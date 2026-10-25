@@ -1,0 +1,342 @@
+{
+  "created_at": "2026-10-25T09:59:22.383221+00:00",
+  "device": "cuda:0",
+  "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+  "torch_threads": 16,
+  "packages": {
+    "torch": "2.7.1+cu128",
+    "warp-lang": "1.17.0",
+    "newton": "1.6.0",
+    "mujoco": "3.12.0",
+    "dexsim": "unavailable",
+    "mjfit": "0.1.0"
+  },
+  "warmup_steps": 5,
+  "dtype": "float32",
+  "scope": "completed end-to-end control step; both Warp and Torch synchronized",
+  "memory_scope": "not measured; no allocator or total-device memory claim",
+  "rows": [
+    {
+      "task": "peg_insertion",
+      "status": "passed",
+      "num_envs": 1,
+      "steps": 25,
+      "seed": 0,
+      "setup_including_generation_ms": 7363.425014074892,
+      "cost_time_ms": 101.25259542837739,
+      "samples_ms": [
+        103.07376086711884,
+        99.31434784084558,
+        99.29213696159422,
+        96.97844600304961,
+        99.43142998963594,
+        97.88320492953062,
+        97.69344702363014,
+        99.40124303102493,
+        97.13996085338295,
+        99.16638885624707,
+        105.05439387634397,
+        103.90322003513575,
+        105.50014697946608,
+        105.72534194216132,
+        106.14487389102578,
+        106.71911993995309,
+        105.82136316224933,
+        108.20018802769482,
+        103.28946984373033,
+        95.08240409195423
+      ],
+      "bilateral_grasp_fraction": 1.0,
+      "grasp_by_step": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "resets": 0,
+      "actor_shape": [
+        1,
+        1023
+      ],
+      "critic_shape": [
+        1,
+        235
+      ],
+      "contact_classes_observed": [
+        1,
+        2
+      ],
+      "final_metrics": {
+        "radial_error": [
+          0.008345159702003002
+        ],
+        "tilt": [
+          0.0023920803796499968
+        ],
+        "depth": [
+          -7.937103509902954e-05
+        ],
+        "penetration": [
+          0.0
+        ],
+        "grasped": [
+          true
+        ],
+        "captured": [
+          false
+        ]
+      },
+      "fidelity": {
+        "profile": "study",
+        "geometry_per_run": 1,
+        "asset_sha256": "74b2651c0389f4fbdc0d4a4fd6b095cddb48e03f807c7fbcb8d060f18a97afd6",
+        "robot_source_urdf": "/home/dex/.cache/embodichain_data/extract/FlexivRizon4SMenagerie/prepared_v4_parallel_jaw/rizon4s_robotiq2f85.urdf",
+        "source_contacts_preserved": true,
+        "paper_robot_dynamics_identified": false,
+        "gripper_model": "parallel_jaw",
+        "source_gripper_dynamics_preserved": false,
+        "reset_distribution": "local contact, fixed ready pose; workspace-wide IK reset not qualified",
+        "contact_labels": "analytic mating-feature labels; recorded engineering thresholds",
+        "gravity_compensation": "URDF COM potential gradient from encoders, held at 50 Hz",
+        "grasp_guard": "bilateral part-pad contact in the control interval, at most 5 ms current air time, force threshold 0.05 N"
+      },
+      "success_rate": null
+    },
+    {
+      "task": "gear_meshing",
+      "status": "passed",
+      "num_envs": 1,
+      "steps": 25,
+      "seed": 0,
+      "setup_including_generation_ms": 4645.948191173375,
+      "cost_time_ms": 97.42834698408842,
+      "samples_ms": [
+        92.52209193073213,
+        88.10055698268116,
+        102.35711489804089,
+        106.60434886813164,
+        97.37957897596061,
+        99.13404402323067,
+        106.61097196862102,
+        90.18976613879204,
+        101.40937403775752,
+        101.63676296360791,
+        99.8802250251174,
+        98.91279693692923,
+        92.92564494535327,
+        91.50721482001245,
+        94.44361296482384,
+        96.18496312759817,
+        94.94037204422057,
+        97.47711499221623,
+        95.27020482346416,
+        97.93737414292991
+      ],
+      "bilateral_grasp_fraction": 1.0,
+      "grasp_by_step": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "resets": 0,
+      "actor_shape": [
+        1,
+        1023
+      ],
+      "critic_shape": [
+        1,
+        427
+      ],
+      "contact_classes_observed": [
+        0,
+        1,
+        2
+      ],
+      "final_metrics": {
+        "radial_error": [
+          0.004855684470385313
+        ],
+        "tilt": [
+          0.00048828125
+        ],
+        "depth": [
+          -1.1274591088294983e-05
+        ],
+        "penetration": [
+          0.0
+        ],
+        "grasped": [
+          true
+        ],
+        "captured": [
+          false
+        ]
+      },
+      "fidelity": {
+        "profile": "study",
+        "geometry_per_run": 1,
+        "asset_sha256": "e7a23f1e1d2ced0adae2cf3aa0054659073d8406d0000813be6be93cd83bb99b",
+        "robot_source_urdf": "/home/dex/.cache/embodichain_data/extract/FlexivRizon4SMenagerie/prepared_v4_parallel_jaw/rizon4s_robotiq2f85.urdf",
+        "source_contacts_preserved": true,
+        "paper_robot_dynamics_identified": false,
+        "gripper_model": "parallel_jaw",
+        "source_gripper_dynamics_preserved": false,
+        "reset_distribution": "local contact, fixed ready pose; workspace-wide IK reset not qualified",
+        "contact_labels": "analytic mating-feature labels; recorded engineering thresholds",
+        "gravity_compensation": "URDF COM potential gradient from encoders, held at 50 Hz",
+        "grasp_guard": "bilateral part-pad contact in the control interval, at most 5 ms current air time, force threshold 0.05 N"
+      },
+      "success_rate": null
+    },
+    {
+      "task": "nut_threading",
+      "status": "passed",
+      "num_envs": 1,
+      "steps": 25,
+      "seed": 0,
+      "setup_including_generation_ms": 7532.981820171699,
+      "cost_time_ms": 102.9297144850716,
+      "samples_ms": [
+        101.66201903484762,
+        99.59009289741516,
+        88.26702903024852,
+        103.47332200035453,
+        97.24391088820994,
+        102.38610696978867,
+        95.78590607270598,
+        109.11357798613608,
+        114.25957200117409,
+        112.25401191040874,
+        111.62878200411797,
+        106.21792683377862,
+        99.03529589064419,
+        97.5870699621737,
+        99.0424498450011,
+        107.02988202683628,
+        112.34920308925211,
+        108.67010080255568,
+        111.68899503536522,
+        100.37372494116426
+      ],
+      "bilateral_grasp_fraction": 0.76,
+      "grasp_by_step": [
+        true,
+        true,
+        false,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true,
+        true,
+        false,
+        true,
+        false,
+        true,
+        true,
+        false,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true,
+        true,
+        true,
+        true
+      ],
+      "resets": 0,
+      "actor_shape": [
+        1,
+        1116
+      ],
+      "critic_shape": [
+        1,
+        305
+      ],
+      "contact_classes_observed": [
+        0,
+        1
+      ],
+      "final_metrics": {
+        "radial_error": [
+          0.009749441407620907
+        ],
+        "tilt": [
+          0.08176140487194061
+        ],
+        "depth": [
+          -0.002158086746931076
+        ],
+        "penetration": [
+          3.7049400702926505e-07
+        ],
+        "grasped": [
+          true
+        ],
+        "captured": [
+          false
+        ]
+      },
+      "fidelity": {
+        "profile": "study",
+        "geometry_per_run": 1,
+        "asset_sha256": "d7a606910581878f18079959710de9dc69e63b83931d0baa45bb80d497f63cfb",
+        "robot_source_urdf": "/home/dex/.cache/embodichain_data/extract/FlexivRizon4SMenagerie/prepared_v4_parallel_jaw/rizon4s_robotiq2f85.urdf",
+        "source_contacts_preserved": true,
+        "paper_robot_dynamics_identified": false,
+        "gripper_model": "parallel_jaw",
+        "source_gripper_dynamics_preserved": false,
+        "reset_distribution": "local contact, fixed ready pose; workspace-wide IK reset not qualified",
+        "contact_labels": "analytic mating-feature labels; recorded engineering thresholds",
+        "gravity_compensation": "URDF COM potential gradient from encoders, held at 50 Hz",
+        "grasp_guard": "bilateral part-pad contact in the control interval, at most 5 ms current air time, force threshold 0.05 N"
+      },
+      "success_rate": null
+    }
+  ]
+}

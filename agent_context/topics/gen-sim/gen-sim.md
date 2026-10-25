@@ -125,6 +125,12 @@ without sampling. File/model coordinate adaptation remains owned here.
 
 ## Runtime and extension boundaries
 
+Procedural precision assembly has a separate owner under
+`embodichain/gen_sim/assembly/`; see [assembly generation and precision](assembly.md)
+for pinned mjfit adaptation, portable manifests and native/USD construction.
+It does not use Scene Engine inference or the general SimReady decomposition
+pipeline, because approximate recooking can consume an assembly's clearance.
+
 Keep parser capabilities idempotent so recorded stages support resume.
 Provider configuration belongs to its loader/client, while coordinate and graph
 contracts belong to importer/exporter. Task registration and physical/semantic

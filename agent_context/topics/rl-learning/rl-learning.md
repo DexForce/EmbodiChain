@@ -227,6 +227,29 @@ lightweight APG component must not eagerly load the simulator-backed Trainer.
 
 ## Invariants
 
+Blind assembly uses the registered `proprioceptive_actor_critic` policy with
+explicit actor/critic groups. Actor input contains flattened history plus the
+current frame; contact labels travel as state-aligned training-only rollout
+fields. PPO's optional auxiliary decoder loss recomputes the latent during
+minibatch updates so gradients reach the encoder. Actor export excludes the
+critic and decoder. See `examples/learning/blind_assembly/` for suite generation
+and measured policy capacity; those tensor measurements do not qualify task
+learning or simulator throughput.
+
+Auto-reset timeouts retain completed-row terminal observations and row IDs.
+The collector evaluates the terminal state before using its value for timeout
+bootstrap; true termination suppresses bootstrap even when truncation is also
+set. Legacy environments without terminal observations retain their previous
+fallback contract.
+
+Training snapshots freeze physical environment/embodiment/scene components
+relative to their declaring deployment before moving configs into a run.
+An optional unwrapped environment `export_checkpoint_gym_config` hook owns
+materialized task resources; assembly uses it to pin the actual robot and
+manifest. Explicit `./` resource paths resolve relative to the saved config,
+including `source_urdf` and `assembly_manifest`. Raw checkpoint context remains
+unchanged so resource packaging does not redefine resume compatibility.
+
 - The selected environment must expose batched observation/action spaces and
   `num_envs`.
 - Policy observation and action dimensions must match the built environment.

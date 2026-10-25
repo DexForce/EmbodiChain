@@ -1,0 +1,1589 @@
+{
+  "schema": "assembly-gear-alignment-report/v1",
+  "generated_at": "2026-10-25T16:43:20.836129+00:00",
+  "generator_revision": "5833f465896e1e06bc4be4f003be847f5183a4db",
+  "formal_certification": false,
+  "overall_status": "not_fully_qualified",
+  "conclusions": {
+    "geometry_and_authored_properties": "passed_observed_checks",
+    "native_profile_behavior_diagnostics": "36/36 passed",
+    "independent_source_warp": "Protocol-dependent: legacy cpu_compiled0/3; controlled warp_recomputed3/3; public runner warp_recomputed3/3.",
+    "dynamic_trajectory_equivalence": "not_established",
+    "full_parameter_calibration": "not_completed",
+    "public_scene_certification": "unverified",
+    "tested_CG_profile_alignment": "passed: native3/3 and independent public Warp3/3 under explicit initialization protocol",
+    "reference_initialization": "Controlled A/B isolates invocation of public set_const_0 for these three fixed-profile cases; derived contact weights change substantially."
+  },
+  "runtime": {
+    "python": "3.11.14 (main, Oct 21 2025, 18:31:21) [GCC 11.2.0]",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "dexsim-engine": "0.5.1rc1",
+      "newton": "1.6.0",
+      "mujoco": "3.12.0",
+      "mujoco-warp": "3.12.0",
+      "warp-lang": "1.17.0",
+      "torch": "2.7.1+cu128",
+      "mjfit": "0.1.0"
+    },
+    "cpu": "x86_64",
+    "cpu_count": 32,
+    "thread_limits": {
+      "OMP_NUM_THREADS": null,
+      "MKL_NUM_THREADS": null,
+      "OPENBLAS_NUM_THREADS": null
+    },
+    "gpu": "NVIDIA GeForce RTX 5090, 32607 MiB, 595.58.03",
+    "files_sha256": {
+      "/home/dex/miniconda3/envs/open/lib/python3.11/site-packages/dexsim/cuda/pybind.cpython-311-x86_64-linux-gnu.so": "658d5cc49999d3ffca2255af5ed9fbee49d75b503d14011533e5afb99de11f52",
+      "/tmp/embodichain-newton-cpu-pgs-wyw4b8sw/newton/_src/solvers/mujoco/solver_mujoco.py": "9a8bb031b53cf1c371fd2866b9d5a20d779aafddd0498c436361c8c95b018399",
+      "/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/patches/dexsim_assembly_contact.patch": "428209af237f915c197001a1e997e60ab1d525bfd9949221342dced45374346b",
+      "/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/patches/dexsim_assembly_variants.patch": "4e5e21f36993a6caf086c2ecd87b786f889826f51228679c0a4f607377c46500",
+      "/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/patches/newton_cpu_pgs.patch": "31957e457d6c55947d55ae986c924babed83feb60aac7946b4df4fdfff9f508c",
+      "/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/patches/dexsim_continuous_joint.patch": "bfb7aa2caaedf56d4ec5506cf4f90530c36f9db3cd89cad1a1deaad9f0bc0fd6"
+    },
+    "generator_revision": "5833f465896e1e06bc4be4f003be847f5183a4db",
+    "formal_public_scene_certification": false
+  },
+  "properties": {
+    "post30_observed_passes": 30,
+    "post30_cells": 30,
+    "post6_requested_observed_passes": 6,
+    "post6_requested_cells": 6,
+    "full_live_capture_passes": 6,
+    "full_live_capture_cells": 6,
+    "full_live_capture_scope": "MC-off profile, 3 assets x CPU PGS/Warp CG, initial and after one 1ms step; does not retroactively observe all fields in 30 trajectories or in the new MC-on cases",
+    "maximum_mass_relative_error": 4.148135457349156e-08,
+    "maximum_full_host_inertia_relative_error": 1.7296937421701747e-06,
+    "maximum_world_com_error_m": 1.5200827832670346e-09,
+    "maximum_collider_geometry_error_m": 1.953858430419272e-09,
+    "maximum_full_captured_live_inertia_relative_error": 1.7296937421701747e-06,
+    "maximum_full_captured_live_world_com_error_m": 1.5200827832670346e-09,
+    "maximum_static_backlash_difference_m": 1.6892132195789594e-09,
+    "static_backlash_scope": "Public MuJoCo CPU geometry queries on independent actual-host MJB/source copies; not a Warp runtime contact oracle."
+  },
+  "requested_settings_pairs": [
+    {
+      "asset": "spur_pair",
+      "profile": "cpu_pgs",
+      "native_passed": true,
+      "steady_ratio_error_percent": 0.009946226618395837,
+      "native_driver_rotation_rad": 12.355486869812012,
+      "paired_source_cpu_solver": "pgs",
+      "source_cpu_driver_rotation_rad": 12.760706548743626,
+      "driver_rotation_relative_difference_percent": -3.1755269771602923,
+      "requested_tolerance": 1e-08,
+      "effective_tolerance": 1e-08,
+      "requested_multiccd": true,
+      "effective_disableflags": 16384,
+      "source_warp_status": "not_run",
+      "source_warp_ratio_error_percent": null,
+      "source_warp_final_state": null,
+      "source_warp_effective_options": null
+    },
+    {
+      "asset": "spur_pair",
+      "profile": "warp_cg",
+      "native_passed": true,
+      "steady_ratio_error_percent": 0.047327264898366916,
+      "native_driver_rotation_rad": 16.074525833129883,
+      "paired_source_cpu_solver": "cg",
+      "source_cpu_driver_rotation_rad": 13.058391562262258,
+      "driver_rotation_relative_difference_percent": 23.097287720977967,
+      "requested_tolerance": 1e-08,
+      "effective_tolerance": [
+        9.999999974752427e-07
+      ],
+      "requested_multiccd": true,
+      "effective_disableflags": 0,
+      "source_warp_status": "failed",
+      "source_warp_ratio_error_percent": 100.0,
+      "source_warp_final_state": {
+        "gear_a": [
+          [
+            29.062898635864258
+          ]
+        ],
+        "gear_b": [
+          [
+            0.0
+          ]
+        ]
+      },
+      "source_warp_effective_options": {
+        "solver": 1,
+        "tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "multiccd": true
+      }
+    },
+    {
+      "asset": "reduction_12_36",
+      "profile": "cpu_pgs",
+      "native_passed": true,
+      "steady_ratio_error_percent": 0.31347351854493777,
+      "native_driver_rotation_rad": 25.075637817382812,
+      "paired_source_cpu_solver": "pgs",
+      "source_cpu_driver_rotation_rad": 24.867818265129902,
+      "driver_rotation_relative_difference_percent": 0.8356967629296275,
+      "requested_tolerance": 1e-08,
+      "effective_tolerance": 1e-08,
+      "requested_multiccd": true,
+      "effective_disableflags": 16384,
+      "source_warp_status": "not_run",
+      "source_warp_ratio_error_percent": null,
+      "source_warp_final_state": null,
+      "source_warp_effective_options": null
+    },
+    {
+      "asset": "reduction_12_36",
+      "profile": "warp_cg",
+      "native_passed": true,
+      "steady_ratio_error_percent": 0.030219085435512216,
+      "native_driver_rotation_rad": 25.116029739379883,
+      "paired_source_cpu_solver": "cg",
+      "source_cpu_driver_rotation_rad": 24.820878794731946,
+      "driver_rotation_relative_difference_percent": 1.1891236691852436,
+      "requested_tolerance": 1e-08,
+      "effective_tolerance": [
+        9.999999974752427e-07
+      ],
+      "requested_multiccd": true,
+      "effective_disableflags": 0,
+      "source_warp_status": "failed",
+      "source_warp_ratio_error_percent": 100.0,
+      "source_warp_final_state": {
+        "gear_a": [
+          [
+            29.90113639831543
+          ]
+        ],
+        "gear_b": [
+          [
+            0.0
+          ]
+        ]
+      },
+      "source_warp_effective_options": {
+        "solver": 1,
+        "tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "multiccd": true
+      }
+    },
+    {
+      "asset": "fine_pitch_32_48",
+      "profile": "cpu_pgs",
+      "native_passed": true,
+      "steady_ratio_error_percent": 0.05979043503973047,
+      "native_driver_rotation_rad": 16.326250076293945,
+      "paired_source_cpu_solver": "pgs",
+      "source_cpu_driver_rotation_rad": 16.16206744432527,
+      "driver_rotation_relative_difference_percent": 1.015851669560508,
+      "requested_tolerance": 1e-08,
+      "effective_tolerance": 1e-08,
+      "requested_multiccd": true,
+      "effective_disableflags": 16384,
+      "source_warp_status": "not_run",
+      "source_warp_ratio_error_percent": null,
+      "source_warp_final_state": null,
+      "source_warp_effective_options": null
+    },
+    {
+      "asset": "fine_pitch_32_48",
+      "profile": "warp_cg",
+      "native_passed": true,
+      "steady_ratio_error_percent": 0.017269842587830375,
+      "native_driver_rotation_rad": 18.931087493896484,
+      "paired_source_cpu_solver": "cg",
+      "source_cpu_driver_rotation_rad": 15.802231033362236,
+      "driver_rotation_relative_difference_percent": 19.80009312563835,
+      "requested_tolerance": 1e-08,
+      "effective_tolerance": [
+        9.999999974752427e-07
+      ],
+      "requested_multiccd": true,
+      "effective_disableflags": 0,
+      "source_warp_status": "failed",
+      "source_warp_ratio_error_percent": 100.0,
+      "source_warp_final_state": {
+        "gear_a": [
+          [
+            29.442800521850586
+          ]
+        ],
+        "gear_b": [
+          [
+            0.0
+          ]
+        ]
+      },
+      "source_warp_effective_options": {
+        "solver": 1,
+        "tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "multiccd": true
+      }
+    }
+  ],
+  "independent_warp_references": [
+    {
+      "asset": "spur_pair",
+      "backend": "mujoco_warp",
+      "route": "direct",
+      "asset_sha256": "cfe72ac6ab35cb564bfe9593184f67b173e43c294ae0d5ca3ff92b18ed00dcca",
+      "config": {
+        "backend": "mujoco_warp",
+        "route": "direct",
+        "num_envs": 1,
+        "duration": 1.5,
+        "timestep": 0.001,
+        "spin_rate": 15.0,
+        "contact_offset": 0.0,
+        "rest_offset": 0.0,
+        "solver_iterations": 100,
+        "solver_tolerance": 1e-08,
+        "enable_multiccd": true,
+        "contact_capacity": 4096,
+        "source_contact": true,
+        "solver": "cg",
+        "use_mujoco_cpu": false,
+        "work_dir": "outputs/assembly_precision"
+      },
+      "status": "failed",
+      "metrics": {
+        "ratio_relative_error": 1.0,
+        "driver_angle_rad": 29.062898635864258,
+        "success_rate": 0.0,
+        "finite": true,
+        "overflow_count": 0
+      },
+      "step_time_ms": 3.1829472474443414,
+      "timing_scope": "GPU batched wall time per world-step; first step compilation may be included",
+      "mujoco_version": "3.12.0",
+      "effective_solver_options": {
+        "solver": 1,
+        "tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "multiccd": true
+      },
+      "initial_state": {
+        "gear_a": [
+          0.0
+        ],
+        "gear_b": [
+          0.0
+        ]
+      },
+      "final_state": {
+        "gear_a": [
+          [
+            29.062898635864258
+          ]
+        ],
+        "gear_b": [
+          [
+            0.0
+          ]
+        ]
+      },
+      "end_to_end_wall_ms": 5122.093381127343,
+      "scope": "independent source-MJCF MuJoCo Warp endpoint after native world cleanup"
+    },
+    {
+      "asset": "reduction_12_36",
+      "backend": "mujoco_warp",
+      "route": "direct",
+      "asset_sha256": "c1ae7c632faa6bfd5acc87d6df9bf180c432056314541c8944064a4bb4349fc5",
+      "config": {
+        "backend": "mujoco_warp",
+        "route": "direct",
+        "num_envs": 1,
+        "duration": 1.5,
+        "timestep": 0.001,
+        "spin_rate": 15.0,
+        "contact_offset": 0.0,
+        "rest_offset": 0.0,
+        "solver_iterations": 100,
+        "solver_tolerance": 1e-08,
+        "enable_multiccd": true,
+        "contact_capacity": 4096,
+        "source_contact": true,
+        "solver": "cg",
+        "use_mujoco_cpu": false,
+        "work_dir": "outputs/assembly_precision"
+      },
+      "status": "failed",
+      "metrics": {
+        "ratio_relative_error": 1.0,
+        "driver_angle_rad": 29.90113639831543,
+        "success_rate": 0.0,
+        "finite": true,
+        "overflow_count": 0
+      },
+      "step_time_ms": 3.30975992201517,
+      "timing_scope": "GPU batched wall time per world-step; first step compilation may be included",
+      "mujoco_version": "3.12.0",
+      "effective_solver_options": {
+        "solver": 1,
+        "tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "multiccd": true
+      },
+      "initial_state": {
+        "gear_a": [
+          0.0
+        ],
+        "gear_b": [
+          0.0
+        ]
+      },
+      "final_state": {
+        "gear_a": [
+          [
+            29.90113639831543
+          ]
+        ],
+        "gear_b": [
+          [
+            0.0
+          ]
+        ]
+      },
+      "end_to_end_wall_ms": 5016.967655858025,
+      "scope": "independent source-MJCF MuJoCo Warp endpoint after native world cleanup"
+    },
+    {
+      "asset": "fine_pitch_32_48",
+      "backend": "mujoco_warp",
+      "route": "direct",
+      "asset_sha256": "c2f1a1fa35880053b2e0c1b92705fe3673236f5b2c79d7f579ae876ad2bce680",
+      "config": {
+        "backend": "mujoco_warp",
+        "route": "direct",
+        "num_envs": 1,
+        "duration": 1.5,
+        "timestep": 0.001,
+        "spin_rate": 15.0,
+        "contact_offset": 0.0,
+        "rest_offset": 0.0,
+        "solver_iterations": 100,
+        "solver_tolerance": 1e-08,
+        "enable_multiccd": true,
+        "contact_capacity": 4096,
+        "source_contact": true,
+        "solver": "cg",
+        "use_mujoco_cpu": false,
+        "work_dir": "outputs/assembly_precision"
+      },
+      "status": "failed",
+      "metrics": {
+        "ratio_relative_error": 1.0,
+        "driver_angle_rad": 29.442800521850586,
+        "success_rate": 0.0,
+        "finite": true,
+        "overflow_count": 0
+      },
+      "step_time_ms": 3.310003663878888,
+      "timing_scope": "GPU batched wall time per world-step; first step compilation may be included",
+      "mujoco_version": "3.12.0",
+      "effective_solver_options": {
+        "solver": 1,
+        "tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "multiccd": true
+      },
+      "initial_state": {
+        "gear_a": [
+          0.0
+        ],
+        "gear_b": [
+          0.0
+        ]
+      },
+      "final_state": {
+        "gear_a": [
+          [
+            29.442800521850586
+          ]
+        ],
+        "gear_b": [
+          [
+            0.0
+          ]
+        ]
+      },
+      "end_to_end_wall_ms": 5034.0428138151765,
+      "scope": "independent source-MJCF MuJoCo Warp endpoint after native world cleanup"
+    }
+  ],
+  "source_local_numerics": {
+    "rows": [
+      {
+        "config": "spur_pair",
+        "mujoco": "3.12.0",
+        "solver": "PGS",
+        "scope": "One fixed source configuration: follower=0, driver 1e-6rad beyond positive first-contact bracket; mj_forward only, no time integration. Not a causal diagnosis of Warp failure.",
+        "driver_angle_rad": 0.0074294634354779695,
+        "ncon": 2,
+        "nefc": 8,
+        "jacobian_shape": [
+          8,
+          2
+        ],
+        "jacobian_singular_values": [
+          0.12342120009860638,
+          0.014099809084663791
+        ],
+        "jacobian_condition": 8.753395124537557,
+        "constraint_regularization_min": 1.2800000000000003e-15,
+        "constraint_regularization_max": 1.2800000000000003e-15,
+        "gear_body_invweight0": {
+          "gear_a": [
+            5.683099170877381e-34,
+            5522.967926435336
+          ],
+          "gear_b": [
+            2.6677359553904906e-35,
+            1963.8520626677946
+          ]
+        },
+        "finite": true
+      },
+      {
+        "config": "fine_pitch_32_48",
+        "mujoco": "3.12.0",
+        "solver": "PGS",
+        "scope": "One fixed source configuration: follower=0, driver 1e-6rad beyond positive first-contact bracket; mj_forward only, no time integration. Not a causal diagnosis of Warp failure.",
+        "driver_angle_rad": 0.0044149745869016795,
+        "ncon": 2,
+        "nefc": 8,
+        "jacobian_shape": [
+          8,
+          2
+        ],
+        "jacobian_singular_values": [
+          0.12545278232517898,
+          0.0024825616370414572
+        ],
+        "jacobian_condition": 50.53360224912071,
+        "constraint_regularization_min": 9.8e-16,
+        "constraint_regularization_max": 9.8e-16,
+        "gear_body_invweight0": {
+          "gear_a": [
+            2.539070188690537e-33,
+            9339.937024122282
+          ],
+          "gear_b": [
+            5.987232417619264e-33,
+            2363.15996275003
+          ]
+        },
+        "finite": true
+      },
+      {
+        "config": "reduction_12_36",
+        "mujoco": "3.12.0",
+        "solver": "PGS",
+        "scope": "One fixed source configuration: follower=0, driver 1e-6rad beyond positive first-contact bracket; mj_forward only, no time integration. Not a causal diagnosis of Warp failure.",
+        "driver_angle_rad": 0.020693848884977106,
+        "ncon": 2,
+        "nefc": 8,
+        "jacobian_shape": [
+          8,
+          2
+        ],
+        "jacobian_singular_values": [
+          0.13083842171730253,
+          0.009555723274443845
+        ],
+        "jacobian_condition": 13.692152646071419,
+        "constraint_regularization_min": 1.1250000000000001e-15,
+        "constraint_regularization_max": 1.1250000000000001e-15,
+        "gear_body_invweight0": {
+          "gear_a": [
+            4.312218841501736e-33,
+            23607.544815395988
+          ],
+          "gear_b": [
+            3.985846581400382e-36,
+            950.3147655868775
+          ]
+        },
+        "finite": true
+      }
+    ],
+    "formal_certification": false
+  },
+  "leaderboard": [
+    {
+      "algorithm": "controlled_AB_Warp_CG_warp_recomputed_1p5s",
+      "passed": 3,
+      "cells": 3,
+      "acceptance": "controlled endpoint ratio/rotation/finite/overflow"
+    },
+    {
+      "algorithm": "native_MCoff_3s/cpu_pgs",
+      "passed": 15,
+      "cells": 15,
+      "acceptance": "steady-tail ratio + native integration diagnostics"
+    },
+    {
+      "algorithm": "native_MCoff_3s/warp_cg",
+      "passed": 15,
+      "cells": 15,
+      "acceptance": "steady-tail ratio + native integration diagnostics"
+    },
+    {
+      "algorithm": "native_MCon_requested_1p5s/cpu_pgs",
+      "passed": 3,
+      "cells": 3,
+      "acceptance": "steady-tail ratio + native integration diagnostics"
+    },
+    {
+      "algorithm": "native_MCon_requested_1p5s/warp_cg",
+      "passed": 3,
+      "cells": 3,
+      "acceptance": "steady-tail ratio + native integration diagnostics"
+    },
+    {
+      "algorithm": "public_source_Warp_CG_warp_recomputed_1p5s",
+      "passed": 3,
+      "cells": 3,
+      "acceptance": "public endpoint ratio/rotation/finite/overflow"
+    },
+    {
+      "algorithm": "source_CPU_3.12.0_3s/cg",
+      "passed": 27,
+      "cells": 27,
+      "acceptance": "steady-tail ratio/travel/finite/warnings"
+    },
+    {
+      "algorithm": "source_CPU_3.12.0_3s/pgs",
+      "passed": 27,
+      "cells": 27,
+      "acceptance": "steady-tail ratio/travel/finite/warnings"
+    },
+    {
+      "algorithm": "source_CPU_3.12.0_MCon_paired_1p5s/cg",
+      "passed": 3,
+      "cells": 3,
+      "acceptance": "steady-tail ratio/travel/finite/warnings"
+    },
+    {
+      "algorithm": "source_CPU_3.12.0_MCon_paired_1p5s/pgs",
+      "passed": 3,
+      "cells": 3,
+      "acceptance": "steady-tail ratio/travel/finite/warnings"
+    },
+    {
+      "algorithm": "source_CPU_3.14.0_3s/pgs",
+      "passed": 27,
+      "cells": 27,
+      "acceptance": "steady-tail ratio/travel/finite/warnings"
+    },
+    {
+      "algorithm": "source_CPU_3.14.0_3s/cg",
+      "passed": 26,
+      "cells": 27,
+      "acceptance": "steady-tail ratio/travel/finite/warnings"
+    },
+    {
+      "algorithm": "source_CPU_3.14.0_3s/newton",
+      "passed": 1,
+      "cells": 27,
+      "acceptance": "steady-tail ratio/travel/finite/warnings"
+    },
+    {
+      "algorithm": "controlled_AB_Warp_CG_cpu_compiled_1p5s",
+      "passed": 0,
+      "cells": 3,
+      "acceptance": "controlled endpoint ratio/rotation/finite/overflow"
+    },
+    {
+      "algorithm": "source_CPU_3.12.0_3s/newton",
+      "passed": 0,
+      "cells": 27,
+      "acceptance": "steady-tail ratio/travel/finite/warnings"
+    },
+    {
+      "algorithm": "source_Warp_3.12.0_CG_cpu_compiled_legacy_1p5s",
+      "passed": 0,
+      "cells": 3,
+      "acceptance": "endpoint ratio/rotation/finite/overflow"
+    }
+  ],
+  "limitations": [
+    "Native engineering diagnostics passed; full physical alignment is not qualified.",
+    "Original MC-off 30-cell matrix uses distinct global contact/solver profiles. No identical-settings trajectory equivalence is claimed.",
+    "New six cells request MultiCCD on and tolerance1e-8. CPU integration still disables midphase; Warp explicitly uses CG and clamps effective tolerance to about1e-6.",
+    "Legacy cpu_compiled source Warp0/3 and explicit warp_recomputed source Warp3/3 are separate protocols; no old result is overwritten. Recomputed constants change degenerate-body inverse-weight/contact regularization conventions, not recorded authored geometry or mass.",
+    "Native driver travel differs from paired same-solver CPU source by up to about23.10% in the requested-settings set; gear-ratio passes do not establish dynamics equivalence.",
+    "Historical MuJoCo3.14 and matched3.12 source results are distinct evidence, including failing Newton/CG cases; they are not pooled into one success claim.",
+    "Source-local Jacobian/regularization measurements document a numerical regime; they do not prove the cause of independent Warp failure.",
+    "All native qualification cells use one environment. Batch isolation/capacity, Default gear alignment, native USD raw-contact equivalence and formal public Scene certification remain unverified.",
+    "No calibrated/test-set split or frozen parameter-search procedure was completed; no completed calibration or real-robot replication claim.",
+    "The public recomputed run and separate controlled A/B observation have slightly different finite FP32 endpoints. Same-profile endpoint agreement does not establish bitwise, phase, full-trajectory, CPU-PGS or long-term equivalence."
+  ],
+  "evidence": [
+    {
+      "path": "native_alignment/raw.json",
+      "sha256": "e84bd6ad9312ddd49fe37631db38c56ee03f2bd8f29773fc5d27c8ccc7130a5b"
+    },
+    {
+      "path": "native_alignment_post_validation/validation.json",
+      "sha256": "680d8de28013f6869662be8120f2e068514d969b7bbf1836a4e1b6c778828609"
+    },
+    {
+      "path": "native_alignment_live_properties/capture.json",
+      "sha256": "4c01e5975a3ee25016d063b5b492b56c0c58d864f2d6ce7ad89a9c0cd8522edf"
+    },
+    {
+      "path": "source_matched_requested/raw.json",
+      "sha256": "8727627a848535cc61c251ddaf8a17f06321865193e41e70e42a4f08282b67d3"
+    },
+    {
+      "path": "source_matched_requested_post_validation/validation.json",
+      "sha256": "320fdccbf0a78787f4a612d05638c8b92aa81f5e2d8d551f79d87d08484edfa7"
+    },
+    {
+      "path": "gear_reference_matched/raw.json",
+      "sha256": "c146c97ef4ee328c9af57cbc7f0c7a912f074ec523ac5f819d46e85c148452ed"
+    },
+    {
+      "path": "gear_reference_historical/raw.json",
+      "sha256": "b2ee5ad38c7f5154e1375d65cf673f0adbec5afa6b5d863ceb993b623f98529f"
+    },
+    {
+      "path": "source_local_numerics.json",
+      "sha256": "d9ca59c355b75452c5c63b2eabcfbc6c38ebc0575c9511bd864286ced3061902"
+    },
+    {
+      "path": "runtime_metadata.json",
+      "sha256": "9ae2757dd4eeee93af2ead00d9530f6f14808324de1f6c45e7e9c8a7948f9b66"
+    },
+    {
+      "path": "constant_diagnostics/ab_results/raw.json",
+      "sha256": "1bcabae630ea0920542e4de1476a01b658969a20f787484a6562baa9913539c1"
+    },
+    {
+      "path": "constant_diagnostics/source_constants_ab.py",
+      "sha256": "204a33225d3d7f951ad41b1b6895a65b0c5ab23c9db4dc9467844fe52b7040f4"
+    },
+    {
+      "path": "source_warp_recomputed/cell_0.json",
+      "sha256": "e2eccffff1f6e6dcd04d5b1b791f6a74c03989d0f1b7791e1b3ef6cf6eadf774"
+    },
+    {
+      "path": "source_warp_recomputed/cell_1.json",
+      "sha256": "f4bf1788c85323c8718d8642733556978a9ec44a4813c83ea14f390db6eedeab"
+    },
+    {
+      "path": "source_warp_recomputed/cell_2.json",
+      "sha256": "fd30822baa3ad44e2824a275fc594dec6c571287cc37f0549a82466cc6b30da6"
+    }
+  ],
+  "controlled_initialization_ab": {
+    "source": "constant_diagnostics/ab_results/raw.json",
+    "protocol": "Only public set_const_0 toggled; same source model, CG, MC enabled, requested tolerance1e-8, actual clamp recorded, dt1ms. Derived contact weights may change substantially.",
+    "groups": {
+      "cpu_compiled": {
+        "passed": 0,
+        "cells": 3
+      },
+      "warp_recomputed": {
+        "passed": 3,
+        "cells": 3
+      }
+    },
+    "recorded_unchanged_fields": [
+      "body_mass",
+      "body_inertia",
+      "body_ipos",
+      "geom_pos",
+      "geom_quat",
+      "geom_solref",
+      "geom_solimp",
+      "dof_armature",
+      "dof_damping"
+    ],
+    "rows": [
+      {
+        "config": "spur_pair",
+        "asset_sha256": "cfe72ac6ab35cb564bfe9593184f67b173e43c294ae0d5ca3ff92b18ed00dcca",
+        "recompute_constants": false,
+        "qpos_final": [
+          29.062898635864258,
+          0.0
+        ],
+        "ratio_relative_error": 1.0,
+        "finite": true,
+        "maximum_speed_rad_s": 19.999940872192383,
+        "peak_contacts": 6,
+        "overflow_steps": [],
+        "elapsed_ms": 4451.179282041267,
+        "effective_tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "before_body_invweight0": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              5.683099171428164e-34,
+              5522.9677734375
+            ],
+            [
+              2.667735928569773e-35,
+              1963.85205078125
+            ]
+          ]
+        ],
+        "after_body_invweight0": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              5.683099171428164e-34,
+              5522.9677734375
+            ],
+            [
+              2.667735928569773e-35,
+              1963.85205078125
+            ]
+          ]
+        ],
+        "changed_field_max_absolute": {
+          "body_invweight0": 0.0,
+          "dof_invweight0": 0.0,
+          "body_mass": 0.0,
+          "body_inertia": 0.0,
+          "body_ipos": 0.0,
+          "geom_pos": 0.0,
+          "geom_quat": 0.0,
+          "geom_solref": 0.0,
+          "geom_solimp": 0.0,
+          "dof_armature": 0.0,
+          "dof_damping": 0.0
+        },
+        "body_rootid": [
+          0,
+          1,
+          2
+        ],
+        "body_parentid": [
+          0,
+          0,
+          0
+        ],
+        "control": [
+          1.0
+        ],
+        "trace": "spur_pair_imported.npz"
+      },
+      {
+        "config": "spur_pair",
+        "asset_sha256": "cfe72ac6ab35cb564bfe9593184f67b173e43c294ae0d5ca3ff92b18ed00dcca",
+        "recompute_constants": true,
+        "qpos_final": [
+          16.094696044921875,
+          -12.068148612976074
+        ],
+        "ratio_relative_error": 0.00023804286888984283,
+        "finite": true,
+        "maximum_speed_rad_s": 12.504158973693848,
+        "peak_contacts": 6,
+        "overflow_steps": [],
+        "elapsed_ms": 4818.157881963998,
+        "effective_tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "before_body_invweight0": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              5.683099171428164e-34,
+              5522.9677734375
+            ],
+            [
+              2.667735928569773e-35,
+              1963.85205078125
+            ]
+          ]
+        ],
+        "after_body_invweight0": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              5522.96826171875,
+              5522.96826171875
+            ],
+            [
+              1963.85205078125,
+              1963.85205078125
+            ]
+          ]
+        ],
+        "changed_field_max_absolute": {
+          "body_invweight0": 5522.96826171875,
+          "dof_invweight0": 0.0,
+          "body_mass": 0.0,
+          "body_inertia": 0.0,
+          "body_ipos": 0.0,
+          "geom_pos": 0.0,
+          "geom_quat": 0.0,
+          "geom_solref": 0.0,
+          "geom_solimp": 0.0,
+          "dof_armature": 0.0,
+          "dof_damping": 0.0
+        },
+        "body_rootid": [
+          0,
+          1,
+          2
+        ],
+        "body_parentid": [
+          0,
+          0,
+          0
+        ],
+        "control": [
+          1.0
+        ],
+        "trace": "spur_pair_recomputed.npz"
+      },
+      {
+        "config": "reduction_12_36",
+        "asset_sha256": "c1ae7c632faa6bfd5acc87d6df9bf180c432056314541c8944064a4bb4349fc5",
+        "recompute_constants": false,
+        "qpos_final": [
+          29.90113639831543,
+          0.0
+        ],
+        "ratio_relative_error": 1.0,
+        "finite": true,
+        "maximum_speed_rad_s": 28.342975616455078,
+        "peak_contacts": 6,
+        "overflow_steps": [],
+        "elapsed_ms": 4412.163703003898,
+        "effective_tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "before_body_invweight0": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              4.312218741387004e-33,
+              23607.544921875
+            ],
+            [
+              3.9858467153759826e-36,
+              950.3147583007812
+            ]
+          ]
+        ],
+        "after_body_invweight0": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              4.312218741387004e-33,
+              23607.544921875
+            ],
+            [
+              3.9858467153759826e-36,
+              950.3147583007812
+            ]
+          ]
+        ],
+        "changed_field_max_absolute": {
+          "body_invweight0": 0.0,
+          "dof_invweight0": 0.0,
+          "body_mass": 0.0,
+          "body_inertia": 0.0,
+          "body_ipos": 0.0,
+          "geom_pos": 0.0,
+          "geom_quat": 0.0,
+          "geom_solref": 0.0,
+          "geom_solimp": 0.0,
+          "dof_armature": 0.0,
+          "dof_damping": 0.0
+        },
+        "body_rootid": [
+          0,
+          1,
+          2
+        ],
+        "body_parentid": [
+          0,
+          0,
+          0
+        ],
+        "control": [
+          1.0
+        ],
+        "trace": "reduction_12_36_imported.npz"
+      },
+      {
+        "config": "reduction_12_36",
+        "asset_sha256": "c1ae7c632faa6bfd5acc87d6df9bf180c432056314541c8944064a4bb4349fc5",
+        "recompute_constants": true,
+        "qpos_final": [
+          25.153438568115234,
+          -8.376864433288574
+        ],
+        "ratio_relative_error": 0.0009082363903306634,
+        "finite": true,
+        "maximum_speed_rad_s": 18.452251434326172,
+        "peak_contacts": 6,
+        "overflow_steps": [],
+        "elapsed_ms": 4696.732625132427,
+        "effective_tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "before_body_invweight0": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              4.312218741387004e-33,
+              23607.544921875
+            ],
+            [
+              3.9858467153759826e-36,
+              950.3147583007812
+            ]
+          ]
+        ],
+        "after_body_invweight0": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              23607.544921875,
+              23607.544921875
+            ],
+            [
+              950.3148193359375,
+              950.3148193359375
+            ]
+          ]
+        ],
+        "changed_field_max_absolute": {
+          "body_invweight0": 23607.544921875,
+          "dof_invweight0": 0.0,
+          "body_mass": 0.0,
+          "body_inertia": 0.0,
+          "body_ipos": 0.0,
+          "geom_pos": 0.0,
+          "geom_quat": 0.0,
+          "geom_solref": 0.0,
+          "geom_solimp": 0.0,
+          "dof_armature": 0.0,
+          "dof_damping": 0.0
+        },
+        "body_rootid": [
+          0,
+          1,
+          2
+        ],
+        "body_parentid": [
+          0,
+          0,
+          0
+        ],
+        "control": [
+          1.0
+        ],
+        "trace": "reduction_12_36_recomputed.npz"
+      },
+      {
+        "config": "fine_pitch_32_48",
+        "asset_sha256": "c2f1a1fa35880053b2e0c1b92705fe3673236f5b2c79d7f579ae876ad2bce680",
+        "recompute_constants": false,
+        "qpos_final": [
+          29.442800521850586,
+          0.0
+        ],
+        "ratio_relative_error": 1.0,
+        "finite": true,
+        "maximum_speed_rad_s": 19.999977111816406,
+        "peak_contacts": 8,
+        "overflow_steps": [],
+        "elapsed_ms": 4618.1229199282825,
+        "effective_tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "before_body_invweight0": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              2.539070185499041e-33,
+              9339.9375
+            ],
+            [
+              5.987232437093515e-33,
+              2363.159912109375
+            ]
+          ]
+        ],
+        "after_body_invweight0": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              2.539070185499041e-33,
+              9339.9375
+            ],
+            [
+              5.987232437093515e-33,
+              2363.159912109375
+            ]
+          ]
+        ],
+        "changed_field_max_absolute": {
+          "body_invweight0": 0.0,
+          "dof_invweight0": 0.0,
+          "body_mass": 0.0,
+          "body_inertia": 0.0,
+          "body_ipos": 0.0,
+          "geom_pos": 0.0,
+          "geom_quat": 0.0,
+          "geom_solref": 0.0,
+          "geom_solimp": 0.0,
+          "dof_armature": 0.0,
+          "dof_damping": 0.0
+        },
+        "body_rootid": [
+          0,
+          1,
+          2
+        ],
+        "body_parentid": [
+          0,
+          0,
+          0
+        ],
+        "control": [
+          1.0
+        ],
+        "trace": "fine_pitch_32_48_imported.npz"
+      },
+      {
+        "config": "fine_pitch_32_48",
+        "asset_sha256": "c2f1a1fa35880053b2e0c1b92705fe3673236f5b2c79d7f579ae876ad2bce680",
+        "recompute_constants": true,
+        "qpos_final": [
+          18.929134368896484,
+          -12.61678409576416
+        ],
+        "ratio_relative_error": 0.00020910756789538354,
+        "finite": true,
+        "maximum_speed_rad_s": 13.959681510925293,
+        "peak_contacts": 6,
+        "overflow_steps": [],
+        "elapsed_ms": 5013.497021980584,
+        "effective_tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "before_body_invweight0": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              2.539070185499041e-33,
+              9339.9375
+            ],
+            [
+              5.987232437093515e-33,
+              2363.159912109375
+            ]
+          ]
+        ],
+        "after_body_invweight0": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              9339.9375,
+              9339.9375
+            ],
+            [
+              2363.16015625,
+              2363.16015625
+            ]
+          ]
+        ],
+        "changed_field_max_absolute": {
+          "body_invweight0": 9339.9375,
+          "dof_invweight0": 0.0,
+          "body_mass": 0.0,
+          "body_inertia": 0.0,
+          "body_ipos": 0.0,
+          "geom_pos": 0.0,
+          "geom_quat": 0.0,
+          "geom_solref": 0.0,
+          "geom_solimp": 0.0,
+          "dof_armature": 0.0,
+          "dof_damping": 0.0
+        },
+        "body_rootid": [
+          0,
+          1,
+          2
+        ],
+        "body_parentid": [
+          0,
+          0,
+          0
+        ],
+        "control": [
+          1.0
+        ],
+        "trace": "fine_pitch_32_48_recomputed.npz"
+      }
+    ],
+    "interpretation": "Only set_const_0 invocation is toggled in each controlled pair. Recorded authored geometry/mass/contact fields are unchanged; derived inverse weights change, so this is an explicit physics/reference initialization protocol, not a geometry modification or a claim of CPU-equivalent regularization."
+  },
+  "public_warp_recomputed_references": [
+    {
+      "backend": "mujoco_warp",
+      "route": "direct",
+      "asset_sha256": "cfe72ac6ab35cb564bfe9593184f67b173e43c294ae0d5ca3ff92b18ed00dcca",
+      "config": {
+        "backend": "mujoco_warp",
+        "route": "direct",
+        "num_envs": 1,
+        "duration": 1.5,
+        "timestep": 0.001,
+        "spin_rate": 15.0,
+        "contact_offset": 0.0,
+        "rest_offset": 0.0,
+        "solver_iterations": 100,
+        "solver_tolerance": 1e-08,
+        "enable_multiccd": true,
+        "contact_capacity": 4096,
+        "source_contact": true,
+        "solver": "cg",
+        "use_mujoco_cpu": false,
+        "warp_reference_initialization": "warp_recomputed",
+        "work_dir": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_many_gears/source_warp_recomputed/runtime"
+      },
+      "status": "passed",
+      "metrics": {
+        "ratio_relative_error": 0.0005299400693662785,
+        "driver_angle_rad": 16.05353355407715,
+        "success_rate": 1.0,
+        "finite": true,
+        "overflow_count": 0
+      },
+      "step_time_ms": 3.009323349998643,
+      "timing_scope": "GPU batched wall time per world-step; first step compilation may be included",
+      "mujoco_version": "3.12.0",
+      "effective_solver_options": {
+        "solver": 1,
+        "tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "multiccd": true
+      },
+      "constant_initialization": {
+        "protocol": "warp_recomputed",
+        "body_invweight0_before": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              5.683099171428164e-34,
+              5522.9677734375
+            ],
+            [
+              2.667735928569773e-35,
+              1963.85205078125
+            ]
+          ]
+        ],
+        "body_invweight0_after": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              5522.96826171875,
+              5522.96826171875
+            ],
+            [
+              1963.85205078125,
+              1963.85205078125
+            ]
+          ]
+        ],
+        "scope": "Public MuJoCo Warp set_const_0, including its degenerate-body inverse-weight fallback"
+      },
+      "initial_state": {
+        "gear_a": [
+          0.0
+        ],
+        "gear_b": [
+          0.0
+        ]
+      },
+      "final_state": {
+        "gear_a": [
+          [
+            16.05353355407715
+          ]
+        ],
+        "gear_b": [
+          [
+            -12.033769607543945
+          ]
+        ]
+      },
+      "config_name": "outputs/assembly_many_gears/gear_assets/spur_pair.json",
+      "requested_num_envs": 1,
+      "timestep": 0.001,
+      "num_envs": 1,
+      "cell_file": "source_warp_recomputed/cell_0.json"
+    },
+    {
+      "backend": "mujoco_warp",
+      "route": "direct",
+      "asset_sha256": "c1ae7c632faa6bfd5acc87d6df9bf180c432056314541c8944064a4bb4349fc5",
+      "config": {
+        "backend": "mujoco_warp",
+        "route": "direct",
+        "num_envs": 1,
+        "duration": 1.5,
+        "timestep": 0.001,
+        "spin_rate": 15.0,
+        "contact_offset": 0.0,
+        "rest_offset": 0.0,
+        "solver_iterations": 100,
+        "solver_tolerance": 1e-08,
+        "enable_multiccd": true,
+        "contact_capacity": 4096,
+        "source_contact": true,
+        "solver": "cg",
+        "use_mujoco_cpu": false,
+        "warp_reference_initialization": "warp_recomputed",
+        "work_dir": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_many_gears/source_warp_recomputed/runtime"
+      },
+      "status": "passed",
+      "metrics": {
+        "ratio_relative_error": 0.0008534475671966302,
+        "driver_angle_rad": 25.151283264160156,
+        "success_rate": 1.0,
+        "finite": true,
+        "overflow_count": 0
+      },
+      "step_time_ms": 3.040131047988931,
+      "timing_scope": "GPU batched wall time per world-step; first step compilation may be included",
+      "mujoco_version": "3.12.0",
+      "effective_solver_options": {
+        "solver": 1,
+        "tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "multiccd": true
+      },
+      "constant_initialization": {
+        "protocol": "warp_recomputed",
+        "body_invweight0_before": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              4.312218741387004e-33,
+              23607.544921875
+            ],
+            [
+              3.9858467153759826e-36,
+              950.3147583007812
+            ]
+          ]
+        ],
+        "body_invweight0_after": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              23607.544921875,
+              23607.544921875
+            ],
+            [
+              950.3148193359375,
+              950.3148193359375
+            ]
+          ]
+        ],
+        "scope": "Public MuJoCo Warp set_const_0, including its degenerate-body inverse-weight fallback"
+      },
+      "initial_state": {
+        "gear_a": [
+          0.0
+        ],
+        "gear_b": [
+          0.0
+        ]
+      },
+      "final_state": {
+        "gear_a": [
+          [
+            25.151283264160156
+          ]
+        ],
+        "gear_b": [
+          [
+            -8.376605987548828
+          ]
+        ]
+      },
+      "config_name": "outputs/assembly_many_gears/gear_assets/reduction_12_36.json",
+      "requested_num_envs": 1,
+      "timestep": 0.001,
+      "num_envs": 1,
+      "cell_file": "source_warp_recomputed/cell_1.json"
+    },
+    {
+      "backend": "mujoco_warp",
+      "route": "direct",
+      "asset_sha256": "c2f1a1fa35880053b2e0c1b92705fe3673236f5b2c79d7f579ae876ad2bce680",
+      "config": {
+        "backend": "mujoco_warp",
+        "route": "direct",
+        "num_envs": 1,
+        "duration": 1.5,
+        "timestep": 0.001,
+        "spin_rate": 15.0,
+        "contact_offset": 0.0,
+        "rest_offset": 0.0,
+        "solver_iterations": 100,
+        "solver_tolerance": 1e-08,
+        "enable_multiccd": true,
+        "contact_capacity": 4096,
+        "source_contact": true,
+        "solver": "cg",
+        "use_mujoco_cpu": false,
+        "warp_reference_initialization": "warp_recomputed",
+        "work_dir": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_many_gears/source_warp_recomputed/runtime"
+      },
+      "status": "passed",
+      "metrics": {
+        "ratio_relative_error": 0.00020910756789532803,
+        "driver_angle_rad": 18.929134368896484,
+        "success_rate": 1.0,
+        "finite": true,
+        "overflow_count": 0
+      },
+      "step_time_ms": 3.1538548838968077,
+      "timing_scope": "GPU batched wall time per world-step; first step compilation may be included",
+      "mujoco_version": "3.12.0",
+      "effective_solver_options": {
+        "solver": 1,
+        "tolerance": 9.999999974752427e-07,
+        "disableflags": 0,
+        "multiccd": true
+      },
+      "constant_initialization": {
+        "protocol": "warp_recomputed",
+        "body_invweight0_before": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              2.539070185499041e-33,
+              9339.9375
+            ],
+            [
+              5.987232437093515e-33,
+              2363.159912109375
+            ]
+          ]
+        ],
+        "body_invweight0_after": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              9339.9375,
+              9339.9375
+            ],
+            [
+              2363.16015625,
+              2363.16015625
+            ]
+          ]
+        ],
+        "scope": "Public MuJoCo Warp set_const_0, including its degenerate-body inverse-weight fallback"
+      },
+      "initial_state": {
+        "gear_a": [
+          0.0
+        ],
+        "gear_b": [
+          0.0
+        ]
+      },
+      "final_state": {
+        "gear_a": [
+          [
+            18.929134368896484
+          ]
+        ],
+        "gear_b": [
+          [
+            -12.61678409576416
+          ]
+        ]
+      },
+      "config_name": "outputs/assembly_many_gears/gear_assets/fine_pitch_32_48.json",
+      "requested_num_envs": 1,
+      "timestep": 0.001,
+      "num_envs": 1,
+      "cell_file": "source_warp_recomputed/cell_2.json"
+    }
+  ],
+  "native_vs_recomputed_warp_endpoint_comparison": [
+    {
+      "config": "spur_pair",
+      "asset_sha256": "cfe72ac6ab35cb564bfe9593184f67b173e43c294ae0d5ca3ff92b18ed00dcca",
+      "duration_s": 1.5,
+      "timestep_s": 0.001,
+      "solver": "CG",
+      "requested_tolerance": 1e-08,
+      "native_effective_tolerance": [
+        9.999999974752427e-07
+      ],
+      "reference_effective_tolerance": 9.999999974752427e-07,
+      "native_disableflags": 0,
+      "reference_disableflags": 0,
+      "reference_initialization": "warp_recomputed",
+      "native_final_qpos": [
+        16.074525833129883,
+        -12.052453994750977
+      ],
+      "public_reference_final_qpos": [
+        16.05353355407715,
+        -12.033769607543945
+      ],
+      "driver_endpoint_relative_difference_percent": 0.130764226966118,
+      "follower_endpoint_relative_difference_percent": 0.15526628659499053,
+      "native_endpoint_ratio_error_percent": 0.02853691306067274,
+      "public_endpoint_ratio_error_percent": 0.05299400693662785,
+      "phase_endpoint_difference_rad": -0.0029401779174804688,
+      "controlled_ab_recomputed_final_qpos": [
+        16.094696044921875,
+        -12.068148612976074
+      ],
+      "controlled_ab_ratio_error_percent": 0.023804286888984283,
+      "native_vs_ab_driver_endpoint_difference_percent": -0.12532210447276926,
+      "scope": "Paired endpoints under observed CG/MC-on/effective1e-6 settings; not full trajectory, phase identity, CPU PGS equivalence, or long-term qualification."
+    },
+    {
+      "config": "reduction_12_36",
+      "asset_sha256": "c1ae7c632faa6bfd5acc87d6df9bf180c432056314541c8944064a4bb4349fc5",
+      "duration_s": 1.5,
+      "timestep_s": 0.001,
+      "solver": "CG",
+      "requested_tolerance": 1e-08,
+      "native_effective_tolerance": [
+        9.999999974752427e-07
+      ],
+      "reference_effective_tolerance": 9.999999974752427e-07,
+      "native_disableflags": 0,
+      "reference_disableflags": 0,
+      "reference_initialization": "warp_recomputed",
+      "native_final_qpos": [
+        25.116029739379883,
+        -8.364057540893555
+      ],
+      "public_reference_final_qpos": [
+        25.151283264160156,
+        -8.376605987548828
+      ],
+      "driver_endpoint_relative_difference_percent": -0.14016590887236946,
+      "follower_endpoint_relative_difference_percent": -0.14980347259887505,
+      "native_endpoint_ratio_error_percent": 0.09498761128560185,
+      "public_endpoint_ratio_error_percent": 0.08534475671966302,
+      "phase_endpoint_difference_rad": 0.000797271728515625,
+      "controlled_ab_recomputed_final_qpos": [
+        25.153438568115234,
+        -8.376864433288574
+      ],
+      "controlled_ab_ratio_error_percent": 0.09082363903306634,
+      "native_vs_ab_driver_endpoint_difference_percent": -0.1487225240956569,
+      "scope": "Paired endpoints under observed CG/MC-on/effective1e-6 settings; not full trajectory, phase identity, CPU PGS equivalence, or long-term qualification."
+    },
+    {
+      "config": "fine_pitch_32_48",
+      "asset_sha256": "c2f1a1fa35880053b2e0c1b92705fe3673236f5b2c79d7f579ae876ad2bce680",
+      "duration_s": 1.5,
+      "timestep_s": 0.001,
+      "solver": "CG",
+      "requested_tolerance": 1e-08,
+      "native_effective_tolerance": [
+        9.999999974752427e-07
+      ],
+      "reference_effective_tolerance": 9.999999974752427e-07,
+      "native_disableflags": 0,
+      "reference_disableflags": 0,
+      "reference_initialization": "warp_recomputed",
+      "native_final_qpos": [
+        18.931087493896484,
+        -12.618504524230957
+      ],
+      "public_reference_final_qpos": [
+        18.929134368896484,
+        -12.61678409576416
+      ],
+      "driver_endpoint_relative_difference_percent": 0.010318089363914318,
+      "follower_endpoint_relative_difference_percent": 0.013636030019514855,
+      "native_endpoint_ratio_error_percent": 0.017593852181607694,
+      "public_endpoint_ratio_error_percent": 0.020910756789532803,
+      "phase_endpoint_difference_rad": -0.0004183451334647259,
+      "controlled_ab_recomputed_final_qpos": [
+        18.929134368896484,
+        -12.61678409576416
+      ],
+      "controlled_ab_ratio_error_percent": 0.020910756789538354,
+      "native_vs_ab_driver_endpoint_difference_percent": 0.010318089363914318,
+      "scope": "Paired endpoints under observed CG/MC-on/effective1e-6 settings; not full trajectory, phase identity, CPU PGS equivalence, or long-term qualification."
+    }
+  ],
+  "timing_scope_extension": {
+    "controlled_ab": "elapsed_ms is1500steps with per-step state/contact/overflow reads; no throughput comparison",
+    "public_recomputed": "step_time_ms\u00d71500 is batched step-loop wall scope; first-step compilation may be included"
+  }
+}

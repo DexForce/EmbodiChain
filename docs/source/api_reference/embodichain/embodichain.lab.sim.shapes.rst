@@ -18,6 +18,12 @@ surface deformables, the array-backed form preserves node order for particle
 flags and kinematic trajectories. Volume deformables generate a separate
 tetrahedral simulation mesh during voxelization.
 
+``CompoundShapeCfg`` attaches body-local ``ShapePartCfg`` pieces to one rigid
+body. Collision meshes stay separate convex hulls, preserving apertures and
+clearance; optional independent visual parts do not participate in collision.
+``CylinderCfg`` retains an analytic cylinder descriptor. Backend cooking may
+approximate that primitive, so precision experiments qualify each backend.
+
 .. rubric:: Type aliases
 
 .. autosummary::
@@ -29,6 +35,9 @@ tetrahedral simulation mesh during voxelization.
 .. autosummary::
 
    CubeCfg
+   CylinderCfg
+   ShapePartCfg
+   CompoundShapeCfg
    LoadOption
    MeshCollisionCfg
    MeshCfg
@@ -71,3 +80,15 @@ tetrahedral simulation mesh during voxelization.
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. autoclass:: CylinderCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: ShapePartCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: CompoundShapeCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate

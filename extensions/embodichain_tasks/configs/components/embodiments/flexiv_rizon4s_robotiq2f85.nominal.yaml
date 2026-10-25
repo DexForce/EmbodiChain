@@ -1,0 +1,7 @@
+embodiment_id: flexiv_rizon4s_robotiq2f85.nominal
+simulation:
+  class_type: FlexivRizon4SRobotiq
+  uid: FlexivRizon4SRobotiq
+  gripper_model: parallel_jaw
+  require_exact_dynamics: false
+sensor: []

@@ -34,6 +34,7 @@ _BLACKLIST = ["utils"]
 
 register_manager_modules(
     [
+        "embodichain.lab.gym.envs.managers.assembly",
         "embodichain_tasks.locomotion.managers.observations",
         "embodichain_tasks.locomotion.managers.rewards",
     ]

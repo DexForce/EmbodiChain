@@ -220,7 +220,26 @@ def evaluate_episodes(
         "eval/avg_reward": float(np.mean(returns)),
         "eval/avg_length": float(np.mean(lengths)),
         "eval/success_rate": (float(np.mean(successes)) if successes else float("nan")),
+        "eval/completed_episodes": float(len(returns)),
+        "eval/success_samples": float(len(successes)),
     }
+    if successes and all(value in (0.0, 1.0) for value in successes):
+        # Wilson's 95% score interval remains informative at 0% and 100%.
+        # The denominator is completed episodes carrying a success label.
+        z = 1.959963984540054
+        count = len(successes)
+        proportion = sum(successes) / count
+        denominator = 1 + z * z / count
+        center = (proportion + z * z / (2 * count)) / denominator
+        radius = (
+            z
+            * np.sqrt(
+                proportion * (1 - proportion) / count + z * z / (4 * count * count)
+            )
+            / denominator
+        )
+        result["eval/success_ci95_low"] = max(0.0, float(center - radius))
+        result["eval/success_ci95_high"] = min(1.0, float(center + radius))
     for name, values in metric_values.items():
         if values:
             result[f"eval/metrics/{name}"] = float(np.mean(values))

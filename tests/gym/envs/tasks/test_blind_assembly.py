@@ -1,0 +1,370 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+"""Native task loading and assembly-specific physical success guards."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import numpy as np
+import pytest
+import torch
+
+from embodichain.lab.gym.envs.assembly_env import BlindAssemblyEnv
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg, register_manager_modules
+from embodichain.utils.utility import load_config
+
+_CONFIG_ROOT = (
+    Path(__file__).resolve().parents[4]
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/assembly"
+)
+
+
+@pytest.mark.parametrize("task", ["peg_insertion", "gear_meshing", "nut_threading"])
+@pytest.mark.parametrize("profile", ["study", "fullrange"])
+def test_nominal_task_uses_production_component_loader(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, task: str, profile: str
+) -> None:
+    from embodichain_robots import FlexivRizon4SRobotiqCfg
+
+    urdf = tmp_path / "robot.urdf"
+    urdf.write_text('<robot name="test"><link name="base"/></robot>')
+    monkeypatch.setattr(
+        FlexivRizon4SRobotiqCfg, "_pk_urdf_path", property(lambda self: str(urdf))
+    )
+    register_manager_modules(["embodichain.lab.gym.envs.managers.assembly"])
+    path = _CONFIG_ROOT / task / f"task.{profile}.nominal.yaml"
+    cfg = config_to_cfg(load_config(str(path)), source_path=path)
+    assert cfg.sim_cfg.physics_dt == pytest.approx(0.001)
+    assert cfg.sim_steps_per_control == 20
+    assert cfg.control_parts == ["arm"]
+    assert cfg.robot.gripper_model == "parallel_jaw"
+    assert len(cfg.robot.control_parts["eef"]) == 2
+    assert cfg.actions.arm_delta.params["part_name"] == "arm"
+    assert cfg.extensions["require_heterogeneous_assets"] is False
+    agent = load_config(
+        str(_CONFIG_ROOT / task / "agents" / f"ppo.{profile}.nominal.yaml")
+    )
+    assert agent["policy"]["obs_groups"]["actor"] == ["proprioception"]
+    assert agent["policy"]["cfg"]["contact_classes"] == (
+        4 if task == "nut_threading" else 3
+    )
+
+
+@pytest.mark.parametrize(
+    "kind,moving,anchor",
+    [("peg", "peg", "plate"), ("gear", "gear_b", "shaft"), ("nut", "nut", "bolt")],
+)
+def test_task_assets_keep_real_mating_constraints(
+    kind: str, moving: str, anchor: str
+) -> None:
+    pytest.importorskip("mjfit")
+    from embodichain.gen_sim.assembly.task_assets import build_task_assembly
+
+    asset = build_task_assembly(kind)
+    bodies = {b.name: b for b in asset.bodies}
+    assert bodies[moving].joint.kind == "free"
+    assert bodies[anchor].joint.kind == "fixed"
+    assert len(bodies[anchor].geometries) > 1
+    if kind == "gear":
+        assert bodies["gear_a"].joint.kind == "hinge"
+        # The perforated root and boss must be assembled from independent
+        # convex pieces; the upstream solid hub cannot remain in collision.
+        assert not any(
+            g.name in {"gear_b_col_0", "gear_b_hub"} for g in bodies[moving].geometries
+        )
+        assert any(g.name.startswith("bore_") for g in bodies[moving].geometries)
+        assert any(g.name.startswith("boss_") for g in bodies[moving].geometries)
+    elif kind == "peg":
+        outline = np.asarray(asset.config["mating_outline"])
+        assert outline.shape[1] == 2
+        assert outline[:, 0].max() - outline[:, 0].min() > 0.05
+
+
+def test_bilateral_grasp_requires_the_part_on_both_pads() -> None:
+    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
+    env.robot = SimpleNamespace(uid="robot")
+    env._moving_uid = "part"
+    data = {
+        "user_ids": torch.tensor([[[1, 3], [3, 2]], [[1, 3], [1, 2]]]),
+        "distance": torch.zeros((2, 2)),
+        "is_valid": torch.ones((2, 2), dtype=torch.bool),
+    }
+    sensor = SimpleNamespace(
+        dropped_contacts=0,
+        get_data=lambda: data,
+        get_actor_ids=lambda uid, links=None: (
+            torch.tensor([[1, 2], [1, 2]])
+            if uid == "robot"
+            else torch.tensor([[3], [3]])
+        ),
+    )
+    env.get_sensor = lambda name: sensor
+    assert env._contact_grasp().tolist() == [True, False]
+
+
+def test_formal_geometry_gate_precedes_world_creation() -> None:
+    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
+    env.require_heterogeneous_assets = True
+    with pytest.raises(RuntimeError, match="per-arena"):
+        env._setup_scene()
+
+
+def _analytic_mating_state(
+    kind: str = "peg", grasped: bool = True, penetration: float = 0.0
+) -> tuple[BlindAssemblyEnv, torch.Tensor]:
+    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
+    env.assembly_kind = kind
+    env._num_envs = 1
+    env._moving_uid, env._fixture_uid = "peg", "plate"
+    part = torch.eye(4).unsqueeze(0)
+    part[:, 2, 3] = -0.02
+    fixture = torch.eye(4).unsqueeze(0)
+    objects = {
+        "peg": SimpleNamespace(get_local_pose=lambda **kwargs: part),
+        "plate": SimpleNamespace(get_local_pose=lambda **kwargs: fixture),
+    }
+    env.sim = SimpleNamespace(
+        device=torch.device("cpu"), get_rigid_object=lambda uid: objects[uid]
+    )
+    env._assembly_revision = 0
+    env._assembly_state_revision = -1
+    env._assembly_state_physics_revision = -1
+    env._assembly_physics_revision = 0
+    env._assembly_edge_points = torch.tensor(
+        [[-0.004, -0.004, 0], [0.004, -0.004, 0], [0.004, 0.004, 0], [-0.004, 0.004, 0]]
+    )
+    env._fixture_zmax = 0.0
+    env._moving_zmin = 0.0
+    env.assembly_asset = SimpleNamespace(
+        config={
+            "clearance": 0.001,
+            "plate_thickness": 0.01,
+            "mating_outline": [
+                [-0.005, -0.005],
+                [0.005, -0.005],
+                [0.005, 0.005],
+                [-0.005, 0.005],
+            ],
+        }
+    )
+    env._assembly_angle = torch.zeros(1)
+    env._assembly_previous_yaw = torch.zeros(1)
+    env._assembly_reset_rows = torch.zeros(1, dtype=torch.bool)
+    env._assembly_new_milestones = torch.zeros((1, 4), dtype=torch.bool)
+    env._assembly_milestones = torch.zeros((1, 4), dtype=torch.bool)
+    env._assembly_success_hold = torch.zeros(1, dtype=torch.long)
+    env._elapsed_steps = torch.tensor([20])
+    data = {
+        "is_valid": torch.ones((1, 1), dtype=torch.bool),
+        "distance": torch.tensor([[-penetration]]),
+    }
+    env.get_sensor = lambda name: SimpleNamespace(
+        dropped_contacts=0, get_data=lambda: data
+    )
+    env._contact_grasp = lambda: torch.tensor([grasped])
+    env._assembly_capture_angle = torch.full((1,), float("nan"))
+    env._assembly_capture_depth = torch.full((1,), float("nan"))
+    if kind == "nut":
+        env.assembly_asset.config.update(
+            pitch=0.004, major_diameter=0.036, nut_height=0.029
+        )
+    return env, part
+
+
+@pytest.mark.parametrize(
+    "grasped,penetration,expected",
+    [(True, 0.0, True), (False, 0.0, False), (True, 0.001, False)],
+)
+def test_seated_peg_requires_grasp_and_penetration_guard(
+    grasped: bool, penetration: float, expected: bool
+) -> None:
+    env, _ = _analytic_mating_state(grasped=grasped, penetration=penetration)
+    for revision in range(3):
+        env._assembly_revision = revision
+        env._assembly_physics_revision = revision
+        success, _, metrics = env.compute_task_state()
+    assert success.item() is expected
+    assert metrics["depth"].item() == pytest.approx(0.02)
+    assert env._assembly_labels.tolist() == [[2, 2, 2, 2]]
+    previous = env._assembly_success_hold.clone()
+    env._assembly_revision += 1
+    env.compute_task_state()
+    assert torch.equal(env._assembly_success_hold, previous)
+
+
+def test_nut_rotation_at_fixed_capture_depth_is_not_threading() -> None:
+    env, part = _analytic_mating_state(kind="nut")
+    part[:, 2, 3] = -0.002
+    env.compute_task_state()
+    assert env._assembly_metrics["captured"].item()
+    for revision in range(1, 5):
+        angle = min(revision * torch.pi / 4, torch.pi / 2)
+        part[0, :2, :2] = torch.tensor(
+            [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+        )
+        env._assembly_revision = env._assembly_physics_revision = revision
+        success, _, _ = env.compute_task_state()
+        assert success.item() is False
+    # A genuine quarter turn advances one quarter of the 4 mm pitch.
+    part[:, 2, 3] = -0.003
+    for revision in range(5, 8):
+        env._assembly_revision = env._assembly_physics_revision = revision
+        success, _, _ = env.compute_task_state()
+    assert success.item() is True
+
+
+@pytest.mark.parametrize("base_pitch", [0.0, 0.4])
+def test_encoder_gravity_feedforward_matches_mujoco_bias(
+    tmp_path: Path, base_pitch: float
+) -> None:
+    mujoco = pytest.importorskip("mujoco")
+    pytest.importorskip("pytorch_kinematics")
+    import xml.etree.ElementTree as ET
+    from embodichain_robots.flexiv.rizon4s_robotiq._menagerie import _append_model
+
+    model = ET.Element("mujoco")
+    world = ET.SubElement(model, "worldbody")
+    from scipy.spatial.transform import Rotation
+
+    rotation = Rotation.from_euler("y", base_pitch)
+    quaternion = np.roll(rotation.as_quat(), 1)
+    body = ET.SubElement(
+        world, "body", name="base", quat=" ".join(map(str, quaternion))
+    )
+    ET.SubElement(body, "geom", type="box", size=".02 .02 .02")
+    for i in range(1, 8):
+        body = ET.SubElement(body, "body", name=f"link{i}", pos="0 0 .1")
+        ET.SubElement(body, "joint", name=f"joint{i}", axis="0 1 0", range="-170 170")
+        ET.SubElement(
+            body, "geom", type="box", size=".01 .01 .05", pos="0 0 .05", mass="1"
+        )
+    reference = mujoco.MjModel.from_xml_string(ET.tostring(model, encoding="unicode"))
+    urdf = ET.Element("robot", name="gravity_reference")
+    _append_model(urdf, reference, tmp_path)
+    path = tmp_path / "gravity.urdf"
+    path.write_text(ET.tostring(urdf, encoding="unicode"))
+    q = torch.tensor([[0.2, -0.1, 0.3, -0.2, 0.1, 0.4, -0.3]])
+    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
+    env._num_envs = 1
+    env.sim = SimpleNamespace(device=torch.device("cpu"))
+    env.sim_cfg = SimpleNamespace(physics_cfg=SimpleNamespace(gravity=[0, 0, -9.81]))
+    root_pose = np.eye(4)
+    root_pose[:3, :3] = rotation.as_matrix()
+    env.cfg = SimpleNamespace(
+        robot=SimpleNamespace(
+            _pk_urdf_path=str(path), init_rot=[0, 0, 0], init_local_pose=root_pose
+        )
+    )
+    env.robot = SimpleNamespace(
+        joint_names=[f"joint{i}" for i in range(1, 8)], get_qpos=lambda: q
+    )
+    env.assembly_fidelity = {}
+    env._prepare_gravity_compensation()
+    actual = env._gravity_torques().numpy()[0]
+    data = mujoco.MjData(reference)
+    data.qpos[:] = q.numpy()[0]
+    mujoco.mj_forward(reference, data)
+    np.testing.assert_allclose(actual, data.qfrc_bias, atol=2e-5, rtol=2e-5)
+
+
+def test_manager_history_selective_reset_does_not_repeat_other_rows() -> None:
+    from embodichain.lab.gym.envs.managers.assembly import AssemblyProprioception
+    from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+    frame = torch.zeros((2, 33))
+    frame[:, 0] = torch.tensor([1.0, 2.0])
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        assembly_kind="peg",
+        _assembly_physics_revision=0,
+        _assembly_reset_rows=torch.ones(2, dtype=torch.bool),
+        refresh_assembly_state=lambda: None,
+        proprioceptive_frame=lambda: frame.clone(),
+    )
+    history = AssemblyProprioception(FunctorCfg(params={"history_length": 30}), env)
+    history(env, {})
+    env._assembly_physics_revision = 1
+    frame[:, 0] = torch.tensor([3.0, 4.0])
+    before = history(env, {})
+    frame[0, 0] = 5.0
+    history.reset(env_ids=torch.tensor([0]))
+    after = history(env, {})
+    assert torch.equal(before[1], after[1])
+    assert after.reshape(2, 31, 33)[0, :, 0].tolist() == [5.0] * 31
+    assert before.reshape(2, 31, 33)[0, -1, 0].item() == 3.0
+
+
+def test_checkpoint_task_resources_relocate_without_generator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from embodichain.gen_sim.assembly import AssemblyAsset
+    import shutil
+    import json
+    import sys
+
+    source = tmp_path / "source" / "prepared_v4_parallel_jaw"
+    source.mkdir(parents=True)
+    urdf = source / "robot.urdf"
+    urdf.write_text('<robot name="test"><link name="base"/></robot>')
+    (source / "fidelity.json").write_text(
+        json.dumps({"exact_source_dynamics": False, "converter_version": 4})
+    )
+    for model in ("flexiv_rizon4s", "robotiq_2f85"):
+        (source.parent / model).mkdir()
+        (source.parent / model / "LICENSE").write_text("fixture license " + model)
+    (source.parent / "source_manifest.json").write_text('{"revision":"fixture"}')
+    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
+    env.cfg = SimpleNamespace(robot=SimpleNamespace(_pk_urdf_path=str(urdf)))
+    env.assembly_asset = AssemblyAsset(config={"kind": "peg"})
+    env.assembly_fidelity = {"source_gripper_dynamics_preserved": False}
+    directory = tmp_path / "run" / "configs"
+    frozen = env.export_checkpoint_gym_config(
+        {
+            "id": "BlindPegInsertionRL-v1",
+            "physics": "newton",
+            "robot": {
+                "class_type": "FlexivRizon4SRobotiq",
+                "gripper_model": "parallel_jaw",
+            },
+            "env": {"extensions": {}},
+        },
+        directory,
+    )
+    target = tmp_path / "relocated" / "configs"
+    shutil.copytree(directory, target)
+    shutil.rmtree(source.parent)
+    monkeypatch.setitem(sys.modules, "mjfit", None)
+    path = target / "gym.yaml"
+    import yaml
+
+    path.write_text(yaml.safe_dump(frozen))
+    cfg = config_to_cfg(load_config(str(path)), source_path=path)
+    assert cfg.robot.source_urdf == str(target / "resources" / "robot" / "robot.urdf")
+    asset = AssemblyAsset.load(cfg.extensions["assembly_manifest"])
+    assert asset.content_hash == env.assembly_asset.content_hash
+    assert (
+        target / "resources/robot/licenses/robotiq_2f85.LICENSE"
+    ).read_text() == "fixture license robotiq_2f85"
+    assert (
+        json.loads((target / "resources/robot/fidelity.json").read_text())[
+            "converter_version"
+        ]
+        == 4
+    )

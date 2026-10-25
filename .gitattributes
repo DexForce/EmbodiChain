@@ -1,0 +1,5 @@
+# Empty unified-diff context lines intentionally retain their space prefix.
+scripts/patches/*.patch whitespace=-blank-at-eol,-blank-at-eof
+
+# Keep measured evidence available without expanding generated results in reviews.
+examples/sim/assembly/validation/**/*.json linguist-generated=true

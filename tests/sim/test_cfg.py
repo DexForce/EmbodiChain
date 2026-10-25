@@ -597,8 +597,12 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         # Asset-loading adapter option, not a native ShapeConfig parameter.
         "use_native_mesh_loader",
     }
+    # Raw MuJoCo parameters are capability-gated for older SDK builds; they
+    # become normal descriptor fields once the bundled SDK patch is applied.
+    optional_native_fields = {"solref", "solimp", "solmix"} - names(NewtonCollisionDesc)
     assert (
-        newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
+        newton_fields - optional_native_fields
+        == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
     )
 
     assert names(NewtonCollisionPipelineCfg) - {"soft_contact_margin"} == names(

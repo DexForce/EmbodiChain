@@ -1,0 +1,70 @@
+--- a/newton/_src/solvers/mujoco/solver_mujoco.py
++++ b/newton/_src/solvers/mujoco/solver_mujoco.py
+@@ -3,6 +3,7 @@
+ 
+ from __future__ import annotations
+ 
++import copy
+ import importlib.metadata as importlib_metadata
+ import math
+ import os
+@@ -572,8 +573,8 @@
+ 
+     @staticmethod
+     def _parse_solver(value: str | int, context: dict[str, Any] | None = None) -> int:
+-        """Parse solver option: CG=1, Newton=2. PGS (0) is not supported."""
+-        return SolverMuJoCo._parse_named_int(value, {"cg": 1, "newton": 2})
++        """Parse solver option; PGS is available only on the MuJoCo CPU path."""
++        return SolverMuJoCo._parse_named_int(value, {"pgs": 0, "cg": 1, "newton": 2})
+ 
+     @staticmethod
+     def _parse_cone(value: str | int, context: dict[str, Any] | None = None) -> int:
+@@ -3991,6 +3992,12 @@
+             disableflags |= mujoco.mjtDisableBit.mjDSBL_CONTACT
+         if disable_sensors:
+             disableflags |= mujoco.mjtDisableBit.mjDSBL_SENSOR
++        if use_mujoco_cpu:
++            # Conversion/property staging changes geom frames after MjSpec
++            # compilation. MuJoCo's CPU midphase BVH is then stale, and its
++            # public mj_setConst API does not rebuild that tree. Use exact
++            # narrowphase checks instead of silently losing valid contacts.
++            disableflags |= mujoco.mjtDisableBit.mjDSBL_MIDPHASE
+         self.use_mujoco_cpu = use_mujoco_cpu
+         if use_mujoco_contacts or use_mujoco_cpu:
+             mujoco_attrs_for_warn = getattr(model, "mujoco", None)
+@@ -4858,6 +4865,14 @@
+             )
+             if flags & ModelFlags.CONSTRAINT_PROPERTIES:
+                 self._sync_equality_properties_to_mujoco_cpu()
++            if flags & ModelFlags.SHAPE_PROPERTIES:
++                # Contact kernels write the shared property staging arrays.
++                # Mirror authored contact parameters to the CPU model as well.
++                for name in (
++                    "geom_friction", "geom_solref", "geom_solimp", "geom_solmix", "geom_gap", "geom_margin",
++                ):
++                    getattr(self.mj_model, name)[:] = getattr(self.mjw_model, name).numpy()[0]
++                self._mujoco.mj_forward(self.mj_model, self.mj_data)
+ 
+         else:
+             if (
+@@ -7518,8 +7533,19 @@
+             policy_init = self.mj_model.tree_sleep_policy == mujoco.mjtSleepPolicy.mjSLEEP_INIT
+             self.mj_model.tree_sleep_policy[policy_never] = mujoco.mjtSleepPolicy.mjSLEEP_AUTO_NEVER
+             self.mj_model.tree_sleep_policy[policy_allowed | policy_init] = mujoco.mjtSleepPolicy.mjSLEEP_AUTO_ALLOWED
++            # CPU model updates still use MJWarp arrays as a property staging
++            # store. PGS is a CPU-only solver, so prepare those arrays from an
++            # independent model copy without modifying the actual CPU solver.
++            staging_model = self.mj_model
++            if self.use_mujoco_cpu:
++                staging_model = copy.copy(self.mj_model)
++                staging_model.opt.disableflags &= ~int(mujoco.mjtDisableBit.mjDSBL_MIDPHASE)
++                if self.mj_model.opt.solver == mujoco.mjtSolver.mjSOL_PGS:
++                    staging_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
+             try:
+-                self.mjw_model = mujoco_warp.put_model(self.mj_model)
++                self.mjw_model = mujoco_warp.put_model(staging_model)
++                if staging_model is not self.mj_model:
++                    self.mjw_model.opt.solver = int(self.mj_model.opt.solver)
+             finally:
+                 # MuJoCo Warp consumes only the compiled runtime policy. Keep
+                 # the authoring policy on the CPU model for inspection and MJCF export.

@@ -28,6 +28,15 @@ velocity clears position gain. Newton rejects active acceleration drives;
 non-MuJoCo position mode is gain-based emulation with zero velocity target.
 Exact field options and defaults remain in `cfg/articulation.py`.
 
+`spawn/source.py` retains authored URDF passive damping and friction in the
+Newton joint descriptor before configured overlays. Passive damping is
+independent of the velocity target gain `joint_drive_props.damping`;
+none/effort modes clear PD gains without removing source dissipation. Explicit
+descriptor values, including zero, retain ownership over source defaults.
+URDF collision geometry remains owned by the native source: resolved
+`LinkDesc.collisions` may contain only attribute overlays and is not a count
+of physical colliders.
+
 ## State order and batched writes
 
 Public `joint_names` follows finalized Scene qpos/qvel order, which may differ

@@ -102,7 +102,7 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     output = capsys.readouterr().out
     assert output.startswith("╭")
     assert output.rstrip().endswith("╯")
-    assert "EmbodiChain · Robot Catalog · 10 robots" in output
+    assert "EmbodiChain · Robot Catalog · 11 robots" in output
     assert "Robot ID" in output
     assert "Config Class" not in output
     assert "Variants" in output
@@ -116,6 +116,7 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "CobotMagic",
         "FrankaPanda",
         "FlexivRizon4S",
+        "FlexivRizon4SRobotiq",
         "SO101Follower",
         "URRobot",
         "DualArmRobot",
@@ -126,8 +127,9 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "ur10",
         "ur10e",
     }
+    robot_ids = _column_text(output, 1)
     for robot_id in expected_ids - {"ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"}:
-        assert re.search(rf"│\s*{re.escape(robot_id)}\s*│", output)
+        assert robot_id in robot_ids
     assert set(registry.list_robot_cfgs()) == expected_ids
     for alias in (
         "aloha_mini",
@@ -213,7 +215,7 @@ main(["list-robot"])
         check=True,
     )
 
-    assert "10 robots" in result.stdout
+    assert "11 robots" in result.stdout
     assert result.stderr == ""
 
 

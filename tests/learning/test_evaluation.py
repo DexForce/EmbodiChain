@@ -168,6 +168,10 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None
     assert result["eval/avg_reward"] == 1.25
     assert result["eval/avg_length"] == 1.25
     assert result["eval/success_rate"] == 1.0
+    assert result["eval/completed_episodes"] == 4
+    assert result["eval/success_samples"] == 4
+    assert result["eval/success_ci95_low"] == pytest.approx(0.5101091635)
+    assert result["eval/success_ci95_high"] == pytest.approx(1.0)
     assert result["eval/metrics/terminal_step"] == 1.25
     assert "eval/metrics/final_position" not in result
 

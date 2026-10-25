@@ -178,6 +178,7 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain.data": ["default_materials.json"],
+            "embodichain_robots.flexiv.rizon4s_robotiq": ["rizon4s_sources.json"],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
             "embodichain_tasks.configs": [
@@ -187,7 +188,17 @@ def main():
                 "**/README.md",
             ],
         },
-        data_files=get_example_data_files(),
+        data_files=[
+            *get_example_data_files(),
+            (
+                "share/embodichain/assembly_patches",
+                [
+                    path.relative_to(THIS_DIR).as_posix()
+                    for path in sorted((THIS_DIR / "scripts" / "patches").iterdir())
+                    if path.suffix in {".patch", ".md"}
+                ],
+            ),
+        ],
         cmdclass=cmdclass,
         include_package_data=False,
     )

@@ -813,3 +813,118 @@ def test_cli_flushes_cleanup_and_propagates_resume_error(monkeypatch):
     with pytest.raises(ValueError, match="incompatible resume"):
         training.cli(["--config", "train.json", "--resume", "source.pt"])
     assert calls == ["cleanup"]
+
+
+def test_componentized_gym_snapshot_reloads_after_source_components_are_removed(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.utils.gym_utils import (
+        config_to_cfg,
+        DEFAULT_MANAGER_MODULES,
+    )
+
+    source = tmp_path / "source"
+    source.mkdir()
+    robot_file = source / "robot.urdf"
+    robot_file.write_text('<robot name="snapshot"><link name="base"/></robot>')
+    environment = source / "environment.yaml"
+    environment.write_text(
+        yaml.safe_dump(
+            {
+                "environment_id": "snapshot",
+                "physics": "default",
+                "simulation": {},
+                "env": {},
+                "max_episode_steps": 17,
+            }
+        )
+    )
+    embodiment = source / "embodiment.yaml"
+    embodiment.write_text(
+        yaml.safe_dump(
+            {
+                "embodiment_id": "snapshot",
+                "simulation": {
+                    "uid": "SnapshotRobot",
+                    "fpath": "./robot.urdf",
+                },
+                "sensor": [],
+            }
+        )
+    )
+    deployment = source / "task.yaml"
+    gym_data = {
+        "id": "EmbodiedEnv-v1",
+        "environment": {"component": "environment.yaml"},
+        "embodiment": {"component": "embodiment.yaml"},
+    }
+    deployment.write_text(yaml.safe_dump(gym_data))
+    run = tmp_path / "run"
+    run.mkdir()
+    checkpoint = run / "checkpoint.pt"
+    checkpoint.write_bytes(b"snapshot fixture")
+    trainer = SimpleNamespace(rank=0)
+    _configure_checkpoints(
+        trainer,
+        _config("ppo"),
+        source / "train.yaml",
+        run,
+        gym_config=deployment,
+        gym_data=gym_data,
+    )
+    trainer._checkpoint_callback(
+        {"latest_checkpoint_path": str(checkpoint), "best_checkpoint_path": None}
+    )
+    environment.unlink()
+    embodiment.unlink()
+    deployment.unlink()
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    monkeypatch.chdir(unrelated)
+    snapshot = RunManifest.load(run).configs["gym"]
+    frozen = yaml.safe_load(snapshot.read_text())
+    assert "environment" not in frozen and "embodiment" not in frozen
+    cfg = config_to_cfg(
+        frozen, manager_modules=DEFAULT_MANAGER_MODULES, source_path=snapshot
+    )
+    assert cfg.max_episode_steps == 17
+    assert cfg.robot.uid == "SnapshotRobot"
+    assert cfg.robot.fpath == str(robot_file.resolve())
+    assert gym_data["environment"]["component"] == "environment.yaml"
+
+
+def test_gym_snapshot_export_hook_runs_on_unwrapped_environment(tmp_path):
+    from types import SimpleNamespace
+
+    class AssetEnvironment:
+        def export_checkpoint_gym_config(self, frozen_config, config_dir):
+            artifact = config_dir / "physical-asset.json"
+            artifact.write_text('{"version": 4}')
+            frozen_config.setdefault("env", {}).setdefault("extensions", {})[
+                "assembly_manifest"
+            ] = "./physical-asset.json"
+            return frozen_config
+
+    gym_data = {"id": "test", "env": {}}
+    trainer = SimpleNamespace(rank=0, env=SimpleNamespace(unwrapped=AssetEnvironment()))
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"snapshot fixture")
+    _configure_checkpoints(
+        trainer,
+        _config("ppo"),
+        "train.yaml",
+        tmp_path,
+        gym_config="gym.yaml",
+        gym_data=gym_data,
+    )
+    trainer._checkpoint_callback(
+        {"latest_checkpoint_path": str(checkpoint), "best_checkpoint_path": None}
+    )
+    manifest = RunManifest.load(tmp_path)
+    frozen = yaml.safe_load(manifest.configs["gym"].read_text())
+    reference = frozen["env"]["extensions"]["assembly_manifest"]
+    artifact = manifest.configs["gym"].parent / reference
+    assert json.loads(artifact.read_text()) == {"version": 4}
+    assert gym_data == {"id": "test", "env": {}}
+    assert trainer._checkpoint_context["gym"] == gym_data

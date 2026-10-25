@@ -1,0 +1,6 @@
+embodiment_id: flexiv_rizon4s_robotiq2f85
+simulation:
+  class_type: FlexivRizon4SRobotiq
+  uid: FlexivRizon4SRobotiq
+  require_exact_dynamics: true
+sensor: []

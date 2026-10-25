@@ -22,13 +22,15 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from dexsim.spawn import ArticulationDesc, LinkDesc
+from dexsim.spawn import ArticulationDesc, JointDesc, LinkDesc, NewtonJointDesc
+from dexsim.engine import JointType
 
 from embodichain.lab.sim.spawn.source import (
     _apply_dexsim_source_overlay,
     _capture_dexsim_source_physics,
     _clear_invalid_source_com,
     _retain_dexsim_source_descriptor,
+    resolve_articulation_source,
 )
 
 pytestmark = pytest.mark.no_sim
@@ -49,6 +51,75 @@ def _physical_attr(
         com_position=np.asarray(com_position, dtype=np.float32),
         com_quaternion=np.asarray((1.0, 0.0, 0.0, 0.0), dtype=np.float32),
     )
+
+
+@pytest.mark.parametrize("override", [None, 0.0])
+def test_urdf_passive_dynamics_survive_effort_mode_and_keep_overrides(
+    tmp_path, monkeypatch, override: float | None
+) -> None:
+    """Effort mode clears PD gains while preserving source joint dissipation."""
+    from embodichain.lab.sim.cfg import ArticulationCfg, JointDrivePropertiesCfg
+    from embodichain.lab.sim.spawn.descriptors import configure_articulation_desc
+
+    urdf = tmp_path / "passive.urdf"
+    urdf.write_text(
+        '<robot name="passive"><link name="base"/><link name="part"/>'
+        '<joint name="axis" type="continuous"><parent link="base"/>'
+        '<child link="part"/><dynamics damping="0.001" friction="0.002"/>'
+        "</joint></robot>"
+    )
+    desc = ArticulationDesc(name="passive", urdf_path=str(urdf))
+    skeleton = SimpleNamespace(
+        set_name=lambda _name: None,
+        detach_parent=lambda: None,
+        load_urdf=lambda _path, _scale: 0,
+        get_link_names=lambda _cache: ["base", "part"],
+        get_collision_shapes=lambda _name: [],
+    )
+    arena = SimpleNamespace(
+        create_skeleton=lambda _kind: skeleton,
+        remove_skeleton=lambda _name: None,
+    )
+    builder = SimpleNamespace(
+        replicate_plan=None, world=SimpleNamespace(get_env=lambda: arena)
+    )
+
+    def translate(_skeleton, descriptor) -> None:
+        # Reproduce the SDK metadata gap without constructing a native world.
+        descriptor.links = [_link("base"), _link("part")]
+        descriptor.joints = [
+            JointDesc(
+                name="axis",
+                parent_link_name="base",
+                child_link_name="part",
+                joint_type=JointType.CONTINUOUS,
+                newton=NewtonJointDesc(damping=override, friction=override),
+            )
+        ]
+
+    monkeypatch.setattr(
+        "dexsim.spawn.adapters.newton_articulation_adapter._translate_urdf_articulation",
+        translate,
+    )
+    resolve_articulation_source(builder, desc)
+    configure_articulation_desc(
+        desc,
+        ArticulationCfg(
+            uid="passive",
+            fpath=str(urdf),
+            asset_physics_mode="overlay",
+            joint_drive_props=JointDrivePropertiesCfg(
+                target_mode="effort", stiffness=0.0, damping=0.0
+            ),
+        ),
+        newton_solver_type="mujoco_warp",
+    )
+    joint = desc.get_joint_desc("axis").newton
+    assert joint.damping == pytest.approx(0.001 if override is None else override)
+    assert joint.friction == pytest.approx(0.002 if override is None else override)
+    assert joint.target_ke == 0.0
+    assert joint.target_kd == 0.0
+    assert joint.target_mode == 4
 
 
 def test_default_source_capture_keeps_valid_inertia_and_discards_invalid_com(

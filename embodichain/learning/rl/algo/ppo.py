@@ -46,6 +46,7 @@ class PPOCfg(AlgorithmCfg):
     maximum_learning_rate: float = 1e-2
     num_mini_batches: int | None = None
     normalize_advantage_per_mini_batch: bool = False
+    auxiliary_coef: float = 0.0
 
 
 class PPO(BaseAlgorithm[TensorDict]):
@@ -76,6 +77,14 @@ class PPO(BaseAlgorithm[TensorDict]):
             raise ValueError("num_mini_batches must be positive when provided.")
         if cfg.action_bound_coef < 0.0:
             raise ValueError("action_bound_coef must be non-negative.")
+        if cfg.auxiliary_coef < 0.0:
+            raise ValueError("auxiliary_coef must be non-negative.")
+        if cfg.auxiliary_coef and not callable(
+            getattr(getattr(policy, "module", policy), "auxiliary_loss", None)
+        ):
+            raise ValueError(
+                "auxiliary_coef requires a policy auxiliary_loss implementation."
+            )
         self.cfg = cfg
         self.policy = policy
         self.device = torch.device(cfg.device)
@@ -100,6 +109,7 @@ class PPO(BaseAlgorithm[TensorDict]):
         total_action_bound_loss = 0.0
         total_entropy = 0.0
         total_kl = 0.0
+        total_auxiliary_loss = 0.0
         total_steps = 0
 
         for _ in range(self.cfg.n_epochs):
@@ -132,12 +142,18 @@ class PPO(BaseAlgorithm[TensorDict]):
                 value_loss = self._value_loss(values, returns, batch["value"])
                 action_bound_loss = self._action_bound_loss(eval_batch["action_mean"])
                 entropy_loss = -entropy.mean()
+                auxiliary_loss = (
+                    policy_module.auxiliary_loss(batch, eval_batch)
+                    if self.cfg.auxiliary_coef
+                    else actor_loss.new_zeros(())
+                )
 
                 loss = (
                     actor_loss
                     + self.cfg.vf_coef * value_loss
                     + self.cfg.action_bound_coef * action_bound_loss
                     + self.cfg.ent_coef * entropy_loss
+                    + self.cfg.auxiliary_coef * auxiliary_loss
                 )
 
                 self.optimizer.zero_grad(set_to_none=True)
@@ -152,6 +168,7 @@ class PPO(BaseAlgorithm[TensorDict]):
                 total_action_bound_loss += action_bound_loss.item() * bs
                 total_entropy += (-entropy_loss.item()) * bs
                 total_kl += kl * bs
+                total_auxiliary_loss += auxiliary_loss.item() * bs
                 total_steps += bs
 
         self._step_scheduler()
@@ -163,6 +180,7 @@ class PPO(BaseAlgorithm[TensorDict]):
             "entropy": total_entropy / max(1, total_steps),
             "kl": total_kl / max(1, total_steps),
             "learning_rate": self.current_learning_rate(),
+            "auxiliary_loss": total_auxiliary_loss / max(1, total_steps),
         }
 
     def _minibatch_indices(self, total: int) -> tuple[torch.Tensor, ...]:

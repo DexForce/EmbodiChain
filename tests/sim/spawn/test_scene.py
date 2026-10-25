@@ -60,6 +60,21 @@ def _make_scene(handles: dict[str, object]) -> SpawnScene:
     return scene
 
 
+@pytest.mark.parametrize("backend", ["newton", "dexsim"])
+def test_invalid_prepared_variants_fail_before_declaration(backend: str) -> None:
+    scene = _make_scene({})
+    scene.builder.backend = backend
+    scene.builder.add_object = MagicMock()
+    descriptor = SimpleNamespace(
+        name="variant", per_env=True, env_variants={1: object()}
+    )
+    expected_error = ValueError if backend == "newton" else NotImplementedError
+    with pytest.raises(expected_error):
+        scene.declare("rigid_object", "variant", descriptor)
+    scene.builder.add_object.assert_not_called()
+    assert "variant" not in scene
+
+
 def _material_assignment_scene(kind: str):
     originals = [MagicMock(name=f"original_{i}") for i in range(2)]
     stale = MagicMock(name="stale_descriptor_material")

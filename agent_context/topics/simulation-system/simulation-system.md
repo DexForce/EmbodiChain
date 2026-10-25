@@ -85,6 +85,21 @@ reset ordering, runtime controls and teardown.
 
 ## Quaternion and pose convention
 
+Procedural rigid geometry can be a `CompoundShapeCfg` of flat body-local
+`ShapePartCfg` entries. Spawn emits one physical body and multiple independent
+colliders; independent visual parts cannot become collision geometry. Explicit
+mass/COM/inertia applies once to the parent. `CylinderCfg` retains a native
+cylinder descriptor, but cooking fidelity remains backend-specific.
+
+Preparation-time `RigidObjectCfg.env_variants` needs the documented SDK variant
+extension. MuJoCo Warp currently requires equal collider topology within a
+batch; differing piece counts are rejected rather than padded or dropped.
+Raw Newton `solref`/`solimp`/`solmix` likewise require the SDK contact extension
+under `scripts/patches/`. These capability checks occur before materialization.
+The default ground is separately owned by `SimulationManagerCfg`: disable it
+for constrained probes or author `ground_plane_attrs` to match a reference
+contact profile. Omitting that profile preserves the existing scene defaults.
+
 EmbodiChain domain-facing quaternions are `(x, y, z, w)` (`xyzw`); public 7D
 poses are `xyz + xyzw`, with identity quaternion `(0, 0, 0, 1)`. This covers
 object/link/COM state, FK/IK, sensor offsets, task configuration and math.

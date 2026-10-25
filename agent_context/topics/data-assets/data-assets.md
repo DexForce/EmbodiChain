@@ -156,3 +156,9 @@ changes, exercise absolute, existing-relative and class-prefixed paths plus
 missing/bare prefixes and a custom data root. For CLI changes, cover category
 visibility and failure exit behavior. Use fake download backends for these
 contracts; separately validate actual network downloads when asset content changes.
+
+`FlexivRizon4SMenagerie` is a source-file bundle rather than an archive:
+`embodichain_robots/flexiv/rizon4s_robotiq/rizon4s_sources.json` pins individual Git blob identities and
+licenses. The owning asset class verifies each downloaded file before publishing
+the source cache. Robot-specific URDF preparation and model-fidelity metadata
+remain owned by the concrete preset, not by the generic dataset resolver.

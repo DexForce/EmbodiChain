@@ -1,4 +1,5 @@
 include VERSION
 recursive-include examples *
+recursive-include scripts/patches *.patch *.md
 global-exclude *.py[cod]
 prune examples/**/__pycache__

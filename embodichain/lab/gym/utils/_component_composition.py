@@ -149,7 +149,14 @@ def _resolve_local_resource_paths(value: object, *, base_dir: Path) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             if (
-                key in {"fpath", "urdf_path", "xml_path"}
+                key
+                in {
+                    "fpath",
+                    "urdf_path",
+                    "xml_path",
+                    "source_urdf",
+                    "assembly_manifest",
+                }
                 and isinstance(child, str)
                 and child.startswith(("./", "../"))
             ):

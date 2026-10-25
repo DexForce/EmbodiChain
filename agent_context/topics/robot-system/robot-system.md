@@ -203,3 +203,9 @@ backend binding rather than adding robot-specific post-bind fixes. For missing
 IK, inspect configured solver coverage; a gripper control part need not have a
 solver. For asset changes, validate round-trip and chain DOF/frame agreement
 before using executable robot smoke programs.
+
+`FlexivRizon4SRobotiqCfg` delegates pinned public-model preparation to
+`extensions/embodichain_robots/flexiv/rizon4s_robotiq/_menagerie.py`. Its default four-bar mimic and
+explicit nominal parallel-jaw variant carry fidelity metadata; neither is the
+unavailable author-identified dynamics. Assembly formal profiles gate those
+limitations. Validate arm/TCP FK separately from physical grasp dynamics.

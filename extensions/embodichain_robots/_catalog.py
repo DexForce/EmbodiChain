@@ -28,6 +28,7 @@ _CONFIG_CLASSES = {
     "CobotMagic": "embodichain_robots.agilex.cobotmagic:CobotMagicCfg",
     "FrankaPanda": "embodichain_robots.franka.panda:FrankaPandaCfg",
     "FlexivRizon4S": "embodichain_robots.flexiv.rizon4s:FlexivRizon4SCfg",
+    "FlexivRizon4SRobotiq": "embodichain_robots.flexiv.rizon4s_robotiq:FlexivRizon4SRobotiqCfg",
     "URRobot": "embodichain_robots.universal_robots.ur_robot:URRobotCfg",
     "SO101Follower": "embodichain_robots.the_robot_studio.so101:SO101FollowerCfg",
 }
@@ -82,9 +83,16 @@ _DEFAULT_CONTROL_INFO = {
     "URRobot": {"dof": 6, "control_parts": {"arm": 6}},
     "SO101Follower": {"dof": 6, "control_parts": {"arm": 5, "eef": 1}},
     "FlexivRizon4S": {"dof": 7, "control_parts": {"arm": 7}},
+    "FlexivRizon4SRobotiq": {"dof": 8, "control_parts": {"arm": 7, "eef": 1}},
 }
 
 _MIMIC_JOINTS = {
+    "FlexivRizon4SRobotiq": {
+        f"gripper_{side}_{name}_joint": "gripper_right_driver_joint"
+        for side in ("left", "right")
+        for name in ("driver", "coupler", "spring_link", "follower")
+        if (side, name) != ("right", "driver")
+    },
     "AlohaMini": {},
     "TianjiMarvin": {
         "LEFT_HAND_FINGER_2": "LEFT_HAND_FINGER_1",
@@ -119,6 +127,7 @@ _CLASSIFICATION = {
     "CobotMagic": ("agilex", "fixed_manipulator", 2),
     "FrankaPanda": ("franka", "fixed_manipulator", 1),
     "FlexivRizon4S": ("flexiv", "fixed_manipulator", 1),
+    "FlexivRizon4SRobotiq": ("flexiv", "fixed_manipulator", 1),
     "URRobot": ("universal_robots", "fixed_manipulator", 1),
     "SO101Follower": ("the_robot_studio", "fixed_manipulator", 1),
 }
@@ -134,6 +143,22 @@ ROBOT_CONFIGS = {
     }
     for name, class_path in _CONFIG_CLASSES.items()
 }
+
+ROBOT_CONFIGS["FlexivRizon4SRobotiq"].update(
+    variants={
+        "four_bar_mimic": {
+            **_DEFAULT_CONTROL_INFO["FlexivRizon4SRobotiq"],
+            "defaults": {"gripper_model": "four_bar_mimic"},
+        },
+        "parallel_jaw": {
+            "dof": 9,
+            "control_parts": {"arm": 7, "eef": 2},
+            "mimic_joints": {},
+            "defaults": {"gripper_model": "parallel_jaw"},
+        },
+    },
+    default_variant="four_bar_mimic",
+)
 
 _W1_VERSIONS = ("v021", "v022", "v025", "v030")
 _W1_HANDS = {

@@ -13,7 +13,8 @@ topics:
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, VisualMaterial, VisualMaterialCfg, VisualMaterialInst, preview-material, 材质预览, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
-    fixed-cadence playback, quaternion, xyzw]
+    fixed-cadence playback, quaternion, xyzw, CompoundShapeCfg, ShapePartCfg, CylinderCfg, env_variants,
+    enable_ground_plane, ground_plane_attrs]
   paths: [topics/simulation-system/simulation-system.md]
   source_of_truth:
   - embodichain/lab/sim/motion/__init__.py
@@ -126,7 +127,8 @@ topics:
   aliases: [robot system, robot config, robot catalog, list robot, robot preview, 机器人配置, 机器人系统, 机型解析, 列出机器人, 机器人预览]
   keywords: [RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg,
     FrankaPandaCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
-    asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot]
+    asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot,
+    FlexivRizon4SRobotiqCfg, Rizon4S]
   paths: [topics/robot-system/robot-system.md]
   source_of_truth:
   - embodichain/lab/sim/objects/robot.py
@@ -294,7 +296,8 @@ topics:
   aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置]
   keywords: [train-rl, Trainer, trainer.gym_config, learning_env, RolloutKind, DifferentiableTrainer,
     PPO, GRPO, APG, SyncCollector, ScheduledDifferentiableVecEnv, DifferentiableRolloutSpec,
-    complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization]
+    complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization,
+    ProprioceptiveActorCritic, temporal proprioception, blind assembly, 本体感知装配]
   paths: [topics/rl-learning/rl-learning.md]
   source_of_truth:
   - embodichain/learning/rl/train.py
@@ -406,7 +409,8 @@ topics:
     grouped scene randomization, GPU场景扩增, 批量场景扩增, 组内扩增, 组内场景扩增, intra-group augmentation, 分组场景随机化, 场景生成, 场景编辑, 生成式仿真]
   keywords: [generate_scene_from_image, edit_scene, SceneExporter, scene-export/v1, SceneRandomizationCfg,
     randomize_scene, prepare_scene_baseline, scene-randomization, load_layouts, preview_layouts, ingest_one_asset,
-    ParserManager, SessionProcessRegistry, Gradio]
+    ParserManager, SessionProcessRegistry, Gradio, mjfit, precision assembly, AssemblyAsset,
+    build_assembly, 精密装配资产]
   paths: [topics/gen-sim/gen-sim.md]
   source_of_truth:
   - embodichain/gen_sim/scene_engine/cli/start.py
@@ -418,6 +422,7 @@ topics:
   - embodichain/gen_sim/simready_pipeline/pipeline/ingest.py
   - embodichain/gen_sim/gradio_ui/app_processes.py
   - embodichain/gen_sim/gradio_ui/app_env.py
+  - embodichain/gen_sim/assembly/
   watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, tests/gen_sim/]
   related_topics: [simulation-system, data-assets, env-framework]
   status: active

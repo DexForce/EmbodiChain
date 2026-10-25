@@ -1,0 +1,62 @@
+trainer:
+  exp_name: blind_gear_meshing_fullrange
+  gym_config: extensions/embodichain_tasks/configs/tasks/manipulation/assembly/gear_meshing/task.fullrange.yaml
+  seed: 0
+  device: cuda:0
+  headless: true
+  renderer: no-render
+  num_envs: 12288
+  iterations: 5000
+  buffer_size: 32
+  enable_eval: true
+  num_eval_envs: 32
+  num_eval_episodes: 256
+  eval_freq: 100
+  save_freq: 100
+  use_wandb: false
+policy:
+  name: proprioceptive_actor_critic
+  obs_groups:
+    actor:
+    - proprioception
+    critic:
+    - privileged
+  initial_action_std: 0.5
+  actor_obs_normalization: false
+  critic_obs_normalization: false
+  cfg:
+    frame_dim: 33
+    history_length: 30
+    latent_dim: 32
+    contact_points: 128
+    contact_classes: 3
+    contact_class_weights:
+    - 0.25
+    - 3.0
+    - 2.0
+    actor_hidden_sizes:
+    - 256
+    - 256
+    - 128
+    critic_hidden_sizes:
+    - 256
+    - 256
+    - 128
+    decoder_hidden_sizes:
+    - 128
+    - 128
+algorithm:
+  name: ppo
+  cfg:
+    optimizer:
+      name: adam
+      learning_rate: 0.0003
+    n_epochs: 5
+    num_mini_batches: 24
+    gamma: 0.98
+    gae_lambda: 0.95
+    clip_coef: 0.2
+    ent_coef: 0.003
+    vf_coef: 1.0
+    max_grad_norm: 1.0
+    auxiliary_coef: 1.0

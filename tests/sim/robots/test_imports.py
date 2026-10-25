@@ -49,6 +49,7 @@ _CONFIG_CLASSES = (
     "CobotMagicCfg",
     "FrankaPandaCfg",
     "FlexivRizon4SCfg",
+    "FlexivRizon4SRobotiqCfg",
     "URRobotCfg",
     "DexforceW1Cfg",
     "SO101FollowerCfg",
@@ -102,6 +103,7 @@ for name in (
     "alohamini.aloha_mini.cfg", "tianji.marvin.cfg", "agilex.cobotmagic.cfg",
     "franka.panda", "universal_robots.ur_robot", "dexforce.w1.cfg",
     "arx.arx5.cfg", "the_robot_studio.so101.cfg", "flexiv.rizon4s.cfg",
+    "flexiv.rizon4s_robotiq.cfg",
 ):
     assert "embodichain_robots." + name not in sys.modules, name
 if module.startswith("embodichain_robots") or module == "embodichain.robot_registry":
@@ -130,6 +132,8 @@ if module.startswith("embodichain_robots") or module == "embodichain.robot_regis
         "cobotmagic",
         "franka_panda",
         "flexiv_rizon4s",
+        "flexiv_rizon4s_robotiq",
+        "_menagerie",
         "tianji_marvin",
         "ur_robot",
         "so101",

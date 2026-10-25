@@ -261,6 +261,124 @@ embodichain.data_pipeline.depth_video
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
 
+
+embodichain.gen_sim.assembly
+----------------------------
+
+Public assembly generation and portable manifests preserve one physical body with multiple convex collision pieces. Generator dependencies are optional at manifest load time.
+
+.. currentmodule:: embodichain.gen_sim.assembly
+
+.. autosummary::
+
+   AssemblyAsset
+   AssemblyBody
+   AssemblyGeometry
+   AssemblyJoint
+   MJFIT_REVISION
+   build_assembly
+   build_many_pegs
+   import_mjcf
+   sample_assemblies
+
+
+
+embodichain.gen_sim.assembly.adapter
+------------------------------------
+
+Pinned public mjfit generation, deterministic sampling and bounded MuJoCo conversion. Source mesh frames and mass tensors are converted at this boundary.
+
+.. currentmodule:: embodichain.gen_sim.assembly.adapter
+
+.. autosummary::
+
+   MJFIT_REVISION
+   build_assembly
+   import_mjcf
+   sample_assemblies
+
+
+
+embodichain.gen_sim.assembly.many
+---------------------------------
+
+The official many-pegs grid preserves the public sampler's indexed seed,
+per-cell configuration and prefixed body ownership in one portable scene.
+Optional curved-outline precision settings record both the original sample
+and the actual public generator configuration. The grid does not represent
+independent simulation arenas.
+
+.. currentmodule:: embodichain.gen_sim.assembly.many
+
+.. autosummary::
+
+   build_many_pegs
+
+
+
+embodichain.gen_sim.assembly.model
+----------------------------------
+
+Self-contained body-local geometry, joint attachment and mass-property records with content-addressed, checksummed serialization. Native configs retain authored collision partitions.
+
+.. currentmodule:: embodichain.gen_sim.assembly.model
+
+.. autosummary::
+
+   AssemblyGeometry
+   AssemblyJoint
+   AssemblyBody
+   AssemblyAsset
+
+
+
+embodichain.gen_sim.assembly.precision
+--------------------------------------
+
+Independent USD geometry/mass acceptance and passive source/native simulation measurements. Missing overflow accounting remains unverified rather than a precision certification.
+
+.. currentmodule:: embodichain.gen_sim.assembly.precision
+
+.. autosummary::
+
+   PrecisionRunCfg
+   compare_usd_geometry
+   run_passive_probe
+
+
+
+embodichain.gen_sim.assembly.probes
+-----------------------------------
+
+Circle/square analytic clearance oracles, state-controlled S0 contact scans and
+real slide/hinge S2-S4 equilibrium probes. Native and source runners preserve
+the same force/torque and geometry; unmeasured health limits qualification.
+
+.. currentmodule:: embodichain.gen_sim.assembly.probes
+
+.. autosummary::
+
+   AnalyticPegGeometry
+   ConstrainedProbeCfg
+   ConstrainedProbeDefinition
+   prepare_probe
+   run_reference_probe
+   run_native_probe
+   run_warp_probe
+
+
+embodichain.gen_sim.assembly.task_assets
+----------------------------------------
+
+Public-generator composition of held pegs, perforated gears and nuts with physically mating fixtures. Task topology changes are recorded in asset provenance.
+
+.. currentmodule:: embodichain.gen_sim.assembly.task_assets
+
+.. autosummary::
+
+   build_task_assembly
+
+
 embodichain.gen_sim.env
 -----------------------
 
@@ -645,6 +763,19 @@ embodichain.gen_sim.simready_pipeline.cli.start
    cli_ingest_single
    main
 
+
+embodichain.lab.gym.envs.assembly_env
+-------------------------------------
+
+Shared simulator-backed blind assembly environment. Nominal development geometry and robot models are distinguished from formal reproduction prerequisites before scene construction.
+
+.. currentmodule:: embodichain.lab.gym.envs.assembly_env
+
+.. autosummary::
+
+   BlindAssemblyEnv
+
+
 embodichain.lab.gym.envs.base_env
 ---------------------------------
 
@@ -682,6 +813,23 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+
+embodichain.lab.gym.envs.managers.assembly
+------------------------------------------
+
+Stateful proprioceptive history, privileged labels, reset and milestone rewards used by the registered assembly tasks. Actor observation groups exclude labels and fixture truth.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.assembly
+
+.. autosummary::
+
+   AssemblyProprioception
+   assembly_privileged_state
+   assembly_contact_labels
+   reset_assembly
+   assembly_milestone_reward
+
 
 embodichain.lab.sim.scene.expansion.layout
 ------------------------------------------
@@ -1679,6 +1827,21 @@ embodichain.lab.sim.motion.planners.trapezoidal_planner
    TrapezoidalPlanner
    TrapezoidalPlannerCfg
 
+
+embodichain.learning.rl.policies.proprioceptive_actor_critic
+------------------------------------------------------------
+
+Temporal encoder policy, selective observation-history storage and weighted training-only contact decoding. Actor export keeps the deployment input independent of privileged state.
+
+.. currentmodule:: embodichain.learning.rl.policies.proprioceptive_actor_critic
+
+.. autosummary::
+
+   ObservationHistory
+   ProprioceptiveActorCriticCfg
+   ProprioceptiveActorCritic
+
+
 embodichain.utils.warp.kinematics.trapezoidal_warp
 --------------------------------------------------
 
@@ -2663,6 +2826,56 @@ embodichain.toolkits.urdf_assembly.urdf_assembly_manager
 
    URDFAssemblyManager
 
+
+embodichain_robots
+------------------
+
+Concrete robot preset exports resolve lazily through the official robot catalog. Rizon4S configuration preserves a documented public-model fidelity boundary.
+
+.. currentmodule:: embodichain_robots
+
+.. autosummary::
+
+   FlexivRizon4SRobotiqCfg
+
+
+
+embodichain_robots.flexiv.rizon4s_robotiq
+----------------------------------------
+
+Rizon4S with a Robotiq 2F-85 source conversion, pinned geometry and explicit model-fidelity metadata. The public model is not the unavailable author-identified dynamics.
+
+.. currentmodule:: embodichain_robots.flexiv.rizon4s_robotiq
+
+.. autosummary::
+
+   FlexivRizon4SRobotiqCfg
+
+
+embodichain_robots.flexiv.rizon4s_robotiq.assets
+------------------------------------------------
+
+Pinned public Menagerie source files, immutable blob identities and licenses for the assembly robot model.
+
+.. currentmodule:: embodichain_robots.flexiv.rizon4s_robotiq.assets
+
+.. autosummary::
+
+   FlexivRizon4SMenagerie
+
+
+embodichain_robots.flexiv.rizon4s_robotiq.cfg
+---------------------------------------------
+
+The explicit assembly preset supports approximate four-bar mimic and nominal parallel-jaw models with a physical-fidelity gate.
+
+.. currentmodule:: embodichain_robots.flexiv.rizon4s_robotiq.cfg
+
+.. autosummary::
+
+   FlexivRizon4SRobotiqCfg
+
+
 embodichain_tasks.classic_control.cart_pole
 --------------------------------------------
 
@@ -2693,6 +2906,45 @@ embodichain_tasks.configs
 .. autosummary::
 
    get_config_path
+
+
+embodichain_tasks.manipulation.assembly.gear_meshing
+----------------------------------------------------
+
+Registered native simulator task for contact-rich assembly with proprioceptive policy observations and independently configured training profiles.
+
+.. currentmodule:: embodichain_tasks.manipulation.assembly.gear_meshing
+
+.. autosummary::
+
+   BlindGearMeshingEnv
+
+
+
+embodichain_tasks.manipulation.assembly.nut_threading
+-----------------------------------------------------
+
+Registered native simulator task for contact-rich assembly with proprioceptive policy observations and independently configured training profiles.
+
+.. currentmodule:: embodichain_tasks.manipulation.assembly.nut_threading
+
+.. autosummary::
+
+   BlindNutThreadingEnv
+
+
+
+embodichain_tasks.manipulation.assembly.peg_insertion
+-----------------------------------------------------
+
+Registered native simulator task for contact-rich assembly with proprioceptive policy observations and independently configured training profiles.
+
+.. currentmodule:: embodichain_tasks.manipulation.assembly.peg_insertion
+
+.. autosummary::
+
+   BlindPegInsertionEnv
+
 
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------

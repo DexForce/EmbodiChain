@@ -1,0 +1,328 @@
+{
+  "mujoco_version": "3.12.0",
+  "numpy_version": "2.2.6",
+  "python": "3.11.14",
+  "scope": "independent CPU S2 exported-MJCF version comparison",
+  "cells": [
+    {
+      "name": "circle@20um",
+      "asset_sha256": "a0d8f37284187b325c1c6ddb4ed072229c8fbadafdc2334b239b9037e51afeff",
+      "source_mjcf": "a0d8f37284187b325c1c6ddb4ed072229c8fbadafdc2334b239b9037e51afeff.xml",
+      "source_config": {
+        "clearance": 2e-05,
+        "hole": {
+          "n": 32,
+          "radius": 0.008,
+          "type": "circle"
+        },
+        "kind": "peg",
+        "peg_length": 0.03,
+        "plate_size": 0.05,
+        "plate_thickness": 0.01
+      },
+      "timestep": 0.001,
+      "duration": 0.3,
+      "solver_iterations": 100,
+      "integrator": 3,
+      "disableflags": 0,
+      "multiccd": true,
+      "force_N": 0.1,
+      "tolerance_m": 5e-06,
+      "passed": true,
+      "rows": [
+        {
+          "direction_rad": 0.0,
+          "wall_error_m": 4.725028467271156e-07,
+          "wall_error_min_m": 4.6648076522662547e-07,
+          "wall_error_max_m": 4.859494130852042e-07,
+          "wall_worst_error_m": 4.859494130852042e-07,
+          "wall_jitter_m": 4.339438992802545e-09,
+          "wall_drift_m": -6.582361973135545e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        },
+        {
+          "direction_rad": 1.5707963267948966,
+          "wall_error_m": 4.799067139826382e-07,
+          "wall_error_min_m": 4.7517300342057105e-07,
+          "wall_error_max_m": 4.941666428815099e-07,
+          "wall_worst_error_m": 4.941666428815099e-07,
+          "wall_jitter_m": 3.995514407177323e-09,
+          "wall_drift_m": -2.514356151623622e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        },
+        {
+          "direction_rad": 3.141592653589793,
+          "wall_error_m": 4.720217484182687e-07,
+          "wall_error_min_m": 4.665263375537603e-07,
+          "wall_error_max_m": 4.829287949633265e-07,
+          "wall_worst_error_m": 4.829287949633265e-07,
+          "wall_jitter_m": 3.779184831802713e-09,
+          "wall_drift_m": -1.0575490871062615e-10,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        },
+        {
+          "direction_rad": -1.5707963267948968,
+          "wall_error_m": 4.797407689456347e-07,
+          "wall_error_min_m": 4.7550100332761146e-07,
+          "wall_error_max_m": 4.892931616631292e-07,
+          "wall_worst_error_m": 4.892931616631292e-07,
+          "wall_jitter_m": 3.243097810584133e-09,
+          "wall_drift_m": 1.0388474126681664e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "circle@50um",
+      "asset_sha256": "2f50c1a7785be0b2ed92cfb2c060ad4e24207fa36c809962cd1be6af8a32ad9b",
+      "source_mjcf": "2f50c1a7785be0b2ed92cfb2c060ad4e24207fa36c809962cd1be6af8a32ad9b.xml",
+      "source_config": {
+        "clearance": 5e-05,
+        "hole": {
+          "n": 32,
+          "radius": 0.008,
+          "type": "circle"
+        },
+        "kind": "peg",
+        "peg_length": 0.03,
+        "plate_size": 0.05,
+        "plate_thickness": 0.01
+      },
+      "timestep": 0.001,
+      "duration": 0.3,
+      "solver_iterations": 100,
+      "integrator": 3,
+      "disableflags": 0,
+      "multiccd": true,
+      "force_N": 0.1,
+      "tolerance_m": 5e-06,
+      "passed": true,
+      "rows": [
+        {
+          "direction_rad": 0.0,
+          "wall_error_m": 6.112346958251265e-07,
+          "wall_error_min_m": 6.057075335707521e-07,
+          "wall_error_max_m": 6.26260730839944e-07,
+          "wall_worst_error_m": 6.26260730839944e-07,
+          "wall_jitter_m": 4.348855093647117e-09,
+          "wall_drift_m": -5.232798942172151e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        },
+        {
+          "direction_rad": 1.5707963267948966,
+          "wall_error_m": 6.193411397340171e-07,
+          "wall_error_min_m": 6.143316323522604e-07,
+          "wall_error_max_m": 6.316640804368415e-07,
+          "wall_worst_error_m": 6.316640804368415e-07,
+          "wall_jitter_m": 3.4359130580163878e-09,
+          "wall_drift_m": -2.7389705341292416e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        },
+        {
+          "direction_rad": 3.141592653589793,
+          "wall_error_m": 6.104124333891911e-07,
+          "wall_error_min_m": 6.059476731440041e-07,
+          "wall_error_max_m": 6.217003102978769e-07,
+          "wall_worst_error_m": 6.217003102978769e-07,
+          "wall_jitter_m": 3.2854660294191092e-09,
+          "wall_drift_m": -1.3348941643179771e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        },
+        {
+          "direction_rad": -1.5707963267948968,
+          "wall_error_m": 6.210298523279558e-07,
+          "wall_error_min_m": 6.148175771406703e-07,
+          "wall_error_max_m": 6.31995900290689e-07,
+          "wall_worst_error_m": 6.31995900290689e-07,
+          "wall_jitter_m": 3.963496448395447e-09,
+          "wall_drift_m": -2.230371369405372e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "circle@100um",
+      "asset_sha256": "f8675e0e01c1695c72d7ef1fe32370b6069bde522dabd1ca605af99a3a94384b",
+      "source_mjcf": "f8675e0e01c1695c72d7ef1fe32370b6069bde522dabd1ca605af99a3a94384b.xml",
+      "source_config": {
+        "clearance": 0.0001,
+        "hole": {
+          "n": 32,
+          "radius": 0.008,
+          "type": "circle"
+        },
+        "kind": "peg",
+        "peg_length": 0.03,
+        "plate_size": 0.05,
+        "plate_thickness": 0.01
+      },
+      "timestep": 0.001,
+      "duration": 0.3,
+      "solver_iterations": 100,
+      "integrator": 3,
+      "disableflags": 0,
+      "multiccd": true,
+      "force_N": 0.1,
+      "tolerance_m": 1e-05,
+      "passed": true,
+      "rows": [
+        {
+          "direction_rad": 0.0,
+          "wall_error_m": 8.414666608709643e-07,
+          "wall_error_min_m": 8.380211715197997e-07,
+          "wall_error_max_m": 8.529047273464507e-07,
+          "wall_worst_error_m": 8.529047273464507e-07,
+          "wall_jitter_m": 3.4331401290816285e-09,
+          "wall_drift_m": 3.2514354726847743e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        },
+        {
+          "direction_rad": 1.5707963267948966,
+          "wall_error_m": 8.518927155848273e-07,
+          "wall_error_min_m": 8.473591155270431e-07,
+          "wall_error_max_m": 8.643217494389786e-07,
+          "wall_worst_error_m": 8.643217494389786e-07,
+          "wall_jitter_m": 3.791377022042222e-09,
+          "wall_drift_m": -6.327667778390388e-10,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        },
+        {
+          "direction_rad": 3.141592653589793,
+          "wall_error_m": 8.432802655435325e-07,
+          "wall_error_min_m": 8.380512251604196e-07,
+          "wall_error_max_m": 8.578351912375893e-07,
+          "wall_worst_error_m": 8.578351912375893e-07,
+          "wall_jitter_m": 4.0665282511369865e-09,
+          "wall_drift_m": -2.89652273714407e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        },
+        {
+          "direction_rad": -1.5707963267948968,
+          "wall_error_m": 8.521212716020452e-07,
+          "wall_error_min_m": 8.475196666358548e-07,
+          "wall_error_max_m": 8.673001701002054e-07,
+          "wall_worst_error_m": 8.673001701002054e-07,
+          "wall_jitter_m": 3.9884247116850565e-09,
+          "wall_drift_m": -1.0411812506505593e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "circle@200um",
+      "asset_sha256": "2c1622a9d69f47f0e5f3df83fc0eb02b087cd37bf9da8420e720a05b8735f2b4",
+      "source_mjcf": "2c1622a9d69f47f0e5f3df83fc0eb02b087cd37bf9da8420e720a05b8735f2b4.xml",
+      "source_config": {
+        "clearance": 0.0002,
+        "hole": {
+          "n": 32,
+          "radius": 0.008,
+          "type": "circle"
+        },
+        "kind": "peg",
+        "peg_length": 0.03,
+        "plate_size": 0.05,
+        "plate_thickness": 0.01
+      },
+      "timestep": 0.001,
+      "duration": 0.3,
+      "solver_iterations": 100,
+      "integrator": 3,
+      "disableflags": 0,
+      "multiccd": true,
+      "force_N": 0.1,
+      "tolerance_m": 2e-05,
+      "passed": true,
+      "rows": [
+        {
+          "direction_rad": 0.0,
+          "wall_error_m": 1.309077814677103e-06,
+          "wall_error_min_m": 1.3047954804296146e-06,
+          "wall_error_max_m": 1.3198980037536115e-06,
+          "wall_worst_error_m": 1.3198980037536115e-06,
+          "wall_jitter_m": 3.450266932721371e-09,
+          "wall_drift_m": -9.1784614092723e-10,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        },
+        {
+          "direction_rad": 1.5707963267948966,
+          "wall_error_m": 1.3186926090326433e-06,
+          "wall_error_min_m": 1.314214001212592e-06,
+          "wall_error_max_m": 1.331040360240301e-06,
+          "wall_worst_error_m": 1.331040360240301e-06,
+          "wall_jitter_m": 3.353067652981056e-09,
+          "wall_drift_m": -1.0077828131475346e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        },
+        {
+          "direction_rad": 3.141592653589793,
+          "wall_error_m": 1.3088483048864547e-06,
+          "wall_error_min_m": 1.304646152792716e-06,
+          "wall_error_max_m": 1.3187865725815533e-06,
+          "wall_worst_error_m": 1.3187865725815533e-06,
+          "wall_jitter_m": 3.1529519609727173e-09,
+          "wall_drift_m": -1.6822584448931873e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        },
+        {
+          "direction_rad": -1.5707963267948968,
+          "wall_error_m": 1.3177456180320528e-06,
+          "wall_error_min_m": 1.313694672302855e-06,
+          "wall_error_max_m": 1.329255141500809e-06,
+          "wall_worst_error_m": 1.329255141500809e-06,
+          "wall_jitter_m": 3.887384453165105e-09,
+          "wall_drift_m": 1.6601047979188367e-09,
+          "finite": true,
+          "initial_overlap": false,
+          "warning_count": 0,
+          "passed": true
+        }
+      ]
+    }
+  ]
+}

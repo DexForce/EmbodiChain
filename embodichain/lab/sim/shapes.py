@@ -37,6 +37,9 @@ __all__ = [
     "MeshCfg",
     "CubeCfg",
     "SphereCfg",
+    "CylinderCfg",
+    "ShapePartCfg",
+    "CompoundShapeCfg",
 ]
 
 
@@ -347,6 +350,8 @@ class ShapeCfg:
         data = dict(init_dict)
         if "shape_type" not in data:
             logger.log_error("shape type must be specified in the configuration.")
+        if data.get("shape_type") == "Compound":
+            return CompoundShapeCfg.from_dict(data)
 
         cfg = get_class_instance(
             "embodichain.lab.sim.shapes", data["shape_type"] + "Cfg"
@@ -400,6 +405,8 @@ class ShapeCfg:
                 logger.log_warning(
                     f"Key '{key}' not found in {cfg.__class__.__name__}."
                 )
+        if isinstance(cfg, CylinderCfg):
+            cfg.__post_init__()
         return cfg
 
 
@@ -473,3 +480,127 @@ class SphereCfg(ShapeCfg):
 
     resolution: int = 20
     """Resolution of the sphere mesh. Defaults to 20."""
+
+
+@configclass
+class CylinderCfg(ShapeCfg):
+    """Native cylinder with full axial height ``2 * half_height``."""
+
+    shape_type: str = "Cylinder"
+    radius: float = 1.0
+    """Cylinder radius [m]."""
+    half_height: float = 0.5
+    """Half of the cylinder's axial height [m]."""
+    axis: Literal["X", "Y", "Z"] = "Z"
+    """Cylinder axis in the shape's local coordinate frame."""
+
+    def __post_init__(self) -> None:
+        """Reject dimensions that cannot describe a finite cylinder."""
+        if any(
+            not math.isfinite(value) or value <= 0
+            for value in (self.radius, self.half_height)
+        ):
+            raise ValueError(
+                "CylinderCfg radius and half_height must be finite and positive."
+            )
+        if self.axis not in ("X", "Y", "Z"):
+            raise ValueError("CylinderCfg.axis must be 'X', 'Y', or 'Z'.")
+
+
+@configclass
+class ShapePartCfg:
+    """One shape and its transform in the owning rigid body's frame.
+
+    Parts do not create bodies or own mass. A mesh collision part must request
+    an explicit single convex hull, preserving gaps between individual parts.
+    """
+
+    shape: ShapeCfg = MISSING
+    position: Sequence[float] = (0.0, 0.0, 0.0)
+    """Body-local translation [m]."""
+    quaternion: Sequence[float] = (0.0, 0.0, 0.0, 1.0)
+    """Body-local orientation in ``xyzw`` order."""
+
+    def __post_init__(self) -> None:
+        """Validate the transform without requiring assembled MISSING fields."""
+        position = np.asarray(self.position, dtype=float)
+        quaternion = np.asarray(self.quaternion, dtype=float)
+        if position.shape != (3,) or not np.isfinite(position).all():
+            raise ValueError("ShapePartCfg.position must contain three finite values.")
+        if (
+            quaternion.shape != (4,)
+            or not np.isfinite(quaternion).all()
+            or np.linalg.norm(quaternion) == 0.0
+        ):
+            raise ValueError(
+                "ShapePartCfg.quaternion must be a finite nonzero xyzw quaternion."
+            )
+        if self.shape is not MISSING and not isinstance(
+            self.shape, (MeshCfg, CubeCfg, SphereCfg, CylinderCfg)
+        ):
+            raise TypeError(
+                "ShapePartCfg.shape must be a mesh or primitive; nested compounds are unsupported."
+            )
+
+    @classmethod
+    def from_dict(cls, init_dict: Dict[str, Any]) -> ShapePartCfg:
+        """Decode a part and its nested shape using the public shape loader."""
+        data = dict(init_dict)
+        if isinstance(data.get("shape"), dict):
+            data["shape"] = ShapeCfg.from_dict(data["shape"])
+        return cls(**data)
+
+
+@configclass
+class CompoundShapeCfg(ShapeCfg):
+    """Several convex collision shapes belonging to one rigid body.
+
+    ``parts`` are independent collision shapes, never merged for cooking.
+    Optional ``visual_parts`` replace their rendered appearance. Without them,
+    collision parts are rendered using their own materials, falling back to
+    :attr:`visual_material`. Overlapping collision volumes require explicit
+    body mass/inertia to avoid double counting during geometry integration.
+    """
+
+    shape_type: str = "Compound"
+    parts: Sequence[ShapePartCfg] = MISSING
+    visual_parts: Sequence[ShapePartCfg] = ()
+
+    def __post_init__(self) -> None:
+        """Validate the flat part layout and explicit convex representation."""
+        if self.parts is MISSING:
+            return
+        if not self.parts:
+            raise ValueError(
+                "CompoundShapeCfg.parts must contain at least one collision part."
+            )
+        for part in (*self.parts, *self.visual_parts):
+            if not isinstance(part, ShapePartCfg):
+                raise TypeError("Compound shape parts must be ShapePartCfg instances.")
+            part.__post_init__()
+        for part in self.parts:
+            if isinstance(part.shape, MeshCfg) and (
+                part.shape.collision is None
+                or part.shape.collision.approximation != "convex_hull"
+            ):
+                raise ValueError(
+                    "Compound mesh collision parts require explicit approximation='convex_hull'."
+                )
+
+    @classmethod
+    def from_dict(cls, init_dict: Dict[str, Any]) -> CompoundShapeCfg:
+        """Decode flat collision and visual part lists."""
+        data = dict(init_dict)
+        for key in ("parts", "visual_parts"):
+            if key in data:
+                data[key] = [
+                    ShapePartCfg.from_dict(value) if isinstance(value, dict) else value
+                    for value in data[key]
+                ]
+        if isinstance(data.get("visual_material"), dict):
+            from embodichain.lab.sim.material import VisualMaterialCfg
+
+            data["visual_material"] = VisualMaterialCfg.from_dict(
+                data["visual_material"]
+            )
+        return cls(**data)
