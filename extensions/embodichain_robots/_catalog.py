@@ -21,6 +21,7 @@ from __future__ import annotations
 from itertools import product
 
 _CONFIG_CLASSES = {
+    "ARX5": "embodichain_robots.arx5:ARX5Cfg",
     "AlohaMini": "embodichain_robots.aloha_mini:AlohaMiniCfg",
     "TianjiMarvin": "embodichain_robots.tianji_marvin:TianjiMarvinCfg",
     "DexforceW1": "embodichain_robots.dexforce_w1.cfg:DexforceW1Cfg",
@@ -33,6 +34,7 @@ _CONFIG_CLASSES = {
 }
 
 _DEFAULT_CONTROL_INFO = {
+    "ARX5": {"dof": 8, "control_parts": {"arm": 6, "eef": 2}},
     "AlohaMini": {
         "dof": 15,
         "control_parts": {

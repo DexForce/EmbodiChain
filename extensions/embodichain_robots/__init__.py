@@ -26,6 +26,7 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
+    "ARX5Cfg",
     "AlohaMiniCfg",
     "TianjiMarvinCfg",
     "DexforceW1Cfg",
@@ -38,6 +39,7 @@ __all__ = [
 ]
 
 _EXPORTS = {
+    "ARX5Cfg": ".arx5",
     "AlohaMiniCfg": ".aloha_mini",
     "TianjiMarvinCfg": ".tianji_marvin",
     "DexforceW1Cfg": ".dexforce_w1.cfg",
