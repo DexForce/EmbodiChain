@@ -74,6 +74,7 @@ def test_robot_asset_listing_includes_locomotion_and_existing_robots(capsys) -> 
         "UnitreeH1",
         "UnitreeH1Usd",
         "CartPole",
+        "FlexivRizon4S",
         "SO101FollowerAssets",
     }.issubset(names)
     assert names == sorted(set(names))

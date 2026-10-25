@@ -23,6 +23,9 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
    * - :doc:`UR family <ur_robot>`
      - ``URRobotCfg``
      - UR3, UR3e, UR5, UR5e, UR10, and UR10e with analytic IK.
+   * - :doc:`Flexiv Rizon 4S <flexiv_rizon4s>`
+     - ``FlexivRizon4SCfg``
+     - Seven-axis bare arm with numerical IK and published Flexiv simulation dynamics.
    * - :doc:`Dexforce W1 <dexforce_w1>`
      - ``DexforceW1Cfg``
      - Dual 7-DOF arms, versioned assets, and configurable hands/grippers.
@@ -48,6 +51,7 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
 
    franka_panda
    ur_robot
+   flexiv_rizon4s
    dexforce_w1
    cobotmagic
    dual_arm
