@@ -980,6 +980,13 @@ def generate_task_program_bundle(
         scene,
         stability_presets=stability["presets"],
     )
+    if embodiment_payload["embodiment_id"] == "dual_ur10_robotiq_arg2f_140":
+        # UR10 contact solves can report motion absent from consecutive poses.
+        # Reuse the equal-budget observed-motion preset; other robots stay put.
+        for item in program_payload["program"]["items"]:
+            for policy in item.get("post", ()):
+                if policy["preset"] == "rigid_object":
+                    policy["preset"] = "transported_rigid_object"
     # Selecting fixed physics must not tighten the public auto placement policy.
     if experiment or requested_runtime_profile == AUTO_PROFILE or frozen is not None:
         from .experiment_policy import apply_placement_tolerances

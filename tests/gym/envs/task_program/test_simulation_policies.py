@@ -598,9 +598,13 @@ def test_contact_sensitive_wait_stable_uses_observed_pose_delta(
     assert metadata["state"]["max_angular_speed"] == [0.0, 0.0]
 
 
-def test_contained_wait_stable_rejects_observed_pose_motion() -> None:
+@pytest.mark.parametrize(
+    "preset_id", ["contained_rigid_object", "transported_rigid_object"]
+)
+def test_contact_sensitive_wait_stable_rejects_observed_pose_motion(
+    preset_id: str,
+) -> None:
     """Pose-delta settling still times out a geometrically moving object."""
-    preset_id = "contained_rigid_object"
     segment = _compiled_segment(settle_preset=preset_id)
     port, entity, _ = _port(
         torch.zeros(2, 3),

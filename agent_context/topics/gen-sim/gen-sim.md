@@ -94,6 +94,11 @@ by `task_program_bundle.py`'s payload/embodiment calibration, not just the sourc
 component: inspect the generated embodiment before comparing actuator settings.
 UR10 light-grip calibration is isolated from Franka and retains lower authored
 limits. These settings do not establish full-path or complete-task qualification.
+New UR10 bundles select the existing `transported_rigid_object` pose-delta
+post-policy for ordinary rigid releases. Its 0.03 m/s and 0.20 rad/s budgets,
+sample counts and timeout match `rigid_object`; contact, placement and TaskSpec
+checks remain independent. Other robots and existing bundles keep their policy
+selection. This addresses velocity-cache disagreement, not an assumed sleep flag.
 For a newly generated UR10 bundle whose first call is prismatic Slide, task-level
 posture calibration keeps the operated arm's initial seed, tucks its idle neighbor
 by 0.5 rad and uses tucked released-hand Park targets. Selection follows the

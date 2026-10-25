@@ -165,6 +165,10 @@ def test_selected_robot_bundle_composes_and_keeps_identity(
         record,
     )
     integration.integration.registration.assert_unchanged()
+    post = load_config(paths.program)["program"]["items"][1]["post"]
+    assert post[0]["preset"] == (
+        "transported_rigid_object" if robot_profile == "dual_ur10" else "rigid_object"
+    )
     assert (
         getattr(
             integration.integration.adapter_factory, "native_pick_exploration", False
