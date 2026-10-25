@@ -63,6 +63,7 @@ def _resolve_paths(
     }
     if operation == "eval":
         inputs["model"] = "directory"
+        inputs["teacher_dataset"] = "directory"
     if operation == "generate":
         inputs.pop("resume")  # generation resume is a Boolean, not a checkpoint.
     for name, kind in inputs.items():
@@ -74,6 +75,15 @@ def _resolve_paths(
     for name in ("output_dir", "output"):
         if name in config:
             config[name] = str(_path(config[name], base))
+    if operation == "eval" and isinstance(config.get("policy"), dict):
+        policy = dict(config["policy"])
+        for name in ("config", "checkpoint"):
+            if name in policy:
+                path = _path(policy[name], base)
+                if not path.is_file():
+                    raise ValueError(f"policy.{name} file does not exist: {path}")
+                policy[name] = str(path)
+        config["policy"] = policy
     return config
 
 
@@ -84,7 +94,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     for name, help_text in (
         ("generate", "Generate committed teacher trajectory shards."),
         ("train", "Train, fine-tune or resume a NeRD model."),
-        ("eval", "Evaluate an exported model on held-out trajectories."),
+        ("eval", "Evaluate offline data or matched simulation rollouts."),
     ):
         child = subparsers.add_parser(name, help=help_text)
         child.add_argument("--config", type=Path, required=True)
@@ -137,7 +147,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 help="Override JSON report path (relative to current directory).",
             )
     export = subparsers.add_parser(
-        "export", help="Export portable model weights and metadata."
+        "export", help="Export a training checkpoint for the named solver."
     )
     export.add_argument("--checkpoint", type=Path, required=True)
     export.add_argument("--output", type=Path, required=True)
@@ -213,10 +223,17 @@ def main(argv: Sequence[str] | None = None) -> None:
                     )
             config = _resolve_paths(config, path.parent, args.operation)
             if args.operation == "generate":
-                from embodichain.data_pipeline.dynamics.generation import (
-                    generate_dataset,
-                )
-
+                collector = config.pop("collector", "newton")
+                if collector == "newton":
+                    from embodichain.data_pipeline.dynamics.generation import (
+                        generate_dataset,
+                    )
+                elif collector == "scene":
+                    from embodichain.lab.sim.physics.solvers.collection import (
+                        generate_dataset,
+                    )
+                else:
+                    raise ValueError("collector must be newton or scene")
                 result = generate_dataset(config)
             elif args.operation == "train":
                 from embodichain.learning.dynamics.workflow import run_train
@@ -228,8 +245,14 @@ def main(argv: Sequence[str] | None = None) -> None:
                     from embodichain.learning.dynamics.workflow import run_eval
 
                     result = run_eval(config)
+                elif mode == "rollout":
+                    from embodichain.lab.sim.physics.solvers.collection import (
+                        evaluate_rollouts,
+                    )
+
+                    result = evaluate_rollouts(config)
                 else:
-                    raise ValueError("This workflow supports offline evaluation only")
+                    raise ValueError("Evaluation mode must be offline or rollout")
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.exit(2, f"{error}\n")
     print(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False))

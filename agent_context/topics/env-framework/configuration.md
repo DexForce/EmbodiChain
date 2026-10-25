@@ -77,6 +77,11 @@ without `base_dir` retains its ordinary filesystem/CWD behavior.
 Component-owned fields and their
 inline counterparts are mutually exclusive; without a selector, the original
 inline `robot`, `sensor`, and scene fields continue to parse unchanged.
+An explicitly null `robot` selects no configured robot; a Python task can own
+procedural articulation declaration through the manager's descriptor interface.
+This does not infer a robot or change the omitted-field policy. The manager
+creation option `enable_ground_plane` controls physical ground declaration,
+independently of ground visibility. Contact-free dynamics disables it explicitly.
 `build_env_cfg_from_args()` expands the selected environment before applying
 launcher arguments so environment-owned run controls such as `max_episodes`
 remain visible to the run loop while explicit CLI values retain precedence.

@@ -1,10 +1,9 @@
 # Neural Dynamics Models
 
 A neural dynamics model predicts how a robot's physical state changes under
-applied joint efforts and contact. EmbodiChain provides a simulation-independent NeRD model, trajectory
-storage, training, offline evaluation and portable export workflow. Data generation
-uses Newton's built-in analytical solvers directly and does not require a custom
-DexSim build.
+applied joint efforts and contact. EmbodiChain supports these models as named
+Newton solver extensions, so the simulation world, scene objects, state access,
+and environment lifecycle remain shared with analytical physics.
 
 [NeRD (Neural Robot Dynamics)](https://neural-robot-dynamics.github.io/) is the
 first implementation. Its causal Transformer consumes a short history of state,
@@ -103,12 +102,25 @@ The pretrained configuration reads the downloaded paths above. Replace
 the tensor device. Offline evaluation measures held-out transition prediction;
 it does not measure accumulated rollout error.
 
-The released datasets were collected through the matching Newton/Scene
-integration. The independent collector below builds a new Newton model directly;
-its manifests use a separate `nerd-direct-newton-builder-v1` physical identity.
-Both datasets share the same state/contact schema and can be trained and evaluated
-here. Do not treat different model-building paths or solver versions as identical
-physical systems, or use offline transition error as a live rollout measurement.
+For a live rollout, install a DexSim build exposing named Newton solver
+extensions and the Scene snapshot/functional APIs. Use the matching reference
+scene and physics profile:
+
+```bash
+embodichain dynamics eval --config extensions/embodichain_tasks/configs/tasks/classic_control/cartpole/dynamics.rollout.pretrained.yaml
+```
+
+This command advances both the released model and a matching Newton teacher at
+the same macro timestep. The preset evaluates 16 trajectories at horizons 1, 10
+and 100. It saves the report, per-trajectory metrics and raw state evidence.
+Select a fresh output path with `--output` when repeating an evaluation.
+
+The released models were trained for `physics_profile: warp_reference`, which
+reconstructs a specific reference asset and material configuration using current
+Newton. The analytical teacher uses five substeps for Cartpole or sixteen for
+Ant, while NeRD predicts the entire 1/60-second interval in one neural substep.
+The default `native`/MuJoCo workflow configurations describe a different physical
+system and do not match these released exports.
 
 ## Generate data, train and export
 
@@ -116,6 +128,13 @@ The workflow configurations are under
 `extensions/embodichain_tasks/configs/tasks/classic_control/<robot>/`.
 They configure `embodichain dynamics` commands and are separate from runnable
 Gym deployment configs.
+
+These Scene-matched generation presets declare `collector: scene` and require
+the DexSim solver/Scene extension. The independent model/data/training PR also
+provides `collector: newton` (the CLI default), which collects directly with
+Newton and needs no DexSim imports. Its separate physical signature describes
+a different model-building path; it cannot be relabeled to qualify a Scene
+export. Existing published datasets remain available for offline training.
 
 For a short local workflow, use the smoke presets:
 
@@ -143,28 +162,68 @@ Export destinations must be new directories. Paths written in configuration
 files resolve relative to the file; explicit CLI path overrides resolve relative
 to the working directory.
 
-## Use the exported model in PyTorch
+## Deploy NeRD in a matching scene
 
-Load tensor weights and their recorded normalization buffers:
+An installed solver entry point makes `nerd` available through the same Newton
+configuration used for analytical solvers:
 
-```python
-from embodichain.learning.models.nerd import load_model
-
-model, manifest = load_model(
-    "outputs/models/neural_dynamics/nerd/cartpole/v1", device="cpu"
-)
+```yaml
+physics: newton
+physics_config:
+  physics_dt: 0.016666666666666666
+  num_substeps: 1
+  solver_cfg:
+    solver_type: nerd
+    options:
+      checkpoint: outputs/models/neural_dynamics/nerd/cartpole/v1
 ```
 
-`NeRDStateCodec` and `encode_batch` construct features from the dataset's state,
-effort and contact fields. The model accepts feature windows and valid history
-lengths; the training and evaluation workflows use this same preprocessing.
+The scene must match the export's ordered joints, gravity, contact schema,
+physical signature and timestep. The pretrained rollout presets construct that
+reference scene. A model cannot be attached to a different importer/material
+profile by changing its manifest or scaling its predicted state delta.
 
-Live Scene stepping, `solver_type: nerd`, and differentiable Gym integration are
-provided separately by the [neural dynamics solver PR](https://github.com/DexForce/EmbodiChain/pull/822).
-The comparison videos above were produced using that integration; they are
-reference recordings, not a command available in this offline workflow.
+NeRD consumes generalized efforts. It rejects unsupported free-base and external
+forces and does not provide physical contact impulse or friction-force reports.
+The current provider runs eager FP32 inference and does not support CUDA Graph
+capture. Compare performance with the analytical solver's supported Graph mode
+enabled, keeping latency and throughput scopes explicit.
+
+## Functional dynamics and gradients
+
+{class}`~embodichain.lab.gym.envs.differentiable_dynamics_env.DifferentiableDynamicsEnv`
+and {class}`~embodichain.lab.sim.diff.dynamics.FunctionalDynamics` expose
+graph-connected physical state, per-world history and valid history lengths.
+The ordinary native step and functional step share the same learned transition;
+publishing a functional result does not advance the world again.
+
+The Torch/Warp FK boundary supplies first-order derivatives. Shared tensor
+storage alone does not establish a gradient path. Continuous state and contact
+geometry have local derivatives, while contact selection, angle wrapping and
+quaternion signs contain discrete branches. Physical parameters and contact
+topology are not differentiable through this provider.
+
+Reset clears the selected worlds' histories while preserving other rows and
+already-computed terminal rewards. Call `detach_state()` at an intentional
+rollout boundary, and update trainable model parameters only after backward.
+
+## Add another neural solver
+
+Implement the DexSim solver-provider contract and expose it through an installed
+entry point:
+
+```toml
+[project.entry-points."dexsim.newton_solvers"]
+my_solver = "my_package.solver:MySolverProvider"
+```
+
+The provider declares builder attributes and capabilities, then creates its
+solver after the scene model is finalized. Mutable histories belong to each
+World. The configured `solver_type` is the entry-point name; auto-selection does
+not choose a learned model implicitly. Duplicate or unknown names fail.
 
 Keep state transforms in {mod}`embodichain.compute.dynamics`, model/checkpoint
-code in {mod}`embodichain.learning.models.nerd`, training in
-{mod}`embodichain.learning.dynamics.workflow`, and trajectory storage/generation in
-{mod}`embodichain.data_pipeline.dynamics`.
+code in {mod}`embodichain.learning.models.nerd`, offline training in
+{mod}`embodichain.learning.dynamics.workflow`, and scene adaptation in
+{mod}`embodichain.lab.sim.physics.solvers`. Dataset storage belongs to
+{mod}`embodichain.data_pipeline.dynamics.shards`.

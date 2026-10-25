@@ -7,6 +7,10 @@ belongs to [data-assets](../data-assets/data-assets.md).
 
 ## Entry points
 
+Offline dynamics shards and their generation/training contract are owned by
+[neural dynamics](../neural-dynamics/neural-dynamics.md); they do not use the
+LeRobot expert-action schema described below.
+
 | Request | Owner |
 |---|---|
 | Online worker and sample selection | `embodichain/data_pipeline/engine/data.py`: `OnlineDataEngine` |

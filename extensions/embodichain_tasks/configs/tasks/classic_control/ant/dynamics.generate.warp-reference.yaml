@@ -1,5 +1,6 @@
 # Bounded parameter-alignment collection; not full accuracy qualification.
 robot: ant
+collector: scene
 output_dir: ../../../../../../outputs/dynamics/ant/warp-reference/data
 device: cpu
 num_envs: 64

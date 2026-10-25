@@ -2,6 +2,10 @@
 
 ## Owners and dependency direction
 
+Robot-specific learned physics, shared codecs and supervised training are routed
+through [neural dynamics](../neural-dynamics/neural-dynamics.md). Their model and
+offline learning modules preserve the simulation-independent boundary below.
+
 `compute/kinematics/{dls,pose_error,serial_chain,types}.py` owns fixed-step
 DLS, SE(3) residuals, copied PK geometry, and shared configuration/results.
 These modules do not import learning or simulation. `SerialChainKinematics`
