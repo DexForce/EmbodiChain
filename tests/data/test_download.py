@@ -70,7 +70,13 @@ def test_robot_asset_listing_includes_locomotion_and_existing_robots(capsys) -> 
     registry = download.get_registry()
     names = [name for name, _ in registry["robot"]]
     assert set(LOCOMOTION_ASSETS).issubset(names)
-    assert {"UnitreeH1", "UnitreeH1Usd", "CartPole"}.issubset(names)
+    assert {
+        "UnitreeH1",
+        "UnitreeH1Usd",
+        "CartPole",
+        "FlexivRizon4S",
+        "SO101FollowerAssets",
+    }.issubset(names)
     assert names == sorted(set(names))
     assert all(not name.startswith("_") for name in names)
     download.cmd_list(Namespace(category="robot"))

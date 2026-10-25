@@ -45,6 +45,7 @@ EXPECTED_COMMANDS = {
     "show-task",
     "preview-asset",
     "preview-robot",
+    "preview-material",
     "preview_lerobot_data",
     "run-task",
     "run-example",

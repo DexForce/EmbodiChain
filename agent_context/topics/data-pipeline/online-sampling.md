@@ -22,7 +22,7 @@
    samplers, writes the rollout, then clears the range after a full fill.
 5. `sample_batch()` is READY-only. While holding the lock it excludes the current write range,
    checks every row in a sampled window, enforces `continuity_id`, applies
-   segment/boundary/episode mode rules, and clones the final batch before releasing the lock
+   segment/boundary/episode mode rules, and copies the final batch before releasing the lock
    (`engine/data.py`).
    `sample_batch_with_context()` samples every valid anchor, including episode
    ends, with a fixed causal-history/future extent. The current frame is at
@@ -50,6 +50,39 @@
 9. `OnlineDataset` is infinite. Item mode samples one row then removes the leading dimension
    so DataLoader can collate; batch mode re-samples a dynamic chunk per yield. Multi-worker
    readers sample shared memory independently.
+
+## Explicit owner-side flow control
+
+`runtime.py` owns opt-in `ODSFlowController` around a caller-managed manual
+engine. Its creating process/thread calls the controller; the application still
+starts/stops the engine and owns training, evaluation and resource accounting.
+An optional `ODSConfiguration` must match engine cache, producer count, quotas
+and batch size. A plan or production limit requires an explicit positive
+`gym_config.num_envs` dividing cache size; unplanned/unlimited legacy engines
+retain their existing layout support.
+With a plan, `prepare_batch()` schedules quota-threshold refill, bounded quota
+waits and batch-start pacing; a pause does not accumulate catch-up credits.
+Without a plan it only polls, leaving round/frozen refill decisions explicit.
+The optional accepted-episode limit covers initial fill and whole-cache refills;
+partial-cache remainder is not produced, and direct engine requests bypass it.
+Already pending generations are adopted without a new engine request or refill
+callback; only requests made through the controller receive request timestamps.
+
+Controller waits drain lifecycle events and check health/caller deadlines.
+`sample_context()` retries only live no-window/quota exceptions within a total
+bound; Source/Dataset behavior stays immediate. Generation waits can accept an
+absolute monotonic deadline that includes earlier work. Callback interval/refill
+times use absolute host monotonic seconds; the application aligns its own clock.
+The controller does not restore source or pacing state. The
+[configuration guide](../../../docs/source/features/ods/configuration.md#apply-the-plan)
+owns the integration example and callback details.
+
+`engine.check_health()` is READY-only and checks existing worker errors/liveness
+without sampling/refill. `get_flow_status()` returns compact generation and
+optional quota counters without per-row audit records or payload clones.
+Producer counters and quota totals use separate lock snapshots. Unlocked quota
+uses the same valid/continuity and write-window test as the full audit, but is a
+coarse scheduling bound; exact context/filter eligibility stays with sampling.
 
 ## Optional publication accounting
 
@@ -79,8 +112,9 @@ quota from no valid windows and terminal worker failure. It is immediate and
 does not partially spend a batch. `get_sampling_budget_snapshot()` returns
 retained identities, budgets, delivered/remaining counts and lifetime delivery;
 clean stopped engines remain auditable. The owner decides when to refill, wait
-with a bound, or stop. The fixed publication budget is not an adaptive replay
-retention policy and does not restore old sources after process restart.
+with a bound, or stop, directly or through the optional flow controller. The
+fixed publication budget is not an adaptive replay retention policy and does
+not restore old sources after process restart.
 
 `configuration.py` derives bounded budgets, cache/refill settings and pacing
 targets from measured accepted episodes/s and training chunks/s. It reads an
@@ -117,7 +151,7 @@ request schema remain independent. Configuration examples live in the
 within the stored episode. The timestamp is Unix nanoseconds at successful
 acceptance/publication, stamped while holding the publication lock before the
 row window becomes readable. It is not a monotonic or simulation timestamp.
-Samplers clone provenance with observations/actions under that same lock.
+Samplers copy provenance with observations/actions under that same lock.
 Invalid frames, including history padding, retain `-1` in every provenance field.
 `get_stats()` returns detached counters and excludes the active write window
 from valid-frame counts. These IDs do not provide shared-buffer checkpoint
@@ -185,7 +219,7 @@ separates acquisition-inclusive and data-ready budgets.
 before selecting a window. Invalid arguments raise `ValueError`. If no unlocked
 valid window satisfies `chunk_size` and `sampling_mode`, it raises `DataUnavailableError`
 immediately; that eligibility failure does not itself change the engine state.
-Refill accounting runs only after a successful clone. `OnlineDataset.__iter__()`
+Refill accounting runs only after a successful copy. `OnlineDataset.__iter__()`
 and `SequenceDataset` propagate these exceptions, so retry policy belongs to the
 consumer. `DataUnavailableError` subclasses `RuntimeError`; quota exhaustion
 and terminal worker/read failures remain distinct and must not be retried by
@@ -196,7 +230,7 @@ matching exception messages.
 | Symptom | Inspect |
 |---|---|
 | Engine times out or all readers fail | Inspect the shared worker error envelope and demo retry limit; do not catch only in one DataLoader consumer. |
-| Samples contain rows being replaced | Selection or clone moved outside the `lock_index` critical section; restore the shared lock boundary. |
+| Samples contain rows being replaced | Selection or copying moved outside the `lock_index` critical section; restore the shared lock boundary. |
 | Sequence crosses a reset or fragment | Fix validity/`continuity_id`/segment eligibility in `sample_batch()`, not downstream training code. |
 | Engine cannot restart | Expected after FAILED/STOPPED; create a new engine instance. |
 | Non-CPU online buffer is not truly process-shared | `_create_buffer()` currently does not reject it but skips `share_memory_()`; keep `buffer_device="cpu"` unless the implementation adds another explicit interprocess transport. |

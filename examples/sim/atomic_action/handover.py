@@ -96,6 +96,16 @@ HANDOVER_GRIPPER_MODEL = ParallelJawGripperModelCfg(
     finger_thickness=0.0075,
     palm_depth=0.10,
 )
+HORIZONTAL_HAND_CLOSE_QPOS = 0.025
+HORIZONTAL_GRIPPER_MODEL = ParallelJawGripperModelCfg(
+    model_id="dh_pgc_140_50",
+    min_opening_width=0.002,
+    max_opening_width=0.050,
+    finger_length=0.030,
+    finger_width=0.030,
+    finger_thickness=0.012,
+    palm_depth=0.105,
+)
 HANDOVER_SAMPLE_INTERVAL = 220
 HANDOVER_HAND_INTERP_STEPS = 10
 HANDOVER_PRE_GRASP_DISTANCE = 0.08
@@ -124,7 +134,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--is_horizontal",
         action="store_true",
-        help="Use the horizontal WaterBasin object instead of the vertical soda can.",
+        help="Hand over a horizontal stick with PGC-140-50 grippers.",
     )
     return parse_affordance_sampling_arguments(parser)
 
@@ -132,14 +142,16 @@ def parse_arguments() -> argparse.Namespace:
 def create_dual_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
+    *,
+    is_horizontal: bool = False,
 ) -> Robot:
-    """Create the selected dual-arm robot with two Robotiq 2F-140 grippers."""
+    """Mount PGC-140-50 for the stick, or Robotiq 2F-140 for the soda can."""
     return add_dual_tutorial_robot(
         sim,
         robot_type=robot_type,
         uid=f"Dual{robot_type.title()}HandOver",
         urdf_name=f"dual_{robot_type}_hand_over",
-        gripper="robotiq_2f_140",
+        gripper="pgc_140_50" if is_horizontal else "robotiq_2f_140",
         solver="pytorch" if robot_type == "franka" else "ur",
         ur_ik_nearest_weight=(1.0, 4.0, 1.0, 1.0, 1.0, 1.0),
         hand_stiffness=1e3,
@@ -218,11 +230,13 @@ def run_handover_demo(
         planner=getattr(args, "planner", "trapezoidal"),
     )
 
+    is_horizontal = bool(getattr(args, "is_horizontal", False))
+    close_qpos = HORIZONTAL_HAND_CLOSE_QPOS if is_horizontal else HAND_CLOSE_QPOS
     left_open, left_close = get_hand_open_close_qpos(
-        robot, hand_control_part="left_eef", close_qpos=HAND_CLOSE_QPOS
+        robot, hand_control_part="left_eef", close_qpos=close_qpos
     )
     right_open, right_close = get_hand_open_close_qpos(
-        robot, hand_control_part="right_eef", close_qpos=HAND_CLOSE_QPOS
+        robot, hand_control_part="right_eef", close_qpos=close_qpos
     )
 
     final_pose = torch.eye(4, dtype=torch.float32)
@@ -237,7 +251,9 @@ def run_handover_demo(
         n_sample=args.n_sample,
         force_refresh=args.force_reannotate,
         approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
-        gripper_model=HANDOVER_GRIPPER_MODEL,
+        gripper_model=(
+            HORIZONTAL_GRIPPER_MODEL if is_horizontal else HANDOVER_GRIPPER_MODEL
+        ),
     )
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
@@ -333,7 +349,9 @@ def run(args: argparse.Namespace) -> None:
         args,
         arena_space=3.0,
     )
-    robot = create_dual_robot(sim, args.robot)
+    robot = create_dual_robot(
+        sim, args.robot, is_horizontal=bool(getattr(args, "is_horizontal", False))
+    )
     run_handover_demo(args, sim, robot)
     serve_tutorial_scene(sim, args)
 

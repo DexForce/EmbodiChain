@@ -619,10 +619,11 @@ class MotionGenerator:
         (``"motion_gen"``) or deterministic waypoint IK followed by joint-space
         interpolation (``"ik_interp"``). Unsupported backend target types raise
         rather than silently switching to interpolation.
-        Joint-only planners that own sparse waypoints may retain every converted
-        waypoint when quantity sampling is requested. For automatically resolved
-        trapezoidal options, the requested count is then treated as a lower bound;
-        an explicitly supplied planner option remains authoritative.
+        Joint-only planners that own sparse waypoints receive IK solutions only
+        at the requested Cartesian goals unless ``options.is_linear`` requests
+        a dense Cartesian path. Quantity sampling retains every required joint
+        waypoint. Automatically resolved trapezoidal options treat the requested
+        count as a lower bound; explicit planner options remain authoritative.
 
         Args:
             target_states: Batched planner waypoints.
@@ -667,10 +668,13 @@ class MotionGenerator:
         """Dispatch batched targets through the configured planner backend."""
         move_types = {state.move_type for state in target_states}
         move_type = target_states[0].move_type
+        owns_sparse_waypoints = (
+            getattr(self.planner, "uses_sparse_joint_waypoints", False) is True
+        )
         uses_sparse_joint_waypoints = (
             len(move_types) == 1
             and move_type is MoveType.JOINT_MOVE
-            and getattr(self.planner, "uses_sparse_joint_waypoints", False) is True
+            and owns_sparse_waypoints
         )
         should_preinterpolate = (
             len(move_types) == 1
@@ -722,6 +726,7 @@ class MotionGenerator:
                 xpos_list=xpos_list,
                 qpos_list=qpos_list,
                 options=options,
+                sparse_cartesian=owns_sparse_waypoints and not options.is_linear,
             )
             target_plan_states = [
                 PlanState(move_type=MoveType.JOINT_MOVE, qpos=qpos_interpolated[:, j])
@@ -1850,8 +1855,10 @@ class MotionGenerator:
         xpos_list: torch.Tensor | None = None,
         qpos_list: torch.Tensor | None = None,
         options: MotionGenOptions | None = None,
+        *,
+        sparse_cartesian: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
-        """Prepare backend waypoints without deleting failed Cartesian targets."""
+        """Prepare required IK waypoints, optionally without Cartesian densification."""
         options = MotionGenOptions() if options is None else options
 
         # Normalize single-env inputs to batched form.
@@ -1892,36 +1899,42 @@ class MotionGenerator:
 
         # Generate trajectory
         if options.is_linear or qpos_list is None:
-            # ``calculate_point_allocations`` only handles single-env (N, 4, 4),
-            # so compute allocations per env and use the per-segment maximum so
-            # all envs can share the same interpolated pose count.
-            per_env_allocations = [
-                calculate_point_allocations(
-                    xpos_list[b],
-                    step_size=options.interpolate_position_step,
-                    angle_step=options.interpolate_angle_step,
-                    device=self.device,
-                )
-                for b in range(xpos_list.shape[0])
-            ]
-            n_segments = xpos_list.shape[1] - 1
-            interpolated_point_allocations = [
-                max(alloc[i] for alloc in per_env_allocations)
-                for i in range(n_segments)
-            ]
+            if sparse_cartesian:
+                # A sparse joint planner owns timing between the requested
+                # goals. Densifying a free Cartesian move would turn every IK
+                # sample into a mandatory rest point for trapezoidal timing.
+                total_interpolated_poses = xpos_list.to(self._runtime_device())
+            else:
+                # Allocations are per environment; share their segment maxima
+                # so the batch has one interpolated pose count.
+                per_env_allocations = [
+                    calculate_point_allocations(
+                        xpos_list[b],
+                        step_size=options.interpolate_position_step,
+                        angle_step=options.interpolate_angle_step,
+                        device=self.device,
+                    )
+                    for b in range(xpos_list.shape[0])
+                ]
+                n_segments = xpos_list.shape[1] - 1
+                interpolated_point_allocations = [
+                    max(alloc[i] for alloc in per_env_allocations)
+                    for i in range(n_segments)
+                ]
 
-            # Linear cartesian interpolation, batched across B envs.
-            total_interpolated_poses = []
-            for i in range(n_segments):
-                seg = interpolate_xpos_batched(
-                    xpos_list[:, i],
-                    xpos_list[:, i + 1],
-                    interpolated_point_allocations[i],
-                )  # (B, seg, 4, 4)
-                total_interpolated_poses.append(seg)
-            total_interpolated_poses = torch.cat(total_interpolated_poses, dim=1).to(
-                self._runtime_device()
-            )  # (B, M, 4, 4)
+                total_interpolated_poses = []
+                for i in range(n_segments):
+                    seg = interpolate_xpos_batched(
+                        xpos_list[:, i],
+                        xpos_list[:, i + 1],
+                        interpolated_point_allocations[i],
+                    )  # (B, seg, 4, 4)
+                    total_interpolated_poses.append(seg)
+                total_interpolated_poses = torch.cat(
+                    total_interpolated_poses, dim=1
+                ).to(
+                    self._runtime_device()
+                )  # (B, M, 4, 4)
 
             if control_part is None:
                 raise ValueError("Cartesian interpolation requires control_part.")

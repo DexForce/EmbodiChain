@@ -40,6 +40,26 @@ EmbodiChain data cache.
    ScoopIceNewEnv
    TabletopFourBases
 
+embodichain.data.assets.materials
+------------------------------------
+
+Material, environment-map and background bundles use the shared asset cache.
+``DefaultMaterials`` downloads the pinned 18-preset collection and its auxiliary
+soap-film layer; it does not create a simulator World.
+
+.. currentmodule:: embodichain.data.assets.materials
+
+.. autosummary::
+
+   SimResources
+   EnvMapHDR
+   CocoBackground
+   BackgroundTexture
+   DefaultMaterials
+
+.. autoclass:: DefaultMaterials
+   :members: get_material_path
+
 embodichain.data.assets.planner_assets
 --------------------------------------
 
@@ -117,6 +137,36 @@ corrected full-body definition.
 .. autoclass:: DexforceW1LeftArmV021
 
 .. autoclass:: DexforceW1RightArmV021
+
+embodichain.data.default_materials
+------------------------------------
+
+The wheel includes catalog metadata so these functions work offline without
+asset downloads. Both functions are also available from ``embodichain.data``. The 24-preset
+catalog combines six built-in parameter definitions and 18 downloadable
+resources; metadata identifies their source and download requirement.
+Metadata includes compatible renderer names, source revision, dependencies,
+auxiliary resources and suggested physical texture dimensions. Dimensions do
+not change geometry or UVs.
+
+.. currentmodule:: embodichain.data.default_materials
+
+.. autosummary::
+
+   list_default_materials
+   get_default_material_info
+
+.. autofunction:: list_default_materials
+
+.. autofunction:: get_default_material_info
+
+.. currentmodule:: embodichain.data
+
+.. autofunction:: list_default_materials
+   :no-index:
+
+.. autofunction:: get_default_material_info
+   :no-index:
 
 embodichain.data_pipeline
 -------------------------
@@ -1214,6 +1264,24 @@ embodichain.lab.scripts.preview_lerobot_data
    inspect_dataset
    main
    resolve_dataset_root
+
+embodichain.lab.scripts.preview_material
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_material
+
+Query the default catalog without loading simulation dependencies, or render
+presets and parameter variants with fixed preview settings and managed cleanup.
+
+.. autosummary::
+
+   main
+   cli
+
+.. autofunction:: main
+
+.. autofunction:: cli
+
 
 embodichain.lab.scripts.preview_robot
 -------------------------------------

@@ -966,18 +966,12 @@ class BaseArticulationTest:
         assert (
             "handle_xpos" in mat_insts[0]
         ), "FAIL: 'handle_xpos' not in material instances"
-        assert mat_insts[0]["outer_box"].base_color == [
-            0.0,
-            0.0,
-            1.0,
-            1.0,
-        ], f"FAIL: 'outer_box' base color not set correctly: {mat_insts[0]['outer_box'].base_color}"
-        assert mat_insts[0]["handle_xpos"].base_color == [
-            0.0,
-            0.0,
-            1.0,
-            1.0,
-        ], f"FAIL: 'handle_xpos' base color not set correctly: {mat_insts[0]['handle_xpos'].base_color}"
+        assert mat_insts[0]["outer_box"].base_color == pytest.approx(
+            [0.0, 0.0, 1.0]
+        ), f"FAIL: 'outer_box' base color not set correctly: {mat_insts[0]['outer_box'].base_color}"
+        assert mat_insts[0]["handle_xpos"].base_color == pytest.approx(
+            [0.0, 0.0, 1.0]
+        ), f"FAIL: 'handle_xpos' base color not set correctly: {mat_insts[0]['handle_xpos'].base_color}"
 
     # TODO: Open this test will cause segfault in CI env
     # def test_get_link_pose(self):

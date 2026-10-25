@@ -156,7 +156,11 @@ The example lives in `examples/sim/atomic_action/` and is shipped as ordinary
 distribution data with the rest of that tree. Its `__main__.py` owns
 typed configuration and validated selection; `host.py` owns compilation,
 expansion and output. Scene modules own physical setup and local defaults.
-Tutorial files forwarding there are compatibility entries. Read the
+All runnable demonstrations and helpers live there. Specialized examples such
+as coordinated manipulation and observed recovery run by file path through
+`embodichain run-example`. The tutorial directory contains only `single_arm.py`
+(PickUp→Place) and `dual_arm.py` (HandOver), which reuse example setup while
+explaining typed application composition. Read the
 [example README](../../../examples/sim/atomic_action/README.md)
 for supported combinations, fixture calibration, playback and output artifacts.
 

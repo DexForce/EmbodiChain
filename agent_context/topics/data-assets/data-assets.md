@@ -12,6 +12,8 @@ Online sampling and demonstration persistence belong to
 | Cache roots / mirror prefix | `embodichain/data/constants.py` |
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
 | CLI list/download | `embodichain/data/download.py`: `CATEGORY_MODULES`, `get_registry()`, `download_asset()` |
+| Default material catalog / provenance | `embodichain/_material_catalog.py` → `embodichain/data/default_materials.py`; `embodichain/data/default_materials.json` |
+| Default material archive | `embodichain/data/assets/materials.py`: `DefaultMaterials` |
 | Dataset class visibility | `embodichain/data/__init__.py`, `embodichain/data/assets/__init__.py` |
 | Pretrained policy bundles | `embodichain/data/assets/policy_assets.py`: `download_pretrained_policy()` |
 | Unified CLI registration | `embodichain/cli/main.py`: `embodichain data` |
@@ -44,6 +46,8 @@ Keep the lock outside the directory repair may delete. POSIX uses `flock`;
 Windows uses a polled byte lock. Direct Open3D subclasses do not automatically
 receive the project's locking/repair behavior.
 
+The CLI honors an asset class's optional `cache_prefix` when checking readiness
+and ensuring extraction; otherwise the class name is the cache entry.
 The CLI imports the fixed `CATEGORY_MODULES` and finds `DownloadDataset`
 subclasses defined in each module. Adding an asset module alone does not add a
 CLI category. `get_registry()` also appends public classes from
@@ -54,6 +58,11 @@ configured remote sources, with the model entry at the ZIP root.
 and exits nonzero if any requested asset failed.
 `_ensure_extract()` copies non-ZIP downloads into the extract tree
 when needed. Solver/planner checkpoint download helpers can have separate paths.
+
+`SO101FollowerAssets` in `assets/so101_assets.py` also belongs to the robot CLI
+category. It resolves a pinned official URDF and individual STL/reference files,
+verifies every SHA256, and repairs dependencies under the shared dataset lock.
+Keep its source revision and complete file checksums together when updating it.
 
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
@@ -71,6 +80,32 @@ support caches, layouts and previews belong to a separate caller-owned workspace
 The registered descriptor respects the configured host and falls back to the
 official Hugging Face dataset. The scene tutorial downloads by asset reference
 by default and accepts local exports through `--source`.
+
+## Default material resources
+
+`list_default_materials()` and `get_default_material_info()` are exported from
+`embodichain.data` and query wheel-packaged metadata without a World or download.
+The shared implementation lives in `_material_catalog.py` so CLI catalog queries
+can avoid importing the data package's Open3D/download dependencies. Preserve the
+public data exports and one catalog implementation. `setup.py` must include
+that catalog explicitly. `DefaultMaterials` uses a
+revision-specific cache prefix and the shared dataset lock, verifies archive
+SHA256 and member digests, and repairs extraction from the verified archive.
+Its data CLI registration follows the existing materials category.
+
+The same catalog includes six built-in parameter presets with their own revision,
+native parameters and no texture size. Metadata distinguishes `source` and
+`requires_download`; only resource entries belong to the `DefaultMaterials`
+archive. The runtime resolves built-ins directly from wheel metadata before any
+dataset construction. Keep their definitions out of the upstream ZIP checksum.
+
+The original DexSim archive is currently on its internal resource server; an
+explicit `EMBODICHAIN_DOWNLOAD_PREFIX` selects the catalog's versioned mirror
+path. Do not substitute an unverified public URL or depend on a DexSim source
+checkout. Preserve upstream manifests, relative auxiliary texture dependencies
+and attribution. The material runtime stages JSON only and does not copy PNGs;
+see [visual materials](../simulation-system/materials.md) for renderer, override
+and native ownership rules.
 
 ## Pretrained policy bundles
 

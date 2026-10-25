@@ -924,12 +924,13 @@ def _get_or_create_dexsim_material(
     if material is None:
         material = env.create_pbr_material(name)
         material_inst = material.get_inst()
-        material_inst.update_pbr_material_type("BSDF_GGX_SMITH")
+        # Transmission selects the native scattering lobe before actor binding.
+        # A fourth color component controls the diagnostic shell's opacity.
+        opacity = color[3] if len(color) == 4 else 0.45
+        material_inst.set_transmission(1.0 - opacity)
         material_inst.set_pbr_param("baseColor", color[0], color[1], color[2])
         material_inst.set_pbr_param("roughness", 0.02)
         material_inst.set_pbr_param("ior", 1.12)
-        material_inst.set_pbr_param("colorAbsorption", 0.005, 0.005, 0.005)
-        material_inst.set_pbr_param("scaleAbsorption", 0.01)
         return material
     return material
 

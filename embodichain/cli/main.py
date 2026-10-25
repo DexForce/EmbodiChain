@@ -73,6 +73,11 @@ COMMANDS = (
         help="Preview a robot with control-part Gizmos and Viser joint controls.",
     ),
     Command(
+        name="preview-material",
+        target="embodichain.lab.scripts.preview_material:cli",
+        help="Preview default materials or export rendered images and galleries.",
+    ),
+    Command(
         name="run-task",
         target="embodichain.lab.scripts.run_task:cli",
         help="Run a task for data generation or preview.",

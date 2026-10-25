@@ -88,6 +88,7 @@ def get_registry() -> dict[str, list[tuple[str, type]]]:
     registry["robot"].extend(
         _get_asset_classes("embodichain.data.assets.locomotion_assets")
     )
+    registry["robot"].extend(_get_asset_classes("embodichain.data.assets.so101_assets"))
     registry["robot"].sort(key=lambda asset: asset[0])
     return registry
 
@@ -142,7 +143,7 @@ def download_asset(cls_name: str, cls: type) -> bool:
     print(f"  Downloading {cls_name} ...")
     try:
         data_obj = cls()
-        _ensure_extract(data_obj, cls_name)
+        _ensure_extract(data_obj, getattr(cls, "cache_prefix", cls_name))
         print(f"  ✓ {cls_name} ready")
         return True
     except Exception as exc:
@@ -170,10 +171,12 @@ def cmd_list(args: argparse.Namespace) -> None:
             sys.exit(1)
 
         print(f"\n[{category}] ({len(assets)} assets)")
-        for cls_name, _ in assets:
+        for cls_name, cls in assets:
             # Show whether it is already downloaded
             extract_dir = os.path.join(
-                EMBODICHAIN_DEFAULT_DATA_ROOT, "extract", cls_name
+                EMBODICHAIN_DEFAULT_DATA_ROOT,
+                "extract",
+                getattr(cls, "cache_prefix", cls_name),
             )
             status = (
                 "✓" if os.path.isdir(extract_dir) and os.listdir(extract_dir) else " "

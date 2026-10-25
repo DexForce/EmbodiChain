@@ -103,6 +103,25 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
 
+.. py:class:: embodichain_robots.SO101FollowerCfg
+
+   SO101 follower with five arm joints, one actuated jaw, official CAD inertials
+   and published STS3215 simulation drives. Both serial chains use the same
+   source URDF as simulation; arm IK constrains position.
+   See :doc:`/resources/robot/so101` for frames, units and source limitations.
+
+.. automethod:: embodichain_robots.SO101FollowerCfg.from_dict
+
+.. automethod:: embodichain_robots.SO101FollowerCfg.build_pk_serial_chain
+
+.. py:class:: embodichain_robots.FlexivRizon4SCfg
+
+   Seven-axis bare Rizon 4S arm with published Flexiv dynamics, tuned simulation
+   damping and a numerical flange IK solver. Construct with ``from_dict()`` and use
+   ``build_pk_serial_chain()`` for the matching differentiable flange chain.
+   Source inertials are preserved; public dynamics are manufacturer-blurred.
+   See :doc:`/resources/robot/flexiv_rizon4s` for units and pinned provenance.
+
 
 embodichain_robots.aloha_mini
 -----------------------------
@@ -264,6 +283,16 @@ W1 configuration, hardware revisions, calibrated transforms, hand specifications
 .. autofunction:: embodichain_robots.dexforce_w1.utils.build_dexforce_w1_assembly_urdf_cfg
 
 
+embodichain_robots.flexiv_rizon4s
+---------------------------------
+
+.. py:class:: embodichain_robots.flexiv_rizon4s.FlexivRizon4SCfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.FlexivRizon4SCfg`.
+   An explicit URDF ``fpath`` is shared by simulation and serial-chain FK/IK.
+
+
 embodichain_robots.franka_panda
 -------------------------------
 
@@ -285,6 +314,15 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    Panda arm with the PGI gripper; available as catalog ID ``FrankaPandaPgi``.
    The arm chain ends at ``fr3_link8`` and the solver applies the PGI TCP.
    See :class:`embodichain_robots.FrankaPandaPgiCfg` for the public entry point.
+
+
+embodichain_robots.so101
+------------------------
+
+.. py:class:: embodichain_robots.so101.SO101FollowerCfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.SO101FollowerCfg`.
 
 
 embodichain_robots.tianji_marvin

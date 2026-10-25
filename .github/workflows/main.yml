@@ -42,7 +42,7 @@ jobs:
         run: |
           echo "Workspace: ${GITHUB_WORKSPACE}"
           ls
-          pip install black==26.3.1
+          pip install black==26.10.1
           black --check --diff --color ./
           if [ $? -ne 0 ]; then
             echo "Code style check failed, please run [black ./] before commit!"
@@ -598,7 +598,14 @@ jobs:
               member
               for member in members
               if not member.startswith(
-                  ("embodichain/", "embodichain_tasks/", "embodichain_robots/", dist_info)
+                  (
+                      "embodichain/",
+                      "embodichain_tasks/",
+                      "embodichain_robots/",
+                      "embodichain_benchmarks/",
+                      f"embodichain-{version}.data/data/share/embodichain/examples/",
+                      dist_info,
+                  )
               )
               or "__pycache__" in member
               or member.endswith((".pyc", ".pyo"))
