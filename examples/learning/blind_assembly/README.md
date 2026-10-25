@@ -157,3 +157,5 @@ capacity, and [the implementation report](../../sim/assembly/IMPLEMENTATION.md)
 for actual task smoke checkpoints, evaluation results and outstanding gates.
 Scientific precision/performance runners under `scripts/benchmark/` require a
 source checkout.
+
+The [measured nominal peg result](../../sim/assembly/validation/rl_attempt/RESULTS.md) records the frozen model's 8006/8192 balanced held-out successes, all raw scored episodes and native previews. Training later stopped on a nonfinite native-state guard; the result is a single-geometry research candidate with failed training-stability qualification. It is not a completed three-task paper reproduction.

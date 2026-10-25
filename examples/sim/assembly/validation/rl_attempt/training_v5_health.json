@@ -1,0 +1,1214 @@
+{
+  "schema": "embodichain-peg-native-training-health/v1",
+  "created_at": "2026-10-25T20:12:22.839313+00:00",
+  "status": "failed",
+  "qualification": "Native proprioception-only PPO attempt; this health report does not establish paper reproduction or learned success.",
+  "config": {
+    "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/extensions/embodichain_tasks/configs/tasks/manipulation/assembly/peg_insertion/agents/ppo.study.nominal.dev.yaml",
+    "exists": true,
+    "bytes": 1418,
+    "sha256": "9a47fa4adfb91d4bfacfcea59feff6952dd4d74383670621e4524e3a443d9ac7"
+  },
+  "source_config": {
+    "trainer": {
+      "exp_name": "blind_peg_study_nominal_floor_epa128_seed0",
+      "gym_config": "extensions/embodichain_tasks/configs/tasks/manipulation/assembly/peg_insertion/task.study.nominal.dev.yaml",
+      "seed": 0,
+      "device": "cuda:0",
+      "headless": true,
+      "renderer": "no-render",
+      "num_envs": 4096,
+      "iterations": 2000,
+      "buffer_size": 32,
+      "enable_eval": true,
+      "num_eval_envs": 64,
+      "num_eval_episodes": 256,
+      "eval_freq": 6553600,
+      "save_freq": 6553600,
+      "use_wandb": false,
+      "best_eval_metric": "eval/success_rate"
+    },
+    "policy": {
+      "name": "proprioceptive_actor_critic",
+      "obs_groups": {
+        "actor": [
+          "proprioception"
+        ],
+        "critic": [
+          "privileged"
+        ]
+      },
+      "initial_action_std": 0.5,
+      "actor_obs_normalization": true,
+      "critic_obs_normalization": false,
+      "cfg": {
+        "architecture_version": "official_v1",
+        "frame_dim": 33,
+        "history_length": 30,
+        "latent_dim": 32,
+        "contact_points": 64,
+        "contact_classes": 3,
+        "contact_class_weights": [
+          0.25,
+          3.0,
+          2.0
+        ],
+        "actor_hidden_sizes": [
+          256,
+          256,
+          128
+        ],
+        "critic_hidden_sizes": [
+          256,
+          256,
+          128
+        ],
+        "decoder_hidden_sizes": [
+          128,
+          128
+        ]
+      }
+    },
+    "algorithm": {
+      "name": "ppo",
+      "cfg": {
+        "optimizer": {
+          "name": "adam",
+          "learning_rate": 0.0003
+        },
+        "n_epochs": 5,
+        "num_mini_batches": 20,
+        "gamma": 0.98,
+        "gae_lambda": 0.95,
+        "clip_coef": 0.2,
+        "use_clipped_value_loss": true,
+        "ent_coef": 0.003,
+        "vf_coef": 1.0,
+        "max_grad_norm": 1.0,
+        "auxiliary_coef": 1.0
+      }
+    }
+  },
+  "resume": {
+    "checkpoint": "best",
+    "run": "outputs/blind_peg_study_nominal_floor_epa128_seed0_20261026_030302_853493134",
+    "scheduler": "restore"
+  },
+  "software": {
+    "python": "3.11.14",
+    "embodichain": "0.3.2",
+    "dexsim-engine": "0.5.1rc1",
+    "torch": "2.7.1+cu128",
+    "warp-lang": "1.17.0",
+    "newton": "1.6.0",
+    "mujoco": "3.12.0",
+    "mujoco-warp": "3.12.0",
+    "mjfit": "0.1.0",
+    "pytorch-kinematics": "0.10.0",
+    "git_head": "1fa5abcfd6b8f27e9e0061c79fd269600ccb07d3",
+    "git_dirty": true
+  },
+  "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+  "argv": [
+    "/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/benchmark/assembly/train_peg.py",
+    "--config",
+    "extensions/embodichain_tasks/configs/tasks/manipulation/assembly/peg_insertion/agents/ppo.study.nominal.dev.yaml",
+    "--resume",
+    "best",
+    "--run",
+    "outputs/blind_peg_study_nominal_floor_epa128_seed0_20261026_030302_853493134",
+    "--failure-dump",
+    "outputs/assembly_rl_attempt_20261026/v5_failed_minibatch.pt",
+    "--output",
+    "outputs/assembly_rl_attempt_20261026/v5_health.json",
+    "--raw-log",
+    "outputs/assembly_rl_attempt_20261026/v5_train.log"
+  ],
+  "wrapper_source": {
+    "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/benchmark/assembly/train_peg.py",
+    "exists": true,
+    "bytes": 26147,
+    "sha256": "e148c20ce27cedeaf534df63305f51462bb0d061052c09a37bba8b1f008af961"
+  },
+  "health_observer_source": {
+    "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/benchmark/assembly/peg_reachability.py",
+    "exists": true,
+    "bytes": 55506,
+    "sha256": "6a8a464388663e0214e2478b8656677126eb1c89743bc3aad56c872bfb0ed150"
+  },
+  "raw_logs": {
+    "capture": "caller-owned stdout/stderr capture; native file descriptors are not redirected by this wrapper",
+    "file": {
+      "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_rl_attempt_20261026/v5_train.log",
+      "exists": true,
+      "bytes": 42188
+    },
+    "size_scope": "finalization-time size snapshot; caller-owned open stdout/stderr file may still receive final messages"
+  },
+  "observation_scope": "after completed sim.update returns and before BaseEnv auto-reset; sticky native flags cover all substeps, sampled contact/constraint counts cover the last substep only",
+  "failure_policy": "capacity/collision-loss or unclassified overflow bits raise before auto-reset; ITERATIONS/LS_ITERATIONS are recorded convergence-budget events, not dropped contacts",
+  "checkpoint_health": [
+    {
+      "checkpoint": {
+        "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_study_nominal_floor_epa128_seed0_20261026_041223_647955945/checkpoints/blind_peg_study_nominal_floor_epa128_seed0_best_step_45875200.pt",
+        "exists": true,
+        "bytes": 4363025
+      },
+      "global_step": 45875200,
+      "num_updates": 350,
+      "health": {
+        "train": {
+          "observations": 1600,
+          "control_boundaries_observed": 1600,
+          "physical_substeps_observed": 0,
+          "physics_substeps_requested_in_completed_controls": 32000,
+          "controls_without_explicit_substep_count": 0,
+          "overflow_available": true,
+          "overflow_seen": false,
+          "capacity_overflow_seen": false,
+          "convergence_budget_exhausted_seen": false,
+          "unclassified_overflow_seen": false,
+          "max_nonzero_overflow_flags": 0,
+          "overflow_flags": {
+            "NEFC": 0,
+            "NJMAX_NNZ": 0,
+            "BROADPHASE": 0,
+            "NARROWPHASE": 0,
+            "CCD": 0,
+            "HFIELD": 0,
+            "CONTACT_MATCH": 0,
+            "NVMAX": 0,
+            "EPA_HORIZON": 0,
+            "ITERATIONS": 0,
+            "LS_ITERATIONS": 0
+          },
+          "flagged_world_observation_counts": {
+            "NEFC": 0,
+            "NJMAX_NNZ": 0,
+            "BROADPHASE": 0,
+            "NARROWPHASE": 0,
+            "CCD": 0,
+            "HFIELD": 0,
+            "CONTACT_MATCH": 0,
+            "NVMAX": 0,
+            "EPA_HORIZON": 0,
+            "ITERATIONS": 0,
+            "LS_ITERATIONS": 0
+          },
+          "contact_maxima": {
+            "nacon": {
+              "max_element": 57688,
+              "max_sum": 57688,
+              "shape": [
+                1
+              ]
+            },
+            "ncollision": {
+              "max_element": 130366,
+              "max_sum": 130366,
+              "shape": [
+                1
+              ]
+            },
+            "nefc": {
+              "max_element": 80,
+              "max_sum": 214368,
+              "shape": [
+                4096
+              ]
+            }
+          },
+          "scope": "after sim.update returns, before BaseEnv auto-reset; sticky overflow flags cover the full control interval, contact maxima sample its last physical substep",
+          "strict": true,
+          "control_clock_observations": [
+            {
+              "completed_update": 1,
+              "explicit_step_count": 20,
+              "requested_physics_dt_seconds": 0.001,
+              "expected_elapsed_seconds_from_request": 0.02,
+              "native_clock_available": true,
+              "individual_substep_clock_measured": false,
+              "native_clock_before": {
+                "shape": [
+                  4096
+                ],
+                "constant": 0.0
+              },
+              "native_clock_after": {
+                "shape": [
+                  4096
+                ],
+                "constant": 0.021000001579523087
+              },
+              "observed_control_elapsed_seconds": {
+                "shape": [
+                  4096
+                ],
+                "constant": 0.021000001579523087
+              },
+              "all_world_clock_deltas_match_request": false
+            },
+            {
+              "completed_update": 2,
+              "explicit_step_count": 20,
+              "requested_physics_dt_seconds": 0.001,
+              "expected_elapsed_seconds_from_request": 0.02,
+              "native_clock_available": true,
+              "individual_substep_clock_measured": false,
+              "native_clock_before": {
+                "shape": [
+                  4096
+                ],
+                "constant": 0.021000001579523087
+              },
+              "native_clock_after": {
+                "shape": [
+                  4096
+                ],
+                "constant": 0.04099998623132706
+              },
+              "observed_control_elapsed_seconds": {
+                "shape": [
+                  4096
+                ],
+                "constant": 0.01999998465180397
+              },
+              "all_world_clock_deltas_match_request": true
+            }
+          ],
+          "control_clock_scope": "clock read immediately before/after the first two completed sim.update calls; no individual substep clock read is claimed",
+          "native_state": {
+            "fields": [
+              "qpos",
+              "qvel",
+              "qacc"
+            ],
+            "scope": "complete native qpos/qvel/qacc arrays after sim.update returns and before BaseEnv auto-reset; states between control boundaries are not sampled",
+            "readback": "synchronous native array copies followed by CPU finite reduction; summaries retain at most 16 first bad world IDs per field",
+            "available": true,
+            "missing_fields": [],
+            "observations": 1600,
+            "complete_observations": 1600,
+            "nonfinite_seen": false,
+            "all_samples_finite": true,
+            "first_nonfinite": null,
+            "field_summaries": {
+              "qpos": {
+                "shape": [
+                  4096,
+                  23
+                ],
+                "observations": 1600,
+                "nonfinite_world_observations": 0,
+                "nonfinite_value_observations": 0,
+                "max_nonfinite_worlds": 0,
+                "first_bad_world_ids": []
+              },
+              "qvel": {
+                "shape": [
+                  4096,
+                  21
+                ],
+                "observations": 1600,
+                "nonfinite_world_observations": 0,
+                "nonfinite_value_observations": 0,
+                "max_nonfinite_worlds": 0,
+                "first_bad_world_ids": []
+              },
+              "qacc": {
+                "shape": [
+                  4096,
+                  21
+                ],
+                "observations": 1600,
+                "nonfinite_world_observations": 0,
+                "nonfinite_value_observations": 0,
+                "max_nonfinite_worlds": 0,
+                "first_bad_world_ids": []
+              }
+            }
+          },
+          "overflow_masks": {
+            "capacity": 511,
+            "convergence_budget": 1536,
+            "meaning": "ITERATIONS/LS_ITERATIONS are convergence budgets; other installed enum bits indicate capacity/collision loss. Flags are sticky until native reset."
+          },
+          "actual_capacities": {
+            "naconmax": 1048576,
+            "njmax": 1024,
+            "njmax_nnz": 21504
+          },
+          "counter_scope": {
+            "nacon": "global batch contact count; naconmax is global allocation, not a hard per-world limit",
+            "ncollision": "global broadphase candidate count",
+            "nefc": "constraints per world; njmax is a hard per-world limit"
+          },
+          "prepared_solver_options": {
+            "cone": 1,
+            "impratio_invsqrt": {
+              "shape": [
+                4096
+              ],
+              "constant": 0.3162277638912201
+            },
+            "impratio_from_invsqrt": {
+              "shape": [
+                4096
+              ],
+              "constant": 10.0
+            },
+            "iterations": 100,
+            "ls_iterations": 50,
+            "ccd_iterations": 35,
+            "timestep": 0.0020000000949949026,
+            "integrator": 3,
+            "tolerance": {
+              "shape": [
+                4096
+              ],
+              "constant": 9.999999974752427e-07
+            }
+          },
+          "prepared_solver_options_scope": "captured before the first live sim.update; timestep may still be the solver preparation default and is not evidence of the effective step duration",
+          "private_path": "peg._entities[0]._physics_binding._runtime.solver.mjw_data",
+          "solver_source": "/home/dex/miniconda3/envs/open/lib/python3.11/site-packages/newton/_src/solvers/mujoco/solver_mujoco.py",
+          "solver_source_sha256": "981568ab792dbc9e82392d57da3cbb507ef1c0d8c88e3b8b7cafe5065945c3cf",
+          "effective_solver_timestep_after_first_update": 0.0010000000474974513,
+          "last_flagged_world_count": 0,
+          "first_flagged_world_ids": []
+        },
+        "eval": {
+          "observations": 260,
+          "control_boundaries_observed": 260,
+          "physical_substeps_observed": 0,
+          "physics_substeps_requested_in_completed_controls": 5200,
+          "controls_without_explicit_substep_count": 0,
+          "overflow_available": true,
+          "overflow_seen": false,
+          "capacity_overflow_seen": false,
+          "convergence_budget_exhausted_seen": false,
+          "unclassified_overflow_seen": false,
+          "max_nonzero_overflow_flags": 0,
+          "overflow_flags": {
+            "NEFC": 0,
+            "NJMAX_NNZ": 0,
+            "BROADPHASE": 0,
+            "NARROWPHASE": 0,
+            "CCD": 0,
+            "HFIELD": 0,
+            "CONTACT_MATCH": 0,
+            "NVMAX": 0,
+            "EPA_HORIZON": 0,
+            "ITERATIONS": 0,
+            "LS_ITERATIONS": 0
+          },
+          "flagged_world_observation_counts": {
+            "NEFC": 0,
+            "NJMAX_NNZ": 0,
+            "BROADPHASE": 0,
+            "NARROWPHASE": 0,
+            "CCD": 0,
+            "HFIELD": 0,
+            "CONTACT_MATCH": 0,
+            "NVMAX": 0,
+            "EPA_HORIZON": 0,
+            "ITERATIONS": 0,
+            "LS_ITERATIONS": 0
+          },
+          "contact_maxima": {
+            "nacon": {
+              "max_element": 966,
+              "max_sum": 966,
+              "shape": [
+                1
+              ]
+            },
+            "ncollision": {
+              "max_element": 2181,
+              "max_sum": 2181,
+              "shape": [
+                1
+              ]
+            },
+            "nefc": {
+              "max_element": 76,
+              "max_sum": 3608,
+              "shape": [
+                64
+              ]
+            }
+          },
+          "scope": "after sim.update returns, before BaseEnv auto-reset; sticky overflow flags cover the full control interval, contact maxima sample its last physical substep",
+          "strict": true,
+          "control_clock_observations": [
+            {
+              "completed_update": 1,
+              "explicit_step_count": 20,
+              "requested_physics_dt_seconds": 0.001,
+              "expected_elapsed_seconds_from_request": 0.02,
+              "native_clock_available": true,
+              "individual_substep_clock_measured": false,
+              "native_clock_before": {
+                "shape": [
+                  64
+                ],
+                "constant": 0.0
+              },
+              "native_clock_after": {
+                "shape": [
+                  64
+                ],
+                "constant": 0.021000001579523087
+              },
+              "observed_control_elapsed_seconds": {
+                "shape": [
+                  64
+                ],
+                "constant": 0.021000001579523087
+              },
+              "all_world_clock_deltas_match_request": false
+            },
+            {
+              "completed_update": 2,
+              "explicit_step_count": 20,
+              "requested_physics_dt_seconds": 0.001,
+              "expected_elapsed_seconds_from_request": 0.02,
+              "native_clock_available": true,
+              "individual_substep_clock_measured": false,
+              "native_clock_before": {
+                "shape": [
+                  64
+                ],
+                "constant": 0.021000001579523087
+              },
+              "native_clock_after": {
+                "shape": [
+                  64
+                ],
+                "constant": 0.04099998623132706
+              },
+              "observed_control_elapsed_seconds": {
+                "shape": [
+                  64
+                ],
+                "constant": 0.01999998465180397
+              },
+              "all_world_clock_deltas_match_request": true
+            }
+          ],
+          "control_clock_scope": "clock read immediately before/after the first two completed sim.update calls; no individual substep clock read is claimed",
+          "native_state": {
+            "fields": [
+              "qpos",
+              "qvel",
+              "qacc"
+            ],
+            "scope": "complete native qpos/qvel/qacc arrays after sim.update returns and before BaseEnv auto-reset; states between control boundaries are not sampled",
+            "readback": "synchronous native array copies followed by CPU finite reduction; summaries retain at most 16 first bad world IDs per field",
+            "available": true,
+            "missing_fields": [],
+            "observations": 260,
+            "complete_observations": 260,
+            "nonfinite_seen": false,
+            "all_samples_finite": true,
+            "first_nonfinite": null,
+            "field_summaries": {
+              "qpos": {
+                "shape": [
+                  64,
+                  23
+                ],
+                "observations": 260,
+                "nonfinite_world_observations": 0,
+                "nonfinite_value_observations": 0,
+                "max_nonfinite_worlds": 0,
+                "first_bad_world_ids": []
+              },
+              "qvel": {
+                "shape": [
+                  64,
+                  21
+                ],
+                "observations": 260,
+                "nonfinite_world_observations": 0,
+                "nonfinite_value_observations": 0,
+                "max_nonfinite_worlds": 0,
+                "first_bad_world_ids": []
+              },
+              "qacc": {
+                "shape": [
+                  64,
+                  21
+                ],
+                "observations": 260,
+                "nonfinite_world_observations": 0,
+                "nonfinite_value_observations": 0,
+                "max_nonfinite_worlds": 0,
+                "first_bad_world_ids": []
+              }
+            }
+          },
+          "overflow_masks": {
+            "capacity": 511,
+            "convergence_budget": 1536,
+            "meaning": "ITERATIONS/LS_ITERATIONS are convergence budgets; other installed enum bits indicate capacity/collision loss. Flags are sticky until native reset."
+          },
+          "actual_capacities": {
+            "naconmax": 16384,
+            "njmax": 1024,
+            "njmax_nnz": 21504
+          },
+          "counter_scope": {
+            "nacon": "global batch contact count; naconmax is global allocation, not a hard per-world limit",
+            "ncollision": "global broadphase candidate count",
+            "nefc": "constraints per world; njmax is a hard per-world limit"
+          },
+          "prepared_solver_options": {
+            "cone": 1,
+            "impratio_invsqrt": {
+              "shape": [
+                64
+              ],
+              "constant": 0.3162277638912201
+            },
+            "impratio_from_invsqrt": {
+              "shape": [
+                64
+              ],
+              "constant": 10.0
+            },
+            "iterations": 100,
+            "ls_iterations": 50,
+            "ccd_iterations": 35,
+            "timestep": 0.0020000000949949026,
+            "integrator": 3,
+            "tolerance": {
+              "shape": [
+                64
+              ],
+              "constant": 9.999999974752427e-07
+            }
+          },
+          "prepared_solver_options_scope": "captured before the first live sim.update; timestep may still be the solver preparation default and is not evidence of the effective step duration",
+          "private_path": "peg._entities[0]._physics_binding._runtime.solver.mjw_data",
+          "solver_source": "/home/dex/miniconda3/envs/open/lib/python3.11/site-packages/newton/_src/solvers/mujoco/solver_mujoco.py",
+          "solver_source_sha256": "981568ab792dbc9e82392d57da3cbb507ef1c0d8c88e3b8b7cafe5065945c3cf",
+          "effective_solver_timestep_after_first_update": 0.0010000000474974513,
+          "last_flagged_world_count": 0,
+          "first_flagged_world_ids": []
+        }
+      }
+    }
+  ],
+  "working_tree_patch": {
+    "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_rl_attempt_20261026/v5_health.source.patch",
+    "exists": true,
+    "bytes": 2451,
+    "sha256": "985486d0041d7d08b3082dd9ed5c6fd5063e7db8660f16e673962195f6c1a37a"
+  },
+  "health": {
+    "train": {
+      "observations": 2518,
+      "control_boundaries_observed": 2518,
+      "physical_substeps_observed": 0,
+      "physics_substeps_requested_in_completed_controls": 50360,
+      "controls_without_explicit_substep_count": 0,
+      "overflow_available": true,
+      "overflow_seen": false,
+      "capacity_overflow_seen": false,
+      "convergence_budget_exhausted_seen": false,
+      "unclassified_overflow_seen": false,
+      "max_nonzero_overflow_flags": 0,
+      "overflow_flags": {
+        "NEFC": 0,
+        "NJMAX_NNZ": 0,
+        "BROADPHASE": 0,
+        "NARROWPHASE": 0,
+        "CCD": 0,
+        "HFIELD": 0,
+        "CONTACT_MATCH": 0,
+        "NVMAX": 0,
+        "EPA_HORIZON": 0,
+        "ITERATIONS": 0,
+        "LS_ITERATIONS": 0
+      },
+      "flagged_world_observation_counts": {
+        "NEFC": 0,
+        "NJMAX_NNZ": 0,
+        "BROADPHASE": 0,
+        "NARROWPHASE": 0,
+        "CCD": 0,
+        "HFIELD": 0,
+        "CONTACT_MATCH": 0,
+        "NVMAX": 0,
+        "EPA_HORIZON": 0,
+        "ITERATIONS": 0,
+        "LS_ITERATIONS": 0
+      },
+      "contact_maxima": {
+        "nacon": {
+          "max_element": 57688,
+          "max_sum": 57688,
+          "shape": [
+            1
+          ]
+        },
+        "ncollision": {
+          "max_element": 130366,
+          "max_sum": 130366,
+          "shape": [
+            1
+          ]
+        },
+        "nefc": {
+          "max_element": 80,
+          "max_sum": 214368,
+          "shape": [
+            4096
+          ]
+        }
+      },
+      "scope": "after sim.update returns, before BaseEnv auto-reset; sticky overflow flags cover the full control interval, contact maxima sample its last physical substep",
+      "strict": true,
+      "control_clock_observations": [
+        {
+          "completed_update": 1,
+          "explicit_step_count": 20,
+          "requested_physics_dt_seconds": 0.001,
+          "expected_elapsed_seconds_from_request": 0.02,
+          "native_clock_available": true,
+          "individual_substep_clock_measured": false,
+          "native_clock_before": {
+            "shape": [
+              4096
+            ],
+            "constant": 0.0
+          },
+          "native_clock_after": {
+            "shape": [
+              4096
+            ],
+            "constant": 0.021000001579523087
+          },
+          "observed_control_elapsed_seconds": {
+            "shape": [
+              4096
+            ],
+            "constant": 0.021000001579523087
+          },
+          "all_world_clock_deltas_match_request": false
+        },
+        {
+          "completed_update": 2,
+          "explicit_step_count": 20,
+          "requested_physics_dt_seconds": 0.001,
+          "expected_elapsed_seconds_from_request": 0.02,
+          "native_clock_available": true,
+          "individual_substep_clock_measured": false,
+          "native_clock_before": {
+            "shape": [
+              4096
+            ],
+            "constant": 0.021000001579523087
+          },
+          "native_clock_after": {
+            "shape": [
+              4096
+            ],
+            "constant": 0.04099998623132706
+          },
+          "observed_control_elapsed_seconds": {
+            "shape": [
+              4096
+            ],
+            "constant": 0.01999998465180397
+          },
+          "all_world_clock_deltas_match_request": true
+        }
+      ],
+      "control_clock_scope": "clock read immediately before/after the first two completed sim.update calls; no individual substep clock read is claimed",
+      "native_state": {
+        "fields": [
+          "qpos",
+          "qvel",
+          "qacc"
+        ],
+        "scope": "complete native qpos/qvel/qacc arrays after sim.update returns and before BaseEnv auto-reset; states between control boundaries are not sampled",
+        "readback": "synchronous native array copies followed by CPU finite reduction; summaries retain at most 16 first bad world IDs per field",
+        "available": true,
+        "missing_fields": [],
+        "observations": 2518,
+        "complete_observations": 2518,
+        "nonfinite_seen": true,
+        "all_samples_finite": false,
+        "first_nonfinite": {
+          "observation": 2518,
+          "field": "qpos",
+          "bad_world_count": 1,
+          "first_bad_world_ids": [
+            515
+          ]
+        },
+        "field_summaries": {
+          "qpos": {
+            "shape": [
+              4096,
+              23
+            ],
+            "observations": 2518,
+            "nonfinite_world_observations": 1,
+            "nonfinite_value_observations": 15,
+            "max_nonfinite_worlds": 1,
+            "first_bad_world_ids": [
+              515
+            ]
+          },
+          "qvel": {
+            "shape": [
+              4096,
+              21
+            ],
+            "observations": 2518,
+            "nonfinite_world_observations": 1,
+            "nonfinite_value_observations": 21,
+            "max_nonfinite_worlds": 1,
+            "first_bad_world_ids": [
+              515
+            ]
+          },
+          "qacc": {
+            "shape": [
+              4096,
+              21
+            ],
+            "observations": 2518,
+            "nonfinite_world_observations": 1,
+            "nonfinite_value_observations": 21,
+            "max_nonfinite_worlds": 1,
+            "first_bad_world_ids": [
+              515
+            ]
+          }
+        }
+      },
+      "overflow_masks": {
+        "capacity": 511,
+        "convergence_budget": 1536,
+        "meaning": "ITERATIONS/LS_ITERATIONS are convergence budgets; other installed enum bits indicate capacity/collision loss. Flags are sticky until native reset."
+      },
+      "actual_capacities": {
+        "naconmax": 1048576,
+        "njmax": 1024,
+        "njmax_nnz": 21504
+      },
+      "counter_scope": {
+        "nacon": "global batch contact count; naconmax is global allocation, not a hard per-world limit",
+        "ncollision": "global broadphase candidate count",
+        "nefc": "constraints per world; njmax is a hard per-world limit"
+      },
+      "prepared_solver_options": {
+        "cone": 1,
+        "impratio_invsqrt": {
+          "shape": [
+            4096
+          ],
+          "constant": 0.3162277638912201
+        },
+        "impratio_from_invsqrt": {
+          "shape": [
+            4096
+          ],
+          "constant": 10.0
+        },
+        "iterations": 100,
+        "ls_iterations": 50,
+        "ccd_iterations": 35,
+        "timestep": 0.0020000000949949026,
+        "integrator": 3,
+        "tolerance": {
+          "shape": [
+            4096
+          ],
+          "constant": 9.999999974752427e-07
+        }
+      },
+      "prepared_solver_options_scope": "captured before the first live sim.update; timestep may still be the solver preparation default and is not evidence of the effective step duration",
+      "private_path": "peg._entities[0]._physics_binding._runtime.solver.mjw_data",
+      "solver_source": "/home/dex/miniconda3/envs/open/lib/python3.11/site-packages/newton/_src/solvers/mujoco/solver_mujoco.py",
+      "solver_source_sha256": "981568ab792dbc9e82392d57da3cbb507ef1c0d8c88e3b8b7cafe5065945c3cf",
+      "effective_solver_timestep_after_first_update": 0.0010000000474974513,
+      "last_flagged_world_count": 0,
+      "first_flagged_world_ids": []
+    },
+    "eval": {
+      "observations": 260,
+      "control_boundaries_observed": 260,
+      "physical_substeps_observed": 0,
+      "physics_substeps_requested_in_completed_controls": 5200,
+      "controls_without_explicit_substep_count": 0,
+      "overflow_available": true,
+      "overflow_seen": false,
+      "capacity_overflow_seen": false,
+      "convergence_budget_exhausted_seen": false,
+      "unclassified_overflow_seen": false,
+      "max_nonzero_overflow_flags": 0,
+      "overflow_flags": {
+        "NEFC": 0,
+        "NJMAX_NNZ": 0,
+        "BROADPHASE": 0,
+        "NARROWPHASE": 0,
+        "CCD": 0,
+        "HFIELD": 0,
+        "CONTACT_MATCH": 0,
+        "NVMAX": 0,
+        "EPA_HORIZON": 0,
+        "ITERATIONS": 0,
+        "LS_ITERATIONS": 0
+      },
+      "flagged_world_observation_counts": {
+        "NEFC": 0,
+        "NJMAX_NNZ": 0,
+        "BROADPHASE": 0,
+        "NARROWPHASE": 0,
+        "CCD": 0,
+        "HFIELD": 0,
+        "CONTACT_MATCH": 0,
+        "NVMAX": 0,
+        "EPA_HORIZON": 0,
+        "ITERATIONS": 0,
+        "LS_ITERATIONS": 0
+      },
+      "contact_maxima": {
+        "nacon": {
+          "max_element": 966,
+          "max_sum": 966,
+          "shape": [
+            1
+          ]
+        },
+        "ncollision": {
+          "max_element": 2181,
+          "max_sum": 2181,
+          "shape": [
+            1
+          ]
+        },
+        "nefc": {
+          "max_element": 76,
+          "max_sum": 3608,
+          "shape": [
+            64
+          ]
+        }
+      },
+      "scope": "after sim.update returns, before BaseEnv auto-reset; sticky overflow flags cover the full control interval, contact maxima sample its last physical substep",
+      "strict": true,
+      "control_clock_observations": [
+        {
+          "completed_update": 1,
+          "explicit_step_count": 20,
+          "requested_physics_dt_seconds": 0.001,
+          "expected_elapsed_seconds_from_request": 0.02,
+          "native_clock_available": true,
+          "individual_substep_clock_measured": false,
+          "native_clock_before": {
+            "shape": [
+              64
+            ],
+            "constant": 0.0
+          },
+          "native_clock_after": {
+            "shape": [
+              64
+            ],
+            "constant": 0.021000001579523087
+          },
+          "observed_control_elapsed_seconds": {
+            "shape": [
+              64
+            ],
+            "constant": 0.021000001579523087
+          },
+          "all_world_clock_deltas_match_request": false
+        },
+        {
+          "completed_update": 2,
+          "explicit_step_count": 20,
+          "requested_physics_dt_seconds": 0.001,
+          "expected_elapsed_seconds_from_request": 0.02,
+          "native_clock_available": true,
+          "individual_substep_clock_measured": false,
+          "native_clock_before": {
+            "shape": [
+              64
+            ],
+            "constant": 0.021000001579523087
+          },
+          "native_clock_after": {
+            "shape": [
+              64
+            ],
+            "constant": 0.04099998623132706
+          },
+          "observed_control_elapsed_seconds": {
+            "shape": [
+              64
+            ],
+            "constant": 0.01999998465180397
+          },
+          "all_world_clock_deltas_match_request": true
+        }
+      ],
+      "control_clock_scope": "clock read immediately before/after the first two completed sim.update calls; no individual substep clock read is claimed",
+      "native_state": {
+        "fields": [
+          "qpos",
+          "qvel",
+          "qacc"
+        ],
+        "scope": "complete native qpos/qvel/qacc arrays after sim.update returns and before BaseEnv auto-reset; states between control boundaries are not sampled",
+        "readback": "synchronous native array copies followed by CPU finite reduction; summaries retain at most 16 first bad world IDs per field",
+        "available": true,
+        "missing_fields": [],
+        "observations": 260,
+        "complete_observations": 260,
+        "nonfinite_seen": false,
+        "all_samples_finite": true,
+        "first_nonfinite": null,
+        "field_summaries": {
+          "qpos": {
+            "shape": [
+              64,
+              23
+            ],
+            "observations": 260,
+            "nonfinite_world_observations": 0,
+            "nonfinite_value_observations": 0,
+            "max_nonfinite_worlds": 0,
+            "first_bad_world_ids": []
+          },
+          "qvel": {
+            "shape": [
+              64,
+              21
+            ],
+            "observations": 260,
+            "nonfinite_world_observations": 0,
+            "nonfinite_value_observations": 0,
+            "max_nonfinite_worlds": 0,
+            "first_bad_world_ids": []
+          },
+          "qacc": {
+            "shape": [
+              64,
+              21
+            ],
+            "observations": 260,
+            "nonfinite_world_observations": 0,
+            "nonfinite_value_observations": 0,
+            "max_nonfinite_worlds": 0,
+            "first_bad_world_ids": []
+          }
+        }
+      },
+      "overflow_masks": {
+        "capacity": 511,
+        "convergence_budget": 1536,
+        "meaning": "ITERATIONS/LS_ITERATIONS are convergence budgets; other installed enum bits indicate capacity/collision loss. Flags are sticky until native reset."
+      },
+      "actual_capacities": {
+        "naconmax": 16384,
+        "njmax": 1024,
+        "njmax_nnz": 21504
+      },
+      "counter_scope": {
+        "nacon": "global batch contact count; naconmax is global allocation, not a hard per-world limit",
+        "ncollision": "global broadphase candidate count",
+        "nefc": "constraints per world; njmax is a hard per-world limit"
+      },
+      "prepared_solver_options": {
+        "cone": 1,
+        "impratio_invsqrt": {
+          "shape": [
+            64
+          ],
+          "constant": 0.3162277638912201
+        },
+        "impratio_from_invsqrt": {
+          "shape": [
+            64
+          ],
+          "constant": 10.0
+        },
+        "iterations": 100,
+        "ls_iterations": 50,
+        "ccd_iterations": 35,
+        "timestep": 0.0020000000949949026,
+        "integrator": 3,
+        "tolerance": {
+          "shape": [
+            64
+          ],
+          "constant": 9.999999974752427e-07
+        }
+      },
+      "prepared_solver_options_scope": "captured before the first live sim.update; timestep may still be the solver preparation default and is not evidence of the effective step duration",
+      "private_path": "peg._entities[0]._physics_binding._runtime.solver.mjw_data",
+      "solver_source": "/home/dex/miniconda3/envs/open/lib/python3.11/site-packages/newton/_src/solvers/mujoco/solver_mujoco.py",
+      "solver_source_sha256": "981568ab792dbc9e82392d57da3cbb507ef1c0d8c88e3b8b7cafe5065945c3cf",
+      "effective_solver_timestep_after_first_update": 0.0010000000474974513,
+      "last_flagged_world_count": 0,
+      "first_flagged_world_ids": []
+    }
+  },
+  "last_snapshot_reason": "final",
+  "elapsed_wall_seconds": 911.2635038669687,
+  "epa_preflight": {
+    "passed": true,
+    "mujoco_warp_version": "3.12.0",
+    "required": "MuJoCo Warp 3.12 with loaded EPA horizon capacity at least 128",
+    "loaded_constants": {
+      "types.MJ_MAX_EPAHORIZON": 128,
+      "collision_convex.MJ_MAX_EPAHORIZON": 128
+    },
+    "loaded_sources": {
+      "types": {
+        "path": "/tmp/embodichain-mjw-epa128-20261026/mujoco_warp/_src/types.py",
+        "exists": true,
+        "bytes": 113257,
+        "sha256": "9f9bc85881875b55513150a18d9cdb797d8ad7fc799b23896c5aed49e8d5eee4"
+      },
+      "collision_convex": {
+        "path": "/tmp/embodichain-mjw-epa128-20261026/mujoco_warp/_src/collision_convex.py",
+        "exists": true,
+        "bytes": 43881,
+        "sha256": "9a030d1756b0c0cc6bc9df818011b0c44859bc45420cd37254df7087773bc85c"
+      }
+    },
+    "scope": "loaded Python constants and source identities before any native training scene; runtime capacity flags remain guarded throughout training"
+  },
+  "environments": {
+    "train": {
+      "num_envs": 4096,
+      "device": "cuda:0",
+      "physics_dt": 0.001,
+      "control_dt": 0.02,
+      "configured_physics_frequency_hz": 1000.0,
+      "configured_policy_frequency_hz": 50.0,
+      "cadence_scope": "resolved task/manager configuration; effective timestep and control-clock evidence are recorded separately by the health observer after live stepping",
+      "asset_sha256": "8d5592ea6da84da3a55f0233616e864b35b29d3950831f397fe2c8ecab1260b7",
+      "asset_generator_revision": "5833f465896e1e06bc4be4f003be847f5183a4db",
+      "fidelity": {
+        "profile": "study",
+        "geometry_per_run": 1,
+        "asset_sha256": "8d5592ea6da84da3a55f0233616e864b35b29d3950831f397fe2c8ecab1260b7",
+        "robot_source_urdf": "/home/dex/.cache/embodichain_data/extract/FlexivRizon4SMenagerie/prepared_v4_parallel_jaw/rizon4s_robotiq2f85.urdf",
+        "source_contacts_preserved": true,
+        "contact_capacities": {
+          "assembly_contact_capacity": 256,
+          "grasp_contact_capacity": 64
+        },
+        "paper_robot_dynamics_identified": false,
+        "gripper_model": "parallel_jaw",
+        "source_gripper_dynamics_preserved": false,
+        "reset_distribution": "local contact, fixed ready pose; workspace-wide IK reset not qualified",
+        "contact_labels": "public assembly_task.js peg signed-distance labels and seated interval; additional bilateral grasp, penetration and 3-control-step hold guards",
+        "proprioception_convention": "official_v1",
+        "gravity_compensation": "URDF COM potential gradient from encoders, held at 50 Hz",
+        "grasp_guard": "bilateral part-pad contact in the control interval, at most 5 ms current air time, force threshold 0.05 N"
+      }
+    },
+    "eval": {
+      "num_envs": 64,
+      "device": "cuda:0",
+      "physics_dt": 0.001,
+      "control_dt": 0.02,
+      "configured_physics_frequency_hz": 1000.0,
+      "configured_policy_frequency_hz": 50.0,
+      "cadence_scope": "resolved task/manager configuration; effective timestep and control-clock evidence are recorded separately by the health observer after live stepping",
+      "asset_sha256": "12e9cd3415cbceb5fd8e980c8b544d719e35071242c2a5ddb8aa261e835aea6e",
+      "asset_generator_revision": "5833f465896e1e06bc4be4f003be847f5183a4db",
+      "fidelity": {
+        "profile": "study",
+        "geometry_per_run": 1,
+        "asset_sha256": "12e9cd3415cbceb5fd8e980c8b544d719e35071242c2a5ddb8aa261e835aea6e",
+        "robot_source_urdf": "/home/dex/.cache/embodichain_data/extract/FlexivRizon4SMenagerie/prepared_v4_parallel_jaw/rizon4s_robotiq2f85.urdf",
+        "source_contacts_preserved": true,
+        "contact_capacities": {
+          "assembly_contact_capacity": 256,
+          "grasp_contact_capacity": 64
+        },
+        "paper_robot_dynamics_identified": false,
+        "gripper_model": "parallel_jaw",
+        "source_gripper_dynamics_preserved": false,
+        "reset_distribution": "local contact, fixed ready pose; workspace-wide IK reset not qualified",
+        "contact_labels": "public assembly_task.js peg signed-distance labels and seated interval; additional bilateral grasp, penetration and 3-control-step hold guards",
+        "proprioception_convention": "official_v1",
+        "gravity_compensation": "URDF COM potential gradient from encoders, held at 50 Hz",
+        "grasp_guard": "bilateral part-pad contact in the control interval, at most 5 ms current air time, force threshold 0.05 N"
+      }
+    }
+  },
+  "training": {
+    "global_step": 49631232,
+    "num_updates": 378,
+    "run_path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_study_nominal_floor_epa128_seed0_20261026_041223_647955945",
+    "latest_checkpoint": {
+      "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_study_nominal_floor_epa128_seed0_20261026_041223_647955945/checkpoints/blind_peg_study_nominal_floor_epa128_seed0_best_step_45875200.pt",
+      "exists": true,
+      "bytes": 4363025
+    },
+    "best_checkpoint": {
+      "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_study_nominal_floor_epa128_seed0_20261026_041223_647955945/checkpoints/blind_peg_study_nominal_floor_epa128_seed0_best_step_45875200.pt",
+      "exists": true,
+      "bytes": 4363025
+    },
+    "last_train_metrics": {
+      "global_step": 49545216.0,
+      "charts/SPS": 13678.756206993648,
+      "charts/episode_reward_avg_100": 1.93,
+      "charts/episode_length_avg_100": 62.53,
+      "train/actor_loss": 0.007989626831320118,
+      "train/value_loss": 0.01914281696195417,
+      "train/action_bound_loss": 0.420106940336791,
+      "train/entropy": 5.218847041280242,
+      "train/kl": 0.0,
+      "train/learning_rate": 0.0003,
+      "train/auxiliary_loss": 0.31828999504732564
+    },
+    "last_eval_metrics": {
+      "global_step": 45875200.0,
+      "eval/avg_reward": 1.93359375,
+      "eval/avg_length": 57.75390625,
+      "eval/success_rate": 0.9609375,
+      "eval/completed_episodes": 256.0,
+      "eval/success_samples": 256.0,
+      "eval/success_ci95_low": 0.9296001682001327,
+      "eval/success_ci95_high": 0.9786459641572671,
+      "eval/metrics/radial_error": 0.0008298819943775015,
+      "eval/metrics/tilt": 0.014739533644728908,
+      "eval/metrics/depth": 0.016892589861527085,
+      "eval/metrics/penetration": 1.7191062692267778e-06,
+      "eval/metrics/grasped": 0.9609375,
+      "eval/metrics/captured": 0.97265625
+    }
+  },
+  "error": "Traceback (most recent call last):\n  File \"/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/benchmark/assembly/train_peg.py\", line 478, in run_training\n    result = train_from_config(\n             ^^^^^^^^^^^^^^^^^^\n  File \"/home/dex/.codex/worktrees/d58c/EmbodiChain/embodichain/learning/rl/train.py\", line 716, in train_from_config\n    trainer.train(total_steps)\n  File \"/home/dex/.codex/worktrees/d58c/EmbodiChain/embodichain/learning/rl/utils/trainer.py\", line 228, in train\n    self._collect_rollout()\n  File \"/home/dex/miniconda3/envs/open/lib/python3.11/site-packages/torch/utils/_contextlib.py\", line 116, in decorate_context\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/dex/.codex/worktrees/d58c/EmbodiChain/embodichain/learning/rl/utils/trainer.py\", line 316, in _collect_rollout\n    rollout = self.collector.collect(\n              ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/dex/miniconda3/envs/open/lib/python3.11/site-packages/torch/utils/_contextlib.py\", line 116, in decorate_context\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/dex/.codex/worktrees/d58c/EmbodiChain/embodichain/learning/rl/collector/sync_collector.py\", line 115, in collect\n    next_obs, reward, terminated, truncated, env_info = self.env.step(\n                                                        ^^^^^^^^^^^^^^\n  File \"/home/dex/.codex/worktrees/d58c/EmbodiChain/embodichain/lab/gym/envs/base_env.py\", line 1094, in step\n    self._advance_physics()\n  File \"/home/dex/.codex/worktrees/d58c/EmbodiChain/embodichain/lab/gym/envs/base_env.py\", line 646, in _advance_physics\n    self.sim.update(\n  File \"/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/benchmark/assembly/peg_reachability.py\", line 246, in observed_update\n    self.observe()\n  File \"/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/benchmark/assembly/peg_reachability.py\", line 444, in observe\n    raise RuntimeError(\nRuntimeError: Strict native health detected nonfinite qpos/qvel/qacc before auto-reset: {'observation': 2518, 'field': 'qpos', 'bad_world_count': 1, 'first_bad_world_ids': [515]}\n",
+  "gradient_failure_dump": {
+    "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_rl_attempt_20261026/v5_failed_minibatch.pt",
+    "exists": false
+  },
+  "run_manifest": {
+    "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_study_nominal_floor_epa128_seed0_20261026_041223_647955945/run-manifest.json",
+    "exists": true,
+    "bytes": 320,
+    "sha256": "3bae843f17f47a976e824cde0b2b26edea7fb45da18c690065b8273a20f27599"
+  },
+  "tensorboard_logs": [
+    {
+      "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_study_nominal_floor_epa128_seed0_20261026_041223_647955945/logs/blind_peg_study_nominal_floor_epa128_seed0/events.out.tfevents.1792959143.dex-X870-EAGLE-WIFI7.465549.0",
+      "exists": true,
+      "bytes": 1076586
+    }
+  ]
+}

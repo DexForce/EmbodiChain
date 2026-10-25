@@ -1,0 +1,20 @@
+{
+  "qualification": "export_verified_task_performance_unqualified",
+  "num_updates": 350,
+  "global_step": 45875200,
+  "actor_path": "outputs/assembly_rl_attempt_20261026/model_bundle/run/exports/actor.pt",
+  "actor_sha256": "c0c4a2948f7ecf0d515e02c14776a72d3a3ef1facbc6505f180f6b7f64112e71",
+  "checkpoint_path": "outputs/assembly_rl_attempt_20261026/model_bundle/run/checkpoints/blind_peg_study_nominal_floor_epa128_seed0_best_step_45875200.pt",
+  "config_path": "outputs/assembly_rl_attempt_20261026/model_bundle/run/configs/train.yaml",
+  "input_shape": [
+    "batch",
+    1023
+  ],
+  "output_shape": [
+    "batch",
+    7
+  ],
+  "action_semantics": "normalized joint-position increments; apply task action scales and limits",
+  "max_export_error": 0.0,
+  "assembly_success_rate": null
+}
