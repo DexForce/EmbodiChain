@@ -121,3 +121,13 @@ Derive new artifacts in a fresh destination rather than altering frozen data.
 `embodichain run-example learning/bc --help` is lazy. Private `_support` modules
 own collection, geometry targets, controller decode, acceptance and reference
 research. They are ordinary installed example data, outside the model package.
+
+The reader's explicit `include_partial_targets=False` default preserves the
+frozen full-future sampling/view. Generic recipes may opt in to complete-history
+tail conditioning, finite zero right padding and `target_valid` masks; the
+source/recipe identity changes. The formal driver continues using the default.
+The pending [tail-conditioning candidate](configs/tail-conditioning.candidate.yaml)
+uses a private `window-candidate` host adapter that passes geometry targets to
+the installable generic recipe. Its `--prepare-only` command constructs both
+arms on CPU without fitting; `--train` is an explicit separate operation. See
+the [predeclared protocol](research/acceptance.md) before running either arm.

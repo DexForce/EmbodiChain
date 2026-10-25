@@ -98,51 +98,108 @@ Geometric phase labels are diagnostic measurements, not expert states or new
 success criteria. These observations locate distinct failure phases without
 establishing an implementation defect or a unique learning cause.
 
-## Next bounded protocol: sequence execution coherence v2
+## Executed sequence coherence diagnostic v2
 
-Test whether longer execution of the already predicted F32 sequence changes
-release/withdraw behavior. Use **zero training updates**, the same immutable
-20k checkpoint and a new auxiliary panel. This tests a specific receding-horizon
-hypothesis after the negative H1 result. It is not a revision of formal v1:
+The pre-execution manifest SHA256 is
+`4b2c8587266ea24a5d492e86c0adc612a7f70b74ece3fcb14733cd156a9097e9`;
+its source commit was `cf60f4dd17c524543de150beee2f32c1516630bd`.
+Both arms used the same frozen 20k checkpoint, auxiliary reset seeds
+`20297025`/`20297026`, 600 steps per scene and physical GPU4. Checkpoint,
+initial-panel and source hashes matched; no expert or rule-based release/
+withdraw intervention was introduced. Both arms closed/flushed successfully.
 
-| Item | Fixed value |
+| Horizon | Auxiliary success | Lift | Mean final goal error | Forward calls |
+| --- | --- | --- | --- | --- |
+| 8 | 0/2 | 0/2 | 0.3773 m | 150 |
+| 32 | 0/2 | 2/2 | 0.2031 m | 38 |
+
+H32 improved lifting on this pair without achieving task success. Its first
+scene remained in transport after lifting; its second reached 10.4 mm final
+goal error but recorded only one withdrawn step among 70 near-goal steps.
+This is a partial phase improvement on two auxiliary states, not evidence of
+formal acceptance or generalization. No more cadence panels or training runs
+were added. Full traces and the frozen manifest remain under
+`/root/outputs/sl-convergence-20261026/bc/cadence-v2/`.
+
+## Tail-conditioning evidence and opt-in reader
+
+A read-only numeric audit of the first 32 training episodes found 256 frames
+satisfying near-goal, opened, withdrawn and instantaneous stability conditions.
+All occurred in the final 31 frames. The original H2/F32 full-future sampling
+rule admitted **zero** of them as conditioning anchors. They still appeared
+1,152 times as future target positions; successful-phase labels were not absent.
+This is a specific coverage hypothesis for late-phase behavior and does not
+explain every approach failure.
+
+`BCWindowDataset(include_partial_targets=True)` now admits all 256 as complete-
+history anchors. A bounded actual sampler check delivered two terminal-phase
+anchors in 152 samples, with two and seven valid targets respectively, complete
+H2 histories and finite zero padding. No parameter update was performed.
+The checksummed corpus manifest remains unchanged. Numeric coverage does not
+claim a new integrity scan of every RGB file; the diagnostic's sampling check
+used declared immutable files without rehashing their RGB payloads.
+
+The option defaults to false. Default real-corpus B4 samples, sampling RNG and
+source identity remain bitwise identical. The frozen formal driver does not
+pass the option. Partial mode groups target encoders by real valid length,
+never supplies synthetic fields to a transform, right-pads finite zeros and
+returns `target_valid`. It binds a different source/recipe identity; cross-mode
+checkpoint recovery is rejected. Model, loss formula, normalization and formal
+acceptance thresholds are unchanged.
+
+## Pending candidate: one window-mode variable
+
+The runnable configuration is
+[`tail-conditioning.candidate.yaml`](../configs/tail-conditioning.candidate.yaml).
+The private `window-candidate` adapter calls the installable generic SL factory;
+it supplies only task-owned target construction and a declared weight-only warm
+start. It does not introduce a trainer or alter the formal acceptance driver.
+
+| Item | Fixed in both arms |
 | --- | --- |
-| Checkpoint | seed 20261025, step 20000, SHA256 `61d4df2456727d59fb7e910edb1a2c64116351b85daece911fd8445a33db85ef` |
-| Inputs/model/normalization | Original H2/F32, two 256-pixel cameras, all saved buffers/weights unchanged |
-| Panel | Two new auxiliary states, seed `20297025`, same panel in both arms |
-| Only changed factor | Executed target horizon 8 versus 32 |
-| Budget | 600 steps/scene, two scenes/arm, 240 seconds/arm, physical GPU4 only |
-| Measurements | Step traces, success/lift/error, finger opening and TCP withdrawal, actual forward calls, hashes and cleanup |
-| Selection | No checkpoint selection or formal-test access; retain both arms, including failures |
+| Corpus | Original 1,024 episodes, manifest SHA256 `6b757b0f2d1343ead3d9812abf8652757825981a64fe9a84042dcd8e9c558093` |
+| Initialization | Frozen seed-20261025 20k weights, checkpoint SHA256 `61d4df2456727d59fb7e910edb1a2c64116351b85daece911fd8445a33db85ef` |
+| Normalization | Original first-32 tensors, compared exactly with checkpoint buffers |
+| Model/objective | Original H2/F32 RGB model and masked normalized target MSE |
+| Only experimental variable | `include_partial_targets=False` versus `True` |
+| New training budget | 2,000 updates × batch64 per arm, seed `20298025`, serial GPU4 |
+| Optimizer | Fresh AdamW in both arms, constant LR3e-5, weight decay1e-6, gradient norm1; new update count starts at zero |
+| Execution | Horizon32 fixed in both arms, unchanged physical controller/success predicate |
+| Held auxiliary panel | Four new states, seed `20300025`, final checkpoint only, 600 steps/scene, 600 seconds/arm |
+| Exploratory reporting gate | Candidate ≥3/4 full physical successes and ≥2 paired successes above control; report all failures and phase metrics regardless |
 
-This protocol has not been executed. After admitting an idle GPU4, copy this
-protocol to a fresh output directory and record its SHA256 before either arm.
-Run the arms serially; save both logs. The checkpoint and task-specific output
-variables below do not write frozen inputs.
+The exploratory gate is not the formal 18/20 then 80/100 acceptance protocol.
+No sealed test or original formal development panel is used. No checkpoint
+selection is allowed on this new auxiliary panel. Both prepare-only commands
+have built the actual recipes on CPU at **zero updates**. Their planned
+configurations differ only in output directory and the window flag. Training,
+held-panel evaluation and learning acceptance are **pending**.
+
+From the repository root, prepare fresh outputs with:
 
 ```bash
-BC_CHECKPOINT=/data1/dyc/.codex-artifacts/embodichain-sl-bc-20261025/formal-v1/seed-20261025/training/step_020000.pt
-BC_DIAGNOSTIC_OUTPUT=/root/outputs/sl-convergence-20261026/bc/cadence-v2
-mkdir -p "$BC_DIAGNOSTIC_OUTPUT"
-cp examples/learning/bc/research/acceptance.md "$BC_DIAGNOSTIC_OUTPUT/protocol.md"
-sha256sum "$BC_DIAGNOSTIC_OUTPUT/protocol.md" > "$BC_DIAGNOSTIC_OUTPUT/protocol.sha256"
-CUDA_VISIBLE_DEVICES=4 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 timeout 240s \
-  embodichain run-example learning/bc evaluate --diagnostic --trace --action-horizon 8 \
-  --checkpoint "$BC_CHECKPOINT" --scenes 2 --seed 20297025 \
-  --sim-device cuda:0 --policy-device cuda:0 --output "$BC_DIAGNOSTIC_OUTPUT/h8.json" \
-  > "$BC_DIAGNOSTIC_OUTPUT/h8.log" 2>&1
-CUDA_VISIBLE_DEVICES=4 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 timeout 240s \
-  embodichain run-example learning/bc evaluate --diagnostic --trace --action-horizon 32 \
-  --checkpoint "$BC_CHECKPOINT" --scenes 2 --seed 20297025 \
-  --sim-device cuda:0 --policy-device cuda:0 --output "$BC_DIAGNOSTIC_OUTPUT/h32.json" \
-  > "$BC_DIAGNOSTIC_OUTPUT/h32.log" 2>&1
+CUDA_VISIBLE_DEVICES='' embodichain run-example learning/bc window-candidate \
+  --config examples/learning/bc/configs/tail-conditioning.candidate.yaml \
+  --no-include-partial-targets --prepare-only \
+  --output-dir outputs/bc-tail-candidate/control/training --report outputs/bc-tail-candidate/control/prepared.json
+CUDA_VISIBLE_DEVICES='' embodichain run-example learning/bc window-candidate \
+  --config examples/learning/bc/configs/tail-conditioning.candidate.yaml \
+  --include-partial-targets --prepare-only \
+  --output-dir outputs/bc-tail-candidate/partial/training --report outputs/bc-tail-candidate/partial/prepared.json
 ```
 
-Require equal checkpoint and scene digests before comparing arms. Overrides and
-traces require `--diagnostic`; the formal driver supplies neither override. A
-reproducible improvement would require a separately frozen recipe and unchanged
-physical success thresholds before broader evaluation. Do not open the sealed
-test panel or repeat the original 3×20k run. If coherence does not improve
-behavior, the next learning design must declare one supervision/recovery
-change, its development-only budget and new source/data signatures before any
-training. Preserve the original formal seeds, budgets, thresholds and failures.
+For a separately authorized training execution, freeze this configuration,
+source commit, all input hashes and the two resolved prepared reports first.
+Admit GPU4, replace `--prepare-only` with `--train`, use distinct `fit.json`
+reports and wrap each serial arm in `timeout 1800s` with
+`CUDA_VISIBLE_DEVICES=4 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1`. Each arm remains
+bounded to exactly 2,000 new updates. Evaluate only its `training/last.pt` with
+`run-example learning/bc evaluate --diagnostic --trace --scenes 4 --seed 20300025`
+and the declared 600-second arm limit. Do not resume or overwrite a formal run.
+
+If the pair misses the exploratory gate, retain both results and stop; do not
+expand seeds/budgets, pick another checkpoint or open the sealed test. Any
+later learning change requires a new single-variable protocol. Even a passing
+auxiliary pair would require a separately frozen review before broader formal
+evaluation. The failed original seeds, budgets, thresholds and test seal stay
+unchanged.

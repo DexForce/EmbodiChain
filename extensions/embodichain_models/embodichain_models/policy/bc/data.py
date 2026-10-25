@@ -32,18 +32,24 @@ __all__ = ["BCWindowDataset"]
 
 
 class BCWindowDataset:
-    """Sample complete history/target windows from a committed offline corpus.
+    """Sample causal histories and physical targets from a committed corpus.
 
     Args:
         manifest: JSON with ``complete=true``, ordered camera names, and
             episode records containing relative ``path``, ``length`` and sha256.
         history_length: Number of measured input frames including the present.
         prediction_horizon: Number of target frames including the present.
+        include_partial_targets: Allow episode-tail anchors with complete input
+            history and at least one target. Missing future targets are finite
+            zeros with ``target_valid=False``. The default preserves complete
+            future windows and their historical source identity/sampling.
         observation_key: Numeric HDF5 dataset containing measured observations.
         observation_slice: Optional feature slice selected before model input.
         target_key: HDF5 physical targets, when no encoder is supplied.
-        target_encoder: Optional pure deterministic task-owned transform of aligned numeric fields
-            with leading ``[batch,prediction_horizon]`` axes.
+        target_encoder: Optional pure deterministic task-owned transform of
+            aligned numeric fields with leading ``[batch,time]`` axes. Partial
+            mode groups equal valid lengths before encoding, so the encoder
+            never sees synthetic padding; ``time`` may be shorter than F.
         target_fields: HDF5 inputs required by the target encoder.
         target_encoder_id: Explicit versioned target-transform identity, required
             when an encoder is supplied. Change it when transform semantics change.
@@ -61,6 +67,7 @@ class BCWindowDataset:
         *,
         history_length: int = 1,
         prediction_horizon: int = 1,
+        include_partial_targets: bool = False,
         observation_key: str = "observations",
         observation_slice: slice | None = None,
         target_key: str = "targets",
@@ -81,6 +88,9 @@ class BCWindowDataset:
             for value in (history_length, prediction_horizon, max_open_files)
         ):
             raise ValueError("History, prediction and handle capacity must be positive")
+        if type(include_partial_targets) is not bool:
+            raise ValueError("include_partial_targets must be a Boolean")
+        self.include_partial_targets = include_partial_targets
         self.history_length, self.prediction_horizon = (
             history_length,
             prediction_horizon,
@@ -106,12 +116,18 @@ class BCWindowDataset:
         if len(set(self.cameras)) != len(self.cameras):
             raise ValueError("Offline camera names must be distinct and ordered")
         self.episodes = self.manifest["episodes"]
+        minimum_length = (
+            history_length
+            if include_partial_targets
+            else history_length + prediction_horizon - 1
+        )
         if not self.episodes or any(
-            record["length"] < history_length + prediction_horizon - 1
-            for record in self.episodes
+            record["length"] < minimum_length for record in self.episodes
         ):
             raise ValueError(
-                "Every BC episode must contain a complete requested window"
+                "Every BC episode must contain a complete requested history"
+                if include_partial_targets
+                else "Every BC episode must contain a complete requested window"
             )
         # The manifest binds content hashes and all physical/camera metadata;
         # source identity cannot be changed by reusing a display source_id.
@@ -139,6 +155,12 @@ class BCWindowDataset:
             "image_transform": "uint8-thwc-rgb-to-float32-nchw-div255@1",
             "sampling": "episode-uniform-complete-windows@1",
         }
+        if include_partial_targets:
+            view.update(
+                include_partial_targets=True,
+                target_padding="finite-zero-right-padding-valid-mask@1",
+                sampling="episode-uniform-complete-history-partial-targets@1",
+            )
         self.view_id = hashlib.sha256(
             json.dumps(view, sort_keys=True, allow_nan=False).encode()
         ).hexdigest()
@@ -187,9 +209,42 @@ class BCWindowDataset:
         handle = self._handle(ordinal)
         return {name: torch.from_numpy(handle[name][:]) for name in fields}
 
+    def _encode_partial_targets(
+        self, fields: dict[str, list[torch.Tensor]], lengths: list[int]
+    ) -> torch.Tensor:
+        assert self.target_encoder is not None
+        groups: dict[int, list[int]] = {}
+        for row, length in enumerate(lengths):
+            groups.setdefault(length, []).append(row)
+        encoded = None
+        for length, rows in groups.items():
+            values = self.target_encoder(
+                {
+                    name: torch.stack([field_rows[row] for row in rows])
+                    for name, field_rows in fields.items()
+                }
+            )
+            if (
+                not isinstance(values, torch.Tensor)
+                or values.ndim != 3
+                or values.shape[:2] != (len(rows), length)
+                or values.shape[-1] < 1
+                or values.dtype != torch.float32
+                or (encoded is not None and values.shape[-1] != encoded.shape[-1])
+            ):
+                raise ValueError("Partial BC target encoding must return FP32 [B,T,K]")
+            if encoded is None:
+                encoded = values.new_zeros(
+                    len(lengths), self.prediction_horizon, values.shape[-1]
+                )
+            for offset, row in enumerate(rows):
+                encoded[row, :length].copy_(values[offset])
+        assert encoded is not None
+        return encoded
+
     @torch.no_grad()
     def sample(self, batch_size: int, *, generator: torch.Generator) -> dict[str, Any]:
-        """Draw complete numeric windows and causal RGB histories.
+        """Draw complete causal histories and optionally masked tail targets.
 
         Args:
             batch_size: Positive number of independent windows.
@@ -198,12 +253,15 @@ class BCWindowDataset:
         Returns:
             Owned CPU batch. Numeric input history is ``[B,H,D]``; images are
             FP32 ``[B,H,3,256,256]`` in ``[0,1]``; physical targets are ``[B,F,K]``.
+            In partial mode each row has at least one valid target and finite
+            zero padding. ``target_valid[B,F]`` excludes unavailable futures.
         """
         if type(batch_size) is not int or batch_size < 1:
             raise ValueError("BC batch size must be a positive integer")
         ordinals = torch.randint(len(self.episodes), (batch_size,), generator=generator)
         anchor_draws = torch.rand(batch_size, generator=generator)
         anchors = []
+        target_lengths = []
         observations, targets = [], []
         fields: dict[str, list[torch.Tensor]] = {
             name: [] for name in self.target_fields
@@ -219,10 +277,14 @@ class BCWindowDataset:
         ):
             length = self.episodes[ordinal]["length"]
             count = length - self.history_length - self.prediction_horizon + 2
+            if self.include_partial_targets:
+                count = length - self.history_length + 1
             anchor = self.history_length - 1 + int(draw * count)
             anchors.append(anchor)
             start = anchor - self.history_length + 1
-            stop = anchor + self.prediction_horizon
+            stop = min(anchor + self.prediction_horizon, length)
+            target_length = stop - anchor
+            target_lengths.append(target_length)
             handle = self._handle(ordinal)
             observation = torch.from_numpy(
                 handle[self.observation_key][start : anchor + 1]
@@ -232,12 +294,23 @@ class BCWindowDataset:
             observations.append(observation.float())
             if self.target_encoder is None:
                 target = torch.from_numpy(handle[self.target_key][anchor:stop]).float()
+                if self.include_partial_targets:
+                    if len(target) != target_length:
+                        raise ValueError("BC targets must align with episode frames")
+                    padded = target.new_zeros(
+                        self.prediction_horizon, *target.shape[1:]
+                    )
+                    padded[:target_length].copy_(target)
+                    target = padded
                 targets.append(target)
             else:
                 for name in self.target_fields:
-                    fields[name].append(
-                        torch.from_numpy(handle[name][anchor:stop]).float()
-                    )
+                    value = torch.from_numpy(handle[name][anchor:stop]).float()
+                    if self.include_partial_targets and len(value) != target_length:
+                        raise ValueError(
+                            "BC target fields must align with episode frames"
+                        )
+                    fields[name].append(value)
             for camera in self.cameras:
                 rgb = torch.from_numpy(handle["images"][camera][start : anchor + 1])
                 if rgb.dtype != torch.uint8 or rgb.shape != (
@@ -254,13 +327,14 @@ class BCWindowDataset:
         inputs: dict[str, Any] = {"history": torch.stack(observations)}
         if images:
             inputs["images"] = images
-        encoded = (
-            torch.stack(targets)
-            if self.target_encoder is None
-            else self.target_encoder(
+        if self.target_encoder is None:
+            encoded = torch.stack(targets)
+        elif self.include_partial_targets:
+            encoded = self._encode_partial_targets(fields, target_lengths)
+        else:
+            encoded = self.target_encoder(
                 {name: torch.stack(values) for name, values in fields.items()}
             )
-        )
         if (
             not isinstance(encoded, torch.Tensor)
             or encoded.ndim != 3
@@ -271,14 +345,16 @@ class BCWindowDataset:
             raise ValueError("BC target encoding must return FP32 [B,F,K] vectors")
         if self.target_encoder is not None:
             encoded = encoded.detach().clone()
+        target_valid = torch.ones(batch_size, self.prediction_horizon, dtype=torch.bool)
+        if self.include_partial_targets:
+            target_valid = (
+                torch.arange(self.prediction_horizon)[None, :]
+                < torch.tensor(target_lengths)[:, None]
+            )
         return {
             "inputs": inputs,
             "targets": encoded,
-            "masks": {
-                "target_valid": torch.ones(
-                    batch_size, self.prediction_horizon, dtype=torch.bool
-                )
-            },
+            "masks": {"target_valid": target_valid},
             "metadata": {
                 "source_id": self.source_id,
                 "episode_ids": ordinals,

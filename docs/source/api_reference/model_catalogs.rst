@@ -337,6 +337,12 @@ Completed immutable manifests bind episode checksums, selected numeric fields,
 camera order and history/target lengths. Samples own their storage; only causal
 RGB histories enter the policy. Optional host-supplied pure transforms construct
 physical targets from numeric fields and require an explicit version identity.
+The default requires complete future windows and preserves the historical
+sampling/source identity. Explicit ``include_partial_targets=True`` permits
+tail anchors with complete history and at least the current target. Missing
+future targets are finite zeros with ``target_valid=False``; encoders receive
+only real fields grouped by valid length. This optional view binds a distinct
+source/recipe identity and is never enabled by the frozen acceptance driver.
 Prefetch reserves a private sampling cursor; only delivered batches advance the
 trainer's committed RNG, so unused batches reconstruct exactly after recovery.
 
@@ -375,6 +381,11 @@ precomputed physical HDF5 targets, caller-frozen normalization, AdamW and the
 shared SL trainer. Model, optimizer, target view and normalization identity bind
 checkpoint recovery. Collection, physical evaluation and learning acceptance
 belong to the ``learning/bc`` example's declared protocol.
+Generic configurations may opt in through
+``data.reader.include_partial_targets``. Default configurations retain their
+previous signature; partial configurations additionally bind the padding/mask
+mode. A programmatic host may supply a pure target encoder through the reader
+mapping without making the model package depend on task/controller code.
 
 .. currentmodule:: embodichain_models.policy.bc.sl_recipe
 

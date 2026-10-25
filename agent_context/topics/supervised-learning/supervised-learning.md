@@ -53,6 +53,11 @@ source/prefetch adapters and per-environment target queues. Its installable
 `sl_recipe:build_supervised_trainer` composes stored physical targets and frozen
 statistics with the common SL trainer. It does not import simulation or infer
 controller semantics. `tests/models/policy/bc/` covers this family boundary.
+The reader defaults to complete future windows with its historical source
+identity. Generic recipes may explicitly enable `include_partial_targets` for
+complete-history tail anchors, finite right padding and `target_valid` masks;
+that view has a distinct recovery identity. The frozen acceptance driver keeps
+the default. Encoders see only real targets, grouped by valid length.
 
 `examples/learning/bc` lazily exposes collection, training, evaluation and
 reference parity through `run-example learning/bc`. Private `_support` modules

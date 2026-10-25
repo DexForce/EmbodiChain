@@ -14,6 +14,7 @@ data:
   normalization: outputs/bc-stored-targets/normalization.pt
   prefetch_batches: 1
   reader:
+    include_partial_targets: false
     observation_key: observations
     target_key: targets
     max_open_files: 32

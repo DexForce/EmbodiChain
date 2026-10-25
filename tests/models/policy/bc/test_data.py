@@ -30,14 +30,14 @@ import torch
 from embodichain_models.policy.bc.data import BCWindowDataset
 from embodichain_models.policy.bc.supervised import HDF5BCSource, PrefetchedBCSource
 from embodichain_models.policy.bc.model import ChunkBCModel, ChunkBCModelCfg
-from embodichain.learning.sl import SupervisedLearner
+from embodichain.learning.sl import SupervisedBatch, SupervisedLearner
 from embodichain_models.policy.bc.supervised import ChunkBCObjective
 from embodichain.learning.sl.trainer import SupervisedTrainer, SupervisedTrainerCfg
 
 
-def _corpus(tmp_path, *, cameras=True):
+def _corpus(tmp_path, *, cameras=True, lengths=(8, 11)):
     episodes = []
-    for ordinal, length in enumerate((8, 11)):
+    for ordinal, length in enumerate(lengths):
         path = tmp_path / f"episode{ordinal}.h5"
         with h5py.File(path, "w") as handle:
             values = np.arange(length, dtype=np.float32)[:, None] + ordinal * 100
@@ -127,6 +127,130 @@ def test_sampling_rng_and_transformed_targets_are_reproducible(tmp_path):
         torch.testing.assert_close(
             first["targets"][:, 0], first["inputs"]["history"][:, 0, :1] * 2 + 7
         )
+    finally:
+        dataset.close()
+
+
+@pytest.mark.parametrize("encoded", [False, True])
+def test_tail_target_keeps_complete_causal_history_and_finite_owned_padding(
+    tmp_path, encoded
+):
+    manifest = _corpus(tmp_path, lengths=(2,))
+    with pytest.raises(ValueError, match="complete requested window"):
+        BCWindowDataset(manifest, history_length=2, prediction_horizon=4)
+
+    def encode(fields):
+        # Padding before encoding would divide by zero. Only real targets enter.
+        assert fields["targets"].shape == (1, 1, 1)
+        return fields["targets"].reciprocal()
+
+    dataset = BCWindowDataset(
+        manifest,
+        history_length=2,
+        prediction_horizon=4,
+        include_partial_targets=True,
+        **(
+            {
+                "target_encoder": encode,
+                "target_fields": ("targets",),
+                "target_encoder_id": "reciprocal-valid-targets@1",
+            }
+            if encoded
+            else {}
+        ),
+    )
+    try:
+        batch = HDF5BCSource(dataset).sample(
+            1, generator=torch.Generator().manual_seed(4)
+        )
+        torch.testing.assert_close(
+            batch.inputs["history"][0, :, 0], torch.tensor([0.0, 1.0])
+        )
+        torch.testing.assert_close(
+            batch.inputs["images"]["front"][0, :, 0, 0, 0],
+            torch.tensor([0.0, 1.0 / 255]),
+        )
+        assert batch.masks["target_valid"].tolist() == [[True, False, False, False]]
+        expected = 0.5 if encoded else 2.0
+        torch.testing.assert_close(
+            batch.targets[0, :, 0], torch.tensor([expected, 0.0, 0.0, 0.0])
+        )
+        assert torch.isfinite(batch.targets).all() and not batch.targets.requires_grad
+
+        model = ChunkBCModel(
+            ChunkBCModelCfg(
+                observation_dim=2,
+                target_dim=1,
+                history_length=2,
+                prediction_horizon=4,
+                hidden_dims=(4,),
+            )
+        )
+        loss = (
+            ChunkBCObjective()
+            .compute_loss(
+                model,
+                SupervisedBatch(
+                    {"history": batch.inputs["history"]}, batch.targets, batch.masks
+                ),
+            )
+            .loss
+        )
+        loss.backward()
+        assert all(
+            torch.isfinite(parameter.grad).all() for parameter in model.parameters()
+        )
+        torch.testing.assert_close(model.head[-1].bias.grad[1:], torch.zeros(3))
+
+        previous = batch.targets.clone()
+        another = dataset.sample(1, generator=torch.Generator().manual_seed(5))
+        another["targets"].fill_(99)
+        dataset.close()
+        torch.testing.assert_close(batch.targets, previous, atol=0, rtol=0)
+    finally:
+        dataset.close()
+    short = tmp_path / "short"
+    short.mkdir()
+    with pytest.raises(ValueError, match="complete requested history"):
+        BCWindowDataset(
+            _corpus(short, cameras=False, lengths=(1,)),
+            history_length=2,
+            prediction_horizon=4,
+            include_partial_targets=True,
+        )
+
+
+def test_partial_encoder_preserves_row_order_and_only_masks_unavailable_futures(
+    tmp_path,
+):
+    manifest = _corpus(tmp_path, cameras=False)
+    dataset = BCWindowDataset(
+        manifest,
+        history_length=2,
+        prediction_horizon=4,
+        include_partial_targets=True,
+        target_encoder=lambda fields: fields["targets"] + 7,
+        target_fields=("targets",),
+        target_encoder_id="targets-plus7@1",
+    )
+    try:
+        batch = dataset.sample(32, generator=torch.Generator().manual_seed(3))
+        counts = batch["masks"]["target_valid"].sum(1)
+        assert set(counts.tolist()) == {1, 2, 3, 4}
+        for row, (ordinal, anchor, count) in enumerate(
+            zip(batch["metadata"]["episode_ids"], batch["metadata"]["anchors"], counts)
+        ):
+            count, anchor, ordinal = int(count), int(anchor), int(ordinal)
+            expected = (
+                torch.arange(anchor, anchor + count) + 100 * ordinal
+            ).float() * 2 + 7
+            torch.testing.assert_close(batch["targets"][row, :count, 0], expected)
+            torch.testing.assert_close(
+                batch["targets"][row, count:, 0], torch.zeros(4 - count)
+            )
+            assert batch["masks"]["target_valid"][row].tolist() == [True] * count + [
+                False
+            ] * (4 - count)
     finally:
         dataset.close()
 
@@ -250,7 +374,10 @@ def test_one_batch_prefetch_preserves_sampling_cursor_and_retry_batches(tmp_path
         prefetched.close()
 
 
-def test_prefetched_training_resume_rebuilds_unused_batch_exactly(tmp_path):
+@pytest.mark.parametrize("include_partial_targets", [False, True])
+def test_prefetched_training_resume_rebuilds_unused_batch_exactly(
+    tmp_path, include_partial_targets
+):
     manifest = _corpus(tmp_path, cameras=False)
     from embodichain_models.policy.bc import build_supervised_trainer
 
@@ -265,14 +392,23 @@ def test_prefetched_training_resume_rebuilds_unused_batch_exactly(tmp_path):
         statistics,
     )
 
-    def trainer(name):
+    def trainer(name, *, partial=include_partial_targets):
         return build_supervised_trainer(
             {
-                "model": {"observation_dim": 1, "target_dim": 1, "hidden_dims": [4]},
+                "model": {
+                    "observation_dim": 1,
+                    "target_dim": 1,
+                    "hidden_dims": [4],
+                    "history_length": 2,
+                    "prediction_horizon": 3,
+                },
                 "data": {
                     "manifest": str(manifest),
                     "normalization": str(statistics),
-                    "reader": {"observation_slice": [0, 1]},
+                    "reader": {
+                        "observation_slice": [0, 1],
+                        "include_partial_targets": partial,
+                    },
                 },
                 "trainer": {
                     "total_updates": 4,
@@ -314,6 +450,20 @@ def test_prefetched_training_resume_rebuilds_unused_batch_exactly(tmp_path):
                 torch.testing.assert_close(
                     resumed.learner.model.state_dict()[name], value, atol=0, rtol=0
                 )
+        opposite = trainer("opposite", partial=not include_partial_targets)
+        try:
+            assert opposite.source.source_id != full.source.source_id
+            before = deepcopy(opposite.learner.model.state_dict())
+            with pytest.raises(ValueError, match="recipe or dataset"):
+                opposite.resume(prefix)
+            assert opposite.learner.num_updates == 0
+            for name, value in before.items():
+                if isinstance(value, torch.Tensor):
+                    torch.testing.assert_close(
+                        opposite.learner.model.state_dict()[name], value, atol=0, rtol=0
+                    )
+        finally:
+            opposite.source.close()
     finally:
         full.source.close()
         resumed.source.close()

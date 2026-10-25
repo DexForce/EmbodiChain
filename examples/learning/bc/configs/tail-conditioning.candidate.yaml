@@ -1,0 +1,37 @@
+# Pending research candidate; no training or held-panel evaluation has run.
+# Both arms use this file. Only include_partial_targets and output paths differ.
+factory: examples.learning.bc._support._window_candidate:build_trainer
+initialization:
+  checkpoint: /data1/dyc/.codex-artifacts/embodichain-sl-bc-20261025/formal-v1/seed-20261025/training/step_020000.pt
+  checkpoint_sha256: 61d4df2456727d59fb7e910edb1a2c64116351b85daece911fd8445a33db85ef
+  policy_step: 20000
+data:
+  manifest: /data1/dyc/.codex-artifacts/embodichain-sl-bc-20261025/corpus-v3/manifest.json
+  manifest_sha256: 6b757b0f2d1343ead3d9812abf8652757825981a64fe9a84042dcd8e9c558093
+  normalization: /data1/dyc/.codex-artifacts/embodichain-sl-bc-20261025/formal-v1/seed-20261025/normalization.pt
+  prepared_normalization: /root/outputs/sl-convergence-20261026/bc/tail-conditioning-candidate-v1/inputs/normalization-statistics.pt
+  include_partial_targets: false
+  prefetch_batches: 1
+objective:
+  type: masked_normalized_target_mse
+optimizer:
+  learning_rate: 0.00003
+  weight_decay: 0.000001
+  max_grad_norm: 1.0
+trainer:
+  total_updates: 2000
+  batch_size: 64
+  device: cuda:0
+  seed: 20298025
+  checkpoint_interval: 0
+  validation_interval: 0
+evaluation:
+  action_horizon: 32
+  auxiliary_seed: 20300025
+  auxiliary_scenes: 4
+  max_steps_per_scene: 600
+  max_seconds_per_arm: 600
+  minimum_candidate_successes: 3
+  minimum_paired_success_gain: 2
+  checkpoint_selection: final-only
+  sealed_test_access: false

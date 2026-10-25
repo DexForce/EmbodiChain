@@ -44,7 +44,12 @@ def build_supervised_trainer(config: dict[str, Any]) -> SupervisedTrainer:
             frozen statistics accepted by ``model.set_normalization``.
             ``data.reader`` optionally supplies observation/target field names,
             handle capacity, checksums and an observation slice as
-            ``[start, stop, step]``. Targets are precomputed by the host.
+            ``[start, stop, step]``. Its explicit ``include_partial_targets``
+            option defaults to false; true includes tail conditioning with
+            finite right padding and a valid-target mask. Targets are
+            precomputed by the host by default. A programmatic host may pass
+            a pure target encoder/fields/version through the reader mapping;
+            the model package never imports the host's task/controller.
             ``data.prefetch_batches`` is zero or one. ``optimizer`` accepts
             AdamW ``learning_rate``, ``weight_decay`` and ``max_grad_norm``;
             ``objective`` accepts only masked normalized target MSE.
@@ -102,6 +107,16 @@ def build_supervised_trainer(config: dict[str, Any]) -> SupervisedTrainer:
             model, ChunkBCObjective(), optimizer, max_grad_norm=maximum
         )
         source = HDF5BCSource(dataset)
+        partial_signature = (
+            {
+                "partial_targets": {
+                    "include_partial_targets": True,
+                    "padding": "finite-zero-right-padding-valid-mask@1",
+                }
+            }
+            if dataset.include_partial_targets
+            else {}
+        )
         return SupervisedTrainer(
             learner,
             PrefetchedBCSource(source) if prefetch else source,
@@ -120,6 +135,7 @@ def build_supervised_trainer(config: dict[str, Any]) -> SupervisedTrainer:
                     statistics_path.read_bytes()
                 ).hexdigest(),
                 "data_source": dataset.source_id,
+                **partial_signature,
             },
         )
     except BaseException:
