@@ -102,11 +102,7 @@ class SupervisedTrainer:
         self.output = Path(self.cfg.output_dir)
         self.output.mkdir(parents=True, exist_ok=True)
         self.learner.model.to(self.cfg.device)
-        self._output_was_used = (
-            (self.output / "metrics.jsonl").exists()
-            or (self.output / "last.pt").exists()
-            or next(self.output.glob("step_*.pt"), None) is not None
-        )
+        self._owned_artifacts: dict[Path, tuple[int, int, int, int]] = {}
         self._fit_started = False
         self._restored = False
 
@@ -126,10 +122,19 @@ class SupervisedTrainer:
         )
         if end < self.learner.num_updates:
             raise ValueError("stop_after precedes the restored update cursor")
-        if not self._fit_started and not self._restored and self._output_was_used:
-            raise FileExistsError(
-                "SL output contains a run; restore a checkpoint or use a fresh output directory"
-            )
+        if not self._fit_started and not self._restored:
+            artifacts = [
+                self.output / "metrics.jsonl",
+                self.output / "last.pt",
+                *self.output.glob("step_*.pt"),
+            ]
+            for path in artifacts:
+                if path.exists() and self._owned_artifacts.get(
+                    path.resolve()
+                ) != self._artifact_stamp(path):
+                    raise FileExistsError(
+                        "SL output contains another run; restore a checkpoint or use a fresh output directory"
+                    )
         self._fit_started = True
         metrics = {}
         while self.learner.num_updates < end:
@@ -193,6 +198,11 @@ class SupervisedTrainer:
         if state["cuda"] is not None:
             torch.cuda.set_rng_state(state["cuda"], self.cfg.device)
 
+    @staticmethod
+    def _artifact_stamp(path: Path) -> tuple[int, int, int, int]:
+        stat = path.stat()
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+
     def save(self, path: str | Path) -> None:
         """Atomically save a complete committed learning and sampling boundary.
 
@@ -221,6 +231,7 @@ class SupervisedTrainer:
         temporary = path.with_suffix(path.suffix + ".tmp")
         torch.save(state, temporary)
         temporary.replace(path)
+        self._owned_artifacts[path.resolve()] = self._artifact_stamp(path)
 
     def resume(self, path: str | Path) -> None:
         """Restore the same run after validating data, recipe and configuration.

@@ -269,3 +269,24 @@ def test_same_trainer_may_save_an_initial_policy_before_fitting(tmp_path):
     trainer = build(tmp_path / "run")
     trainer.save(trainer.output / "step_000000.pt")
     assert trainer.fit(stop_after=1)["num_updates"] == 1
+
+
+def test_preconstructed_trainer_rechecks_output_ownership_at_fit(tmp_path):
+    first = build(tmp_path / "shared")
+    second = build(tmp_path / "shared")
+    first.fit(stop_after=2)
+    before = (tmp_path / "shared/last.pt").read_bytes()
+    with pytest.raises(FileExistsError, match="another run"):
+        second.fit(stop_after=1)
+    assert (tmp_path / "shared/last.pt").read_bytes() == before
+    assert second.learner.num_updates == 0
+
+
+def test_foreign_replacement_of_owned_initial_snapshot_is_rejected(tmp_path):
+    first = build(tmp_path / "shared")
+    second = build(tmp_path / "shared")
+    path = first.output / "step_000000.pt"
+    first.save(path)
+    second.save(path)
+    with pytest.raises(FileExistsError, match="another run"):
+        first.fit(stop_after=1)
