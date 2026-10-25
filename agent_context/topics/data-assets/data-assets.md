@@ -1,6 +1,8 @@
 # Data assets and path resolution
 
 This topic owns asset paths, dataset-class discovery and download coordination.
+The data package exposes its asset namespace lazily so extension assets can
+import the shared dataset base before their own classes finish initialization.
 Online sampling and demonstration persistence belong to
 [data-pipeline](../data-pipeline/data-pipeline.md).
 
@@ -11,7 +13,9 @@ Online sampling and demonstration persistence belong to
 | Asset path lookup | `embodichain/data/dataset.py`: `get_data_path()`, `get_data_class()` |
 | Cache roots / mirror prefix | `embodichain/data/constants.py` |
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
-| CLI list/download | `embodichain/data/download.py`: `CATEGORY_MODULES`, `get_registry()`, `download_asset()` |
+| Shared class discovery | `embodichain/data/_asset_registry.py`: core modules and `embodichain.assets` catalogs |
+| Robot-owned asset definitions | `extensions/embodichain_robots/_asset_catalog.py` → vendor/model `assets.py` |
+| CLI list/download | `embodichain/data/download.py`: `get_registry()`, `download_asset()` |
 | Default material catalog / provenance | `embodichain/_material_catalog.py` → `embodichain/data/default_materials.py`; `embodichain/data/default_materials.json` |
 | Default material archive | `embodichain/data/assets/materials.py`: `DefaultMaterials` |
 | Dataset class visibility | `embodichain/data/__init__.py`, `embodichain/data/assets/__init__.py` |
@@ -31,12 +35,12 @@ base URL for asset archives (default: the hf-mirror.com copy of
 
 1. Absolute input is returned unchanged, without existence checks.
 2. An existing relative path under the data root is returned.
-3. Otherwise, the first path segment selects a dataset class in already-loaded
-   data modules. Construct it, then append the remaining path under `extract_dir`.
+3. Otherwise, the first path segment selects a class from the shared core and
+   extension asset index. Construct it, then append the subpath under `extract_dir`.
 
-The final nested asset path is not independently verified. A successful lookup
-can trigger download/extraction and still name a nonexistent nested file.
-Inspect `get_data_class()` and package imports when a newly added class is invisible.
+Lookup does not verify the final nested file. Check the shared index and installed
+entry points for missing IDs. Explicit loaded modules remain available through
+`extra_modules` after registered IDs; package re-exports do not register assets.
 
 ## Download and registry boundaries
 
@@ -48,18 +52,29 @@ receive the project's locking/repair behavior.
 
 The CLI honors an asset class's optional `cache_prefix` when checking readiness
 and ensuring extraction; otherwise the class name is the cache entry.
-The CLI imports the fixed `CATEGORY_MODULES` and finds `DownloadDataset`
-subclasses defined in each module. Adding an asset module alone does not add a
-CLI category. `get_registry()` also appends public classes from
-`assets/locomotion_assets.py` to the robot category and excludes underscore-prefixed
-helper classes. These seven classes use `robot_assets/<ClassName>.zip` on the
-configured remote sources, with the model entry at the ZIP root.
+The shared registry merges core category modules and `embodichain.assets`
+entry-point mappings. Each extension entry maps an asset ID to `class_path`
+(`module:Class`) and `category`; metadata must not import implementations.
+Dataset lookup and the download CLI use this same index. Duplicate IDs, including
+case-only collisions, fail explicitly. CLI categories come from the merged index;
+the public `CATEGORY_MODULES` mapping remains a single-module compatibility view.
+Catalogs are cached for the process lifetime; refresh editable metadata and restart
+after changing entry points.
+
+Migrated robot assets live in `embodichain_robots`, alongside each model or at
+vendor level for shared archives. The legacy `robot_assets`, `w1_assets` and
+`so101_assets` modules forward their public names to the same class objects.
+Discovery excludes these imported aliases so IDs register once. Keep class names,
+asset IDs, URLs, digests and cache prefixes stable across ownership moves.
+Locomotion assets and remaining core robot datasets still use the core category
+table, which excludes private helpers. Locomotion archives keep their existing
+`robot_assets/<ClassName>.zip` paths.
 `download_asset()` returns success or failure; `cmd_download()` finishes the batch
 and exits nonzero if any requested asset failed.
 `_ensure_extract()` copies non-ZIP downloads into the extract tree
 when needed. Solver/planner checkpoint download helpers can have separate paths.
 
-`SO101FollowerAssets` in `assets/so101_assets.py` also belongs to the robot CLI
+`SO101FollowerAssets` in `embodichain_robots.the_robot_studio.so101.assets` also belongs to the robot CLI
 category. It resolves a pinned official URDF and individual STL/reference files,
 verifies every SHA256, and repairs dependencies under the shared dataset lock.
 Keep its source revision and complete file checksums together when updating it.
@@ -123,7 +138,7 @@ validate a real selected-model download separately.
 
 | Symptom | Inspect |
 |---|---|
-| Missing class or CLI item | Package imports, first path segment, `CATEGORY_MODULES` and module ownership filtering |
+| Missing class or CLI item | Shared index, installed asset catalogs, first path segment and alias filtering |
 | Download races | Inheritance from `EmbodiChainDataset` and one lock scope spanning repair + extraction |
 | Corrupt archive repeatedly retained | `check_zip()` MD5 checks and `is_safe_path()` cleanup guard, particularly with custom roots |
 | Returned path is absent | Caller-owned absolute path or unverified nested extracted path |
@@ -131,7 +146,7 @@ validate a real selected-model download separately.
 | Automation sees success after download failure | Verify the caller preserves `cmd_download()`'s nonzero exit status |
 
 Change path policy in `dataset.py`, root defaults in `constants.py`, registry
-visibility in package exports/`download.py`, and asset URLs/checksums in the
+visibility in `_asset_registry.py`/extension catalogs, and asset URLs/checksums in the
 owning asset class. Do not alter a global root to repair one caller's path.
 
 ## Focused validation

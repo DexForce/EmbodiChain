@@ -22,6 +22,30 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.data
+----------------
+
+The public data namespace exposes dataset resolution, legacy database locations,
+and resource metadata. Its asset namespace loads on first access so extension
+asset definitions can import the dataset base without circular initialization.
+
+.. currentmodule:: embodichain.data
+
+.. autosummary::
+
+   assets
+   EMBODICHAIN_DEFAULT_DATABASE_ROOT
+   database_dir
+   database_2d_dir
+   database_agent_prompt_dir
+   database_demo_dir
+   EmbodiChainDataset
+   DEFAULT_DATA_MODULES
+   get_data_class
+   get_data_path
+   list_default_materials
+   get_default_material_info
+
 embodichain.data.assets.demo_assets
 -----------------------------------
 

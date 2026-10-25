@@ -1,7 +1,7 @@
 # ARX5 X5A
 
 `embodichain_robots.ARX5Cfg` configures the bundled `ARX5/X5A.urdf` asset.
-Its implementation lives in `extensions/embodichain_robots/arx5.py`, and the
+Its implementation lives in `extensions/embodichain_robots/arx/arx5/cfg.py`, and the
 bundled robot catalog registers it as `ARX5`. The package exports the class
 lazily; listing the catalog does not load the asset or simulation runtime.
 
