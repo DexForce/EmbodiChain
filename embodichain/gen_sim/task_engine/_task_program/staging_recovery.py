@@ -36,7 +36,7 @@ from .pick_safety import _inspect_pick_motion, _inspect_pick_plan
 
 __all__: list[str] = []
 
-STAGING_RECOVERY_REVISION = 2
+STAGING_RECOVERY_REVISION = 4
 _FK_ATOL = 2e-4
 _UNAVAILABLE = (
     ImportError,

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -118,6 +118,7 @@ class TaskEngineCoordinator:
         twist_mass_source: bool = False,
         runtime_profile: str = "default",
         experimental_open_release: bool | None = None,
+        native_pick_exploration: bool = False,
         press_extra_distance: float | None = None,
         candidate_set: TaskCandidateSet | Mapping[str, Any] | None = None,
         force_most_likely: bool = False,
@@ -141,13 +142,18 @@ class TaskEngineCoordinator:
         ):
             raise TypeError("experimental_open_release must be a boolean or None.")
         normalized_source = self._coerce_source(source)
+        from ..experiment_policy import validate_native_pick_exploration
+
+        validate_native_pick_exploration(
+            native_pick_exploration, normalized_source.robot_profile
+        )
         selected_physical = physical_input or getattr(
             self.scene_adapter, "physical_input", None
         )
         if selected_physical is not None:
-            if runtime_profile != "default":
+            if native_pick_exploration:
                 raise ValueError(
-                    "Selected physical input requires runtime_profile=default."
+                    "Selected physical input forbids native_pick_exploration."
                 )
             selected_physical.assert_unchanged()
             output = Path(output_dir).expanduser().resolve()
@@ -241,6 +247,7 @@ class TaskEngineCoordinator:
                 "planner_route": str(planning_mode),
                 "status": "running",
             }
+            planning_attempts = []
             try:
                 planner = self.semantic_planner
                 from ..robot_profiles import _NEW_PROFILES, _profile_lateral_positions
@@ -263,13 +270,66 @@ class TaskEngineCoordinator:
                     planner.reuse_pour_resource = True
                 if lateral_positions is not None:
                     planner.resource_lateral_positions = lateral_positions
-                plan = planner.plan_spec(
-                    selected,
-                    role_bindings,
-                    adaptation.prepared_scene.planner_objects,
-                    task_spec=specifications[selected["candidate_id"]],
-                    planner_route=planning_mode,
+                alternatives = sorted(
+                    (
+                        item
+                        for item in normalized_candidates["candidates"]
+                        if item["candidate_id"] != selected["candidate_id"]
+                        and item["candidate_id"] in adaptation.candidate_bindings
+                    ),
+                    key=lambda item: -int(item["vote_count"]),
                 )
+                for candidate in [selected, *alternatives]:
+                    candidate_id = str(candidate["candidate_id"])
+                    bindings = adaptation.candidate_bindings.get(candidate_id)
+                    if bindings is None:
+                        bindings = role_bindings
+                    planning_attempt = {
+                        "candidate_id": candidate_id,
+                        "planner_route": str(planning_mode),
+                        "status": "running",
+                    }
+                    planning_attempts.append(planning_attempt)
+                    try:
+                        plan = planner.plan_spec(
+                            candidate,
+                            bindings,
+                            adaptation.prepared_scene.planner_objects,
+                            task_spec=specifications[candidate_id],
+                            planner_route=planning_mode,
+                        )
+                    except (
+                        TypeError,
+                        ValueError,
+                        UnsupportedSemanticCapabilityError,
+                    ) as exc:
+                        planning_attempt.update(
+                            status="failed", error=_error_record(exc)
+                        )
+                        last_error = exc
+                        continue
+                    if candidate_id != selected["candidate_id"]:
+                        report = deepcopy(adaptation.binding_report)
+                        report.update(
+                            selected_candidate_id=candidate_id,
+                            selection_reason="preflight_bindable_fallback",
+                        )
+                        adaptation = replace(
+                            adaptation,
+                            selected_candidate=deepcopy(candidate),
+                            role_bindings=deepcopy(bindings),
+                            binding_report=report,
+                        )
+                        selected = candidate
+                        self._write_audit_artifacts(
+                            staging,
+                            candidate_set=normalized_candidates,
+                            adaptation=adaptation,
+                            final_inspection=final_inspection,
+                        )
+                    break
+                else:
+                    raise last_error
                 graph = plan.graph
 
                 is_twist = any(node["task_type"] == "E8" for node in graph["nodes"])
@@ -281,6 +341,8 @@ class TaskEngineCoordinator:
                     extra["runtime_profile"] = runtime_profile
                 if experimental_open_release is not None:
                     extra["experimental_open_release"] = experimental_open_release
+                if native_pick_exploration:
+                    extra["native_pick_exploration"] = True
                 if press_extra_distance is not None:
                     extra["press_extra_distance"] = press_extra_distance
                 if twist_mass_source:
@@ -339,6 +401,8 @@ class TaskEngineCoordinator:
             except (TypeError, ValueError, UnsupportedSemanticCapabilityError) as exc:
                 planning_attempt["status"] = "failed"
                 planning_attempt["error"] = _error_record(exc)
+                if not planning_attempts:
+                    planning_attempts.append(planning_attempt)
                 write_preparation_failure(
                     staging,
                     {
@@ -346,7 +410,7 @@ class TaskEngineCoordinator:
                         "task_id": str(normalized_candidates["task_id"]),
                         "status": "unsupported_semantic_capability",
                         "selected_candidate_id": str(selected["candidate_id"]),
-                        "attempts": [deepcopy(planning_attempt)],
+                        "attempts": deepcopy(planning_attempts),
                     },
                 )
                 published = transaction.commit()
@@ -356,7 +420,7 @@ class TaskEngineCoordinator:
                     candidate_set=deepcopy(normalized_candidates),
                     adaptation=adaptation,
                     artifacts=task_engine_artifact_paths(published),
-                    planning_attempts=(deepcopy(planning_attempt),),
+                    planning_attempts=tuple(deepcopy(planning_attempts)),
                 )
 
             planning_attempt.update(
@@ -369,7 +433,10 @@ class TaskEngineCoordinator:
                     "semantic_graph_validation": "semantic_graph_validation.json",
                 }
             )
-            _write_json(staging / "planner_report.json", planning_attempt)
+            _write_json(
+                staging / "planner_report.json",
+                {**planning_attempt, "attempts": planning_attempts},
+            )
             self._write_selected_candidate_artifacts(staging, selected)
             published = transaction.commit()
             return PreparationResult(
@@ -380,7 +447,7 @@ class TaskEngineCoordinator:
                 artifacts=task_engine_artifact_paths(published),
                 semantic_task_graph=deepcopy(graph),
                 generated_paths=_published_paths(generated, published),
-                planning_attempts=(deepcopy(planning_attempt),),
+                planning_attempts=tuple(deepcopy(planning_attempts)),
             )
 
     def _coerce_source(self, source: SceneSourceRef | str | Path) -> SceneSourceRef:

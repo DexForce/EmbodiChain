@@ -70,6 +70,21 @@ if TYPE_CHECKING:
 SENSOR_UID = "gen_sim_press_evidence"
 
 
+class _QuarterRollPressAffordance(PressAffordance):
+    """One equivalent wrist roll; calibrated contact point and axis are fixed."""
+
+    def get_press_pose(
+        self,
+        target_pose: torch.Tensor,
+        press_position: tuple[float, float, float] | None = None,
+    ) -> torch.Tensor:
+        pose = super().get_press_pose(target_pose, press_position=press_position)
+        x = pose[:, :3, 0].clone()
+        pose[:, :3, 0] = pose[:, :3, 1]
+        pose[:, :3, 1] = -x
+        return pose
+
+
 class GenSimPress(Press):
     """Keep public Press planning and validate its final arm/hand command grid."""
 
@@ -79,9 +94,67 @@ class GenSimPress(Press):
     binding_contract = Press.binding_contract
 
     def _plan(self, request: Any, context: Any) -> Any:
+        original = self._plan_checked(request, context)
+        affordance = request.goal.semantics.affordance
+        if (
+            original.plan_success.all()
+            or context.batch_size != 1
+            or type(affordance) is not PressAffordance
+        ):
+            return original
+        alternate = _QuarterRollPressAffordance(
+            object_label=affordance.object_label,
+            custom_config=deepcopy(affordance.custom_config),
+            press_axis=affordance.press_axis,
+            press_position=affordance.press_position,
+        )
+        candidate = replace(
+            request,
+            goal=replace(
+                request.goal,
+                semantics=replace(request.goal.semantics, affordance=alternate),
+            ),
+        )
+        recovered = self._plan_checked(candidate, context)
+        result = recovered if recovered.plan_success.all() else original
+        if result.diagnostics is not None:
+            result = replace(
+                result,
+                diagnostics=replace(
+                    result.diagnostics,
+                    metadata={
+                        **result.diagnostics.metadata,
+                        "gen_sim_press_quarter_roll": {
+                            "maximum_complete_plans": 2,
+                            "roll_rad": math.pi / 2,
+                            "accepted": bool(recovered.plan_success.all()),
+                            "alternate_phases": recovered.diagnostics.metadata.get(
+                                "gen_sim_press_continuous_ik", []
+                            ),
+                            "scope": "same_contact_point_axis_and_resource_not_physical_evidence",
+                        },
+                    },
+                ),
+            )
+        return result
+
+    def _plan_checked(self, request: Any, context: Any) -> Any:
         from .motion import _joint_velocity_limits, _velocity_validity
 
+        self._press_recovery_records = []
+        self._press_phase_index = 0
         plan = super()._plan(request, context)
+        if self._press_recovery_records and plan.diagnostics is not None:
+            plan = replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "gen_sim_press_continuous_ik": self._press_recovery_records,
+                    },
+                ),
+            )
         if plan.plan_success.any():
             trajectory = plan.joint_trajectory
             limits = _joint_velocity_limits(self.robot, None).to(trajectory.positions)
@@ -94,6 +167,70 @@ class GenSimPress(Press):
                     message="E9 Press exceeds final resampled joint velocity limits.",
                 )
         return plan
+
+    def _plan_pose_segment(
+        self,
+        target_pose: torch.Tensor,
+        start_qpos: torch.Tensor,
+        control_part: str,
+        request: Any,
+        sample_count: int,
+        *,
+        interpolation_dt: float,
+        cartesian_linear: bool = False,
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+            build_pose_plan_states,
+        )
+        from .motion import _cartesian_samples, resolve_continuous_ik_path
+
+        phase_index = self._press_phase_index
+        self._press_phase_index += 1
+        original = super()._plan_pose_segment(
+            target_pose,
+            start_qpos,
+            control_part,
+            request,
+            sample_count,
+            interpolation_dt=interpolation_dt,
+            cartesian_linear=cartesian_linear,
+        )
+        if (
+            original[0].all()
+            or start_qpos.shape[0] != 1
+            or request.motion_policy.strategy != "ik_interp"
+        ):
+            return original
+        start = self.robot.compute_fk(
+            qpos=start_qpos, name=control_part, to_matrix=True
+        )
+        targets = _cartesian_samples(
+            start, build_pose_plan_states(target_pose), sample_count
+        )
+        options = request.motion_policy.to_motion_gen_options(
+            start_qpos=start_qpos,
+            control_part=control_part,
+            sample_count=sample_count,
+            interpolation_dt=interpolation_dt,
+            cartesian_linear=True,
+        )
+        recovered = resolve_continuous_ik_path(
+            self.motion_generator, targets, options, operation="Press"
+        )
+        self._press_recovery_records.append(
+            {
+                "phase": ("approach", "contact", "press", "retract")[phase_index],
+                "sample_count": sample_count,
+                "control_dt": interpolation_dt,
+                "accepted": recovered is not None,
+                "scope": "failure_only_seeded_ik_same_targets_and_time_not_physical_evidence",
+            }
+        )
+        if recovered is None:
+            return original
+        return recovered.success, self._retime_motion_phase(
+            recovered.positions, recovered.dt, sample_count, interpolation_dt
+        )
 
 
 def with_press_options(profile: Any, routes: tuple[PressRoute, ...]) -> Any:

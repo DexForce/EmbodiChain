@@ -217,6 +217,7 @@ def placement_pose_candidates(
     high: np.ndarray,
     *,
     margin: float = DRAWER_PLACEMENT_MARGIN,
+    preserve_vertical: bool = False,
 ) -> tuple[np.ndarray, ...]:
     """Generate a bounded set of link-local floor targets for one payload.
 
@@ -254,7 +255,7 @@ def placement_pose_candidates(
     candidates: list[np.ndarray] = []
     extents = np.ptp(vertices, axis=0)
     isotropic = float(extents.max()) <= max(float(extents.min()) * 1.25, 1e-6)
-    if isotropic:
+    if isotropic and not preserve_vertical:
         rotation_variants = (
             rotation,
             _rotation_matrix(np.pi / 2.0, link_rotation[:, 0]) @ rotation,
@@ -263,7 +264,11 @@ def placement_pose_candidates(
     else:
         rotation_variants = tuple(
             _rotation_matrix(angle, link_rotation[:, 2]) @ rotation
-            for angle in DRAWER_PLACEMENT_ROTATIONS
+            for angle in (
+                (*DRAWER_PLACEMENT_ROTATIONS, -np.pi / 2.0, np.pi)
+                if preserve_vertical
+                else DRAWER_PLACEMENT_ROTATIONS
+            )
         )
     for variant_index, world_rotation in enumerate(rotation_variants):
         local_rotation = link_rotation.T @ world_rotation
@@ -290,7 +295,9 @@ def placement_pose_candidates(
                 np.allclose(pose, existing, atol=1e-8) for existing in candidates
             ):
                 candidates.append(pose)
-                if len(candidates) >= DRAWER_PLACEMENT_MAX_CANDIDATES:
+                if len(candidates) >= (
+                    5 if preserve_vertical else DRAWER_PLACEMENT_MAX_CANDIDATES
+                ):
                     return tuple(candidates)
     return tuple(candidates)
 
@@ -303,8 +310,12 @@ def drawer_containment_report(
     high: np.ndarray,
     *,
     margin: float = DRAWER_PLACEMENT_MARGIN,
+    lateral_margin: float | None = None,
 ) -> dict[str, object]:
-    """Check the complete payload mesh against a live drawer-link envelope."""
+    """Check a full payload mesh; closing may omit the planning-only XY inset."""
+    inset = margin if lateral_margin is None else lateral_margin
+    if not np.isfinite(inset) or inset < 0.0:
+        raise ValueError("Drawer lateral margin must be finite and nonnegative.")
     vertices = np.asarray(vertices, dtype=float)
     object_pose = np.asarray(object_pose, dtype=float)
     link_pose = np.asarray(link_pose, dtype=float)
@@ -313,10 +324,11 @@ def drawer_containment_report(
     relative = np.linalg.inv(link_pose) @ object_pose
     local = vertices @ relative[:3, :3].T + relative[:3, 3]
     safe_low = low + margin
-    # Contact with the measured floor is allowed within the floor tolerance;
-    # lateral bounds remain eroded to keep the payload off the walls.
+    # Keep floor/top tolerances independent of a planning-only lateral inset.
     safe_low[2] = low[2] - margin
     safe_high = high - margin
+    safe_low[:2] = low[:2] + inset
+    safe_high[:2] = high[:2] - inset
     minimum, maximum = local.min(0), local.max(0)
     checks = {
         "finite": bool(np.isfinite(local).all()),
@@ -338,4 +350,5 @@ def drawer_containment_report(
         "safe_upper": safe_high.tolist(),
         "checks": checks,
         "margin": float(margin),
+        "lateral_margin": float(inset),
     }

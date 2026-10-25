@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from typing import Any
 
 import numpy as np
@@ -193,8 +193,21 @@ class DrawerRoute:
     binding: PrismaticBinding
     lower: tuple[float, float, float]
     upper: tuple[float, float, float]
+    upright: bool = False
+    upright_calls: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
+        if type(self.upright) is not bool:
+            raise ValueError("Drawer upright must be a boolean.")
+        if self.upright_calls is not None and (
+            type(self.upright_calls) is not tuple
+            or any(
+                type(name) is not str or not name or name != name.strip()
+                for name in self.upright_calls
+            )
+            or len(set(self.upright_calls)) != len(self.upright_calls)
+        ):
+            raise ValueError("Drawer upright calls must be unique non-empty names.")
         container, obj, part = inside_parts(self.affordance)
         if (container, obj, part) != (
             self.binding.object_id,
@@ -214,11 +227,18 @@ class DrawerRoute:
         object.__setattr__(self, "upper", tuple(map(float, high)))
 
     def payload(self) -> dict[str, Any]:
-        return {**asdict(self), "binding": self.binding.payload()}
+        result = {**asdict(self), "binding": self.binding.payload()}
+        if not self.upright:
+            result.pop("upright")
+        if self.upright_calls is None:
+            result.pop("upright_calls")
+        else:
+            result["upright_calls"] = list(self.upright_calls)
+        return result
 
     @classmethod
     def decode(cls, value: dict[str, Any]) -> DrawerRoute:
-        if type(value) is not dict or set(value) != {
+        if type(value) is not dict or set(value) - {"upright", "upright_calls"} != {
             "affordance",
             "object_id",
             "binding",
@@ -226,7 +246,48 @@ class DrawerRoute:
             "upper",
         }:
             raise ValueError("Drawer route requires exactly its declared fields.")
-        return cls(**{**value, "binding": PrismaticBinding.decode(value["binding"])})
+        fields = {**value, "binding": PrismaticBinding.decode(value["binding"])}
+        if "upright_calls" in fields:
+            if type(fields["upright_calls"]) is not list:
+                raise ValueError("Drawer upright calls must be a list of names.")
+            fields["upright_calls"] = tuple(fields["upright_calls"])
+        return cls(**fields)
+
+
+def bind_drawer_routes(
+    routes: tuple[DrawerRoute, ...], program: Any
+) -> tuple[DrawerRoute, ...]:
+    """Bind occurrence policies while keeping one geometry route per affordance."""
+    from embodichain.lab.task_program.semantics import Place
+    from .invocation_policy import bind_cartesian_calls
+
+    calls = {segment.name: segment.calls[0].call for segment in program.iter_segments()}
+    result = []
+    for route in routes:
+        if route.upright_calls is None:
+            result.append(route)
+            continue
+        for name in route.upright_calls:
+            call = calls.get(name)
+            if isinstance(call, Place):
+                valid = (
+                    call.object.entity_id == route.object_id
+                    and getattr(call.inside, "entity_id", None) == route.affordance
+                )
+            else:
+                args = getattr(call, "arguments", {})
+                valid = (
+                    getattr(call, "call_id", None) == DRAWER_TRANSPORT_CALL
+                    and args.get("object") == route.object_id
+                    and args.get("target") == route.affordance
+                )
+            if not valid:
+                raise ValueError(
+                    "Drawer upright calls must reference their own placement or transport."
+                )
+        identities = bind_cartesian_calls(list(route.upright_calls), program)
+        result.append(replace(route, upright_calls=identities))
+    return tuple(result)
 
 
 def drawer_routes(graph: dict[str, Any], scene: Any) -> tuple[DrawerRoute, ...]:
@@ -234,6 +295,30 @@ def drawer_routes(graph: dict[str, Any], scene: Any) -> tuple[DrawerRoute, ...]:
     if not configs:
         return ()
     bindings = graph_bindings(graph, scene)
+    upright_groups = {
+        (node["task_instance_id"], node["call"]["arguments"]["object"])
+        for node in graph["nodes"]
+        if node["call"].get("call_id") == "gen_sim.align_held"
+        and node["call"].get("arguments", {}).get("target") == "current_object_pose"
+    }
+    upright_calls: dict[str, set[str]] = {}
+    for node in graph["nodes"]:
+        call = node["call"]
+        arguments = call.get("arguments", {})
+        obj = call.get("object", arguments.get("object"))
+        if (node.get("task_instance_id"), obj) not in upright_groups:
+            continue
+        target = (
+            call.get("inside")
+            if call.get("kind") == "place"
+            else (
+                arguments.get("target")
+                if call.get("call_id") == DRAWER_TRANSPORT_CALL
+                else None
+            )
+        )
+        if target is not None:
+            upright_calls.setdefault(target, set()).add(node["id"])
     routes = {}
     for node in graph["nodes"]:
         call = node["call"]
@@ -242,11 +327,18 @@ def drawer_routes(graph: dict[str, Any], scene: Any) -> tuple[DrawerRoute, ...]:
         container, obj, part = inside_parts(call["inside"])
         if container not in configs:
             continue
+        if call["inside"] in routes:
+            continue
         if part is None or f"{container}::{part}" not in bindings:
             raise ValueError("Drawer placement has no canonical E6 part binding.")
         binding = bindings[f"{container}::{part}"]
         low, high = drawer_region(configs[container], binding)
         routes[call["inside"]] = DrawerRoute(
-            call["inside"], obj, binding, tuple(low), tuple(high)
+            call["inside"],
+            obj,
+            binding,
+            tuple(low),
+            tuple(high),
+            upright_calls=tuple(sorted(upright_calls.get(call["inside"], ()))),
         )
     return tuple(routes.values())

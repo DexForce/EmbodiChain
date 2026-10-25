@@ -25,6 +25,7 @@ from dataclasses import dataclass, replace
 import json
 import math
 from pathlib import Path
+import re
 from typing import Any, Final
 
 import numpy as np
@@ -174,6 +175,71 @@ class TaskProgramBundlePaths:
     integration_fingerprint: Path
 
 
+def _merge_passive_prismatic_drive(
+    drive: dict[str, Any], joints: Sequence[str]
+) -> None:
+    """Compose generated passive drawer properties with existing drive rules."""
+    if drive.get("drive_type", "none") == "none":
+        modes = drive.get("target_mode")
+        if modes is None:
+            drive.setdefault("drive_type", "none")
+        elif isinstance(modes, dict) and "drive_type" not in drive:
+            # A global NONE would disable calibrated buttons in the same asset.
+            for joint in joints:
+                if not any(re.fullmatch(pattern, joint) for pattern in modes):
+                    modes[re.escape(joint)] = "none"
+        if "friction" not in drive:
+            drive["friction"] = {joint: PASSIVE_FRICTION for joint in joints}
+
+
+def _merge_prismatic_link_mass(
+    articulation: dict[str, Any],
+    links: Sequence[str],
+    *,
+    preserve_source_mass: bool = False,
+) -> None:
+    """Compose the E6 moving-link calibration with an existing mass owner."""
+    if preserve_source_mass:
+        return
+    link_attrs = articulation.setdefault("link_attrs", {})
+    group = "gen_sim_prismatic_link_mass"
+    if group in link_attrs:
+        raise ValueError(f"Generated E6 articulation reserves {group!r}.")
+    link_attrs[group] = {
+        "link_names_expr": sorted(set(links)),
+        "attrs": {"mass_props": {"mass": PRISMATIC_LINK_MASS}},
+    }
+
+
+def _coarse_twist_routes(
+    routes: tuple[Any, ...],
+    candidate: Mapping[str, Any] | None,
+    lineage: Mapping[str, Any] | None,
+) -> tuple[Any, ...]:
+    """Give explicit coarse turns one continuous command, not a printed goal."""
+    steps = () if candidate is None else candidate["draft"]["steps"]
+    coarse = {
+        s["id"]
+        for s in steps
+        if s["task_type"] == "E8" and s.get("twist_goal_mode") == "coarse"
+    }
+    if not coarse:
+        return routes
+    if lineage is None:
+        raise ValueError("Coarse Twist motion requires explicit expansion lineage.")
+    groups = {entry["group_id"] for sid in coarse for entry in lineage[sid]}
+    if groups - {route.operation_id for route in routes}:
+        raise ValueError("Coarse Twist lineage does not name its control routes.")
+    return tuple(
+        (
+            replace(route, chunk_angle=math.radians(20.0))
+            if route.operation_id in groups
+            else route
+        )
+        for route in routes
+    )
+
+
 def generate_task_program_bundle(
     graph: SemanticTaskGraph,
     prepared_scene: Any,
@@ -204,6 +270,7 @@ def generate_task_program_bundle(
     idle_clearance_routes: Sequence[Mapping[str, Any]] | None = None,
     runtime_profile: str = "default",
     experimental_open_release: bool | None = None,
+    native_pick_exploration: bool = False,
     press_extra_distance: float | None = None,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
@@ -273,6 +340,8 @@ def generate_task_program_bundle(
             Omission preserves legacy physics, sampling and route declarations.
         experimental_open_release: Explicit release-evidence policy. None retains
             legacy profile selection; False keeps the original release gate.
+        native_pick_exploration: Explicit UR10 ordinary Pick physics trials
+            without planned scene-clearance certification. Defaults to False.
         press_extra_distance: Request-owned E9 overtravel in metres, added to the
             native button stroke. None preserves the legacy 10 mm extra travel;
             zero requests only the native stroke without changing other tasks.
@@ -301,6 +370,9 @@ def generate_task_program_bundle(
         experimental_release_enabled,
     )
 
+    from .experiment_policy import validate_native_pick_exploration
+
+    validate_native_pick_exploration(native_pick_exploration, robot_profile)
     requested_runtime_profile = runtime_profile
     runtime_profile = resolve_profile(runtime_profile, selected_graph)
     experiment = runtime_profile != "default"
@@ -354,7 +426,7 @@ def generate_task_program_bundle(
             raise ValueError("Frozen physical input owns its robot-profile selection.")
         if (
             fit_grasp_assets
-            or requested_runtime_profile != "default"
+            or native_pick_exploration
             or twist_mass_source
             or twist_grip_depth_m is not None
             or twist_support_lift_m != 0.001
@@ -448,7 +520,7 @@ def generate_task_program_bundle(
         if normalized_profile == "dual_franka_pgi":
             _apply_pgi_experiment_embodiment(embodiment_payload)
         _calibrate_task_gripper_opening(embodiment_payload)
-    if runtime_profile == CONTACT_PROFILE:
+    if runtime_profile == CONTACT_PROFILE and frozen is None:
         from .experiment_policy import apply_contact_embodiment
 
         apply_contact_embodiment(embodiment_payload)
@@ -505,12 +577,28 @@ def generate_task_program_bundle(
 
     _collect_scene_refs(selected_graph)
     eligible_table_children: set[str] = set()
+    source_control_payloads: set[tuple[str, str]] = set()
     if source_twist_routes and frozen is None:
         graph_path = scene.source_config_path.with_name("scene_graph.json")
         if graph_path.is_file():
             source_graph = load_config(graph_path)
             nodes = source_graph.get("nodes", ())
             uid_map = scene.uid_map
+            rigid_uids = {str(item["uid"]) for item in scene.rigid_objects}
+            articulation_uids = {str(item["uid"]) for item in scene.articulations}
+            source_control_payloads = {
+                (
+                    uid_map.get(node.get("parent_id"), node.get("parent_id")),
+                    uid_map.get(node.get("object_id"), node.get("object_id")),
+                )
+                for node in nodes
+                if isinstance(node, dict)
+                and node.get("parent_relation") in {"on", "inside"}
+                and uid_map.get(node.get("parent_id"), node.get("parent_id"))
+                in articulation_uids
+                and uid_map.get(node.get("object_id"), node.get("object_id"))
+                in rigid_uids
+            }
             support_uids = {
                 uid_map.get(node.get("parent_id"), node.get("parent_id"))
                 for node in nodes
@@ -555,6 +643,7 @@ def generate_task_program_bundle(
                 (route,),
                 interaction="E8",
                 relayout_uids=movable_e8_uids,
+                source_payloads=source_control_payloads,
                 interaction_scale=twist_scale,
                 interaction_scale_qualified=twist_scale is not None,
                 support_lift_m=twist_support_lift_m,
@@ -653,6 +742,27 @@ def generate_task_program_bundle(
                 raise ValueError(
                     "E8 derived mass source changed its numeric binding or roles."
                 )
+    if frozen is None:
+        original_twist_routes = twist_routes
+        twist_routes = _coarse_twist_routes(twist_routes, task_candidate, step_lineage)
+        changes = [
+            {
+                "operation_id": after.operation_id,
+                "previous_chunk_angle_rad": before.chunk_angle,
+                "command_chunk_angle_rad": after.chunk_angle,
+                "native_contact_acceptance_unchanged": True,
+            }
+            for before, after in zip(original_twist_routes, twist_routes, strict=True)
+            if before.chunk_angle != after.chunk_angle
+        ]
+        if changes:
+            _write_json(
+                root / "twist_coarse_motion.json",
+                {
+                    "scope": "explicit_coarse_intent_motion_only_not_physical_success",
+                    "routes": changes,
+                },
+            )
     if press_adaptation:
         _write_json(
             root / "press_adaptation.json",
@@ -679,6 +789,7 @@ def generate_task_program_bundle(
     selected_graph = _refine_upright_targets(selected_graph, scene)
     selected_graph = _refine_coordinated_targets(selected_graph, scene)
     scene_objects = {item["runtime_uid"]: item for item in scene.planner_objects}
+    selected_graph = _preserve_already_upright_pick(selected_graph, scene_objects)
     for node in selected_graph["nodes"]:
         if node["task_type"] == "E4" and node["call"]["kind"] == "pick":
             call = node["call"]
@@ -773,6 +884,11 @@ def generate_task_program_bundle(
             selected_graph,
             runtime_profile=runtime_profile,
         )
+        posture = _calibrate_initial_articulation_posture(
+            embodiment_payload, selected_graph
+        )
+        if posture is not None:
+            _write_json(root / "ur10_initial_posture_selection.json", posture)
     if articulation_bindings and frozen is None:
         # Calibrate this generated E6 deployment, not shared robot defaults.
         stiffness = embodiment_payload["simulation"]["joint_drive_props"]["stiffness"]
@@ -864,13 +980,16 @@ def generate_task_program_bundle(
         scene,
         stability_presets=stability["presets"],
     )
-    if experiment or requested_runtime_profile == AUTO_PROFILE:
+    # Selecting fixed physics must not tighten the public auto placement policy.
+    if experiment or requested_runtime_profile == AUTO_PROFILE or frozen is not None:
         from .experiment_policy import apply_placement_tolerances
 
         apply_placement_tolerances(stability, program_payload)
         stability["runtime_profile"] = runtime_profile
     if experimental_open_release is not None:
         stability["experimental_open_release"] = experimental_open_release
+    if native_pick_exploration:
+        stability["native_pick_exploration"] = True
     save_config(paths.program, program_payload)
     _write_json(
         task_program_root / "constraints.json",
@@ -888,6 +1007,7 @@ def generate_task_program_bundle(
         pour_proxy_position_tolerance_m=pour_proxy_position_tolerance_m,
         idle_clearance_routes=idle_clearance_routes,
         press_extra_distance=press_extra_distance,
+        twist_routes=twist_routes,
     )
     if runtime_profile == CONTACT_PROFILE:
         from .experiment_policy import apply_contact_options
@@ -918,24 +1038,19 @@ def generate_task_program_bundle(
         if press_calibration:
             _write_json(root / "press_calibration.json", {"routes": press_calibration})
         bound_uids = {binding.object_id for binding in articulation_bindings.values()}
+        source_mass_owned_uids = {route.binding.object_id for route in twist_routes}
         for articulation in scene_payload["simulation"]["articulation"]:
             if articulation["uid"] not in bound_uids:
                 continue
             articulation.setdefault("asset_physics_mode", "overlay")
             parts = discover_prismatic_parts(articulation)
-            link_attrs = articulation.setdefault("link_attrs", {})
-            mass_group = "gen_sim_prismatic_link_mass"
-            if mass_group in link_attrs:
-                raise ValueError(f"Generated E6 articulation reserves {mass_group!r}.")
-            link_attrs[mass_group] = {
-                "link_names_expr": sorted({part.link for part in parts}),
-                "attrs": {"mass_props": {"mass": PRISMATIC_LINK_MASS}},
-            }
+            _merge_prismatic_link_mass(
+                articulation,
+                [part.link for part in parts],
+                preserve_source_mass=articulation["uid"] in source_mass_owned_uids,
+            )
             drive = articulation.setdefault("joint_drive_props", {})
-            if drive.get("drive_type", "none") == "none":
-                drive.setdefault("drive_type", "none")
-                if "friction" not in drive:
-                    drive["friction"] = {part.joint: PASSIVE_FRICTION for part in parts}
+            _merge_passive_prismatic_drive(drive, [part.joint for part in parts])
     save_config(paths.scene, scene_payload)
     episode_steps = int(max_episode_steps or TaskEnginePlanningCfg().max_episode_steps)
     if twist_routes and len(selected_graph["task_groups"]) == 1 and frozen is None:
@@ -1405,6 +1520,20 @@ def _task_stability_payload(
                 cfg["kind"] = "supported_region"
             cfg.update(reference=ref, support_contract_revision=1)
             presets[key] = cfg
+    vertical = {
+        (n["task_instance_id"], n["call"]["arguments"]["object"])
+        for n in graph["nodes"]
+        if n["call"].get("call_id") == _ALIGN_HELD_CALL_ID
+        and n["call"]["arguments"].get("axis_direction_free") is True
+    }
+    for node in graph["nodes"]:
+        cfg = presets.get(f"gen_sim.{node['id']}.stable")
+        if (
+            cfg is not None
+            and cfg.get("local_axis") is not None
+            and (node["task_instance_id"], cfg["entity"]) in vertical
+        ):
+            cfg["axis_direction_free"] = True
     result = {
         "schema_version": "gen_sim_task_constraints/v1",
         "presets": presets,
@@ -1972,6 +2101,7 @@ def _integration_payload(
     pour_proxy_position_tolerance_m: float | None = None,
     idle_clearance_routes: Sequence[Mapping[str, Any]] | None = None,
     press_extra_distance: float | None = None,
+    twist_routes: tuple[Any, ...] | None = None,
 ) -> dict[str, Any]:
     from dataclasses import asdict
     from ._task_program.idle_clearance import CALL_ID as IDLE_CALL, decode_routes
@@ -1999,7 +2129,8 @@ def _integration_payload(
         TWIST_CALL,
     )
 
-    twist_routes = twist_graph_routes(graph, scene)
+    if twist_routes is None:
+        twist_routes = twist_graph_routes(graph, scene)
     from ._task_program.drawer_binding import drawer_routes, inside_parts
 
     drawers = {route.affordance: route for route in drawer_routes(graph, scene)}
@@ -2835,7 +2966,7 @@ def _integration_payload(
                     or node["call"].get("call_id") == semantic_id
                     or (
                         semantic_id == "pick"
-                        and node["call"].get("kind") == "hand_over"
+                        and node["call"].get("kind") in {"hand_over", "place"}
                     )
                     for node in graph["nodes"]
                 )
@@ -3255,6 +3386,36 @@ def _grasp_contact_clearances(
     }
 
 
+def _calibrate_initial_articulation_posture(
+    embodiment: dict[str, Any], graph: SemanticTaskGraph
+) -> dict[str, Any] | None:
+    """Keep the initial E6 arm seed and tuck only its idle UR10 neighbor."""
+    first = graph["nodes"][0]["call"]
+    active = first.get("resources", {}).get("primary")
+    if (
+        embodiment["embodiment_id"] != "dual_ur10_robotiq_arg2f_140"
+        or first.get("call_id") != "gen_sim.articulation_slide"
+        or active not in {"left", "right"}
+    ):
+        return None
+    idle = "right" if active == "left" else "left"
+    positions = embodiment["simulation"]["init_qpos"]
+    # UR10 source DOFs interleave the two equal six-joint arm chains.
+    idle_shoulder_index = 3 if idle == "right" else 2
+    positions[idle_shoulder_index] -= 0.5
+    for preset in embodiment["skill_profile"]["command_presets"]:
+        if preset["preset_id"] in {"left_arm_postures", "right_arm_postures"}:
+            preset["commands"]["park"][1] -= 0.5
+    return {
+        "schema_version": "gen_sim.ur10-initial-articulation-posture/v1",
+        "reason": "initial_prismatic_operation_idle_arm_clearance",
+        "active_resource": active,
+        "tucked_initial_resource": idle,
+        "shoulder_offset_rad": -0.5,
+        "physical_clearance_certified": False,
+    }
+
+
 def _calibrate_task_gripper_effort(
     embodiment: dict[str, Any],
     scene: Any,
@@ -3266,13 +3427,20 @@ def _calibrate_task_gripper_effort(
 
     The canonical Robotiq keeps its complete closing range. Unknown/heavier
     payloads and other recipe families retain their declared actuator limits.
-    E3 pouring and Contact use 5; other Default grips retain 0.5. Composition
-    changes only qualified pouring resources. Lower authored limits remain intact.
+    E3 pouring, Contact and UR10 light grips use 5; other Default grips retain
+    0.5. UR10's tabletop wrist orientations need this effort against gravity.
+    Composition changes only qualified pouring resources. Lower authored limits
+    remain intact.
     This does not change the imported mechanism or any collision properties.
     """
     from .experiment_policy import COMPOSITION_PROFILE, CONTACT_PROFILE
 
-    effort_limit = 5.0 if runtime_profile == CONTACT_PROFILE else 0.5
+    effort_limit = (
+        5.0
+        if runtime_profile == CONTACT_PROFILE
+        or embodiment.get("embodiment_id") == "dual_ur10_robotiq_arg2f_140"
+        else 0.5
+    )
     picks = []
     blocked_resources: set[str] = set()
     pour_resources: set[str] = set()
@@ -4615,6 +4783,41 @@ def _upright_release_clearance(source: dict[str, Any]) -> float:
         if slenderness >= 2.5
         else _UPRIGHT_RELEASE_CLEARANCE
     )
+
+
+def _preserve_already_upright_pick(
+    graph: SemanticTaskGraph, objects: dict[str, Any]
+) -> SemanticTaskGraph:
+    """Do not impose an inversion grip on an untouched, already-upright E1 source."""
+    selected = deepcopy(graph)
+    aligned = {
+        (node["task_instance_id"], node["call"]["arguments"]["object"])
+        for node in graph["nodes"]
+        if node["call"].get("call_id") == _ALIGN_HELD_CALL_ID
+        and node["call"]["arguments"].get("target") == "current_object_pose"
+    }
+    moved = set()
+    for node in selected["nodes"]:
+        call = node["call"]
+        obj = call.get("object", call.get("arguments", {}).get("object"))
+        source = objects.get(obj)
+        if (
+            node["task_type"] == "E1"
+            and call.get("call_id") == _PICK_CALL_ID
+            and (node["task_instance_id"], obj) in aligned
+            and obj not in moved
+            and source is not None
+            and (_initial_rotation(source) @ np.asarray(_longest_local_axis(source)))[2]
+            >= math.cos(math.radians(10.0))
+        ):
+            node["call"] = {
+                "kind": "pick",
+                "object": obj,
+                "resources": deepcopy(call["resources"]),
+            }
+        if obj is not None:
+            moved.add(obj)
+    return validate_semantic_task_graph(selected)
 
 
 def _refine_upright_targets(

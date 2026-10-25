@@ -74,10 +74,18 @@ def _inputs(
 @pytest.mark.parametrize("task_type", ["E1", "E2"])
 @pytest.mark.parametrize("resource", ["left", "right"])
 @pytest.mark.parametrize("profile,cap", [("default", 0.5), ("contact_experiment", 5.0)])
+@pytest.mark.parametrize(
+    "embodiment_id",
+    [None, "dual_franka_robotiq_arg2f_140", "dual_ur10_robotiq_arg2f_140"],
+)
 def test_light_rigid_grip_limits_only_the_used_gripper(
-    task_type: str, resource: str, profile: str, cap: float
+    task_type: str, resource: str, profile: str, cap: float, embodiment_id: str | None
 ) -> None:
     embodiment, scene, graph = _inputs(task_type=task_type)
+    if embodiment_id is not None:
+        embodiment["embodiment_id"] = embodiment_id
+    if embodiment_id == "dual_ur10_robotiq_arg2f_140":
+        cap = 5.0
     graph["nodes"][0]["call"]["resources"]["primary"] = resource
     _calibrate_task_gripper_effort(embodiment, scene, graph, runtime_profile=profile)
     assert embodiment["simulation"]["joint_drive_props"]["max_effort"] == {
@@ -104,8 +112,13 @@ def test_light_grip_calibration_never_raises_an_authored_lower_limit(
 @pytest.mark.parametrize(
     "mass", [None, True, 0, -0.01, 0.0101, float("nan"), float("inf")]
 )
-def test_unqualified_payload_does_not_change_effort(mass: float | None) -> None:
+@pytest.mark.parametrize("embodiment_id", [None, "dual_ur10_robotiq_arg2f_140"])
+def test_unqualified_payload_does_not_change_effort(
+    mass: float | None, embodiment_id: str | None
+) -> None:
     embodiment, scene, graph = _inputs(mass=mass)
+    if embodiment_id is not None:
+        embodiment["embodiment_id"] = embodiment_id
     before = deepcopy(embodiment)
     _calibrate_task_gripper_effort(embodiment, scene, graph)
     assert embodiment == before

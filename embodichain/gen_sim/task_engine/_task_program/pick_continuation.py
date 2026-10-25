@@ -232,6 +232,12 @@ def _same_resources(before: Any, after: Any) -> bool:
     )
 
 
+def requires_full_place_preview(preview: Preview) -> bool:
+    """Keep forecasts mandatory except for bound ordinary on-support releases."""
+    place = getattr(preview.compiler.integration.engine, "actions", {}).get("place")
+    return preview.route.place_id not in getattr(place, "ordinary_on_invocations", ())
+
+
 def _project_held(action: Any, request: Any, context: Any, plan: Any, held: Any) -> Any:
     future = context.project(
         qpos=plan.joint_trajectory.positions[:, -1].clone(),
@@ -521,6 +527,21 @@ def recover(
         or not _validate_final_plan_velocity(first, action.robot)["valid_mask"].all()
     ):
         return first
+    if not requires_full_place_preview(preview):
+        return replace(
+            first,
+            diagnostics=replace(
+                first.diagnostics,
+                metadata={
+                    **first.diagnostics.metadata,
+                    "gen_sim_pick_continuation_deferred": {
+                        "place_invocation_id": preview.route.place_id,
+                        "scope": "plan_release_from_observed_attachment_not_predicted_state",
+                        "physical_evidence": False,
+                    },
+                },
+            ),
+        )
     state = _RandomState.capture(
         _cuda_devices(action.robot.device, context.robot.qpos.device)
     )

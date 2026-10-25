@@ -320,7 +320,7 @@ class E8GeometryGuard:
                             ).resolve()
                             self._sources[path] = _digest(path)
             self._meshes = load_robot_link_meshes(
-                self._robot_path, self._names, self._robot_scale
+                self._robot_path, self._names, self._robot_scale, vertices_only=True
             )
             if self.table is not None:
                 source = getattr(self.table.cfg.shape, "fpath", None)

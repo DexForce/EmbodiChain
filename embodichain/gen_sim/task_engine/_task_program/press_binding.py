@@ -35,7 +35,7 @@ __all__: list[str] = []
 
 PREPARE_CALL = "gen_sim.press_prepare"
 PRESS_CALL = "gen_sim.press"
-PRESS_REVISION = "20"
+PRESS_REVISION = "22"
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +308,7 @@ def prepare_press_scene(
     interaction_scale_qualified: bool = False,
     interaction: str = "E9",
     relayout_uids: Collection[str] = (),
+    source_payloads: Collection[tuple[str, str]] = (),
     support_lift_m: float | None = None,
 ) -> tuple[Any, list[dict]]:
     """Adapt selected controls and optionally resolve bounded scene overlaps.
@@ -323,6 +324,10 @@ def prepare_press_scene(
     XY-only, preserving support height/orientation, and is accepted only when
     the moved object remains inside the table footprint and clear of all
     measured geometry.
+    Source-declared on/inside payload pairs may retain an already-overlapping
+    assembly AABB only for source-scale E8. This defers a coarse screen to native
+    physics; it is not collision or containment qualification, and new scale
+    candidates cannot acquire it.
     """
     if not routes:
         return scene, []
@@ -353,9 +358,12 @@ def prepare_press_scene(
         raise ValueError("body_scale must be finite and positive.")
     if relayout_uids and interaction != "E8":
         raise ValueError("relayout_uids is only valid for E8.")
+    if source_payloads and interaction != "E8":
+        raise ValueError("source_payloads is only valid for E8.")
     if support_lift_m is not None and interaction != "E8":
         raise ValueError("support_lift_m is only valid for E8.")
     requested_relayout = {str(uid) for uid in relayout_uids}
+    inherited_payloads = set(source_payloads)
     from ..scene.articulation_geometry import _root_pose, read_articulation_geometry
     from ..scene.final_inspection import _measure_geometry
 
@@ -494,6 +502,7 @@ def prepare_press_scene(
         adapted = deepcopy(original)
         geometry = read_articulation_geometry(original["fpath"])
         before = geometry.world_vertices(original)
+        original_bounds = np.stack((before.min(0), before.max(0)))
         source_scale = np.asarray(
             original.get("body_scale", [1.0, 1.0, 1.0]), dtype=float
         )
@@ -538,6 +547,7 @@ def prepare_press_scene(
             )
         vertices = geometry.world_vertices(adapted)
         bounds = np.stack((vertices.min(0), vertices.max(0)))
+        deferred_payloads = []
         for other in (*background, *rigid_objects, *articulations):
             if other["uid"] == uid:
                 continue
@@ -562,6 +572,24 @@ def prepare_press_scene(
                 bounds[0], other_bounds[0]
             )
             if np.all(overlap > 1e-6):
+                inherited_overlap = np.minimum(
+                    original_bounds[1], other_bounds[1]
+                ) - np.maximum(original_bounds[0], other_bounds[0])
+                if (
+                    interaction == "E8"
+                    and interaction_scale is None
+                    and (uid, other["uid"]) in inherited_payloads
+                    and np.all(inherited_overlap > 1e-6)
+                ):
+                    deferred_payloads.append(
+                        {
+                            "uid": other["uid"],
+                            "scope": "source_declared_payload_aabb_overlap_deferred_to_native_not_collision_certificate",
+                            "original_overlap_m": inherited_overlap.tolist(),
+                            "adapted_overlap_m": overlap.tolist(),
+                        }
+                    )
+                    continue
                 if interaction != "E8" or other["uid"] not in requested_relayout:
                     raise ValueError(
                         f"{interaction} scaled control overlaps {other['uid']!r}."
@@ -609,6 +637,11 @@ def prepare_press_scene(
                 "relayout": [
                     item for item in relayout_records if item["target_id"] == uid
                 ],
+                **(
+                    {"source_payload_overlap_deferred": deferred_payloads}
+                    if deferred_payloads
+                    else {}
+                ),
                 **({"support_clearance": support_audit} if support_audit else {}),
             }
         )

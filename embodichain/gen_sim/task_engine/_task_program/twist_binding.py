@@ -31,7 +31,7 @@ from .twist_semantics import MissingTwistSemanticsError, resolve_twist_semantics
 __all__: list[str] = []
 PREPARE_CALL = "gen_sim.twist_prepare"
 TWIST_CALL = "gen_sim.twist"
-TWIST_REVISION = "17"
+TWIST_REVISION = "19"
 TWIST_CHUNK_COUNT = 8
 TWIST_CHUNK_ANGLE = math.radians(5.0)
 TWIST_SETTLE_STEPS = 5

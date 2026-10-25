@@ -29,7 +29,7 @@ import torch
 from embodichain.gen_sim.task_spec import TaskSpec, evaluate_task_spec
 from embodichain.utils.utility import load_config
 from ..contracts import canonical_hash
-from .stability import StabilityConstraint
+from .stability import StabilityConstraint, _constraint_axis_alignment
 from .placement_evidence import (
     _placement_predicate,
     _require_handover_receiver,
@@ -262,16 +262,22 @@ def capture_final_goals(
                     if pose.shape[0] != num_envs:
                         raise ValueError("Final observation environment count differs.")
                     metrics = {"pose": pose.tolist()}
-                    if predicate.name == "object_upright":
+                    direction_free = (
+                        predicate.name == "orientation"
+                        and predicate.arguments.get("orientation_goal") == "vertical"
+                    )
+                    if predicate.name == "object_upright" or direction_free:
                         constraint = StabilityConstraint.decode(cfg)
                         axis = constraint.local_axis
                         if axis is None:
                             raise ValueError(
                                 "No measured local upright axis is declared."
                             )
-                        alignment = (
-                            pose[:, :3, :3] @ torch.tensor(axis, dtype=pose.dtype)
-                        )[:, 2]
+                        if constraint.axis_direction_free is not direction_free:
+                            raise ValueError(
+                                "Orientation evidence uses a different axis-direction contract."
+                            )
+                        alignment = _constraint_axis_alignment(constraint, pose)
                         accepted = alignment >= constraint.minimum_alignment
                         metrics["alignment"] = alignment.tolist()
                     elif predicate.name == "semantic_goal":

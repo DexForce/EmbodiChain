@@ -132,6 +132,38 @@ def test_valid_nominal_withdrawal_preserves_exact_trajectory(monkeypatch):
     assert result.plan_success.tolist() == [True]
 
 
+@pytest.mark.parametrize("clear", [False, True])
+def test_nominal_push_requires_scene_clearance_before_contact(monkeypatch, clear):
+    scope, request, context = _scope(monkeypatch)
+    scope.calls.append(scope.calls[-1])
+    original = Plan(
+        torch.tensor([True]),
+        _trajectory(0),
+        segments=(NS(name="approach", stop=2), NS(name="push")),
+    )
+    seen = []
+
+    def inspect(robot, simulation, positions, part):
+        seen.append(positions.clone())
+        return {"valid": clear, "kind": "scene"}
+
+    monkeypatch.setattr(recovery, "check_free_motion", inspect)
+    monkeypatch.setattr(
+        recovery, "_preview_withdrawal", lambda *a, **kw: {"valid": True}
+    )
+    monkeypatch.setattr(recovery, "_tracks", lambda *a: iter(()))
+    result = recovery.recover(
+        scope,
+        request,
+        context,
+        original,
+        lambda _: pytest.fail("no recovery candidates"),
+    )
+    assert torch.equal(seen[0], original.joint_trajectory.positions[0, :2])
+    assert result.plan_success.tolist() == [clear]
+    assert original.plan_success.tolist() == [True]
+
+
 def test_nominal_preview_error_does_not_dispatch_unqualified_terminal(monkeypatch):
     scope, request, context = _scope(monkeypatch)
     original = Plan(torch.tensor([True]), _trajectory(0))
@@ -379,12 +411,43 @@ def test_short_park_authority_comes_from_installed_withdrawal(
         _articulation_sessions={"park": ("withdraw", NS(plan_attempts=[attempt]))},
     )
     assert (
-        GenSimActionEngine._articulation_park_after_short_withdrawal(engine, "park")
+        GenSimActionEngine._articulation_park_after_withdrawal(engine, "park")
         is expected
     )
     assert (
-        GenSimActionEngine._articulation_park_after_short_withdrawal(engine, "unbound")
+        GenSimActionEngine._articulation_park_after_withdrawal(engine, "unbound")
         is False
+    )
+
+
+@pytest.mark.parametrize(
+    "previous_kind,installed,expected",
+    [
+        ("withdraw", True, True),
+        ("withdraw", False, False),
+        ("slide", True, False),
+        ("park", True, False),
+    ],
+)
+def test_nominal_withdrawal_also_owns_the_following_park(
+    previous_kind: str, installed: bool, expected: bool
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        GenSimActionEngine,
+    )
+
+    attempt = NS(
+        request=NS(invocation_id="previous"),
+        planned_mask=torch.tensor([installed]),
+        plan=NS(diagnostics=NS(metadata={})),
+    )
+    engine = NS(
+        _articulation_calls={"previous": previous_kind, "park": "park"},
+        _articulation_sessions={"park": ("previous", NS(plan_attempts=[attempt]))},
+    )
+    assert (
+        GenSimActionEngine._articulation_park_after_withdrawal(engine, "park")
+        is expected
     )
 
 
@@ -415,7 +478,7 @@ def test_existing_park_recovery_can_qualify_only_owned_empty_e6_park(
     engine = NS(
         _park_recovery_previews={},
         _actions={"move_joints": MoveJoints()},
-        _articulation_park_after_short_withdrawal=lambda identity: owned,
+        _articulation_park_after_withdrawal=lambda identity: owned,
     )
     context = NS(
         batch_size=1,
@@ -426,6 +489,111 @@ def test_existing_park_recovery_can_qualify_only_owned_empty_e6_park(
         ),
     )
     assert park_recovery.eligible(engine, request, context) is allowed
+
+
+@pytest.mark.parametrize("kind", ["scene", "self", "other_arm"])
+@pytest.mark.parametrize("clear", [True, False])
+@pytest.mark.parametrize("frame", [0, 2])
+def test_park_collision_recovery_requires_a_fully_checked_alternative(
+    monkeypatch, kind, clear, frame
+):
+    from embodichain.gen_sim.task_engine._task_program import park_recovery
+    from embodichain.lab.sim.atomic_actions import JointPositionTarget
+
+    @dataclass
+    class Request:
+        goal: object
+        binding: object
+
+    qpos = torch.zeros(1, 2)
+    ready = torch.tensor([[0.1, 0.2]])
+    endpoint = NS(
+        require_target=lambda _: JointPositionTarget("arm", (0, 1)),
+        joint_positions=lambda *args, **kwargs: ready.clone(),
+    )
+    request = Request(None, NS(endpoint=lambda *args: endpoint))
+    robot = NS(
+        device=torch.device("cpu"),
+        get_qpos=lambda: qpos.clone(),
+        get_qpos_limits=lambda **kwargs: torch.tensor([[[-3.0, 3.0]] * 2]),
+        compute_fk=lambda **kwargs: torch.eye(4)[None],
+        compute_ik=lambda **kwargs: (torch.tensor([True]), torch.ones(1, 2)),
+    )
+    engine = NS(robot=robot)
+    context = NS(robot=NS(qpos=qpos), env_ids=torch.tensor([0]))
+    original = Plan(torch.tensor([True]), _trajectory(0))
+    original.joint_trajectory.positions[:, -1] = ready
+    checked = []
+    monkeypatch.setattr(park_recovery, "eligible", lambda *args: True)
+    monkeypatch.setattr(
+        park_recovery, "basic_check", lambda *args, **kwargs: {"valid": True}
+    )
+
+    def validate(candidate, context, robot, simulation, part):
+        assert part == "arm"
+        assert torch.equal(candidate.joint_trajectory.positions[:, -1], ready)
+        assert candidate.joint_trajectory.positions.shape == (1, 3, 2)
+        checked.append(candidate)
+        return {"valid": clear, "collision": {"valid": clear, "kind": kind, "frame": 2}}
+
+    monkeypatch.setattr(park_recovery, "validate_motion", validate)
+
+    def build(selected, context):
+        assert torch.equal(selected.goal.target[:, -1], ready)
+        return Plan(torch.tensor([True]), original.joint_trajectory)
+
+    acceptance = {
+        "valid": False,
+        "joint_limits": {"valid": True},
+        "velocity": {"valid": True},
+        "collision": {"kind": kind, "frame": frame, "valid": False},
+    }
+    result = park_recovery.recover(
+        engine,
+        request,
+        context,
+        original,
+        acceptance=acceptance,
+        build=build,
+        simulation=object(),
+    )
+    assert len(checked) == ((1 if clear else 4) if frame else 0)
+    accepted = clear and frame > 0
+    assert result.plan_success.tolist() == [accepted]
+    assert result.diagnostics.metadata["gen_sim_park_recovery"]["accepted"] is accepted
+    assert original.plan_success.tolist() == [True]
+    assert torch.equal(qpos, torch.zeros(1, 2))
+
+
+def test_neutral_park_joint_route_preserves_limits_other_joints_and_final_ready():
+    from embodichain.gen_sim.task_engine._task_program.park_recovery import (
+        _neutral_joint_routes,
+    )
+
+    current = torch.tensor([[1.0, 0.7, -0.4]])
+    ready = torch.tensor([[-1.0, 0.5, 0.9]])
+    bounds = torch.tensor([[[-2.0, 2.0], [0.3, 0.8], [-1.0, 1.0]]])
+    routes = list(_neutral_joint_routes(current, ready, bounds))
+    assert len(routes) == 1
+    index, path = routes[0]
+    assert index == 1
+    assert torch.allclose(
+        path, torch.tensor([[[1.0, 0.3, -0.4], [-1.0, 0.3, 0.9], [-1.0, 0.5, 0.9]]])
+    )
+    assert torch.equal(current, torch.tensor([[1.0, 0.7, -0.4]]))
+    assert torch.equal(ready, torch.tensor([[-1.0, 0.5, 0.9]]))
+    assert (
+        len(
+            list(
+                _neutral_joint_routes(
+                    torch.zeros(1, 8),
+                    torch.ones(1, 8),
+                    torch.tensor([[[-2.0, 2.0]] * 8]),
+                )
+            )
+        )
+        == 4
+    )
 
 
 @pytest.mark.parametrize(

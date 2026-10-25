@@ -119,13 +119,18 @@ class TaskEnginePlanningCfg:
     physical_reference: str | None = None
     runtime_profile: str = "default"
     experimental_open_release: bool | None = None
+    native_pick_exploration: bool = False
     press_extra_distance: float | None = None
 
     def __post_init__(self) -> None:
-        from .experiment_policy import validate_profile
+        from .experiment_policy import (
+            validate_profile,
+            validate_native_pick_exploration,
+        )
         from ._task_program.press_binding import validate_extra_press_distance
 
         validate_profile(self.runtime_profile)
+        validate_native_pick_exploration(self.native_pick_exploration)
         validate_extra_press_distance(self.press_extra_distance)
         if (
             self.experimental_open_release is not None
@@ -151,12 +156,12 @@ class TaskEnginePlanningCfg:
                 raise TypeError("physical_reference must be a bundle path or None.")
             if not self.physical_reference.strip():
                 raise ValueError("physical_reference must be a non-empty bundle path.")
-            if self.runtime_profile != "default":
-                raise ValueError("physical_reference requires runtime_profile=default.")
             if self.fit_grasp_assets or self.twist_mass_source:
                 raise ValueError(
                     "physical_reference cannot be combined with physical adaptation."
                 )
+            if self.native_pick_exploration:
+                raise ValueError("physical_reference forbids native_pick_exploration.")
 
 
 def load_task_engine_config(
@@ -215,6 +220,7 @@ def load_task_engine_config(
             "physical_reference",
             "runtime_profile",
             "experimental_open_release",
+            "native_pick_exploration",
             "press_extra_distance",
         }
     ):

@@ -517,6 +517,14 @@ class TaskEngineWorkflow:
             workflow_cfg = workflow_cfg or loaded_workflow
             planning_cfg = planning_cfg or loaded_planning
             execution_cfg = execution_cfg or loaded_execution
+        if planning_cfg.native_pick_exploration:
+            from .experiment_policy import validate_native_pick_exploration
+
+            validate_native_pick_exploration(True, self.scene_adapter.robot_profile)
+            if execute and execution_cfg.acceptance_mode != "experiment":
+                raise ValueError(
+                    "Native Pick exploration requires experiment acceptance mode."
+                )
         effective_candidate_count = planning_cfg.candidate_count
         effective_run_id = str(run_id or Path(normalized["output_dir"]).name).strip()
         if not effective_run_id or Path(effective_run_id).name != effective_run_id:
@@ -880,6 +888,11 @@ class TaskEngineWorkflow:
                             else {}
                         ),
                         candidate_set=candidate_set,
+                        **(
+                            {"native_pick_exploration": True}
+                            if planning_cfg.native_pick_exploration
+                            else {}
+                        ),
                         **(
                             {"press_extra_distance": planning_cfg.press_extra_distance}
                             if planning_cfg.press_extra_distance is not None
@@ -1296,6 +1309,11 @@ class TaskEngineWorkflow:
                                 "experimental_open_release": planning_cfg.experimental_open_release
                             }
                             if planning_cfg.experimental_open_release is not None
+                            else {}
+                        ),
+                        **(
+                            {"native_pick_exploration": True}
+                            if planning_cfg.native_pick_exploration
                             else {}
                         ),
                         **(

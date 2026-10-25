@@ -177,6 +177,7 @@ class GenSimPickUp(PickUp):
     OptionsType = PickUp.OptionsType
     binding_contract = PickUp.binding_contract
     adaptive_unconstrained = False
+    native_pick_exploration = False
     pick_purposes: dict[str, str] | None = None
     continuation_previews: dict | None = None
     path_simulation: object | None = None
@@ -831,7 +832,7 @@ class GenSimPickUp(PickUp):
         """Use the shared builder only after qualifying this exact Pick branch."""
         from .articulation_collision import check_free_motion
         from .pick_candidate_path import trajectory
-        from .pick_continuation import preview_place
+        from .pick_continuation import preview_place, requires_full_place_preview
 
         exact, receipt = trajectory(self, request, context, pose, direction)
         record = {"trajectory": receipt}
@@ -870,7 +871,7 @@ class GenSimPickUp(PickUp):
             if not record["approach_scene"]["valid"]:
                 return None, record
             preview = (self.continuation_previews or {}).get(request.invocation_id)
-            if preview is not None:
+            if preview is not None and requires_full_place_preview(preview):
                 record["place_preview"] = preview_place(
                     self, request, context, candidate, preview, safety=True
                 )
@@ -1118,7 +1119,7 @@ class GenSimPickUp(PickUp):
         if first.plan_success.any() or not selection.candidate_routes or not budget:
             return first
         from .pick_path import rebuild
-        from .pick_continuation import preview_place
+        from .pick_continuation import preview_place, requires_full_place_preview
 
         key = request.binding.endpoint("primary", "motion").task_state_key
         original = first.expected_effects.held_object_updates.get(key)
@@ -1212,7 +1213,7 @@ class GenSimPickUp(PickUp):
                 attempts.append(record)
                 if not candidate.plan_success.all():
                     continue
-                if preview is not None:
+                if preview is not None and requires_full_place_preview(preview):
                     record["place_preview"] = preview_place(
                         self, selected, context, candidate, preview, safety=True
                     )
@@ -1281,7 +1282,7 @@ class GenSimPickUp(PickUp):
                 if first.plan_success.any()
                 else first
             )
-        from .grasp_filter import TaskGraspPoseGenerator
+        from .grasp_filter import resolve_pick_filter
 
         calibration = options.grasp_frame_to_eef.to(held.grasp_xpos)
         original_grasp = held.grasp_xpos @ pose_inv(calibration)
@@ -1392,8 +1393,12 @@ class GenSimPickUp(PickUp):
         # attachment and emitted commands together and restore all extra draws.
         state = _RandomState.capture(_cuda_devices(self.device, self.robot.device))
         try:
-            generator = self.planning_services.grasp_pose_generator(hand.target_id)
-            if not isinstance(generator, TaskGraspPoseGenerator):
+            generator = resolve_pick_filter(
+                self.planning_services.grasp_pose_generator(hand.target_id),
+                affordance.mesh_vertices,
+                affordance.mesh_triangles,
+            )
+            if generator is None:
                 raise ValueError(
                     "Constrained Pick roll recovery requires its grasp filter."
                 )
@@ -1549,10 +1554,13 @@ class GenSimPickUp(PickUp):
             raise ValueError("GenSim Pick requires AntipodalAffordance.")
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
         if rule_selector is not None:
-            from .grasp_filter import TaskGraspPoseGenerator
+            from .grasp_filter import resolve_pick_filter
 
+            generator = resolve_pick_filter(
+                generator, affordance.mesh_vertices, affordance.mesh_triangles
+            )
             if (
-                not isinstance(generator, TaskGraspPoseGenerator)
+                generator is None
                 or options.pick_object_part != "center"
                 or len(rule_selector) != 2
                 or rule_selector[0] != semantics.entity_id
@@ -1576,6 +1584,41 @@ class GenSimPickUp(PickUp):
             selection.raw_candidate_routes.append(
                 (0, candidates, approach_direction.reshape(1, 3).clone())
             )
+        if (
+            selection is not None
+            and selection.constrained
+            and not candidates.valid.any()
+            and _owns_constrained_pick(
+                selection.request, context, self.motion_generator
+            )
+            and torch.equal(
+                approach_direction.reshape(-1, 3),
+                approach_direction.new_tensor([[0.0, 0.0, -1.0]]),
+            )
+        ):
+            axis = observed_axis(affordance, object_pose)
+            tcp = self.robot.compute_fk(
+                qpos=start_qpos, name=manipulator.control_part, to_matrix=True
+            )
+            choices = grasp_strategies(
+                axis, object_pose, tcp, ends=False, purpose="ordinary"
+            )[1:]
+            state = _RandomState.capture(_cuda_devices(self.device, self.robot.device))
+            try:
+                return self._select_adaptive_pick(
+                    affordance,
+                    generator,
+                    object_pose,
+                    start_qpos,
+                    manipulator,
+                    options,
+                    context,
+                    sample_key,
+                    choices,
+                    selection,
+                )
+            finally:
+                state.restore()
         poses, ik_success = self._select_feasible_grasp_variants(
             candidates.poses,
             start_qpos,
@@ -2474,6 +2517,19 @@ class GenSimMoveHeldObject(MoveHeldObject):
             with world_yaw_free_collision_scope(
                 self.robot, selected, context
             ) as selected_scope:
+                from .drawer_curobo import DrawerMotionGenerator
+                from .articulation_collision import articulation_motion_checker
+
+                if (
+                    selected_scope is not None
+                    and before_original is not None
+                    and isinstance(self.motion_generator, DrawerMotionGenerator)
+                ):
+                    selected_scope.articulation_checker = articulation_motion_checker(
+                        self.robot,
+                        self.motion_generator._simulation,
+                        selected_scope.part,
+                    )
                 candidate = super(GenSimMoveHeldObject, self)._plan(selected, context)
                 candidate = recover(
                     selected_scope,

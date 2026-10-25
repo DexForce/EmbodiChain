@@ -164,7 +164,9 @@ def _load_robotiq_embodiment(profile: str, output_dir: Path) -> dict[str, Any]:
                 )["arm"]
         # At q1=0 this URDF reaches along local -X, away from the table after
         # the shared 180-degree mount yaw. Turn the shoulder, not the scene/TCP.
-        home = [np.pi, -np.pi / 2, np.pi / 2, -np.pi / 2, -np.pi / 2, 0.0]
+        # Prefer the upper-wrist analytic branch at low tabletop flanges.
+        # The opposite wrist seed can put Link4 below the support plane.
+        home = [np.pi, -np.pi / 2, np.pi / 2, -np.pi / 2, np.pi / 2, 0.0]
         # The two equally deep arm chains are interleaved in source DOF order.
         simulation["init_qpos"] = [q for q in home for _ in range(2)] + [0.0] * 12
     else:

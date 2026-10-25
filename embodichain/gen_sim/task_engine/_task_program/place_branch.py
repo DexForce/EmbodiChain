@@ -54,7 +54,7 @@ from .solver_tolerances import _pose_validation_parameters
 
 __all__: list[str] = []
 PRESERVED_LATERAL_RECOVERY_REVISION = 2
-PRESERVED_ON_RECOVERY_REVISION = 1
+PRESERVED_ON_RECOVERY_REVISION = 2
 
 if TYPE_CHECKING:
     from .place_transport import _ContactPhases

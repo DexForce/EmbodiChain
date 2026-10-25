@@ -219,12 +219,25 @@ def validate_graph_coverage(
             }.get(step["task_type"])
             if required is not None and not kinds.intersection(required):
                 issue("missing_semantic_producer", group_id)
-            if step["task_type"] == "E8" and not any(
-                c.get("call_id") == f"gen_sim.twist.{group_id}"
-                and c["arguments"].get("setting") == step["target_setting"]
-                for c in subject_calls
-            ):
-                issue("wrong_control_setting", group_id)
+            if step["task_type"] == "E8":
+                controls = [
+                    c
+                    for c in subject_calls
+                    if c.get("call_id", "").startswith("gen_sim.twist")
+                ]
+                settings = [c["arguments"].get("setting") for c in controls]
+                if step.get("twist_goal_mode") == "coarse":
+                    valid_setting = bool(settings) and all(
+                        type(s) is int and s == settings[0] for s in settings
+                    )
+                else:
+                    valid_setting = any(
+                        c.get("call_id") == f"gen_sim.twist.{group_id}"
+                        and c["arguments"].get("setting") == step["target_setting"]
+                        for c in subject_calls
+                    )
+                if not valid_setting:
+                    issue("wrong_control_setting", group_id)
             if step["task_type"] == "E6" and not any(
                 c.get("call_id") == "gen_sim.articulation_slide"
                 and c["arguments"].get("part") == entry["object_part_id"]

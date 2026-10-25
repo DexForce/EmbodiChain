@@ -54,6 +54,13 @@ physical reference owns its frozen model and arm anchors. Robot switching
 requires a new bundle; `run --bundle` never replaces its embodiment. New-profile
 TaskSpec envelopes seal robot assets as well as component declarations. Static
 assembly/preflight is not collision, contact or complete-task qualification.
+`prepare`/`run-all --native-pick-exploration` explicitly opts dual UR10 into
+ordinary Pick physics trials with experiment acceptance. The sealed bundle owns
+this option; frozen `run --bundle` cannot toggle it. Scene mesh clearance becomes
+diagnostic, not certified; IK, robot command/velocity guards, tracking, physical
+effects and TaskSpec validators remain enabled. Constrained Pick, Pour, HandOver
+and other robots keep their existing paths. Default omission does not opt in.
+`native_pick_exploration.json` records the mode; per-call diagnostics record use.
 Official components resolve through `resolve_config_path`; concrete robot
 presets import from `embodichain_robots`. Changes to endpoint names, motion
 limits or validator declarations require bundle regeneration and new identity;
@@ -73,7 +80,20 @@ policy. Adapter identity seals this routing, and changed bundles must be
 regenerated and qualified rather than resealing old receipts. Final open
 commands and physical release gates are unchanged.
 UR10 ready/Park shoulder pan faces the table under the shared mount; its zero
-pan pose faces away. `_task_program/solver_tolerances.py` preserves iterative
+pan pose faces away. Its ready and Park postures share an upper-wrist seed to
+avoid the below-table analytic branch at low flanges. Final hand effort is owned
+by `task_program_bundle.py`'s payload/embodiment calibration, not just the source
+component: inspect the generated embodiment before comparing actuator settings.
+UR10 light-grip calibration is isolated from Franka and retains lower authored
+limits. These settings do not establish full-path or complete-task qualification.
+For a newly generated UR10 bundle whose first call is prismatic Slide, task-level
+posture calibration keeps the operated arm's initial seed, tucks its idle neighbor
+by 0.5 rad and uses tucked released-hand Park targets. Selection follows the
+bound initial resource, not task or object IDs. Other initial calls, Franka,
+Marvin and frozen physical references retain their postures. The bundle's
+`ur10_initial_posture_selection.json` is configuration provenance, not a physical
+clearance certificate; runtime path and task checks still apply.
+`_task_program/solver_tolerances.py` preserves iterative
 solver budgets and supplies explicit analytic-UR FK validation budgets without
 requiring or mutating an iteration API on the shared solver.
 
@@ -205,7 +225,14 @@ does not by itself certify a task witness.
 
 Task Engine preparation derives the normative specification before binding,
 then `SemanticTaskPlanner.plan_spec()` retains the original witness and emits
-explicit expansion lineage. `semantic_graph_validation.py` checks every source
+explicit expansion lineage. If the selected witness fails planner preflight,
+the coordinator tries only the remaining already-bound candidates, ordered by
+vote count, before generating any bundle. Each failed attempt remains in the
+preparation audit; this adds no provider, scene, or physical action attempts.
+Embedded E8/E9 control references may bind their source-described owning root
+when no separate control entity exists; native joint/contact discovery still
+qualifies the actual route and ambiguous ownership remains unresolved.
+`semantic_graph_validation.py` checks every source
 member, required resource, milestone dependency and surviving terminal clause.
 The existing graph/reader/executor remains the only execution path;
 new bundles add root-level `task_spec.json`, `semantic_graph_validation.json`
@@ -261,7 +288,10 @@ Ordinary single-environment Place with preserved target orientation screens its
 unchanged required keyframes with finite IK/FK before dense path planning.
 An unqualified screen is not a proof of global unreachability; explicit height
 caps, multi-waypoint goals and protected Cartesian/pour routes keep their prior
-path. Owned adjacent Pick/Place calls share one 90-second cooperative wall ledger
+path. Bound ordinary E1 on-support Pick defers speculative adjacent Place planning
+to the observed post-acquisition state. Its emitted closing, source approach,
+joint-limit/velocity and real acquisition checks remain required. Inside/lateral
+continuations retain their existing forecasts. Owned adjacent Pick/Place calls share one 90-second cooperative wall ledger
 across nested previews and recovery; measured rigid planning uses the same
 threshold from `_task_program/_search_cost.py`. It rejects overdue planning at
 instrumented boundaries, not by preempting a native operation, so elapsed time may exceed that
@@ -891,7 +921,7 @@ E6 recovery is bound to exact registered Slide/withdraw invocation IDs, not
 all calls of those underlying skills. Bound single-environment `ik_interp`
 Slide retains its 85% preshape unless every finite candidate fails aperture.
 Only then, measured whole-hand FK selects the smallest sufficient opening in
-the 84--80% closure band and rebuilds once with matching Slide options and
+the 84--75% closure band and rebuilds once with matching Slide options and
 call-local clearance. The 4 mm pad reserve, full-hand/table screening and all
 execution gates remain; width-fitting/table/IK failures do not widen the hand.
 Initial-plan evidence records the selected plan, not the intermediate rejection.
@@ -914,15 +944,20 @@ discards the preview path. This is not a predicted-scene certificate: actual
 withdrawal is freshly planned and checked against current scene meshes before
 dispatch, including when its nominal plan succeeds, only when the lookahead
 actually rejected the formerly admissible terminal and selected another one.
-The exact adjacent E6 Park after an installed short withdrawal may reuse the
-existing four joint-via Park recovery with fresh full-scene qualification. Its
-canonical home target, timing and released-hand requirement remain unchanged;
-ordinary E6 Parks do not acquire this extra gate. A failed signed push may try
+The exact adjacent E6 Park after an installed nominal or recovered withdrawal
+uses fresh full-scene qualification and may reuse the four Cartesian-via
+Park recovery. Interior self/other-arm path collisions may also try those vias,
+then at most four limit-clamped neutral interior-joint routes, restoring the
+exact canonical Park target. Initial-state collisions remain rejected. Every
+candidate retains full scene/self/other-arm, command, limit and velocity checks;
+this is not a Native exploration bypass. An unchanged safe home path remains preferred. Its canonical
+home target, timing and released-hand requirement remain unchanged; E8/E9 parks
+without an adjacent E6 withdrawal are not included. A failed signed push may try
 50 mm then 30 mm approach/return offsets, preserving the handle grasp, rail,
 joint target and all full-path checks. Pulls and nominal successes are unchanged.
 Push diagnostics record the first failed leg instead of only exhaustion.
-Unchanged successful branches and unpaired calls retain their existing checks;
-they do not acquire a blanket new scene gate. Qualification is read from the
+Unpaired calls retain their existing checks rather than acquiring a blanket
+scene gate. Qualification is read from the
 paired public ExecutionSession's installed plan attempts, not from speculative
 planning side effects. Rejected revisions cannot erase it; a later nominal
 replan in that session does not erase earlier installed reselection evidence.
@@ -934,7 +969,10 @@ reach/push/open/return suffix, frame budget and control dt remain unchanged;
 longer prefixes reject rather than being accelerated. Shared Slide rebuilds
 the commands, then native joint/velocity/full-robot and fresh approach-scene
 checks qualify them. This does not bypass collision predictions or certify CCD.
-The E6 recovery fingerprint revision 11 owns these changes. A valid nominal paired
+The E6 recovery fingerprint revision 13 owns these changes. Nominal push success
+also checks its free approach against the live scene before accepting the paired
+withdrawal; a collision enters the same existing bounded recovery, not a second
+executor. A valid nominal paired
 continuation retains its exact commands; a supported but unqualified nominal
 terminal enters the same bounded branch search, without dispatching a preview.
 An ordinary rigid lateral Pick/Place pair may reuse goal-conditioned payload
@@ -948,12 +986,13 @@ Within this failure-only lateral recovery, the existing single-row CPU
 PytorchSolver search may supply up to four distinct release branches. Each
 branch rebuilds and qualifies the entire transport/contact/release/retreat;
 other solvers retain one branch, and no endpoint alone certifies the path.
-Ordinary rigid on-Place may use the same preserved-orientation transport only
-after the cheap fallback collides with its own support. Support affordances
-resolve through their bound rigid parent, never by name parsing. Non-target
-obstacle, self-collision and velocity refusals do not activate this on-specific
-route. Its conditional fingerprint requires regenerating affected on bundles;
-the exact release/contact/retract goals and complete emitted checks remain.
+For bound ordinary rigid on-Place, held-object clearance against the exact intended
+support owner is deferred to native landing/release observations, not certified as
+free space. Support affordances resolve through their bound rigid parent, never
+by name parsing. Other scene components, robot self-collision, joint limits and
+velocity remain screened. This is not proof of contact or task success. The
+existing preserved-orientation recovery and exact release/contact/retract goals
+remain; its conditional fingerprint requires regenerating affected on bundles.
 Generated ordinary E1 cardinal side placements beside rigid references release
 30 mm above the projected tabletop landing instead of the resting evidence
 target. XY, world orientation and settled validators remain unchanged; qualified
@@ -1005,6 +1044,16 @@ disabled in this mode. `selected_physical_input.json` records source/model
 differences; selection never certifies original-scene equivalence or historical
 success. Without an explicit reference, legacy graph-dependent calibration is
 unchanged; this opt-in contract is not default-wide composition isolation.
+Selecting a frozen physical model retains the public Auto entry's 100 mm
+experimental program placement policy in both post-policies and validators;
+it does not silently restore the legacy 50 mm program gate. Physical component
+digests and strict TaskSpec evaluation are unchanged. An explicit non-frozen
+`runtime_profile=default` retains its legacy policy.
+An explicit logical runtime profile may retain its motion timing and acceptance
+policy with a frozen physical reference. Material overlays, mass conversion,
+asset fitting and robot calibration remain disabled for the pinned model;
+output physical components must remain identical. Native Pick exploration is
+still forbidden with a physical reference.
 Ordinary E1 placement on another object retains its position tolerance and uses
 `supported_placement`: scaled local mesh vertices are cached per environment,
 then transformed by observed poses for vertical gap and projected support-envelope
@@ -1097,6 +1146,47 @@ strategy retains the diagonal fallback. E4 source lowerers try the arm-near end 
 diagonally before considering the far end, leaving the other end for reception.
 The wrapper marks only an owned goal
 snapshot; upright and stack constraints take precedence over ordinary policy.
+Constrained rigid Picks resolve their immutable task grasp filter through the
+known E6 approach wrapper only when their geometry is not a bound handle.
+Lowering, candidate selection and roll/path recovery share this resolution;
+unknown providers and handle geometry cannot bypass the E6 policy. The shared
+sampler and its rules remain unmodified, and ordinary adaptive Picks retain
+their existing provider path.
+When every nominal top-down constrained candidate is rejected geometrically,
+the same call-local filter may screen the existing arm-relative diagonal
+strategy. Shared full-Pick planning still owns the trajectory and effects;
+nonempty nominal pools, explicit directions and downstream targets are unchanged.
+Owned yaw-free staging in a drawer deployment also screens the operated robot
+against live articulation meshes while selecting its existing yaw candidates.
+This narrow screen prevents uprighting from pushing a drawer closed; it is not
+a carried-payload or ordinary-rigid scene certificate. Non-drawer staging keeps
+its original robot-proxy screen.
+Drawer routes share geometry per affordance but serialize `upright_calls` for
+the exact transport and Place occurrences with an explicit upright alignment
+in the same task group. Assembly binds these names to invocation identities;
+runtime selects a non-mutating observation view, including recovery within the
+same generated one-call segment. A later placement cannot overwrite an earlier
+call's policy. Legacy route-wide flags remain readable. Placement varies yaw, not pitch/roll,
+and first tries a supported release after crossing the rim rather than a high
+drop. The rim retains 25 mm payload clearance without the extra 120 mm legacy
+lift. Before payload-aware transport, these routes rank the same finite entry,
+release and open-hand endpoint candidates; cuRobo transports in the selected
+heading. Place still replans from observed state and checks its complete path.
+This is endpoint ranking, not a full future Place replay. Ordinary drawer routes
+retain their original release order; new bundles declare an empty call scope.
+Explicit E1 `orientation_goal=vertical` means an undirected long axis only
+when the user permits either pole. It keeps ordinary acquisition and serializes
+`axis_direction_free` on alignment calls and their stability presets. Alignment
+selects the nearest vertical pole; runtime and final TaskSpec observers use the
+same absolute axis projection. Existing `upright` stays directed toward +Z and
+does not inherit this relaxation; mouth-up and base-down intent remain directed.
+An untouched E1 source already within ten degrees of directed upright keeps
+ordinary acquisition rather than the inversion-specific grasp-region filter;
+its generated alignment and upright acceptance remain required. Occupied
+upright drawer landings reuse the existing planar-container selector with the
+observed contained payloads. Center and two side preferences stay bounded, and
+release heights 0/25/50/120 mm are ranked before spending at most two full Place
+plans. Empty drawers and ordinary non-upright routes retain their old policies.
 `GenSimPickUp` screens each
 candidate strategy through the shared full pickup planner and retains the exact
 successful trajectory per row; endpoint IK alone is not acceptance. Explicit
@@ -1155,8 +1245,9 @@ qualification and ranking; its Antipodal `pg_grasp.GraspRegionSelector` extensio
 only qualified rows to the GenSim strategy before top-K. The provider does not
 copy the backend, mutate its cache, or create a second sampler. The adapter
 contract requires regeneration when this policy boundary changes.
-Generated E4 integrations include the curated Pick monitor needed by the existing bounded
-workflow recovery, even when source acquisition uses a registered alias.
+Generated integrations with HandOver or curated Place include the curated Pick
+monitor needed by existing bounded workflow recovery, even when source
+acquisition uses only a registered alias.
 This does not change recovery budgets or qualify initial grasp stability;
 regenerate bundles to acquire the declaration rather than resealing old files.
 GenSimHandOver retains the bound closing drive through the shared hand-target
@@ -1172,10 +1263,10 @@ Constrained E2 Pick lowerers
 snapshot their object/target rule selector into the goal; only that Pick uses
 an immutable filtered-generator view. Unscoped sampling, including HandOver,
 checks opening clearance without applying another stage's region/release rules.
-Drawer transport and release remain drawer-owned. Drawer release recovery keeps
-the original rim route and extra 120 mm release lift first. On failure it may
-omit only that extra lift, retaining the outside/rim poses and payload floor
-target. Both modes share the original two-full-plan budget, final velocity gate,
+Drawer transport and release remain drawer-owned. Ordinary drawer release first
+uses the existing rim route without the extra 120 mm release lift; that higher
+release remains the fallback. Outside/rim poses and the payload floor target
+are unchanged. Both modes share the original two-full-plan budget, final velocity gate,
 physical release and containment checks. A conditional drawer release revision
 requires regenerating affected bundles; this is not permission to ignore walls
 or close around an uncontained payload. Relative placement geometry and
@@ -1316,8 +1407,19 @@ checked after every recipe call; this is not in-flight contact qualification.
 
 E8 is owned by `_task_program/twist_binding.py` and `twist_runtime.py`: a source-qualified
 revolute knob lowers to prepare/bounded Twist chunks/Park through the public `Twist` skill and
-ordinary Gym runtime. Each chunk is capped at 5 degrees and the next semantic segment reads
-the measured qpos again. Nonzero targets reserve 32 feedback calls; nominal 5-degree coverage
+ordinary Gym runtime. Legacy chunks are capped at 5 degrees and the next semantic segment reads
+the measured qpos again. An explicit optional E8 `twist_goal_mode=coarse` uses
+`target_setting=0` only as an intent placeholder, not as printed label zero.
+The planner chooses the farthest nonzero source-calibrated setting that fits the
+existing recipe budget, leaving contact-travel headroom rather than capping motion
+at a near-zero printed mark. This is only a motion reference; that label is not
+added to the normative coarse task goal. Explicit coarse routes use bounded
+20-degree commands; legacy routes retain their prior span.
+All chunks must retain one consistent reference, and ordinary source/runtime
+qualification plus native coarse contact-travel/release acceptance still apply.
+Legacy steps without this field retain exact setting lookup and recipe behavior;
+an unavailable requested label is not silently replaced.
+Nonzero references reserve 32 feedback calls; nominal 5-degree coverage
 plus the bounded candidate recovery must fit that bound. Verified coarse contact travel permits
 unused calls to become one-frame holds; Park still checks release and clearance. The printed setting uses
 pointer/label geometry and an asset hash; ordinal settings and joint-limit guesses are rejected.
@@ -1336,6 +1438,10 @@ finger thickness. Dimensional candidates still require actual physics acceptance
 relayout moves only unreferenced rigid `on(table)` children,
 excluding supports/parents. Four axis-separation candidates reuse Scene Engine's 20 mm target
 margin and check table bounds and other AABBs; this is not its full layout optimizer.
+When source dimensions are retained, a source graph's direct rigid `on`/`inside`
+payload can keep an inherited whole-assembly AABB overlap. The adaptation audit
+marks that coarse screen as deferred to native physics, not a collision-free
+certificate. Undeclared/new overlaps and resized assemblies retain rejection.
 The formal generator proposes 1 mm total extra lift after preserving the resized support bottom.
 `twist_support.py` checks full swept geometry; `twist_attempts.py` rebuilds from the original
 PreparedScene at 2/3/4 mm only after support-related startup rejection. Geometric penetration also
@@ -1358,7 +1464,11 @@ by Lab. Default-only qualification compares the complete authored layer and reje
 asset-valued dependencies. Native readback still uses the pristine source and existing
 tolerances; the deployment conversion is not guaranteed bitwise equivalent to the compatibility
 path. Mass ownership does not change feedback or execution ownership. A raw or repeated scale fails
-closed rather than applying another runtime correction. The adaptation audit
+closed rather than applying another runtime correction. Verified pristine mass
+lineage preserves geometric E6 part IDs when E8 and E6 share an asset; E6 bindings
+still seal the runtime USD hash and invalid lineage rejects. E8 owns source mass
+for that shared asset, so E6 does not also impose its ordinary 1 kg moving-link
+calibration. The adaptation audit
 separates actual gap from conservative contact-envelope reference. Direct helper calls retain
 their conservative default. Canonical startup evidence covers sensor-observed Prepare substeps,
 not direct World updates during reset/settling; its `complete` flag means the observation window
@@ -1377,17 +1487,29 @@ the calibrated grip collider, not the full render-link union. Parent screening a
 use owned collider inputs, including non-selected articulation bodies. Default render
 vertices are not collision inputs. Authored convex-cooking policies remain diagnostic;
 these proxies do not certify backend cooked shapes or continuous collision clearance.
+Robot table and rotor-sweep guards consume conservative envelopes of every finite
+authored collision vertex, not triangle surfaces. Their vertex-only URDF loading
+retains points belonging to zero-area STL facets and returns no surface-topology
+claim; indices and finiteness remain validated. Knob USD geometry and default
+URDF surface consumers retain strict triangle validation. Regenerate E8 bundles
+for revision 19; no table margin or native contact criterion is relaxed.
+E8 lowering allows four native-dtype roundoff units at calibrated joint bounds
+for USD/native conversion and constraint projection, then bounds only its
+planning scalar. Geometry freshness and recorded evidence retain the raw native
+observation; substantive overtravel and nonfinite values remain rejected.
 Candidates use final tip bites
 B/3, 2B/3 and B, where B=min(grasp_depth, grip_depth/2). Their TCP shifts are outward-only,
 so no extra inward offset can exceed the requested bite. Depth takes precedence over closed-hand,
 arena-frame geometry scores. The shallowest feasible layer selects the original first roll.
 Zero-contact recovery retains the same-roll depth order and its dimensional-retry receipt.
+Later contact loss may unlock a previously productive grasp only after measured release
+and control-tick stability; this schedules a bounded unused candidate, not turn completion.
 Two consecutive contact chunks without new debounced travel may instead choose a shallow
 qualified candidate on another parallel-gripper axis, only after measured release and
 control-tick joint stability. Axes are equivalent modulo pi, and an explicit fixed roll
 never permits other directions. First grasp plus both recovery kinds share three attempts
 total; no candidate is reserved twice. Each new candidate is replanned and screened from
-fresh observations. Progress and completed goals retain their candidate. Exhaustion is an
+fresh observations. Continued productive contact and completed goals retain their candidate. Exhaustion is an
 explicit failure, not more sampling or relaxed acceptance. Failed IK cannot
 silently fall back to an undeclared base pose. The lowerer measures matching jaw aperture and uses invocation-owned typed grasp
 overrides; public `Twist` and non-E8 routes remain unchanged.
@@ -1474,6 +1596,16 @@ One environment and unambiguous source-qualified controls are supported. Multipl
 press events, mixed recipes and repeat objects retain independent contact/release receipts.
 The old standalone press probe was removed; qualification uses
 the normal Task Engine route. Regenerate E9 bundles after lowerer revisions.
+For one environment, a failed Press phase may reuse the bounded previous-waypoint
+IK resolver with the same Cartesian targets and requested control period.
+Successful nominal phases are unchanged. Shared control-grid retiming and final
+full-arm/hand velocity checks still apply; a kinematic recovery is not contact
+or collision evidence, and native press/release/withdrawal acceptance remains.
+If the complete nominal Press still fails, a single quarter-turn wrist-roll
+alternative retains the calibrated contact point, forward axis and resource.
+The same Press planner builds every phase again, capped at two complete plans
+including the nominal one. This is failure-only; successful nominal plans and
+explicit custom affordance subclasses do not acquire this alternative.
 E9 preserves the declared/native button, housing and finger contact envelopes;
 it does not override contact or rest offsets. Normal E9 generation sets only
 the selected button assembly to unit body scale, preserving XY, rotation and
@@ -1516,6 +1648,10 @@ prismatic moving links. Fixed cabinet/root links retain source-authored mass,
 while contact offsets and materials remain asset-owned; this preserves the
 Slide grasp response across the legacy loader and Spawn without restoring the
 old global articulation-physics override.
+For an asset shared by E6 and E9, existing explicit button target modes and
+calibrated gains remain intact. Passive drawer defaults are merged by joint;
+the generator must not add a global disabled drive alongside active button modes.
+Authored drive types, matching target-mode rules and friction remain authoritative.
 
 E6-open / E1-inside / E6-close composition is owned by
 `_task_program/drawer_binding.py`, `drawer_geometry.py`, `drawer_runtime.py`,
@@ -1550,6 +1686,11 @@ motion sample budget rather than raising joint velocity limits. Ordinary command
 planning, effect verification and E6 joint-state acceptance remain.
 Execution completion does not prove an object is contained.
 Evaluate actual placement/closing from the recorded physical outcome.
+Drawer target generation retains its 5 mm lateral planning inset. The pre-close
+full-payload check instead uses the measured lateral cavity bounds: a settled
+payload need not retain that extra planning inset. Real boundary overflow still
+rejects; the existing floor tolerance, upper clearance and complete close-motion
+checks remain unchanged. Reports record the separate lateral margin explicitly.
 
 ## Focused validation
 
