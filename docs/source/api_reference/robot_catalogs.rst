@@ -103,6 +103,17 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
 
+.. py:class:: embodichain_robots.SO101FollowerCfg
+
+   SO101 follower with five arm joints, one actuated jaw, official CAD inertials
+   and published STS3215 simulation drives. Both serial chains use the same
+   source URDF as simulation; arm IK constrains position.
+   See :doc:`/resources/robot/so101` for frames, units and source limitations.
+
+.. automethod:: embodichain_robots.SO101FollowerCfg.from_dict
+
+.. automethod:: embodichain_robots.SO101FollowerCfg.build_pk_serial_chain
+
 
 embodichain_robots.aloha_mini
 -----------------------------
@@ -285,6 +296,15 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    Panda arm with the PGI gripper; available as catalog ID ``FrankaPandaPgi``.
    The arm chain ends at ``fr3_link8`` and the solver applies the PGI TCP.
    See :class:`embodichain_robots.FrankaPandaPgiCfg` for the public entry point.
+
+
+embodichain_robots.so101
+------------------------
+
+.. py:class:: embodichain_robots.so101.SO101FollowerCfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.SO101FollowerCfg`.
 
 
 embodichain_robots.tianji_marvin

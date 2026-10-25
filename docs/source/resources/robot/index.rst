@@ -38,6 +38,9 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
    * - :doc:`Tianji Marvin <tianji_marvin>`
      - ``TianjiMarvinCfg``
      - Dual 7-DOF arms with optional parallel-jaw grippers.
+   * - :doc:`SO101 Follower <so101>`
+     - ``SO101FollowerCfg``
+     - Five-axis follower arm and actuated jaw with official simulation dynamics.
 
 .. toctree::
    :maxdepth: 1
@@ -50,6 +53,7 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
    dual_arm
    aloha_mini
    tianji_marvin
+   so101
 
 To add another model, follow :doc:`/guides/add_robot` and include its page in
 this catalog and toctree.

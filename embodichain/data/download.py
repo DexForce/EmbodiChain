@@ -88,6 +88,7 @@ def get_registry() -> dict[str, list[tuple[str, type]]]:
     registry["robot"].extend(
         _get_asset_classes("embodichain.data.assets.locomotion_assets")
     )
+    registry["robot"].extend(_get_asset_classes("embodichain.data.assets.so101_assets"))
     registry["robot"].sort(key=lambda asset: asset[0])
     return registry
 
