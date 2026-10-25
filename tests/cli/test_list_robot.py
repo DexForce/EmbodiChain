@@ -245,11 +245,15 @@ def test_list_robot_wraps_long_catalog_metadata(
     assert "1 robot" in output
 
 
+@pytest.mark.parametrize("terminal_width", [80, 120])
 def test_list_robot_prints_control_metadata_without_loading_robot(
     catalogs: list[Any],
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_width: int,
 ) -> None:
     """A provider's control summary is printed directly from its catalog."""
+    monkeypatch.setenv("COLUMNS", str(terminal_width))
     spec = {
         "class_path": "absent_robots:RobotCfg",
         "dof": 7,
@@ -261,8 +265,9 @@ def test_list_robot_prints_control_metadata_without_loading_robot(
 
     output = capsys.readouterr().out
     assert re.search(r"│\s*vendor.arm\s*│\s*-\s*│\s*7\s*│", output)
-    assert "arm (6 total)" in output
-    assert "tool (1 total)" in output
+    parts = re.sub(r"\s+", "", _column_text(output, 4))
+    assert "arm(6total)" in parts
+    assert "tool(1total)" in parts
     assert "absent_robots" not in sys.modules
 
 
