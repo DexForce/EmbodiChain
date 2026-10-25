@@ -56,6 +56,16 @@ FORMAL_OPTIMIZER = {
 }
 
 
+def _require_single_process() -> None:
+    if int(os.environ.get("WORLD_SIZE", "1")) > 1 or (
+        torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1
+    ):
+        raise ValueError(
+            "The frozen PickPlace BC acceptance recipe requires one training process "
+            "with global batch64. Use a separate BC recipe for SL DDP training."
+        )
+
+
 def _validate_recipe(config: dict[str, Any]) -> None:
     if config.get("optimizer") != FORMAL_OPTIMIZER:
         raise ValueError(
@@ -195,6 +205,7 @@ def _evaluate(
 
 def build_trainer(config: dict[str, Any]) -> SupervisedTrainer:
     """Build the pinned offline acceptance recipe for ``train-sl``."""
+    _require_single_process()
     _validate_recipe(config)
     deadline = time.monotonic() + 21600
     data = source(config["data"]["manifest"])
@@ -345,6 +356,7 @@ def main() -> None:
     parser.add_argument("--policy-device", default="cuda:1")
     parser.add_argument("--prepare-only", action="store_true")
     args = parser.parse_args()
+    _require_single_process()
     torch.set_num_threads(1)
     args.output.mkdir(parents=True, exist_ok=False)
     config = {

@@ -49,6 +49,12 @@ Run one seed per fresh output directory. The example assigns physical GPU1 to
 training and GPU7 to the independent evaluator's simulation; pass the GPU IDs
 allocated to your run:
 
+This frozen acceptance protocol uses one training process and global batch64.
+It rejects DDP before accessing the corpus or creating experiment artifacts.
+The shared BC model, objective and sources can be used in a separate SL DDP
+recipe; its global batch, budget and learning acceptance must be declared
+separately rather than changing this protocol.
+
 ```bash
 CUDA_VISIBLE_DEVICES=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
 python -m experiments.learning.sl.train_bc \
