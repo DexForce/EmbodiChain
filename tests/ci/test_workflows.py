@@ -381,6 +381,8 @@ def test_release_guard_validates_bundled_robot_catalog(
         task_config: source.read_text(),
         "embodichain_robots/__init__.py": "",
         "embodichain_robots/_catalog.py": "ROBOT_CONFIGS = {}\n",
+        "embodichain_benchmarks/__init__.py": "",
+        f"embodichain-{version}.data/data/share/embodichain/examples/__init__.py": "",
         f"embodichain-{version}.dist-info/METADATA": f"Version: {version}\n",
         f"embodichain-{version}.dist-info/entry_points.txt": entry_points,
     }

@@ -42,7 +42,7 @@ from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
-from scripts.tutorials.atomic_action.tutorial_utils import (
+from examples.sim.atomic_action.support import (
     add_tutorial_robot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
@@ -60,7 +60,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     replay_trajectory,
     run_tutorial,
 )
-from scripts.tutorials.atomic_action.tutorial_utils import (
+from examples.sim.atomic_action.support import (
     compute_pick_close_end_step,
     initialize_benchmark_simulation,
     make_eef_pose_at,
