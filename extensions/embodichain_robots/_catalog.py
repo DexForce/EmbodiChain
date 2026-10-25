@@ -27,7 +27,9 @@ _CONFIG_CLASSES = {
     "CobotMagic": "embodichain_robots.cobotmagic:CobotMagicCfg",
     "FrankaPanda": "embodichain_robots.franka_panda:FrankaPandaCfg",
     "FrankaPandaPgi": "embodichain_robots.franka_panda:FrankaPandaPgiCfg",
+    "FlexivRizon4S": "embodichain_robots.flexiv_rizon4s:FlexivRizon4SCfg",
     "URRobot": "embodichain_robots.ur_robot:URRobotCfg",
+    "SO101Follower": "embodichain_robots.so101:SO101FollowerCfg",
 }
 
 _DEFAULT_CONTROL_INFO = {
@@ -81,6 +83,8 @@ _DEFAULT_CONTROL_INFO = {
         "control_parts": {"arm": 7, "eef": 1},
     },
     "URRobot": {"dof": 6, "control_parts": {"arm": 6}},
+    "SO101Follower": {"dof": 6, "control_parts": {"arm": 5, "eef": 1}},
+    "FlexivRizon4S": {"dof": 7, "control_parts": {"arm": 7}},
 }
 
 _MIMIC_JOINTS = {

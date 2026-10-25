@@ -57,6 +57,17 @@ through `update_null_space_joint_targets()` in simulator joint order. Do not
 substitute configuration-space subtraction or let posture improvement override
 failure to progress on the controlled frame.
 
+## PyTorch position constraints
+
+`PytorchSolverCfg.is_only_position_constraint` removes orientation from both
+the DLS objective and convergence. Targets remain TCP poses relative to the
+chain root; their rotations are ignored. A translated TCP must be part of the
+solved chain/Jacobian, rather than removed using an unconstrained target
+rotation. `set_tcp()` refreshes that task frame, and iteration-parameter
+round trips preserve the constraint mode. Full-pose IK retains its separate
+position and rotation tolerances. Verify both modes, mixed reachable batches
+and TCP updates with `test_pytorch_solver.py`.
+
 ## Seeds and cached retrieval
 
 `BaseSolver.get_default_qpos_seed()` returns the joint-range midpoint. Seedless
@@ -69,9 +80,11 @@ remaining slots sample within limits. Target repetition must use the same
 expanded batch ordering.
 
 `QposSeedSelSampler` is an opt-in Pytorch multi-start extension. Its lazy Sobol FK
-database stores flange poses, so retrieval receives the TCP-stripped target and
-`set_tcp()` does not invalidate the database. Joint-limit changes do trigger a
-rebuild. Without a target it falls back to ordinary random sampling. Optional
+database stores flange poses. Full-pose retrieval receives the TCP-stripped
+target; position-only retrieval estimates the flange goal using the caller
+seed's orientation, ignoring target rotation. `set_tcp()` does not invalidate
+the database. Joint-limit changes do trigger a rebuild. Without a target it
+falls back to ordinary random sampling. Optional
 Jacobian ranking consumes the same pose/joint ordering. Analytical solvers do
 not use this database; they still use seeds for their own branch selection.
 

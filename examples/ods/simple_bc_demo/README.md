@@ -8,7 +8,7 @@ robot and object state.
 
 Run the commands below from the repository root. This directory owns the local
 task, configuration, model, trainer, checkpoint tools and evaluation. The shared
-ODS engine, throughput configurator and numeric source APIs remain in
+ODS engine, throughput configurator, flow controller and numeric source APIs remain in
 `embodichain.data_pipeline`.
 
 ## Layout
@@ -131,6 +131,12 @@ deferred evaluation. Per-source quotas are enforced during locked sampling;
 replacement can retire unused allowances. The historical K=2660 is provisional.
 Throughput matching determines pace, while the learning protocol determines
 the total production and update budgets.
+
+The trainer uses the public `ODSFlowController` for manual refill scheduling,
+bounded data waits, quota readiness and batch pacing. The example owns the
+optimizer, evaluation, resource accounting and engine shutdown. Sampling from a
+source or Dataset still returns immediately or raises; waiting is explicit in
+the controller.
 
 Measure the actual learner, representation, horizons, batch size and producer
 concurrency together. The public `measure_ods_throughput` helper preserves rate

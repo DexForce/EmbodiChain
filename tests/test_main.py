@@ -45,6 +45,7 @@ EXPECTED_COMMANDS = {
     "show-task",
     "preview-asset",
     "preview-robot",
+    "preview-material",
     "preview_lerobot_data",
     "run-task",
     "run-example",
@@ -600,7 +601,7 @@ def test_motion_generation_dispatch_selects_suite(
     expected_suite: str,
 ) -> None:
     """The domain command forwards either family and its canonical default."""
-    from scripts.benchmark.motion_generation import run_benchmark
+    from embodichain_benchmarks.motion_generation import cli as run_benchmark
 
     received: dict[str, object] = {}
 
@@ -679,3 +680,33 @@ def test_atomic_action_benchmark_name_is_rejected(
 
     assert exc_info.value.code == 2
     assert "invalid choice: 'atomic-action'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "arguments", [["--help"], ["robotics-kinematic-solver", "--solvers", "pytorch"]]
+)
+def test_benchmark_dispatch_loads_extension_only_for_motion_generation(
+    monkeypatch, arguments
+):
+    """Other benchmark commands remain usable without importing the extension."""
+    import builtins
+    from embodichain.cli import benchmark
+
+    original_import = builtins.__import__
+
+    def reject_extension(name, *args, **kwargs):
+        if name == "embodichain_benchmarks" or name.startswith(
+            "embodichain_benchmarks."
+        ):
+            raise AssertionError("An unrelated benchmark command loaded the extension")
+        return original_import(name, *args, **kwargs)
+
+    received = []
+    monkeypatch.setattr(
+        benchmark,
+        "_run_robotics_kinematic_solver_cli",
+        lambda args: received.extend(args.solvers),
+    )
+    monkeypatch.setattr(builtins, "__import__", reject_extension)
+    benchmark.main(arguments)
+    assert received == ([] if arguments == ["--help"] else ["pytorch"])

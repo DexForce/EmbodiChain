@@ -8,13 +8,14 @@ extension types.
 | --- | --- | --- |
 | `embodichain_tasks/` | `embodichain_tasks` | Official tasks, deployments, and reusable task components |
 | `embodichain_robots/` | `embodichain_robots` | Concrete robot presets and the official robot catalog |
+| `embodichain_benchmarks/` | `embodichain_benchmarks` | Evaluation suites, planner adapters, scoring policies, and reports |
 
 Keep the `embodichain_` prefix on extension modules and Python packages. It
 identifies their ecosystem outside this repository and avoids ambiguous
 top-level imports such as `tasks` or `robots`. The parent `extensions/`
 directory is only a source container, not a Python package or an import prefix.
 
-Both modules currently ship in the main `embodichain` distribution, sharing
+These modules currently ship in the main `embodichain` distribution, sharing
 its version and dependencies. Install or refresh the editable mappings from
 the repository root after moving or adding a module:
 

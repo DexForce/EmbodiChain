@@ -32,7 +32,9 @@ __all__ = [
     "CobotMagicCfg",
     "FrankaPandaCfg",
     "FrankaPandaPgiCfg",
+    "FlexivRizon4SCfg",
     "URRobotCfg",
+    "SO101FollowerCfg",
 ]
 
 _EXPORTS = {
@@ -42,7 +44,9 @@ _EXPORTS = {
     "CobotMagicCfg": ".cobotmagic",
     "FrankaPandaCfg": ".franka_panda",
     "FrankaPandaPgiCfg": ".franka_panda",
+    "FlexivRizon4SCfg": ".flexiv_rizon4s",
     "URRobotCfg": ".ur_robot",
+    "SO101FollowerCfg": ".so101",
 }
 
 

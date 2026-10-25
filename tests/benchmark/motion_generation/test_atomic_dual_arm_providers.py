@@ -26,34 +26,41 @@ from unittest.mock import Mock
 import pytest
 import torch
 
+from embodichain_benchmarks.motion_generation.scenarios._atomic_pose_sampling import (
+    apply_task_frame_randomization,
+)
+
 from embodichain.lab.sim.motion.planners import PlanState
 from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
 )
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
-from scripts.benchmark.motion_generation.config import load_suite
-from scripts.benchmark.motion_generation.contracts import (
+from embodichain_benchmarks.motion_generation.config import (
+    AtomicPoseRandomizationCfg,
+    load_suite,
+)
+from embodichain_benchmarks.motion_generation.contracts import (
     ReplayObservationTrace,
     ReplayObservationWindow,
 )
-from scripts.benchmark.motion_generation.models import BenchmarkCase, CaseOutcome
-from scripts.benchmark.motion_generation import robots as _robots  # noqa: F401
-from scripts.benchmark.motion_generation.registry import create_robot_provider
-from scripts.benchmark.motion_generation.scenarios import (
+from embodichain_benchmarks.motion_generation.models import BenchmarkCase, CaseOutcome
+from embodichain_benchmarks.motion_generation import robots as _robots  # noqa: F401
+from embodichain_benchmarks.motion_generation.registry import create_robot_provider
+from embodichain_benchmarks.motion_generation.scenarios import (
     atomic_dual_arm_providers as dual,
 )
-from scripts.benchmark.motion_generation.scenarios import atomic_case_utils
-from scripts.benchmark.motion_generation.scenarios import atomic_skill
-from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+from embodichain_benchmarks.motion_generation.scenarios import atomic_case_utils
+from embodichain_benchmarks.motion_generation.scenarios import atomic_skill
+from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_grasps import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_grasps import (
     ActiveCaseGraspPoseGenerator,
     CaseSampleCountGraspPoseGenerator,
 )
-from scripts.benchmark.motion_generation.contracts import ExecutionObservation
-from scripts.benchmark.motion_generation.atomic_skill import (
+from embodichain_benchmarks.motion_generation.contracts import ExecutionObservation
+from embodichain_benchmarks.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 
@@ -690,6 +697,7 @@ def _protocol_suite() -> Mock:
             position_threshold_m=0.01,
             rotation_threshold_rad=0.1,
             joint_limit_tolerance_rad=1.0e-5,
+            start_state_tolerance_rad=1.0e-3,
             joint_velocity_limit_rad_s=None,
             joint_acceleration_limit_rad_s2=None,
             joint_jerk_limit_rad_s3=None,
@@ -786,8 +794,14 @@ def test_dual_arm_target_randomization_is_batched_and_deterministic():
     batch_size = 4
     object_pose = torch.eye(4).repeat(batch_size, 1, 1)
     config = {
-        "_pose_batch_translation_jitter_m": [0.03, 0.02, 0.01],
-        "_pose_batch_seed_stride": 1,
+        "_pose_batch": AtomicPoseRandomizationCfg(
+            target_translation_jitter_m=(
+                0.03,
+                0.02,
+                0.01,
+            ),
+            seed_stride=1,
+        )
     }
 
     first = dual._randomized_target_pose(
@@ -826,7 +840,13 @@ def test_coordinated_placement_randomizes_both_objects_before_one_settle():
         "object_position_jitter_m": [0.01, 0.01, 0.0],
         "support_object_position_jitter_m": [0.02, 0.03, 0.0],
         "support_object_yaw_jitter_rad": 0.2,
-        "_pose_batch_object_translation_jitter_m": [0.04, 0.04, 0.0],
+        "_pose_batch": AtomicPoseRandomizationCfg(
+            object_translation_jitter_m=(
+                0.04,
+                0.04,
+                0.0,
+            )
+        ),
     }
 
     actual = dual._settled_placement_poses(scenario, placing, support, config, seed=17)
@@ -868,7 +888,7 @@ def test_coordinated_placement_builds_each_pose_row_independently(monkeypatch):
 
     config = {
         "target_object_offset_jitter_m": [0.03, 0.02, 0.01],
-        "_pose_batch_seed_stride": 1,
+        "_pose_batch": AtomicPoseRandomizationCfg(seed_stride=1),
     }
     poses = dual._placement_poses(
         Mock(), Mock(), placing_pose, support_pose, config, seed=11
@@ -896,14 +916,20 @@ def test_coordinated_placement_transforms_fixed_targets_with_task_frame(monkeypa
     nominal_placing_pose[:, :3, 3] = torch.tensor([0.2, -0.1, 0.2])
     nominal_support_pose[:, :3, 3] = torch.tensor([-0.1, 0.2, 0.2])
     config = {
-        "_pose_batch_task_frame_translation_jitter_m": [0.03, 0.02, 0.0],
-        "_pose_batch_task_frame_yaw_jitter_rad": 0.3,
-        "_pose_batch_seed_stride": 1,
+        "_pose_batch": AtomicPoseRandomizationCfg(
+            task_frame_translation_jitter_m=(
+                0.03,
+                0.02,
+                0.0,
+            ),
+            task_frame_yaw_jitter_rad=0.3,
+            seed_stride=1,
+        )
     }
     placing_pose = nominal_placing_pose.clone()
     support_pose = nominal_support_pose.clone()
-    atomic_case_utils.apply_task_frame_randomization(placing_pose, config, seed=11)
-    atomic_case_utils.apply_task_frame_randomization(support_pose, config, seed=11)
+    apply_task_frame_randomization(placing_pose, config, seed=11)
+    apply_task_frame_randomization(support_pose, config, seed=11)
     placing_vertices = torch.tensor(
         [
             [-0.04, -0.03, -0.01],
@@ -936,7 +962,7 @@ def test_coordinated_placement_transforms_fixed_targets_with_task_frame(monkeypa
         Mock(), Mock(), nominal_placing_pose, nominal_support_pose, {}, seed=11
     )
     task_frame_pose = torch.eye(4).repeat(batch_size, 1, 1)
-    atomic_case_utils.apply_task_frame_randomization(task_frame_pose, config, seed=11)
+    apply_task_frame_randomization(task_frame_pose, config, seed=11)
     expected_placing = torch.bmm(task_frame_pose, nominal["placing_target_pose"])
     expected_support = torch.bmm(task_frame_pose, nominal["support_target_pose"])
 

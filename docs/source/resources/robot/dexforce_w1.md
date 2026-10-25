@@ -15,16 +15,22 @@ are configured separately.
   </figure>
 </div>
 
-Both images use the same camera, bent-elbow display pose and current
-`RenderCfg(renderer="rt")` defaults (OfflineRT), with default scene lighting.
+Both images are captured from the registered robot presets using the same
+camera, bent-elbow display pose and current `RenderCfg(renderer="rt")`
+defaults (OfflineRT), with default scene lighting.
 The display pose is for illustration; it does not change the preset home pose.
+V030 uses the V021 yellow (`#F8C349`) and dark
+(`#2E2E2E`) plastic palette with matching roughness, retaining V030 geometry
+and markings.
 
 :::{dropdown} Image rendering settings
 960 × 1200; 1 sample per pixel; DLSS offscreen reconstruction (quality 2);
 tone mapping off; exposure 1.0; path depths 4–8. The scene uses the default
-ground and environment emission, with no added direct lights. Camera and
-joint settings are recorded in the
+ground and environment emission, with no added direct lights. Camera settings,
+joint positions and the V030 asset revision are recorded in the
 [render manifest](../../_static/robots/dexforcew1_render.json).
+The manifest also records the V021 material parameters and the published
+archive checksums.
 :::
 
 ## Supported Body Revisions
@@ -147,6 +153,11 @@ revision uses one checksum-validated archive containing the full robot and
 five component URDFs, with matching visual, collision and inertial definitions.
 V030's `robot_with_ee.urdf` is a compatibility alias of its bare `robot.urdf`;
 detachable tools are separate assets.
+
+V030 visual updates replace the existing archive and cache in place. To refresh
+an existing assembled robot after a visual-only update, set
+`cfg.urdf_cfg.use_signature_check = False` for one assembly so its copied meshes
+are rebuilt.
 
 Body assets, solvers and mounting offsets are registered in
 `embodichain_robots/dexforce_w1/specs.py`; external hand assets and transforms

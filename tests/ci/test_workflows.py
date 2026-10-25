@@ -19,7 +19,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 from zipfile import ZipFile
@@ -201,18 +203,51 @@ def test_release_dispatch_reports_child_without_timing_out_while_queued() -> Non
     assert "GITHUB_STEP_SUMMARY" in command
 
 
-def test_test_package_install_uses_explicit_public_index_and_private_sources() -> None:
-    steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
-    install = next(step for step in steps if step.get("name") == "Install test package")
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name", "step_name"),
+    [
+        ("main.yml", "test", "Install test package"),
+        ("main.yml", "build", "Build docs"),
+        ("docs-pages.yml", "build-and-deploy", "Build docs site"),
+    ],
+)
+def test_package_install_uses_explicit_public_index_and_private_sources(
+    workflow_name: str, job_name: str, step_name: str
+) -> None:
+    steps = _load_workflow(workflow_name)["jobs"][job_name]["steps"]
+    install = next(step for step in steps if step.get("name") == step_name)
     commands = install["run"].split("pip install")[1:]
 
     # Each invocation must override any mirror inherited from the runner image.
     assert commands
     assert all("--index-url https://pypi.org/simple" in command for command in commands)
-    package_install = next(command for command in commands if "${package}" in command)
+    package_install = next(
+        command for command in commands if "--extra-index-url" in command
+    )
     assert "--extra-index-url http://pyp.open3dv.site:2345/simple/" in package_install
     assert "--trusted-host pyp.open3dv.site" in package_install
     assert "--extra-index-url https://download.blender.org/pypi/" in package_install
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name", "step_name"),
+    [
+        ("main.yml", "build", "Build docs"),
+        ("main.yml", "test_docs", "Install docs test dependencies"),
+        ("docs-pages.yml", "build-and-deploy", "Build docs site"),
+    ],
+)
+def test_docs_dependencies_override_inherited_pip_index(
+    workflow_name: str, job_name: str, step_name: str
+) -> None:
+    steps = _load_workflow(workflow_name)["jobs"][job_name]["steps"]
+    install = next(step for step in steps if step.get("name") == step_name)
+    commands = install["run"].replace("\\\n", " ").splitlines()
+    arguments = shlex.split(
+        next(command for command in commands if "docs/requirements.txt" in command)
+    )
+    assert "--isolated" in arguments
+    assert arguments[arguments.index("--index-url") + 1] == "https://pypi.org/simple"
 
 
 def test_simulator_test_job_installs_node_before_workflow_contract_tests() -> None:
@@ -235,6 +270,72 @@ def test_simulator_test_job_installs_node_before_workflow_contract_tests() -> No
     assert setup_index < capture_index < tests_index
     assert "GITHUB_ENV" in steps[capture_index]["run"]
     assert 'export PATH="${CI_NODE_BIN_DIR}:${PATH}"' in steps[tests_index]["run"]
+
+
+def test_test_job_restores_git_access_before_running_selected_tests(
+    tmp_path: Path,
+) -> None:
+    """Run the workflow preparation against a checkout with untrusted ownership."""
+    steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
+    tests = next(step for step in steps if step.get("name") == "Run selected tests")
+    assert tests["shell"] == "bash -l {0}"
+    preparation = tests["run"].split("python scripts/ci/run_test_plan.py", 1)[0]
+    preparation = preparation.replace("source activate py311", ":").replace(
+        "node --version", ":"
+    )
+    repository = tmp_path / "checkout with spaces"
+    repository.mkdir()
+    config = tmp_path / "gitconfig"
+    config.write_text("")
+    environment = os.environ.copy()
+    environment.update(
+        GIT_CONFIG_GLOBAL=str(config),
+        GIT_CONFIG_NOSYSTEM="1",
+        GITHUB_WORKSPACE=str(repository),
+        CI_NODE_BIN_DIR="",
+    )
+    for args in (
+        ["init", "-q"],
+        [
+            "-c",
+            "user.name=CI Test",
+            "-c",
+            "user.email=ci@example.org",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "fixture",
+        ],
+    ):
+        subprocess.run(["git", *args], cwd=repository, env=environment, check=True)
+    revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repository, env=environment, text=True
+    ).strip()
+    environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+    untrusted = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert untrusted.returncode != 0
+    assert "dubious ownership" in untrusted.stderr
+    prepared = subprocess.run(
+        ["bash", "-e", "-c", preparation],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert prepared.returncode == 0, prepared.stdout + prepared.stderr
+    assert (
+        subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=repository, env=environment, text=True
+        ).strip()
+        == revision
+    )
 
 
 @pytest.mark.parametrize(
@@ -280,6 +381,8 @@ def test_release_guard_validates_bundled_robot_catalog(
         task_config: source.read_text(),
         "embodichain_robots/__init__.py": "",
         "embodichain_robots/_catalog.py": "ROBOT_CONFIGS = {}\n",
+        "embodichain_benchmarks/__init__.py": "",
+        f"embodichain-{version}.data/data/share/embodichain/examples/__init__.py": "",
         f"embodichain-{version}.dist-info/METADATA": f"Version: {version}\n",
         f"embodichain-{version}.dist-info/entry_points.txt": entry_points,
     }

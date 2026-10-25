@@ -149,7 +149,7 @@ DEFAULT_TUTORIAL_SUN_DIRECTION = (0.0, 0.0, -1.0)
 DEFAULT_TUTORIAL_SUN_INTENSITY = 5.0
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 _GRIPPER_CONTACT_LINK_PATTERN = (
-    r"(?:.*_)?(?:gripper_finger[12]_link_1|"
+    r"(?:.*_)?(?:gripper_finger[12]_link_1|finger[12]_link|"
     r"(?:left|right)_(?:outer|inner)_(?:finger(?:_pad)?|knuckle))"
 )
 TOP_DOWN_EEF_ROTATION = (
@@ -1840,7 +1840,7 @@ def get_hand_open_close_qpos(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return open and closed positions for a tutorial parallel gripper.
 
-    PGI hands use their lower position limit as the open command. A Robotiq
+    PGI and PGC hands use their lower position limit as the open command. A Robotiq
     2F-140 hand is recognized from its six expanded finger/knuckle joint names;
     its open command is zero and a scalar close magnitude is negated for the
     three knuckle joints according to the URDF mimic directions. Supplying a

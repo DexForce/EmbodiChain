@@ -91,6 +91,24 @@ See {doc}`preview_robot` for robot files, overrides, and bounded headless runs.
 
 ---
 
+(cli-preview-material)=
+## Preview Material
+
+Query default presets, open a native material preview or export rendered images:
+
+```bash
+embodichain preview-material --list
+embodichain preview-material --material GlassClear
+embodichain preview-material --all --headless --gallery --output outputs/materials
+```
+
+OfflineRT (`--renderer rt`) is the default. Other renderers reject incompatible
+requests; `--all --compatible-only` explicitly selects and reports supported
+presets. See {doc}`preview_material` for JSON overrides, output metadata,
+direct-native comparisons and renderer requirements.
+
+---
+
 (cli-list-tasks)=
 ## List Tasks
 

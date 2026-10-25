@@ -29,3 +29,4 @@ from .solver_assets import *
 from .planner_assets import *
 
 from .locomotion_assets import *
+from .so101_assets import *

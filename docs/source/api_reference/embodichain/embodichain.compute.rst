@@ -31,6 +31,11 @@ and may omit interior input samples. ``warp_trajectory_qpos`` changes a joint
 trajectory using interpolated offsets at supplied keyframes; warping here
 means trajectory deformation.
 
+Use ``resample_with_distance(..., backend="torch")`` for dtype-preserving
+Torch resampling without entering Warp. The default ``auto`` path retains its
+float32 Warp implementation and Torch fallback. Both operate on batched paths;
+stationary paths and repeated endpoints remain valid inputs.
+
 .. code-block:: python
 
    import torch

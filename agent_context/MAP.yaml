@@ -11,7 +11,7 @@ topics:
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
   keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
-    DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
+    DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, VisualMaterial, VisualMaterialCfg, VisualMaterialInst, preview-material, 材质预览, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
     fixed-cadence playback, quaternion, xyzw]
   paths: [topics/simulation-system/simulation-system.md]
@@ -24,6 +24,9 @@ topics:
   - embodichain/lab/sim/cfg/
   - embodichain/lab/sim/physics/
   - embodichain/lab/sim/spawn/
+  - embodichain/lab/sim/material.py
+  - embodichain/lab/sim/_material_presets.py
+  - embodichain/lab/scripts/preview_material.py
   - embodichain/lab/sim/common.py
   - embodichain/lab/sim/_startup_summary.py
   - embodichain/lab/sim/_runtime_controls.py
@@ -34,7 +37,7 @@ topics:
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/gym/envs/base_env.py
   watch_paths: [embodichain/lab/sim/sim_manager.py, embodichain/lab/sim/cfg/, embodichain/lab/sim/physics/,
-    embodichain/lab/sim/spawn/, embodichain/lab/sim/objects/, tests/sim/]
+    embodichain/lab/sim/spawn/, embodichain/lab/sim/material.py, embodichain/lab/sim/_material_presets.py, embodichain/lab/scripts/preview_material.py, tests/lab/scripts/test_preview_material.py, embodichain/lab/sim/objects/, tests/sim/]
   related_topics: [env-framework, robot-system, sensor-system, sim-visualization, ik-solvers, motion-planning,
     atomic-actions, rl-learning, configclass-pattern, robot-workspace]
   status: active
@@ -181,7 +184,7 @@ topics:
   status: active
 - id: motion-planning
   title: Motion Planning
-  aliases: [motion planning, trajectory planning, trajectory playback, fixed-cadence trajectory playback, motion expansion,
+  aliases: [motion planning, motion generation benchmark, motion benchmark, 运动生成评测, trajectory planning, trajectory playback, fixed-cadence trajectory playback, motion expansion,
     trajectory expansion, trajectory augmentation, expansion profile, configured trajectory expansion,
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
     轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体]
@@ -198,6 +201,8 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
   - embodichain/lab/sim/motion/motion_generator.py
+  - extensions/embodichain_benchmarks/motion_generation/
+  - embodichain/cli/benchmark.py
   - embodichain/lab/sim/motion/execution.py
   - embodichain/lab/sim/motion/planners/utils.py
   - embodichain/lab/sim/motion/planners/toppra_planner.py
@@ -213,7 +218,7 @@ topics:
   - embodichain/lab/sim/motion/expansion/
   - embodichain/compute/trajectory/
   - embodichain/lab/sim/utility/action_utils.py
-  watch_paths: [embodichain/lab/sim/motion/motion_generator.py, embodichain/lab/sim/motion/execution.py,
+  watch_paths: [extensions/embodichain_benchmarks/motion_generation/, tests/benchmark/motion_generation/, tests/test_benchmark_package.py, embodichain/lab/sim/motion/motion_generator.py, embodichain/lab/sim/motion/execution.py,
     embodichain/compute/kinematics/_path_derivatives.py,
     tests/sim/motion/test_motion_generator.py,
     tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
@@ -420,7 +425,7 @@ topics:
   title: Data Assets
   aliases: [data assets, data path, asset download, 数据资产, 资产下载, 数据路径]
   keywords: [get_data_path, get_data_class, EmbodiChainDataset, TabletopFourBases, demo assets, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
-    CATEGORY_MODULES, download lock, get_registry]
+    CATEGORY_MODULES, download lock, get_registry, DefaultMaterials, list_default_materials, get_default_material_info]
   paths: [topics/data-assets/data-assets.md]
   source_of_truth:
   - embodichain/data/dataset.py
@@ -428,7 +433,11 @@ topics:
   - embodichain/data/download.py
   - embodichain/data/__init__.py
   - embodichain/data/assets/__init__.py
-  watch_paths: [embodichain/data/, embodichain/cli/main.py, tests/data/]
+  - embodichain/data/assets/materials.py
+  - embodichain/data/default_materials.py
+  - embodichain/data/default_materials.json
+  - embodichain/_material_catalog.py
+  watch_paths: [embodichain/data/, embodichain/_material_catalog.py, embodichain/cli/main.py, tests/data/]
   related_topics: [gen-sim, robot-system, data-pipeline]
   status: active
 - id: data-pipeline
@@ -439,6 +448,7 @@ topics:
     DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice,
     validate_dataset, create_split_manifest, recover_recording, episode_uuid, language_persistent,
     SharedLanguageRegistry, resolve_language, configure_ods, ODSReuseProfileCfg,
+    ODSFlowController, ODSFlowControllerCfg, get_flow_status, ODS 供数控制,
     episode_sample_budget, OnlineDataBudgetExhaustedError, ODS 自动配置, BatchSource, SequenceSpecCfg,
     OnlineDataSource, TensorDataSource, LeRobotDataSource, OfflineDataset, SequenceDataset,
     DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, 数据集加载, 离线加载]
@@ -447,6 +457,7 @@ topics:
   - embodichain/data_pipeline/engine/data.py
   - embodichain/data_pipeline/engine/language.py
   - embodichain/data_pipeline/configuration.py
+  - embodichain/data_pipeline/runtime.py
   - embodichain/data_pipeline/datasets/online_data.py
   - embodichain/data_pipeline/datasets/sequence.py
   - embodichain/data_pipeline/datasets/sources.py

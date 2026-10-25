@@ -261,3 +261,17 @@ def test_main_writes_missing_json_to_stdout(
     assert exit_code == 1
     assert json.loads(captured.out)["missing_count"] == 1
     assert captured.err == ""
+
+
+def test_default_inventory_includes_bundled_benchmark_public_exports():
+    """Moving evaluation to an extension must not remove it from API coverage."""
+    roots = [
+        root
+        for root in _checker.DEFAULT_PACKAGE_ROOTS
+        if root.module == "embodichain_benchmarks"
+    ]
+    assert len(roots) == 1
+    modules = {module.name: module for module in discover_public_modules(roots)}
+    public = modules["embodichain_benchmarks.motion_generation"]
+    assert "run_benchmark" in public.exports
+    assert "PlannerAdapter" in public.exports

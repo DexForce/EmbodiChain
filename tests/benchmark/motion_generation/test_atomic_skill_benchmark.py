@@ -36,15 +36,17 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory, TimedTrajectory
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.utils.math import axis_angle_to_rotation_matrix
-from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.artifacts import (
+from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
+from embodichain_benchmarks.motion_generation.artifacts import (
     TrialJsonlWriter,
     write_case_manifest,
 )
-from scripts.benchmark.motion_generation.config import load_suite
-from scripts.benchmark.motion_generation.contracts import ReplayObservationTrace
-from scripts.benchmark.motion_generation.metrics.trajectory import compute_case_outcomes
-from scripts.benchmark.motion_generation.models import (
+from embodichain_benchmarks.motion_generation.config import load_suite
+from embodichain_benchmarks.motion_generation.contracts import ReplayObservationTrace
+from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+    compute_case_outcomes,
+)
+from embodichain_benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -52,21 +54,21 @@ from scripts.benchmark.motion_generation.models import (
     TrialPhase,
     TrialRecord,
 )
-from scripts.benchmark.motion_generation.registry import create_robot_provider
-from scripts.benchmark.motion_generation.runner import BenchmarkRunner
-from scripts.benchmark.motion_generation import robots as _robots  # noqa: F401
-from scripts.benchmark.motion_generation.scenarios.atomic_objects import (
+from embodichain_benchmarks.motion_generation.registry import create_robot_provider
+from embodichain_benchmarks.motion_generation.runner import BenchmarkRunner
+from embodichain_benchmarks.motion_generation import robots as _robots  # noqa: F401
+from embodichain_benchmarks.motion_generation.scenarios.atomic_objects import (
     atomic_object_kind_names,
     create_atomic_object,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_replay import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
     AtomicReplayRuntime,
 )
-from scripts.benchmark.motion_generation.contracts import ExecutionObservation
-from scripts.benchmark.motion_generation.scenarios.atomic_case_utils import (
+from embodichain_benchmarks.motion_generation.contracts import ExecutionObservation
+from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
     atomic_case_id,
     canonical_case_qpos,
     case_generation_seed,
@@ -74,17 +76,19 @@ from scripts.benchmark.motion_generation.scenarios.atomic_case_utils import (
     seeded_jitter,
     snapshot_case_qpos,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_policy import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
     benchmark_motion_attribution,
     benchmark_motion_policy_strategy,
 )
-from scripts.benchmark.motion_generation.atomic_skill import (
+from embodichain_benchmarks.motion_generation.atomic_skill import (
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
-from scripts.benchmark.motion_generation.scenarios.base import ScenarioProvider
-from scripts.benchmark.motion_generation.scenarios.free_space import FreeSpaceScenario
-from scripts.benchmark.motion_generation.video import (
+from embodichain_benchmarks.motion_generation.scenarios.base import ScenarioProvider
+from embodichain_benchmarks.motion_generation.scenarios.free_space import (
+    FreeSpaceScenario,
+)
+from embodichain_benchmarks.motion_generation.video import (
     VideoRecordCfg,
     build_video_path,
     record_with_window,
@@ -861,7 +865,7 @@ def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
 def test_atomic_suite_is_franka_pgi_and_curobo_only():
     suite = load_suite("atomic_franka_pgi_smoke")
 
-    assert suite.suite_version == "atomic_franka_pgi_smoke_v4"
+    assert suite.suite_version == "atomic_franka_pgi_smoke_v5"
     assert suite.robot.id == "franka_pgi"
     assert suite.robot.provider == "franka_pgi"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo"]
@@ -992,7 +996,7 @@ def test_randomized_atomic_suite_covers_four_interaction_skills_with_fixed_seed_
     suite = load_suite("atomic_franka_pgi_randomized")
     track = suite.enabled_tracks()[0]
 
-    assert suite.suite_version == "atomic_franka_pgi_randomized_v2"
+    assert suite.suite_version == "atomic_franka_pgi_randomized_v3"
     assert track.id == "atomic-skill-randomized"
     assert track.config["seeds"] == list(range(101, 117))
     assert [item["id"] for item in track.config["skills"]] == [
@@ -1563,6 +1567,7 @@ def test_execute_masks_failed_plan_rows_from_execution_success() -> None:
         return_value=Mock(
             squared_tracking_error=torch.zeros(batch_size),
             tracking_value_count=7,
+            physics_steps=None,
             articulation_joint_initial=None,
             articulation_joint_final=None,
             articulation_joint_peak_signed_delta=None,
@@ -2079,8 +2084,8 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
     monkeypatch, execution_ok: bool, motion_ok: bool
 ) -> None:
     """Physical evidence stays row-local and cannot override failed execution."""
-    from scripts.benchmark.motion_generation import contracts
-    from scripts.benchmark.motion_generation.scenarios import atomic_skill
+    from embodichain_benchmarks.motion_generation import contracts
+    from embodichain_benchmarks.motion_generation.scenarios import atomic_skill
 
     case = replace(
         _atomic_case(), batch_size=2, target_waypoints=torch.eye(4).repeat(2, 1, 1, 1)
@@ -2166,8 +2171,8 @@ def test_runner_freezes_domain_manifest_before_each_planner(
     monkeypatch, tmp_path
 ) -> None:
     """The same case population and provenance reach all candidate records."""
-    from scripts.benchmark.motion_generation import runner as runner_module
-    from scripts.benchmark.motion_generation.config import DomainCfg
+    from embodichain_benchmarks.motion_generation import runner as runner_module
+    from embodichain_benchmarks.motion_generation.config import DomainCfg
 
     suite = load_suite("atomic_franka_pgi_smoke")
     suite.tracks = [suite.enabled_tracks()[0]]
@@ -2533,3 +2538,160 @@ def test_nonfinite_press_joint_evidence_does_not_count_as_contact_failure(
     assert results[1].stages[0].status == "unavailable"
     assert results[1].stages[1].status == "not_reached"
     assert results[1].failure_code == "evidence_unavailable"
+
+
+def test_compiled_replay_clock_preserves_intervals_and_zero_time_boundaries():
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
+        _PhysicsReplaySettings,
+    )
+
+    runtime = AtomicReplayRuntime(
+        simulation=Mock(sim_config=Mock(physics_dt=0.01)),
+        robot=Mock(),
+        control_part="arm",
+        track_config={},
+        objects={},
+        articulations={},
+        gripper_states={},
+    )
+    compiled = SimpleNamespace(
+        trajectory=SimpleNamespace(
+            positions=torch.zeros(2, 5, 7),
+            dt=torch.tensor(
+                [[0.0, 0.025, 0.0, 0.025, 0.0], [0.0, 0.025, 0.0, 0.025, 0.0]]
+            ),
+        )
+    )
+    settings = _PhysicsReplaySettings(
+        steps_per_waypoint=16,
+        hold_steps=0,
+        hold_sim_steps=1,
+        joint_tracking_tolerance_rad=0.05,
+        clock="compiled",
+    )
+    assert runtime._arrival_steps(compiled, settings) == [0, 3, 0, 2, 0]
+    # The two 25 ms intervals occupy five physics ticks, independent of the
+    # historical sixteen-ticks-per-sample setting.
+    settings = replace(settings, clock="fixed_samples")
+    assert runtime._arrival_steps(compiled, settings) == [16] * 5
+
+
+def test_compiled_replay_uses_scheduled_ticks_for_completion_time():
+    scenario = AtomicSkillScenario()
+    scenario.simulation = Mock(sim_config=Mock(physics_dt=0.01))
+    scenario.robot = Mock()
+    scenario.robot.get_qpos.return_value = torch.zeros(1, 7)
+    scenario.robot.compute_fk.return_value = torch.eye(4).unsqueeze(0)
+    scenario.track = Mock(
+        config={
+            "physics": {
+                "clock": "compiled",
+                "steps_per_waypoint": 16,
+                "hold_steps": 0,
+                "hold_sim_steps": 1,
+            }
+        }
+    )
+    runtime = scenario._replay_runtime()
+    runtime.replay_physics = Mock(
+        return_value=SimpleNamespace(
+            squared_tracking_error=torch.zeros(1),
+            tracking_value_count=7,
+            physics_steps=5,
+            articulation_joint_initial=None,
+            articulation_joint_final=None,
+            articulation_joint_peak_signed_delta=None,
+            articulation_joint_effect_end=None,
+            object_rotation_peak_signed_rad=None,
+            replay_traces={},
+        )
+    )
+    observation = runtime.execute(
+        _compiled_replay_batch([True]), _atomic_case(), Mock()
+    )
+    assert observation.task_completion_time_s == pytest.approx(0.05)
+
+
+def test_compiled_clock_synchronizes_unequal_row_intervals():
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
+        _PhysicsReplaySettings,
+    )
+
+    runtime = AtomicReplayRuntime(
+        simulation=Mock(sim_config=Mock(physics_dt=0.01)),
+        robot=Mock(),
+        control_part="arm",
+        track_config={},
+        objects={},
+        articulations={},
+        gripper_states={},
+    )
+    compiled = SimpleNamespace(
+        trajectory=SimpleNamespace(
+            positions=torch.zeros(2, 3, 7),
+            dt=torch.tensor([[0.0, 0.01, 0.03], [0.0, 0.03, 0.01]]),
+        )
+    )
+    settings = _PhysicsReplaySettings(
+        steps_per_waypoint=4,
+        hold_steps=0,
+        hold_sim_steps=1,
+        joint_tracking_tolerance_rad=0.05,
+        clock="compiled",
+    )
+    # Both rows reach each indexed command before the next shared phase.
+    assert runtime._arrival_steps(compiled, settings) == [0, 3, 3]
+
+
+def test_atomic_reset_restores_frozen_robot_state_after_settling() -> None:
+    case = _atomic_case()
+    frozen_qpos = case.full_start_qpos.clone()
+    state = {"qpos": frozen_qpos.clone(), "target": frozen_qpos.clone()}
+    events = []
+
+    def set_qpos(qpos: torch.Tensor, *, target: bool) -> None:
+        state["target" if target else "qpos"] = qpos.clone()
+        events.append(("set_qpos", target))
+
+    def settle(*, step: int) -> None:
+        # Model the observed driven-joint drift during the reset window.
+        state["qpos"].add_(0.002)
+        events.append(("settle", step))
+
+    robot = SimpleNamespace(
+        set_qpos=set_qpos,
+        clear_dynamics=lambda: events.append(("clear_dynamics",)),
+        device=torch.device("cpu"),
+    )
+    simulation = SimpleNamespace(update=settle)
+    scenario = AtomicSkillScenario()
+    scenario.reset_case(simulation, robot, case, "arm")
+
+    torch.testing.assert_close(state["qpos"], frozen_qpos, rtol=0, atol=0)
+    torch.testing.assert_close(state["target"], frozen_qpos, rtol=0, atol=0)
+    torch.testing.assert_close(case.full_start_qpos, frozen_qpos, rtol=0, atol=0)
+    assert events[-3:] == [
+        ("set_qpos", False),
+        ("set_qpos", True),
+        ("clear_dynamics",),
+    ]
+    assert ("settle", 2) in events
+
+
+def test_loaded_cases_bind_atomic_providers_without_regeneration(monkeypatch):
+    scenario = AtomicSkillScenario()
+    case = _atomic_case()
+    provider = Mock()
+    factory = Mock(return_value=provider)
+    monkeypatch.setattr(
+        "embodichain_benchmarks.motion_generation.scenarios.atomic_skill.create_atomic_skill_provider",
+        factory,
+    )
+    monkeypatch.setattr(scenario, "restore_base_robot", Mock())
+    scenario.bind_cases([case])
+    factory.assert_called_once_with(case.skill_id)
+    assert scenario._case_providers == {case.case_id: provider}
+    assert scenario._cases_by_id == {case.case_id: case}
+    provider.generate_case.assert_not_called()
+    scenario.bind_cases([case])
+    factory.assert_called_once()

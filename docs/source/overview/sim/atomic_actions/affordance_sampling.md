@@ -55,17 +55,17 @@ Explicit caller-provided grasp poses remain exact. Slide travel distance, Twist
 angle, and OpenDoor opening fraction are action or goal parameters and are not
 sampled by the Affordance layer.
 
-## Parallel simulation tutorials
+## Parallel simulation examples
 
-The following tutorials map one Affordance branch to one simulation environment.
+The following examples map one Affordance branch to one simulation environment.
 They share argument validation, sampling-context construction, and per-row
-diagnostic logging in `scripts/tutorials/atomic_action/tutorial_utils.py`.
+diagnostic logging in `examples/sim/atomic_action/support.py`.
 
-| Entry point under `scripts/tutorials/atomic_action/` | Geometric augmentation | Sampling metadata | Preserved task inputs |
+| Entry point under `examples/sim/atomic_action/` | Geometric augmentation | Sampling metadata | Preserved task inputs |
 |---|---|---|---|
 | `pickup.py` | Select antipodal candidates returned by `AntipodalGraspPoseGenerator.get_valid_grasp_poses()`, after pickup IK and symmetric-roll screening | `grasp`: candidate ID, candidate counts, reuse | Approach direction, pre-grasp distance, lift height |
 | `axis_align.py` | Select generator candidates within the action's preferred alignment-grasp set, then apply the existing symmetric/upright pose adjustments | `grasp`: candidate ID, candidate counts, reuse | Object internal axis and requested target axis |
-| `hand_over.py` | Independently select generator candidates for pickup and receiving grasps; the first hand uses its near projected object end and the receiver uses the opposite end at the predicted middle pose | `pickup_grasp` and `receive_grasp`: candidate ID, candidate counts, reuse, executing arm | Nearest-arm assignment, opposite-end constraint, lift height, final target |
+| `handover.py` | Independently select generator candidates for pickup and receiving grasps; the first hand uses its near projected object end and the receiver uses the opposite end at the predicted middle pose | `pickup_grasp` and `receive_grasp`: candidate ID, candidate counts, reuse, executing arm | Nearest-arm assignment, opposite-end constraint, lift height, final target |
 | `open_door.py` | Select generator candidates on the door handle and replan the hinge-following motion | `grasp`: candidate ID, candidate counts, reuse | Hinge geometry and requested opening fraction |
 | `press.py` | Sample a contact-frame roll in `[-pi, pi]` radians around the press pose's local z-axis | `roll`: per-row contact roll in radians | Contact position, local z-axis, approach distance, press distance |
 | `slide.py` | Select generator candidates on the handle for both pull and push; push plans from the handle pose observed after pull replay | `grasp`: candidate ID, candidate counts, reuse | Pull/push direction and translation distance |
@@ -96,7 +96,7 @@ Every listed entry point accepts the same branch controls:
 For example:
 
 ```bash
-python scripts/tutorials/atomic_action/pickup.py \
+embodichain run-example sim/atomic_action/pickup \
   --affordance_branches 4 \
   --sampling_seed 7 \
   --sampling_attempt 0 \
@@ -110,9 +110,9 @@ also support the same roll augmentation. Press, Slide, and OpenDoor use
 `strategy="ik_interp"` to preserve their required Cartesian contact/path
 samples; their exact-path segments do not use the `--planner` backend.
 
-Each tutorial logs the selected candidate and reuse status, or the sampled roll,
+Each example logs the selected candidate and reuse status, or the sampled roll,
 for every row before replay. HandOver also logs the arm for each grasp stage.
-The tutorials replay only when every row has a successful plan. Planning
+The examples replay only when every row has a successful plan. Planning
 success is not a physical task-success measurement.
 
 The shared parser accepts `--num_envs=1` as the default sentinel; otherwise

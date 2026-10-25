@@ -97,7 +97,7 @@ not switch it. Use a separate environment config for each backend.
   [implement-performance](.agents/skills/implement-performance/SKILL.md).
   Preserve numerical correctness and public contracts; validate material
   performance claims with representative measurements using `/benchmark`.
-- Run **`black==26.3.1`**, using `black .`, before every commit.
+- Run **`black==26.10.1`**, using `black .`, before every commit.
 - Use `/pre-commit-check` for proportional checks. Production fixes/features
   need focused behavioral coverage; existing tests may suffice. Before and after
   adding or extending tests, apply the
