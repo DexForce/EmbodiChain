@@ -997,6 +997,13 @@ class TwistFactory(TwistPrepareFactory):
 class TwistContactSensor(PressContactSensor):
     """Reuse the read-only substep collector; qpos values here are radians."""
 
+    def _native_sleeping(self) -> bool:
+        # The Scene handle's sleep query is unsupported; use Default's native
+        # actor, whose cached velocities may remain nonzero after it sleeps.
+        if self.art.body_data.is_newton_backend:
+            return False
+        return bool(self.art.body_data.entities[0].render_articulation.is_sleeping())
+
     def configure(self, route: TwistRoute, robot: Any) -> None:
         super().configure(route, robot)
         self.geometry = load_twist_geometry(self.art.cfg.fpath, route.binding)
@@ -1452,16 +1459,18 @@ class TwistAcceptancePort:
             if self._candidate_state.goal_complete and not ready
             else self.robot.get_qpos()
         ).clone()
-        values, velocities = [], []
+        values, velocities, sleeping = [], [], []
         for _ in range(math.ceil(0.5 / self.dt)):
             yield hold.clone()
             values.append(float(s.art.get_qpos()[0, s.joint_index]))
             velocities.append(float(s.art.get_qvel()[0, s.joint_index]))
+            sleeping.append(s._native_sleeping())
         stable = bool(
-            max(values) - min(values) <= math.radians(1.0)
+            all(math.isfinite(q) for q in values)
+            and max(values) - min(values) <= math.radians(1.0)
             and all(
-                math.isfinite(v) and abs(v) <= INITIAL_VELOCITY_TOLERANCE
-                for v in velocities
+                math.isfinite(v) and (abs(v) <= INITIAL_VELOCITY_TOLERANCE or asleep)
+                for v, asleep in zip(velocities, sleeping, strict=True)
             )
         )
         recent = s.samples[-max(1, math.ceil(0.15 / s._sim.sim_config.physics_dt)) :]
@@ -1502,6 +1511,7 @@ class TwistAcceptancePort:
                 ),
                 "joint_positions": values,
                 "joint_velocities": velocities,
+                "native_sleeping": sleeping,
                 "initial_velocity_tolerance": INITIAL_VELOCITY_TOLERANCE,
                 "startup_check": startup,
             }
@@ -1620,6 +1630,7 @@ class TwistAcceptancePort:
                 "chunk_contact_progress": chunk_progress,
                 "contact_released": released,
                 "stable": stable,
+                "native_sleeping": sleeping,
                 "recovery_safe": recovery_safe,
                 "candidate_exhausted": bool(
                     valid_chunk
@@ -1661,7 +1672,10 @@ class TwistAcceptancePort:
                 accepted=good,
                 contact_released=released,
                 stable=stable,
+                joint_positions=values,
                 joint_velocities=velocities,
+                native_sleeping=sleeping,
+                stability_velocity_tolerance=INITIAL_VELOCITY_TOLERANCE,
                 clearance=clearance,
                 clearance_required=0.04 if terminal else None,
                 others_unchanged=others_unchanged,

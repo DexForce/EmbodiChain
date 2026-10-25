@@ -1492,11 +1492,18 @@ authored collision vertex, not triangle surfaces. Their vertex-only URDF loading
 retains points belonging to zero-area STL facets and returns no surface-topology
 claim; indices and finiteness remain validated. Knob USD geometry and default
 URDF surface consumers retain strict triangle validation. Regenerate E8 bundles
-for revision 19; no table margin or native contact criterion is relaxed.
+for revision 20; no table margin or native contact criterion is relaxed.
 E8 lowering allows four native-dtype roundoff units at calibrated joint bounds
 for USD/native conversion and constraint projection, then bounds only its
 planning scalar. Geometry freshness and recorded evidence retain the raw native
 observation; substantive overtravel and nonfinite values remain rejected.
+Terminal/chunk stability retains the 1-degree position window and 2-degree/s
+velocity budget. A Default native articulation confirmed asleep at each sample
+can satisfy the velocity condition despite its retained nonzero velocity buffer;
+finite observations, release and contact travel remain required. Evidence keeps
+raw joint positions/velocities and native sleep flags. The Scene wrapper's
+unsupported sleep query is not used, and Newton retains the velocity-only rule.
+Initial startup checks remain unchanged.
 Candidates use final tip bites
 B/3, 2B/3 and B, where B=min(grasp_depth, grip_depth/2). Their TCP shifts are outward-only,
 so no extra inward offset can exceed the requested bite. Depth takes precedence over closed-hand,
