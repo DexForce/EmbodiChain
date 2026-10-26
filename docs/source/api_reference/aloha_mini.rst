@@ -23,7 +23,7 @@ Public import
 Implementation module
 ---------------------
 
-.. currentmodule:: embodichain_robots.aloha_mini
+.. currentmodule:: embodichain_robots.alohamini.aloha_mini.cfg
 
 .. py:class:: AlohaMiniCfg
    :no-index:

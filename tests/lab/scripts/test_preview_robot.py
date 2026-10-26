@@ -118,12 +118,35 @@ def test_preview_defaults_and_opt_outs() -> None:
     assert not disabled.gizmo and not disabled.joint_control
 
 
+@pytest.mark.parametrize("robot_id", (*ROBOT_CONFIGS, "DualArmRobot"))
+def test_all_registered_robot_configs_pass_preview_validation(
+    monkeypatch, robot_asset, robot_id
+) -> None:
+    from importlib import import_module
+    import embodichain.data
+    import embodichain.lab.sim.cfg as sim_cfg
+    from embodichain_robots.dexforce.w1 import utils
+
+    local = lambda _: str(robot_asset)
+    monkeypatch.setattr(embodichain.data, "get_data_path", local)
+    monkeypatch.setattr(sim_cfg, "get_data_path", local)
+    monkeypatch.setattr(utils, "get_data_path", local)
+    for spec in ROBOT_CONFIGS.values():
+        path, _, name = spec["class_path"].partition(":")
+        cls = getattr(import_module(path), name)
+        monkeypatch.setattr(
+            import_module(cls.__module__), "get_data_path", local, raising=False
+        )
+    cfg = preview_robot.build_robot_cfg(_args("--robot", robot_id))
+    assert cfg.fpath or cfg.urdf_cfg is not None
+
+
 @pytest.mark.parametrize("variant", tuple(ROBOT_CONFIGS["DexforceW1"]["variants"]))
 def test_w1_catalog_variants_pass_preview_validation(
     monkeypatch: pytest.MonkeyPatch, robot_asset: Path, variant: str
 ) -> None:
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain_robots.dexforce_w1 import utils as w1_utils
+    from embodichain_robots.dexforce.w1 import utils as w1_utils
 
     monkeypatch.setattr(w1_utils, "get_data_path", lambda _: str(robot_asset))
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda _: str(robot_asset))

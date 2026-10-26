@@ -27,10 +27,17 @@ resolver. Selectors use exact registered IDs; old aliases and `Cfg`-suffixed
 spellings are not accepted. UR variants have their own default parameters. After changing
 entry-point metadata, refresh the editable install and restart the process.
 
-`FrankaPandaPgi` selects the bundled `embodichain_robots.FrankaPandaPgiCfg`,
-assembling the Panda arm and DH PGI gripper. Its `eef` group exposes one leader;
-the passive follower remains in `mimic_joints` outside that group. The stock
-`FrankaPanda` catalog entry keeps the Panda hand and its existing defaults.
+Classification is optional display metadata: `vendor` and `morphology` are
+nonempty strings or `None`; `arm_count` is a nonnegative integer or `None`,
+excluding booleans. Morphology describes the authored body, independently of
+arm count and simulation anchoring. Missing variant fields inherit the parent;
+explicit `None` stays unknown. Classification differences prevent variant rows
+from being grouped. Never infer these fields from paths or control-group names.
+
+Only the stock `FrankaPanda` hand is an official Panda preset. The former PGI
+preset is removed; examples and benchmark fixtures own their explicit Panda/PGI
+assemblies, including flange FK, TCP, drives and finger contacts. Flat concrete
+robot configuration module paths are retired; root class exports remain stable.
 
 `resolve_robot_cfg(..., variant=...)` selects a declared profile's defaults
 between catalog defaults and caller overrides. Omitting the variant keeps

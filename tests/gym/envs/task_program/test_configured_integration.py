@@ -1601,7 +1601,7 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
 ) -> None:
     """Both Marvin hands use source joint commands and toolkit policy defaults."""
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     path = _config_path("hand_over")
     config = _gym_config("hand_over")

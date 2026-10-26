@@ -28,26 +28,26 @@ if __name__ == "__main__" and not __package__:
 
     # Replace the script directory so its ``types.py`` cannot shadow the
     # standard-library ``types`` module in compiler subprocesses.
-    sys.path[0] = str(Path(__file__).resolve().parents[2])
-    sys.path.insert(1, str(Path(__file__).resolve().parents[3]))
+    sys.path[0] = str(Path(__file__).resolve().parents[3])
+    sys.path.insert(1, str(Path(__file__).resolve().parents[4]))
 
 from typing import TYPE_CHECKING, Dict
 
-from embodichain_robots.dexforce_w1.types import (
+from embodichain_robots.dexforce.w1.types import (
     DexforceW1ArmSide,
     DexforceW1HandBrand,
     DexforceW1HandVersion,
     DexforceW1Version,
 )
-from embodichain_robots.dexforce_w1.utils import (
+from embodichain_robots.dexforce.w1.utils import (
     build_dexforce_w1_assembly_urdf_cfg,
     build_dexforce_w1_control_parts,
 )
-from embodichain_robots.dexforce_w1.hand_specs import (
+from embodichain_robots.dexforce.w1.hand_specs import (
     get_default_w1_hand_version,
     normalize_w1_hand_mappings,
 )
-from embodichain_robots.dexforce_w1.specs import get_w1_version_spec
+from embodichain_robots.dexforce.w1.specs import get_w1_version_spec
 from embodichain.lab.sim.cfg import (
     ArticulationRootPropertiesCfg,
     CollisionPropertiesCfg,
@@ -234,7 +234,7 @@ class DexforceW1Cfg(RobotCfg):
     def _build_default_solver_cfg(self):
         """Build version-matched solvers with URDF joint coordinates and limits."""
         from embodichain.lab.sim.motion.solvers import SRSSolverCfg, SolverCfg
-        from embodichain_robots.dexforce_w1.params import (
+        from embodichain_robots.dexforce.w1.params import (
             W1ArmKineParams,
         )
 
@@ -343,7 +343,7 @@ class DexforceW1Cfg(RobotCfg):
             The root_link->end_link kinematics here must match the arms in the
             simulation (assembled) URDF. A DOF drift guard in the tests checks this.
         """
-        from embodichain_robots.dexforce_w1.utils import arm_manager
+        from embodichain_robots.dexforce.w1.utils import arm_manager
 
         return arm_manager.get_urdf(side=arm_side, version=self.version)
 

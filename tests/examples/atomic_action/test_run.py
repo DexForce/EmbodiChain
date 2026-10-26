@@ -44,7 +44,7 @@ from examples.sim.atomic_action.support import (
 )
 from embodichain.lab.sim.atomic_actions import TimedTrajectory
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain_robots import franka_panda
+from embodichain_robots.franka import panda as franka_panda
 from embodichain.utils.string import resolve_matching_names
 
 from examples.sim.atomic_action import scenario, tcp_presets

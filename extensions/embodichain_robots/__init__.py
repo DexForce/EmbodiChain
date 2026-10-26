@@ -26,27 +26,27 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
+    "ARX5Cfg",
     "AlohaMiniCfg",
     "TianjiMarvinCfg",
     "DexforceW1Cfg",
     "CobotMagicCfg",
     "FrankaPandaCfg",
-    "FrankaPandaPgiCfg",
     "FlexivRizon4SCfg",
     "URRobotCfg",
     "SO101FollowerCfg",
 ]
 
 _EXPORTS = {
-    "AlohaMiniCfg": ".aloha_mini",
-    "TianjiMarvinCfg": ".tianji_marvin",
-    "DexforceW1Cfg": ".dexforce_w1.cfg",
-    "CobotMagicCfg": ".cobotmagic",
-    "FrankaPandaCfg": ".franka_panda",
-    "FrankaPandaPgiCfg": ".franka_panda",
-    "FlexivRizon4SCfg": ".flexiv_rizon4s",
-    "URRobotCfg": ".ur_robot",
-    "SO101FollowerCfg": ".so101",
+    "ARX5Cfg": ".arx.arx5",
+    "AlohaMiniCfg": ".alohamini.aloha_mini",
+    "TianjiMarvinCfg": ".tianji.marvin",
+    "DexforceW1Cfg": ".dexforce.w1",
+    "CobotMagicCfg": ".agilex.cobotmagic",
+    "FrankaPandaCfg": ".franka.panda",
+    "FlexivRizon4SCfg": ".flexiv.rizon4s",
+    "URRobotCfg": ".universal_robots.ur_robot",
+    "SO101FollowerCfg": ".the_robot_studio.so101",
 }
 
 

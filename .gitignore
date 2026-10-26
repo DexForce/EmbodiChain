@@ -168,6 +168,10 @@ cache
 *.filament
 *.filamat
 *.png
+# Curated standalone ARX5 robot documentation illustration.
+!/docs/source/_static/robots/arx5.png
+# Curated Atomic Skills recording posters and comparison overviews.
+!/docs/source/_static/atomic_actions/embodiment_switching/*.png
 *.tiff
 *.npy
 *.pkl
@@ -196,6 +200,8 @@ examples/sim/atomic_action/*.glb
 
 wandb/
 *.mp4
+# Curated recordings embedded in the Atomic Skills switching tutorial.
+!/docs/source/_static/atomic_actions/embodiment_switching/*.mp4
 
 # vscode settings
 .vscode/

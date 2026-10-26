@@ -126,6 +126,10 @@ class CheckResult:
 
 DEFAULT_PACKAGE_ROOTS = (
     PackageRoot("embodichain", REPO_ROOT / "embodichain"),
+    PackageRoot(
+        "embodichain_models",
+        REPO_ROOT / "extensions" / "embodichain_models" / "embodichain_models",
+    ),
     PackageRoot("embodichain_robots", REPO_ROOT / "extensions" / "embodichain_robots"),
     PackageRoot(
         "embodichain_benchmarks", REPO_ROOT / "extensions" / "embodichain_benchmarks"

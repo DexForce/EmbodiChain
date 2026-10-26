@@ -23,6 +23,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Offline collection retries and final partial batch | `embodichain/lab/scripts/run_task.py` |
 | File-only validation and grouped quality splits | `embodichain/data_pipeline/datasets/inspection.py`; `embodichain dataset validate\|split` |
 | Durable commit diagnostics and metadata repair | `embodichain/data_pipeline/recording/journal.py`; `embodichain dataset recover` |
+| NeRD-specific HDF5 windows and teacher collection | `extensions/embodichain_models/embodichain_models/dynamics/nerd/data.py` and `examples/learning/nerd/_support/_generation.py`; contracts in [neural dynamics](../neural-dynamics/neural-dynamics.md) |
 | Isolated LeRobot 0.6.1 language/depth conversion | `tools/lerobot_export/` (Python >=3.12, independent dependencies) |
 
 Read [online sampling](online-sampling.md) for worker states, refill, shared
