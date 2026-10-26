@@ -3,7 +3,8 @@
 ## Interactive pure-trajectory augmentation laboratory
 
 Build one self-contained browser page that compares all implemented trajectory
-augmentation routes against the same planar three-link reference:
+augmentation routes against the same 7-DoF Franka Panda reference used by the
+official Atomic Action example:
 
 ```bash
 python examples/expansion/trajectory/trajectory_augmentation_visualizer.py \
@@ -21,7 +22,9 @@ python examples/expansion/trajectory/trajectory_augmentation_visualizer.py \
   --output docs/source/labs/trajectory-augmentation/index.html
 ```
 
-The tabs cover endpoint-preserving joint residuals, interior via points,
+The interactive 3D view uses the official Panda serial-chain geometry and can
+be orbited or zoomed without loading a simulator. The tabs cover
+endpoint-preserving joint residuals, interior via points,
 Jacobian null-space residuals, manipulability-guided selection, task-space
 deformation with trajectory IK, temporal retiming, fixed-contact approach
 direction changes, and phase-aligned multi-demo stitching with explicit

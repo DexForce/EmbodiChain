@@ -16,11 +16,12 @@
 
 """Build an interactive, CPU-only laboratory for trajectory augmentation.
 
-The generated HTML compares every implemented pure-trajectory method on the
-same planar three-link reference.  All candidates are produced by the public
-motion-expansion APIs; the browser owns only playback and drawing.  No image,
-affordance proposal, contact-point sampling, simulator, or task environment is
-involved.
+The generated HTML compares every implemented pure-trajectory method on one
+seven-DoF Franka Panda reference. The browser renders the robot with the same
+serial-chain geometry as the official EmbodiChain preset. All candidates are
+produced by the public motion-expansion APIs; the browser owns only playback
+and drawing. No image, affordance proposal, contact-point sampling, simulator,
+or task environment is involved.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ if str(_REPOSITORY_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.compute.kinematics import DifferentiableIKCfg
+from embodichain.compute.kinematics import DifferentiableIKCfg, solve_dls_ik
 from embodichain.lab.sim.motion.expansion import (
     ManipulabilityBands,
     MinimumJerkBridgePlanner,
@@ -64,18 +65,89 @@ from embodichain.lab.sim.motion.expansion import (
 __all__ = ["main"]
 
 _DT = 0.05
-_LINK_LENGTHS = torch.tensor((0.34, 0.28, 0.22), dtype=torch.float64)
 _JOINT_LIMITS = torch.tensor(
-    ((-math.pi, math.pi),) * 3,
+    (
+        (-2.7437, 2.7437),
+        (-1.7837, 1.7837),
+        (-2.9007, 2.9007),
+        (-3.0421, -0.1518),
+        (-2.8065, 2.8065),
+        (0.5445, 4.5169),
+        (-3.0159, 3.0159),
+    ),
     dtype=torch.float64,
+)
+_FRANKA_JOINT_NAMES = tuple(f"fr3_joint{index}" for index in range(1, 8))
+# Serial chain from the official PandaWithHand URDF used by FrankaPandaCfg.
+# Entries are (name, type, origin xyz, origin rpy, axis).
+_FRANKA_KINEMATIC_JOINTS = (
+    ("fr3_base_joint", "fixed", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    ("fr3_joint1", "revolute", (0.0, 0.0, 0.333), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    (
+        "fr3_joint2",
+        "revolute",
+        (0.0, 0.0, 0.0),
+        (-math.pi / 2, 0.0, 0.0),
+        (0.0, 0.0, 1.0),
+    ),
+    (
+        "fr3_joint3",
+        "revolute",
+        (0.0, -0.316, 0.0),
+        (math.pi / 2, 0.0, 0.0),
+        (0.0, 0.0, 1.0),
+    ),
+    (
+        "fr3_joint4",
+        "revolute",
+        (0.0825, 0.0, 0.0),
+        (math.pi / 2, 0.0, 0.0),
+        (0.0, 0.0, 1.0),
+    ),
+    (
+        "fr3_joint5",
+        "revolute",
+        (-0.0825, 0.384, 0.0),
+        (-math.pi / 2, 0.0, 0.0),
+        (0.0, 0.0, 1.0),
+    ),
+    (
+        "fr3_joint6",
+        "revolute",
+        (0.0, 0.0, 0.0),
+        (math.pi / 2, 0.0, 0.0),
+        (0.0, 0.0, 1.0),
+    ),
+    (
+        "fr3_joint7",
+        "revolute",
+        (0.088, 0.0, 0.0),
+        (math.pi / 2, 0.0, 0.0),
+        (0.0, 0.0, 1.0),
+    ),
+    ("fr3_joint8", "fixed", (0.0, 0.0, 0.107), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    (
+        "fr3_hand_joint",
+        "fixed",
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, -math.pi / 4),
+        (0.0, 0.0, 1.0),
+    ),
+    (
+        "fr3_hand_tcp_joint",
+        "fixed",
+        (0.0, 0.0, 0.1034),
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 1.0),
+    ),
 )
 _FREE_PHASES = ("approach", "transport", "retreat")
 _OPERATORS = ("joint_residual", "via_points", "nullspace_residual", "retime")
 _SEEDS = tuple(range(9))
-_STRENGTHS = (0.02, 0.04, 0.07)
-_TASK_SPACE_STRENGTHS = (0.025, 0.05, 0.08)
+_STRENGTHS = (0.01, 0.025, 0.04)
+_TASK_SPACE_STRENGTHS = (0.015, 0.03, 0.05)
 _APPROACH_ANGLES = (0.12, 0.24, 0.36)
-_STITCH_POSTURE_OFFSETS = (0.12, 0.20, 0.30)
+_STITCH_POSTURE_OFFSETS = (0.08, 0.14, 0.22)
 _TEMPLATE_PATH = Path(__file__).with_name("trajectory_augmentation_lab_template.html")
 
 
@@ -128,24 +200,24 @@ def _template_from_waypoints(
         source_id=source_id,
         source_revision="one",
         template_id=f"{source_id}_pick_place",
-        joint_names=("shoulder", "elbow", "wrist"),
+        joint_names=_FRANKA_JOINT_NAMES,
         positions=positions,
         dt=dt,
         phases=phases,
         allowed_operators=_OPERATORS,
         validator_id="visualization_only",
-        controlled_joint_indices=(0, 1, 2),
+        controlled_joint_indices=tuple(range(7)),
     )
 
 
 def _reference_template() -> TrajectoryTemplate:
     values = (
-        (-0.90, 1.40, 0.20),
-        (-0.45, 1.20, -0.25),
-        (-0.45, 1.20, -0.25),
-        (0.25, 1.05, -0.55),
-        (0.25, 1.05, -0.55),
-        (0.65, 0.75, -0.30),
+        (0.00, -0.569, 0.00, -2.55, 0.00, 2.75, 0.741),
+        (0.32, -0.42, 0.18, -2.30, 0.12, 2.38, 0.82),
+        (0.32, -0.42, 0.18, -2.30, 0.12, 2.38, 0.82),
+        (-0.52, -0.48, -0.12, -2.18, 0.28, 2.22, 0.36),
+        (-0.52, -0.48, -0.12, -2.18, 0.28, 2.22, 0.36),
+        (-0.18, -0.62, 0.08, -2.42, 0.08, 2.58, 0.58),
     )
     return _template_from_waypoints(
         "reference",
@@ -153,57 +225,99 @@ def _reference_template() -> TrajectoryTemplate:
     )
 
 
-def _planar_kinematics(
+def _rotation_matrix(
+    rpy: tuple[float, float, float], reference: torch.Tensor
+) -> torch.Tensor:
+    roll, pitch, yaw = rpy
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    x = reference.new_tensor(((1, 0, 0), (0, cr, -sr), (0, sr, cr)))
+    y = reference.new_tensor(((cp, 0, sp), (0, 1, 0), (-sp, 0, cp)))
+    z = reference.new_tensor(((cy, -sy, 0), (sy, cy, 0), (0, 0, 1)))
+    return z @ y @ x
+
+
+def _origin_transform(
+    xyz: tuple[float, float, float],
+    rpy: tuple[float, float, float],
+    reference: torch.Tensor,
+) -> torch.Tensor:
+    transform = torch.eye(4, dtype=reference.dtype, device=reference.device).repeat(
+        reference.shape[0], 1, 1
+    )
+    transform[:, :3, :3] = _rotation_matrix(rpy, reference)
+    transform[:, :3, 3] = reference.new_tensor(xyz)
+    return transform
+
+
+def _axis_rotation(
+    axis: tuple[float, float, float], angles: torch.Tensor
+) -> torch.Tensor:
+    direction = angles.new_tensor(axis)
+    direction = direction / torch.linalg.vector_norm(direction)
+    x, y, z = direction.unbind()
+    zero = angles.new_zeros(())
+    skew = torch.stack(
+        (
+            torch.stack((zero, -z, y)),
+            torch.stack((z, zero, -x)),
+            torch.stack((-y, x, zero)),
+        )
+    )
+    identity = torch.eye(3, dtype=angles.dtype, device=angles.device)
+    outer = direction[:, None] * direction[None, :]
+    cosine = angles.cos()[:, None, None]
+    sine = angles.sin()[:, None, None]
+    rotation = cosine * identity + (1 - cosine) * outer + sine * skew
+    transform = torch.eye(4, dtype=angles.dtype, device=angles.device).repeat(
+        angles.shape[0], 1, 1
+    )
+    transform[:, :3, :3] = rotation
+    return transform
+
+
+def _franka_forward(
     positions: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    angles = positions.cumsum(dim=-1)
-    cosine = angles.cos()
-    sine = angles.sin()
-    lengths = _LINK_LENGTHS.to(device=positions.device, dtype=positions.dtype)
-    poses = torch.eye(4, dtype=positions.dtype, device=positions.device).repeat(
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Evaluate the official Franka Panda serial-chain geometry."""
+    if positions.ndim != 2 or positions.shape[1] != len(_FRANKA_JOINT_NAMES):
+        raise ValueError("Franka positions must have shape (N, 7)")
+    transform = torch.eye(4, dtype=positions.dtype, device=positions.device).repeat(
         positions.shape[0], 1, 1
     )
-    poses[:, 0, 0] = cosine[:, -1]
-    poses[:, 0, 1] = -sine[:, -1]
-    poses[:, 1, 0] = sine[:, -1]
-    poses[:, 1, 1] = cosine[:, -1]
-    poses[:, 0, 3] = (cosine * lengths).sum(dim=-1)
-    poses[:, 1, 3] = (sine * lengths).sum(dim=-1)
-    jacobians = torch.zeros(
-        positions.shape[0], 6, 3, dtype=positions.dtype, device=positions.device
-    )
-    for joint_index in range(3):
-        jacobians[:, 0, joint_index] = -(
-            sine[:, joint_index:] * lengths[joint_index:]
-        ).sum(dim=-1)
-        jacobians[:, 1, joint_index] = (
-            cosine[:, joint_index:] * lengths[joint_index:]
-        ).sum(dim=-1)
-        jacobians[:, 5, joint_index] = 1
+    active_index = 0
+    joint_origins = []
+    joint_axes = []
+    link_points = [positions.new_zeros((positions.shape[0], 3))]
+    for _, joint_type, xyz, rpy, axis in _FRANKA_KINEMATIC_JOINTS:
+        transform = transform @ _origin_transform(xyz, rpy, positions)
+        if joint_type == "revolute":
+            joint_origins.append(transform[:, :3, 3].clone())
+            local_axis = positions.new_tensor(axis).expand(positions.shape[0], -1)
+            joint_axes.append(
+                (transform[:, :3, :3] @ local_axis.unsqueeze(-1)).squeeze(-1)
+            )
+            transform = transform @ _axis_rotation(axis, positions[:, active_index])
+            active_index += 1
+        link_points.append(transform[:, :3, 3].clone())
+    tcp = transform[:, :3, 3]
+    jacobians = positions.new_zeros((positions.shape[0], 6, positions.shape[1]))
+    for index, (origin, axis) in enumerate(zip(joint_origins, joint_axes, strict=True)):
+        jacobians[:, :3, index] = torch.cross(axis, tcp - origin, dim=-1)
+        jacobians[:, 3:, index] = axis
+    return transform, jacobians, torch.stack(link_points, dim=1)
+
+
+def _franka_kinematics(
+    positions: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    poses, jacobians, _ = _franka_forward(positions)
     return poses, jacobians
 
 
-def _planar_inverse(x: float, y: float, heading: float) -> torch.Tensor:
-    first, second, tool = (float(value) for value in _LINK_LENGTHS)
-    wrist_x = x - tool * math.cos(heading)
-    wrist_y = y - tool * math.sin(heading)
-    cosine = (
-        wrist_x * wrist_x + wrist_y * wrist_y - first * first - second * second
-    ) / (2 * first * second)
-    if abs(cosine) > 1 + 1e-8:
-        raise RuntimeError("The analytic visualizer requested an unreachable pose.")
-    elbow = math.acos(max(-1.0, min(1.0, cosine)))
-    shoulder = math.atan2(wrist_y, wrist_x) - math.atan2(
-        second * math.sin(elbow), first + second * math.cos(elbow)
-    )
-    return torch.tensor(
-        (shoulder, elbow, heading - shoulder - elbow),
-        dtype=torch.float64,
-    )
-
-
 def _tool_points(template: TrajectoryTemplate) -> torch.Tensor:
-    return _planar_kinematics(template.positions)[0][:, :2, 3]
+    return _franka_kinematics(template.positions)[0][:, :3, 3]
 
 
 def _path_length(points: torch.Tensor) -> float:
@@ -224,7 +338,7 @@ def _record(
 ) -> dict[str, object]:
     tool_points = _tool_points(template)
     reference_tool = _tool_points(reference)
-    jacobians = _planar_kinematics(template.positions)[1][:, :2]
+    jacobians = _franka_kinematics(template.positions)[1][:, :3]
     profile = describe_manipulability(jacobians, phases=template.phases)
     phase_sources = phase_sources or {}
     phases = [
@@ -302,7 +416,7 @@ def _via_point_variants(
 def _nullspace_variants(
     reference: TrajectoryTemplate,
 ) -> list[list[dict[str, object]]]:
-    task_jacobians = _planar_kinematics(reference.positions)[1][:, :2]
+    task_jacobians = _franka_kinematics(reference.positions)[1][:, :3]
     return [
         [
             _record(
@@ -314,7 +428,7 @@ def _nullspace_variants(
                     generator=torch.Generator().manual_seed(seed),
                 ),
                 reference,
-                details={"constrained_task_rows": "tool x, tool y"},
+                details={"constrained_task_rows": "EEF x, y, z"},
             )
             for seed in _SEEDS
         ]
@@ -325,7 +439,7 @@ def _nullspace_variants(
 def _manipulability_variants(
     reference: TrajectoryTemplate,
 ) -> list[list[dict[str, object]]]:
-    reference_jacobians = _planar_kinematics(reference.positions)[1][:, :2]
+    reference_jacobians = _franka_kinematics(reference.positions)[1][:, :3]
     reference_score = describe_manipulability(
         reference_jacobians, phases=reference.phases
     ).bottleneck
@@ -339,7 +453,7 @@ def _manipulability_variants(
                 joint_limits=_JOINT_LIMITS,
                 normalized_scale=strength,
                 generator=torch.Generator().manual_seed(seed),
-                jacobian_fn=lambda positions: _planar_kinematics(positions)[1][:, :2],
+                jacobian_fn=lambda positions: _franka_kinematics(positions)[1][:, :3],
                 bands=bands,
                 target_band=seed % bands.count,
                 proposals=12,
@@ -365,23 +479,23 @@ def _task_space_variants(
 ) -> list[list[dict[str, object]]]:
     task_space = task_space_from_joint_template(
         reference,
-        frame_id="planar_tool",
-        kinematics=_planar_kinematics,
+        frame_id="fr3_hand_tcp",
+        kinematics=_franka_kinematics,
         editable_phase_ids=_FREE_PHASES,
     )
     ik_cfg = DifferentiableIKCfg(
-        max_iterations=40,
-        damping=1e-3,
-        step_size=0.8,
-        pos_eps=2e-5,
-        rot_eps=2e-5,
+        max_iterations=80,
+        damping=2e-3,
+        step_size=0.7,
+        pos_eps=5e-5,
+        rot_eps=5e-5,
     )
     result = []
     for strength in _TASK_SPACE_STRENGTHS:
         constraints = {
             phase_id: TaskSpaceDeformationConstraint(
                 phase_id,
-                translation_axes=(True, True, False),
+                translation_axes=(True, True, True),
                 rotation_axes=(False, False, False),
                 max_translation_m=strength,
             )
@@ -397,13 +511,13 @@ def _task_space_variants(
             projection = project_task_space_trajectory(
                 target,
                 reference,
-                kinematics=_planar_kinematics,
+                kinematics=_franka_kinematics,
                 joint_limits=_JOINT_LIMITS,
                 ik_cfg=ik_cfg,
             )
             if not projection.accepted:
                 raise RuntimeError(
-                    f"Analytic task-space variant seed {seed} failed trajectory IK."
+                    f"Franka task-space variant seed {seed} failed trajectory IK."
                 )
             row.append(
                 _record(
@@ -451,9 +565,16 @@ def _approach_variants(
     reference: TrajectoryTemplate,
 ) -> list[list[dict[str, object]]]:
     contact_index = reference.phases[0].stop_index - 1
-    contact_pose = _planar_kinematics(
+    contact_pose = _franka_kinematics(
         reference.positions[contact_index : contact_index + 1]
     )[0][0]
+    ik_cfg = DifferentiableIKCfg(
+        max_iterations=120,
+        damping=2e-3,
+        step_size=0.65,
+        pos_eps=5e-5,
+        rot_eps=5e-5,
+    )
     result = []
     for maximum_angle in _APPROACH_ANGLES:
         row = []
@@ -463,20 +584,28 @@ def _approach_variants(
             azimuth = math.pi / 2 if seed % 2 == 0 else -math.pi / 2
             standoff = perturb_approach_direction(
                 contact_pose,
-                approach_axis=torch.tensor((1.0, 0.0, 0.0), dtype=torch.float64),
-                standoff_distance=0.18,
+                approach_axis=torch.tensor((0.0, 0.0, 1.0), dtype=torch.float64),
+                standoff_distance=0.12,
                 polar_angles=torch.tensor((polar_angle,), dtype=torch.float64),
                 azimuth_angles=torch.tensor((azimuth,), dtype=torch.float64),
-                align_tool=True,
+                align_tool=False,
             )[0]
-            heading = math.atan2(float(standoff[1, 0]), float(standoff[0, 0]))
-            standoff_qpos = _planar_inverse(
-                float(standoff[0, 3]), float(standoff[1, 3]), heading
+            solved = solve_dls_ik(
+                standoff.unsqueeze(0),
+                reference.positions[reference.phases[0].start_index],
+                _franka_kinematics,
+                _JOINT_LIMITS[:, 0],
+                _JOINT_LIMITS[:, 1],
+                ik_cfg,
             )
+            if not bool(solved.success[0]):
+                raise RuntimeError(
+                    f"Franka approach variant seed {seed} failed standoff IK."
+                )
             positions = reference.positions.clone()
             phase = reference.phases[0]
             positions[phase.start_index : phase.stop_index] = _smooth_segment(
-                standoff_qpos,
+                solved.qpos[0],
                 positions[contact_index],
                 phase.stop_index - phase.start_index,
             )
@@ -499,21 +628,17 @@ def _approach_variants(
 def _posture_shifted_template(
     reference: TrajectoryTemplate,
     source_id: str,
-    heading_offset: float,
+    posture_offset: float,
 ) -> TrajectoryTemplate:
     indices = [phase.start_index for phase in reference.phases]
     indices.append(reference.phases[-1].stop_index - 1)
-    poses = _planar_kinematics(reference.positions[indices])[0]
+    pattern = reference.positions.new_tensor((0.35, -0.15, 0.8, 0.0, -0.6, 0.0, 0.5))
+    phase_signs = reference.positions.new_tensor((1.0, 1.0, -1.0, -1.0, 0.7, 0.7))
+    lower, upper = _JOINT_LIMITS[:, 0], _JOINT_LIMITS[:, 1]
     waypoints = []
-    for pose in poses:
-        heading = math.atan2(float(pose[1, 0]), float(pose[0, 0]))
-        waypoints.append(
-            _planar_inverse(
-                float(pose[0, 3]),
-                float(pose[1, 3]),
-                heading + heading_offset,
-            )
-        )
+    for index, sign in zip(indices, phase_signs, strict=True):
+        value = reference.positions[index] + sign * posture_offset * pattern
+        waypoints.append(value.clamp(min=lower + 1e-3, max=upper - 1e-3))
     return _template_from_waypoints(source_id, tuple(waypoints))
 
 
@@ -539,8 +664,10 @@ def _stitching_variants(
         )
         bridge_planner = MinimumJerkBridgePlanner(
             control_dt=_DT,
-            velocity_limits=torch.tensor((1.8, 1.8, 1.8), dtype=torch.float64),
-            acceleration_limits=torch.tensor((6.0, 6.0, 6.0), dtype=torch.float64),
+            velocity_limits=torch.tensor(
+                (2.0, 2.0, 2.0, 2.0, 2.5, 2.5, 2.5), dtype=torch.float64
+            ),
+            acceleration_limits=torch.full((7,), 6.0, dtype=torch.float64),
             minimum_sample_count=5,
         )
         row = []
@@ -623,100 +750,130 @@ def _payload() -> dict[str, object]:
     reference_record = _record(reference, reference)
     methods = {
         "joint_residual": _method(
-            label="关节残差",
+            label="Joint Residual",
             badge="qpos",
-            equation="参考关节轨迹 → 端点包络残差 → 正运动学 FK → 末端路径",
-            principle="在已授权自由阶段内叠加零值、零导数的平滑残差。不同随机种子改变关节方向和幅度。",
+            equation="Reference joint positions → smooth residual → trajectory variant",
+            principle="Adds a smooth joint-space offset inside authorized free phases. Each seed changes the offset direction and amplitude.",
             implementation="joint_residual(template, joint_limits, normalized_scale, generator)",
-            guarantee="阶段端点与 contact/hold 样本保持不变；碰撞、动力学和任务成功仍由宿主验证。",
-            strength_labels=("2% 关节范围", "4% 关节范围", "7% 关节范围"),
+            guarantee="Preserved: phase endpoints and contact/hold samples. The host still validates collisions, dynamics, and task success.",
+            strength_labels=(
+                "1% of joint range",
+                "2.5% of joint range",
+                "4% of joint range",
+            ),
             variants=_joint_residual_variants(reference),
         ),
         "via_points": _method(
-            label="途经点",
+            label="Via Points",
             badge="qpos",
-            equation="参考轨迹 → 每自由段 3 个内部结点 → Clamp Hermite → 末端路径",
-            principle="采样内部结点并用端点导数为零的三次 Hermite 曲线连接，可改变路径形状而不仅是整体鼓包。",
+            equation="Reference path → interior via points → reshaped trajectory",
+            principle="Pulls each free phase through sampled interior joint targets. This creates local bends instead of one broad offset.",
             implementation="via_points(template, via_count=3, normalized_scale, generator)",
-            guarantee="所有标注路点保持精确；只修改显式授权的受控关节。",
-            strength_labels=("2% 结点偏移", "4% 结点偏移", "7% 结点偏移"),
+            guarantee="Preserved: every annotated waypoint. Only explicitly authorized controlled joints change.",
+            strength_labels=(
+                "1% waypoint offset",
+                "2.5% waypoint offset",
+                "4% waypoint offset",
+            ),
             variants=_via_point_variants(reference),
         ),
         "nullspace": _method(
-            label="零空间",
+            label="Null Space",
             badge="Jacobian",
-            equation="关节残差 → J 的零空间投影 → 同一 XY 任务 → 不同机械臂姿态",
-            principle="把残差投影到平面末端 XY Jacobian 的零空间，改变冗余姿态，同时一阶保持任务行。",
+            equation="Joint residual → Jacobian null space → posture variant",
+            principle="Changes redundant joint posture while preserving the selected EEF task rows to first order.",
             implementation="nullspace_residual(template, task_jacobians, ...)",
-            guarantee="端点严格不变，内部任务约束仅一阶保持，必须用 FK 和物理执行再次验证。",
-            strength_labels=("2% 投影前幅度", "4% 投影前幅度", "7% 投影前幅度"),
+            guarantee="Preserved: phase endpoints. Recheck the first-order EEF constraint with FK and physical execution.",
+            strength_labels=(
+                "1% before projection",
+                "2.5% before projection",
+                "4% before projection",
+            ),
             variants=_nullspace_variants(reference),
         ),
         "manipulability": _method(
-            label="可操作度引导",
+            label="Manipulability",
             badge="guided",
-            equation="多次关节残差候选 → Yoshikawa 评分 → 目标区间 → 保留最近候选",
-            principle="不均匀盲采样，而是按参考轨迹归一化的可操作度区间选择候选，从而覆盖不同姿态条件。",
+            equation="Generate candidates → score manipulability → select by band",
+            principle="Selects joint-residual candidates across reference-normalized manipulability bands, covering different posture conditions.",
             implementation="manipulability_guided_residual(..., bands, target_band, proposals=12)",
-            guarantee="可操作度只用于提议和覆盖，不构成可行性或安全证明。",
-            strength_labels=("2% 候选幅度", "4% 候选幅度", "7% 候选幅度"),
+            guarantee="Manipulability guides sampling coverage only; it is not a feasibility or safety certificate.",
+            strength_labels=(
+                "1% proposal scale",
+                "2.5% proposal scale",
+                "4% proposal scale",
+            ),
             variants=_manipulability_variants(reference),
         ),
         "task_space": _method(
-            label="任务空间",
+            label="Task Space",
             badge="trajectory IK",
-            equation="参考 TCP 轨迹 → 有界 XY 形变 → 批量 DLS 轨迹 IK → qpos",
-            principle="直接改变末端路径的内部样本，再投影回完整关节轨迹；锁定样本沿用参考 qpos。",
+            equation="Deform EEF path → trajectory IK → joint positions",
+            principle="Moves interior EEF samples, then projects the edited path back to a full joint trajectory. Locked samples keep their reference qpos.",
             implementation="deform_task_space_trajectory() + project_task_space_trajectory()",
-            guarantee="只编辑授权自由阶段，阶段端点精确；结果携带逐样本 IK 成功和位姿残差。",
-            strength_labels=("2.5 cm", "5 cm", "8 cm"),
+            guarantee="Only authorized free phases change. Endpoints stay exact, and every sample reports IK success and pose residual.",
+            strength_labels=("1.5 cm", "3 cm", "5 cm"),
             variants=_task_space_variants(reference),
         ),
         "timing": _method(
-            label="时间重参数化",
+            label="Retiming",
             badge="retime",
-            equation="同一几何路径 → 时长缩放 + ease profile → 控制时钟重采样",
-            principle="保持空间路径不变，改变自由阶段的速度分布和总时长；种子在 uniform/ease-in/ease-out 间切换。",
+            equation="Same geometry → new duration and timing profile",
+            principle="Keeps the spatial path and changes free-phase speed distribution and total duration. Seeds select uniform, ease-in, or ease-out timing.",
             implementation="retime(template, duration_scale, control_dt, profile)",
-            guarantee="contact/hold 时长和阶段端点不变；路径视图重合，关节曲线视图显示时间差异。",
-            strength_labels=("1.15× 时长", "1.40× 时长", "1.80× 时长"),
+            guarantee="Preserved: geometry, contact/hold duration, and phase endpoints. Open Joint Positions to see the timing change.",
+            strength_labels=("1.15× duration", "1.40× duration", "1.80× duration"),
             variants=_timing_variants(reference),
         ),
         "approach": _method(
-            label="接近方向",
+            label="Approach",
             badge="fixed contact",
-            equation="固定接触位姿 → 锥面采样 standoff → 解析 IK → 重新生成接近段",
-            principle="只改变接触前的接近方向和预接触姿态，接触位姿本身不变；这不是接触点或 affordance 采样。",
-            implementation="perturb_approach_direction() + showcase-owned planar replanning",
-            guarantee="候选 standoff 仍需可达性、净空和路径规划验证；页面中的解析 IK 只服务于这个平面示例。",
-            strength_labels=("±6.9° 锥角", "±13.8° 锥角", "±20.6° 锥角"),
+            equation="Fixed contact pose → sampled standoff → replanned approach",
+            principle="Changes the pre-contact direction and standoff while keeping the contact pose fixed. This is not affordance sampling.",
+            implementation="perturb_approach_direction() + solve_dls_ik()",
+            guarantee="Preserved: contact pose. The sampled standoff still needs reachability, clearance, and planning checks.",
+            strength_labels=("±6.9° cone", "±13.8° cone", "±20.6° cone"),
             variants=_approach_variants(reference),
         ),
         "stitching": _method(
-            label="分段拼接",
+            label="Stitching",
             badge="multi-demo",
-            equation="同任务示教库 → 按语义阶段选段 → 不连续边界显式桥接 → 新轨迹",
-            principle="从多个同任务示教中按 approach/grasp/transport/release/retreat 重组，保留来源谱系。",
+            equation="Compatible phase segments → explicit bridges → new trajectory",
+            principle="Recombines semantic phases from demonstrations of the same task and keeps source lineage for every segment.",
             implementation="TrajectorySegmentBank + stitch_trajectory_segments(..., bridge_planner)",
-            guarantee="兼容性按阶段语义和关节布局检查；最小 jerk 桥只保证采样连续，不保证碰撞安全。",
+            guarantee="Compatibility covers phase semantics and joint layout. Minimum-jerk bridges are continuous but not collision-certified.",
             strength_labels=(
-                "±0.12 rad 姿态库",
-                "±0.20 rad 姿态库",
-                "±0.30 rad 姿态库",
+                "±0.08 rad source range",
+                "±0.14 rad source range",
+                "±0.22 rad source range",
             ),
             variants=_stitching_variants(reference),
         ),
     }
     return {
-        "title": "轨迹扩增实验室",
-        "subtitle": "同一条参考轨迹 · 平面三关节机械臂 · 生产 API 原理演示",
-        "link_lengths": _LINK_LENGTHS.tolist(),
+        "title": "Trajectory Augmentation Lab",
+        "subtitle": "Compare trajectory variants for one task on the 7-DoF Franka Panda.",
+        "robot": {
+            "name": "Franka Panda",
+            "dof": len(_FRANKA_JOINT_NAMES),
+            "joint_names": list(_FRANKA_JOINT_NAMES),
+            "kinematic_joints": [
+                {
+                    "name": name,
+                    "type": joint_type,
+                    "xyz": list(xyz),
+                    "rpy": list(rpy),
+                    "axis": list(axis),
+                }
+                for name, joint_type, xyz, rpy, axis in _FRANKA_KINEMATIC_JOINTS
+            ],
+        },
         "seed_count": len(_SEEDS),
         "reference": reference_record,
         "methods": methods,
         "scope": {
-            "included": "关节、任务空间、时序、接近方向与多示教分段重组",
-            "excluded": "图像、affordance、接触点/抓取位姿采样和场景随机化",
+            "included": "joint motion, EEF path, timing, approach, and demonstration segments",
+            "excluded": "task, contact poses, affordances, observations, and scene",
         },
     }
 

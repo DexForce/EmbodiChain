@@ -3,11 +3,11 @@
   Licensed under the Apache License, Version 2.0.
 -->
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>轨迹扩增实验室 · EmbodiChain</title>
+  <title>Trajectory Augmentation Lab · EmbodiChain</title>
   <style>
     :root {
       color-scheme: dark;
@@ -51,6 +51,7 @@
       padding: 10px 13px; max-width: 470px; color: #b9c2cf; line-height: 1.55;
     }
     .scope strong { color: var(--green); }
+    .scope span { margin-left: 4px; }
     .scope .excluded { color: #9da6b4; }
     .tabs {
       display: flex; gap: 8px; overflow-x: auto; padding: 22px 0 14px;
@@ -109,6 +110,8 @@
     .view-button.active { color: white; background: #263347; border-color: #3a4d69; }
     .canvas-wrap { position: relative; height: 540px; background: #0d1015; }
     canvas { display: block; width: 100%; height: 100%; }
+    canvas.orbitable { cursor: grab; touch-action: none; }
+    canvas.orbitable.dragging { cursor: grabbing; }
     .chart-caption {
       position: absolute; top: 13px; left: 16px; color: #8a95a5; font-size: 11px;
       pointer-events: none;
@@ -140,17 +143,17 @@
   <div class="app">
     <header class="header">
       <div>
-        <div class="eyebrow">EmbodiChain · Pure trajectory</div>
+        <div class="eyebrow">EmbodiChain · Trajectory augmentation</div>
         <h1 id="title"></h1>
         <p class="subtitle" id="subtitle"></p>
       </div>
       <div class="scope">
-        <div><strong>包含：</strong><span id="scope-included"></span></div>
-        <div class="excluded"><strong>明确排除：</strong><span id="scope-excluded"></span></div>
+        <div><strong>Varies:</strong><span id="scope-included"></span></div>
+        <div class="excluded"><strong>Keeps fixed:</strong><span id="scope-excluded"></span></div>
       </div>
     </header>
 
-    <nav class="tabs" id="tabs" aria-label="轨迹扩增方法"></nav>
+    <nav class="tabs" id="tabs" aria-label="Trajectory augmentation methods"></nav>
 
     <main class="main-grid">
       <aside class="panel sidebar">
@@ -161,39 +164,39 @@
 
         <section class="control-block">
           <div class="slider-head">
-            <span>扰动上限 / 方法强度</span>
+            <span>Variation</span>
             <span class="strength-value" id="strength-value"></span>
           </div>
-          <input id="strength" type="range" min="0" max="2" step="1" value="1" aria-label="方法强度">
+          <input id="strength" type="range" min="0" max="2" step="1" value="1" aria-label="Variation strength">
           <div class="seed-row">
-            <div class="seed-box">局部随机种子 <span id="seed-value">7</span></div>
-            <button class="seed-button" id="seed-button">换一组轨迹</button>
+            <div class="seed-box">Seed <span id="seed-value">7</span></div>
+            <button class="seed-button" id="seed-button">New variant</button>
           </div>
         </section>
 
         <section class="control-block">
-          <div class="section-label">原理</div>
+          <div class="section-label">What changes</div>
           <p class="explain" id="method-principle"></p>
           <code class="implementation" id="method-implementation"></code>
         </section>
 
         <section class="control-block">
-          <div class="section-label">边界与保证</div>
+          <div class="section-label">Validity boundary</div>
           <div class="guarantee" id="method-guarantee"></div>
-          <div class="footnote">所有随机性来自显式局部 generator；页面只播放 Python 已生成的数据，不在 JavaScript 中重新实现扩增算法。</div>
+          <div class="footnote">EmbodiChain's Python APIs generated every candidate. The browser only visualizes the results.</div>
         </section>
       </aside>
 
       <section class="panel visual">
         <div class="visual-head">
           <div class="legend">
-            <span class="legend-item"><i class="line reference"></i>参考轨迹</span>
-            <span class="legend-item"><i class="line"></i>扩增轨迹</span>
-            <span class="legend-item"><i class="diamond"></i>阶段边界</span>
+            <span class="legend-item"><i class="line reference"></i>Reference</span>
+            <span class="legend-item"><i class="line"></i>Variant</span>
+            <span class="legend-item"><i class="diamond"></i>Phase boundary</span>
           </div>
           <div class="view-toggle">
-            <button class="view-button active" data-view="path">末端路径</button>
-            <button class="view-button" data-view="joint">关节曲线</button>
+            <button class="view-button active" data-view="path">EEF Path</button>
+            <button class="view-button" data-view="joint">Joint Positions</button>
           </div>
         </div>
         <div class="canvas-wrap">
@@ -204,8 +207,8 @@
         <div class="timeline-area">
           <div class="phases" id="phases"></div>
           <div class="transport">
-            <button class="play-button" id="play-button">播放</button>
-            <input id="timeline" type="range" min="0" max="1000" value="330" step="1" aria-label="轨迹播放位置">
+            <button class="play-button" id="play-button">Play</button>
+            <input id="timeline" type="range" min="0" max="1000" value="330" step="1" aria-label="Trajectory playback position">
             <div class="time-readout" id="time-readout"></div>
           </div>
         </div>
@@ -217,17 +220,18 @@
     "use strict";
     const DATA = __TRAJECTORY_AUGMENTATION_DATA__;
     const state = { method: "joint_residual", strength: 1, seed: 7, view: "path", progress: 0.33, playing: false };
-    const phaseNames = { approach: "接近", grasp: "抓取", transport: "运送", release: "释放", retreat: "撤回" };
+    const camera = { yaw: -0.72, pitch: 0.36, distance: 1.85, dragging: false, x: 0, y: 0 };
+    const phaseNames = { approach: "Approach", grasp: "Grasp", transport: "Transport", release: "Release", retreat: "Retreat" };
     const metricNames = {
-      duration_s: "总时长", sample_count: "采样点", tool_path_ratio: "路径长度 / 参考",
-      minimum_manipulability: "最低可操作度", joint_range_fraction: "关节范围比例",
-      via_points_per_free_phase: "每段途经点", constrained_task_rows: "约束任务行",
-      target_band: "目标区间", reached_band: "实际区间", matched: "命中目标",
-      proposals_scored: "评估候选", translation_bound_m: "平移上限",
-      maximum_ik_error_m: "最大 IK 误差", duration_scale: "时长倍率",
-      timing_profile: "时间曲线", cone_angle_deg: "锥角", fixed_contact_error_m: "接触误差",
-      requires_replanning: "需重新规划", bank_size: "示教段库", bridge_count: "桥接段",
-      selected_sources: "来源顺序"
+      duration_s: "Duration", sample_count: "Samples", tool_path_ratio: "Path length / reference",
+      minimum_manipulability: "Min. manipulability", joint_range_fraction: "Joint range used",
+      via_points_per_free_phase: "Via points / free phase", constrained_task_rows: "Constrained task rows",
+      target_band: "Target band", reached_band: "Reached band", matched: "Target matched",
+      proposals_scored: "Candidates scored", translation_bound_m: "Translation bound",
+      maximum_ik_error_m: "Max. IK error", duration_scale: "Duration scale",
+      timing_profile: "Timing profile", cone_angle_deg: "Cone angle", fixed_contact_error_m: "Fixed-contact error",
+      requires_replanning: "Replan required", bank_size: "Segment bank", bridge_count: "Bridges",
+      selected_sources: "Source order"
     };
     const colors = { blue: "#4f8cff", reference: "#8993a1", grid: "#242a33", text: "#7f8997", boundary: "#e4eaf2", contact: "#f0b35a", bridge: "#ff6b6b" };
     const canvas = document.getElementById("plot");
@@ -247,16 +251,75 @@
       if (low > 0 && Math.abs(record.time[low - 1] - target) < Math.abs(record.time[low] - target)) return low - 1;
       return low;
     }
-    function armPoints(q) {
-      const points = [[0, 0]];
-      let angle = 0, x = 0, y = 0;
-      q.forEach((value, index) => {
-        angle += value;
-        x += DATA.link_lengths[index] * Math.cos(angle);
-        y += DATA.link_lengths[index] * Math.sin(angle);
-        points.push([x, y]);
+    function identity4() {
+      return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    }
+    function multiply4(a, b) {
+      const result = new Array(16).fill(0);
+      for (let row = 0; row < 4; row += 1) {
+        for (let column = 0; column < 4; column += 1) {
+          for (let index = 0; index < 4; index += 1) result[row * 4 + column] += a[row * 4 + index] * b[index * 4 + column];
+        }
+      }
+      return result;
+    }
+    function originTransform(xyz, rpy) {
+      const [roll, pitch, yaw] = rpy;
+      const cr = Math.cos(roll), sr = Math.sin(roll), cp = Math.cos(pitch), sp = Math.sin(pitch), cy = Math.cos(yaw), sy = Math.sin(yaw);
+      return [
+        cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr, xyz[0],
+        sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr, xyz[1],
+        -sp, cp * sr, cp * cr, xyz[2],
+        0, 0, 0, 1
+      ];
+    }
+    function axisRotation(axis, angle) {
+      const length = Math.hypot(...axis), x = axis[0] / length, y = axis[1] / length, z = axis[2] / length;
+      const cosine = Math.cos(angle), sine = Math.sin(angle), complement = 1 - cosine;
+      return [
+        cosine + x * x * complement, x * y * complement - z * sine, x * z * complement + y * sine, 0,
+        y * x * complement + z * sine, cosine + y * y * complement, y * z * complement - x * sine, 0,
+        z * x * complement - y * sine, z * y * complement + x * sine, cosine + z * z * complement, 0,
+        0, 0, 0, 1
+      ];
+    }
+    function transformPoint(transform, point) {
+      return [
+        transform[0] * point[0] + transform[1] * point[1] + transform[2] * point[2] + transform[3],
+        transform[4] * point[0] + transform[5] * point[1] + transform[6] * point[2] + transform[7],
+        transform[8] * point[0] + transform[9] * point[1] + transform[10] * point[2] + transform[11]
+      ];
+    }
+    function transformVector(transform, vector) {
+      return [
+        transform[0] * vector[0] + transform[1] * vector[1] + transform[2] * vector[2],
+        transform[4] * vector[0] + transform[5] * vector[1] + transform[6] * vector[2],
+        transform[8] * vector[0] + transform[9] * vector[1] + transform[10] * vector[2]
+      ];
+    }
+    function add3(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+    function scale3(value, scale) { return [value[0] * scale, value[1] * scale, value[2] * scale]; }
+    function dot3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+    function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+    function normalize3(value) {
+      const length = Math.max(1e-9, Math.hypot(...value));
+      return value.map(component => component / length);
+    }
+    function frankaPose(q) {
+      let transform = identity4(), activeIndex = 0;
+      const points = [[0, 0, 0]], joints = [];
+      DATA.robot.kinematic_joints.forEach(joint => {
+        transform = multiply4(transform, originTransform(joint.xyz, joint.rpy));
+        if (joint.type === "revolute") {
+          joints.push(transformPoint(transform, [0, 0, 0]));
+          transform = multiply4(transform, axisRotation(joint.axis, q[activeIndex]));
+          activeIndex += 1;
+        }
+        const point = transformPoint(transform, [0, 0, 0]);
+        const previous = points[points.length - 1];
+        if (Math.hypot(point[0] - previous[0], point[1] - previous[1], point[2] - previous[2]) > 1e-5) points.push(point);
       });
-      return points;
+      return { points, joints, tcp: transformPoint(transform, [0, 0, 0]), transform };
     }
     function resizeCanvas() {
       const bounds = canvas.getBoundingClientRect();
@@ -317,36 +380,82 @@
       for (let value = start; value <= maximum + step * .1; value += step) ticks.push(value);
       return ticks;
     }
+    function cameraProjection(width, height) {
+      const target = [0, 0, .43], horizontal = camera.distance * Math.cos(camera.pitch);
+      const position = [
+        target[0] + horizontal * Math.cos(camera.yaw),
+        target[1] + horizontal * Math.sin(camera.yaw),
+        target[2] + camera.distance * Math.sin(camera.pitch)
+      ];
+      const forward = normalize3([target[0] - position[0], target[1] - position[1], target[2] - position[2]]);
+      const right = normalize3(cross3(forward, [0, 0, 1]));
+      const up = normalize3(cross3(right, forward));
+      const focalLength = Math.min(width, height) * 1.28;
+      return point => {
+        const relative = [point[0] - position[0], point[1] - position[1], point[2] - position[2]];
+        const depth = Math.max(.1, dot3(relative, forward));
+        return [width * .52 + dot3(relative, right) / depth * focalLength, height * .55 - dot3(relative, up) / depth * focalLength, depth];
+      };
+    }
+    function drawGround(project) {
+      const extent = .65, step = .13;
+      for (let index = -5; index <= 5; index += 1) {
+        const value = index * step;
+        polyline([[-extent, value, 0], [extent, value, 0]], project, index === 0 ? "#343c48" : "#202730", index === 0 ? 1.2 : 1);
+        polyline([[value, -extent, 0], [value, extent, 0]], project, index === 0 ? "#343c48" : "#202730", index === 0 ? 1.2 : 1);
+      }
+      const axes = [
+        { point: [.19, 0, 0], color: "#ff6b6b", label: "X" },
+        { point: [0, .19, 0], color: "#58d68d", label: "Y" },
+        { point: [0, 0, .19], color: "#5b9dff", label: "Z" }
+      ];
+      axes.forEach(axis => {
+        polyline([[0, 0, 0], axis.point], project, axis.color, 2);
+        const [x, y] = project(axis.point);
+        context.fillStyle = axis.color; context.font = "10px ui-sans-serif, system-ui"; context.textAlign = "center"; context.fillText(axis.label, x, y - 5);
+      });
+    }
+    function drawRobot(pose, project, reference = false) {
+      const projectedLinks = pose.points.slice(1).map((point, index) => {
+        const start = pose.points[index], startProjected = project(start), stopProjected = project(point);
+        return { start, point, depth: (startProjected[2] + stopProjected[2]) / 2 };
+      }).sort((a, b) => b.depth - a.depth);
+      if (reference) {
+        projectedLinks.forEach(link => polyline([link.start, link.point], project, "rgba(124,135,149,.46)", 4, [5, 5]));
+        return;
+      }
+      const [baseX, baseY] = project([0, 0, 0]);
+      context.beginPath(); context.ellipse(baseX, baseY + 4, 22, 10, 0, 0, Math.PI * 2);
+      context.fillStyle = "#202a36"; context.fill(); context.strokeStyle = "#647184"; context.lineWidth = 1.5; context.stroke();
+      projectedLinks.forEach(link => polyline([link.start, link.point], project, "#28313c", 17));
+      projectedLinks.forEach((link, index) => polyline([link.start, link.point], project, index % 2 ? "#cfd7df" : "#e4e9ee", 10));
+      pose.joints.forEach((point, index) => {
+        const [x, y] = project(point), radius = index === 6 ? 6 : 7;
+        context.beginPath(); context.arc(x, y, radius + 2, 0, Math.PI * 2); context.fillStyle = "#222b35"; context.fill();
+        context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2); context.fillStyle = "#3869ad"; context.strokeStyle = "#7fb0ff"; context.lineWidth = 1.5; context.fill(); context.stroke();
+      });
+      const toolX = normalize3(transformVector(pose.transform, [1, 0, 0]));
+      const toolZ = normalize3(transformVector(pose.transform, [0, 0, 1]));
+      const palm = add3(pose.tcp, scale3(toolZ, -.07));
+      const left = add3(palm, scale3(toolX, .045)), right = add3(palm, scale3(toolX, -.045));
+      const leftTip = add3(left, scale3(toolZ, .105)), rightTip = add3(right, scale3(toolZ, .105));
+      polyline([left, right], project, "#1d2630", 10);
+      polyline([left, right], project, "#dce3e9", 6);
+      [[left, leftTip], [right, rightTip]].forEach(finger => {
+        polyline(finger, project, "#1d2630", 9); polyline(finger, project, "#dce3e9", 5);
+      });
+      const [tcpX, tcpY] = project(pose.tcp);
+      context.beginPath(); context.arc(tcpX, tcpY, 4, 0, Math.PI * 2); context.fillStyle = "#d9e8ff"; context.fill(); context.strokeStyle = colors.blue; context.lineWidth = 2; context.stroke();
+    }
     function drawPath(width, height) {
-      const reference = DATA.reference, variant = candidate();
-      const allArms = [];
-      reference.q.forEach(q => allArms.push(...armPoints(q)));
-      variant.q.forEach(q => allArms.push(...armPoints(q)));
-      const xValues = allArms.map(point => point[0]), yValues = allArms.map(point => point[1]);
-      let [xMin, xMax] = extent(xValues), [yMin, yMax] = extent(yValues);
-      const margin = .06; xMin -= margin; xMax += margin; yMin -= margin; yMax += margin;
-      const left = 62, right = width - 24, top = 28, bottom = height - 48;
-      const plotWidth = right - left, plotHeight = bottom - top;
-      const scale = Math.min(plotWidth / (xMax - xMin), plotHeight / (yMax - yMin));
-      const usedWidth = (xMax - xMin) * scale, usedHeight = (yMax - yMin) * scale;
-      const offsetX = left + (plotWidth - usedWidth) / 2, offsetY = top + (plotHeight - usedHeight) / 2;
-      const project = point => [offsetX + (point[0] - xMin) * scale, offsetY + (yMax - point[1]) * scale];
-      const bounds = { left: offsetX, right: offsetX + usedWidth, top: offsetY, bottom: offsetY + usedHeight, xMin, yMin };
-      drawGrid(project, niceTicks(xMin, xMax), niceTicks(yMin, yMax), "x / m", "y / m", bounds);
+      const reference = DATA.reference, variant = candidate(), project = cameraProjection(width, height);
+      drawGround(project);
       polyline(reference.tool, project, colors.reference, 1.7, [6, 5]);
-      polyline(variant.tool, project, colors.blue, 2.5);
+      polyline(variant.tool, project, colors.blue, 2.8);
       variant.phases.forEach(phase => diamond(variant.tool[phase.stop - 1], project, phase.kind === "bridge" ? colors.bridge : colors.boundary));
       const referenceIndex = sampleIndex(reference, state.progress), variantIndex = sampleIndex(variant, state.progress);
-      const referenceArm = armPoints(reference.q[referenceIndex]), variantArm = armPoints(variant.q[variantIndex]);
-      polyline(referenceArm, project, "rgba(143,152,165,.75)", 5, [6, 5]);
-      polyline(variantArm, project, colors.blue, 6);
-      [...referenceArm.slice(1, -1)].forEach(point => {
-        const [x, y] = project(point); context.beginPath(); context.arc(x, y, 4, 0, Math.PI * 2); context.fillStyle = "#566171"; context.fill();
-      });
-      [...variantArm].forEach((point, index) => {
-        const [x, y] = project(point); context.beginPath(); context.arc(x, y, index === 0 ? 5 : 4, 0, Math.PI * 2);
-        context.fillStyle = index === variantArm.length - 1 ? "#cfe0ff" : "#173d7d"; context.strokeStyle = colors.blue; context.lineWidth = 2; context.fill(); context.stroke();
-      });
+      drawRobot(frankaPose(reference.q[referenceIndex]), project, true);
+      drawRobot(frankaPose(variant.q[variantIndex]), project);
     }
     function drawJoints(width, height) {
       const reference = DATA.reference, variant = candidate();
@@ -364,16 +473,16 @@
         context.fillStyle = phase.kind === "bridge" ? "rgba(255,107,107,.12)" : "rgba(240,179,90,.09)";
         context.fillRect(x0, top, Math.max(1, x1 - x0), bottom - top);
       });
-      const jointColors = ["#4f8cff", "#5bd6de", "#d88cf0"];
-      for (let joint = 0; joint < 3; joint += 1) {
+      const jointColors = ["#4f8cff", "#5bd6de", "#d88cf0", "#f0b35a", "#58d68d", "#ff7a90", "#a3b8ff"];
+      for (let joint = 0; joint < DATA.robot.dof; joint += 1) {
         polyline(reference.q.map((q, index) => [reference.time[index], q[joint]]), project, jointColors[joint] + "88", 1.4, [5, 4]);
         polyline(variant.q.map((q, index) => [variant.time[index], q[joint]]), project, jointColors[joint], 2.2);
       }
       const cursorTime = state.progress * duration(variant), [cursorX] = project([cursorTime, qMin]);
       context.strokeStyle = "rgba(255,255,255,.65)"; context.lineWidth = 1; context.beginPath(); context.moveTo(cursorX, top); context.lineTo(cursorX, bottom); context.stroke();
       context.font = "11px ui-sans-serif, system-ui";
-      ["shoulder", "elbow", "wrist"].forEach((name, index) => {
-        context.fillStyle = jointColors[index]; context.textAlign = "left"; context.fillText(name, left + index * 76, top + 12);
+      DATA.robot.joint_names.forEach((name, index) => {
+        context.fillStyle = jointColors[index]; context.textAlign = "left"; context.fillText(`J${index + 1}`, left + index * 38, top + 12);
       });
     }
     function draw() {
@@ -385,7 +494,7 @@
     }
     function formatMetric(key, value) {
       if (Array.isArray(value)) return value.join(" → ");
-      if (typeof value === "boolean") return value ? "是" : "否";
+      if (typeof value === "boolean") return value ? "Yes" : "No";
       if (typeof value === "number") {
         if (key.endsWith("_m")) return `${value} m`;
         if (key.endsWith("_s")) return `${value.toFixed(2)} s`;
@@ -409,7 +518,7 @@
         const button = document.createElement("button");
         button.className = `phase-button ${phase.kind}` + (currentIndex >= phase.start && currentIndex < phase.stop ? " active" : "");
         const source = phase.source && phase.source !== "reference" && phase.source !== "stitched" ? ` · ${phase.source}` : "";
-        button.textContent = `${phaseNames[phase.label] || (phase.kind === "bridge" ? "桥接" : phase.label)}${source}`;
+        button.textContent = `${phaseNames[phase.label] || (phase.kind === "bridge" ? "Bridge" : phase.label)}${source}`;
         button.onclick = () => { state.progress = variant.time[phase.start] / duration(variant); syncProgress(); };
         container.appendChild(button);
       });
@@ -430,7 +539,8 @@
       document.getElementById("method-implementation").textContent = value.implementation;
       document.getElementById("method-guarantee").textContent = value.guarantee;
       document.getElementById("strength-value").textContent = value.strength_labels[state.strength];
-      document.getElementById("chart-caption").textContent = state.view === "path" ? "末端路径与当前机械臂姿态" : "参考与扩增关节轨迹 · 虚线 / 实线";
+      document.getElementById("chart-caption").textContent = state.view === "path" ? "3D EEF path and Franka Panda pose · drag to orbit · scroll to zoom" : "Reference vs. variant joint positions · dashed / solid";
+      canvas.classList.toggle("orbitable", state.view === "path");
       updateMetrics(); syncProgress();
     }
     function initialize() {
@@ -441,7 +551,7 @@
       const tabs = document.getElementById("tabs");
       Object.entries(DATA.methods).forEach(([key, value]) => {
         const button = document.createElement("button"); button.className = "tab"; button.dataset.method = key;
-        button.innerHTML = `${value.label}<span class="mini">${value.badge}</span>`;
+        button.textContent = value.label;
         button.onclick = () => { state.method = key; state.progress = .33; updateMethod(); };
         tabs.appendChild(button);
       });
@@ -452,13 +562,35 @@
       };
       document.getElementById("timeline").oninput = event => { state.progress = Number(event.target.value) / 1000; syncProgress(); };
       document.getElementById("play-button").onclick = () => {
-        state.playing = !state.playing; document.getElementById("play-button").textContent = state.playing ? "暂停" : "播放";
+        state.playing = !state.playing; document.getElementById("play-button").textContent = state.playing ? "Pause" : "Play";
       };
       document.querySelectorAll(".view-button").forEach(button => button.onclick = () => {
         state.view = button.dataset.view;
         document.querySelectorAll(".view-button").forEach(item => item.classList.toggle("active", item === button));
         updateMethod();
       });
+      canvas.addEventListener("pointerdown", event => {
+        if (state.view !== "path") return;
+        camera.dragging = true; camera.x = event.clientX; camera.y = event.clientY;
+        canvas.classList.add("dragging"); canvas.setPointerCapture(event.pointerId);
+      });
+      canvas.addEventListener("pointermove", event => {
+        if (!camera.dragging) return;
+        camera.yaw -= (event.clientX - camera.x) * .008;
+        camera.pitch = Math.max(-.08, Math.min(1.18, camera.pitch + (event.clientY - camera.y) * .006));
+        camera.x = event.clientX; camera.y = event.clientY; draw();
+      });
+      const endOrbit = event => {
+        if (!camera.dragging) return;
+        camera.dragging = false; canvas.classList.remove("dragging");
+        if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      };
+      canvas.addEventListener("pointerup", endOrbit);
+      canvas.addEventListener("pointercancel", endOrbit);
+      canvas.addEventListener("wheel", event => {
+        if (state.view !== "path") return;
+        event.preventDefault(); camera.distance = Math.max(1.15, Math.min(3.2, camera.distance * Math.exp(event.deltaY * .001))); draw();
+      }, { passive: false });
       new ResizeObserver(resizeCanvas).observe(canvas.parentElement);
       updateMethod(); resizeCanvas();
       requestAnimationFrame(animate);

@@ -15,9 +15,10 @@ and variant expansion then produces several ways of executing that set.
 ## Interactive laboratory
 
 [Open the trajectory augmentation laboratory](../../../labs/trajectory-augmentation/)
-to compare the implemented trajectory-only routes on one planar three-link
-reference. It provides method and strength selection, nine deterministic local
-seeds, phase-aware playback, and tool-path and joint-curve views. The page is a
+to compare the implemented trajectory-only routes on the 7-DoF Franka Panda
+used by the official Atomic Action example. It provides method and strength
+selection, nine deterministic local seeds, phase-aware playback, an orbitable
+3D tool-path and robot view, and seven joint curves. The page is a
 self-contained static artifact: Python generated every candidate through the
 production expansion APIs, while the browser only draws and plays the records.
 

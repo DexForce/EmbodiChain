@@ -189,8 +189,10 @@ renders both paths analytically on CPU and records IK residuals, source lineage
 and bridge phases without constructing a simulator.
 `trajectory_augmentation_visualizer.py` is the CPU-only browser overview for
 the implemented trajectory operators: Python calls the production APIs and
-embeds their candidates in a self-contained HTML page, while JavaScript owns
-only playback and plotting. The checked-in generated page lives under
+embeds their candidates in a self-contained HTML page. The page uses the
+official Atomic Action example's seven-DoF Franka Panda serial-chain geometry
+for orbitable 3D robot and EEF-path playback; JavaScript owns only playback and
+drawing. The checked-in generated page lives under
 `docs/source/labs/trajectory-augmentation/`; Sphinx copies that directory into
 each versioned documentation build through `html_extra_path`, so the same page
 is published by the existing GitHub Pages workflow. It deliberately excludes
