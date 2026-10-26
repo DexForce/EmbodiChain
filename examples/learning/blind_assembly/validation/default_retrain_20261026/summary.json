@@ -1,0 +1,278 @@
+{
+  "schema": "embodichain-default-assets-retraining-summary/v1",
+  "qualification": "Native PPO initialized randomly, externally interrupted and restored at950, then completed the unchanged1000-update lineage. One geometry, seed0,4096 arenas. Not uninterrupted training, full paper reproduction, multi-seed,12288-arena or hardware qualification.",
+  "source_evidence_commit": "f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0",
+  "full_result_url": "https://github.com/DexForce/EmbodiChain/blob/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/examples/learning/blind_assembly/validation/default_retrain_20261026/result.json",
+  "training": {
+    "status": "completed_after_parent_interruption",
+    "updates": 1000,
+    "global_step": 131072000,
+    "parent_checkpoint_covered_wrapper_seconds": 26897.33886074787,
+    "parent_observed_process_span_seconds": 27235.353387,
+    "continuation_wrapper_seconds": 2072.9626446468756,
+    "continuation_process_seconds": 2094.2586604910903,
+    "observed_segment_span_sum_seconds": 29329.61204749109,
+    "calendar_first_launch_to_continuation_exit_seconds": 30247.335308,
+    "setup_until_trainer_ready_seconds_by_segment": [
+      222.58802639180794,
+      293.60901921405457
+    ],
+    "recorded_executed_updates_lower_bound": 1008,
+    "discarded_parent_updates_after_checkpoint": 8,
+    "timing_scope": "Parent last liveness supplies an approximate observed process span, not exact termination time. Continuation process wall includes setup/native PPO/validation/strict readbacks/teardown. Calendar span includes interruption gap. Original resource probes overlapped development jobs. No uninterrupted or isolated performance measurement is claimed."
+  },
+  "checkpoint": {
+    "num_updates": 850,
+    "global_step": 111411200,
+    "sha256": "68c9625efbb7f85c07e22b1b2b0111e1a5e83d4ac386121927c57e0a898da116",
+    "selection_successes": 462,
+    "selection_episodes": 512,
+    "selection_seed": 10000,
+    "selection_num_envs": 64,
+    "selection_allocation": "8 episodes per arena; every saved update evaluated; earliest update wins a score tie; independent test excluded"
+  },
+  "final_evaluation": {
+    "successes": 7240,
+    "episodes": 8192,
+    "success_rate": 0.8837890625,
+    "wilson_95": [
+      0.8766686088749416,
+      0.8905497458960139
+    ],
+    "acceptance_target": 0.95,
+    "acceptance_target_met": false,
+    "seed": 20000,
+    "num_envs": 1024,
+    "episodes_per_env": 8,
+    "episode_ledger_sha256": "a2b328dbc5261e55d3ebb7d3f6b3c62e76805aec58b2d8c084618dd00f93a260",
+    "metrics": {
+      "eval/avg_reward": 1.8017578125,
+      "eval/avg_length": 45.059326171875,
+      "eval/success_rate": 0.8837890625,
+      "eval/completed_episodes": 8192.0,
+      "eval/success_samples": 8192.0,
+      "eval/episodes_per_env_min": 8.0,
+      "eval/episodes_per_env_max": 8.0,
+      "eval/success_ci95_low": 0.8766686088749416,
+      "eval/success_ci95_high": 0.8905497458960139,
+      "eval/metrics/radial_error": 0.0017005603734088215,
+      "eval/metrics/tilt": 0.01814193368853978,
+      "eval/metrics/depth": 0.01582705998430356,
+      "eval/metrics/penetration": 3.670120212297277e-06,
+      "eval/metrics/grasped": 0.8902587890625,
+      "eval/metrics/captured": 0.9178466796875
+    },
+    "control_grid_duration_seconds": {
+      "n": 8192,
+      "mean": 0.9011865234375,
+      "median": 0.76,
+      "p95": 1.72,
+      "max": 5.0,
+      "min": 0.26
+    },
+    "successful_control_grid_duration_seconds": {
+      "n": 7240,
+      "mean": 0.8634254143646409,
+      "median": 0.76,
+      "p95": 1.58,
+      "max": 4.94,
+      "min": 0.26
+    },
+    "failed_control_grid_duration_seconds": {
+      "n": 952,
+      "mean": 1.1883613445378152,
+      "median": 0.74,
+      "p95": 5.0,
+      "max": 5.0,
+      "min": 0.54
+    },
+    "terminal_penetration_micrometres": {
+      "n": 8192,
+      "mean": 3.670120212297277,
+      "median": 1.0708313880058995,
+      "p95": 15.600214919686545,
+      "max": 175.63180881552398,
+      "min": 0.0
+    },
+    "failure_endpoint_observations": {
+      "failures": 952,
+      "terminal_not_grasped": 899,
+      "terminal_captured": 279,
+      "length_250": 53,
+      "scope": "Overlapping endpoint observations, not inferred causes. Peak force, torque, penetration and path length were not measured."
+    }
+  },
+  "resources": {
+    "sampled_peak_process_gpu_bytes": 11010048000,
+    "sampled_peak_process_rss_bytes": 6766366720,
+    "scope": "Maximum of parent and continuation PID-filtered1Hz samples, not sum or transient peak. Parent raw monitor stopped without finalization."
+  },
+  "native_health": {
+    "parent_through950": {
+      "train": {
+        "observations": 30400,
+        "control_boundaries_observed": 30400,
+        "physical_substeps_observed": 0,
+        "scope": "after sim.update returns, before BaseEnv auto-reset; sticky overflow flags cover the full control interval, contact maxima sample its last physical substep",
+        "capacity_overflow_seen": false,
+        "convergence_budget_exhausted_seen": true,
+        "unclassified_overflow_seen": false,
+        "native_state": {
+          "fields": [
+            "qpos",
+            "qvel",
+            "qacc"
+          ],
+          "scope": "complete native qpos/qvel/qacc arrays after sim.update returns and before BaseEnv auto-reset; states between control boundaries are not sampled",
+          "observations": 30400,
+          "complete_observations": 30400,
+          "nonfinite_seen": false,
+          "all_samples_finite": true
+        }
+      },
+      "eval": {
+        "observations": 4843,
+        "control_boundaries_observed": 4843,
+        "physical_substeps_observed": 0,
+        "scope": "after sim.update returns, before BaseEnv auto-reset; sticky overflow flags cover the full control interval, contact maxima sample its last physical substep",
+        "capacity_overflow_seen": false,
+        "convergence_budget_exhausted_seen": true,
+        "unclassified_overflow_seen": false,
+        "native_state": {
+          "fields": [
+            "qpos",
+            "qvel",
+            "qacc"
+          ],
+          "scope": "complete native qpos/qvel/qacc arrays after sim.update returns and before BaseEnv auto-reset; states between control boundaries are not sampled",
+          "observations": 4843,
+          "complete_observations": 4843,
+          "nonfinite_seen": false,
+          "all_samples_finite": true
+        }
+      }
+    },
+    "continuation_950_to1000": {
+      "train": {
+        "observations": 1600,
+        "control_boundaries_observed": 1600,
+        "physical_substeps_observed": 0,
+        "scope": "after sim.update returns, before BaseEnv auto-reset; sticky overflow flags cover the full control interval, contact maxima sample its last physical substep",
+        "capacity_overflow_seen": false,
+        "convergence_budget_exhausted_seen": true,
+        "unclassified_overflow_seen": false,
+        "native_state": {
+          "fields": [
+            "qpos",
+            "qvel",
+            "qacc"
+          ],
+          "scope": "complete native qpos/qvel/qacc arrays after sim.update returns and before BaseEnv auto-reset; states between control boundaries are not sampled",
+          "observations": 1600,
+          "complete_observations": 1600,
+          "nonfinite_seen": false,
+          "all_samples_finite": true
+        }
+      },
+      "eval": {
+        "observations": 200,
+        "control_boundaries_observed": 200,
+        "physical_substeps_observed": 0,
+        "scope": "after sim.update returns, before BaseEnv auto-reset; sticky overflow flags cover the full control interval, contact maxima sample its last physical substep",
+        "capacity_overflow_seen": false,
+        "convergence_budget_exhausted_seen": true,
+        "unclassified_overflow_seen": false,
+        "native_state": {
+          "fields": [
+            "qpos",
+            "qvel",
+            "qacc"
+          ],
+          "scope": "complete native qpos/qvel/qacc arrays after sim.update returns and before BaseEnv auto-reset; states between control boundaries are not sampled",
+          "observations": 200,
+          "complete_observations": 200,
+          "nonfinite_seen": false,
+          "all_samples_finite": true
+        }
+      }
+    },
+    "final_evaluation": {
+      "observations": 799,
+      "control_boundaries_observed": 799,
+      "physical_substeps_observed": 0,
+      "scope": "after sim.update returns, before BaseEnv auto-reset; sticky overflow flags cover the full control interval, contact maxima sample its last physical substep",
+      "capacity_overflow_seen": false,
+      "convergence_budget_exhausted_seen": true,
+      "unclassified_overflow_seen": false,
+      "native_state": {
+        "fields": [
+          "qpos",
+          "qvel",
+          "qacc"
+        ],
+        "scope": "complete native qpos/qvel/qacc arrays after sim.update returns and before BaseEnv auto-reset; states between control boundaries are not sampled",
+        "observations": 799,
+        "complete_observations": 799,
+        "nonfinite_seen": false,
+        "all_samples_finite": true
+      }
+    }
+  },
+  "runtime_software": {
+    "python": "3.11.14",
+    "embodichain": "0.3.2",
+    "dexsim-engine": "0.5.1+528daf12fd44b9383b30165ac484cf79b574e873",
+    "torch": "2.7.1+cu128",
+    "warp-lang": "1.17.0",
+    "newton": "1.7.0",
+    "mujoco": "3.15.0",
+    "mujoco-warp": "3.15.0",
+    "mjfit": "0.1.0",
+    "pytorch-kinematics": "0.10.0",
+    "git_head": "40e8ed41ab83cebdf1776a19a462172702ee4e63",
+    "git_dirty": false
+  },
+  "preview": {
+    "seed_sequence": [
+      30000,
+      30001,
+      30002
+    ],
+    "checkpoint_sha256": "68c9625efbb7f85c07e22b1b2b0111e1a5e83d4ac386121927c57e0a898da116",
+    "video_sha256": "40fd80bbe77363401cb97300f7d9b21d069019c9958b37f4bf28eba3cf2aee38",
+    "video_bytes": 101285,
+    "width": 960,
+    "height": 540,
+    "frames": 95,
+    "fps": "25/1",
+    "duration_seconds": 3.8,
+    "qualification": "All predeclared seeds retained, including failures. Separate native rendering demonstration, without strict raw-state guard."
+  },
+  "preview_episodes": [
+    {
+      "seed": 30000,
+      "steps": 39,
+      "simulation_seconds": 0.78,
+      "success": true,
+      "fail": false,
+      "truncated": false
+    },
+    {
+      "seed": 30001,
+      "steps": 39,
+      "simulation_seconds": 0.78,
+      "success": true,
+      "fail": false,
+      "truncated": false
+    },
+    {
+      "seed": 30002,
+      "steps": 43,
+      "simulation_seconds": 0.86,
+      "success": true,
+      "fail": false,
+      "truncated": false
+    }
+  ],
+  "actor_export_max_absolute_error": 0.0
+}

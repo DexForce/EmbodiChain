@@ -1,9 +1,0 @@
-{
-  "pid": 1858503,
-  "samples": 2084,
-  "sampled_peak_process_gpu_bytes": 10982785024,
-  "sampled_peak_process_rss_bytes": 6222389248,
-  "sampling_interval_seconds": 1,
-  "status": "process_exited",
-  "scope": "1 Hz owning resumed training process samples; not transient allocation peaks"
-}

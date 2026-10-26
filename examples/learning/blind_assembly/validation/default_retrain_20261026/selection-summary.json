@@ -1,0 +1,198 @@
+{
+  "schema": "embodichain-peg-balanced-selection-summary/v1",
+  "source_evidence_commit": "f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0",
+  "qualification": "Balanced development validation of every saved update; not independent-test or paper-reproduction evidence.",
+  "protocol": {
+    "episodes": 512,
+    "num_envs": 64,
+    "seed": 10000,
+    "episode_allocation": "balanced",
+    "jobs": 4,
+    "device": "cuda:0",
+    "selection_rule": "highest success rate; ties prefer earlier updates"
+  },
+  "selected_update": 850,
+  "selected_checkpoint_sha256": "68c9625efbb7f85c07e22b1b2b0111e1a5e83d4ac386121927c57e0a898da116",
+  "candidates": [
+    {
+      "num_updates": 50,
+      "global_step": 6553600,
+      "sha256": "5d24d1a7a19ed7d49190a6010e49321f369deeac547e79800800a390299f5e93",
+      "status": "completed",
+      "successes": 303,
+      "success_rate": 0.591796875,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 100,
+      "global_step": 13107200,
+      "sha256": "39bb57547040fc6d8388016ea8ed5d1249e9bb221dc155debab3786674feb12b",
+      "status": "completed",
+      "successes": 349,
+      "success_rate": 0.681640625,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 150,
+      "global_step": 19660800,
+      "sha256": "78fdbfe88b3e3fdca0427dd40564817e55953f13b317e2d54e413b59353c62a9",
+      "status": "completed",
+      "successes": 398,
+      "success_rate": 0.77734375,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 200,
+      "global_step": 26214400,
+      "sha256": "5ee641630a6bbe09f9fec6110a702f116c31e4f5ccfd4f4ae1d02f04de1697ce",
+      "status": "completed",
+      "successes": 377,
+      "success_rate": 0.736328125,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 250,
+      "global_step": 32768000,
+      "sha256": "312af960aa704496f9bea502d3f368336f6828a1aa9641b23cfa54de884e5335",
+      "status": "completed",
+      "successes": 413,
+      "success_rate": 0.806640625,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 300,
+      "global_step": 39321600,
+      "sha256": "3aed5da25d15c124cc4036abdb555d6aa7c3b69077958229b04b80c45e33885b",
+      "status": "completed",
+      "successes": 425,
+      "success_rate": 0.830078125,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 350,
+      "global_step": 45875200,
+      "sha256": "4c55bf922487e3692ae92a5a640b63fda1ba91589497209e2ee7ca9cc7eae37d",
+      "status": "completed",
+      "successes": 410,
+      "success_rate": 0.80078125,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 400,
+      "global_step": 52428800,
+      "sha256": "a046d576d55ccf3e53f8218fb49372ad881d1c40b3ffe56ed4634b562283d961",
+      "status": "completed",
+      "successes": 417,
+      "success_rate": 0.814453125,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 450,
+      "global_step": 58982400,
+      "sha256": "a5906d1d853fa0a3a3c55545457f66b054bef325a38f746d9035df89b7e5b753",
+      "status": "completed",
+      "successes": 442,
+      "success_rate": 0.86328125,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 500,
+      "global_step": 65536000,
+      "sha256": "0095ae685c666f682dc188e9c13b296988294ca4067e0c4788115d6dde7b493a",
+      "status": "completed",
+      "successes": 434,
+      "success_rate": 0.84765625,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 550,
+      "global_step": 72089600,
+      "sha256": "f6c39d1ef71f19c3973342149c3417f03e2db3cc4d264dffa70b83d21dbbc156",
+      "status": "completed",
+      "successes": 441,
+      "success_rate": 0.861328125,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 600,
+      "global_step": 78643200,
+      "sha256": "97bb8efb7f2822087b04d04845ab3b9567a95d1740e27cbf7131543e7fe929ea",
+      "status": "completed",
+      "successes": 431,
+      "success_rate": 0.841796875,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 650,
+      "global_step": 85196800,
+      "sha256": "63228fa842e37fb59e5be43d436f54c1fbf586d7508487f4e2cab61b07b41115",
+      "status": "completed",
+      "successes": 425,
+      "success_rate": 0.830078125,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 700,
+      "global_step": 91750400,
+      "sha256": "9930a62f25871cbb0df43f493f60f285289578c7ee06276ed6713cf70398ac1d",
+      "status": "completed",
+      "successes": 444,
+      "success_rate": 0.8671875,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 750,
+      "global_step": 98304000,
+      "sha256": "f16cd7786680b4cc86452e03726fbcbdc5b313b182cf3410f39d14c4628f34e1",
+      "status": "completed",
+      "successes": 441,
+      "success_rate": 0.861328125,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 800,
+      "global_step": 104857600,
+      "sha256": "3ba306db2f482ac7a555574ee32a74bfb8d4d36b8cf0e8c098c209dda6944170",
+      "status": "completed",
+      "successes": 446,
+      "success_rate": 0.87109375,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 850,
+      "global_step": 111411200,
+      "sha256": "68c9625efbb7f85c07e22b1b2b0111e1a5e83d4ac386121927c57e0a898da116",
+      "status": "completed",
+      "successes": 462,
+      "success_rate": 0.90234375,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 900,
+      "global_step": 117964800,
+      "sha256": "98da527c3ef8063ef3041f9cacef874805b6dcb6fef23a59f0a5df3e6cde9df6",
+      "status": "completed",
+      "successes": 448,
+      "success_rate": 0.875,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 950,
+      "global_step": 124518400,
+      "sha256": "a66990ce2eb7b04239724a3a1e368efae971f6980955e1d21e0d89ec6940c793",
+      "status": "completed",
+      "successes": 447,
+      "success_rate": 0.873046875,
+      "convergence_budget_exhausted_seen": true
+    },
+    {
+      "num_updates": 1000,
+      "global_step": 131072000,
+      "sha256": "cd13c8c5bf168fbcd3f2339d78ef33d9ab1de3c7fe6ab4a8c13bd655a602e144",
+      "status": "completed",
+      "successes": 454,
+      "success_rate": 0.88671875,
+      "convergence_budget_exhausted_seen": true
+    }
+  ]
+}

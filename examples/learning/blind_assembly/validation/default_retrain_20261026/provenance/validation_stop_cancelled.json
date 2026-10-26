@@ -1,9 +1,0 @@
-{
-  "utc": "2026-10-26T12:20:23.156801+00:00",
-  "observer_pids": [
-    1324977
-  ],
-  "training_pid_unchanged": 1309570,
-  "scope": "only the external early-stop observer was stopped; native training and physics unchanged",
-  "final_test_used": false
-}

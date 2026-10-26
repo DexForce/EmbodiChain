@@ -1,1 +1,0 @@
-{"pid": 1309570, "samples": 27095, "sampled_peak_process_gpu_bytes": 11010048000, "sampled_peak_process_rss_bytes": 6766366720, "sampling_interval_seconds": 1, "scope": "1 Hz sampled owning training process; monitoring begins after initialization has already started; not a transient allocation peak", "status": "sampling"}

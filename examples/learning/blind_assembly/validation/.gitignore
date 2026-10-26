@@ -1,0 +1,19 @@
+# Curated evidence only; training logs and state dumps belong in outputs/.
+*
+!.gitignore
+!default_assets_20261026/
+!default_assets_20261026/README.md
+!default_assets_20261026/inference_report.json
+!default_retrain_20261026/
+!default_retrain_20261026/RESULTS.md
+!default_retrain_20261026/EXPERIMENT_REVIEW.md
+!default_retrain_20261026/summary.json
+!default_retrain_20261026/selection-summary.json
+!default_retrain_20261026/evaluation.json
+!default_retrain_20261026/experimental_settings_comparison.json
+!default_retrain_20261026/model_descriptor.json
+!default_retrain_20261026/actor_export.json
+!default_retrain_20261026/episodes.jsonl.gz
+!default_retrain_20261026/learning_curves.png
+!default_retrain_20261026/grip_and_repeatability.png
+!default_retrain_20261026/preview.mp4

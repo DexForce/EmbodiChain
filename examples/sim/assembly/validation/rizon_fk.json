@@ -1,8 +1,0 @@
-{
-  "samples": 100,
-  "max_translation_m": 1.6286568149670444e-07,
-  "max_rotation_element_error": 4.0780595678135967e-07,
-  "source_revision": "f3b6013629c7b94f8ee93fd977b161fa8350f9bc",
-  "gripper_model": "parallel_jaw",
-  "paper_dynamics_identified": false
-}

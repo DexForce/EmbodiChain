@@ -38,7 +38,7 @@ Python 3.12.14、MuJoCo/Warp 3.14.0、Warp 1.17.0。
 
 原生两环境测试验证了孔不会被视觉网格封闭、质量只作用一次、选择性 reset、删除重建、变体质量和初态、连续铰链超过整圈旋转。
 
-公开机器人 100 个随机关节状态对照源 MuJoCo，最大 FK 平移差为 **0.163 μm**；这验证运动学，不验证作者辨识动力学或源夹爪闭链。[原始记录](validation/rizon_fk.json)
+公开机器人 100 个随机关节状态对照源 MuJoCo，最大 FK 平移差为 **0.163 μm**；这验证运动学，不验证作者辨识动力学或源夹爪闭链。[原始记录](https://github.com/DexForce/EmbodiChain/blob/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/examples/sim/assembly/validation/rizon_fk.json)
 
 ### 接触精度
 
@@ -51,7 +51,7 @@ Python 3.12.14、MuJoCo/Warp 3.14.0、Warp 1.17.0。
 | Newton/Warp | 0.0683 μm | 0.1296 μm | 0.0579 μm | 行为通过；native 溢出诊断尚缺 |
 | Default | 0.0010 μm | −0.0954 μm | 0.0034 μm | 行为通过；参数映射仍不等价 |
 
-Default 记录到接触 offset 从 0 钳制到 100 μm 的提示，因此不能将其结果解释为原始 MuJoCo 参数等价。原生引擎未暴露的健康计数保留为 `unverified`。[CPU/Warp/Newton 数据](validation/constrained_cpu_warp_newton.json)，[Default 数据](validation/constrained_default.json)
+Default 记录到接触 offset 从 0 钳制到 100 μm 的提示，因此不能将其结果解释为原始 MuJoCo 参数等价。原生引擎未暴露的健康计数保留为 `unverified`。[CPU/Warp/Newton 数据](https://github.com/DexForce/EmbodiChain/blob/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/examples/sim/assembly/validation/constrained_cpu_warp_newton.json)，[Default 数据](https://github.com/DexForce/EmbodiChain/blob/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/examples/sim/assembly/validation/constrained_default.json)
 
 独立 worker 只导入 MuJoCo/NumPy，对两版引擎加载同一份 MJCF；MULTICCD 显式启用、步长 1 ms、作用力 0.1 N、时长 0.3 s、四个方向。修正后的圆孔最坏稳态误差如下：
 
@@ -64,20 +64,20 @@ Default 记录到接触 offset 从 0 钳制到 100 μm 的提示，因此不能�
 
 验收容差没有改变。此前解析圆柱未继承 nested defaults 的结果已作废；回归测试检查两侧的实际 `solref/solimp/solmix/priority`。这里仅包含修正后的 [独立参考 XML、spec 与数据](validation/independent_reference/)。
 
-匹配源地面接触参数后，圆销在 CPU、原生 Warp、Newton 直接构建和 Newton USD 路线的下降量均约 15.000 mm；native 路线保留溢出诊断未验证状态。[数据](validation/passive_matched_floor.json)
+匹配源地面接触参数后，圆销在 CPU、原生 Warp、Newton 直接构建和 Newton USD 路线的下降量均约 15.000 mm；native 路线保留溢出诊断未验证状态。[数据](https://github.com/DexForce/EmbodiChain/blob/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/examples/sim/assembly/validation/passive_matched_floor.json)
 
 ### 原生任务与模型
 
-三任务均通过构建、reset 与 25 步实际仿真。双侧接触比例为 peg 1.0、gear 1.0、nut 0.76；螺母仍有接触间歇，未认定为稳定抓持。[数据](validation/task_smoke.json)
+三任务均通过构建、reset 与 25 步实际仿真。双侧接触比例为 peg 1.0、gear 1.0、nut 0.76；螺母仍有接触间歇，未认定为稳定抓持。[数据](https://github.com/DexForce/EmbodiChain/blob/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/examples/sim/assembly/validation/task_smoke.json)
 
 nominal 配置使用显式双滑动夹爪、源手指质量与接触几何，以及编码器驱动的模型重力前馈。它不保留 Robotiq 四连杆/肌腱动力学。当前 reset 是局部接触与固定 ready pose，没有声称完成论文的全工作空间初态分布。
 
 真实 PPO smoke 完成 2 环境 × 32 步 × 1 update，即 **64 transitions**。最终 checkpoint 的 SHA-256 为
 `205585e4e31e1c93e5fd69cd91d5eecae92246a3072a1b72ea9142761f778f72`。
 
-搬移完整 run 后，在禁止 mjfit 和原机器人缓存访问的条件下完成 2 个 250 步 episode：**成功 0/2**、抓持指标 1.0、平均夹具穿透 1.296 μm，Wilson 95% 区间为 [0, 0.6576]。这是训练与重放通路验证，尚未学会装配。[评估记录](validation/native_smoke_eval.json)
+搬移完整 run 后，在禁止 mjfit 和原机器人缓存访问的条件下完成 2 个 250 步 episode：**成功 0/2**、抓持指标 1.0、平均夹具穿透 1.296 μm，Wilson 95% 区间为 [0, 0.6576]。这是训练与重放通路验证，尚未学会装配。[评估记录](https://github.com/DexForce/EmbodiChain/blob/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/examples/sim/assembly/validation/native_smoke_eval.json)
 
-actor-only TorchScript 已导出并与 eager 推理多 batch 对照，最大差异为 0。它不含 critic 或 contact decoder。[导出描述](validation/actor_smoke.json)
+actor-only TorchScript 已导出并与 eager 推理多 batch 对照，最大差异为 0。它不含 critic 或 contact decoder。[导出描述](https://github.com/DexForce/EmbodiChain/blob/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/examples/sim/assembly/validation/actor_smoke.json)
 
 独立合成 tensor 容量测量支持 12288 环境：rollout payload 2261 MiB、一次 PPO 更新的 warmed Torch 峰值约 6360 MiB。该测量不包含真实场景、渲染或非 Torch 分配。[完整范围说明](../../learning/blind_assembly/CAPACITY.md)
 

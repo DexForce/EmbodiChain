@@ -1,0 +1,18 @@
+# Curated evidence only; generated benchmark output belongs in outputs/.
+*
+!.gitignore
+!ARCHIVE.md
+!archive.json
+!index.json
+!independent_reference/
+!independent_reference/**
+!20261026/
+!20261026/*.md
+!rl_attempt/
+!rl_attempt/RESULTS.md
+!rl_attempt/result.json
+!rl_attempt/final_evaluation.json
+!rl_attempt/episodes.jsonl.gz
+!rl_attempt/model_descriptor.json
+!rl_attempt/policy_reference.json
+!rl_attempt/policy_reference_inputs.json

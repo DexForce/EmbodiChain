@@ -2,7 +2,7 @@
 
 本轮独立测试为 **7240/8192=88.3789%**，95%Wilson区间 **87.6669%–89.0550%**，未达到95%工程目标。目前最应优先验证的是**驱动暖机/接触执行的可重复性和真实负载夹持稳定性**。没有证据支持把差距简单归因于机械臂增益变大、孔销尺寸改变或训练步数不够；也尚未定位一个可确认的源码缺陷。
 
-审查固定在`40e8ed41ab83cebdf1776a19a462172702ee4e63`。三组对象分别是：旧nominal滑动夹爪模型及其97.73%评测、旧权重换默认资产后的0/3预览、本轮默认资产从随机权重训练并在950处恢复的1000-update lineage。三者不能混作同一成功率曲线。
+审查固定在`40e8ed41ab83cebdf1776a19a462172702ee4e63`。三组对象分别是：旧nominal滑动夹爪模型及其97.73%评测、旧权重换默认资产后的0/3预览、本轮默认资产从随机权重训练并在950处恢复的1000-update lineage。三者不能混作同一成功率曲线。当前源码树保留核心结论、设置对比和关键数据；中间状态快照、完整探针和重复媒体见[证据归档](../../../../sim/assembly/validation/ARCHIVE.md)，相应链接指向清理前的固定提交。
 
 ## 设置与资产对比
 
@@ -36,7 +36,7 @@
 
 两次串行诊断的reset关节位置/速度、孔板与零件位姿、缓存33维特征、首个策略输出在全部64环境逐位相同。首个控制步后，零件平移最大差109.246µm、转角差0.009908rad；第10个控制之前已积累10.5327mm最大平移差。前10个控制仍屏蔽学习策略动作，但会施加重力前馈、EEF目标和基于测量位置的保持控制。因此并发不是出现分叉的必要条件，学习策略命令差也不能发起首步分叉。
 
-这是**驱动暖机/控制执行/原生状态初始化的资格缺口**，还不是已定位的引擎bug。完整native模型、warm-start/接触内部状态、实际qf/关节目标没有共同指纹；returned TensorDict的完整1023维观测也未被helper递归保存。CPU读回本身可能影响调度。不能据此断言全部仿真输入相同或把分叉唯一归因于GPU原子顺序。见[指纹比较](repro_fingerprint_comparison.json)、[串行运行记录](serial_review.json)及两组NPZ。
+这是**驱动暖机/控制执行/原生状态初始化的资格缺口**，还不是已定位的引擎bug。完整native模型、warm-start/接触内部状态、实际qf/关节目标没有共同指纹；returned TensorDict的完整1023维观测也未被helper递归保存。CPU读回本身可能影响调度。不能据此断言全部仿真输入相同或把分叉唯一归因于GPU原子顺序。见[指纹比较](https://github.com/DexForce/EmbodiChain/blob/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/examples/learning/blind_assembly/validation/default_retrain_20261026/repro_fingerprint_comparison.json)、[串行运行记录](https://github.com/DexForce/EmbodiChain/blob/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/examples/learning/blind_assembly/validation/default_retrain_20261026/serial_review.json)及两组NPZ。
 
 ![夹持漂移与串行分叉](grip_and_repeatability.png)
 

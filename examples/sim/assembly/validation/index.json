@@ -11,14 +11,6 @@
     "passed": 197
   },
   "files": {
-    "passive_matched_floor.json": "4efaf7853616d579350cad28310627c2a86845bc2d4e14fa5b91c0e462977af9",
-    "task_smoke.json": "2d0d43f441a6ae0ee19cadadfbe761c02ceb7ebb3af980877fb21dd15315ec9f",
-    "rizon_fk.json": "18f90b96d4c86d2dc85c11ea0b3573c54a0d18afe157b2c5baf97d03aed0c7ad",
-    "constrained_default.json": "c81ca72b4d51b416e480669f9f0cb0c818dd546e45fbebc4cdb40ed47b4eba9f",
-    "native_smoke_eval.json": "c6b0b4a3ffd26ef91fc9ea4d6feab582a0f144421fad9d72fe71c2ea2062045d",
-    "clearance_sweep_corrected.json": "9ed22612e144d37897d8fdc3d7b11c0fb5d289b68b337b142df4ad4d14baf85b",
-    "constrained_cpu_warp_newton.json": "b96fef38f62dc986871c6c3a48e1fc6ac5c2966af5ae4f500166957a4763b297",
-    "actor_smoke.json": "093eac7947599b2557345104e58900b6b8cf3efe110c5d15a94ecc6620d20c09",
     "independent_reference/2f50c1a7785be0b2ed92cfb2c060ad4e24207fa36c809962cd1be6af8a32ad9b.xml": "efc0399334296123250b65538be78657fedfe02f32669a1748f1187ae84b1b6f",
     "independent_reference/2c1622a9d69f47f0e5f3df83fc0eb02b087cd37bf9da8420e720a05b8735f2b4.xml": "129920d279e3e8214321262cf8cc04a10d286cb006ae3a39af1bbca7b8149155",
     "independent_reference/mujoco_3.14.0.json": "2cea34a255ecf9c3695946aceb3f5d86e63268b6700ef8697ad8f0aafb84f787",
@@ -27,12 +19,8 @@
     "independent_reference/mujoco_3.12.0.json": "672069250897741209f06acda5365ddae171b727a2d5556ab21a93620c13e5de",
     "independent_reference/README.md": "642f85e84e8bb466b1694d51deb3705f3967e74b2ebba3bb87d4caf3de97f219",
     "independent_reference/spec.json": "cdf61283a6788b0c2f12bf950b5160517f562c698f8789405f6c2d6b2a2b95d4",
-    "20261026/README.md": "951587a78ea0e3debba2eac8a7539f176dfdd079882b3a2f0aa239c9b08fa247",
-    "20261026/gears.gif": "73d74fb44ef67cdd45e85b26519226f3f6dd3bbe993fc950500b60b3b12880d5",
-    "20261026/gears.json": "ba99bf002f9aa45b4cfff9eb531542f31bcd2a1514e62c167cd70cb1e08b57af",
-    "20261026/gears.md": "74fd49db190b7edd4f9d6068ed2f552239d926e05666373303184faf09e3d0fe",
-    "20261026/many_pegs.gif": "e2b567fe83d182572b7e4bdb92c8c6990dc2a94c15cb159e4665d6bd313ff653",
-    "20261026/many_pegs.json": "5d8dd9a46eefdadb1c47931ce157b9950b6c0a107ed2ca11aa86b99947a7a9c0",
+    "20261026/README.md": "e9a385d7f83ff69c1f0ae32c7131d79f3b9e42f4b407ab93abe1886b4461ff73",
+    "20261026/gears.md": "4280e1f2581fb66532f72454e5498417b6b808b445e7ad72e6480624b8220727",
     "20261026/many_pegs.md": "5da19bc042f89d3e6b0fd0ab85bb29e8c8fc0662febbfb31f1ff01d369b19012"
   },
   "checks": {
@@ -92,5 +80,12 @@
       "passed": 214,
       "isolation": "Disable unrelated older editable import finders in this test process only; shared installed environment restored."
     }
+  },
+  "archived_evidence": {
+    "source_commit": "f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0",
+    "descriptor": "archive.json",
+    "readme": "ARCHIVE.md",
+    "original_index_url": "https://github.com/DexForce/EmbodiChain/blob/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/examples/sim/assembly/validation/index.json",
+    "qualification": "Historical validation counts and measurements below are unchanged. The files map lists only artifacts retained in the current tree; full original evidence is archived."
   }
 }
