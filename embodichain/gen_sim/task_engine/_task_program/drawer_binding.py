@@ -1,0 +1,344 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Bind GenSim inside placement to the same inspected part as E6."""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from dataclasses import dataclass, asdict, replace
+from typing import Any
+
+import numpy as np
+
+from .articulation_binding import (
+    PrismaticBinding,
+    SLIDE_CALL,
+    WITHDRAW_CALL,
+    graph_bindings,
+    discover_prismatic_parts,
+    inspect_prismatic_part,
+)
+from .drawer_geometry import drawer_region
+
+__all__: list[str] = []
+
+DRAWER_TRANSPORT_CALL = "gen_sim.drawer_transport"
+TRANSPORT_CLEARANCE = 0.12
+ENTRY_RIM_CLEARANCE = 0.12
+# The transport endpoint is deliberately outside the active drawer.  The
+# object enters the drawer on the subsequent Place approach waypoints.
+TRANSPORT_OUTWARD_DISTANCE = 0.18
+
+
+def inside_parts(affordance: str) -> tuple[str, str, str | None]:
+    parts = affordance.split("__")
+    if len(parts) not in (3, 4) or parts[0] != "inside" or not all(parts):
+        raise ValueError(f"Unsupported generated inside affordance {affordance!r}.")
+    if len(parts) == 4 and not parts[3].startswith("part_"):
+        raise ValueError("Drawer inside target requires a stable part ID.")
+    return parts[1], parts[2], parts[3] if len(parts) == 4 else None
+
+
+def prepare_drawer_graph(graph: dict[str, Any], scene: Any) -> dict[str, Any]:
+    """Canonicalize only composite drawers; ambiguous parts never default to first."""
+    configs = {str(c["uid"]): c for c in getattr(scene, "articulations", ())}
+    if not configs:
+        return graph
+    places = [
+        n
+        for n in graph["nodes"]
+        if n["call"].get("kind") == "place" and "inside" in n["call"]
+    ]
+    if not any(inside_parts(n["call"]["inside"])[0] in configs for n in places):
+        return graph
+    result = deepcopy(graph)
+    bindings = graph_bindings(graph, scene)
+    canonical = {}
+    for binding in bindings.values():
+        if not any(
+            inside_parts(n["call"]["inside"])[0] == binding.object_id for n in places
+        ):
+            continue
+        part = next(
+            p
+            for p in discover_prismatic_parts(configs[binding.object_id])
+            if p.joint == binding.joint
+        )
+        canonical[(binding.object_id, binding.part_id)] = inspect_prismatic_part(
+            configs[binding.object_id], part.part_id
+        )
+    for node in result["nodes"]:
+        call = node["call"]
+        if call.get("call_id") in {SLIDE_CALL, WITHDRAW_CALL}:
+            args = call["arguments"]
+            binding = canonical.get((args["object"], args.get("part", "")))
+            if binding is not None:
+                args["part"] = binding.part_id
+        elif call.get("kind") == "place" and "inside" in call:
+            container, obj, part = inside_parts(call["inside"])
+            if container not in configs:
+                continue
+            matches = [
+                b
+                for b in dict.fromkeys(canonical.values())
+                if b.object_id == container and (part is None or part == b.part_id)
+            ]
+            if len(matches) != 1:
+                raise ValueError(
+                    "Drawer placement requires one explicit E6 part; use its step_result or target part binding."
+                )
+            binding = matches[0]
+            call["inside"] = f"inside__{container}__{obj}__{binding.part_id}"
+    by_id = {node["id"]: node for node in result["nodes"]}
+    expanded = []
+    for node in result["nodes"]:
+        call = node["call"]
+        if (
+            call.get("kind") == "place"
+            and "inside" in call
+            and inside_parts(call["inside"])[0] in configs
+        ):
+            transport_id = f"{node['id']}__transport"
+            transport_call = {
+                "kind": "registered",
+                "call_id": DRAWER_TRANSPORT_CALL,
+                "arguments": {"object": call["object"], "target": call["inside"]},
+                "resources": deepcopy(call["resources"]),
+            }
+            if transport_id in by_id:
+                existing = by_id[transport_id]["call"]
+                if existing == {
+                    **transport_call,
+                    "call_id": "simulation.move_held_object",
+                }:
+                    existing["call_id"] = DRAWER_TRANSPORT_CALL
+                if by_id[transport_id]["call"] != transport_call or node[
+                    "depends_on"
+                ] != [transport_id]:
+                    raise ValueError(
+                        "Drawer transport conflicts with the placement route."
+                    )
+            else:
+                expanded.append(
+                    {**deepcopy(node), "id": transport_id, "call": transport_call}
+                )
+                node["depends_on"] = [transport_id]
+                group = next(
+                    g for g in result["task_groups"] if node["id"] in g["node_ids"]
+                )
+                group["node_ids"].insert(
+                    group["node_ids"].index(node["id"]), transport_id
+                )
+        expanded.append(node)
+    result["nodes"] = expanded
+    return result
+
+
+def rewrite_drawer_close_resources(
+    graph: dict[str, Any],
+    *,
+    drawer_bindings: frozenset[tuple[str, str]] = frozenset(),
+) -> dict[str, Any]:
+    """Use the free arm for the closing E6 after a composite placement."""
+    result = deepcopy(graph)
+    nodes = {node["id"]: node for node in result["nodes"]}
+    if not drawer_bindings:
+        return result
+    for group in result.get("task_groups", ()):
+        ids = group.get("node_ids", ())
+        if group.get("task_type") != "E6" or not ids:
+            continue
+        first = nodes[ids[0]]["call"]
+        if first.get("arguments", {}).get("state") != "closed":
+            continue
+        arguments = first.get("arguments", {})
+        object_id = str(arguments.get("object", ""))
+        part_id = str(arguments.get("part", ""))
+        if not any(
+            bound_object == object_id and (not part_id or bound_part == part_id)
+            for bound_object, bound_part in drawer_bindings
+        ):
+            continue
+        primary = first.get("resources", {}).get("primary")
+        # The right arm is the alternate in the supported dual-arm profile.
+        # Keep an already-right close route idempotent across bundle passes.
+        alternate = "right" if primary == "left" else primary
+        if alternate is None:
+            continue
+        for node_id in ids:
+            resources = nodes[node_id]["call"].get("resources")
+            if resources is not None:
+                resources["primary"] = alternate
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class DrawerRoute:
+    affordance: str
+    object_id: str
+    binding: PrismaticBinding
+    lower: tuple[float, float, float]
+    upper: tuple[float, float, float]
+    upright: bool = False
+    upright_calls: tuple[str, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.upright) is not bool:
+            raise ValueError("Drawer upright must be a boolean.")
+        if self.upright_calls is not None and (
+            type(self.upright_calls) is not tuple
+            or any(
+                type(name) is not str or not name or name != name.strip()
+                for name in self.upright_calls
+            )
+            or len(set(self.upright_calls)) != len(self.upright_calls)
+        ):
+            raise ValueError("Drawer upright calls must be unique non-empty names.")
+        container, obj, part = inside_parts(self.affordance)
+        if (container, obj, part) != (
+            self.binding.object_id,
+            self.object_id,
+            self.binding.part_id,
+        ):
+            raise ValueError("Drawer route identity differs from the E6 part binding.")
+        low, high = np.asarray(self.lower), np.asarray(self.upper)
+        if (
+            low.shape != (3,)
+            or high.shape != (3,)
+            or not np.isfinite([low, high]).all()
+            or (low > high).any()
+        ):
+            raise ValueError("Drawer placement bounds must be finite and ordered.")
+        object.__setattr__(self, "lower", tuple(map(float, low)))
+        object.__setattr__(self, "upper", tuple(map(float, high)))
+
+    def payload(self) -> dict[str, Any]:
+        result = {**asdict(self), "binding": self.binding.payload()}
+        if not self.upright:
+            result.pop("upright")
+        if self.upright_calls is None:
+            result.pop("upright_calls")
+        else:
+            result["upright_calls"] = list(self.upright_calls)
+        return result
+
+    @classmethod
+    def decode(cls, value: dict[str, Any]) -> DrawerRoute:
+        if type(value) is not dict or set(value) - {"upright", "upright_calls"} != {
+            "affordance",
+            "object_id",
+            "binding",
+            "lower",
+            "upper",
+        }:
+            raise ValueError("Drawer route requires exactly its declared fields.")
+        fields = {**value, "binding": PrismaticBinding.decode(value["binding"])}
+        if "upright_calls" in fields:
+            if type(fields["upright_calls"]) is not list:
+                raise ValueError("Drawer upright calls must be a list of names.")
+            fields["upright_calls"] = tuple(fields["upright_calls"])
+        return cls(**fields)
+
+
+def bind_drawer_routes(
+    routes: tuple[DrawerRoute, ...], program: Any
+) -> tuple[DrawerRoute, ...]:
+    """Bind occurrence policies while keeping one geometry route per affordance."""
+    from embodichain.lab.task_program.semantics import Place
+    from .invocation_policy import bind_cartesian_calls
+
+    calls = {segment.name: segment.calls[0].call for segment in program.iter_segments()}
+    result = []
+    for route in routes:
+        if route.upright_calls is None:
+            result.append(route)
+            continue
+        for name in route.upright_calls:
+            call = calls.get(name)
+            if isinstance(call, Place):
+                valid = (
+                    call.object.entity_id == route.object_id
+                    and getattr(call.inside, "entity_id", None) == route.affordance
+                )
+            else:
+                args = getattr(call, "arguments", {})
+                valid = (
+                    getattr(call, "call_id", None) == DRAWER_TRANSPORT_CALL
+                    and args.get("object") == route.object_id
+                    and args.get("target") == route.affordance
+                )
+            if not valid:
+                raise ValueError(
+                    "Drawer upright calls must reference their own placement or transport."
+                )
+        identities = bind_cartesian_calls(list(route.upright_calls), program)
+        result.append(replace(route, upright_calls=identities))
+    return tuple(result)
+
+
+def drawer_routes(graph: dict[str, Any], scene: Any) -> tuple[DrawerRoute, ...]:
+    configs = {str(c["uid"]): c for c in getattr(scene, "articulations", ())}
+    if not configs:
+        return ()
+    bindings = graph_bindings(graph, scene)
+    upright_groups = {
+        (node["task_instance_id"], node["call"]["arguments"]["object"])
+        for node in graph["nodes"]
+        if node["call"].get("call_id") == "gen_sim.align_held"
+        and node["call"].get("arguments", {}).get("target") == "current_object_pose"
+    }
+    upright_calls: dict[str, set[str]] = {}
+    for node in graph["nodes"]:
+        call = node["call"]
+        arguments = call.get("arguments", {})
+        obj = call.get("object", arguments.get("object"))
+        if (node.get("task_instance_id"), obj) not in upright_groups:
+            continue
+        target = (
+            call.get("inside")
+            if call.get("kind") == "place"
+            else (
+                arguments.get("target")
+                if call.get("call_id") == DRAWER_TRANSPORT_CALL
+                else None
+            )
+        )
+        if target is not None:
+            upright_calls.setdefault(target, set()).add(node["id"])
+    routes = {}
+    for node in graph["nodes"]:
+        call = node["call"]
+        if call.get("kind") != "place" or "inside" not in call:
+            continue
+        container, obj, part = inside_parts(call["inside"])
+        if container not in configs:
+            continue
+        if call["inside"] in routes:
+            continue
+        if part is None or f"{container}::{part}" not in bindings:
+            raise ValueError("Drawer placement has no canonical E6 part binding.")
+        binding = bindings[f"{container}::{part}"]
+        low, high = drawer_region(configs[container], binding)
+        routes[call["inside"]] = DrawerRoute(
+            call["inside"],
+            obj,
+            binding,
+            tuple(low),
+            tuple(high),
+            upright_calls=tuple(sorted(upright_calls.get(call["inside"], ()))),
+        )
+    return tuple(routes.values())

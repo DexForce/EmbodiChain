@@ -752,7 +752,6 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         exchange_pose[:, :3, :3] = current_object_pose[:, :3, :3]
 
-        source_exchange_eef = torch.bmm(exchange_pose, source_object_to_eef)
         destination_eef = self.robot.compute_fk(
             qpos=destination_start_qpos,
             name=resources.second.arm.control_part,
@@ -799,17 +798,19 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             receive_positive = torch.ones(
                 self.num_envs, dtype=torch.bool, device=self.device
             )
-        destination_sample = self._resolve_grasp(
-            affordance,
+        exchange_pose, destination_sample = self._resolve_existing_hold_receive(
+            request,
+            context,
+            resources,
             exchange_pose,
             approach_direction,
-            resources.second.hand.target_id,
-            obj_longest_axis=receive_axis,
-            is_positive_part=receive_positive,
-            center_axis=receive_center_axis,
-            context=context,
-            sample_key=(request.invocation_id or self.skill_id) + ":receive_grasp",
+            receive_axis=receive_axis,
+            receive_positive=receive_positive,
+            receive_center_axis=receive_center_axis,
+            source_root=source_root,
+            destination_root=destination_root,
         )
+        source_exchange_eef = torch.bmm(exchange_pose, source_object_to_eef)
         destination_grasp = destination_sample.poses
         grasp_success = destination_sample.success
         destination_pre_grasp = translate_pose_world(
@@ -906,11 +907,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         lengths["retreat"] = source_retreat.shape[1]
 
-        # An existing hold is already physically established.  Preserve the
-        # observed source-hand closure until the release phase instead of
-        # commanding a configured grasp setpoint that may be tighter than the
-        # contact-supported pose.
-        source_hand_qpos = context.last_qpos[:, list(resources.first.hand.joint_ids)]
+        source_hand_qpos = self._existing_hold_hand_qpos(request, context, resources)
         destination_hand_qpos = context.last_qpos[
             :, list(resources.second.hand.joint_ids)
         ]
@@ -1132,6 +1129,47 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             return requested_entity is held_entity
         requested_label = getattr(requested, "label", None)
         return bool(requested_label) and requested_label == held.semantics.label
+
+    def _resolve_existing_hold_receive(
+        self,
+        request: ResolvedActionRequest[HandOverGoal, HandOverOptions],
+        context: PlanningContext,
+        resources: _HandOverResources,
+        exchange_pose: torch.Tensor,
+        approach_direction: torch.Tensor,
+        *,
+        receive_axis: torch.Tensor | None,
+        receive_positive: torch.Tensor,
+        receive_center_axis: torch.Tensor | None,
+        source_root: torch.Tensor,
+        destination_root: torch.Tensor,
+    ) -> tuple[torch.Tensor, AffordanceSample]:
+        """Resolve one original receive sample at the unchanged exchange pose.
+
+        Subclasses may qualify an invocation-local internal exchange station.
+        Both source transport and the receiver must use the returned pose.
+        The default preserves the original grasp-service call and its ordering.
+        """
+        return exchange_pose, self._resolve_grasp(
+            request.goal.semantics.affordance,
+            exchange_pose,
+            approach_direction,
+            resources.second.hand.target_id,
+            obj_longest_axis=receive_axis,
+            is_positive_part=receive_positive,
+            center_axis=receive_center_axis,
+            context=context,
+            sample_key=(request.invocation_id or self.skill_id) + ":receive_grasp",
+        )
+
+    def _existing_hold_hand_qpos(
+        self,
+        request: ResolvedActionRequest[HandOverGoal, HandOverOptions],
+        context: PlanningContext,
+        resources: _HandOverResources,
+    ) -> torch.Tensor:
+        """Keep the observed existing hold unless a specialization owns its target."""
+        return context.last_qpos[:, list(resources.first.hand.joint_ids)]
 
     @staticmethod
     def _compute_existing_hold_segment_lengths(

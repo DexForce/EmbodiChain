@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import math
-from typing import Literal
+from typing import Literal, Protocol
 
 import torch
 
@@ -37,9 +37,45 @@ from .gripper_collision_checker import GripperCollisionCfg
 __all__ = [
     "AntipodalGraspPoseGenerator",
     "AntipodalGraspPoseGeneratorCfg",
+    "GraspRegionSelector",
     "GraspAnnotationCfg",
     "ParallelJawGraspCollisionCfg",
 ]
+
+
+class GraspRegionSelector(Protocol):
+    """Filter a qualified fallback region before candidate ranking and top-K.
+
+    The callback runs only when a requested mesh-axis region has no qualified
+    geometry. It may select existing rows and a ranking center, never introduce
+    poses or bypass angle, NMS, ground or collision qualification.
+    """
+
+    def __call__(
+        self,
+        *,
+        centers: torch.Tensor,
+        pair_ids: torch.Tensor,
+        pair_centers: torch.Tensor,
+        axis: torch.Tensor,
+        positive: bool,
+        center_mode: Literal["bounds", "centroid"],
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Select a subset or reject the fallback.
+
+        Args:
+            centers: Qualified candidate centers, shape (K, 3).
+            pair_ids: Original contact-pair indices for those K candidates.
+            pair_centers: Complete cached-pair centers, shape (N, 3).
+            axis: Normalized requested region axis, shape (3,).
+            positive: Requested side of that axis.
+            center_mode: Generator's existing center convention.
+
+        Returns:
+            Boolean mask (K,) and finite ranking center (3,), on the input
+            device, or None to reject. Inputs must not be modified.
+        """
+        ...
 
 
 def _real_number(value: float, *, field_name: str, minimum: float) -> float:
@@ -417,8 +453,14 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        axis_region_selector: GraspRegionSelector | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return ranked candidates, optionally from one projected axis end."""
+        """Return candidates with an optional invocation-local region selector."""
+        region_options = (
+            {}
+            if axis_region_selector is None
+            else {"axis_region_selector": axis_region_selector}
+        )
         return [
             (poses, costs)
             for poses, _, costs in self.get_grasp_candidates(
@@ -428,6 +470,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 approach_direction=approach_direction,
                 obj_longest_axis=obj_longest_axis,
                 is_positive_part=is_positive_part,
+                **region_options,
             )
         ]
 
@@ -440,8 +483,20 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        axis_region_selector: GraspRegionSelector | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        """Expose candidate opening widths alongside their poses and costs."""
+        """Expose aligned candidates without changing configured region defaults.
+
+        The selector sees only qualified fallback geometry before top-K.
+        Default calls retain the original backend keyword shape.
+        """
+        if axis_region_selector is not None and not callable(axis_region_selector):
+            raise TypeError("axis_region_selector must be callable or None.")
+        region_options = (
+            {}
+            if axis_region_selector is None
+            else {"axis_region_selector": axis_region_selector}
+        )
         backend = self._backend(mesh_vertices, mesh_triangles)
         poses = self._object_poses(obj_poses, device=backend.device)
         directions = self._approach_directions(
@@ -493,6 +548,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 approach_direction=directions[index],
                 obj_longest_axis=None if axes is None else axes[index],
                 is_positive_part=bool(positive_parts[index].item()),
+                **region_options,
             )
             if grasp_poses.shape == (4, 4):
                 grasp_poses = grasp_poses.unsqueeze(0)

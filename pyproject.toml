@@ -66,7 +66,10 @@ gensim = [
   "pyrender==0.1.45",
   "requests",
   "Pillow",
+  "shapely",
   "matplotlib",
+  "yourdfpy>=0.0.60",
+  "python-fcl>=0.7.0.11",
 ]
 
 [project.scripts]

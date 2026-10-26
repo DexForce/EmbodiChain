@@ -187,7 +187,17 @@ def main():
             "embodichain_models.dynamics.nerd": ["THIRD_PARTY_LICENSES"],
             "embodichain.data": ["default_materials.json"],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
-            "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
+            "embodichain.gen_sim.asset_engine.configs": ["*.json"],
+            "embodichain.gen_sim.task_engine": [
+                "*.yaml",
+                "_semantic_graph_viewer.html",
+                "_semantic_graph_viewer.css",
+                "_semantic_graph_viewer.js",
+                "_graph_assets/*.css",
+                "_graph_assets/*.woff2",
+                "_graph_assets/*.ttf",
+                "_graph_assets/LICENSE.txt",
+            ],
             "embodichain_tasks.configs": [
                 "**/*.json",
                 "**/*.yaml",

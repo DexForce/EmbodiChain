@@ -48,6 +48,34 @@
       "details": "Start here when describing an embodied task declaratively. The configuration records the program structure and targets that the compiler validates before execution; the same language can be supplied through JSON, YAML, or Python."
     },
     {
+      "id": "task-spec",
+      "label": "TaskSpec",
+      "kind": "module",
+      "topic_ids": [
+        "task-spec"
+      ],
+      "summary": "Simulator-independent normative task contract with milestones, requirements, semantic identity, and cache support.",
+      "boundaries": [
+        "TaskSpec defines task semantics; scene bindings, execution evidence, and trajectory expansion remain owned by their existing integrations."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_spec/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 22,
+          "excerpt": "\"\"\"GenSim-owned, simulator-independent TaskSpec protocol and cache.\n\nThe core object is :class:`TaskSpec`. Legacy artifact exports are resolved\nfrom :mod:`.compat` only when requested; normal generation and cache access\ndo not load them. Runtime evidence belongs to the execution integrations.\n\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/public_api",
+          "label": "TaskSpec API"
+        }
+      ],
+      "details": "Task Engine emits one reusable TaskSpec for Asset Engine, Scene Engine, Task Program, runtime evaluation, and expansion lineage. Its semantic hash is content addressed and excludes execution-specific identities."
+    },
+    {
       "id": "program-compiler",
       "label": "TaskProgramCompiler",
       "kind": "class",
@@ -2001,7 +2029,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 17,
@@ -2010,7 +2038,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
+          "docname": "features/generative_sim/asset_engine",
           "label": "SimReady pipeline documentation"
         }
       ]
@@ -2783,7 +2811,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/parser/base.py",
+          "path": "embodichain/gen_sim/asset_engine/parser/base.py",
           "symbol": "ParserManager",
           "start_line": 46,
           "end_line": 46,
@@ -2792,7 +2820,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
+          "docname": "features/generative_sim/asset_engine",
           "label": "SimReady pipeline documentation"
         }
       ]
@@ -4344,7 +4372,7 @@
           "symbol": "<module>",
           "start_line": 48,
           "end_line": 48,
-          "excerpt": "        target=\"embodichain.gen_sim.simready_pipeline.cli.start:main\","
+          "excerpt": "        target=\"embodichain.gen_sim.asset_engine.cli.start:main\","
         }
       ]
     },
@@ -5211,7 +5239,7 @@
       "scope": "Caller supplies the ParserManager instance.",
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "ingest_one_asset",
           "start_line": 178,
           "end_line": 178,
@@ -5901,6 +5929,7 @@
         "grasp-tools",
         "urdf-assembly",
         "convex-decomposition",
+        "task-spec",
         "scene-services",
         "neural-dynamics",
         "supervised-learning",
@@ -6099,7 +6128,8 @@
             "scene-export",
             "simready",
             "asset-parsers",
-            "gen-sim-sessions"
+            "gen-sim-sessions",
+            "task-spec"
           ]
         },
         {
@@ -6175,7 +6205,8 @@
         "step-clock",
         "embodied-env",
         "base-env",
-        "simulation-manager"
+        "simulation-manager",
+        "task-spec"
       ],
       "edge_ids": [
         "compiler-reads-config",
@@ -6219,7 +6250,8 @@
             "scene-registry",
             "scene-expansion",
             "skill-profile",
-            "integration-catalog"
+            "integration-catalog",
+            "task-spec"
           ]
         },
         {
@@ -6601,6 +6633,7 @@
         "simulation-manager",
         "robot",
         "workspace-analyzer",
+        "task-spec",
         "scene-services",
         "compute",
         "scene-expansion"
@@ -6683,7 +6716,8 @@
           "node_ids": [
             "simulation-manager",
             "robot",
-            "workspace-analyzer"
+            "workspace-analyzer",
+            "task-spec"
           ]
         },
         {

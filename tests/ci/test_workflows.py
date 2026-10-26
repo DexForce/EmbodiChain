@@ -386,7 +386,7 @@ def test_release_guard_validates_bundled_runtime_packages(
         entry_points = entry_points.split("[embodichain.assets]", 1)[0]
     members = {
         "embodichain/VERSION": version,
-        "embodichain/gen_sim/simready_pipeline/configs/gen_config.json": "{}",
+        "embodichain/gen_sim/asset_engine/configs/gen_config.json": "{}",
         "embodichain_tasks/__init__.py": "",
         task_config: source.read_text(),
         "embodichain_robots/__init__.py": "",
