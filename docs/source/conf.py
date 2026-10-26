@@ -110,6 +110,7 @@ html_sidebars = {
 
 html_theme = "sphinx_book_theme"
 html_static_path = ["_static"]
+html_extra_path = ["labs"]
 # Don't include version-redirect.js automatically - we add it manually to root
 html_js_files = []
 # html_logo = "_static/logo_e.png"

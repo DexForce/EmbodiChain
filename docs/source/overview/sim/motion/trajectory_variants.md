@@ -12,6 +12,19 @@ dwell stays exactly where planning put it, and only the free motion in between
 differs. The two compose: a sampled affordance produces a new set of waypoints,
 and variant expansion then produces several ways of executing that set.
 
+## Interactive laboratory
+
+[Open the trajectory augmentation laboratory](../../../labs/trajectory-augmentation/)
+to compare the implemented trajectory-only routes on one planar three-link
+reference. It provides method and strength selection, nine deterministic local
+seeds, phase-aware playback, and tool-path and joint-curve views. The page is a
+self-contained static artifact: Python generated every candidate through the
+production expansion APIs, while the browser only draws and plays the records.
+
+The laboratory explicitly excludes image, affordance, contact-point, grasp-pose,
+object-layout and scene-appearance sampling. Its fixed-contact approach tab
+changes the pre-contact standoff without moving the contact transform.
+
 ## Where the variation comes from
 
 ```{list-table}

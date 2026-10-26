@@ -11,6 +11,16 @@ python examples/expansion/trajectory/trajectory_augmentation_visualizer.py \
   --open
 ```
 
+The main-branch documentation publishes the generated page at
+[dexforce.github.io/EmbodiChain/main/labs/trajectory-augmentation/](https://dexforce.github.io/EmbodiChain/main/labs/trajectory-augmentation/).
+Regenerate the Pages artifact after changing the visualizer or its production
+inputs:
+
+```bash
+python examples/expansion/trajectory/trajectory_augmentation_visualizer.py \
+  --output docs/source/labs/trajectory-augmentation/index.html
+```
+
 The tabs cover endpoint-preserving joint residuals, interior via points,
 Jacobian null-space residuals, manipulability-guided selection, task-space
 deformation with trajectory IK, temporal retiming, fixed-contact approach
