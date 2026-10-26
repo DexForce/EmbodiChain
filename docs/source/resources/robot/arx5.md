@@ -47,7 +47,7 @@ cfg = ARX5Cfg.from_dict({})
 robot = sim.add_robot(cfg=cfg)
 ```
 
-The numerical Pytorch solver uses the `base_link` → `ee_link` serial chain.
+The default Warp SSIK solver uses the `base_link` → `ee_link` serial chain.
 Its separate tool transform aligns TCP X with jaw opening and TCP Z with
 approach. `build_pk_serial_chain()` returns the flange chain; compose its FK
 with `solver_cfg["arm"].tcp` to obtain tool poses. Both simulation and kinematics
@@ -82,21 +82,22 @@ simulation defaults, not manufacturer-verified hardware parameters. Source
 arm limits are preserved; task-specific workspace and IK branch restrictions
 belong to the caller's scene configuration.
 
-## Optional SSIK
+## Warp IK and optional reference alignment
 
-The default arm solver remains Pytorch. The source rounds a half turn to
+The default arm solver is `SSIKSolverCfg(backend="warp", geometry_mode="near_parallel")`,
+using Warp on CPU or CUDA. The source rounds a half turn to
 `3.1416`, producing a parallel-axis residual of about `7.24e-6`. It therefore
 does not satisfy the SSIK Warp backend's strict geometric classification.
-Explicit `SSIKSolverCfg(geometry_mode="near_parallel", ...)` supports CPU
-and CUDA using eight geometric initializations and one seed initialization,
+The near-parallel mode uses eight geometric initializations and one seed initialization,
 with bounded numerical correction on the actual source model. It preserves
 the 85 mm, quarter-turn TCP and validates returned float32 joints at the
 unchanged `1e-5` metre/radian gates. This mode is a geometric/numerical hybrid;
 it does not require SSIK installed. Continuous paths regenerate candidates
 from each preceding result, including its current winding; the complete
 source and benchmark qualifications are recorded in the acceptance reports.
-Default switching additionally requires the matched original-Pytorch performance
-baseline and configuration regression checks.
+Explicit solver replacements remain authoritative. The original Pytorch
+configuration can be restored while preserving frames, TCP, limits and weights;
+see [numerical solver selection](../../overview/sim/motion/solvers/ssik_solver.md#selecting-the-numerical-solver).
 
 The optional CPU reference instead uses an offline-derived general 6R
 Raghavan–Roth artifact for this actual source model. Its final acceptance uses
@@ -104,8 +105,8 @@ the original model and unchanged `1e-5` metre/radian pose gates.
 
 See [SSIK's prepared model example](../../overview/sim/motion/solvers/ssik_solver.md#prepared-arx5-and-rizon4s-models)
 for explicit selection, optional dependency installation and rebuilding an
-artifact after a model change. No optional SSIK dependency is needed to list
-or construct the default Pytorch configuration.
+artifact after a model change. No optional SSIK dependency is needed to list,
+construct or execute the default Warp configuration.
 
 ## Asset fingerprints
 

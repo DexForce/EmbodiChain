@@ -65,17 +65,17 @@ UVs, material assignments and collision meshes are unchanged.
 
 Both simulation and `build_pk_serial_chain()` use the same selected URDF.
 An explicit URDF `fpath` override replaces that source for both consumers.
-The chain and the default `PytorchSolverCfg` run from `base_link` to `flange`.
+The chain and the default Warp `SSIKSolverCfg` run from `base_link` to `flange`.
 The TCP is identity, so FK returns the bare flange pose. IK targets that same
-frame. The general numerical solver accommodates this arm's offset joint
-geometry without assuming Franka or spherical-wrist dimensions.
+frame. The prepared RR solver handles this arm's offset joint geometry
+without assuming Franka or spherical-wrist dimensions.
 
 The initial joint positions are the official ready pose, in source order:
 `[0, -0.69813, 0, 1.570796, 0, 0.69813, 0]` radians.
 
 ## Warp IK and optional reference alignment
 
-`SSIKSolverCfg(backend="warp", geometry_mode="rr", rr_search="seed_local", ...)`
+The default `SSIKSolverCfg(backend="warp", geometry_mode="rr", rr_search="seed_local", ...)`
 runs the prepared Raghavan–Roth matrix-pencil solve on CPU or CUDA using Warp,
 without installing SSIK. The seed-local pool contains all 600 root slots from
 16 global and nine local lock samples. The fixed search retains its 384-slot
@@ -90,8 +90,9 @@ certificates. Runtime CPU execution uses Warp rather than the independent
 SciPy QZ test oracle. Finite lock sampling can miss a feasible interval; every
 query returns a validity mask and failure never invokes another solver.
 
-The preset retains Pytorch pending default-switch acceptance. Optional pinned
-SSIK is used only for explicit numerical alignment with the packaged
+Explicit solver replacements remain authoritative; the original Pytorch
+configuration can be restored using the [numerical solver selection example](../../overview/sim/motion/solvers/ssik_solver.md#selecting-the-numerical-solver).
+Optional pinned SSIK is used only for explicit numerical alignment with the packaged
 `flexiv_rizon4s.py` artifact. See
 [prepared SSIK models](../../overview/sim/motion/solvers/ssik_solver.md#prepared-arx5-and-rizon4s-models)
 for configuration, acceptance and artifact rebuild details.

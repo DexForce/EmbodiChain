@@ -89,10 +89,14 @@ def test_arx5_source_chain_commands_and_ik_roundtrip(
     torch.testing.assert_close(solver.get_fk(q), reference)
     success, solution = solver.get_ik(reference, q + 0.02)
     assert bool(success.all())
-    actual = solver.get_fk(solution[:, 0])
-    torch.testing.assert_close(actual[:, :3, 3], reference[:, :3, 3], atol=5e-4, rtol=0)
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
+    assert isinstance(solver_cfg, SSIKSolverCfg)
+    assert solver_cfg.backend == "warp" and solver_cfg.geometry_mode == "near_parallel"
+    actual = solver.get_fk(solution.reshape_as(q))
+    torch.testing.assert_close(actual[:, :3, 3], reference[:, :3, 3], atol=1e-5, rtol=0)
     torch.testing.assert_close(
-        actual[:, :3, :3], reference[:, :3, :3], atol=1e-3, rtol=0
+        actual[:, :3, :3], reference[:, :3, :3], atol=1e-5, rtol=0
     )
 
     # Local source and end-frame overrides must reach kinematics as well as
@@ -663,7 +667,7 @@ def test_robotcfg_to_dict_roundtrip():
 
 
 from embodichain_robots.agilex.cobotmagic.cfg import CobotMagicCfg
-from embodichain_robots import AlohaMiniCfg, TianjiMarvinCfg
+from embodichain_robots import AlohaMiniCfg, TianjiMarvinCfg, ARX5Cfg, FlexivRizon4SCfg
 from embodichain_robots.franka.panda import FrankaPandaCfg
 from embodichain_robots.universal_robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import OPWSolverCfg
@@ -820,53 +824,60 @@ def test_aloha_mini_solvers_use_local_frames_and_source_tcp():
 
 
 @pytest.mark.parametrize(
-    ("robot_class", "variant"),
+    ("robot_class", "variant", "part"),
     [
-        pytest.param(AlohaMiniCfg, {}, id="aloha"),
-        pytest.param(TianjiMarvinCfg, {"with_gripper": True}, id="marvin-gripper"),
-        pytest.param(TianjiMarvinCfg, {"with_gripper": False}, id="marvin-bare"),
+        pytest.param(AlohaMiniCfg, {}, "left_arm", id="aloha"),
+        pytest.param(
+            TianjiMarvinCfg, {"with_gripper": True}, "left_arm", id="marvin-gripper"
+        ),
+        pytest.param(
+            TianjiMarvinCfg, {"with_gripper": False}, "left_arm", id="marvin-bare"
+        ),
+        pytest.param(ARX5Cfg, {}, "arm", id="arx5"),
+        pytest.param(FlexivRizon4SCfg, {}, "arm", id="rizon4s"),
     ],
 )
 @pytest.mark.parametrize("typed", [False, True])
 def test_arm_pytorch_restore_replaces_default_and_roundtrips(
-    robot_class: type[RobotCfg], variant: dict[str, bool], typed: bool
+    robot_class: type[RobotCfg], variant: dict[str, bool], part: str, typed: bool
 ) -> None:
     """Complete replacements restore numerical defaults and retain model frames."""
     from embodichain.lab.sim.motion.solvers import PytorchSolverCfg, SSIKSolverCfg
 
     defaults = robot_class.from_dict(variant)
-    previous = defaults.solver_cfg["left_arm"]
+    previous = defaults.solver_cfg[part]
     assert isinstance(previous, SSIKSolverCfg)
     explicit = PytorchSolverCfg(
         urdf_path=defaults.fpath,
-        joint_names=defaults.control_parts["left_arm"],
+        joint_names=defaults.control_parts[part],
         root_link_name=previous.root_link_name,
         end_link_name=previous.end_link_name,
         tcp=deepcopy(previous.tcp),
-        ik_nearest_weight=[1.0] * len(defaults.control_parts["left_arm"]),
+        ik_nearest_weight=[1.0] * len(defaults.control_parts[part]),
     )
     provided = explicit if typed else explicit.to_dict()
-    cfg = robot_class.from_dict({**variant, "solver_cfg": {"left_arm": provided}})
-    selected = cfg.solver_cfg["left_arm"]
+    cfg = robot_class.from_dict({**variant, "solver_cfg": {part: provided}})
+    selected = cfg.solver_cfg[part]
     assert isinstance(selected, PytorchSolverCfg)
     assert selected.num_samples == 30 and selected.max_iterations == 500
     assert selected.pos_eps == 5e-4 and selected.rot_eps == 5e-4
     assert selected.root_link_name == previous.root_link_name
     assert selected.end_link_name == previous.end_link_name
     np.testing.assert_array_equal(selected.tcp, previous.tcp)
-    assert isinstance(cfg.solver_cfg["right_arm"], SSIKSolverCfg)
-    assert cfg.solver_cfg["right_arm"].num_samples == 128
+    if part == "left_arm":
+        assert isinstance(cfg.solver_cfg["right_arm"], SSIKSolverCfg)
+        assert cfg.solver_cfg["right_arm"].num_samples == 128
     if robot_class is AlohaMiniCfg:
         assert isinstance(cfg.solver_cfg["torso"], PytorchSolverCfg)
         assert cfg.solver_cfg["torso"].is_only_position_constraint
     restored = robot_class.from_dict(cfg.to_dict())
     assert restored.to_dict() == cfg.to_dict()
-    assert isinstance(restored.solver_cfg["left_arm"], PytorchSolverCfg)
+    assert isinstance(restored.solver_cfg[part], PytorchSolverCfg)
     assert selected is not explicit
     selected.num_samples = 12
     selected.ik_nearest_weight[0] = 3.0
     assert explicit.num_samples == 30
-    assert explicit.ik_nearest_weight == [1.0] * len(defaults.control_parts["left_arm"])
+    assert explicit.ik_nearest_weight == [1.0] * len(defaults.control_parts[part])
     if not typed:
         assert provided["num_samples"] == 30
         assert provided["ik_nearest_weight"] == explicit.ik_nearest_weight

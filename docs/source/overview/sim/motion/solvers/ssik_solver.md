@@ -28,7 +28,9 @@ Unsupported geometry raises `ValueError` during initialization.
 Aloha Mini's two arm defaults use strict Warp SSIK. Both Tianji Marvin
 variants use Warp SSIK with `srs_search="seed_local"`. CPU and CUDA use the
 same configured geometry and acceptance thresholds, without the optional SSIK
-reference dependency. Aloha's torso retains its position-only Pytorch solver.
+reference dependency. ARX5 defaults to `geometry_mode="near_parallel"`;
+Rizon4S defaults to `geometry_mode="rr", rr_search="seed_local"`.
+Aloha's torso retains its position-only Pytorch solver.
 Explicit `solver_cfg` replacements remain authoritative. All finite searches
 can miss solutions; inspect the validity mask before executing a result.
 
@@ -186,17 +188,18 @@ converts arena-frame poses into the solver root frame. See
 
 ## Selecting the numerical solver
 
-Explicit solver configurations remain authoritative. Restore Aloha Mini's
-original numerical arm settings while preserving its source frames, TCP, limits
-and weights with the following replacement. The same code applies to either
-Marvin variant:
+Explicit solver configurations remain authoritative. Restore the original
+numerical arm settings while preserving source frames, TCP, limits and weights
+with the following replacement. This applies to Aloha Mini, either Marvin
+variant, ARX5 and Rizon4S:
 
 ```python
 from copy import deepcopy
 
 from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 
-for part in ("left_arm", "right_arm"):
+parts = ("arm",) if "arm" in robot_cfg.solver_cfg else ("left_arm", "right_arm")
+for part in parts:
     current = robot_cfg.solver_cfg[part]
     robot_cfg.solver_cfg[part] = PytorchSolverCfg(
         urdf_path=robot_cfg.fpath,
@@ -311,6 +314,13 @@ coefficient evaluation. This prevents float32 frame-conversion roundoff from
 violating the exact SO(3) polynomial identities. It does not repair malformed
 targets, change the target used for final original-model FK validation, or
 relax either acceptance tolerance.
+Existing real roots receive three bounded determinant-Newton corrections on
+the original quadratic matrix pencil. CPU and CUDA call the same Warp kernel;
+the reciprocal chart keeps large roots numerically bounded. This corrects
+shift-invert roundoff without changing the sampled locks, root masks or
+candidate count. It is algebraic root refinement, and does not introduce a
+joint-space or Cartesian IK fallback. Unsafe corrections retain the last safe
+root; the original-model FK gate still decides whether a candidate is valid.
 ARX5's target-aware batch path hook regenerates its nine candidates and their
 periodic representatives from each preceding result on CPU and CUDA. For
 single-target streaming, pass the preceding result explicitly. Rizon4S's fixed

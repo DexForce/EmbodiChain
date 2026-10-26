@@ -159,6 +159,10 @@ selected by production dispatch. Benchmark reference alignment is explicit and
 quality-only, keeping the official SSIK package outside normal execution.
 Parameterized RR conditions small valid-pose rotation roundoff only for its
 SO(3) coefficient identities; original targets still own final FK acceptance.
+CPU and CUDA share bounded algebraic root refinement against the original
+quadratic pencil before back substitution. It retains the existing root mask
+and lock samples, uses global chunked scratch, and cannot invoke pose IK or
+the optional QZ/reference oracle to repair a failed query.
 Other modes use `_get_continuous_ik_candidates` and the shared
 selector. Hard step bounds apply relative to the preceding selected posture;
 failed waypoints retain that posture and a false validity mask.

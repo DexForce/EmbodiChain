@@ -74,22 +74,12 @@ import embodichain_robots
 preset = getattr(embodichain_robots, case["robot"]).from_dict(case["variant"])
 source = preset.solver_cfg[case["part"]]
 chain = preset.build_pk_serial_chain(device=torch.device("cpu"))[case["part"]].to(dtype=torch.float64)
-if isinstance(source, SSIKSolverCfg):
-    configuration = source.copy()
-    assert configuration.backend == "warp" and configuration.geometry_mode == case["mode"]
-    assert getattr(configuration, "rr_search" if case["mode"] == "rr" else "srs_search") == case["search"]
-    configuration.urdf_path = preset.fpath
-    configuration.joint_names = list(chain.get_joint_parameter_names())
-else:
-    # Pre-promotion validation still exercises the explicit public Warp route.
-    configuration = SSIKSolverCfg(
-        backend="warp", geometry_mode=case["mode"],
-        srs_search=case["search"] if case["mode"] != "rr" else "uniform",
-        rr_search=case["search"] if case["mode"] == "rr" else "fixed",
-        urdf_path=preset.fpath, joint_names=list(chain.get_joint_parameter_names()),
-        root_link_name=source.root_link_name, end_link_name=source.end_link_name,
-        tcp=source.tcp,
-    )
+assert isinstance(source, SSIKSolverCfg), "Official arm defaults must use Warp SSIK"
+configuration = source.copy()
+assert configuration.backend == "warp" and configuration.geometry_mode == case["mode"]
+assert getattr(configuration, "rr_search" if case["mode"] == "rr" else "srs_search") == case["search"]
+configuration.urdf_path = preset.fpath
+configuration.joint_names = list(chain.get_joint_parameter_names())
 restored = SSIKSolverCfg.from_dict(configuration.to_dict())
 assert restored.backend == "warp" and restored.geometry_mode == case["mode"]
 solver = restored.init_solver(device="cpu", pk_serial_chain=chain)
