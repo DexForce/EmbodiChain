@@ -668,6 +668,16 @@ def _main() -> None:
         output_path=str(args.output),
     )
     metadata = _manifest(model, cfg)
+    # The pinned general-6R emitter forces Cartesian near-miss refinement.
+    # Keep it opt-in without changing the separate accepted-root polishing.
+    source = args.output.read_bytes()
+    forced_gate = b"if not (allow_refinement or True):"
+    if forced_gate in source:
+        args.output.write_bytes(
+            source.replace(forced_gate, b"if not allow_refinement:")
+        )
+        metadata["codegen_patches"] = ["respect_allow_refinement"]
+        metadata["unpatched_source_sha256"] = hashlib.sha256(source).hexdigest()
     metadata["source_sha256"] = hashlib.sha256(args.output.read_bytes()).hexdigest()
     args.output.with_suffix(".json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(args.output)

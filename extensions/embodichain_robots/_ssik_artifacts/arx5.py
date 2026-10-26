@@ -4584,7 +4584,7 @@ def solve(
         if residual <= fk_atol:
             verified.append((q, residual, "none", 0, _free[_ci]))
             continue
-        if not (allow_refinement or True):
+        if not allow_refinement:
             continue
         # Refine only NEAR-misses. An algebraic candidate whose FK is
         # already >0.1 off (Frobenius) is an eigensolve root that does not

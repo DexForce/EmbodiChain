@@ -25,6 +25,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+from unittest.mock import Mock
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -102,6 +103,91 @@ def _sample(solver: SSIKSolver, count: int = 4) -> torch.Tensor:
     return solver.lower_qpos_limits + fraction * (
         solver.upper_qpos_limits - solver.lower_qpos_limits
     )
+
+
+@pytest.mark.parametrize("rebuilt", [False, True], ids=["packaged", "rebuilt"])
+@pytest.mark.parametrize(
+    "perturbation,allow_refinement,expected_refinement",
+    [(0.0, False, "none"), (1e-3, False, None), (1e-3, True, "lm")],
+    ids=["accepted-root", "near-miss-disabled", "near-miss-enabled"],
+)
+def test_arx_reference_near_miss_refinement_is_opt_in(
+    pinned_reference: None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rebuilt: bool,
+    perturbation: float,
+    allow_refinement: bool,
+    expected_refinement: str | None,
+) -> None:
+    output = None
+    if rebuilt:
+        from ssik.core.solver_registry import SOLVERS
+        from embodichain.lab.sim.motion.solvers._ssik_reference import _main
+
+        # Exercise the real pinned emitter and offline post-processing without
+        # repeating RR coefficient derivation. Candidates are supplied below.
+        composer = importlib.import_module(SOLVERS["ikgeo.general_6r"].composer)
+        monkeypatch.setattr(
+            composer,
+            "compose",
+            lambda kb: "def _solve_algebraic(target):\n    return []\n",
+        )
+        output = tmp_path / "arx5.py"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "reference",
+                "--urdf",
+                ARX5Cfg.from_dict({}).fpath,
+                "--root",
+                "base_link",
+                "--end",
+                "ee_link",
+                "--output",
+                str(output),
+            ],
+        )
+        _main()
+        metadata = json.loads(output.with_suffix(".json").read_text())
+        assert metadata["codegen_patches"] == ["respect_allow_refinement"]
+
+    reference = _make_reference("arx5", output)._reference
+    artifact, policy = reference.artifact, reference.policy
+    # A nonsingular posture and a nearby algebraic candidate let the real
+    # Cartesian LM run deterministically, independently of RR root extraction.
+    qpos = np.array([-1.2, 1.0, 0.7, -0.8, 0.3, -1.0])
+    target = artifact.fk(qpos)
+    candidate = qpos.copy()
+    candidate[1] += perturbation
+    if perturbation:
+        residual = np.linalg.norm(artifact.fk(candidate) - target)
+        assert policy.subproblem_numerical < residual < 0.1
+    monkeypatch.setattr(artifact, "_solve_algebraic", lambda target: [candidate.copy()])
+    refine = Mock(wraps=artifact._lm_refine)
+    polish = Mock(wraps=artifact._polish_flagged)
+    monkeypatch.setattr(artifact, "_lm_refine", refine)
+    monkeypatch.setattr(artifact, "_polish_flagged", polish)
+    rows = artifact.solve(
+        target,
+        allow_refinement=allow_refinement,
+        allow_rescue=False,
+        native=False,
+        respect_limits=False,
+        enumerate_windings=False,
+        policy=policy,
+    )
+    assert refine.call_count == int(expected_refinement == "lm")
+    assert polish.call_count == int(expected_refinement == "none")
+    if expected_refinement is None:
+        assert rows == []
+    else:
+        assert len(rows) == 1 and rows[0].refinement_used == expected_refinement
+        assert (
+            np.linalg.norm(artifact.fk(rows[0].q) - target)
+            <= policy.subproblem_numerical
+        )
 
 
 @pytest.mark.parametrize("name", ["arx5", "flexiv_rizon4s"])
