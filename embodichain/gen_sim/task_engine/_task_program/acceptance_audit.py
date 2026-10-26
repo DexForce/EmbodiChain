@@ -119,7 +119,9 @@ def evaluate_episode_observers(
     )
     pours = capture_pour_motions(env, deployment, graph, runtime, program, count)
     evaluations = {}
-    for legacy in (True, False):
+    # The selected observer must consume its exact native evidence query before
+    # the audit-only legacy pass; otherwise that pass shifts receipt indices.
+    for legacy in (False, True):
         final = capture_final_goals(
             env,
             deployment,
