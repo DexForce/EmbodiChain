@@ -343,14 +343,16 @@ def test_test_job_restores_git_access_before_running_selected_tests(
     [
         None,
         "missing_robots",
+        "missing_models",
         "missing_entry_point",
-        "missing_asset_entry_point",
         "wrong_entry_point_group",
+        "missing_asset_entry_point",
+        "retired_robot_module",
         "foreign_package",
         "bytecode",
     ],
 )
-def test_release_guard_validates_bundled_robot_catalog(
+def test_release_guard_validates_bundled_runtime_packages(
     tmp_path: Path, invalid_contents: str | None
 ) -> None:
     """Execute the release guard against wheels, including invalid artifacts."""
@@ -369,30 +371,32 @@ def test_release_guard_validates_bundled_robot_catalog(
     source.write_text("physics: default\n")
     entry_points = (
         "[embodichain.tasks]\nembodichain_tasks = embodichain_tasks\n\n"
-        "[embodichain.assets]\nofficial_robots = embodichain_robots._asset_catalog:ROBOT_ASSETS\n\n"
         "[embodichain.robots]\nofficial = embodichain_robots._catalog:ROBOT_CONFIGS\n"
+        "\n[embodichain.assets]\n"
+        "official_robots = embodichain_robots._asset_catalog:ROBOT_ASSETS\n"
     )
     if invalid_contents == "missing_entry_point":
-        entry_points = entry_points.split("[embodichain.robots]", 1)[0]
+        entry_points = entry_points.replace(
+            "[embodichain.robots]\nofficial = embodichain_robots._catalog:ROBOT_CONFIGS\n",
+            "",
+        )
     elif invalid_contents == "wrong_entry_point_group":
         entry_points = entry_points.replace("[embodichain.robots]", "[other.robots]")
     elif invalid_contents == "missing_asset_entry_point":
-        entry_points = entry_points.replace(
-            "[embodichain.assets]\nofficial_robots = embodichain_robots._asset_catalog:ROBOT_ASSETS\n\n",
-            "",
-        )
+        entry_points = entry_points.split("[embodichain.assets]", 1)[0]
     members = {
         "embodichain/VERSION": version,
-        "embodichain/data/_asset_registry.py": "",
         "embodichain/gen_sim/simready_pipeline/configs/gen_config.json": "{}",
         "embodichain_tasks/__init__.py": "",
         task_config: source.read_text(),
         "embodichain_robots/__init__.py": "",
         "embodichain_robots/_catalog.py": "ROBOT_CONFIGS = {}\n",
         "embodichain_robots/_asset_catalog.py": "ROBOT_ASSETS = {}\n",
-        "embodichain_robots/dexforce/w1/assets.py": "",
+        "embodichain/data/_asset_registry.py": "",
         "embodichain_robots/franka/assets.py": "",
+        "embodichain_robots/dexforce/w1/assets.py": "",
         "embodichain_benchmarks/__init__.py": "",
+        "embodichain_models/__init__.py": "",
         f"embodichain-{version}.data/data/share/embodichain/examples/__init__.py": "",
         f"embodichain-{version}.dist-info/METADATA": f"Version: {version}\n",
         f"embodichain-{version}.dist-info/entry_points.txt": entry_points,
@@ -403,6 +407,14 @@ def test_release_guard_validates_bundled_robot_catalog(
             for path, data in members.items()
             if not path.startswith("embodichain_robots/")
         }
+    elif invalid_contents == "missing_models":
+        members = {
+            path: data
+            for path, data in members.items()
+            if not path.startswith("embodichain_models/")
+        }
+    elif invalid_contents == "retired_robot_module":
+        members["embodichain_robots/franka_panda.py"] = ""
     elif invalid_contents == "foreign_package":
         members["foreign/__init__.py"] = ""
     elif invalid_contents == "bytecode":

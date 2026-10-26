@@ -243,7 +243,7 @@ def test_velocity_env_injects_one_ordered_joint_selector(
 
 
 @pytest.mark.parametrize("backend", ["default", "newton"])
-def test_locomotion_keeps_explicit_robot_drive_overrides(
+def test_locomotion_keeps_explicit_robot_overrides(
     backend: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Task initialization must preserve caller overrides of catalog defaults."""
@@ -262,6 +262,7 @@ def test_locomotion_keeps_explicit_robot_drive_overrides(
     raw = load_config(path)
     override = 12.5  # Deliberately different from the model's hip stiffness of 20.
     raw["robot"]["joint_drive_props"] = {"stiffness": {"FL_hip_joint": override}}
+    raw["robot"]["root_props"] = {"self_collision_enabled": True}
     cfg = config_to_cfg(
         raw,
         source_path=path,
@@ -276,6 +277,10 @@ def test_locomotion_keeps_explicit_robot_drive_overrides(
 
     assert cfg.robot.joint_drive_props.stiffness["FL_hip_joint"] == override
     assert cfg.robot.joint_drive_props.stiffness["FR_hip_joint"] == 20.0
+    assert cfg.robot.root_props.fixed_base is False
+    assert cfg.robot.root_props.self_collision_enabled is True
+    assert cfg.robot.root_props.min_position_iters == 4
+    assert cfg.robot.root_props.min_velocity_iters == 0
 
 
 def test_policy_viewer_target_pose_preserves_world_xyzw_and_copies_state():
