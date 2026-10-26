@@ -38,6 +38,11 @@ class Command:
 
 COMMANDS = (
     Command(
+        name="train-sl",
+        target="embodichain.learning.sl.workflow:cli",
+        help="Train a supervised policy or dynamics recipe from YAML or JSON.",
+    ),
+    Command(
         name="data",
         target="embodichain.data.download:main",
         help="List and download EmbodiChain data assets.",
@@ -71,6 +76,11 @@ COMMANDS = (
         name="preview-robot",
         target="embodichain.lab.scripts.preview_robot:cli",
         help="Preview a robot with control-part Gizmos and Viser joint controls.",
+    ),
+    Command(
+        name="preview-material",
+        target="embodichain.lab.scripts.preview_material:cli",
+        help="Preview default materials or export rendered images and galleries.",
     ),
     Command(
         name="run-task",

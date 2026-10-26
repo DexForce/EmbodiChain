@@ -253,7 +253,7 @@ def test_gripper_and_domain_overrides_cannot_change_component_commands(
 
 def test_official_ur5_component_uses_robot_catalog(monkeypatch, tmp_path: Path) -> None:
     from embodichain.lab.sim import cfg as cfg_module
-    from embodichain_robots import ur_robot
+    from embodichain_robots.universal_robots import ur_robot
 
     def local_asset(path: str) -> str:
         target = tmp_path / path

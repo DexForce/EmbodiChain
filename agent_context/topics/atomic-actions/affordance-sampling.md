@@ -26,15 +26,15 @@ Action/Goal inputs rather than Affordance variation.
 ## Current host boundary
 
 The only host integration is direct simulation. The PickUp, AxisAlign,
-HandOver, OpenDoor, Press, Slide, and Twist tutorials map
+HandOver, OpenDoor, Press, Slide, and Twist examples map
 `--affordance_branches` one-to-one to simulation rows and inject the context
 through the shared host helpers in
-`scripts/tutorials/atomic_action/tutorial_utils.py`. HandOver samples pickup
+`examples/sim/atomic_action/support.py`. HandOver samples pickup
 and receiving grasps in separate named streams while preserving opposite object
 ends and per-row arm assignment; its diagnostics retain the selected assignment's
 candidate metadata and control parts. Press samples local contact-frame roll;
-the Twist tutorial explicitly declares `grasp_roll_range=(-pi, pi)` for parallel
-branches. Press, Slide, and OpenDoor tutorials use `ik_interp` for their exact
+the Twist example explicitly declares `grasp_roll_range=(-pi, pi)` for parallel
+branches. Press, Slide, and OpenDoor examples use `ik_interp` for their exact
 Cartesian contact/path samples.
 
 The seed and attempt identity control Affordance selection, not upstream grasp
@@ -42,7 +42,7 @@ generation. Antipodal approach-direction perturbations still use PyTorch's
 global RNG and each row has its own candidate pool. Candidate IDs and reuse
 flags are row-local; they do not certify cross-row uniqueness. One branch keeps
 sampling disabled. See the human-facing
-[tutorial matrix](../../../docs/source/overview/sim/atomic_actions/affordance_sampling.md)
+[example matrix](../../../docs/source/overview/sim/atomic_actions/affordance_sampling.md)
 for supported geometric freedom and CLI examples.
 
 Do not route this feature through Task Program, the Gym bridge, environment
@@ -54,7 +54,7 @@ define an explicit expansion policy.
 - Sampling contracts and selection: `atomic_actions/affordance_sampling.py`.
 - Geometric samplers: `atomic_actions/affordance.py`.
 - Feasibility and diagnostics: matching file under `atomic_actions/primitives/`.
-- Direct host examples: `scripts/tutorials/atomic_action/` and its shared
-  `tutorial_utils.py` sampling helpers.
+- Direct host examples: `examples/sim/atomic_action/` and its shared
+  `support.py` sampling helpers.
 - Tests: `tests/sim/atomic_actions/test_affordance_sampling.py`,
   `test_affordance.py`, `test_actions.py`, `test_core.py`, and `test_engine.py`.

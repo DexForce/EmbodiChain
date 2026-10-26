@@ -137,13 +137,18 @@ def _phases(
     for phase in result:
         if not isinstance(phase, TrajectoryPhase):
             raise ValueError("phases must contain TrajectoryPhase values")
+        # Adjacent semantic phases may share their single boundary sample. The
+        # shared point remains an endpoint of both phases, so endpoint-preserving
+        # operators cannot race to modify it. Their interiors must stay disjoint.
+        minimum_start = previous_stop - int(bool(seen))
         if (
             phase.phase_id in seen
-            or phase.start_index < previous_stop
+            or phase.start_index < minimum_start
             or phase.stop_index > length
         ):
             raise ValueError(
-                "phases must be unique, ordered, nonoverlapping, and within valid samples"
+                "phases must be unique, ordered, have nonoverlapping interiors, "
+                "and lie within valid samples"
             )
         seen.add(phase.phase_id)
         previous_stop = phase.stop_index
@@ -213,6 +218,8 @@ class TrajectoryPhase:
     """An explicitly annotated half-open sample interval ``[start, stop)``.
 
     Phase endpoints are samples ``start_index`` and ``stop_index - 1``.
+    Adjacent phases may share exactly one endpoint sample; their interiors may
+    not overlap.
     Unannotated samples remain unchanged by augmentation operators.
     """
 

@@ -62,6 +62,13 @@ randomization remains active. See the owning
 
 - Camera extrinsics auto-detect the representation and frame: if `extrinsics.eye` is set → look-at mode (eye/target/up perturbation via `look_at`); otherwise → pose mode (pos/euler perturbation via `set_local_pose`), with `extrinsics.parent` selecting parent-relative pose and `parent=None` selecting arena-frame pose.
 - `set_rigid_object_visual_material` is deterministic (not random) but uses the same functor mechanism for fixed material assignment at reset.
+- Visual material randomization preserves selected environments. Shared material
+  instances require a full-environment selection and are mutated once per call;
+  partial shared selections fail before mutation. Empty selections are no-ops.
+  Solid and library tiers apply configured scalar PBR ranges. Texture pools use
+  normalized source paths and remain bounded after initialization. See
+  [material identity and lifetime](../simulation-system/materials.md) for
+  configuration conversion, instance reuse and topology replay.
 - Light randomization applies the **same values across all envs** (documented limitation).
 - HDR indirect-lighting events inform the environment's automatic native-ground
   visibility; emissive mode does not. See the deployment-owned

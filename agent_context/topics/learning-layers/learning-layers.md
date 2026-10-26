@@ -9,8 +9,13 @@ returns TCP poses and geometric Jacobians from one FK pass, retaining dJ/dq.
 
 `learning/layers/` owns `KinematicsLayer` and `DifferentiableIKLayer` Torch
 module interfaces. `learning/models/` owns general MLPs, feature normalization
-and configuration-driven MLP construction. These components do not import RL,
-TensorDict or simulation. RL policy interfaces, actor-critic composition and
+and configuration-driven MLP construction. These shared components do not import
+RL, TensorDict or simulation. Concrete NeRD models, codecs and the shared-SL
+recipe live in the bundled `embodichain_models.dynamics.nerd` extension;
+teacher collection, historical training and research belong to
+`examples/learning/nerd/`. See
+[neural dynamics](../neural-dynamics/neural-dynamics.md) for model, SL integration,
+dataset and checkpoint ownership. RL policy interfaces, actor-critic composition and
 policy registration/builders belong to `learning/rl/policies/`; RL code consumes
 the shared networks and normalizer. See [RL learning](../rl-learning/rl-learning.md)
 for those contracts.
@@ -20,6 +25,9 @@ Training, task-parameter optimization and the differentiable benchmark call
 There is no registered Robot solver adapter: callers provide root-frame targets
 and explicitly configure the layer's TCP and limits. Existing Robot solver binding
 and arena conversion remain in [IK solvers](../ik-solvers/ik-solvers.md).
+
+Supervised optimizer and offline-run ownership belongs to
+[supervised learning](../supervised-learning/supervised-learning.md).
 
 ## Gradient and state boundaries
 

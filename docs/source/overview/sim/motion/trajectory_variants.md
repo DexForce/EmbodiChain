@@ -79,7 +79,7 @@ environment where EmbodiChain is installed (see
 [Installation](../../../quick_start/install.md)):
 
 ```bash
-python scripts/tutorials/atomic_action/place.py --num_envs 6 --device cuda
+embodichain run-example sim/atomic_action/place --num_envs 6 --device cuda
 ```
 
 The tutorial declares only which of the action's own named segments may move:
@@ -114,7 +114,7 @@ replay them; ask for a hundred and run a single environment if you only want
 the figures:
 
 ```bash
-python scripts/tutorials/atomic_action/place.py --headless --num_envs 1 --device cuda --trajectory_variants 100 --variant_plot_dir outputs/variants
+embodichain run-example sim/atomic_action/place --headless --num_envs 1 --device cuda --trajectory_variants 100 --variant_plot_dir outputs/variants
 ```
 
 The first figure plots every variant's arm joints against time. Curves separate

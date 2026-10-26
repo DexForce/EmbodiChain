@@ -33,9 +33,11 @@ THIS_DIR = Path(__file__).resolve().parent
 CORE_PACKAGE_PATTERNS = ["embodichain", "embodichain.*"]
 EXTENSIONS_DIR = THIS_DIR / "extensions"
 TASKS_PROJECT_DIR = EXTENSIONS_DIR / "embodichain_tasks"
+MODELS_PROJECT_DIR = EXTENSIONS_DIR / "embodichain_models"
 TASKS_PACKAGE_PATTERNS = ["embodichain_tasks", "embodichain_tasks.*"]
 ROBOTS_PACKAGE_PATTERNS = ["embodichain_robots", "embodichain_robots.*"]
 BENCHMARKS_PACKAGE_PATTERNS = ["embodichain_benchmarks", "embodichain_benchmarks.*"]
+MODELS_PACKAGE_PATTERNS = ["embodichain_models", "embodichain_models.*"]
 EXAMPLES_DIR = THIS_DIR / "examples"
 
 # Defer importing torch until it's actually needed (when building extensions).
@@ -99,6 +101,9 @@ def get_packages() -> list[str]:
     benchmark_packages = find_namespace_packages(
         where=str(EXTENSIONS_DIR), include=BENCHMARKS_PACKAGE_PATTERNS
     )
+    model_packages = find_namespace_packages(
+        where=str(MODELS_PROJECT_DIR), include=MODELS_PACKAGE_PATTERNS
+    )
     return sorted(
         set(
             [
@@ -106,6 +111,7 @@ def get_packages() -> list[str]:
                 *task_packages,
                 *robot_packages,
                 *benchmark_packages,
+                *model_packages,
                 "embodichain_tasks.configs",
             ]
         )
@@ -119,6 +125,7 @@ def get_package_dir() -> dict[str, str]:
         "embodichain_tasks.configs": "extensions/embodichain_tasks/configs",
         "embodichain_robots": "extensions/embodichain_robots",
         "embodichain_benchmarks": "extensions/embodichain_benchmarks",
+        "embodichain_models": "extensions/embodichain_models/embodichain_models",
     }
 
 
@@ -177,6 +184,14 @@ def main():
         package_dir=get_package_dir(),
         package_data={
             "embodichain": ["VERSION"],
+            "embodichain_models.dynamics.nerd": ["THIRD_PARTY_LICENSES"],
+            "embodichain.data": ["default_materials.json"],
+            "embodichain_robots.unitree.go1": ["profile.json"],
+            "embodichain_robots.unitree.go2": ["profile.json"],
+            "embodichain_robots.unitree.g1": ["profile.json"],
+            "embodichain_robots.unitree.h1_2": ["profile.json"],
+            "embodichain_robots.anybotics.anymal_c": ["profile.json"],
+            "embodichain_robots.pollen_robotics.microduck": ["profile.json"],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
             "embodichain_tasks.configs": [

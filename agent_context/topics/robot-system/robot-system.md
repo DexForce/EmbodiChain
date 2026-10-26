@@ -7,10 +7,11 @@
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
 | Available robot configs and variants | `extensions/embodichain_robots/_catalog.py`; `extensions/embodichain_robots/__init__.py` owns lazy exports |
+| Locomotion assets, standing poses, drives and reference frames | `extensions/embodichain_robots/locomotion_profiles.py` reads each vendor/model's `profile.json`; model packages own `cfg.py` and `assets.py` |
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
-| W1 variants and serialization | `extensions/embodichain_robots/dexforce_w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
+| W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
@@ -26,7 +27,12 @@ package under `extensions/embodichain_robots/`, bundled in the main wheel with
 the core version. `extensions/` is only a source container; imports keep the
 `embodichain_` prefix. Generic `Robot`,
 `RobotCfg`, `RobotPresetCfg`, and dual-arm composition remain in the core.
-Concrete presets import from `embodichain_robots`. The core
+Concrete presets import from `embodichain_robots` and follow vendor/model
+ownership. Model packages keep `cfg.py` and their own `assets.py`; shared
+Franka and UR archives belong at vendor level. Model and vendor initializers
+must stay lazy so asset lookup cannot load robot configurations. Asset discovery
+and backward-compatible asset IDs are owned by
+[data assets](../data-assets/data-assets.md). The core
 `embodichain.lab.sim.robots` package exposes only generic dual-arm composition.
 
 Catalog listing defers robot classes and asset downloads; resolution imports
@@ -36,6 +42,10 @@ Selectors use exact registered IDs; aliases and `Cfg` suffixes are not accepted.
 An explicit `variant` applies profile defaults before caller overrides, while
 omission preserves existing construction behavior. See
 [catalog contracts](catalogs.md) for entry points, metadata and model profiles.
+
+Locomotion presets and pure Torch task contracts share backend-free model
+profiles. For source/contract joint ordering, drive ownership and solver limits,
+see [locomotion model profiles](catalogs.md#locomotion-model-profiles).
 
 `preview-robot` accepts a catalog ID or a standalone JSON/YAML RobotCfg file.
 File `class_type` optionally selects the catalog; local asset paths, including

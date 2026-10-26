@@ -21,6 +21,8 @@ from __future__ import annotations
 import json
 from importlib.resources import files
 
+from embodichain_robots.locomotion_profiles import load_locomotion_robot_profile
+
 __all__ = ["load_task_data"]
 
 
@@ -29,4 +31,9 @@ def load_task_data(task_name: str) -> dict:
     resource = files("embodichain_tasks.configs").joinpath(
         "tasks", "locomotion", "velocity", task_name, "task.json"
     )
-    return json.loads(resource.read_text(encoding="utf-8"))
+    data = json.loads(resource.read_text(encoding="utf-8"))
+    robot = data["robot"]
+    if "class_type" in robot:
+        profile = load_locomotion_robot_profile(robot["class_type"])
+        data["robot"] = {**profile["robot"], "frames": profile["frames"], **robot}
+    return data

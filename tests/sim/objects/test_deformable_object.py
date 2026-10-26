@@ -216,7 +216,8 @@ def test_manager_declares_deformables_with_supported_solver(
         add_cloth_object=lambda descriptor: descriptor,
     )
     monkeypatch.setattr("dexsim.spawn.SceneBuilder", lambda _world: builder)
-    sim._spawn_scene = SpawnScene(object(), num_envs=2)
+    # This declaration-only World stub has no native renderer query interface.
+    sim._spawn_scene = SpawnScene(object(), num_envs=2, renderer="hybrid")
 
     try:
         facade = sim.add_deformable_object(

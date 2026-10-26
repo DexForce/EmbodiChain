@@ -76,10 +76,11 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
         "embodichain_tasks",
         "embodichain_robots",
         "embodichain_benchmarks",
+        "embodichain_models",
     }
     assert runtime_roots | {
         "embodichain_tasks.configs",
-        "embodichain_robots.dexforce_w1",
+        "embodichain_robots.dexforce.w1",
     } <= set(packages)
     assert "embodichain_tasks.manipulation.tableware" in packages
     assert "embodichain_tasks.tableware" not in packages
@@ -89,6 +90,7 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
         "embodichain_tasks.configs": "extensions/embodichain_tasks/configs",
         "embodichain_robots": "extensions/embodichain_robots",
         "embodichain_benchmarks": "extensions/embodichain_benchmarks",
+        "embodichain_models": "extensions/embodichain_models/embodichain_models",
     }
 
 

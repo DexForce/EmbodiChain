@@ -48,6 +48,24 @@ and persistence confirmations; this package does not instantiate them.
    SPATIAL_METHODS
    TrajectoryPhase
    TrajectoryTemplate
+   TASK_SPACE_RESIDUAL_OPERATOR
+   TaskSpaceDeformationConstraint
+   TaskSpaceTrajectory
+   TaskSpaceProjectionResult
+   task_space_from_joint_template
+   deform_task_space_trajectory
+   project_task_space_trajectory
+   TrajectorySegment
+   SegmentCompatibility
+   TrajectorySegmentBank
+   TrajectoryBridge
+   TrajectoryBridgePlanner
+   MinimumJerkBridgePlanner
+   StitchedSegmentPlacement
+   StitchedTrajectory
+   extract_trajectory_segments
+   compare_trajectory_segments
+   stitch_trajectory_segments
    ValidationCheck
    ValidationResult
    TrajectoryDescriptor
@@ -380,6 +398,82 @@ release collection and coverage reservations before an explicit write retry.
 .. autoclass:: ExpansionSession
    :members:
 
+Task-Space Deformation and Segment Stitching
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These pure-trajectory helpers do not consume visual observations or affordance
+labels. ``task_space_from_joint_template`` evaluates an existing full-joint
+template through an injected batched kinematics function. Editable free phases
+may then receive bounded root-frame translation and rotation residuals from
+``deform_task_space_trajectory``. The deformation envelope is zero at both
+phase endpoints. ``project_task_space_trajectory`` solves all editable interior
+samples with batched damped least squares, leaves locked samples and phase
+endpoints at their exact reference qpos, and returns per-sample pose residuals
+and success evidence. The result still requires collision, dynamics, and task
+validation before execution.
+
+``extract_trajectory_segments`` converts annotated demonstrations into
+local-time, source-owned phases. ``TrajectorySegmentBank`` filters candidates
+by semantic phase, motion kind, joint layout, controlled joints, dtype, device,
+and timing dtype, then selects deterministically in FIFO or nearest-start
+order. ``stitch_trajectory_segments`` de-duplicates shared boundaries and
+retains multi-source lineage. Discontinuous boundaries require an explicit
+``TrajectoryBridgePlanner``. ``MinimumJerkBridgePlanner`` is a velocity- and
+acceleration-limited geometric fallback; it does not claim collision freedom.
+
+The stitched ``TrajectoryTemplate`` can be passed directly to
+``TemplateSourceAdapter``. Task-space projection also returns a normal
+``TrajectoryTemplate``, so both paths compose with existing candidate
+coordination, execution, validation, and persistence integrations without
+giving this package ownership of simulator state.
+
+.. autodata:: TASK_SPACE_RESIDUAL_OPERATOR
+
+.. autoclass:: TaskSpaceDeformationConstraint
+   :members:
+
+.. autoclass:: TaskSpaceTrajectory
+   :members:
+
+.. autoclass:: TaskSpaceProjectionResult
+   :members:
+
+.. autofunction:: task_space_from_joint_template
+
+.. autofunction:: deform_task_space_trajectory
+
+.. autofunction:: project_task_space_trajectory
+
+.. autoclass:: TrajectorySegment
+   :members:
+
+.. autoclass:: SegmentCompatibility
+   :members:
+
+.. autoclass:: TrajectorySegmentBank
+   :members:
+
+.. autoclass:: TrajectoryBridge
+   :members:
+
+.. autoclass:: TrajectoryBridgePlanner
+   :members:
+
+.. autoclass:: MinimumJerkBridgePlanner
+   :members:
+
+.. autoclass:: StitchedSegmentPlacement
+   :members:
+
+.. autoclass:: StitchedTrajectory
+   :members:
+
+.. autofunction:: extract_trajectory_segments
+
+.. autofunction:: compare_trajectory_segments
+
+.. autofunction:: stitch_trajectory_segments
+
 Trajectory Variants
 ~~~~~~~~~~~~~~~~~~~
 
@@ -566,6 +660,36 @@ The package import path above is convenient for callers combining them.
    apply_trajectory_variant
    expand_trajectory_variants
    sample_approach_cone
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.task_space
+
+.. autosummary::
+   :nosignatures:
+
+   TASK_SPACE_RESIDUAL_OPERATOR
+   TaskSpaceDeformationConstraint
+   TaskSpaceTrajectory
+   TaskSpaceProjectionResult
+   task_space_from_joint_template
+   deform_task_space_trajectory
+   project_task_space_trajectory
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.stitching
+
+.. autosummary::
+   :nosignatures:
+
+   TrajectorySegment
+   SegmentCompatibility
+   TrajectorySegmentBank
+   TrajectoryBridge
+   TrajectoryBridgePlanner
+   MinimumJerkBridgePlanner
+   StitchedSegmentPlacement
+   StitchedTrajectory
+   extract_trajectory_segments
+   compare_trajectory_segments
+   stitch_trajectory_segments
 
 .. currentmodule:: embodichain.lab.sim.motion.expansion.session
 

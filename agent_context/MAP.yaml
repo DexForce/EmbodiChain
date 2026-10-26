@@ -11,7 +11,7 @@ topics:
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
   keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
-    DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
+    DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, VisualMaterial, VisualMaterialCfg, VisualMaterialInst, preview-material, 材质预览, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
     fixed-cadence playback, quaternion, xyzw]
   paths: [topics/simulation-system/simulation-system.md]
@@ -24,6 +24,9 @@ topics:
   - embodichain/lab/sim/cfg/
   - embodichain/lab/sim/physics/
   - embodichain/lab/sim/spawn/
+  - embodichain/lab/sim/material.py
+  - embodichain/lab/sim/_material_presets.py
+  - embodichain/lab/scripts/preview_material.py
   - embodichain/lab/sim/common.py
   - embodichain/lab/sim/_startup_summary.py
   - embodichain/lab/sim/_runtime_controls.py
@@ -34,7 +37,7 @@ topics:
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/gym/envs/base_env.py
   watch_paths: [embodichain/lab/sim/sim_manager.py, embodichain/lab/sim/cfg/, embodichain/lab/sim/physics/,
-    embodichain/lab/sim/spawn/, embodichain/lab/sim/objects/, tests/sim/]
+    embodichain/lab/sim/spawn/, embodichain/lab/sim/material.py, embodichain/lab/sim/_material_presets.py, embodichain/lab/scripts/preview_material.py, tests/lab/scripts/test_preview_material.py, embodichain/lab/sim/objects/, tests/sim/]
   related_topics: [env-framework, robot-system, sensor-system, sim-visualization, ik-solvers, motion-planning,
     atomic-actions, rl-learning, configclass-pattern, robot-workspace]
   status: active
@@ -121,8 +124,8 @@ topics:
 - id: robot-system
   title: Robot System
   aliases: [robot system, robot config, robot catalog, list robot, robot preview, 机器人配置, 机器人系统, 机型解析, 列出机器人, 机器人预览]
-  keywords: [RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg,
-    FrankaPandaCfg, FrankaPandaPgiCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
+  keywords: [UnitreeGo1Cfg, UnitreeGo2Cfg, UnitreeG1Cfg, UnitreeH12Cfg, ANYmalCCfg, MicroDuckCfg, load_locomotion_robot_profile, RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg,
+    FrankaPandaCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
     asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot]
   paths: [topics/robot-system/robot-system.md]
   source_of_truth:
@@ -264,6 +267,25 @@ topics:
     tests/gym/envs/task_program/test_simulation_scene_expansion.py,
     tests/gym/envs/task_program/test_simulation_environment.py]
   related_topics: [scene-services, simulation-system, task-programs, robot-workspace, motion-planning, gen-sim, data-pipeline]
+  status: active
+- id: neural-dynamics
+  title: Neural Dynamics Models and Training
+  aliases: [neural dynamics, neural robot dynamics, NeRD, 神经动力学, 动力学模型训练, NeRD 示例]
+  keywords: [NeRDStateCodec, NeRDModel, DynamicsGenerationCfg,
+    DynamicsShardWriter, DynamicsWindowDataset, DynamicsTrainer, embodichain_models,
+    learning/nerd, nerd reference assets,
+    官方训练精度对比]
+  paths: [topics/neural-dynamics/neural-dynamics.md]
+  source_of_truth:
+  - extensions/embodichain_models/embodichain_models/dynamics/nerd/
+  - examples/learning/nerd/__main__.py
+  - examples/learning/nerd/_resources.py
+  - examples/learning/nerd/_support/
+  - examples/learning/nerd/configs/
+  watch_paths: [extensions/embodichain_models/, examples/learning/nerd/,
+    docs/source/features/neural_dynamics.md,
+    docs/source/api_reference/model_catalogs.rst]
+  related_topics: [supervised-learning, learning-layers, data-pipeline, data-assets]
   status: active
 - id: learning-layers
   title: Differentiable Learning Layers
@@ -422,15 +444,21 @@ topics:
   title: Data Assets
   aliases: [data assets, data path, asset download, 数据资产, 资产下载, 数据路径]
   keywords: [get_data_path, get_data_class, EmbodiChainDataset, TabletopFourBases, demo assets, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
-    CATEGORY_MODULES, download lock, get_registry]
+    CATEGORY_MODULES, embodichain.assets, ROBOT_ASSETS, 资产注册, download lock, get_registry, DefaultMaterials, list_default_materials, get_default_material_info]
   paths: [topics/data-assets/data-assets.md]
   source_of_truth:
   - embodichain/data/dataset.py
+  - embodichain/data/_asset_registry.py
+  - extensions/embodichain_robots/_asset_catalog.py
   - embodichain/data/constants.py
   - embodichain/data/download.py
   - embodichain/data/__init__.py
   - embodichain/data/assets/__init__.py
-  watch_paths: [embodichain/data/, embodichain/cli/main.py, tests/data/]
+  - embodichain/data/assets/materials.py
+  - embodichain/data/default_materials.py
+  - embodichain/data/default_materials.json
+  - embodichain/_material_catalog.py
+  watch_paths: [embodichain/data/, extensions/embodichain_robots/, embodichain/_material_catalog.py, embodichain/cli/main.py, tests/data/]
   related_topics: [gen-sim, robot-system, data-pipeline]
   status: active
 - id: data-pipeline
@@ -441,6 +469,7 @@ topics:
     DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice,
     validate_dataset, create_split_manifest, recover_recording, episode_uuid, language_persistent,
     SharedLanguageRegistry, resolve_language, configure_ods, ODSReuseProfileCfg,
+    ODSFlowController, ODSFlowControllerCfg, get_flow_status, ODS 供数控制,
     episode_sample_budget, OnlineDataBudgetExhaustedError, ODS 自动配置, BatchSource, SequenceSpecCfg,
     OnlineDataSource, TensorDataSource, LeRobotDataSource, OfflineDataset, SequenceDataset,
     DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, 数据集加载, 离线加载]
@@ -449,6 +478,7 @@ topics:
   - embodichain/data_pipeline/engine/data.py
   - embodichain/data_pipeline/engine/language.py
   - embodichain/data_pipeline/configuration.py
+  - embodichain/data_pipeline/runtime.py
   - embodichain/data_pipeline/datasets/online_data.py
   - embodichain/data_pipeline/datasets/sequence.py
   - embodichain/data_pipeline/datasets/sources.py
@@ -474,7 +504,7 @@ topics:
     embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_task.py,
     tests/data_pipeline/, embodichain/cli/dataset.py, tools/lerobot_export/, examples/ods/simple_bc_demo/,
     docs/source/features/online_data.md, docs/source/features/ods/, docs/architecture/dataset-loading-design.md]
-  related_topics: [manager-functor, env-framework, task-programs, sensor-system]
+  related_topics: [manager-functor, env-framework, task-programs, sensor-system, neural-dynamics, supervised-learning]
   status: active
 - id: robot-workspace
   title: Robot Workspace
@@ -513,4 +543,16 @@ topics:
   - embodichain/lab/task_program/integrations/simulation/asset_pouring.py
   watch_paths: [embodichain/data/asset_catalog/, tests/data/asset_catalog/, embodichain/lab/task_program/semantics/asset_requirements.py, tests/lab/task_program/semantics/test_asset_requirements.py, embodichain/lab/task_program/semantics/asset_matching.py, tests/lab/task_program/semantics/test_asset_matching.py, embodichain/lab/task_program/integrations/asset_materialization.py, tests/gym/envs/task_program/test_asset_materialization.py, embodichain/lab/gym/envs/asset_generalization.py, tests/gym/envs/test_asset_generalization.py, examples/expansion/asset_generalization/, examples/expansion/asset_catalog/, examples/expansion/README.md]
   related_topics: [data-assets, task-programs, gen-sim, scene-services, manager-functor, env-framework]
+  status: active
+
+- id: supervised-learning
+  title: Supervised Learning
+  aliases: [supervised learning, SL learning, 监督学习, 统一监督学习]
+  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
+  paths: [topics/supervised-learning/supervised-learning.md]
+  source_of_truth:
+  - embodichain/learning/sl/
+  - embodichain/cli/main.py
+  watch_paths: [embodichain/learning/sl/, tests/learning/sl/]
+  related_topics: [learning-layers, data-pipeline, rl-learning, neural-dynamics]
   status: active

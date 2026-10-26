@@ -26,23 +26,39 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
+    "UnitreeGo1Cfg",
+    "UnitreeGo2Cfg",
+    "UnitreeG1Cfg",
+    "UnitreeH12Cfg",
+    "ANYmalCCfg",
+    "MicroDuckCfg",
+    "ARX5Cfg",
     "AlohaMiniCfg",
     "TianjiMarvinCfg",
     "DexforceW1Cfg",
     "CobotMagicCfg",
     "FrankaPandaCfg",
-    "FrankaPandaPgiCfg",
+    "FlexivRizon4SCfg",
     "URRobotCfg",
+    "SO101FollowerCfg",
 ]
 
 _EXPORTS = {
-    "AlohaMiniCfg": ".aloha_mini",
-    "TianjiMarvinCfg": ".tianji_marvin",
-    "DexforceW1Cfg": ".dexforce_w1.cfg",
-    "CobotMagicCfg": ".cobotmagic",
-    "FrankaPandaCfg": ".franka_panda",
-    "FrankaPandaPgiCfg": ".franka_panda",
-    "URRobotCfg": ".ur_robot",
+    "UnitreeGo1Cfg": ".unitree.go1",
+    "UnitreeGo2Cfg": ".unitree.go2",
+    "UnitreeG1Cfg": ".unitree.g1",
+    "UnitreeH12Cfg": ".unitree.h1_2",
+    "ANYmalCCfg": ".anybotics.anymal_c",
+    "MicroDuckCfg": ".pollen_robotics.microduck",
+    "ARX5Cfg": ".arx.arx5",
+    "AlohaMiniCfg": ".alohamini.aloha_mini",
+    "TianjiMarvinCfg": ".tianji.marvin",
+    "DexforceW1Cfg": ".dexforce.w1",
+    "CobotMagicCfg": ".agilex.cobotmagic",
+    "FrankaPandaCfg": ".franka.panda",
+    "FlexivRizon4SCfg": ".flexiv.rizon4s",
+    "URRobotCfg": ".universal_robots.ur_robot",
+    "SO101FollowerCfg": ".the_robot_studio.so101",
 }
 
 

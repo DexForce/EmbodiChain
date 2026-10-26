@@ -26,7 +26,7 @@ a Python namespace. Keep the `embodichain_` prefix for bundled extension modules
 |---|---|
 | CLI dispatch / task discovery | `embodichain/cli/` |
 | Shared numerical algorithms | `embodichain/compute/` |
-| Assets and download registry | `embodichain/data/` |
+| Shared asset downloads, cache and registry | `embodichain/data/` |
 | Online datasets and depth video | `embodichain/data_pipeline/` |
 | Scene Engine and SimReady generation | `embodichain/gen_sim/` |
 | Simulation world, objects, sensors, solvers, planning | `embodichain/lab/sim/` |
@@ -37,13 +37,15 @@ a Python namespace. Keep the `embodichain_` prefix for bundled extension modules
 | Real-device controllers / standalone tools | `embodichain/lab/devices/`, `embodichain/toolkits/` |
 | Shared config and math utilities | `embodichain/utils/` |
 | Official task entry points / components / deployments | `extensions/embodichain_tasks/` |
-| Concrete robot configurations / hardware revisions / calibrated defaults | `extensions/embodichain_robots/` |
+| Concrete robot configurations / model-owned asset definitions / calibrated defaults | `extensions/embodichain_robots/` |
 
 Generic robot runtime/configuration and dual-arm composition remain in
 `embodichain/lab/sim/`; lightweight catalog resolution lives in
 `embodichain/robot_registry.py`. Concrete robot presets register
-through the `embodichain.robots` catalog entry point. Concrete presets import
-from `embodichain_robots`; `embodichain.lab.sim.robots` owns only generic
+through the `embodichain.robots` catalog entry point. Concrete presets and migrated model-owned asset definitions use vendor/model
+namespaces in `embodichain_robots`. Shared download/cache machinery stays in
+`embodichain/data`; the `embodichain.assets` entry point registers robot assets.
+Concrete presets import from `embodichain_robots`; `embodichain.lab.sim.robots` owns only generic
 dual-arm composition.
 
 Shared numerical algorithms belong to `compute/<domain>/`, with Warp kernels
@@ -97,7 +99,7 @@ not switch it. Use a separate environment config for each backend.
   [implement-performance](.agents/skills/implement-performance/SKILL.md).
   Preserve numerical correctness and public contracts; validate material
   performance claims with representative measurements using `/benchmark`.
-- Run **`black==26.3.1`**, using `black .`, before every commit.
+- Run **`black==26.10.1`**, using `black .`, before every commit.
 - Use `/pre-commit-check` for proportional checks. Production fixes/features
   need focused behavioral coverage; existing tests may suffice. Before and after
   adding or extending tests, apply the

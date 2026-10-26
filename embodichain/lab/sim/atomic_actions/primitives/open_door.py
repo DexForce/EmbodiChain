@@ -16,7 +16,7 @@
 
 """OpenDoor atomic action implementation.
 
-The ``scripts/tutorials/atomic_action/open_door.py`` example loads
+The ``examples/sim/atomic_action/open_door.py`` example loads
 ``Microwave/microwave.urdf`` and resolves the ``handle_link`` target through
 ``door_handle_fixed_joint`` to ``door_hinge``. Its invocation requests
 ``MotionPolicy.sample_count=300``, ``hand_interp_steps=30``, and

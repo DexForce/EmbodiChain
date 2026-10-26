@@ -70,6 +70,14 @@ ordinary batch IK and reject continuous requests before solving.
 PyTorch Solver
 --------------
 
+``PytorchSolver`` uses batched damped least squares. Set
+``PytorchSolverCfg.is_only_position_constraint=True`` for underactuated arms
+such as SO101: the objective and convergence test constrain only TCP position.
+Targets remain root-relative 4x4 poses, but their rotation is ignored, including
+when a translated or rotated TCP is configured. Runtime ``set_tcp()`` and
+``set_iteration_params()`` updates preserve this behavior. The default
+``False`` continues to require both position and rotation convergence.
+
 .. autoclass:: PytorchSolverCfg
     :members:
     :exclude-members: __init__, copy, replace, to_dict, validate
@@ -78,6 +86,18 @@ PyTorch Solver
     :members:
     :inherited-members:
     :show-inheritance:
+
+.. py:class:: embodichain.lab.sim.motion.solvers.pytorch_solver.PytorchSolverCfg
+    :no-index:
+
+    Implementation of :class:`PytorchSolverCfg`, configuring DLS tolerances,
+    position-only constraints and multi-start candidate selection.
+
+.. py:class:: embodichain.lab.sim.motion.solvers.pytorch_solver.PytorchSolver
+    :no-index:
+
+    Implementation of :class:`PytorchSolver`, including runtime TCP and
+    constraint-mode updates for the batched PK backend.
 
 FEP Solver
 ----------

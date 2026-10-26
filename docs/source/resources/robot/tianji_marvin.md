@@ -137,8 +137,8 @@ cfg = TianjiMarvinCfg.from_dict(
 Run the preview and FK/IK smoke check in the project environment:
 
 ```bash
-conda run -n embodichain python -m embodichain_robots.tianji_marvin --headless
-conda run -n embodichain python -m embodichain_robots.tianji_marvin --headless --no-with-gripper
+conda run -n embodichain python -m embodichain_robots.tianji.marvin.cfg --headless
+conda run -n embodichain python -m embodichain_robots.tianji.marvin.cfg --headless --no-with-gripper
 ```
 
 Omit `--headless` to open the simulation window and an interactive session.

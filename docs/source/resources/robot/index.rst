@@ -17,12 +17,18 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
    * - Robot
      - Configuration class
      - Current coverage
+   * - :doc:`ARX5 X5A <arx5>`
+     - ``ARX5Cfg``
+     - Six-joint arm with two independent parallel fingers and numerical IK.
    * - :doc:`Franka Panda <franka_panda>`
-     - ``FrankaPandaCfg``, ``FrankaPandaPgiCfg``
+     - ``FrankaPandaCfg``
      - Panda arm with the Panda hand or a DH PGI gripper, with numerical FK/IK.
    * - :doc:`UR family <ur_robot>`
      - ``URRobotCfg``
      - UR3, UR3e, UR5, UR5e, UR10, and UR10e with analytic IK.
+   * - :doc:`Flexiv Rizon 4S <flexiv_rizon4s>`
+     - ``FlexivRizon4SCfg``
+     - Seven-axis bare arm with numerical IK and published Flexiv simulation dynamics.
    * - :doc:`Dexforce W1 <dexforce_w1>`
      - ``DexforceW1Cfg``
      - Dual 7-DOF arms, versioned assets, and configurable hands/grippers.
@@ -38,18 +44,55 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
    * - :doc:`Tianji Marvin <tianji_marvin>`
      - ``TianjiMarvinCfg``
      - Dual 7-DOF arms with optional parallel-jaw grippers.
+   * - :doc:`SO101 Follower <so101>`
+     - ``SO101FollowerCfg``
+     - Five-axis follower arm and actuated jaw with official simulation dynamics.
+   * - :doc:`Unitree Go1 <unitree_go1>`
+     - ``UnitreeGo1Cfg``
+     - Twelve-joint floating-base quadruped with simulation PD defaults.
+   * - :doc:`Unitree Go2 <unitree_go2>`
+     - ``UnitreeGo2Cfg``
+     - Twelve-joint floating-base quadruped with simulation PD defaults.
+   * - :doc:`Unitree G1 <unitree_g1>`
+     - ``UnitreeG1Cfg``
+     - Twenty-nine-joint humanoid with its standing pose and simulation PD defaults.
+   * - :doc:`Unitree H1_2 <unitree_h1_2>`
+     - ``UnitreeH12Cfg``
+     - Twenty-seven-joint humanoid with its standing pose and simulation PD defaults.
+   * - :doc:`ANYmal-C <anymal_c>`
+     - ``ANYmalCCfg``
+     - Twelve-joint floating-base quadruped with simulation PD defaults.
+   * - :doc:`MicroDuck <microduck>`
+     - ``MicroDuckCfg``
+     - Fourteen-joint floating-base biped with simulation PD defaults.
 
 .. toctree::
    :maxdepth: 1
    :hidden:
 
    franka_panda
+   arx5
    ur_robot
+   flexiv_rizon4s
    dexforce_w1
    cobotmagic
    dual_arm
    aloha_mini
    tianji_marvin
+   so101
 
 To add another model, follow :doc:`/guides/add_robot` and include its page in
 this catalog and toctree.
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Locomotion robots
+
+   locomotion
+   unitree_go1
+   unitree_go2
+   unitree_g1
+   unitree_h1_2
+   anymal_c
+   microduck
