@@ -569,6 +569,7 @@ jobs:
               "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
               "embodichain_robots/__init__.py",
               "embodichain_robots/_catalog.py",
+              "embodichain_models/__init__.py",
               "embodichain_robots/_asset_catalog.py",
               "embodichain/data/_asset_registry.py",
               "embodichain_robots/franka/assets.py",
@@ -607,6 +608,7 @@ jobs:
                       "embodichain_tasks/",
                       "embodichain_robots/",
                       "embodichain_benchmarks/",
+                      "embodichain_models/",
                       f"embodichain-{version}.data/data/share/embodichain/examples/",
                       dist_info,
                   )

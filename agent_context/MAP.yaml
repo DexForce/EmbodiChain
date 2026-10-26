@@ -270,6 +270,25 @@ topics:
     tests/gym/envs/task_program/test_simulation_environment.py]
   related_topics: [scene-services, simulation-system, task-programs, robot-workspace, motion-planning, gen-sim, data-pipeline]
   status: active
+- id: neural-dynamics
+  title: Neural Dynamics Models and Training
+  aliases: [neural dynamics, neural robot dynamics, NeRD, 神经动力学, 动力学模型训练, NeRD 示例]
+  keywords: [NeRDStateCodec, NeRDModel, DynamicsGenerationCfg,
+    DynamicsShardWriter, DynamicsWindowDataset, DynamicsTrainer, embodichain_models,
+    learning/nerd, nerd reference assets,
+    官方训练精度对比]
+  paths: [topics/neural-dynamics/neural-dynamics.md]
+  source_of_truth:
+  - extensions/embodichain_models/embodichain_models/dynamics/nerd/
+  - examples/learning/nerd/__main__.py
+  - examples/learning/nerd/_resources.py
+  - examples/learning/nerd/_support/
+  - examples/learning/nerd/configs/
+  watch_paths: [extensions/embodichain_models/, examples/learning/nerd/,
+    docs/source/features/neural_dynamics.md,
+    docs/source/api_reference/model_catalogs.rst]
+  related_topics: [supervised-learning, learning-layers, data-pipeline, data-assets]
+  status: active
 - id: learning-layers
   title: Differentiable Learning Layers
   aliases: [learning layers, differentiable IK layer, 可微 IK, 训练层, 学习模块分层]
@@ -490,7 +509,7 @@ topics:
     embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_task.py,
     tests/data_pipeline/, embodichain/cli/dataset.py, tools/lerobot_export/, examples/ods/simple_bc_demo/,
     docs/source/features/online_data.md, docs/source/features/ods/, docs/architecture/dataset-loading-design.md]
-  related_topics: [manager-functor, env-framework, task-programs, sensor-system]
+  related_topics: [manager-functor, env-framework, task-programs, sensor-system, neural-dynamics, supervised-learning]
   status: active
 - id: robot-workspace
   title: Robot Workspace
@@ -529,4 +548,16 @@ topics:
   - embodichain/lab/task_program/integrations/simulation/asset_pouring.py
   watch_paths: [embodichain/data/asset_catalog/, tests/data/asset_catalog/, embodichain/lab/task_program/semantics/asset_requirements.py, tests/lab/task_program/semantics/test_asset_requirements.py, embodichain/lab/task_program/semantics/asset_matching.py, tests/lab/task_program/semantics/test_asset_matching.py, embodichain/lab/task_program/integrations/asset_materialization.py, tests/gym/envs/task_program/test_asset_materialization.py, embodichain/lab/gym/envs/asset_generalization.py, tests/gym/envs/test_asset_generalization.py, examples/expansion/asset_generalization/, examples/expansion/asset_catalog/, examples/expansion/README.md]
   related_topics: [data-assets, task-programs, gen-sim, scene-services, manager-functor, env-framework]
+  status: active
+
+- id: supervised-learning
+  title: Supervised Learning
+  aliases: [supervised learning, SL learning, 监督学习, 统一监督学习]
+  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
+  paths: [topics/supervised-learning/supervised-learning.md]
+  source_of_truth:
+  - embodichain/learning/sl/
+  - embodichain/cli/main.py
+  watch_paths: [embodichain/learning/sl/, tests/learning/sl/]
+  related_topics: [learning-layers, data-pipeline, rl-learning, neural-dynamics]
   status: active
