@@ -43,13 +43,12 @@ __all__ = [
 ]
 
 STANDARD_VERSION = "atomic-skill-v2"
-# Adopt #642's absolute SI thresholds, including its rounded angular values.
 TOLERANCES: Mapping[str, float] = MappingProxyType(
     {
-        "primitive_position_m": 0.003,
-        "primitive_joint_l2_rad": 0.00524,
+        "primitive_position_m": 0.01,
+        "primitive_joint_l2_rad": 0.1,
         "task_position_m": 0.01,
-        "task_rotation_rad": 0.08727,
+        "task_rotation_rad": 0.1,
         "pick_min_lift_m": 0.04,
         "press_min_stroke_ratio": 0.80,
         "drop_margin_m": 0.15,

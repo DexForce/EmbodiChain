@@ -284,7 +284,7 @@ def test_move_end_effector_provider_uses_settled_tcp_standard_evidence() -> None
         target_waypoints=torch.eye(4).repeat(2, 1, 1, 1),
     )
     final_tcp = torch.eye(4).repeat(2, 1, 1)
-    final_tcp[:, 0, 3] = torch.tensor([0.002, 0.004])
+    final_tcp[:, 0, 3] = torch.tensor([0.009, 0.011])
     observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=final_tcp,
@@ -377,7 +377,7 @@ def test_move_joints_provider_uses_l2_settled_joint_error() -> None:
         joint_tracking_rmse_rad=torch.zeros(2),
         execution_time_ms=1.0,
         task_completion_time_s=0.5,
-        final_arm_qpos=torch.tensor([[0.003, 0.003], [0.004, 0.004]]),
+        final_arm_qpos=torch.tensor([[0.06, 0.06], [0.08, 0.08]]),
     )
     outcomes = (_atomic_outcome(), replace(_atomic_outcome(), env_index=1))
 
@@ -388,7 +388,7 @@ def test_move_joints_provider_uses_l2_settled_joint_error() -> None:
     assert [result.task_success for result in results] == [True, False]
     assert results[1].failure_code == "task_goal_miss"
     assert results[0].stages[0].measurements["joint_error_l2_rad"] == pytest.approx(
-        2**0.5 * 0.003
+        2**0.5 * 0.06
     )
 
 
