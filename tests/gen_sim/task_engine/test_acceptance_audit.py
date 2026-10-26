@@ -137,8 +137,10 @@ def test_dual_observer_audit_preserves_runtime_and_exact_terminal_snapshot(
     output = tmp_path / "audit"
     output.mkdir()
     original = audit.capture_final_goals
+    observer_order = []
 
     def capture(*args, **kwargs):
+        observer_order.append(kwargs.get("legacy_observer"))
         value = original(*args, **kwargs)
         if mutate and not kwargs.get("legacy_observer"):
             runtime["unexpected_mutation"] = True
@@ -158,6 +160,7 @@ def test_dual_observer_audit_preserves_runtime_and_exact_terminal_snapshot(
     comparison = json.loads((output / "task_spec_observer_comparison.json").read_text())
     terminal = json.loads((output / "task_spec_terminal_snapshot.json").read_text())
     assert current["environments"][0]["certificate_ready"] is True
+    assert observer_order == [False, True]
     assert legacy["environments"][0]["certificate_ready"] is True
     assert comparison["native_state_unchanged"] is True
     assert comparison["legacy_affects_selected_verdict"] is False
