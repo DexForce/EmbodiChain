@@ -110,7 +110,9 @@ retain caller thread settings; `worker_threads` only controls spawned workers.
 
 For frozen B=1 Free-space cases and NMG-only planners, the Python API also
 accepts `quality_batch_size=4`. This groups matching K/modality requests into
-physical execution slots and composes with spawned workers. The case manifest,
+physical execution slots and composes with spawned workers. A model with a fixed
+batch dimension must match this capacity; incompatible settings fail before
+planning. The case manifest,
 case/seed identities, per-case validator grids and quality weights stay intact;
 unused physical slots create no extra trials. Raw valid prefixes and endpoint
 finite-difference stencils are restored before individual validation, while

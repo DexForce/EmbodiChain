@@ -43,6 +43,7 @@ from embodichain_benchmarks.motion_generation.config import (
 from embodichain_benchmarks.motion_generation.models import BenchmarkCase
 from embodichain_benchmarks.motion_generation.embodiments import resolve_embodiment
 from embodichain_benchmarks.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+from embodichain_benchmarks.motion_generation.planners import nmg_onnx as nmg_module
 from embodichain_benchmarks.motion_generation import runner as runner_module
 
 pytestmark = pytest.mark.no_sim
@@ -173,12 +174,16 @@ def test_grouping_preserves_semantics_without_changing_original_inputs() -> None
         )
 
 
+@pytest.mark.parametrize("fixed_batch_size", [None, 1])
 @pytest.mark.parametrize("retimed", [False, True])
 def test_public_batch_replay_preserves_original_records_and_scores(
-    tmp_path, monkeypatch, retimed
+    tmp_path, monkeypatch, retimed, fixed_batch_size
 ) -> None:
     """Exercise real runner/scoring with explicit per-row FK and padding."""
     mapped = []
+    planned_batches = []
+    closed_adapters = []
+    destroyed_simulations = []
 
     class Robot:
         device = torch.device("cpu")
@@ -224,7 +229,7 @@ def test_public_batch_replay_preserves_original_records_and_scores(
             robot=Robot(cfg.num_envs),
             update=lambda **kw: None,
             sync_render_state=lambda: None,
-            destroy=lambda **kw: None,
+            destroy=lambda **kw: destroyed_simulations.append(cfg.num_envs),
         )
 
     simulation.flush_cleanup_queue = lambda: None
@@ -234,6 +239,17 @@ def test_public_batch_replay_preserves_original_records_and_scores(
         "create_robot_provider",
         lambda spec: SimpleNamespace(
             control_part="arm", add_robot=lambda sim: sim.robot
+        ),
+    )
+
+    monkeypatch.setattr(
+        nmg_module,
+        "MotionGenerator",
+        lambda cfg: SimpleNamespace(
+            planner=SimpleNamespace(
+                _policy=SimpleNamespace(fixed_batch_size=fixed_batch_size),
+                close=lambda: closed_adapters.append(True),
+            )
         ),
     )
 
@@ -251,10 +267,10 @@ def test_public_batch_replay_preserves_original_records_and_scores(
         def availability(self):
             return True, None
 
-        def build(self):
-            pass
-
         def plan(self, case):
+            planned_batches.append(case.batch_size)
+            if fixed_batch_size is not None and case.batch_size != fixed_batch_size:
+                raise ValueError("ONNX policy has incompatible fixed batch size")
             indices = (case.start_qpos[:, 1] * 20).round().long().tolist()
             lengths = torch.tensor([[2, 4, 5][i] for i in indices], dtype=torch.int32)
             n = int(lengths.max())
@@ -288,7 +304,11 @@ def test_public_batch_replay_preserves_original_records_and_scores(
                 id="nmg",
                 adapter="nmg_onnx",
                 enabled=True,
-                config={"model_revision": "fixture", "retime": retimed},
+                config={
+                    "model_revision": "fixture",
+                    "onnx_model_path": "fixture.onnx",
+                    "retime": retimed,
+                },
             )
         ],
         tracks=[
@@ -298,6 +318,7 @@ def test_public_batch_replay_preserves_original_records_and_scores(
     suite.protocol.warmup_trials = 0
     suite.protocol.measured_trials = 1
     suite.protocol.validation_samples = 32
+    suite.protocol.joint_acceleration_limit_rad_s2 = 0.5
     cases = [_case(i) for i in range(3)]
     source = write_case_manifest(
         tmp_path / "originals.json",
@@ -307,8 +328,9 @@ def test_public_batch_replay_preserves_original_records_and_scores(
             suite.embodiment, suite.robot, base_dir=tmp_path
         ),
     )
-    results = [
-        run_benchmark(
+
+    def run(capacity):
+        return run_benchmark(
             suite,
             adapters={"nmg_onnx": Adapter},
             device="cpu",
@@ -316,8 +338,23 @@ def test_public_batch_replay_preserves_original_records_and_scores(
             quality_batch_size=capacity,
             output_root=tmp_path / f"batch-{capacity}",
         )
-        for capacity in (1, 4)
-    ]
+
+    singleton = run(1)
+    assert all(record.status == "ok" for record in singleton.records)
+    if fixed_batch_size == 1:
+        calls_before = len(planned_batches)
+        with pytest.raises(
+            ValueError, match="quality_batch_size=4.*fixed batch size 1"
+        ):
+            run(4)
+        assert len(planned_batches) == calls_before
+        assert len(closed_adapters) == len(destroyed_simulations) == 2
+        trials = next((tmp_path / "batch-4").rglob("trials.jsonl"))
+        records = [json.loads(line) for line in trials.read_text().splitlines()]
+        assert all(record["status"] == "ok" for record in records)
+        assert all(record["phase"] == "construct" for record in records)
+        fixed_batch_size = 4
+    results = [singleton, run(4)]
     measured = [
         {r.case_id: r for r in result.records if r.phase.value == "measured"}
         for result in results

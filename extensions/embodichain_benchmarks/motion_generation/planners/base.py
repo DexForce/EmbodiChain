@@ -88,6 +88,8 @@ class PlannerAdapter(ABC):
 
     capabilities: frozenset[str] = frozenset()
     model_revision: str = "N/A"
+    fixed_batch_size: int | None = None
+    """Required execution batch size, if the loaded model fixes it."""
     separate_prepare: bool = False
     """Whether this backend exposes a distinct lazy preparation phase."""
     timing_is_solved: bool = False

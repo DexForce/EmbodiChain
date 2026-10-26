@@ -684,6 +684,17 @@ class BenchmarkRunner:
         }
         scenario_prepared = False
         try:
+            if (
+                self.quality_batch_size > 1
+                and adapter.fixed_batch_size is not None
+                and adapter.fixed_batch_size != self.quality_batch_size
+            ):
+                raise ValueError(
+                    f"quality_batch_size={self.quality_batch_size} is incompatible "
+                    f"with planner {metadata.algorithm_id!r}: model has fixed batch "
+                    f"size {adapter.fixed_batch_size}. Use "
+                    f"quality_batch_size={adapter.fixed_batch_size}."
+                )
             if adapter.separate_prepare:
                 preparation_cases = deepcopy(supported_cases)
                 _, prepare_error = self._record_timed_lifecycle(

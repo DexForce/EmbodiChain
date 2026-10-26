@@ -175,6 +175,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             constraints=self._retiming_constraints() if self.retime else None,
         )
         self.motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
+        self.fixed_batch_size = self.motion_generator.planner._policy.fixed_batch_size
 
     def plan(self, case: BenchmarkCase) -> PlanResult:
         """Plan all ordered constraints in one closed-loop rollout."""
