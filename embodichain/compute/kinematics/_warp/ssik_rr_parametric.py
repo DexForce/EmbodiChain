@@ -82,6 +82,119 @@ def _factor_at(data: _ParametricData, phi: wp.float64, joint: int) -> wp.mat44d:
 
 
 @wp.kernel
+def parametric_refine_roots(
+    pencil: wp.array4d(dtype=wp.float64),
+    roots: wp.array3d(dtype=wp.float64),
+    root_valid: wp.array3d(dtype=wp.int32),
+    matrix: wp.array4d(dtype=wp.float64),
+    derivative: wp.array4d(dtype=wp.float64),
+):
+    """Refine existing real algebraic roots against their original pencil.
+
+    Shift-invert linearization can amplify roundoff in a non-normal pencil.
+    Three bounded determinant Newton steps use the original quadratic matrix,
+    with simultaneous LU differentiation computing ``d(log(det(M)))/dx``.
+    Both 12-by-12 workspaces are global and reused by back substitution; no
+    joint-space or Cartesian IK iterate is introduced and masks stay unchanged.
+    """
+    target, sample, branch = wp.tid()
+    slot = sample * 24 + branch
+    if root_valid[target, sample, branch] == 0:
+        return
+    original = roots[target, sample, branch]
+    if not wp.isfinite(original):
+        return
+    reciprocal = wp.abs(original) > wp.float64(1.0)
+    initial = original
+    if reciprocal:
+        initial = wp.float64(1.0) / original
+    value = initial
+    for iteration in range(3):
+        for i in range(12):
+            scale = wp.float64(0.0)
+            for j in range(12):
+                a = pencil[target, sample, i, j]
+                b = pencil[target, sample, i + 12, j]
+                c = pencil[target, sample, i + 24, j]
+                if reciprocal:
+                    temp = a
+                    a = c
+                    c = temp
+                entry = (a * value + b) * value + c
+                matrix[target, slot, i, j] = entry
+                derivative[target, slot, i, j] = wp.float64(2.0) * a * value + b
+                scale = wp.max(scale, wp.abs(entry))
+            if scale > wp.float64(0.0):
+                for j in range(12):
+                    matrix[target, slot, i, j] /= scale
+                    derivative[target, slot, i, j] /= scale
+        safe = bool(True)
+        for k in range(12):
+            pivot = int(k)
+            for i in range(k + 1, 12):
+                if wp.abs(matrix[target, slot, i, k]) > wp.abs(
+                    matrix[target, slot, pivot, k]
+                ):
+                    pivot = i
+            diagonal = matrix[target, slot, pivot, k]
+            if not wp.isfinite(diagonal) or wp.abs(diagonal) <= wp.float64(1e-28):
+                safe = False
+                break
+            if pivot != k:
+                for j in range(k, 12):
+                    temp = matrix[target, slot, k, j]
+                    matrix[target, slot, k, j] = matrix[target, slot, pivot, j]
+                    matrix[target, slot, pivot, j] = temp
+                    temp = derivative[target, slot, k, j]
+                    derivative[target, slot, k, j] = derivative[target, slot, pivot, j]
+                    derivative[target, slot, pivot, j] = temp
+            diagonal_derivative = derivative[target, slot, k, k]
+            for i in range(k + 1, 12):
+                factor = matrix[target, slot, i, k] / diagonal
+                factor_derivative = (
+                    derivative[target, slot, i, k] - factor * diagonal_derivative
+                ) / diagonal
+                for j in range(k + 1, 12):
+                    derivative[target, slot, i, j] -= (
+                        factor_derivative * matrix[target, slot, k, j]
+                        + factor * derivative[target, slot, k, j]
+                    )
+                    matrix[target, slot, i, j] -= factor * matrix[target, slot, k, j]
+                matrix[target, slot, i, k] = wp.float64(0.0)
+                derivative[target, slot, i, k] = wp.float64(0.0)
+        if not safe:
+            break
+        log_derivative = wp.float64(0.0)
+        for k in range(12):
+            log_derivative += (
+                derivative[target, slot, k, k] / matrix[target, slot, k, k]
+            )
+        if not wp.isfinite(log_derivative) or wp.abs(log_derivative) <= wp.float64(
+            1e-28
+        ):
+            break
+        delta = wp.float64(1.0) / log_derivative
+        proposed = value - delta
+        # A chart correction is deliberately local to the existing root. An
+        # unsafe correction preserves the last safe value, never adds a root.
+        if (
+            not wp.isfinite(delta)
+            or not wp.isfinite(proposed)
+            or wp.abs(delta) > wp.float64(0.01)
+            or wp.abs(proposed - initial) > wp.float64(0.01)
+        ):
+            break
+        value = proposed
+    refined = value
+    if reciprocal:
+        refined = original
+        if wp.abs(value) > wp.float64(1e-30):
+            refined = wp.float64(1.0) / value
+    if wp.isfinite(refined):
+        roots[target, sample, branch] = refined
+
+
+@wp.kernel
 def parametric_back_substitute(
     data: _ParametricData,
     goals: wp.array(dtype=wp.mat44d),

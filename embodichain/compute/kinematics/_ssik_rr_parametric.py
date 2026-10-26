@@ -325,6 +325,7 @@ class _ParametricRRCandidates:
             "angles": (size, samples),
             "predictions": (size, 2),
             "back_matrix": (size, slots, 12, 12),
+            "root_derivative": (size, slots, 12, 12),
             "back_vectors": (size, slots, 2, 12),
         }
         if self.device.type == "cpu":
@@ -398,7 +399,10 @@ class _ParametricRRCandidates:
             parametric_lock_predictor_cpu,
             parametric_pencil_roots_cpu,
         )
-        from ._warp.ssik_rr_parametric import parametric_back_substitute
+        from ._warp.ssik_rr_parametric import (
+            parametric_back_substitute,
+            parametric_refine_roots,
+        )
 
         n = len(target_end)
         validity = torch.empty(
@@ -469,6 +473,18 @@ class _ParametricRRCandidates:
                     w["roots"],
                     w["root_imag"],
                     w["root_valid"],
+                ],
+                device="cpu",
+            )
+            wp.launch(
+                parametric_refine_roots,
+                dim=(count, self.sample_count, 24),
+                inputs=[
+                    w["pencil"],
+                    w["roots"],
+                    w["root_valid"],
+                    w["back_matrix"],
+                    w["root_derivative"],
                 ],
                 device="cpu",
             )
@@ -606,7 +622,10 @@ class _ParametricRRCandidates:
             parametric_lock_predictor,
         )
         from ._warp.ssik_rr_cuda import rr_eigen_cooperative
-        from ._warp.ssik_rr_parametric import parametric_back_substitute
+        from ._warp.ssik_rr_parametric import (
+            parametric_back_substitute,
+            parametric_refine_roots,
+        )
 
         n = len(target_end)
         validity = torch.empty(
@@ -698,6 +717,19 @@ class _ParametricRRCandidates:
                 device=str(self.device),
                 stream=stream,
                 block_dim=32,
+            )
+            wp.launch(
+                parametric_refine_roots,
+                dim=(count, self.sample_count, 24),
+                inputs=[
+                    w["pencil"],
+                    w["roots"],
+                    w["root_valid"],
+                    w["back_matrix"],
+                    w["root_derivative"],
+                ],
+                device=str(self.device),
+                stream=stream,
             )
             wp.launch(
                 parametric_back_substitute,

@@ -83,7 +83,70 @@ def _check_candidates(
     return flags.bool() & (error <= 1e-5)
 
 
-def _world_roundtrip_case() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def _world_roundtrip_case(
+    case: str = "so3",
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if case == "ill_conditioned_pencil":
+        # Actual CPU Robot seed2531 trajectory9/frame807. Keep the captured
+        # root-frame F32 pose: regenerating it from a witness removes the
+        # shift-invert eigenvalue sensitivity which triggered the regression.
+        target = torch.tensor(
+            [
+                [
+                    [
+                        0.7102590203285217,
+                        0.6447283029556274,
+                        0.2825905680656433,
+                        0.20175625383853912,
+                    ],
+                    [
+                        -0.4977051317691803,
+                        0.7438258528709412,
+                        -0.446108341217041,
+                        -0.31850552558898926,
+                    ],
+                    [
+                        -0.49781686067581177,
+                        0.17620570957660675,
+                        0.8491936922073364,
+                        1.112137794494629,
+                    ],
+                    [0, 0, 0, 1],
+                ]
+            ],
+            dtype=torch.float64,
+        )
+        seed = torch.tensor(
+            [
+                [
+                    -0.32544785737991333,
+                    0.0148703558370471,
+                    -0.1697521209716797,
+                    0.9526528716087341,
+                    0.5544560551643372,
+                    2.077914237976074,
+                    -0.601459264755249,
+                ]
+            ],
+            dtype=torch.float64,
+        )
+        # Independently constructed against the original URDF/PK and captured
+        # target; it establishes a strictly feasible solution within 0.05 rad.
+        witness = torch.tensor(
+            [
+                [
+                    -0.3247928023338318,
+                    0.01464746706187725,
+                    -0.16913074254989624,
+                    0.9529126882553101,
+                    0.5556564927101135,
+                    2.079097032546997,
+                    -0.6035043001174927,
+                ]
+            ],
+            dtype=torch.float64,
+        )
+        return target, seed, witness
     # Actual Rizon4S seed2531 trajectory3/frame337. Its native world/root F32
     # conversion exposed the exact-SO(3) reduction's input-conditioning error.
     root = np.array(
@@ -216,7 +279,9 @@ def test_rr_cuda_chunking_noncontiguous_targets_and_stream_order(
     torch.cuda.current_stream().wait_stream(stream)
     assert good.any(dim=-1).all()
     assert engine._capacity == engine.max_chunk_size
-    assert sum(t.nbytes for t in engine._workspace.values()) < 32 * 1024**2
+    # The parameterized path includes a global derivative matrix for bounded
+    # root refinement. Full driver/runtime peak memory is measured separately.
+    assert sum(t.nbytes for t in engine._workspace.values()) < 64 * 1024**2
 
 
 @pytest.mark.parametrize("search", ["fixed", "seed_local"])
@@ -264,13 +329,15 @@ def test_parameterized_rr_follows_arbitrary_seed_lock_on_cpu(
     assert (difference[flags[:, seed_slots].bool()] < 1e-14).all()
 
 
+@pytest.mark.parametrize("case", ["so3", "ill_conditioned_pencil"])
 def test_parameterized_rr_conditions_f32_pose_without_accepting_invalid_inputs(
     rr_chain: pk.SerialChain,
+    case: str,
 ) -> None:
     chain = rr_chain.to(dtype=torch.float64, device="cpu")
     model = _extract_model(chain)
     engine = _PreparedRRCandidates(model, "cpu", search="seed_local")
-    target, seed, witness = _world_roundtrip_case()
+    target, seed, witness = _world_roundtrip_case(case)
     assert _check_candidates(chain, target, torch.ones((1, 1)), witness[:, None]).all()
     assert (witness - seed).abs().max() < 0.05
     original = target.numpy().copy()
@@ -292,7 +359,13 @@ def test_parameterized_rr_conditions_f32_pose_without_accepting_invalid_inputs(
         0.05,
     )
     assert flags.shape == (5, 600)
-    assert _check_candidates(chain, target, flags[:1], candidates[:1]).any()
+    good = _check_candidates(chain, target, flags[:1], candidates[:1])
+    periodic_step = (
+        ((candidates[:1] - seed[:, None] + torch.pi) % (2 * torch.pi) - torch.pi)
+        .abs()
+        .amax(-1)
+    )
+    assert (good & (periodic_step <= 0.05)).any()
     assert not flags[1:].any()
     torch.testing.assert_close(targets, untouched, equal_nan=True)
 
@@ -312,7 +385,9 @@ def test_parameterized_rr_matches_explicit_qz_conditional_branches(
         dtype=torch.float64,
     )
     target = chain.forward_kinematics(q).get_matrix().float().double()
-    roundtrip, roundtrip_seed, _ = _world_roundtrip_case()
+    cases = [_world_roundtrip_case(case) for case in ("so3", "ill_conditioned_pencil")]
+    roundtrip = torch.cat([case[0] for case in cases])
+    roundtrip_seed = torch.cat([case[1] for case in cases])
     reflected = roundtrip.clone()
     reflected[:, :3, 0] *= -1
     target = torch.cat((target, roundtrip, reflected))
