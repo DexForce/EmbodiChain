@@ -36,10 +36,14 @@ import pytest
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     ArticulationAffordanceGeometry,
+    JointPositionGoal,
     MotionPolicy,
 )
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory, TimedTrajectory
+from embodichain.lab.sim.motion.planners import ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.utils.math import axis_angle_to_rotation_matrix
 from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
@@ -1223,6 +1227,62 @@ def test_atomic_scenario_accepts_required_contact_strategy(skill_id: str) -> Non
 
     assert scenario.plan_case(adapter, case) is compiled
     engine.compile.assert_called_once()
+
+
+@pytest.mark.parametrize("clock_aware", [False, True])
+@pytest.mark.parametrize("hook_fails", [False, True])
+def test_atomic_scenario_supports_existing_adapter_options_hooks(
+    clock_aware: bool, hook_fails: bool
+) -> None:
+    case = replace(_atomic_case(), skill_id="move_joints")
+    options = ToppraPlanOptions(sample_interval=17)
+    calls: list[float | None] = []
+    hook_error = TypeError("adapter options failed")
+
+    def legacy_options() -> ToppraPlanOptions:
+        calls.append(None)
+        if hook_fails:
+            raise hook_error
+        return options
+
+    def clock_options(*, control_dt: float) -> ToppraPlanOptions:
+        calls.append(control_dt)
+        if hook_fails:
+            raise hook_error
+        return options
+
+    adapter = Mock()
+    adapter.atomic_plan_options = clock_options if clock_aware else legacy_options
+    invocation = ActionInvocation(
+        skill_id="move_joints",
+        goal=JointPositionGoal(torch.zeros(1, 7)),
+        binding=Mock(spec=ActionBinding),
+        motion_policy=MotionPolicy(strategy="motion_gen"),
+    )
+    provider = Mock(samples_grasps=False)
+    provider.build_invocation.return_value = invocation
+    provider.prefix_invocations.return_value = ()
+    provider.frozen_grasps.return_value = {}
+    engine = Mock(motion_generator=adapter.require_motion_generator())
+    scenario = AtomicSkillScenario()
+    scenario.simulation = SimpleNamespace(sim_config=SimpleNamespace(physics_dt=0.01))
+    scenario.track = SimpleNamespace(
+        config={"physics": {"clock": "compiled", "steps_per_waypoint": 4}}
+    )
+    scenario._engine = engine
+    scenario._case_providers[case.case_id] = provider
+
+    if hook_fails:
+        with pytest.raises(TypeError) as raised:
+            scenario.plan_case(adapter, case)
+        assert raised.value is hook_error
+        engine.compile.assert_not_called()
+    else:
+        assert scenario.plan_case(adapter, case) is engine.compile.return_value
+        compiled_invocation = engine.compile.call_args.args[0][0]
+        assert compiled_invocation.motion_policy.plan_opts.sample_interval == 17
+        assert engine.initial_context.call_args.kwargs["control_dt"] == 0.04
+    assert calls == [0.04 if clock_aware else None]
 
 
 def test_atomic_skill_and_object_extensions_are_registry_driven():

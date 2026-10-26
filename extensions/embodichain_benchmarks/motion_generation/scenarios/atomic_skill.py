@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
+from inspect import signature
 from pathlib import Path
 from typing import Literal, TYPE_CHECKING
 
@@ -762,7 +763,13 @@ class AtomicSkillScenario(ScenarioProvider):
         control_dt = float(self.simulation.sim_config.physics_dt)
         if physics.get("clock", "fixed_samples") == "compiled":
             control_dt *= int(physics.get("steps_per_waypoint", 4))
-        plan_opts = adapter.atomic_plan_options(control_dt=control_dt)
+        options_hook = adapter.atomic_plan_options
+        try:
+            signature(options_hook).bind(control_dt=control_dt)
+        except TypeError:
+            plan_opts = options_hook()
+        else:
+            plan_opts = options_hook(control_dt=control_dt)
         if plan_opts is not None:
             invocations = tuple(
                 with_plan_options(item, plan_opts) for item in invocations
