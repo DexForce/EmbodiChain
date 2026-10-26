@@ -283,8 +283,9 @@ determined by upstream SSIK rather than the Warp fixed-slot layout.
 For device execution, preserve the preset's original root, end link and TCP as
 in the first example, then set `geometry_mode="near_parallel"` for ARX5, or
 `backend="warp", geometry_mode="rr"` on CPU or CUDA for Rizon4S. Neither requires installing
-SSIK. Both presets retain their Pytorch defaults pending complete performance
-acceptance. ARX5 keeps its authored 85 mm TCP and tool rotation.
+SSIK. These are the validated presets' defaults; Rizon4S also selects
+`rr_search="seed_local"`. Explicit Pytorch replacements remain available as
+shown above. ARX5 keeps its authored 85 mm TCP and tool rotation.
 
 ARX5's device path generates eight surrogate geometric branches and one seed
 initialization, then performs at most twelve monotone Newton corrections on

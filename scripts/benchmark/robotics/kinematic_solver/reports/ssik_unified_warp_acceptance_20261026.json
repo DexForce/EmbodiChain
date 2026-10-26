@@ -1,0 +1,1351 @@
+{
+  "schema_version": 1,
+  "generated_utc": "2026-10-26T09:29:20.360532+00:00",
+  "status": "ACCEPTANCE_PASS_WITH_KNOWN_ENVIRONMENT_FAILURES",
+  "intended_report": "/home/dex/.codex/worktrees/459c/EmbodiChain/scripts/benchmark/robotics/kinematic_solver/reports/ssik_unified_warp_acceptance_20261026",
+  "implementation_head_at_render": "5bb718515226772f94c07511e1c50ef9cab0d814",
+  "default_checkpoint": "5bb718515226772f94c07511e1c50ef9cab0d814",
+  "default_checkpoint_validation": {
+    "wheel": {
+      "status": "PASS",
+      "receipt": {
+        "path": "/tmp/ssik-postpromotion-wheel-receipt.json",
+        "sha256": "ac86d8c5bcc865dc0845b93491d793a3229c47a4fcb85d2792e87c8ed857f043",
+        "bytes": 109187
+      },
+      "actual_cpu_ik_routes": 8,
+      "pytorch_restorations": 10,
+      "cold_processes": 4,
+      "official_ssik_and_qz_blocked": true,
+      "global_dependency_installation_changed": false
+    },
+    "cpu_fast": {
+      "status": "FAIL_12_ENVIRONMENT_FAILURES_INDEPENDENTLY_EXPLAINED",
+      "passed": 10010,
+      "failed": 12,
+      "skipped": 31,
+      "receipt": {
+        "path": "/tmp/ssik-unified-promoted-fast-summary.json",
+        "sha256": "485128935170a1b258bf4d019cc3292dafff1a4c6808963012dbdfadb58420bc",
+        "bytes": 4628
+      },
+      "newton_11": {
+        "path": "/tmp/ssik-unified-environment-newton-diagnostic.json",
+        "sha256": "e092a564cdbed24ec070dbed51cafe1a23bf01e9fd6652328154e99b53ba509f",
+        "bytes": 117043
+      },
+      "installed_benchmark_1": {
+        "status": "PASS_PRIVATE_ENV_DEPENDENCY_PROOF",
+        "receipt": {
+          "path": "/tmp/ssik-installed-benchmark-external-dep-proof.json",
+          "sha256": "931c818fc7cf02b3ca37bd6be756774dcc85ccccae658b375421b8248d9e2985"
+        }
+      },
+      "limitation": "Original full-fast remains 10010 passed,12 failed,31 skipped under the shared current dependencies. Replays independently explain all12 environment failures; this is not a rerun or replacement of the full lane."
+    },
+    "gpu_focused": {
+      "passed": 33,
+      "receipt": {
+        "path": "/tmp/ssik-rizon-rootrefine-focused-final.log",
+        "sha256": "4a300e06c7cef02b9392e99e3c5ebfd86cc5d5d421f52306302cb43404f9749d",
+        "bytes": 178
+      },
+      "formal": {
+        "path": "/tmp/ssik-rizon-rootrefine-formal-qualification.json",
+        "sha256": "df13b34791feb5895f608788e0760316840481d5f994d792947efe12cad36b7a",
+        "bytes": 36428
+      },
+      "racecheck": "0 hazards/errors/warnings; correctness only; concurrent foreign work allowed"
+    },
+    "api_docs": {
+      "documented": 3212,
+      "exports": 3212,
+      "receipt": {
+        "path": "/tmp/ssik-unified-promoted-api.log",
+        "sha256": "2ce6dbac0fe8a5c09acc9e4c9e3bb489f6486603b50715b5951aead30dcc3bcd",
+        "bytes": 52
+      }
+    },
+    "context": {
+      "map": "PASS",
+      "tests_passed": 42,
+      "receipt": {
+        "path": "/tmp/ssik-unified-promoted-context-tests.log",
+        "sha256": "f9d8733367528800b35bc28794e2ed13b0b61747b3b9f2c5ffd3dbbc07e13454",
+        "bytes": 742
+      },
+      "affected": {
+        "path": "/tmp/ssik-unified-promoted-context-affected.log",
+        "sha256": "4dddbb5beff13e7565be2618d694a3aa3f5b6ac3046b51c0e49ad278ba6ff73c",
+        "bytes": 15755
+      },
+      "decision": "Revise owning IK and robot-default passages; preserve topic inventory and other unchanged solver guidance."
+    },
+    "black": {
+      "version": "26.10.1",
+      "command": "black .",
+      "receipt": {
+        "path": "/tmp/ssik-unified-final-black.log",
+        "sha256": "315e03402faebca182901b91ad995394196c4cfef97157f99330a12be710e6aa",
+        "bytes": 50
+      }
+    },
+    "default_source_identity": {
+      "status": "PASS",
+      "checkpoint": "5bb718515226772f94c07511e1c50ef9cab0d814",
+      "numerical_source33_unchanged": true
+    },
+    "focused_cpu": {
+      "passed": 186,
+      "deselected": 16,
+      "receipt": {
+        "path": "/tmp/ssik-unified-promoted-focused.log",
+        "sha256": "13fcacbaa59a189879163e09c5f9ae996a6e004436e848f1bc387cf031ee7b0b",
+        "bytes": 365
+      }
+    },
+    "sphinx": {
+      "status": "PASS_STRICT_FOCUSED_BUILD",
+      "receipt": {
+        "path": "/tmp/ssik-unified-promoted-sphinx-final.log",
+        "sha256": "7c351dde47c90ac013de43944505e9e58c62b0b79ce30a1cae889d71f684bc90",
+        "bytes": 2500
+      }
+    }
+  },
+  "initial_full_CPU_fast_run_preserved": {
+    "status": "FAIL",
+    "passed": 10010,
+    "failed": 12,
+    "skipped": 31,
+    "receipt": {
+      "path": "/tmp/ssik-unified-promoted-fast-summary.json",
+      "sha256": "485128935170a1b258bf4d019cc3292dafff1a4c6808963012dbdfadb58420bc",
+      "size_bytes": 4628
+    },
+    "diagnosis": "Current global Newton1.7 rejects scalar gravity; the same11 tests pass with compatible private Newton1.6. No exact prior global version is asserted. The existing upstream installed-benchmark test removes all editable finders, including external editable dexsim-engine; our first temporary wheel probe had the same overbroad filter. External dependency paths are corrected only in private consumer environments; global packages and production tests are unchanged. Original12 failed full-run results remain preserved separately from narrow replay results."
+  },
+  "runtime_contract": {
+    "backend": "warp",
+    "devices": [
+      "cpu",
+      "cuda"
+    ],
+    "official_ssik": "optional CPU accuracy oracle only; not core runtime or performance baseline",
+    "automatic_solver_fallback": false,
+    "returned_joints_dtype": "float32",
+    "geometry_dtype": "float64",
+    "acceptance_position_m": 1e-05,
+    "acceptance_rotation_rad": 1e-05,
+    "continuous_max_joint_step_rad": 0.05,
+    "step_setting_scope": "Validation setting; production default remains optional, not silently .05"
+  },
+  "source_bindings": {
+    "old_public_report": {
+      "path": "/home/dex/.codex/worktrees/459c/EmbodiChain/scripts/benchmark/robotics/kinematic_solver/reports/ssik_followup_acceptance_20261026.json",
+      "sha256": "c959555f1937e6b7c336f6df4ed7af0b314ab440360c7f3b2183722c16890f02",
+      "size_bytes": 2233976
+    },
+    "old_immutable_index": {
+      "path": "/home/dex/.codex/worktrees/459c/EmbodiChain/outputs/benchmarks/ssik_followup_acceptance_20261026/indexes/index-edf7d3f47c7490c64ccb4c946cd6dd577275f22bccd1c0d3c93ef17c590f6884.json",
+      "sha256": "edf7d3f47c7490c64ccb4c946cd6dd577275f22bccd1c0d3c93ef17c590f6884",
+      "size_bytes": 2960718
+    },
+    "P1": {
+      "path": "/tmp/ssik-hpc1-delivery-final.json",
+      "sha256": "d1d473d6f93b21b2cd9a37d222c83efc7224f1fde96a0400278df2e8d62e464a",
+      "size_bytes": 841642
+    },
+    "ARX5": {
+      "path": "/tmp/ssik-arx5-default-acceptance-final.json",
+      "sha256": "47a66430fcd3db211054a1f916bd8e41d10035954167d590dbd7338a710393c1",
+      "size_bytes": 66683
+    },
+    "Rizon4S": {
+      "path": "/tmp/ssik-rizon-rootrefine-delivery.json",
+      "sha256": "bbb940492132c948a3a5e50d5c09df23e5de59cb93011f19cdbc239f7fe330d1",
+      "size_bytes": 61575
+    },
+    "official_precision_alignment": {
+      "path": "/tmp/ssik-rootrefine-official-alignment-final.json",
+      "sha256": "10aa5c6cef5fb65883d61766ff8faf78821844bb1b7d611c2c81829404fceed9",
+      "size_bytes": 117436
+    },
+    "new_archive_receipt": {
+      "path": "/tmp/ssik-unified-warp-archive-delivery.json",
+      "sha256": "217f5903cbc61673b137a8209b52d938dee40ba52c42417580ba71452a13a00b",
+      "size_bytes": 5830
+    },
+    "finalization": {
+      "path": "/tmp/ssik-unified-warp-finalization.json",
+      "sha256": "b933323680fd6a5b91abbaa2c25e598929167b05f7e7e0e9fcf99bd61814e325",
+      "size_bytes": 6275
+    }
+  },
+  "P1_numerical_byte_carryforward": {
+    "embodichain/compute/kinematics/_ssik_model.py": true,
+    "embodichain/compute/kinematics/_ssik_geometric.py": true,
+    "embodichain/compute/kinematics/_warp/ssik.py": true,
+    "embodichain/compute/kinematics/_warp/ssik_6r.py": true,
+    "embodichain/compute/kinematics/_warp/ssik_7r.py": true,
+    "embodichain/compute/kinematics/_warp/ssik_srs_path.py": true,
+    "embodichain/compute/kinematics/_warp/ssik_srs_search.py": true,
+    "embodichain/compute/kinematics/_warp/ssik_legacy.py": true,
+    "embodichain/compute/kinematics/_warp/ssik_strict_6r.py": true,
+    "embodichain/compute/kinematics/_warp/ssik_srs_geometry.py": true,
+    "embodichain/compute/kinematics/_warp/ssik_srs_optimize.py": true,
+    "embodichain/compute/kinematics/_warp/ssik_srs_parallel.py": true
+  },
+  "shared_adapter_carryforward_review": {
+    "path": "/tmp/ssik-unified-warp-hpc-review.json",
+    "qualification": "RR-only adapter routes do not alter strict/SRS/near paths; exact source changes and limitations in review"
+  },
+  "family_quality": [
+    {
+      "family": "Aloha Mini",
+      "wide_rate": 1.0,
+      "trajectory_rate": 1.0,
+      "trajectory_n_each_arm": 20000,
+      "false_successes": 0,
+      "qualification": "Carried P1; both arms, CPU/CUDA"
+    },
+    {
+      "family": "Marvin (bare + gripper)",
+      "wide_rate": 1.0,
+      "trajectory_left_rate": 0.98345,
+      "trajectory_right_rate": 0.97185,
+      "trajectory_n_each_arm": 20000,
+      "false_successes": 0,
+      "qualification": "Carried P1; both variants, CPU/CUDA; radial-shell certificate"
+    },
+    {
+      "family": "ARX5",
+      "wide_rate": 1.0,
+      "trajectory_rate": 0.95225,
+      "trajectory_n": 20000,
+      "false_successes": 0,
+      "qualification": "Current d73 wide/bulk; P2 full trajectory + independent step-feasibility certificate carried"
+    },
+    {
+      "family": "Rizon4S",
+      "wide_rate": 0.9999,
+      "trajectory_rate": 1.0,
+      "trajectory_n": 20000,
+      "false_successes": 0,
+      "qualification": "Current 7bbc CPU/CUDA; wide8659 known finite-pool miss"
+    }
+  ],
+  "actual_Robot_latency": [
+    {
+      "family": "Aloha Mini",
+      "device": "cpu",
+      "scope": "actual Robot worst observed arm/variant per metric",
+      "repeats_each": 10000,
+      "cost_time_ms": 1.692845020443201,
+      "p99_ms": 2.212616568431258,
+      "qualification": "P1 carried; numerical source bound; old receipt exact source identity"
+    },
+    {
+      "family": "Aloha Mini",
+      "device": "cuda",
+      "scope": "actual Robot worst observed arm/variant per metric",
+      "repeats_each": 10000,
+      "cost_time_ms": 0.7993495091795921,
+      "p99_ms": 1.2015157681889832,
+      "qualification": "P1 carried; numerical source bound; old receipt exact source identity"
+    },
+    {
+      "family": "Marvin (bare + gripper)",
+      "device": "cpu",
+      "scope": "actual Robot worst observed arm/variant per metric",
+      "repeats_each": 10000,
+      "cost_time_ms": 1.845102058723569,
+      "p99_ms": 2.3883355571888396,
+      "qualification": "P1 carried; numerical source bound; old receipt exact source identity"
+    },
+    {
+      "family": "Marvin (bare + gripper)",
+      "device": "cuda",
+      "scope": "actual Robot worst observed arm/variant per metric",
+      "repeats_each": 10000,
+      "cost_time_ms": 2.4017239920794964,
+      "p99_ms": 2.9723280505277216,
+      "qualification": "P1 carried; numerical source bound; old receipt exact source identity"
+    },
+    {
+      "family": "ARX5",
+      "device": "cpu",
+      "scope": "actual Robot",
+      "qualification": "4748 carried, not retimed atd73",
+      "cost_time_ms": 0.9172441205009818,
+      "p95_ms": 1.0000014794059098,
+      "p99_ms": 1.0661175171844661,
+      "max_ms": 2.283737063407898,
+      "repeats": 10000,
+      "failure_count": 955,
+      "both_reported_success_rate": 0.9045
+    },
+    {
+      "family": "ARX5",
+      "device": "cuda",
+      "scope": "actual Robot",
+      "qualification": "4748 carried, not retimed atd73",
+      "cost_time_ms": 1.264906139113009,
+      "p95_ms": 2.470850944519043,
+      "p99_ms": 2.8753606905229394,
+      "max_ms": 4.235577071085572,
+      "repeats": 10000,
+      "failure_count": 955,
+      "both_reported_success_rate": 0.9045
+    },
+    {
+      "family": "Rizon4S",
+      "device": "cpu",
+      "scope": "actual Robot",
+      "qualification": "QUALIFIED",
+      "cost_time_ms": 2.0696495193988085,
+      "p95_ms": 2.425714978016913,
+      "p99_ms": 2.623596582561732,
+      "max_ms": 6.481345975771546,
+      "repeats": 10000,
+      "failure_count": 0,
+      "both_reported_success_rate": 1.0
+    },
+    {
+      "family": "Rizon4S",
+      "device": "cuda",
+      "scope": "actual Robot",
+      "qualification": "QUALIFIED",
+      "cost_time_ms": 3.8472425658255816,
+      "p95_ms": 4.215777106583118,
+      "p99_ms": 4.505247604101897,
+      "max_ms": 5.561622092500329,
+      "repeats": 10000,
+      "failure_count": 0,
+      "both_reported_success_rate": 1.0
+    }
+  ],
+  "ARX_control_p99_ms": {
+    "cpu": 0.2915531070902944,
+    "cuda": 2.5444101612083614
+  },
+  "Rizon_N1_p99_ms": {
+    "cpu-control": 1.7472915048711004,
+    "cpu-robot": 2.623596582561732,
+    "cpu-unbounded": 3.9250702876597647,
+    "cuda-unbounded": 4.671515887603165,
+    "cuda-control": 4.016326465643942,
+    "cuda-robot": 4.505247604101897
+  },
+  "bulk_comparison": [
+    {
+      "family": "ARX5",
+      "batch_size": 1000,
+      "warp_cost_time_ms": 8.36272502783686,
+      "warp_p99_ms": 8.701130505651236,
+      "original_pytorch_cost_time_ms": 444.99957747757435,
+      "original_speedup": 53.21226944522412,
+      "repeats": 30,
+      "qualification": "d73 both backends independently monitored, exact float32 cohort",
+      "source_checkpoint": "d73b21acb424f014c387eaf5a5e8208a7f8f62cc"
+    },
+    {
+      "family": "ARX5",
+      "batch_size": 10000,
+      "warp_cost_time_ms": 83.73909594956785,
+      "warp_p99_ms": 86.32527217501774,
+      "original_pytorch_cost_time_ms": 5029.118265490979,
+      "original_speedup": 60.056992596621555,
+      "repeats": 30,
+      "qualification": "d73 both backends independently monitored, exact float32 cohort",
+      "source_checkpoint": "d73b21acb424f014c387eaf5a5e8208a7f8f62cc"
+    },
+    {
+      "family": "Rizon4S",
+      "batch_size": 1000,
+      "warp_cost_time_ms": 168.77149499487132,
+      "warp_p99_ms": 172.3715697741136,
+      "original_pytorch_cost_time_ms": 430.0929104210809,
+      "original_speedup": 2.54837412226603,
+      "matched_speedup": 2.558260235311254,
+      "repeats": 30,
+      "qualification": "Historical isolated samecohort, source/model/measurement identity independently verified.",
+      "source_checkpoint": "7bbc6bf192ec152214684aae1beba123567917ba"
+    },
+    {
+      "family": "Rizon4S",
+      "batch_size": 10000,
+      "warp_cost_time_ms": 1638.3540100650862,
+      "warp_p99_ms": 1641.7329074442387,
+      "original_pytorch_cost_time_ms": 4996.1307069752365,
+      "original_speedup": 3.0494817824975184,
+      "matched_speedup": 3.047114704862086,
+      "repeats": 30,
+      "qualification": "Historical isolated samecohort, source/model/measurement identity independently verified.",
+      "source_checkpoint": "7bbc6bf192ec152214684aae1beba123567917ba"
+    }
+  ],
+  "scratch_memory": {
+    "Aloha Mini": {
+      "scratch_MiB": 34.25,
+      "qualification": "P1 fresh-PID carried; driver/local stack included"
+    },
+    "Marvin (bare + gripper)": {
+      "scratch_MiB": 80.0,
+      "qualification": "P1 fresh-PID carried; driver/local stack included"
+    },
+    "ARX5": {
+      "scratch_MiB": 34.0,
+      "qualification": "4748 fresh-PID carried, caller outputs conservatively included"
+    },
+    "Rizon4S": {
+      "scratch_MiB": 95.72343444824219,
+      "qualification": "Current7bbc fresh-PID; larger driver growth less final output; not Torch-only"
+    }
+  },
+  "Rizon_own_PID_NVML": {
+    "baseline_bytes": 641728512,
+    "peak_bytes": 742391808,
+    "growth_bytes": 100663296,
+    "growth_MiB": 96,
+    "peak_MiB": 708,
+    "output_bytes": 290000,
+    "scratch_bytes_after_output_subtraction": 100373296,
+    "scope": "Fresh-process own PID NVML, not total card memory"
+  },
+  "mandatory_gate_status": {
+    "Aloha Mini": true,
+    "Marvin (bare + gripper)": true,
+    "ARX5": true,
+    "Rizon4S": true
+  },
+  "P1_gate_summary": [
+    {
+      "family": "aloha",
+      "gates": {
+        "robot_cuda_single_coverage": true,
+        "robot_cpu_single_coverage": true,
+        "robot_cuda_pair_coverage": true,
+        "robot_cpu_pair_coverage": true,
+        "robot_cpu_single_p99": true,
+        "robot_cpu_pair_p99": true,
+        "cuda_single_p99": true,
+        "cuda_pair_p99": true,
+        "cpu_single_p99": true,
+        "cpu_pair_p99": true,
+        "robot_cuda_single_p99": true,
+        "robot_cuda_pair_p99": true,
+        "original_baseline_two_times_bulk": true,
+        "memory": true
+      },
+      "status": "ELIGIBLE_FOR_ROOT_DEFAULT_REVIEW",
+      "cuda_single_p99_ms": [
+        0.9141223295591773,
+        0.7257660315372051
+      ],
+      "cuda_pair_p99_ms": 1.1234686430543661,
+      "cpu_single_p99_ms": [
+        0.1649108878336847,
+        0.20592828514054418
+      ],
+      "cpu_pair_p99_ms": 0.3018185985274613,
+      "robot_cuda_single_p99_ms": [
+        1.162321080919356,
+        1.2015157681889832
+      ],
+      "robot_cuda_pair_p99_ms": 2.1453341469168663,
+      "robot_cpu_single_p99_ms": [
+        2.0225394330918802,
+        2.212616568431258
+      ],
+      "robot_cpu_pair_p99_ms": 3.869929767679427,
+      "minimum_original_config_bulk_speed_ratio": 310.4916821309185
+    },
+    {
+      "family": "marvin_bare",
+      "gates": {
+        "robot_cuda_single_coverage": true,
+        "robot_cpu_single_coverage": true,
+        "robot_cuda_pair_coverage": true,
+        "robot_cpu_pair_coverage": true,
+        "robot_cpu_single_p99": true,
+        "robot_cpu_pair_p99": true,
+        "cuda_single_p99": true,
+        "cuda_pair_p99": true,
+        "cpu_single_p99": true,
+        "cpu_pair_p99": true,
+        "robot_cuda_single_p99": true,
+        "robot_cuda_pair_p99": true,
+        "original_baseline_two_times_bulk": true,
+        "memory": true
+      },
+      "status": "ELIGIBLE_FOR_ROOT_DEFAULT_REVIEW",
+      "cuda_single_p99_ms": [
+        2.431367747485638,
+        2.431852468289435
+      ],
+      "cuda_pair_p99_ms": 4.390559569001198,
+      "cpu_single_p99_ms": [
+        0.4579109326004988,
+        0.4786510788835585
+      ],
+      "cpu_pair_p99_ms": 0.8090534666553144,
+      "robot_cuda_single_p99_ms": [
+        2.9723280505277216,
+        2.9390261718071997
+      ],
+      "robot_cuda_pair_p99_ms": 5.403378843329848,
+      "robot_cpu_single_p99_ms": [
+        1.5883422130718827,
+        1.6752883046865463
+      ],
+      "robot_cpu_pair_p99_ms": 3.1942650582641394,
+      "minimum_original_config_bulk_speed_ratio": 33.2373656095772
+    },
+    {
+      "family": "marvin_gripper",
+      "gates": {
+        "robot_cuda_single_coverage": true,
+        "robot_cpu_single_coverage": true,
+        "robot_cuda_pair_coverage": true,
+        "robot_cpu_pair_coverage": true,
+        "robot_cpu_single_p99": true,
+        "robot_cpu_pair_p99": true,
+        "cuda_single_p99": true,
+        "cuda_pair_p99": true,
+        "cpu_single_p99": true,
+        "cpu_pair_p99": true,
+        "robot_cuda_single_p99": true,
+        "robot_cuda_pair_p99": true,
+        "original_baseline_two_times_bulk": true,
+        "memory": true
+      },
+      "status": "ELIGIBLE_FOR_ROOT_DEFAULT_REVIEW",
+      "cuda_single_p99_ms": [
+        2.4260722915641963,
+        2.4384763976559047
+      ],
+      "cuda_pair_p99_ms": 4.40108694601804,
+      "cpu_single_p99_ms": [
+        0.3854062408208847,
+        0.5314004584215581
+      ],
+      "cpu_pair_p99_ms": 0.877551045268774,
+      "robot_cuda_single_p99_ms": [
+        2.939239465631545,
+        2.9389004549011593
+      ],
+      "robot_cuda_pair_p99_ms": 5.432575095910579,
+      "robot_cpu_single_p99_ms": [
+        2.3883355571888396,
+        2.1812628582119973
+      ],
+      "robot_cpu_pair_p99_ms": 4.086405353154987,
+      "minimum_original_config_bulk_speed_ratio": 38.965370273401724
+    }
+  ],
+  "P1_pair_actual_Robot_p99_ms": {
+    "aloha": {
+      "cpu": 3.869929767679427,
+      "cuda": 2.1453341469168663
+    },
+    "marvin_bare": {
+      "cpu": 3.1942650582641394,
+      "cuda": 5.403378843329848
+    },
+    "marvin_gripper": {
+      "cpu": 4.086405353154987,
+      "cuda": 5.432575095910579
+    }
+  },
+  "ARX_source_and_qualification": {
+    "new_bulk_checkpoint": "d73b21acb424f014c387eaf5a5e8208a7f8f62cc",
+    "carryforward_checkpoint": "4748f3de969b940e875bfcd6a609b128d463fd39",
+    "unchanged_code_checks": {
+      "embodichain/compute/kinematics/_ssik_model.py": true,
+      "embodichain/compute/kinematics/_ssik_near.py": true,
+      "embodichain/compute/kinematics/_warp/ssik_near.py": true,
+      "embodichain/compute/kinematics/_warp/ssik_6r.py": true,
+      "embodichain/compute/kinematics/_warp/ssik.py": true,
+      "embodichain/lab/sim/motion/solvers/base_solver.py": true,
+      "embodichain/lab/sim/objects/robot.py": true
+    },
+    "source_routing_diff": "/tmp/ssik-arx5-default-acceptance-routing-reuse.diff",
+    "cohort": "9cbe8ecfbe7cfffa588f4546c6786a4cf4b480bae098fccd3c747fd011fe5676",
+    "same_float32_bytes": {
+      "wide_target": {
+        "stored_shape": [
+          10000,
+          4,
+          4
+        ],
+        "stored_dtype": "float64",
+        "call_dtype": "float32",
+        "hash_definition": "SHA256 of little-endian float32 C-order numeric values after maintained .float() conversion",
+        "sha256_by_batch": {
+          "1000": "b6677480a4f5af16c0df94333b1727ccd16288806bc25d7f2bfc4d36966ab02b",
+          "10000": "7e2381796bf52e23db27cd9fc1904f756c407ac73bcddffcccddbc11dd6140cc"
+        }
+      },
+      "wide_seed": {
+        "stored_shape": [
+          10000,
+          6
+        ],
+        "stored_dtype": "float64",
+        "call_dtype": "float32",
+        "hash_definition": "SHA256 of little-endian float32 C-order numeric values after maintained .float() conversion",
+        "sha256_by_batch": {
+          "1000": "db5e259378148ed269cca8423b62c0554fc8bda5d59da9cef8f9acd68a0e1516",
+          "10000": "00102eef5d5d2f0d4b1d18bf05dacbadc38c422b08a870372ad91ac24905fa38"
+        }
+      },
+      "effective_limits": {
+        "shape": [
+          2,
+          6
+        ],
+        "dtype": "float32",
+        "sha256": "7c5c341094cb75fa9230de62c8b77a177c0a8a8d135f0166f1fa7bba55376d1b"
+      },
+      "ik_nearest_weight": {
+        "shape": [
+          6
+        ],
+        "dtype": "float32",
+        "values": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "sha256": "f46913286d895f62d646314f400fc3d7a543cf34eb4ae56df87f43dc4582a36b"
+      }
+    },
+    "algorithm": "Warp CPU/CUDA explicit near_parallel:8 analytical surrogate slots plus1 seed-initialized bounded original-model solve;12 bounded iterations per slot, original1e-5 returned-f32 FK gate; no automatic fallback; not pure closed form or complete general6R root enumeration."
+  },
+  "RR_current_math": {
+    "head": "7bbc6bf192ec152214684aae1beba123567917ba",
+    "source33": {
+      "embodichain/compute/kinematics/_ssik_model.py": "5788948cb59486a7df6f771813e20d53de7a79e97e3b67b21cc80a8a02d0ee29",
+      "embodichain/compute/kinematics/_ssik_geometric.py": "258052821fd92022035e53b909d549c50fadbf2a316a782a3f04200e411c6743",
+      "embodichain/compute/kinematics/_ssik_near.py": "2839d67dc04bf282b3cdef6e7593a9beb533126df08964b230bc3feec77f6167",
+      "embodichain/compute/kinematics/_ssik_rr.py": "dd642d231cb9e0b219c3e9e7a1b7299debfccbc790a037abc0f12f72f43e01eb",
+      "embodichain/compute/kinematics/_ssik_rr_parametric.py": "9eb33e76cb651bb2e495fae06e50c110658d491fc6f6ab0f1f1c49838cccb171",
+      "embodichain/compute/kinematics/_warp/ssik.py": "be687fe38609b0d0f743be3bb8ffcbb2d9732f3a6d3d028e5813bf6421c4143d",
+      "embodichain/compute/kinematics/_warp/ssik_6r.py": "2cccd5dc218204fa9a152d8db8c7bdb281217251f9d458d0a254e32c2a767e17",
+      "embodichain/compute/kinematics/_warp/ssik_7r.py": "8b1e9194cc0cebd35f4fedeabbf4ca56b4a79247af2f23550847b6bce82c92de",
+      "embodichain/compute/kinematics/_warp/ssik_near.py": "e2afb7cc825006d8be8f2c5acf8c8d16f0797186f06afb89fea546905f417b17",
+      "embodichain/compute/kinematics/_warp/ssik_rr.py": "e729dae12d0079097b67af17c929715c6dcc4548fb58bfd63411606a26e1ce8a",
+      "embodichain/compute/kinematics/_warp/ssik_rr_cuda.py": "33c59b2031c939d1b37725dedd28cc13e3eb4417322d72594b546898b45632be",
+      "embodichain/compute/kinematics/_warp/ssik_rr_parametric.py": "a9e3bdbff20abd3716da7ba495ef8ef2ea875bfbcf5add0ffbaeb56c41f9290f",
+      "embodichain/compute/kinematics/_warp/ssik_rr_parametric_cuda.py": "fa8d7c9a9bc068b1564bf9578b8887248c0df395173a09ae7c25003ec343dc1a",
+      "embodichain/compute/kinematics/_warp/ssik_rr_parametric_cpu.py": "d2dc8f44c41907c25e62bcf1a3aec05394a80ab9a45e7cd9b9c03bd7e751a205",
+      "embodichain/compute/kinematics/_warp/ssik_srs_path.py": "8529be04df3cf5ceaa5f4d3b95ebc8e8815deacffa5a27e1fffb76a34c368a9e",
+      "embodichain/compute/kinematics/_warp/ssik_srs_search.py": "2d3b5a3064717cf0c56f6642d6c054f082e789eedfe590898e98364c188d38c6",
+      "embodichain/compute/kinematics/_warp/ssik_legacy.py": "660592522dff1278f8d02d7d8ad660f59d4625abc6a2251e6d2614b88c279940",
+      "embodichain/compute/kinematics/_warp/ssik_strict_6r.py": "ee8677dd65fcaacc42a849949108d23d1ea97e93e8209308f295bf52b420f077",
+      "embodichain/compute/kinematics/_warp/ssik_srs_geometry.py": "9aa42206f7890df723672c1f08ace7d2ad0f1c20634e6cf762fdfbfbeca4597d",
+      "embodichain/compute/kinematics/_warp/ssik_srs_optimize.py": "5fd900e2ba3de76f4be1bfb3a725f97712602f7fdca2ff79e6ff27232e5f0eb5",
+      "embodichain/compute/kinematics/_warp/ssik_srs_parallel.py": "0ce7420eefd7931fcf37215f535e713a0cea050c091e556273e917d5766d5ed0",
+      "embodichain/compute/kinematics/_warp/data/ssik_rr_rizon4.npz": "067f5cf1c57fb93868b09dcac62fd4126c1d00def4bdb15eb8d3bc9b1d302c16",
+      "embodichain/compute/kinematics/_warp/data/ssik_rr_rizon4.json": "bea031d670756ff549df8ddd0c96fed9f35603104576e0718082f1eaa96429de",
+      "embodichain/compute/kinematics/_warp/data/ssik_rr_rizon4_parametric.npz": "deda0b3e150d2f7c7b56ea3a255bb76a758b2f6bb406397faf1acd74e1329477",
+      "embodichain/compute/kinematics/_warp/data/ssik_rr_rizon4_parametric.json": "73154d75972a227109b611cc7bc2b28ad0f783cfb62012ff24b8ec241668500a",
+      "embodichain/lab/sim/motion/solvers/ssik_solver.py": "1ae4093965fe6c56ae24a9ad58154ee4c41a238ab1685d1e8c5fd549f3eb3517",
+      "embodichain/lab/sim/motion/solvers/base_solver.py": "cc2d99c7f30bbcefc3609909829cdc1ac8a41f224e9eed94897cac2d99da7290",
+      "embodichain/lab/sim/objects/robot.py": "5a5e739f00c9a951864e205848b5e898ea82c91c323b7ef108b1cc7fd6d32793",
+      "embodichain/lab/sim/motion/solvers/_ssik_reference.py": "28fd52cf00ca43d45b5572f3be9ddcdc2b46b1c118a0141de4682f8b07f1cdd1",
+      "scripts/benchmark/robotics/kinematic_solver/ssik_benchmark.py": "fbbe4f8e169aee3255d6ce28f9ddcac7158d07bb6c6ffb275a11b574977d11a4",
+      "scripts/benchmark/robotics/kinematic_solver/run_benchmark.py": "a8d2e46862f5659e3799b0d0e91024cbc53a9b65ce3965f8c5d8740200c0297c",
+      "scripts/benchmark/robotics/kinematic_solver/prepare_ssik_rr_rizon4.py": "fef45b72565b39bc9cf1e49f71e606c5b1ee677e9a0f6127c394deea693853f7",
+      "scripts/benchmark/robotics/kinematic_solver/_ssik_robot_e2e.py": "8c5ac0d7ac8db1febd7dab44c6fcd0b4907659bbd3cfee44ecbb19d15ed0a0f6"
+    },
+    "quality": {
+      "cpu": [
+        {
+          "model": "flexiv_rizon4s",
+          "impl": "ssik_warp_rr_seed_local_cpu",
+          "component": "ssik_ik",
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "srs_search": "uniform",
+          "rr_search": "seed_local",
+          "scenario": "wide",
+          "sample_size": 10000,
+          "success_rate": 0.9999,
+          "reported_success_rate": 0.9999,
+          "false_successes": 0,
+          "translation_err_mm": 8.893634721450727e-05,
+          "rotation_err_deg": 1.8731860016187772e-05,
+          "max_position_m": 2.509015325262773e-07,
+          "max_rotation_rad": 7.976729943452504e-07
+        },
+        {
+          "model": "flexiv_rizon4s",
+          "impl": "ssik_warp_rr_seed_local_cpu",
+          "component": "ssik_ik",
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "srs_search": "uniform",
+          "rr_search": "seed_local",
+          "scenario": "boundary",
+          "sample_size": 1000,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 8.671751978048772e-05,
+          "rotation_err_deg": 1.858852651048554e-05,
+          "max_position_m": 1.894577825769352e-07,
+          "max_rotation_rad": 8.064042563017595e-07
+        },
+        {
+          "model": "flexiv_rizon4s",
+          "impl": "ssik_warp_rr_seed_local_cpu",
+          "component": "ssik_ik",
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "srs_search": "uniform",
+          "rr_search": "seed_local",
+          "scenario": "singular",
+          "sample_size": 200,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 0.00010040703809853403,
+          "rotation_err_deg": 2.461429373007671e-05,
+          "max_position_m": 1.7209253693690003e-07,
+          "max_rotation_rad": 5.992878909361262e-07
+        },
+        {
+          "model": "flexiv_rizon4s",
+          "impl": "ssik_warp_rr_seed_local_cpu",
+          "component": "ssik_ik",
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "srs_search": "uniform",
+          "rr_search": "seed_local",
+          "scenario": "unreachable",
+          "sample_size": 500,
+          "success_rate": 0.0,
+          "reported_success_rate": 0.0,
+          "false_successes": 0,
+          "translation_err_mm": 0.0,
+          "rotation_err_deg": 0.0,
+          "max_position_m": null,
+          "max_rotation_rad": null
+        },
+        {
+          "model": "flexiv_rizon4s",
+          "impl": "ssik_warp_rr_seed_local_cpu",
+          "component": "ssik_ik",
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "srs_search": "uniform",
+          "rr_search": "seed_local",
+          "scenario": "trajectory",
+          "sample_size": 20000,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 7.392365156812475e-05,
+          "rotation_err_deg": 1.8060194484578236e-05,
+          "max_position_m": 4.6417705099997953e-07,
+          "max_rotation_rad": 3.719314742784601e-06,
+          "max_accepted_joint_step_rad": 0.017178058624267578
+        }
+      ],
+      "cuda": [
+        {
+          "model": "flexiv_rizon4s",
+          "impl": "ssik_warp_rr_seed_local_cuda",
+          "component": "ssik_ik",
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "srs_search": "uniform",
+          "rr_search": "seed_local",
+          "scenario": "wide",
+          "sample_size": 10000,
+          "success_rate": 0.9999,
+          "reported_success_rate": 0.9999,
+          "false_successes": 0,
+          "translation_err_mm": 8.893634721450727e-05,
+          "rotation_err_deg": 1.8731860016187772e-05,
+          "max_position_m": 2.509015325262773e-07,
+          "max_rotation_rad": 7.976729943452504e-07
+        },
+        {
+          "model": "flexiv_rizon4s",
+          "impl": "ssik_warp_rr_seed_local_cuda",
+          "component": "ssik_ik",
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "srs_search": "uniform",
+          "rr_search": "seed_local",
+          "scenario": "boundary",
+          "sample_size": 1000,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 8.671751978048772e-05,
+          "rotation_err_deg": 1.858852651048554e-05,
+          "max_position_m": 1.894577825769352e-07,
+          "max_rotation_rad": 8.064042563017595e-07
+        },
+        {
+          "model": "flexiv_rizon4s",
+          "impl": "ssik_warp_rr_seed_local_cuda",
+          "component": "ssik_ik",
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "srs_search": "uniform",
+          "rr_search": "seed_local",
+          "scenario": "singular",
+          "sample_size": 200,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 0.00010040703809853403,
+          "rotation_err_deg": 2.461429373007671e-05,
+          "max_position_m": 1.7209253693690003e-07,
+          "max_rotation_rad": 5.992878909361262e-07
+        },
+        {
+          "model": "flexiv_rizon4s",
+          "impl": "ssik_warp_rr_seed_local_cuda",
+          "component": "ssik_ik",
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "srs_search": "uniform",
+          "rr_search": "seed_local",
+          "scenario": "unreachable",
+          "sample_size": 500,
+          "success_rate": 0.0,
+          "reported_success_rate": 0.0,
+          "false_successes": 0,
+          "translation_err_mm": 0.0,
+          "rotation_err_deg": 0.0,
+          "max_position_m": null,
+          "max_rotation_rad": null
+        },
+        {
+          "model": "flexiv_rizon4s",
+          "impl": "ssik_warp_rr_seed_local_cuda",
+          "component": "ssik_ik",
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "srs_search": "uniform",
+          "rr_search": "seed_local",
+          "scenario": "trajectory",
+          "sample_size": 20000,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 7.392365156812475e-05,
+          "rotation_err_deg": 1.8060194484578236e-05,
+          "max_position_m": 4.6417705099997953e-07,
+          "max_rotation_rad": 3.719314742784601e-06,
+          "max_accepted_joint_step_rad": 0.017178058624267578
+        }
+      ]
+    },
+    "finite_pool_miss": {
+      "wide_index": 8659,
+      "classification": "Known previous25lockpool narrowintervalmiss; same solefailure onCPU/CUDA, notunreachable andnot newlyintroduced."
+    },
+    "formal_gates": {
+      "six_N1_public_and_actualRobot_p99_le_5ms": "PASS",
+      "all_4_changing_control_and_Robot_10000frames_quality": "PASS",
+      "GPU_N1000_N10000_speedup_at_least_2x": "PASS",
+      "GPU_scratch_le_128MiB": "PASS",
+      "racecheck_zero_errors": "PASS"
+    },
+    "qualified_stages": {
+      "cpu-control": {
+        "qualification": "QUALIFIED",
+        "head": "7bbc6bf192ec152214684aae1beba123567917ba",
+        "source33_unchanged": true,
+        "start_utc": "2026-10-26T08:46:53.224453+00:00",
+        "end_utc": "2026-10-26T08:47:14.682015+00:00",
+        "monitor_samples": 21,
+        "foreign_samples": 0,
+        "latency": {
+          "cost_time_ms": 1.3481001369655132,
+          "p95_ms": 1.6266156220808623,
+          "p99_ms": 1.7472915048711004,
+          "max_ms": 2.485794946551323,
+          "repeats": 10000,
+          "failure_count": 0,
+          "both_reported_success_rate": 1.0
+        },
+        "quality": {
+          "sample_size": 10000,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 7.451531269756797e-05,
+          "rotation_err_deg": 1.9456057066450853e-05,
+          "max_position_m": 4.6417705099997953e-07,
+          "max_rotation_rad": 3.719314742784601e-06,
+          "step_violations": 0,
+          "failed_hold_violations": 0,
+          "max_accepted_joint_step_rad": 0.017178058624267578
+        },
+        "memory": null,
+        "actual_solver_cfg": {
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "rr_search": "seed_local",
+          "num_samples": 128,
+          "chunk_size": 512,
+          "position_tolerance": 1e-05,
+          "rotation_tolerance": 1e-05,
+          "max_joint_step": null,
+          "candidate_count": 600,
+          "device": "cpu"
+        },
+        "fixture_sha256": "2c5b475429f214762adfc52985cd63d8b52ad0443a2114872e463097c542dade",
+        "path": "/tmp/ssik-rizon-rootrefine-formal/cpu-control",
+        "process": "/tmp/ssik-rizon-rootrefine-formal/cpu-control/process.json"
+      },
+      "cpu-robot": {
+        "qualification": "QUALIFIED",
+        "head": "7bbc6bf192ec152214684aae1beba123567917ba",
+        "source33_unchanged": true,
+        "start_utc": "2026-10-26T08:47:17.804052+00:00",
+        "end_utc": "2026-10-26T08:48:04.577558+00:00",
+        "monitor_samples": 46,
+        "foreign_samples": 0,
+        "latency": {
+          "cost_time_ms": 2.0696495193988085,
+          "p95_ms": 2.425714978016913,
+          "p99_ms": 2.623596582561732,
+          "max_ms": 6.481345975771546,
+          "repeats": 10000,
+          "failure_count": 0,
+          "both_reported_success_rate": 1.0
+        },
+        "quality": {
+          "sample_size": 10000,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 0.00013175652504664892,
+          "rotation_err_deg": 1.963121183630093e-05,
+          "max_position_m": 4.84668266460666e-07,
+          "max_rotation_rad": 3.692811478814005e-06,
+          "step_violations": 0,
+          "failed_hold_violations": 0,
+          "max_accepted_joint_step_rad": 0.017172396183013916
+        },
+        "memory": null,
+        "actual_solver_cfg": {
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "rr_search": "seed_local",
+          "num_samples": 128,
+          "chunk_size": 512,
+          "position_tolerance": 1e-05,
+          "rotation_tolerance": 1e-05,
+          "max_joint_step": 0.05,
+          "candidate_count": 600,
+          "device": "cpu"
+        },
+        "fixture_sha256": "2c5b475429f214762adfc52985cd63d8b52ad0443a2114872e463097c542dade",
+        "path": "/tmp/ssik-rizon-rootrefine-formal/cpu-robot",
+        "process": "/tmp/ssik-rizon-rootrefine-formal/cpu-robot/process.json"
+      },
+      "cpu-unbounded": {
+        "qualification": "QUALIFIED",
+        "head": "7bbc6bf192ec152214684aae1beba123567917ba",
+        "source33_unchanged": true,
+        "start_utc": "2026-10-26T08:46:06.153202+00:00",
+        "end_utc": "2026-10-26T08:46:50.102566+00:00",
+        "monitor_samples": 43,
+        "foreign_samples": 0,
+        "latency": {
+          "cost_time_ms": 3.4559625200927258,
+          "p95_ms": 3.661909676156938,
+          "p99_ms": 3.9250702876597647,
+          "max_ms": 6.3171470537781715,
+          "repeats": 10000
+        },
+        "quality": {
+          "sample_size": 1,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 8.516145089910934e-05,
+          "rotation_err_deg": 1.769921666333189e-05,
+          "max_position_m": 8.516145089910935e-08,
+          "max_rotation_rad": 3.089096057989862e-07
+        },
+        "memory": null,
+        "actual_solver_cfg": {
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "rr_search": "seed_local",
+          "num_samples": 128,
+          "chunk_size": 512,
+          "position_tolerance": 1e-05,
+          "rotation_tolerance": 1e-05,
+          "max_joint_step": null,
+          "candidate_count": 600,
+          "device": "cpu"
+        },
+        "fixture_sha256": "2c5b475429f214762adfc52985cd63d8b52ad0443a2114872e463097c542dade",
+        "path": "/tmp/ssik-rizon-rootrefine-formal/cpu-unbounded",
+        "process": "/tmp/ssik-rizon-rootrefine-formal/cpu-unbounded/process.json"
+      },
+      "cuda-unbounded": {
+        "qualification": "QUALIFIED",
+        "head": "7bbc6bf192ec152214684aae1beba123567917ba",
+        "source33_unchanged": true,
+        "start_utc": "2026-10-26T08:48:07.689892+00:00",
+        "end_utc": "2026-10-26T08:48:59.412245+00:00",
+        "monitor_samples": 51,
+        "foreign_samples": 0,
+        "latency": {
+          "cost_time_ms": 4.22061956487596,
+          "p95_ms": 4.514798382297158,
+          "p99_ms": 4.671515887603165,
+          "max_ms": 5.43994503095746,
+          "repeats": 10000
+        },
+        "quality": {
+          "sample_size": 1,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 8.516145089910934e-05,
+          "rotation_err_deg": 1.769921666333189e-05,
+          "max_position_m": 8.516145089910935e-08,
+          "max_rotation_rad": 3.089096057989862e-07
+        },
+        "memory": null,
+        "actual_solver_cfg": {
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "rr_search": "seed_local",
+          "num_samples": 128,
+          "chunk_size": 512,
+          "position_tolerance": 1e-05,
+          "rotation_tolerance": 1e-05,
+          "max_joint_step": null,
+          "candidate_count": 600,
+          "device": "cuda"
+        },
+        "fixture_sha256": "2c5b475429f214762adfc52985cd63d8b52ad0443a2114872e463097c542dade",
+        "path": "/tmp/ssik-rizon-rootrefine-formal/cuda-unbounded",
+        "process": "/tmp/ssik-rizon-rootrefine-formal/cuda-unbounded/process.json"
+      },
+      "cuda-control": {
+        "qualification": "QUALIFIED",
+        "head": "7bbc6bf192ec152214684aae1beba123567917ba",
+        "source33_unchanged": true,
+        "start_utc": "2026-10-26T08:51:37.432554+00:00",
+        "end_utc": "2026-10-26T08:52:22.098063+00:00",
+        "monitor_samples": 44,
+        "foreign_samples": 0,
+        "latency": {
+          "cost_time_ms": 3.531639464199543,
+          "p95_ms": 3.849118505604565,
+          "p99_ms": 4.016326465643942,
+          "max_ms": 5.279873963445425,
+          "repeats": 10000,
+          "failure_count": 0,
+          "both_reported_success_rate": 1.0
+        },
+        "quality": {
+          "sample_size": 10000,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 7.451531269756797e-05,
+          "rotation_err_deg": 1.9456057066450853e-05,
+          "max_position_m": 4.6417705099997953e-07,
+          "max_rotation_rad": 3.719314742784601e-06,
+          "step_violations": 0,
+          "failed_hold_violations": 0,
+          "max_accepted_joint_step_rad": 0.017178058624267578
+        },
+        "memory": null,
+        "actual_solver_cfg": {
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "rr_search": "seed_local",
+          "num_samples": 128,
+          "chunk_size": 512,
+          "position_tolerance": 1e-05,
+          "rotation_tolerance": 1e-05,
+          "max_joint_step": null,
+          "candidate_count": 600,
+          "device": "cuda"
+        },
+        "fixture_sha256": "2c5b475429f214762adfc52985cd63d8b52ad0443a2114872e463097c542dade",
+        "path": "/tmp/ssik-rizon-rootrefine-formal-resumed2/cuda-control",
+        "process": "/tmp/ssik-rizon-rootrefine-formal-resumed2/cuda-control/process.json"
+      },
+      "cuda-memory": {
+        "qualification": "QUALIFIED",
+        "head": "7bbc6bf192ec152214684aae1beba123567917ba",
+        "source33_unchanged": true,
+        "start_utc": "2026-10-26T08:57:02.047528+00:00",
+        "end_utc": "2026-10-26T08:57:12.216123+00:00",
+        "monitor_samples": 10,
+        "foreign_samples": 0,
+        "latency": null,
+        "quality": {
+          "reported_successes": 9999,
+          "sample_size": 10000,
+          "scope": "Memory probe only; strict original PK fully validated independently in quality artifacts."
+        },
+        "memory": {
+          "scope": "Fresh PID; model and resident caller inputs excluded; first kernel loading/driver/localstack/workspace included; no GPU FK oracle; outputs subtracted separately.",
+          "baseline_pid_nvml_bytes": 641728512,
+          "peak_pid_nvml_bytes": 742391808,
+          "pid_nvml_growth_bytes": 100663296,
+          "baseline_cuda_mem_get_info_used_bytes": 1933639680,
+          "peak_cuda_mem_get_info_used_bytes": 2027290624,
+          "cuda_mem_get_info_growth_bytes": 93650944,
+          "output_bytes": 290000,
+          "growth_minus_output_bytes": 100373296,
+          "torch_allocated_growth_bytes": 67058176,
+          "rr_workspace_bytes": 54698368,
+          "rr_capacity": 32,
+          "samples": 1402,
+          "scratch_gate_128_mib": "PASS"
+        },
+        "actual_solver_cfg": {
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "rr_search": "seed_local",
+          "candidate_count": 600,
+          "device": "cuda"
+        },
+        "fixture_sha256": "2c5b475429f214762adfc52985cd63d8b52ad0443a2114872e463097c542dade",
+        "path": "/tmp/ssik-rizon-rootrefine-formal-resumed4/cuda-memory",
+        "process": "/tmp/ssik-rizon-rootrefine-formal-resumed4/cuda-memory/process.json"
+      },
+      "cuda-bulk1000": {
+        "qualification": "QUALIFIED",
+        "head": "7bbc6bf192ec152214684aae1beba123567917ba",
+        "source33_unchanged": true,
+        "start_utc": "2026-10-26T08:57:15.330434+00:00",
+        "end_utc": "2026-10-26T08:57:29.561552+00:00",
+        "monitor_samples": 14,
+        "foreign_samples": 0,
+        "latency": {
+          "cost_time_ms": 168.77149499487132,
+          "p95_ms": 172.1133517101407,
+          "p99_ms": 172.3715697741136,
+          "max_ms": 172.3962090909481,
+          "repeats": 30
+        },
+        "quality": {
+          "sample_size": 1000,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 8.838675367245682e-05,
+          "rotation_err_deg": 1.876792472492198e-05,
+          "max_position_m": 2.3855773928616335e-07,
+          "max_rotation_rad": 7.00930060385222e-07
+        },
+        "memory": null,
+        "actual_solver_cfg": {
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "rr_search": "seed_local",
+          "num_samples": 128,
+          "chunk_size": 512,
+          "position_tolerance": 1e-05,
+          "rotation_tolerance": 1e-05,
+          "max_joint_step": null,
+          "candidate_count": 600,
+          "device": "cuda"
+        },
+        "fixture_sha256": "2c5b475429f214762adfc52985cd63d8b52ad0443a2114872e463097c542dade",
+        "path": "/tmp/ssik-rizon-rootrefine-formal-resumed5/cuda-bulk1000",
+        "process": "/tmp/ssik-rizon-rootrefine-formal-resumed5/cuda-bulk1000/process.json"
+      },
+      "cuda-robot": {
+        "qualification": "QUALIFIED",
+        "head": "7bbc6bf192ec152214684aae1beba123567917ba",
+        "source33_unchanged": true,
+        "start_utc": "2026-10-26T08:57:32.661723+00:00",
+        "end_utc": "2026-10-26T08:58:23.365466+00:00",
+        "monitor_samples": 50,
+        "foreign_samples": 0,
+        "latency": {
+          "cost_time_ms": 3.8472425658255816,
+          "p95_ms": 4.215777106583118,
+          "p99_ms": 4.505247604101897,
+          "max_ms": 5.561622092500329,
+          "repeats": 10000,
+          "failure_count": 0,
+          "both_reported_success_rate": 1.0
+        },
+        "quality": {
+          "sample_size": 10000,
+          "success_rate": 1.0,
+          "reported_success_rate": 1.0,
+          "false_successes": 0,
+          "translation_err_mm": 7.770530731704462e-05,
+          "rotation_err_deg": 1.9621580078149635e-05,
+          "max_position_m": 5.253497769600223e-07,
+          "max_rotation_rad": 3.8780835711516485e-06,
+          "step_violations": 0,
+          "failed_hold_violations": 0,
+          "max_accepted_joint_step_rad": 0.017171800136566162
+        },
+        "memory": null,
+        "actual_solver_cfg": {
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "rr_search": "seed_local",
+          "num_samples": 128,
+          "chunk_size": 512,
+          "position_tolerance": 1e-05,
+          "rotation_tolerance": 1e-05,
+          "max_joint_step": 0.05,
+          "candidate_count": 600,
+          "device": "cuda"
+        },
+        "fixture_sha256": "2c5b475429f214762adfc52985cd63d8b52ad0443a2114872e463097c542dade",
+        "path": "/tmp/ssik-rizon-rootrefine-formal-resumed6/cuda-robot",
+        "process": "/tmp/ssik-rizon-rootrefine-formal-resumed6/cuda-robot/process.json"
+      },
+      "cuda-bulk10000": {
+        "qualification": "QUALIFIED",
+        "head": "7bbc6bf192ec152214684aae1beba123567917ba",
+        "source33_unchanged": true,
+        "start_utc": "2026-10-26T08:59:11.305456+00:00",
+        "end_utc": "2026-10-26T09:00:20.278189+00:00",
+        "monitor_samples": 68,
+        "foreign_samples": 0,
+        "latency": {
+          "cost_time_ms": 1638.3540100650862,
+          "p95_ms": 1641.516066447366,
+          "p99_ms": 1641.7329074442387,
+          "max_ms": 1641.787339001894,
+          "repeats": 30
+        },
+        "quality": {
+          "sample_size": 10000,
+          "success_rate": 0.9999,
+          "reported_success_rate": 0.9999,
+          "false_successes": 0,
+          "translation_err_mm": 8.893634721450727e-05,
+          "rotation_err_deg": 1.8731860016187772e-05,
+          "max_position_m": 2.509015325262773e-07,
+          "max_rotation_rad": 7.976729943452504e-07
+        },
+        "memory": null,
+        "actual_solver_cfg": {
+          "backend": "warp",
+          "geometry_mode": "rr",
+          "rr_search": "seed_local",
+          "num_samples": 128,
+          "chunk_size": 512,
+          "position_tolerance": 1e-05,
+          "rotation_tolerance": 1e-05,
+          "max_joint_step": null,
+          "candidate_count": 600,
+          "device": "cuda"
+        },
+        "fixture_sha256": "2c5b475429f214762adfc52985cd63d8b52ad0443a2114872e463097c542dade",
+        "path": "/tmp/ssik-rizon-rootrefine-formal-resumed8/cuda-bulk10000",
+        "process": "/tmp/ssik-rizon-rootrefine-formal-resumed8/cuda-bulk10000/process.json"
+      }
+    },
+    "qualification_manifest": "/tmp/ssik-rizon-rootrefine-formal-qualification.json",
+    "qualification_manifest_sha256": "df13b34791feb5895f608788e0760316840481d5f994d792947efe12cad36b7a",
+    "racecheck": {
+      "status": "PASS",
+      "error_summary": 0,
+      "process": "/tmp/ssik-rizon-rootrefine-formal/racecheck/process.json",
+      "log": "/tmp/ssik-rizon-rootrefine-formal/racecheck-correctness-only.log",
+      "source33_unchanged": true,
+      "isolation": "Correctness-only under authorized concurrent external training; no performance or isolation claim."
+    },
+    "other_sizes_scopes": "N8/N100 and transfer/sustained not remeasured aftersharedmath; no certificate or claim made for those rows.",
+    "CPU_large_matrix": "UNMEASURED"
+  },
+  "official_precision": {
+    "status": "PASS_RIZON_ONLY_FRESH_PRECISION_ALIGNMENT_OTHER_SEVEN_CARRIED_FORWARD",
+    "scope": "Optional official CPU precision alignment only; no timing/memory/default-switch certificate. Only Rizon was rerun after shared algebraic root correction.",
+    "pinned_revision": "4109147f37a7ca3e2516c83853aca583612783f3",
+    "fresh_Rizon_stats": {
+      "attempted_each": 108,
+      "reference_accepted": 68,
+      "warp_accepted": 87,
+      "false_successes_reference": 0,
+      "false_successes_warp": 0
+    },
+    "other_seven_carryforward": "Only parameterized RR algebraic roots changed. Strict6R/SRS/near math bytes are unchanged; adapter AST is identical and relevant fixture/evaluation/selection functions are unchanged. Benchmark source inventory merely added the new CPU module.",
+    "reference_performance_rows": 0,
+    "limitations": [
+      "The official Rizon artifact uses a fixed cached lock grid; Warp uses16global+9local lock samples, so redundant joint vectors and finite candidate sets are not required to match.",
+      "This smoke cohort contains32wide+12boundary+8singular+8unreachable+3x16trajectory samples; it is not formal full-coverage or10k latency evidence.",
+      "Same-conditioned QZ/PK root checks and exact9807 fix are separately verified by the independent refinement review.",
+      "No GPU or formal performance execution occurred; new postpromotion wheel validation still awaits root authorization."
+    ]
+  },
+  "raw_archive_binding": {
+    "index": "/home/dex/.codex/worktrees/459c/EmbodiChain/outputs/benchmarks/ssik_unified_warp_acceptance_20261026/indexes/index-4d10f8c75f9c035efbffab6503128de28b4bc3ccc6517ea2c3b12f3b75641763.json",
+    "mutable_index": "/home/dex/.codex/worktrees/459c/EmbodiChain/outputs/benchmarks/ssik_unified_warp_acceptance_20261026/index.json",
+    "index_sha256": "4d10f8c75f9c035efbffab6503128de28b4bc3ccc6517ea2c3b12f3b75641763",
+    "index_binding": "IMMUTABLE_CHECKPOINT_SNAPSHOT",
+    "archive_status": "COMPLETE_SNAPSHOTS_WITH_DECLARED_MISSING_REFERENCES",
+    "totals": {
+      "current_source_files": 1006,
+      "stored_file_snapshots": 1007,
+      "stored_bytes": 61498377,
+      "current_source_bytes": 61472704,
+      "new_snapshots_this_run": 1,
+      "unchanged_cached_hashes_reused": 1005
+    },
+    "pending_expected": [],
+    "missing_reference_count": 16,
+    "missing_reference_classification": {
+      "/tmp/ssik-arx5-default-acceptance-split-runs/attempt-20261026T070400092299Z": "UNEXECUTED_PLAN_ONLY_ATTEMPT; plan-only output names were never run; actual completed attempt071651244937Z is separately retained",
+      "/tmp/ssik-arx5-default-acceptance-split-runs/attempt-20261026T070400092299Z/pytorch_original_1000/unified": "UNEXECUTED_PLAN_ONLY_ATTEMPT; plan-only output names were never run; actual completed attempt071651244937Z is separately retained",
+      "/tmp/ssik-arx5-default-acceptance-split-runs/attempt-20261026T070400092299Z/pytorch_original_10000/unified": "UNEXECUTED_PLAN_ONLY_ATTEMPT; plan-only output names were never run; actual completed attempt071651244937Z is separately retained",
+      "/tmp/ssik-arx5-default-acceptance-split-runs/attempt-20261026T070400092299Z/warp_1000/unified": "UNEXECUTED_PLAN_ONLY_ATTEMPT; plan-only output names were never run; actual completed attempt071651244937Z is separately retained",
+      "/tmp/ssik-arx5-default-acceptance-split-runs/attempt-20261026T070400092299Z/warp_10000/unified": "UNEXECUTED_PLAN_ONLY_ATTEMPT; plan-only output names were never run; actual completed attempt071651244937Z is separately retained",
+      "/tmp/ssik-arx5-default-acceptance-split-runs/attempt-20261026T070400122548Z/pytorch_original_1000/unified": "REFUSED_AT_INITIAL_PREFLIGHT; receipt proves zero benchmark children, downstream planned output directories were never created",
+      "/tmp/ssik-arx5-default-acceptance-split-runs/attempt-20261026T070400122548Z/pytorch_original_10000/unified": "REFUSED_AT_INITIAL_PREFLIGHT; receipt proves zero benchmark children, downstream planned output directories were never created",
+      "/tmp/ssik-arx5-default-acceptance-split-runs/attempt-20261026T070400122548Z/warp_1000/unified": "REFUSED_AT_INITIAL_PREFLIGHT; receipt proves zero benchmark children, downstream planned output directories were never created",
+      "/tmp/ssik-arx5-default-acceptance-split-runs/attempt-20261026T070400122548Z/warp_10000/unified": "REFUSED_AT_INITIAL_PREFLIGHT; receipt proves zero benchmark children, downstream planned output directories were never created",
+      "/tmp/ssik-postpromotion-wheel-cold-child.py": "SUPERSEDED_UNEXECUTED_RECIPE_DEFAULT; authoritative postpromotion wheel receipt binds actual external-deps-attempt2 child/main/cold evidence and SHA instead; no missing measured output is asserted",
+      "/tmp/ssik-postpromotion-wheel-cold-evidence.json": "SUPERSEDED_UNEXECUTED_RECIPE_DEFAULT; authoritative postpromotion wheel receipt binds actual external-deps-attempt2 child/main/cold evidence and SHA instead; no missing measured output is asserted",
+      "/tmp/ssik-postpromotion-wheel-evidence.json": "SUPERSEDED_UNEXECUTED_RECIPE_DEFAULT; authoritative postpromotion wheel receipt binds actual external-deps-attempt2 child/main/cold evidence and SHA instead; no missing measured output is asserted",
+      "/tmp/ssik-rizon-rootrefine-formal/cuda-robot": "SUPERSEDED_PLAN_OUTPUT; authoritative final formal receipt binds qualified resumed cuda-robot and actual racecheck-correctness-only.log, not these old placeholders",
+      "/tmp/ssik-rizon-rootrefine-formal/racecheck/racecheck.log": "SUPERSEDED_PLAN_OUTPUT; authoritative final formal receipt binds qualified resumed cuda-robot and actual racecheck-correctness-only.log, not these old placeholders",
+      "/tmp/ssik-rizon-rootrefine-racecheck-history": "CONDITIONAL_HISTORY_DIRECTORY_NOT_CREATED; auto-racecheck recipe creates it only when rotating an older nonempty folder; final actual correctness-only log is separately retained",
+      "/tmp/ssik-unified-warp-report-draft": "OUTPUT_PREFIX_ONLY; actual .md/.json report bodies are deliberately excluded from raw index"
+    },
+    "parent_checkpoint": {
+      "path": "/home/dex/.codex/worktrees/459c/EmbodiChain/outputs/benchmarks/ssik_followup_acceptance_20261026/indexes/index-edf7d3f47c7490c64ccb4c946cd6dd577275f22bccd1c0d3c93ef17c590f6884.json",
+      "sha256": "edf7d3f47c7490c64ccb4c946cd6dd577275f22bccd1c0d3c93ef17c590f6884",
+      "read_only": true
+    },
+    "freeze_requested": true,
+    "refresh_command": "CUDA_VISIBLE_DEVICES='' OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /home/dex/miniconda3/envs/open/bin/python /home/dex/.codex/worktrees/459c/EmbodiChain/outputs/benchmarks/ssik_unified_warp_acceptance_20261026/checkpoints/20261026T092920266334Z/reports_and_recipes/ssik-unified-warp-archive.py --copy",
+    "finalize_command": "CUDA_VISIBLE_DEVICES='' OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /home/dex/miniconda3/envs/open/bin/python /home/dex/.codex/worktrees/459c/EmbodiChain/outputs/benchmarks/ssik_unified_warp_acceptance_20261026/checkpoints/20261026T092920266334Z/reports_and_recipes/ssik-unified-warp-archive.py --copy --freeze-index",
+    "report_binding_policy": "Freeze raw evidence before final report render. A pre-binding report snapshot, if captured, is labelled historical; do not refresh raw index merely to include the report that binds to it."
+  },
+  "limitations": [
+    "Measured p99 is not a hard real-time guarantee. Actual Robot scope includes live native root query/frame conversion/dispatch/completion, no renderer, no physics step, hardware transport or physical execution.",
+    "ARX is9-slot bounded numerical hybrid, not pure closed form or complete general6R algebraic root enumeration. Its95.225% full-path completion has an independent initial-seed/.05-step infeasibility certificate; the failed whole path is not relabelled pointwise unreachable.",
+    "Marvin Cartesian failures are outside certified radial shell; matched baseline and all smooth-joint paths checked. Full20k rates remain left98.345%,right97.185%, both variants.",
+    "Rizon wide9999/10000; index8659 is a classified finite25-lock/600-slot sampling miss, not unreachable. Rizon20k path coverage100% does not imply complete7R solution-manifold coverage.",
+    "Original Pytorch internal30samples/500iterations/5e-4 thresholds retained; both backend outputs independently judged at1e-5. ARX strict wide accepted0% for original is not a violation of its looser internal contract.",
+    "Official small precision alignment has different finite candidate pools and is not a throughput, latency or production-coverage certificate.",
+    "Racecheck ran with explicitly authorized external training: zero hazards/errors/warnings is correctness-only, with no isolation/performance claim.",
+    "P1 and ARX older controls/memory retain their measured source identities; source bindings justify carryforward, not new-head retiming. No cross-robot algorithm-superiority ranking is inferred."
+  ]
+}
