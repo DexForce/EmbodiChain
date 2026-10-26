@@ -179,6 +179,9 @@ def merge_solver_cfg(
 def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> RobotCfg:
     """Merge current robot configuration with overriding values from a dictionary.
 
+    Partial ``root_props`` mappings retain unspecified preset values. Explicit
+    ``None`` entries are applied, and iteration pairs validate after merging.
+
     Args:
         base_cfg (RobotCfg): The base robot configuration.
         override_cfg_dict (dict[str, any]): Dictionary of overriding configuration values.
@@ -200,7 +203,9 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
     base_safe = {
         k: v
         for k, v in override_cfg_dict.items()
-        if k in base_fields and k != "link_attrs"
+        if k in base_fields
+        and k != "link_attrs"
+        and not (k == "root_props" and isinstance(v, Mapping))
     }
     robot_cfg = RobotCfg.from_dict(base_safe)
 
@@ -278,6 +283,10 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                 logger.log_warning(
                     "joint_drive_props should be a dictionary. Skipping joint_drive_props merge."
                 )
+        elif key == "root_props" and isinstance(value, Mapping):
+            root_values = base_cfg.root_props.to_dict()
+            root_values.update(value)
+            base_cfg.root_props = type(base_cfg.root_props).from_dict(root_values)
         elif key == "attrs":
             # merge physics attributes
             user_attrs_dict = override_cfg_dict.get("attrs")

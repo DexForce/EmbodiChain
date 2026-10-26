@@ -28,6 +28,9 @@ operations remain in `compute`; source storage belongs to data adapters.
   at `embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer`.
   The core does not import the model extension or example helpers. The NeRD
   showcase's default `train` command uses this same common recipe.
+- The [RWM recipe](../robot-world-model/robot-world-model.md) is
+  `embodichain_models.dynamics.rwm.sl_recipe:build_rwm_trainer`. Its model,
+  state codec, objective, predictor and replay belong to that model family.
 
 Objectives own loss masks, normalization, integration and multi-step graph
 construction. The optimizer does not infer action semantics or detach histories.

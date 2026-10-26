@@ -21,6 +21,12 @@ from __future__ import annotations
 from itertools import product
 
 _CONFIG_CLASSES = {
+    "UnitreeGo1": "embodichain_robots.unitree.go1:UnitreeGo1Cfg",
+    "UnitreeGo2": "embodichain_robots.unitree.go2:UnitreeGo2Cfg",
+    "UnitreeG1": "embodichain_robots.unitree.g1:UnitreeG1Cfg",
+    "UnitreeH1_2": "embodichain_robots.unitree.h1_2:UnitreeH12Cfg",
+    "ANYmalC": "embodichain_robots.anybotics.anymal_c:ANYmalCCfg",
+    "MicroDuck": "embodichain_robots.pollen_robotics.microduck:MicroDuckCfg",
     "ARX5": "embodichain_robots.arx.arx5:ARX5Cfg",
     "AlohaMini": "embodichain_robots.alohamini.aloha_mini:AlohaMiniCfg",
     "TianjiMarvin": "embodichain_robots.tianji.marvin:TianjiMarvinCfg",
@@ -34,6 +40,12 @@ _CONFIG_CLASSES = {
 }
 
 _DEFAULT_CONTROL_INFO = {
+    "UnitreeGo1": {"dof": 12, "control_parts": {"locomotion": 12}},
+    "UnitreeGo2": {"dof": 12, "control_parts": {"locomotion": 12}},
+    "UnitreeG1": {"dof": 29, "control_parts": {"locomotion": 29}},
+    "UnitreeH1_2": {"dof": 27, "control_parts": {"locomotion": 27}},
+    "ANYmalC": {"dof": 12, "control_parts": {"locomotion": 12}},
+    "MicroDuck": {"dof": 14, "control_parts": {"locomotion": 14}},
     "ARX5": {"dof": 8, "control_parts": {"arm": 6, "eef": 2}},
     "AlohaMini": {
         "dof": 15,
@@ -120,6 +132,12 @@ _CONTROL_PART_MIMICS = {
 }
 
 _CLASSIFICATION = {
+    "UnitreeGo1": ("unitree", "quadruped", 0),
+    "UnitreeGo2": ("unitree", "quadruped", 0),
+    "UnitreeG1": ("unitree", "bipedal_humanoid", 2),
+    "UnitreeH1_2": ("unitree", "bipedal_humanoid", 2),
+    "ANYmalC": ("anybotics", "quadruped", 0),
+    "MicroDuck": ("pollen_robotics", "biped", 0),
     "ARX5": ("arx", "fixed_manipulator", 1),
     "AlohaMini": (None, "wheeled_manipulator", 2),
     "TianjiMarvin": ("tianji", "fixed_manipulator", 2),

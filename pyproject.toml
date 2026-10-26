@@ -48,7 +48,8 @@ dependencies = [
   "black==26.10.1",
   "fvcore",
   "h5py",
-  "tensordict",
+  # Keep the tested 0.13 baseline; 0.15+ requires a newer torch stack.
+  "tensordict>=0.13,<0.15",
   "viser==1.0.21",
   "lerobot>=0.4.4,<0.5",
   # torch 2.7 compatibility; newer TorchCodec releases target newer torch ABIs.

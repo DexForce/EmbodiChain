@@ -62,13 +62,16 @@ Catalogs are cached for the process lifetime; refresh editable metadata and rest
 after changing entry points.
 
 Migrated robot assets live in `embodichain_robots`, alongside each model or at
-vendor level for shared archives. The legacy `robot_assets`, `w1_assets` and
-`so101_assets` modules forward their public names to the same class objects.
+vendor level for shared archives. The legacy `robot_assets`, `w1_assets`,
+`so101_assets` and migrated `locomotion_assets` names forward to the same class objects.
 Discovery excludes these imported aliases so IDs register once. Keep class names,
 asset IDs, URLs, digests and cache prefixes stable across ownership moves.
-Locomotion assets and remaining core robot datasets still use the core category
-table, which excludes private helpers. Locomotion archives keep their existing
-`robot_assets/<ClassName>.zip` paths.
+The six catalog locomotion models register their model-owned archives through
+the robot asset catalog. `HumanoidRun` and remaining core robot datasets still
+use the core category table, which excludes private helpers. Locomotion archives
+keep their existing `robot_assets/<ClassName>.zip` paths. Their common archive
+downloader lives in `embodichain/data/_locomotion_asset.py`, outside the eager
+legacy asset namespace so asset-first imports do not re-enter model construction.
 `download_asset()` returns success or failure; `cmd_download()` finishes the batch
 and exits nonzero if any requested asset failed.
 `_ensure_extract()` copies non-ZIP downloads into the extract tree

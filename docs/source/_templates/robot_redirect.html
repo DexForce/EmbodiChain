@@ -1,0 +1,19 @@
+{% set target = pathto(robot_doc_redirects[pagename]) %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Robot documentation moved</title>
+    <meta name="robots" content="noindex">
+    <link rel="canonical" href="{{ target | e }}">
+    <script>
+      window.location.replace({{ target | tojson }} + window.location.search + window.location.hash);
+    </script>
+    <noscript>
+      <meta http-equiv="refresh" content="0; url={{ target | e }}">
+    </noscript>
+  </head>
+  <body>
+    <p>This page has moved. <a href="{{ target | e }}">Continue to the robot documentation.</a></p>
+  </body>
+</html>
