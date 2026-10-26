@@ -40,6 +40,51 @@ from embodichain.gen_sim.task_engine.workflow import _semantic_draft
 from embodichain.utils.utility import load_config, save_config
 
 
+@pytest.mark.parametrize(
+    ("body_type", "shape_count", "contact_offset", "error"),
+    [
+        ("static", 1, 0.01, None),
+        ("kinematic", 1, 0.01, None),
+        ("static", 2, 0.01, "requires all actual native table colliders"),
+        ("static", 1, -0.01, "contact offsets are invalid"),
+    ],
+)
+def test_native_table_reads_static_entity_and_checks_shape_and_contact(
+    body_type, shape_count, contact_offset, error
+):
+    from embodichain.gen_sim.task_engine._task_program.twist_geometry_guard import (
+        _native_table,
+    )
+
+    body = NS(get_shape_count=lambda: shape_count)
+    entity = NS(
+        native=lambda: NS(get_physical_body=lambda: body),
+        get_physical_attr=lambda: NS(contact_offset=contact_offset, rest_offset=0.0),
+    )
+    shape = NS(
+        local_pose=torch.eye(4),
+        vertices=None,
+        triangles=None,
+        half_extents=torch.tensor([1.0, 2.0, 3.0]),
+    )
+    table = NS(
+        num_instances=1,
+        body_type=body_type,
+        body_data=None if body_type == "static" else NS(entities=[entity]),
+        _entities=[entity],
+        get_collision_shapes=lambda env_id: [shape],
+        get_local_pose=lambda to_matrix: torch.eye(4).unsqueeze(0),
+    )
+    if error is not None:
+        with pytest.raises(ValueError, match=error):
+            _native_table(table)
+        return
+
+    bounds, contact = _native_table(table)
+    np.testing.assert_array_equal(bounds, [[-1, -2, -3], [1, 2, 3]])
+    assert contact == 0.01
+
+
 @pytest.mark.parametrize("mode", ["safe", "collision", "missing", "nan"])
 def test_table_clearance_requires_complete_finite_geometry(monkeypatch, mode):
     from embodichain.gen_sim.task_engine._task_program import (
