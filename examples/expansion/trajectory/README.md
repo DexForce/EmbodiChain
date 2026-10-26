@@ -1,5 +1,34 @@
 # Trajectory augmentation showcases
 
+## Interactive pure-trajectory augmentation laboratory
+
+Build one self-contained browser page that compares all implemented trajectory
+augmentation routes against the same planar three-link reference:
+
+```bash
+python examples/expansion/trajectory/trajectory_augmentation_visualizer.py \
+  --output /tmp/embodichain-trajectory-lab/index.html \
+  --open
+```
+
+The tabs cover endpoint-preserving joint residuals, interior via points,
+Jacobian null-space residuals, manipulability-guided selection, task-space
+deformation with trajectory IK, temporal retiming, fixed-contact approach
+direction changes, and phase-aligned multi-demo stitching with explicit
+bridges. The strength slider and nine local seeds select candidates generated
+by the production APIs. Playback, phase navigation, tool-path and joint-curve
+views run entirely in the generated HTML; JavaScript does not reimplement an
+augmentation operator.
+
+![Interactive pure-trajectory augmentation laboratory](assets/trajectory_augmentation_lab.png)
+
+This laboratory is intentionally trajectory-only. It does not sample images,
+affordances, contact points, grasp poses, object layouts or scene appearance.
+The fixed-contact approach tab varies the pre-contact standoff while preserving
+the contact transform, and is therefore kept separate from affordance
+augmentation. Every candidate remains subject to host-owned collision,
+dynamics and task-success validation.
+
 ## Pure trajectory: task-space deformation and segment stitching
 
 Generate two CPU-only figures without constructing a simulator:

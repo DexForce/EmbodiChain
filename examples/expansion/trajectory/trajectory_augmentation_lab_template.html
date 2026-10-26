@@ -1,0 +1,478 @@
+<!--
+  Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+  Licensed under the Apache License, Version 2.0.
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>轨迹扩增实验室 · EmbodiChain</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090b0f;
+      --panel: #11151b;
+      --panel-2: #151a22;
+      --border: #252c36;
+      --muted: #8e98a7;
+      --text: #edf1f7;
+      --blue: #4f8cff;
+      --blue-soft: rgba(79, 140, 255, 0.14);
+      --cyan: #5bd6de;
+      --gold: #f0b35a;
+      --red: #ff6b6b;
+      --green: #58d68d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 980px;
+      background:
+        radial-gradient(circle at 15% 0%, rgba(43, 88, 160, 0.13), transparent 32rem),
+        linear-gradient(180deg, #0b0e13 0%, var(--bg) 100%);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    .app { max-width: 1480px; margin: 0 auto; padding: 28px 32px 40px; }
+    .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+    .eyebrow {
+      color: var(--blue); font-size: 11px; font-weight: 750; letter-spacing: .15em;
+      text-transform: uppercase; margin-bottom: 8px;
+    }
+    h1 { margin: 0; font-size: 28px; letter-spacing: -.02em; }
+    .subtitle { margin: 7px 0 0; color: var(--muted); }
+    .scope {
+      border: 1px solid var(--border); border-radius: 12px; background: rgba(17,21,27,.82);
+      padding: 10px 13px; max-width: 470px; color: #b9c2cf; line-height: 1.55;
+    }
+    .scope strong { color: var(--green); }
+    .scope .excluded { color: #9da6b4; }
+    .tabs {
+      display: flex; gap: 8px; overflow-x: auto; padding: 22px 0 14px;
+      scrollbar-width: thin;
+    }
+    .tab, .view-button, .seed-button, .phase-button, .play-button {
+      border: 1px solid var(--border); background: #151a21; border-radius: 8px;
+      cursor: pointer; transition: border-color .15s, background .15s, transform .15s;
+    }
+    .tab { white-space: nowrap; padding: 9px 13px; color: #aeb8c7; }
+    .tab:hover, .view-button:hover, .seed-button:hover, .phase-button:hover { border-color: #465267; }
+    .tab.active { color: white; background: #255aa8; border-color: #3979d6; }
+    .tab .mini { opacity: .65; margin-left: 5px; font-size: 10px; text-transform: uppercase; }
+    .main-grid { display: grid; grid-template-columns: minmax(270px, 340px) minmax(620px, 1fr); gap: 16px; }
+    .panel { border: 1px solid var(--border); background: rgba(17, 21, 27, .94); border-radius: 14px; }
+    .sidebar { padding: 18px; display: flex; flex-direction: column; gap: 18px; }
+    .method-title { display: flex; align-items: center; gap: 9px; margin: 0 0 8px; font-size: 20px; }
+    .badge {
+      display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 999px;
+      background: var(--blue-soft); border: 1px solid rgba(79,140,255,.35);
+      color: #8db5ff; font-size: 10px; font-weight: 700; letter-spacing: .05em;
+    }
+    .equation { color: #c5ccd7; line-height: 1.65; }
+    .section-label { margin-bottom: 8px; color: #7f8a9a; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .control-block { border-top: 1px solid var(--border); padding-top: 16px; }
+    .slider-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
+    .strength-value { color: #dbe6f8; font-variant-numeric: tabular-nums; }
+    input[type="range"] { width: 100%; accent-color: var(--blue); cursor: pointer; }
+    .seed-row { display: flex; align-items: center; gap: 9px; margin-top: 13px; }
+    .seed-box {
+      flex: 1; background: #0d1015; border: 1px solid var(--border); border-radius: 8px;
+      padding: 9px 10px; color: #b8c0cc;
+    }
+    .seed-box span { float: right; color: white; font-variant-numeric: tabular-nums; }
+    .seed-button { padding: 9px 11px; background: #1b222c; }
+    .explain { color: #a9b2bf; line-height: 1.65; margin: 0; }
+    .implementation {
+      display: block; margin-top: 9px; padding: 9px 10px; border-radius: 8px;
+      color: #9dc0ff; background: #0c1118; border: 1px solid #202b39;
+      font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+    .guarantee { border-left: 2px solid var(--gold); padding-left: 10px; color: #b8bec8; line-height: 1.55; }
+    .visual { overflow: hidden; }
+    .visual-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      padding: 13px 16px; border-bottom: 1px solid var(--border);
+    }
+    .legend { display: flex; gap: 18px; align-items: center; color: #9aa4b2; font-size: 12px; }
+    .legend-item { display: flex; align-items: center; gap: 7px; }
+    .line { width: 22px; height: 0; border-top: 2px solid var(--blue); }
+    .line.reference { border-color: #8f98a5; border-top-style: dashed; }
+    .diamond { width: 8px; height: 8px; border: 1.5px solid #dde4ed; transform: rotate(45deg); }
+    .view-toggle { display: flex; gap: 5px; }
+    .view-button { padding: 7px 10px; color: #95a0af; }
+    .view-button.active { color: white; background: #263347; border-color: #3a4d69; }
+    .canvas-wrap { position: relative; height: 540px; background: #0d1015; }
+    canvas { display: block; width: 100%; height: 100%; }
+    .chart-caption {
+      position: absolute; top: 13px; left: 16px; color: #8a95a5; font-size: 11px;
+      pointer-events: none;
+    }
+    .metrics {
+      position: absolute; right: 13px; top: 13px; display: grid; grid-template-columns: repeat(2, minmax(115px, 1fr));
+      gap: 7px; max-width: 360px; pointer-events: none;
+    }
+    .metric { background: rgba(12,15,20,.88); border: 1px solid #252d38; border-radius: 8px; padding: 7px 9px; }
+    .metric-label { color: #778292; font-size: 10px; }
+    .metric-value { margin-top: 2px; color: #e5ebf3; font-size: 12px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .timeline-area { padding: 14px 16px 16px; border-top: 1px solid var(--border); }
+    .phases { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 13px; }
+    .phase-button { padding: 6px 9px; color: #8792a2; font-size: 12px; }
+    .phase-button.active { background: var(--blue-soft); color: #86adf5; border-color: rgba(79,140,255,.42); }
+    .phase-button.contact { color: #d9ad69; }
+    .phase-button.bridge { color: #ff8f8f; border-style: dashed; }
+    .transport { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; }
+    .play-button { min-width: 58px; padding: 8px 12px; background: #f4f6f8; color: #11151a; border-color: white; font-weight: 700; }
+    .time-readout { min-width: 86px; text-align: right; color: #c8d0da; font-variant-numeric: tabular-nums; }
+    .footnote { margin-top: 14px; color: #687383; font-size: 11px; line-height: 1.55; }
+    @media (max-width: 1120px) {
+      .main-grid { grid-template-columns: 290px minmax(620px, 1fr); }
+      .metrics { grid-template-columns: 1fr; max-width: 180px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div>
+        <div class="eyebrow">EmbodiChain · Pure trajectory</div>
+        <h1 id="title"></h1>
+        <p class="subtitle" id="subtitle"></p>
+      </div>
+      <div class="scope">
+        <div><strong>包含：</strong><span id="scope-included"></span></div>
+        <div class="excluded"><strong>明确排除：</strong><span id="scope-excluded"></span></div>
+      </div>
+    </header>
+
+    <nav class="tabs" id="tabs" aria-label="轨迹扩增方法"></nav>
+
+    <main class="main-grid">
+      <aside class="panel sidebar">
+        <section>
+          <h2 class="method-title"><span id="method-label"></span><span class="badge" id="method-badge"></span></h2>
+          <div class="equation" id="method-equation"></div>
+        </section>
+
+        <section class="control-block">
+          <div class="slider-head">
+            <span>扰动上限 / 方法强度</span>
+            <span class="strength-value" id="strength-value"></span>
+          </div>
+          <input id="strength" type="range" min="0" max="2" step="1" value="1" aria-label="方法强度">
+          <div class="seed-row">
+            <div class="seed-box">局部随机种子 <span id="seed-value">7</span></div>
+            <button class="seed-button" id="seed-button">换一组轨迹</button>
+          </div>
+        </section>
+
+        <section class="control-block">
+          <div class="section-label">原理</div>
+          <p class="explain" id="method-principle"></p>
+          <code class="implementation" id="method-implementation"></code>
+        </section>
+
+        <section class="control-block">
+          <div class="section-label">边界与保证</div>
+          <div class="guarantee" id="method-guarantee"></div>
+          <div class="footnote">所有随机性来自显式局部 generator；页面只播放 Python 已生成的数据，不在 JavaScript 中重新实现扩增算法。</div>
+        </section>
+      </aside>
+
+      <section class="panel visual">
+        <div class="visual-head">
+          <div class="legend">
+            <span class="legend-item"><i class="line reference"></i>参考轨迹</span>
+            <span class="legend-item"><i class="line"></i>扩增轨迹</span>
+            <span class="legend-item"><i class="diamond"></i>阶段边界</span>
+          </div>
+          <div class="view-toggle">
+            <button class="view-button active" data-view="path">末端路径</button>
+            <button class="view-button" data-view="joint">关节曲线</button>
+          </div>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="plot"></canvas>
+          <div class="chart-caption" id="chart-caption"></div>
+          <div class="metrics" id="metrics"></div>
+        </div>
+        <div class="timeline-area">
+          <div class="phases" id="phases"></div>
+          <div class="transport">
+            <button class="play-button" id="play-button">播放</button>
+            <input id="timeline" type="range" min="0" max="1000" value="330" step="1" aria-label="轨迹播放位置">
+            <div class="time-readout" id="time-readout"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    "use strict";
+    const DATA = __TRAJECTORY_AUGMENTATION_DATA__;
+    const state = { method: "joint_residual", strength: 1, seed: 7, view: "path", progress: 0.33, playing: false };
+    const phaseNames = { approach: "接近", grasp: "抓取", transport: "运送", release: "释放", retreat: "撤回" };
+    const metricNames = {
+      duration_s: "总时长", sample_count: "采样点", tool_path_ratio: "路径长度 / 参考",
+      minimum_manipulability: "最低可操作度", joint_range_fraction: "关节范围比例",
+      via_points_per_free_phase: "每段途经点", constrained_task_rows: "约束任务行",
+      target_band: "目标区间", reached_band: "实际区间", matched: "命中目标",
+      proposals_scored: "评估候选", translation_bound_m: "平移上限",
+      maximum_ik_error_m: "最大 IK 误差", duration_scale: "时长倍率",
+      timing_profile: "时间曲线", cone_angle_deg: "锥角", fixed_contact_error_m: "接触误差",
+      requires_replanning: "需重新规划", bank_size: "示教段库", bridge_count: "桥接段",
+      selected_sources: "来源顺序"
+    };
+    const colors = { blue: "#4f8cff", reference: "#8993a1", grid: "#242a33", text: "#7f8997", boundary: "#e4eaf2", contact: "#f0b35a", bridge: "#ff6b6b" };
+    const canvas = document.getElementById("plot");
+    const context = canvas.getContext("2d");
+    let lastFrame = performance.now();
+
+    function method() { return DATA.methods[state.method]; }
+    function candidate() { return method().variants[state.strength][state.seed]; }
+    function duration(record) { return record.time[record.time.length - 1]; }
+    function sampleIndex(record, progress) {
+      const target = progress * duration(record);
+      let low = 0, high = record.time.length - 1;
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        if (record.time[middle] < target) low = middle + 1; else high = middle;
+      }
+      if (low > 0 && Math.abs(record.time[low - 1] - target) < Math.abs(record.time[low] - target)) return low - 1;
+      return low;
+    }
+    function armPoints(q) {
+      const points = [[0, 0]];
+      let angle = 0, x = 0, y = 0;
+      q.forEach((value, index) => {
+        angle += value;
+        x += DATA.link_lengths[index] * Math.cos(angle);
+        y += DATA.link_lengths[index] * Math.sin(angle);
+        points.push([x, y]);
+      });
+      return points;
+    }
+    function resizeCanvas() {
+      const bounds = canvas.getBoundingClientRect();
+      const ratio = Math.max(1, window.devicePixelRatio || 1);
+      const width = Math.round(bounds.width * ratio), height = Math.round(bounds.height * ratio);
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width; canvas.height = height;
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      }
+      draw();
+    }
+    function clear(width, height) {
+      context.clearRect(0, 0, width, height);
+      context.fillStyle = "#0d1015";
+      context.fillRect(0, 0, width, height);
+    }
+    function polyline(points, project, color, width, dash = []) {
+      if (!points.length) return;
+      context.beginPath();
+      points.forEach((point, index) => {
+        const [x, y] = project(point);
+        if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
+      });
+      context.strokeStyle = color; context.lineWidth = width; context.setLineDash(dash); context.stroke(); context.setLineDash([]);
+    }
+    function diamond(point, project, color) {
+      const [x, y] = project(point), radius = 5;
+      context.beginPath(); context.moveTo(x, y - radius); context.lineTo(x + radius, y);
+      context.lineTo(x, y + radius); context.lineTo(x - radius, y); context.closePath();
+      context.fillStyle = "#0d1015"; context.fill(); context.strokeStyle = color; context.lineWidth = 1.5; context.stroke();
+    }
+    function extent(values) {
+      let minimum = Infinity, maximum = -Infinity;
+      values.forEach(value => { minimum = Math.min(minimum, value); maximum = Math.max(maximum, value); });
+      return [minimum, maximum];
+    }
+    function drawGrid(project, xTicks, yTicks, xLabel, yLabel, bounds) {
+      context.font = "11px ui-sans-serif, system-ui"; context.lineWidth = 1;
+      xTicks.forEach(value => {
+        const [x] = project([value, bounds.yMin]);
+        context.strokeStyle = colors.grid; context.beginPath(); context.moveTo(x, bounds.top); context.lineTo(x, bounds.bottom); context.stroke();
+        context.fillStyle = colors.text; context.textAlign = "center"; context.fillText(value.toFixed(1), x, bounds.bottom + 19);
+      });
+      yTicks.forEach(value => {
+        const [, y] = project([bounds.xMin, value]);
+        context.strokeStyle = colors.grid; context.beginPath(); context.moveTo(bounds.left, y); context.lineTo(bounds.right, y); context.stroke();
+        context.fillStyle = colors.text; context.textAlign = "right"; context.fillText(value.toFixed(1), bounds.left - 8, y + 4);
+      });
+      context.fillStyle = "#98a2b1"; context.textAlign = "right"; context.fillText(xLabel, bounds.right, bounds.bottom + 35);
+      context.save(); context.translate(16, bounds.top); context.rotate(-Math.PI / 2); context.textAlign = "right"; context.fillText(yLabel, 0, 0); context.restore();
+    }
+    function niceTicks(minimum, maximum, count = 5) {
+      const span = Math.max(maximum - minimum, 1e-6), raw = span / count;
+      const power = Math.pow(10, Math.floor(Math.log10(raw)));
+      const normalized = raw / power;
+      const step = (normalized < 1.5 ? 1 : normalized < 3.5 ? 2 : normalized < 7.5 ? 5 : 10) * power;
+      const start = Math.ceil(minimum / step) * step, ticks = [];
+      for (let value = start; value <= maximum + step * .1; value += step) ticks.push(value);
+      return ticks;
+    }
+    function drawPath(width, height) {
+      const reference = DATA.reference, variant = candidate();
+      const allArms = [];
+      reference.q.forEach(q => allArms.push(...armPoints(q)));
+      variant.q.forEach(q => allArms.push(...armPoints(q)));
+      const xValues = allArms.map(point => point[0]), yValues = allArms.map(point => point[1]);
+      let [xMin, xMax] = extent(xValues), [yMin, yMax] = extent(yValues);
+      const margin = .06; xMin -= margin; xMax += margin; yMin -= margin; yMax += margin;
+      const left = 62, right = width - 24, top = 28, bottom = height - 48;
+      const plotWidth = right - left, plotHeight = bottom - top;
+      const scale = Math.min(plotWidth / (xMax - xMin), plotHeight / (yMax - yMin));
+      const usedWidth = (xMax - xMin) * scale, usedHeight = (yMax - yMin) * scale;
+      const offsetX = left + (plotWidth - usedWidth) / 2, offsetY = top + (plotHeight - usedHeight) / 2;
+      const project = point => [offsetX + (point[0] - xMin) * scale, offsetY + (yMax - point[1]) * scale];
+      const bounds = { left: offsetX, right: offsetX + usedWidth, top: offsetY, bottom: offsetY + usedHeight, xMin, yMin };
+      drawGrid(project, niceTicks(xMin, xMax), niceTicks(yMin, yMax), "x / m", "y / m", bounds);
+      polyline(reference.tool, project, colors.reference, 1.7, [6, 5]);
+      polyline(variant.tool, project, colors.blue, 2.5);
+      variant.phases.forEach(phase => diamond(variant.tool[phase.stop - 1], project, phase.kind === "bridge" ? colors.bridge : colors.boundary));
+      const referenceIndex = sampleIndex(reference, state.progress), variantIndex = sampleIndex(variant, state.progress);
+      const referenceArm = armPoints(reference.q[referenceIndex]), variantArm = armPoints(variant.q[variantIndex]);
+      polyline(referenceArm, project, "rgba(143,152,165,.75)", 5, [6, 5]);
+      polyline(variantArm, project, colors.blue, 6);
+      [...referenceArm.slice(1, -1)].forEach(point => {
+        const [x, y] = project(point); context.beginPath(); context.arc(x, y, 4, 0, Math.PI * 2); context.fillStyle = "#566171"; context.fill();
+      });
+      [...variantArm].forEach((point, index) => {
+        const [x, y] = project(point); context.beginPath(); context.arc(x, y, index === 0 ? 5 : 4, 0, Math.PI * 2);
+        context.fillStyle = index === variantArm.length - 1 ? "#cfe0ff" : "#173d7d"; context.strokeStyle = colors.blue; context.lineWidth = 2; context.fill(); context.stroke();
+      });
+    }
+    function drawJoints(width, height) {
+      const reference = DATA.reference, variant = candidate();
+      const left = 62, right = width - 24, top = 28, bottom = height - 48;
+      const maxTime = Math.max(duration(reference), duration(variant));
+      const values = reference.q.flat().concat(variant.q.flat()); let [qMin, qMax] = extent(values);
+      const margin = Math.max(.12, (qMax - qMin) * .12); qMin -= margin; qMax += margin;
+      const project = point => [left + point[0] / maxTime * (right - left), bottom - (point[1] - qMin) / (qMax - qMin) * (bottom - top)];
+      const bounds = { left, right, top, bottom, xMin: 0, yMin: qMin };
+      drawGrid(project, niceTicks(0, maxTime), niceTicks(qMin, qMax), "time / s", "q / rad", bounds);
+      variant.phases.forEach(phase => {
+        if (phase.kind !== "contact" && phase.kind !== "bridge") return;
+        const start = variant.time[phase.start], stop = variant.time[phase.stop - 1];
+        const [x0] = project([start, qMin]), [x1] = project([stop, qMin]);
+        context.fillStyle = phase.kind === "bridge" ? "rgba(255,107,107,.12)" : "rgba(240,179,90,.09)";
+        context.fillRect(x0, top, Math.max(1, x1 - x0), bottom - top);
+      });
+      const jointColors = ["#4f8cff", "#5bd6de", "#d88cf0"];
+      for (let joint = 0; joint < 3; joint += 1) {
+        polyline(reference.q.map((q, index) => [reference.time[index], q[joint]]), project, jointColors[joint] + "88", 1.4, [5, 4]);
+        polyline(variant.q.map((q, index) => [variant.time[index], q[joint]]), project, jointColors[joint], 2.2);
+      }
+      const cursorTime = state.progress * duration(variant), [cursorX] = project([cursorTime, qMin]);
+      context.strokeStyle = "rgba(255,255,255,.65)"; context.lineWidth = 1; context.beginPath(); context.moveTo(cursorX, top); context.lineTo(cursorX, bottom); context.stroke();
+      context.font = "11px ui-sans-serif, system-ui";
+      ["shoulder", "elbow", "wrist"].forEach((name, index) => {
+        context.fillStyle = jointColors[index]; context.textAlign = "left"; context.fillText(name, left + index * 76, top + 12);
+      });
+    }
+    function draw() {
+      const ratio = Math.max(1, window.devicePixelRatio || 1);
+      const width = canvas.width / ratio, height = canvas.height / ratio;
+      if (!width || !height) return;
+      clear(width, height);
+      if (state.view === "path") drawPath(width, height); else drawJoints(width, height);
+    }
+    function formatMetric(key, value) {
+      if (Array.isArray(value)) return value.join(" → ");
+      if (typeof value === "boolean") return value ? "是" : "否";
+      if (typeof value === "number") {
+        if (key.endsWith("_m")) return `${value} m`;
+        if (key.endsWith("_s")) return `${value.toFixed(2)} s`;
+        if (key === "tool_path_ratio" || key === "duration_scale") return `${value.toFixed(2)}×`;
+        if (key === "joint_range_fraction") return `${(value * 100).toFixed(0)}%`;
+        if (key === "maximum_ik_error_m" || key === "fixed_contact_error_m") return value.toExponential(2) + " m";
+        return Number.isInteger(value) ? String(value) : String(value);
+      }
+      return String(value).replaceAll("_", "-");
+    }
+    function updateMetrics() {
+      const entries = Object.entries(candidate().metrics);
+      document.getElementById("metrics").innerHTML = entries.slice(0, 6).map(([key, value]) =>
+        `<div class="metric"><div class="metric-label">${metricNames[key] || key}</div><div class="metric-value" title="${formatMetric(key, value)}">${formatMetric(key, value)}</div></div>`
+      ).join("");
+    }
+    function updatePhases() {
+      const variant = candidate(), currentIndex = sampleIndex(variant, state.progress);
+      const container = document.getElementById("phases"); container.innerHTML = "";
+      variant.phases.forEach(phase => {
+        const button = document.createElement("button");
+        button.className = `phase-button ${phase.kind}` + (currentIndex >= phase.start && currentIndex < phase.stop ? " active" : "");
+        const source = phase.source && phase.source !== "reference" && phase.source !== "stitched" ? ` · ${phase.source}` : "";
+        button.textContent = `${phaseNames[phase.label] || (phase.kind === "bridge" ? "桥接" : phase.label)}${source}`;
+        button.onclick = () => { state.progress = variant.time[phase.start] / duration(variant); syncProgress(); };
+        container.appendChild(button);
+      });
+    }
+    function syncProgress() {
+      document.getElementById("timeline").value = Math.round(state.progress * 1000);
+      const variant = candidate(), current = state.progress * duration(variant);
+      document.getElementById("time-readout").textContent = `${current.toFixed(2)} / ${duration(variant).toFixed(2)} s`;
+      updatePhases(); draw();
+    }
+    function updateMethod() {
+      const value = method();
+      document.querySelectorAll(".tab").forEach(button => button.classList.toggle("active", button.dataset.method === state.method));
+      document.getElementById("method-label").textContent = value.label;
+      document.getElementById("method-badge").textContent = value.badge;
+      document.getElementById("method-equation").textContent = value.equation;
+      document.getElementById("method-principle").textContent = value.principle;
+      document.getElementById("method-implementation").textContent = value.implementation;
+      document.getElementById("method-guarantee").textContent = value.guarantee;
+      document.getElementById("strength-value").textContent = value.strength_labels[state.strength];
+      document.getElementById("chart-caption").textContent = state.view === "path" ? "末端路径与当前机械臂姿态" : "参考与扩增关节轨迹 · 虚线 / 实线";
+      updateMetrics(); syncProgress();
+    }
+    function initialize() {
+      document.getElementById("title").textContent = DATA.title;
+      document.getElementById("subtitle").textContent = DATA.subtitle;
+      document.getElementById("scope-included").textContent = DATA.scope.included;
+      document.getElementById("scope-excluded").textContent = DATA.scope.excluded;
+      const tabs = document.getElementById("tabs");
+      Object.entries(DATA.methods).forEach(([key, value]) => {
+        const button = document.createElement("button"); button.className = "tab"; button.dataset.method = key;
+        button.innerHTML = `${value.label}<span class="mini">${value.badge}</span>`;
+        button.onclick = () => { state.method = key; state.progress = .33; updateMethod(); };
+        tabs.appendChild(button);
+      });
+      document.getElementById("strength").oninput = event => { state.strength = Number(event.target.value); updateMethod(); };
+      document.getElementById("seed-button").onclick = () => {
+        state.seed = (state.seed * 5 + 3) % DATA.seed_count;
+        document.getElementById("seed-value").textContent = state.seed; updateMethod();
+      };
+      document.getElementById("timeline").oninput = event => { state.progress = Number(event.target.value) / 1000; syncProgress(); };
+      document.getElementById("play-button").onclick = () => {
+        state.playing = !state.playing; document.getElementById("play-button").textContent = state.playing ? "暂停" : "播放";
+      };
+      document.querySelectorAll(".view-button").forEach(button => button.onclick = () => {
+        state.view = button.dataset.view;
+        document.querySelectorAll(".view-button").forEach(item => item.classList.toggle("active", item === button));
+        updateMethod();
+      });
+      new ResizeObserver(resizeCanvas).observe(canvas.parentElement);
+      updateMethod(); resizeCanvas();
+      requestAnimationFrame(animate);
+    }
+    function animate(timestamp) {
+      const elapsed = Math.min(.1, (timestamp - lastFrame) / 1000); lastFrame = timestamp;
+      if (state.playing) {
+        state.progress += elapsed / Math.max(2.5, duration(candidate()));
+        if (state.progress >= 1) state.progress = 0;
+        syncProgress();
+      }
+      requestAnimationFrame(animate);
+    }
+    initialize();
+  </script>
+</body>
+</html>
