@@ -185,29 +185,15 @@ report.md
 videos/                 # optional
 ```
 
-`report.md` contains Time & Memory, Success & Other Metrics, and Leaderboard
-for each represented family. Motion Planning additionally has Workload Success
-& Uncertainty and Measured Start Difficulty tables: five tables for Motion
-Planning, three for Atomic Skills and eight for a mixed run. Motion Planning has
-separate geometry and solved-timing rankings. Built-in Atomic
-Skills rank physical success and report motion, execution and end-to-end
-success separately. Custom/legacy populations retain their declared primary
-metric, which is named explicitly in the ranking. Raw NMG and fixed-clock IK interpolation have no timed rank.
+`report.md` separates Motion Planning geometry and solved-timing rankings from
+Atomic physical success. Motion, execution and end-to-end success are reported
+separately. Raw NMG and fixed-clock IK interpolation have no timed rank.
 
-Report schema `3` uses `report_views` and the `motion_planning_*` /
-`atomic_skills_*` aggregate tables. `motion_timing_leaderboard` exposes the
-solved-timing subset; `motion_planning_workload_summary` and
-`motion_planning_measured_difficulty` add population-level uncertainty and
-measured-class rates. `generalization` contains domain summaries. There is no
-combined cross-family leaderboard. New suites must select schema `3`; existing
-artifacts keep their original versions. See the
-[report contract](./BENCHMARK_DESIGN.md#8-artifacts-and-report-contract) for
-field meanings and denominator rules.
-
-Explicitly unsupported cases are excluded from success-rate denominators; a
-population with no applicable cases reports N/A consistently in metric tables
-and leaderboards. Missing supported results and runtime failures count as
-failures. Unsupported cases still reduce coverage and prevent eligibility.
+New suites use report schema `3`; existing artifacts retain their recorded
+versions. The [report contract](./BENCHMARK_DESIGN.md#8-artifacts-and-report-contract)
+defines family tables, aggregate fields and denominator rules. See
+[capability gates](./BENCHMARK_DESIGN.md#5-scenario-tracks-and-capability-gates)
+for unsupported populations and eligibility.
 
 Policy control steps are auxiliary Free-space diagnostics. Raw outcomes retain
 `policy_steps_used`, `policy_completion_step` and strictly ordered
