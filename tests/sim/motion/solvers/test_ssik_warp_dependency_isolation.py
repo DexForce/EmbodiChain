@@ -74,6 +74,7 @@ import embodichain_robots
 preset = getattr(embodichain_robots, case["robot"]).from_dict(case["variant"])
 source = preset.solver_cfg[case["part"]]
 chain = preset.build_pk_serial_chain(device=torch.device("cpu"))[case["part"]].to(dtype=torch.float64)
+assert chain.device.type == "cpu"
 assert isinstance(source, SSIKSolverCfg), "Official arm defaults must use Warp SSIK"
 configuration = source.copy()
 assert configuration.backend == "warp" and configuration.geometry_mode == case["mode"]
@@ -83,11 +84,13 @@ configuration.joint_names = list(chain.get_joint_parameter_names())
 restored = SSIKSolverCfg.from_dict(configuration.to_dict())
 assert restored.backend == "warp" and restored.geometry_mode == case["mode"]
 solver = restored.init_solver(device="cpu", pk_serial_chain=chain)
+assert solver.device.type == "cpu"
 limits = torch.tensor(chain.get_joint_limits(), dtype=torch.float64)
 phase = torch.arange(len(limits[0]), dtype=torch.float64) + .37
 joints = (limits.mean(0) + .08 * (limits[1] - limits[0]) * phase.sin())[None].float()
 tcp = torch.as_tensor(source.tcp, dtype=torch.float64)
 goal = (chain.forward_kinematics(joints.double()).get_matrix() @ tcp).float()
+assert joints.device.type == goal.device.type == "cpu"
 valid, result = solver.get_ik(goal, qpos_seed=joints)
 assert valid.shape == (1,) and result.shape == joints.shape and bool(valid.all())
 assert result.device.type == "cpu" and torch.isfinite(result).all()
@@ -119,8 +122,10 @@ if case["robot"] == "AlohaMiniCfg":
         raise AssertionError("Explicit reference unexpectedly worked without official SSIK")
 print(json.dumps({"passed": True, "mode": case["mode"], "device": result.device.type}), flush=True)
 """
+    # Preserve the runner's visibility for native dependencies: some Open3D
+    # wheels ship only CUDA bindings. The chain, solver and tensors above
+    # independently enforce CPU execution of the tested IK contract.
     environment = os.environ.copy()
-    environment["CUDA_VISIBLE_DEVICES"] = ""
     for name in (
         "OMP_NUM_THREADS",
         "MKL_NUM_THREADS",
