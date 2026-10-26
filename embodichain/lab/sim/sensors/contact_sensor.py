@@ -525,6 +525,15 @@ class ContactSensor(BaseSensor):
         """Whether this sensor participates in the physics-substep lifecycle."""
         return bool(self._histories)
 
+    @property
+    def requires_control_update(self) -> bool:
+        """Sample ordinary contacts once before reset invalidates SDK snapshots.
+
+        Returns:
+            True for sensors without registered substep histories.
+        """
+        return not self._histories
+
     def begin_control_step(self) -> None:
         """Start a new interval without discarding persistent contact timing."""
         self._query_dropped_count.zero_()

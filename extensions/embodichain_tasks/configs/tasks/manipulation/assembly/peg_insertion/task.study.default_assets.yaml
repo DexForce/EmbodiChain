@@ -1,0 +1,5 @@
+id: BlindPegInsertionRL-v1
+environment:
+  component: ./env.study.nominal.dev.yaml
+embodiment:
+  component: ../../../../components/embodiments/flexiv_rizon4s_robotiq2f85.default_assets.yaml

@@ -101,6 +101,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
     parser.add_argument("--checkpoint", default="best")
+    parser.add_argument(
+        "--gym-config",
+        type=Path,
+        help="Explicit task/asset transfer deployment; old checkpoint assessment does not qualify the replacement.",
+    )
     parser.add_argument("--episodes", type=int, default=3)
     parser.add_argument("--seed", type=int, default=30000)
     parser.add_argument("--device", default="cuda:0")
@@ -148,6 +153,7 @@ def main() -> None:
         renderer=args.renderer,
         seed=args.seed,
         device=args.device,
+        gym_config=str(args.gym_config.resolve()) if args.gym_config else None,
     )
     trace: dict[str, Any] = {
         "status": "initializing",

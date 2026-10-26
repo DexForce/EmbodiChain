@@ -40,6 +40,29 @@ from embodichain.utils.math import (
 __all__ = ["BlindAssemblyEnv"]
 
 
+def _grasp_joint_reset(
+    robot: Any, value: float, rows: int, device: torch.device
+) -> tuple[list[int], torch.Tensor]:
+    """Expand the EEF leaders through source mimic relations without name rules."""
+    values = {int(i): value for i in robot.get_joint_ids(name="eef")}
+    relations = list(
+        zip(
+            robot.mimic_ids,
+            robot.mimic_parents,
+            robot.mimic_multipliers,
+            robot.mimic_offsets,
+        )
+    )
+    for _ in range(len(relations) + 1):
+        for child, parent, multiplier, offset in relations:
+            if parent in values:
+                values[int(child)] = values[parent] * multiplier + offset
+    indices = sorted(values)
+    return indices, torch.tensor(
+        [values[i] for i in indices], dtype=torch.float32, device=device
+    ).expand(rows, -1)
+
+
 def _body_vertices(body: Any) -> np.ndarray:
     clouds = []
     for geometry in body.geometries:
@@ -181,14 +204,28 @@ class BlindAssemblyEnv(EmbodiedEnv):
         width = float(np.ptp(grip_vertices[:, 1]))
         # These coefficients are the pinned public Robotiq four-bar geometry,
         # including the two inner pad faces. Bisection is preparation-only.
-        aperture = lambda angle: 2 * (
-            0.0057 + 0.037 * np.cos(angle) - 0.044 * np.sin(angle)
+        a, b, c = getattr(
+            self.cfg.robot, "grasp_aperture_coefficients", (0.0057, 0.037, -0.044)
         )
-        if width >= aperture(0) or width <= aperture(0.8):
+        aperture = lambda angle: 2 * (a + b * np.cos(angle) + c * np.sin(angle))
+        upper = float(getattr(self.cfg.robot, "grasp_joint_upper", 0.8))
+        self._assembly_grasp_links = list(
+            getattr(
+                self.cfg.robot,
+                "grasp_link_names",
+                ("gripper_right_pad", "gripper_left_pad"),
+            )
+        )
+        if (
+            len(self._assembly_grasp_links) != 2
+            or len(set(self._assembly_grasp_links)) != 2
+        ):
+            raise ValueError("Assembly grasp requires two distinct contact links.")
+        if width >= aperture(0) or width <= aperture(upper):
             raise ValueError(
                 f"Grip width {width:g} m is outside the public 2F85 aperture."
             )
-        low, high = 0.0, 0.8
+        low, high = 0.0, upper
         for _ in range(40):
             middle = (low + high) / 2
             if aperture(middle) > width + 0.0005:
@@ -206,7 +243,7 @@ class BlindAssemblyEnv(EmbodiedEnv):
         self._grasp_target_joint = (
             min(0.0425, self._grasp_reset_joint + 0.0035)
             if self._parallel_jaw
-            else min(0.8, self._grasp_reset_joint + 0.08)
+            else min(upper, self._grasp_reset_joint + 0.08)
         )
         fixture_vertices = _body_vertices(self._fixture_definition)
         self._fixture_zmax = float(fixture_vertices[:, 2].max())
@@ -249,7 +286,7 @@ class BlindAssemblyEnv(EmbodiedEnv):
                     articulation_cfg_list=[
                         ArticulationContactFilterCfg(
                             articulation_uid=self.robot.uid,
-                            link_name_list=["gripper_right_pad", "gripper_left_pad"],
+                            link_name_list=self._assembly_grasp_links,
                         )
                     ],
                     filter_need_both_actor=True,
@@ -266,6 +303,8 @@ class BlindAssemblyEnv(EmbodiedEnv):
             "contact_capacities": contact_capacities,
             "paper_robot_dynamics_identified": False,
             "gripper_model": getattr(self.cfg.robot, "gripper_model", "custom"),
+            "robot_asset_source": getattr(self.cfg.robot, "asset_source", "menagerie"),
+            "grasp_contact_links": self._assembly_grasp_links,
             "source_gripper_dynamics_preserved": False,
             "reset_distribution": "local contact, fixed ready pose; workspace-wide IK reset not qualified",
             "contact_labels": (
@@ -352,7 +391,7 @@ class BlindAssemblyEnv(EmbodiedEnv):
         self._prepare_gravity_compensation()
         grasp_sensor = self.get_sensor("grasp_contacts")
         self._assembly_pad_actor_ids = grasp_sensor.get_actor_ids(
-            self.robot.uid, ["gripper_right_pad", "gripper_left_pad"]
+            self.robot.uid, self._assembly_grasp_links
         )
         self._assembly_part_actor_ids = grasp_sensor.get_actor_ids(self._moving_uid)[
             :, 0
@@ -501,19 +540,11 @@ class BlindAssemblyEnv(EmbodiedEnv):
                 env_ids=ids,
                 target=False,
             )
-        grip_names = [
-            name for name in self.robot.joint_names if name.startswith("gripper_")
-        ]
-        grip_ids = [self.robot.joint_names.index(name) for name in grip_names]
-        signs = torch.tensor(
-            [
-                -1.0 if any(word in name for word in ("coupler", "follower")) else 1.0
-                for name in grip_names
-            ],
-            device=self.device,
+        grip_ids, grip_values = _grasp_joint_reset(
+            self.robot, self._grasp_reset_joint, n, self.device
         )
         self.robot.set_qpos(
-            (signs * self._grasp_reset_joint).expand(n, -1),
+            grip_values,
             joint_ids=grip_ids,
             env_ids=ids,
             target=False,
@@ -652,7 +683,12 @@ class BlindAssemblyEnv(EmbodiedEnv):
         data = sensor.get_data()
         if not hasattr(self, "_assembly_pad_actor_ids"):
             self._assembly_pad_actor_ids = sensor.get_actor_ids(
-                self.robot.uid, ["gripper_right_pad", "gripper_left_pad"]
+                self.robot.uid,
+                getattr(
+                    self,
+                    "_assembly_grasp_links",
+                    ["gripper_right_pad", "gripper_left_pad"],
+                ),
             )
             self._assembly_part_actor_ids = sensor.get_actor_ids(self._moving_uid)[:, 0]
         robot_ids = self._assembly_pad_actor_ids

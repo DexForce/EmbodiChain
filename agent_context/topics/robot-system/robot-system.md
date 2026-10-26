@@ -204,8 +204,12 @@ IK, inspect configured solver coverage; a gripper control part need not have a
 solver. For asset changes, validate round-trip and chain DOF/frame agreement
 before using executable robot smoke programs.
 
-`FlexivRizon4SRobotiqCfg` delegates pinned public-model preparation to
-`extensions/embodichain_robots/flexiv/rizon4s_robotiq/_menagerie.py`. Its default four-bar mimic and
-explicit nominal parallel-jaw variant carry fidelity metadata; neither is the
-unavailable author-identified dynamics. Assembly formal profiles gate those
-limitations. Validate arm/TCP FK separately from physical grasp dynamics.
+`FlexivRizon4SRobotiqCfg` keeps `asset_source="menagerie"` for archived checkpoint
+construction and delegates it to `_menagerie.py` in its model package.
+`asset_source="default"` uses `_default_assets.py` to compose the registered
+FlexivRizon4S and Robotiq2F85 URDFs through `URDFCfg`, preserving source names,
+visual materials, collisions, inertials and mimic relations. The configured
+contact links and aperture geometry belong to the robot preset; tasks must not
+infer those capabilities from a joint-name prefix. Both paths record engineering
+TCP/gripper assumptions and remain distinct from qualified author-identified
+dynamics. Validate FK, physical grasp and policy transfer separately.

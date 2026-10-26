@@ -635,20 +635,23 @@ class BaseEnv(gym.Env):
                 self.cfg.sim_steps_per_control,
                 render_final_step=False,
             )
-            return
-        for sensor in sensors:
-            sensor.begin_control_step()
-
-        def sample_substep(dt: float) -> None:
+        else:
             for sensor in sensors:
-                sensor.update_physics_step(dt)
+                sensor.begin_control_step()
 
-        self.sim.update(
-            self.physics_dt,
-            self.cfg.sim_steps_per_control,
-            after_substep=sample_substep,
-            render_final_step=False,
-        )
+            def sample_substep(dt: float) -> None:
+                for sensor in sensors:
+                    sensor.update_physics_step(dt)
+
+            self.sim.update(
+                self.physics_dt,
+                self.cfg.sim_steps_per_control,
+                after_substep=sample_substep,
+                render_final_step=False,
+            )
+        for sensor in self.sensors.values():
+            if getattr(sensor, "requires_control_update", False):
+                sensor.update()
 
     def _update_sim_state(self, **kwargs):
         """Update the simulation state at each step.
@@ -719,7 +722,9 @@ class BaseEnv(gym.Env):
         with self._profiler.section("sensor_fetch"):
             for sensor_name, sensor in self.sensors.items():
                 with self._profiler.section(f"sensor_update.{sensor_name}"):
-                    if not sensor.requires_substep_update:
+                    if not sensor.requires_substep_update and not getattr(
+                        sensor, "requires_control_update", False
+                    ):
                         sensor.update(fetch_only=fetch_only)
                 with self._profiler.section(f"sensor_get_data.{sensor_name}"):
                     obs[sensor_name] = sensor.get_data()

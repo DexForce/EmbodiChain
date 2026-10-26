@@ -29,10 +29,52 @@ from embodichain.lab.gym.envs.assembly_env import BlindAssemblyEnv
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, register_manager_modules
 from embodichain.utils.utility import load_config
 
+
+def test_grasp_reset_uses_source_mimic_relations_without_joint_name_assumptions() -> (
+    None
+):
+    from embodichain.lab.gym.envs.assembly_env import _grasp_joint_reset
+
+    robot = SimpleNamespace(
+        get_joint_ids=lambda **kwargs: [7],
+        mimic_ids=[9, 8],
+        mimic_parents=[8, 7],
+        mimic_multipliers=[-1.0, 2.0],
+        mimic_offsets=[0.1, 0.0],
+    )
+    indices, positions = _grasp_joint_reset(robot, 0.3, 2, torch.device("cpu"))
+    assert indices == [7, 8, 9]
+    torch.testing.assert_close(
+        positions, torch.tensor([[0.3, 0.6, -0.5]]).expand(2, -1)
+    )
+
+
 _CONFIG_ROOT = (
     Path(__file__).resolve().parents[4]
     / "extensions/embodichain_tasks/configs/tasks/manipulation/assembly"
 )
+
+
+def test_default_asset_deployment_uses_production_component_loader(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import importlib
+    from embodichain_robots import FlexivRizon4SRobotiqCfg
+
+    urdf = tmp_path / "robot.urdf"
+    urdf.write_text('<robot name="fixture"><link name="base_link"/></robot>')
+    monkeypatch.setattr(
+        FlexivRizon4SRobotiqCfg, "_pk_urdf_path", property(lambda self: str(urdf))
+    )
+    module = importlib.import_module("embodichain_robots.flexiv.rizon4s.cfg")
+    monkeypatch.setattr(module, "get_data_path", lambda path: str(urdf))
+    register_manager_modules(["embodichain.lab.gym.envs.managers.assembly"])
+    path = _CONFIG_ROOT / "peg_insertion/task.study.default_assets.yaml"
+    cfg = config_to_cfg(load_config(str(path)), source_path=path)
+    assert cfg.robot.asset_source == "default"
+    assert cfg.robot.control_parts["eef"] == ["finger_joint"]
+    assert cfg.robot.solver_cfg["arm"].root_link_name == "base_link"
+    assert cfg.sim_steps_per_control == 20
 
 
 @pytest.mark.parametrize("task", ["peg_insertion", "gear_meshing", "nut_threading"])

@@ -253,6 +253,15 @@ class BaseSensor(BatchEntity):
         """Whether the environment must sample this sensor each physics substep."""
         return False
 
+    @property
+    def requires_control_update(self) -> bool:
+        """Whether Gym samples this sensor after physics, before any auto-reset.
+
+        Returns:
+            False unless the concrete sensor opts into control-boundary sampling.
+        """
+        return False
+
     def begin_control_step(self) -> None:
         """Begin interval accumulation for a sensor that samples physics substeps."""
 

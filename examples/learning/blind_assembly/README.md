@@ -152,6 +152,22 @@ before the next reset; camera reads never advance the physics. This small visual
 preview is separate from the held-out success-rate measurement. A display,
 native rendering dependencies and `ffmpeg` are required.
 
+To transfer the same actor to the registered default Rizon4S and Robotiq2F85
+assets, use the explicit replacement deployment:
+
+```bash
+DISPLAY=:1 embodichain run-example learning/blind_assembly/preview RUN \
+  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/assembly/peg_insertion/task.study.default_assets.yaml \
+  --checkpoint best --episodes 3 --seed 30000 --output outputs/peg_default_assets
+```
+
+This composes the existing URDFs and retains their meshes, materials, collision
+geometry, inertials and source mimic relations. It changes the hand dynamics
+and TCP relative to the trained nominal parallel-jaw model; actual new FK is
+used for proprioception. The previous nominal success rate does not qualify
+this transfer. The first recorded default-asset replay completed all three
+episodes with **0/3 successes**, without retraining or forcing poses.
+
 See [CAPACITY.md](CAPACITY.md) for measured synthetic 12,288-environment policy
 capacity, and [the implementation report](../../sim/assembly/IMPLEMENTATION.md)
 for actual task smoke checkpoints, evaluation results and outstanding gates.

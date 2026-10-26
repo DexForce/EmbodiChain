@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -46,10 +47,11 @@ __all__ = ["FlexivRizon4SRobotiqCfg"]
 class FlexivRizon4SRobotiqCfg(RobotCfg):
     """Public Rizon arm with an explicitly approximate parallel mimic gripper.
 
-    The default assets preserve the pinned Menagerie arm model. The prepared
-    Robotiq model cannot preserve its closed loops through the current URDF
-    boundary; it is intended for development and is not the author's identified
-    model. ``require_exact_dynamics`` fails before simulation setup unless a
+    ``asset_source="menagerie"`` preserves legacy checkpoint construction.
+    ``asset_source="default"`` composes the registered FlexivRizon4S and
+    Robotiq2F85 URDF assets, retaining their visuals, collisions and mimic tree.
+    Neither deployment is qualified as the author's identified closed-loop
+    dynamics. ``require_exact_dynamics`` fails before simulation setup unless a
     separately qualified URDF and matching fidelity record are supplied.
     """
 
@@ -59,6 +61,14 @@ class FlexivRizon4SRobotiqCfg(RobotCfg):
     """Optional prepared replacement URDF with the same joint/link contract."""
     require_exact_dynamics: bool = False
     """Require a neighboring fidelity.json attesting exact source dynamics."""
+    asset_source: str = "menagerie"
+    """Asset selection: legacy Menagerie or registered default arm/hand assets."""
+    grasp_link_names: tuple[str, str] = ("gripper_right_pad", "gripper_left_pad")
+    """Opposing contact links, independent of their source-defined spelling."""
+    grasp_aperture_coefficients: tuple[float, float, float] = (0.0057, 0.037, -0.044)
+    """Half aperture in metres: constant + cosine*cos(q) + sine*sin(q)."""
+    grasp_joint_upper: float = 0.8
+    """Upper joint position used to initialize a grasp."""
 
     @classmethod
     def from_dict(cls, init_dict: dict[str, Any]) -> FlexivRizon4SRobotiqCfg:
@@ -69,9 +79,14 @@ class FlexivRizon4SRobotiqCfg(RobotCfg):
 
     def _build_defaults(self, init_dict: dict[str, Any] | None = None) -> None:
         init_dict = init_dict or {}
+        self.asset_source = init_dict.get("asset_source", self.asset_source)
+        if self.asset_source not in {"menagerie", "default"}:
+            raise ValueError("asset_source must be menagerie or default.")
         self.gripper_model = init_dict.get("gripper_model", self.gripper_model)
         if self.gripper_model not in {"four_bar_mimic", "parallel_jaw"}:
             raise ValueError("gripper_model must be four_bar_mimic or parallel_jaw.")
+        if self.asset_source == "default" and self.gripper_model != "four_bar_mimic":
+            raise ValueError("Default 2F85 assets retain their source mimic tree.")
         self.source_urdf = init_dict.get("source_urdf", self.source_urdf)
         self.require_exact_dynamics = init_dict.get(
             "require_exact_dynamics", self.require_exact_dynamics
@@ -90,6 +105,9 @@ class FlexivRizon4SRobotiqCfg(RobotCfg):
                     "exact_source_dynamics=true after physical validation, or select "
                     "the explicitly approximate development deployment."
                 )
+        if self.asset_source == "default":
+            self._build_default_assets(urdf)
+            return
         self.uid = "FlexivRizon4SRobotiq"
         self.urdf_cfg = URDFCfg(
             components=[{"component_type": "arm", "urdf_path": urdf}]
@@ -162,10 +180,70 @@ class FlexivRizon4SRobotiqCfg(RobotCfg):
             2 if self.gripper_model == "parallel_jaw" else 8
         )
 
+    def _build_default_assets(self, urdf: str) -> None:
+        """Reuse the default arm configuration and the unconverted hand URDF."""
+        from embodichain_robots.flexiv.rizon4s import FlexivRizon4SCfg
+
+        arm = FlexivRizon4SCfg.from_dict({})
+        self.uid = "FlexivRizon4SRobotiq"
+        self.urdf_cfg = URDFCfg(
+            components=[{"component_type": "arm", "urdf_path": urdf}]
+        )
+        self.control_parts = {
+            "arm": list(arm.control_parts["arm"]),
+            "eef": ["finger_joint"],
+        }
+        self.solver_cfg = {
+            "arm": PytorchSolverCfg(
+                end_link_name="gripper_tcp", root_link_name="base_link", num_samples=1
+            )
+        }
+        self.root_props = deepcopy(arm.root_props)
+        self.attrs = deepcopy(arm.attrs)
+        self.joint_drive_props = deepcopy(arm.joint_drive_props)
+        for field, value in (
+            ("stiffness", 100.0),
+            ("damping", 10.0),
+            ("max_effort", 5.0),
+            ("max_velocity", 2.0),
+        ):
+            getattr(self.joint_drive_props, field)["finger_joint"] = value
+        self.grasp_link_names = ("right_inner_finger", "left_inner_finger")
+        # Conservative inward bounds of the registered coarse finger meshes.
+        self.grasp_aperture_coefficients = (
+            0.004898087275028228,
+            0.034345679203517304,
+            -0.04567720361798315,
+        )
+        self.grasp_joint_upper = 0.725
+        self.link_attrs = {
+            "default_pad_contacts": LinkPhysicsOverrideCfg(
+                link_names_expr=list(self.grasp_link_names),
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=NewtonCollisionPropertiesCfg(
+                        contact_offset=0.0, rest_offset=0.0, condim=4
+                    ),
+                    material_props=NewtonRigidBodyMaterialCfg(
+                        static_friction=1.0,
+                        dynamic_friction=1.0,
+                        ke=40000.0,
+                        kd=40.0,
+                        torsional_friction=0.02,
+                        rolling_friction=0.001,
+                    ),
+                ),
+            )
+        }
+        self.init_qpos = list(arm.init_qpos) + [0.0] * 6
+
     @property
     def _pk_urdf_path(self) -> str:
         if self.source_urdf is not None:
             return get_data_path(self.source_urdf)
+        if self.asset_source == "default":
+            from ._default_assets import prepare_default_assets
+
+            return prepare_default_assets()
         from ._menagerie import prepare_rizon4s_urdf
 
         return prepare_rizon4s_urdf(
@@ -182,7 +260,7 @@ class FlexivRizon4SRobotiqCfg(RobotCfg):
             "arm": create_pk_serial_chain(
                 urdf_path=self._pk_urdf_path,
                 device=device,
-                end_link_name="gripper_tcp",
-                root_link_name="base",
+                end_link_name=self.solver_cfg["arm"].end_link_name,
+                root_link_name=self.solver_cfg["arm"].root_link_name,
             )
         }

@@ -11,6 +11,14 @@ once with an `after_substep` observer. The manager invokes the observer after
 each world update, preserving its preparation, profiling and camera-capture
 boundary. Observation reads reuse the sampled sensor buffer.
 
+Sensors without histories opt into `requires_control_update` and are sampled
+once after the control interval's physics, before auto-reset. Gym observation
+reads reuse that buffer. Reset clears selected rows without querying the SDK's
+invalidated contact snapshot or advancing physics; untouched rows retain their
+last sample. Explicit standalone `ContactSensor.update()` still requires a
+completed physics step after a reset. Histories retain per-substep sampling,
+so ordinary contact acquisition does not acquire a decimation-factor overhead.
+
 CUDA queries use `fetch_async()` and device-resident counts. Sparse Warp kernels
 process valid contact rows, using precomputed sorted environment/actor indices;
 no environment-by-contact-by-body tensor is allocated. Per-body force, contact
