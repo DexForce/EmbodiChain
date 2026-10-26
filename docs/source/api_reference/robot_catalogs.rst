@@ -112,7 +112,7 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    SO101 follower with five arm joints, one actuated jaw, official CAD inertials
    and published STS3215 simulation drives. Both serial chains use the same
    source URDF as simulation; arm IK constrains position.
-   See :doc:`/resources/robot/so101` for frames, units and source limitations.
+   See :doc:`/resources/robot/the_robot_studio/so101` for frames, units and source limitations.
 
 .. automethod:: embodichain_robots.SO101FollowerCfg.from_dict
 
@@ -121,10 +121,10 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 .. py:class:: embodichain_robots.FlexivRizon4SCfg
 
    Seven-axis bare Rizon 4S arm with published Flexiv dynamics, tuned simulation
-   damping and a numerical flange IK solver. Construct with ``from_dict()`` and use
+   damping and a Warp RR flange IK solver on CPU/CUDA. Construct with ``from_dict()`` and use
    ``build_pk_serial_chain()`` for the matching differentiable flange chain.
    Source inertials are preserved; public dynamics are manufacturer-blurred.
-   See :doc:`/resources/robot/flexiv_rizon4s` for units and pinned provenance.
+   See :doc:`/resources/robot/flexiv/rizon4s` for units and pinned provenance.
 
 
 embodichain_robots.alohamini.aloha_mini.cfg

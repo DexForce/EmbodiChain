@@ -196,6 +196,12 @@ def main():
                 "_ssik_artifacts/*.json",
                 "_ssik_artifacts/LICENSE.txt",
             ],
+            "embodichain_robots.unitree.go1": ["profile.json"],
+            "embodichain_robots.unitree.go2": ["profile.json"],
+            "embodichain_robots.unitree.g1": ["profile.json"],
+            "embodichain_robots.unitree.h1_2": ["profile.json"],
+            "embodichain_robots.anybotics.anymal_c": ["profile.json"],
+            "embodichain_robots.pollen_robotics.microduck": ["profile.json"],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
             "embodichain_tasks.configs": [

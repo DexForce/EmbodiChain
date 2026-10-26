@@ -19,6 +19,30 @@
 from __future__ import annotations
 
 ROBOT_ASSETS = {
+    "UnitreeGo1Locomotion": {
+        "class_path": "embodichain_robots.unitree.go1.assets:UnitreeGo1Locomotion",
+        "category": "robot",
+    },
+    "UnitreeGo2Locomotion": {
+        "class_path": "embodichain_robots.unitree.go2.assets:UnitreeGo2Locomotion",
+        "category": "robot",
+    },
+    "UnitreeG1Locomotion": {
+        "class_path": "embodichain_robots.unitree.g1.assets:UnitreeG1Locomotion",
+        "category": "robot",
+    },
+    "UnitreeH1_2Locomotion": {
+        "class_path": "embodichain_robots.unitree.h1_2.assets:UnitreeH1_2Locomotion",
+        "category": "robot",
+    },
+    "ANYmalCLocomotion": {
+        "class_path": "embodichain_robots.anybotics.anymal_c.assets:ANYmalCLocomotion",
+        "category": "robot",
+    },
+    "MicroDuckLocomotion": {
+        "class_path": "embodichain_robots.pollen_robotics.microduck.assets:MicroDuckLocomotion",
+        "category": "robot",
+    },
     "CobotMagicArm": {
         "class_path": "embodichain_robots.agilex.cobotmagic.assets:CobotMagicArm",
         "category": "robot",

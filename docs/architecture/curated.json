@@ -3430,6 +3430,64 @@
           "label": "SL batches, updates and recovery"
         }
       ]
+    },
+    {
+      "id": "robot-world-model",
+      "label": "Robot world model (RWM)",
+      "kind": "package",
+      "topic_ids": [
+        "robot-world-model"
+      ],
+      "summary": "Owns action-conditioned robot-state prediction, differentiable rollout objectives and bounded transition replay.",
+      "details": "embodichain_models.dynamics.rwm owns frame-local state increments and SO(3) integration, graph-connected prediction state, autoregressive objectives and fixed-byte-budget replay. Its installable build_rwm_trainer recipe composes these contracts with the shared SL learner and offline trainer. The learning/rwm example owns controlled corpus generation and fitting qualification.",
+      "boundaries": [
+        "The model family imports neither simulation nor example helpers; acquisition and execution remain caller-owned.",
+        "Fixed control period, action semantics and ordered joints bind model and checkpoint identity.",
+        "Shared SL owns optimizer updates and run recovery; controlled fitting evidence does not qualify robot policy performance."
+      ],
+      "evidence": [
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/model.py",
+          "symbol": "RobotWorldModel",
+          "start_line": 73,
+          "end_line": 73,
+          "excerpt": "class RobotWorldModel(nn.Module):"
+        },
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/predictor.py",
+          "symbol": "RWMPredictor",
+          "start_line": 31,
+          "end_line": 31,
+          "excerpt": "class RWMPredictor:"
+        },
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/replay.py",
+          "symbol": "TransitionReplay",
+          "start_line": 35,
+          "end_line": 35,
+          "excerpt": "class TransitionReplay:"
+        },
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/supervised.py",
+          "symbol": "RobotWorldModelObjective",
+          "start_line": 59,
+          "end_line": 59,
+          "excerpt": "class RobotWorldModelObjective:"
+        },
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/sl_recipe.py",
+          "symbol": "build_rwm_trainer",
+          "start_line": 39,
+          "end_line": 39,
+          "excerpt": "def build_rwm_trainer(config: Mapping[str, Any]) -> SupervisedTrainer:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/rwm",
+          "label": "RWM state, objectives, prediction, replay and SL recipe"
+        }
+      ]
     }
   ],
   "edges": [
@@ -5808,6 +5866,31 @@
           "excerpt": "                result = train_from_config("
         }
       ]
+    },
+    {
+      "id": "rwm-recipe-constructs-sl-trainer",
+      "source": "robot-world-model",
+      "target": "supervised-learning",
+      "relation": "constructs",
+      "description": "The RWM recipe constructs the shared learner and offline trainer for its model-specific autoregressive objective and corpus.",
+      "provenance": "source-reviewed",
+      "scope": "The installable RWM supervised recipe only; acquisition and simulation are outside this factory, and the core does not import the model family.",
+      "evidence": [
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/sl_recipe.py",
+          "symbol": "build_rwm_trainer",
+          "start_line": 108,
+          "end_line": 108,
+          "excerpt": "    learner = SupervisedLearner(model, objective, optimizer, max_grad_norm=maximum_norm)"
+        },
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/sl_recipe.py",
+          "symbol": "build_rwm_trainer",
+          "start_line": 138,
+          "end_line": 138,
+          "excerpt": "    return SupervisedTrainer("
+        }
+      ]
     }
   ],
   "views": [
@@ -5904,7 +5987,8 @@
         "scene-services",
         "neural-dynamics",
         "supervised-learning",
-        "nerd-showcase"
+        "nerd-showcase",
+        "robot-world-model"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -5992,7 +6076,8 @@
         "cli-calls-motion-benchmarks",
         "motion-benchmarks-constructs-simulation",
         "nerd-recipe-constructs-sl-learner",
-        "nerd-showcase-calls-sl-workflow"
+        "nerd-showcase-calls-sl-workflow",
+        "rwm-recipe-constructs-sl-trainer"
       ],
       "groups": [
         {
@@ -6124,7 +6209,8 @@
             "policy-evaluation",
             "neural-dynamics",
             "supervised-learning",
-            "nerd-showcase"
+            "nerd-showcase",
+            "robot-world-model"
           ]
         },
         {
@@ -6467,7 +6553,8 @@
         "observation-normalizer",
         "supervised-learning",
         "neural-dynamics",
-        "nerd-showcase"
+        "nerd-showcase",
+        "robot-world-model"
       ],
       "edge_ids": [
         "cli-calls-training-assembly",
@@ -6496,7 +6583,8 @@
         "rl-algorithms-holds-grpo",
         "rl-algorithms-holds-apg",
         "nerd-recipe-constructs-sl-learner",
-        "nerd-showcase-calls-sl-workflow"
+        "nerd-showcase-calls-sl-workflow",
+        "rwm-recipe-constructs-sl-trainer"
       ],
       "groups": [
         {
@@ -6539,7 +6627,8 @@
             "policy-evaluation",
             "supervised-learning",
             "neural-dynamics",
-            "nerd-showcase"
+            "nerd-showcase",
+            "robot-world-model"
           ]
         },
         {

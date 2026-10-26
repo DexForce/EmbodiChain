@@ -700,6 +700,44 @@ def test_robotcfg_to_dict_roundtrip():
     assert cfg2.joint_drive_props.stiffness == {"J[1-2]": 1e4}
 
 
+@pytest.mark.parametrize(
+    "override,expected",
+    [
+        ({"self_collision_enabled": True}, (False, True, 0.05, 8, 4)),
+        ({"min_position_iters": 16}, (False, False, 0.05, 16, 4)),
+        ({"fixed_base": True, "min_velocity_iters": 0}, (True, False, 0.05, 8, 0)),
+        ({"fixed_base": None, "sleep_threshold": None}, (None, False, None, 8, 4)),
+        ({}, (False, False, 0.05, 8, 4)),
+    ],
+)
+def test_root_property_overrides_preserve_unspecified_preset_fields(
+    override: dict[str, object], expected: tuple[object, ...]
+) -> None:
+    """Sparse root overlays keep floating bases and validate complete iter pairs."""
+    from copy import deepcopy
+
+    cfg = RobotCfg(
+        root_props=ArticulationRootPropertiesCfg(
+            fixed_base=False,
+            self_collision_enabled=False,
+            sleep_threshold=0.05,
+            min_position_iters=8,
+            min_velocity_iters=4,
+        )
+    )
+    original = deepcopy(override)
+    result = merge_robot_cfg(cfg, {"root_props": override}).root_props
+
+    assert (
+        result.fixed_base,
+        result.self_collision_enabled,
+        result.sleep_threshold,
+        result.min_position_iters,
+        result.min_velocity_iters,
+    ) == expected
+    assert override == original
+
+
 from embodichain_robots.agilex.cobotmagic.cfg import CobotMagicCfg
 from embodichain_robots import AlohaMiniCfg, TianjiMarvinCfg, ARX5Cfg, FlexivRizon4SCfg
 from embodichain_robots.franka.panda import FrankaPandaCfg

@@ -12,42 +12,8 @@
     }
   },
   "robot": {
-    "root_body": "base",
-    "root_height": 0.6,
-    "joint_names": [
-      "LF_HAA",
-      "LF_HFE",
-      "LF_KFE",
-      "LH_HAA",
-      "LH_HFE",
-      "LH_KFE",
-      "RF_HAA",
-      "RF_HFE",
-      "RF_KFE",
-      "RH_HAA",
-      "RH_HFE",
-      "RH_KFE"
-    ],
-    "default_joint_position": [
-      0.0,
-      0.4,
-      -0.8,
-      0.0,
-      -0.4,
-      0.8,
-      0.0,
-      0.4,
-      -0.8,
-      0.0,
-      -0.4,
-      0.8
-    ],
-    "action_scale": 0.5,
-    "stiffness": 40.0,
-    "damping": 5.0,
-    "effort_limit": 80.0,
-    "velocity_limit": 7.5,
-    "actuator_model": "ANYDRIVE_3_SIMPLE_ACTUATOR_CFG"
+    "class_type": "ANYmalC",
+    "action_scale": 0.5
   },
   "contact": {
     "foot_body_names": ["LF_FOOT", "LH_FOOT", "RF_FOOT", "RH_FOOT"],

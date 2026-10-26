@@ -124,7 +124,7 @@ topics:
 - id: robot-system
   title: Robot System
   aliases: [robot system, robot config, robot catalog, list robot, robot preview, 机器人配置, 机器人系统, 机型解析, 列出机器人, 机器人预览]
-  keywords: [RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg, ARX5Cfg, ARX5, FlexivRizon4SCfg, FlexivRizon4S,
+  keywords: [UnitreeGo1Cfg, UnitreeGo2Cfg, UnitreeG1Cfg, UnitreeH12Cfg, ANYmalCCfg, MicroDuckCfg, load_locomotion_robot_profile, RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg, ARX5Cfg, ARX5, FlexivRizon4SCfg, FlexivRizon4S,
     FrankaPandaCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
     asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot]
   paths: [topics/robot-system/robot-system.md]
@@ -554,5 +554,19 @@ topics:
   - embodichain/learning/sl/
   - embodichain/cli/main.py
   watch_paths: [embodichain/learning/sl/, tests/learning/sl/]
-  related_topics: [learning-layers, data-pipeline, rl-learning, neural-dynamics]
+  related_topics: [learning-layers, data-pipeline, rl-learning, neural-dynamics, robot-world-model]
+  status: active
+- id: robot-world-model
+  title: Robot World Model
+  aliases: [robot world model, RWM, 机器人世界模型]
+  keywords: [RobotWorldModel, RWMPredictor, TransitionReplay, build_rwm_trainer,
+    replay_supervised_batch, learning/rwm]
+  paths: [topics/robot-world-model/robot-world-model.md]
+  source_of_truth:
+  - extensions/embodichain_models/embodichain_models/dynamics/rwm/
+  - examples/learning/rwm/
+  watch_paths: [extensions/embodichain_models/embodichain_models/dynamics/rwm/,
+    examples/learning/rwm/, tests/models/dynamics/rwm/,
+    docs/source/api_reference/rwm.rst]
+  related_topics: [supervised-learning, learning-layers, neural-dynamics]
   status: active
