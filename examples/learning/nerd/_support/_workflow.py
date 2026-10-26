@@ -271,7 +271,9 @@ def run_export(checkpoint: str | Path, output: str | Path) -> dict[str, Any]:
         ]
     ):
         state = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    if state.get("version") == 1 and "learner" in state:
+    # SL v2 adds rank-local recovery state; portable export still uses the
+    # committed rank-zero model with the same recipe and ordered feature layout.
+    if state.get("version") in (1, 2) and "learner" in state:
         signature = state["signature"]
         model_cfg = dict(signature["model"])
         weights = state["learner"]["model"]

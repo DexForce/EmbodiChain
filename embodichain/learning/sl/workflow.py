@@ -20,11 +20,16 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+import copy
 import importlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
+import torch.distributed as dist
+
+from .distributed import _DistributedContext, distributed_run
 from .trainer import SupervisedTrainer
 
 __all__ = ["train_from_config", "cli"]
@@ -48,12 +53,37 @@ def train_from_config(
     module, separator, name = factory.partition(":")
     if not separator or not module or not name:
         raise ValueError("SL configuration requires factory: module:function")
-    trainer = getattr(importlib.import_module(module), name)(config)
-    if not isinstance(trainer, SupervisedTrainer):
-        raise TypeError("SL recipe factory must return a SupervisedTrainer")
-    if resume is not None:
-        trainer.resume(resume)
-    return trainer.fit()
+    prepared = copy.deepcopy(config)
+    device = prepared.get("trainer", {}).get("device", "cpu")
+    trainer: SupervisedTrainer | None = None
+    with distributed_run(device) as resolved:
+        context = _DistributedContext(resolved)
+        if context.enabled:
+            prepared["trainer"] = {
+                **prepared.get("trainer", {}),
+                "device": str(resolved),
+            }
+
+        def build() -> SupervisedTrainer:
+            nonlocal trainer
+            candidate = getattr(importlib.import_module(module), name)(prepared)
+            if not isinstance(candidate, SupervisedTrainer):
+                raise TypeError("SL recipe factory must return a SupervisedTrainer")
+            trainer = candidate
+            return candidate
+
+        try:
+            trainer = context.run(build, "recipe factory")
+            if resume is not None:
+                trainer.resume(resume)
+            return trainer.fit()
+        finally:
+            # Factories own acquisition, but this entry point owns the returned
+            # source's consumption lifetime, including background prefetch work.
+            if trainer is not None:
+                close = getattr(trainer.source, "close", None)
+                if close is not None:
+                    close()
 
 
 def cli(argv: Sequence[str] | None = None) -> None:
@@ -71,7 +101,12 @@ def cli(argv: Sequence[str] | None = None) -> None:
     config = yaml.safe_load(args.config.read_text())
     if not isinstance(config, dict):
         raise ValueError("SL configuration must be a mapping")
-    print(json.dumps(train_from_config(config, resume=args.resume), allow_nan=False))
+    rank = (
+        dist.get_rank() if dist.is_initialized() else int(os.environ.get("RANK", "0"))
+    )
+    result = train_from_config(config, resume=args.resume)
+    if rank == 0:
+        print(json.dumps(result, allow_nan=False))
 
 
 if __name__ == "__main__":

@@ -548,7 +548,7 @@ topics:
 - id: supervised-learning
   title: Supervised Learning
   aliases: [supervised learning, SL learning, 监督学习, 统一监督学习]
-  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource]
+  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
   paths: [topics/supervised-learning/supervised-learning.md]
   source_of_truth:
   - embodichain/learning/sl/

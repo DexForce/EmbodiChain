@@ -214,6 +214,7 @@ def test_validation_restores_rng_and_mode_even_on_failure(tmp_path, callback_fai
     count = 1 if callback_fails else 3
     baseline.fit(stop_after=count)
     expected = copy.deepcopy(baseline.learner.model.state_dict())
+    expected_sampler = baseline.sampler.get_state().clone()
     expected_random = (random.random(), np.random.rand(), torch.rand(4))
     reset_rng()
     candidate = build(tmp_path / "candidate")
@@ -225,6 +226,7 @@ def test_validation_restores_rng_and_mode_even_on_failure(tmp_path, callback_fai
         random.random()
         np.random.rand(5)
         torch.rand(9)
+        torch.randint(10, (3,), generator=candidate.sampler)
         candidate.save(candidate.output / "selected.pt")
         if callback_fails:
             raise RuntimeError("validation failed")
@@ -237,6 +239,7 @@ def test_validation_restores_rng_and_mode_even_on_failure(tmp_path, callback_fai
     else:
         candidate.fit(stop_after=count)
     assert candidate.learner.model.training
+    torch.testing.assert_close(candidate.sampler.get_state(), expected_sampler)
     for key, value in expected.items():
         torch.testing.assert_close(
             candidate.learner.model.state_dict()[key], value, rtol=0, atol=0
@@ -248,6 +251,7 @@ def test_validation_restores_rng_and_mode_even_on_failure(tmp_path, callback_fai
     count_forwards(resumed)
     resumed.cfg.validation_interval = 1
     resumed.resume(candidate.output / "selected.pt")
+    torch.testing.assert_close(resumed.sampler.get_state(), expected_sampler)
     for key, value in expected.items():
         torch.testing.assert_close(
             resumed.learner.model.state_dict()[key], value, rtol=0, atol=0
