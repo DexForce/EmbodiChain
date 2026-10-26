@@ -1,0 +1,59 @@
+{
+  "status": "completed",
+  "cases": [
+    {
+      "repeat": 1,
+      "argv": [
+        "/home/dex/miniconda3/envs/open/bin/python",
+        "/tmp/fingerprint_peg_eval.py",
+        "--fingerprint",
+        "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/repro_serial_1",
+        "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568",
+        "--checkpoint",
+        "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/checkpoints/blind_peg_default_assets_epa128_seed0_best_step_26214400.pt",
+        "--episodes",
+        "512",
+        "--num-envs",
+        "64",
+        "--seed",
+        "10000",
+        "--output",
+        "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/repro_serial_1/evaluation",
+        "--raw-log",
+        "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/repro_serial_1/run.log"
+      ],
+      "started_at": "2026-10-26T17:45:03.999946+00:00",
+      "returncode": 0,
+      "elapsed_process_wall_seconds": 79.77584989718162,
+      "health": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/repro_serial_1/evaluation/20261026T174508.645771Z-strict-peg-health/health.json",
+      "success_rate": 0.76953125
+    },
+    {
+      "repeat": 2,
+      "argv": [
+        "/home/dex/miniconda3/envs/open/bin/python",
+        "/tmp/fingerprint_peg_eval.py",
+        "--fingerprint",
+        "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/repro_serial_2",
+        "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568",
+        "--checkpoint",
+        "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/checkpoints/blind_peg_default_assets_epa128_seed0_best_step_26214400.pt",
+        "--episodes",
+        "512",
+        "--num-envs",
+        "64",
+        "--seed",
+        "10000",
+        "--output",
+        "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/repro_serial_2/evaluation",
+        "--raw-log",
+        "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/repro_serial_2/run.log"
+      ],
+      "started_at": "2026-10-26T17:46:23.778308+00:00",
+      "returncode": 0,
+      "elapsed_process_wall_seconds": 85.03927106200717,
+      "health": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/repro_serial_2/evaluation/20261026T174628.373830Z-strict-peg-health/health.json",
+      "success_rate": 0.78515625
+    }
+  ]
+}

@@ -1,5 +1,12 @@
 # mjfit 迁移实现与验收记录
 
+本文件保留首次迁移阶段的记录。后续学习结果分别见
+[nominal 模型实测](validation/rl_attempt/RESULTS.md)与
+[默认机器人资产重训练](../../learning/blind_assembly/validation/default_retrain_20261026/RESULTS.md)；
+后者独立评测为 88.38%，未达到 95% 目标，其
+[实验复核](../../learning/blind_assembly/validation/default_retrain_20261026/EXPERIMENT_REVIEW.md)
+记录了资产、控制、夹持及可重复性差异。
+
 本次已实现可运行的几何、仿真与原生 RL 通路，并交付测试、实验工具和 smoke 模型。**完整论文复现尚未完成**：任意碰撞拓扑的异构训练、源 Robotiq 闭链动力学、完整训练/泛化/消融仍未通过资格验收。
 
 源码基线为 EmbodiChain `19c254577`；生成器固定为 mjfit

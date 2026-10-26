@@ -1,5 +1,9 @@
 # Default-asset Rizon4S / Robotiq policy inference
 
+This historical transfer preview is followed by a separate
+[default-asset retraining and independent assessment](../default_retrain_20261026/RESULTS.md).
+Its new weights and 88.38% result do not change the 0/3 transfer recorded here.
+
 The worktree was merged with main `3a9e10939ec92bb69b972337a6a4a6eb18b6798a`. This preview composes the existing registered `FlexivRizon4S/rizon4s.urdf` and `Robotiq2F85/Robotiq2F85.urdf` through the native URDF assembly path. Source visual meshes/materials, collision geometry, inertials, joint names and mimic relations are retained. It does not regenerate the arm or hand through the Menagerie converter.
 
 The unchanged checkpoint `e8454a0a59d8c3b50d4f472965c95a24a0ee97d09b71aa1757948483ad7d75ce` drives the new robot using its actual joint encoders/FK. It was trained on the earlier nominal parallel-jaw model. The original 97.73% nominal assessment does not apply to this new asset/runtime combination. No retraining or scripted insertion is used.

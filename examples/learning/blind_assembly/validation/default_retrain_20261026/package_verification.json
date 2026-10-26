@@ -1,0 +1,27 @@
+{
+  "source": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/packaging_final/embodichain-0.3.2.tar.gz",
+  "wheel": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/packaging_final/embodichain-0.3.2-py3-none-any.whl",
+  "wheel_rebuilt_from_clean_source_archive": true,
+  "required_paths": {
+    "embodichain_robots/flexiv/rizon4s_robotiq/rizon4s_sources.json": [
+      "embodichain_robots/flexiv/rizon4s_robotiq/rizon4s_sources.json"
+    ],
+    "embodichain_robots/unitree/go1/profile.json": [
+      "embodichain_robots/unitree/go1/profile.json"
+    ],
+    "embodichain_tasks/configs/tasks/manipulation/assembly/peg_insertion/agents/ppo.study.default_assets.dev.yaml": [
+      "embodichain_tasks/configs/tasks/manipulation/assembly/peg_insertion/agents/ppo.study.default_assets.dev.yaml"
+    ],
+    "assembly_patches/mujoco_warp_epa_horizon_3_15.patch": [
+      "embodichain-0.3.2.data/data/share/embodichain/assembly_patches/mujoco_warp_epa_horizon_3_15.patch"
+    ],
+    "learning/blind_assembly/validation/default_retrain_20261026/EXPERIMENT_REVIEW.md": [
+      "embodichain-0.3.2.data/data/share/embodichain/examples/learning/blind_assembly/validation/default_retrain_20261026/EXPERIMENT_REVIEW.md"
+    ],
+    "learning/blind_assembly/validation/default_retrain_20261026/preview.mp4": [
+      "embodichain-0.3.2.data/data/share/embodichain/examples/learning/blind_assembly/validation/default_retrain_20261026/preview.mp4"
+    ]
+  },
+  "wheel_crc_verified": true,
+  "scope": "Package construction/content verification; not dependency-isolated installation, native runtime equivalence or Sphinx site validation."
+}

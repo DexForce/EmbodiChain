@@ -1,0 +1,1570 @@
+{
+  "schema": "native-serial-reset-fingerprint-comparison/v1",
+  "same_keys": true,
+  "reset_calls": [
+    1,
+    1
+  ],
+  "arrays": [
+    {
+      "key": "reset_00/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_01/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_01/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_01/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_01/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_01/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_01/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_01/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_02/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.0017735660076141357,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_02/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.5938644409179688,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_02/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.009055503411218524,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_02/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_02/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_02/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 0.035877416376024485,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_02/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 0.41940033435821533,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_03/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.0009018182754516602,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_03/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.3469904065132141,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_03/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.04490634985268116,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_03/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_03/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_03/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 0.008064892143011093,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_03/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 0.1196749210357666,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_04/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.0062558650970458984,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_04/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.9456576704978943,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_04/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.03739816433517262,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_04/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_04/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_04/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.283128499984741,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_04/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 0.6245744228363037,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_05/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.01740819215774536,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_05/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.8777920603752136,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_05/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.0403177747502923,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_05/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_05/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_05/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.283132791519165,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_05/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 0.8895517438650131,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_06/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.009726107120513916,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_06/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.976035863161087,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_06/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.043932633474469185,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_06/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_06/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_06/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.277133464813232,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_06/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 1.0514501631259918,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_07/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.009483397006988525,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_07/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 1.0371735468506813,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_07/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.05712237395346165,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_07/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_07/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_07/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.283067941665649,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_07/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 0.9349928200244904,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_08/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.016255080699920654,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_08/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 1.5028905905783176,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_08/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.057465292513370514,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_08/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_08/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_08/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.283067226409912,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_08/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 0.7668054401874542,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_09/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.02680528163909912,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_09/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 1.7527919262647629,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_09/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.057812146842479706,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_09/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_09/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_09/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.282483339309692,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_09/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 0.8695350587368011,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_10/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.01570725440979004,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_10/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 1.585394263267517,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_10/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.05871157348155975,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_10/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_10/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_10/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.282828092575073,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_10/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 0.9850190803408623,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_11/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.01959317922592163,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_11/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 1.812000036239624,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_11/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.05833449587225914,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_11/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_11/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_11/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.281976938247681,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_11/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 0.9885049015283585,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_12/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.02486652135848999,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_12/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 1.5260213017463684,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_12/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.05614142492413521,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_12/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_12/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_12/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.281773328781128,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_12/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 1.1014824360609055,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_13/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.018354713916778564,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_13/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 2.0037538409233093,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_13/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.06402407959103584,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_13/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_13/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_13/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.282821178436279,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_13/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 1.3386752605438232,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_14/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.019183576107025146,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_14/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 2.518745183944702,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_14/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.08151448983699083,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_14/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_14/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_14/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.2820212841033936,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_14/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 1.9150111675262451,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_15/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.02612316608428955,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_15/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 2.342319905757904,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_15/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.09267885982990265,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_15/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_15/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_15/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.282114267349243,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_15/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 2.5244650840759277,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_16/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.02362734079360962,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_16/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 2.6706417202949524,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_16/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.10097145894542336,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_16/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_16/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": true,
+      "max_abs_difference": 0.0,
+      "exact_arena_rows": 64
+    },
+    {
+      "key": "reset_00/before_control_16/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.28256368637085,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_16/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 2.8029369115829468,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_17/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.10738292336463928,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_17/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 1.6188015341758728,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_17/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.10046749515458941,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_17/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.010082721710205078,
+      "exact_arena_rows": 62
+    },
+    {
+      "key": "reset_00/before_control_17/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": false,
+      "max_abs_difference": 16.0,
+      "exact_arena_rows": 62
+    },
+    {
+      "key": "reset_00/before_control_17/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.280364513397217,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_17/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 2.4542949199676514,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_18/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.06774643063545227,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_18/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 2.4279115423560143,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_18/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.10023132152855396,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_18/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.010082721710205078,
+      "exact_arena_rows": 62
+    },
+    {
+      "key": "reset_00/before_control_18/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": false,
+      "max_abs_difference": 16.0,
+      "exact_arena_rows": 62
+    },
+    {
+      "key": "reset_00/before_control_18/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.282820701599121,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_18/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 2.6537771224975586,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_19/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.05369049310684204,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_19/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 1.6597005128860474,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_19/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.09748598048463464,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_19/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.010082721710205078,
+      "exact_arena_rows": 62
+    },
+    {
+      "key": "reset_00/before_control_19/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": false,
+      "max_abs_difference": 16.0,
+      "exact_arena_rows": 62
+    },
+    {
+      "key": "reset_00/before_control_19/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.27308201789856,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_19/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 2.765967845916748,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_20/qpos",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 0.058238089084625244,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_20/qvel",
+      "shape": [
+        64,
+        13
+      ],
+      "exact": false,
+      "max_abs_difference": 1.447950303554535,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_20/part",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.09568755340296775,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_20/fixture",
+      "shape": [
+        64,
+        4,
+        4
+      ],
+      "exact": false,
+      "max_abs_difference": 0.010082721710205078,
+      "exact_arena_rows": 62
+    },
+    {
+      "key": "reset_00/before_control_20/elapsed",
+      "shape": [
+        64
+      ],
+      "exact": false,
+      "max_abs_difference": 16.0,
+      "exact_arena_rows": 62
+    },
+    {
+      "key": "reset_00/before_control_20/cached_frame",
+      "shape": [
+        64,
+        33
+      ],
+      "exact": false,
+      "max_abs_difference": 6.282699823379517,
+      "exact_arena_rows": 0
+    },
+    {
+      "key": "reset_00/before_control_20/action",
+      "shape": [
+        64,
+        7
+      ],
+      "exact": false,
+      "max_abs_difference": 3.0910494327545166,
+      "exact_arena_rows": 0
+    }
+  ],
+  "case_successes": [
+    394,
+    402
+  ],
+  "episodes_each": 512,
+  "scope": "Two instrumented serial fresh-process repeats at identical update200 and configured seed; extra managed-state reads but no added physics or observation-manager calls; excluded from checkpoint selection and independent test.",
+  "first20_control_comparison": [
+    {
+      "before_control": 1,
+      "previous_completed_controls": 0,
+      "max_all_qpos_diff_rad": 0.0,
+      "max_first7_arm_qpos_diff_rad": 0.0,
+      "max_part_translation_difference_m": 0.0,
+      "max_part_angle_difference_rad": 3.325274710988213e-19,
+      "max_raw_action_difference": 0.0,
+      "policy_action_masked_by_warmup": true
+    },
+    {
+      "before_control": 2,
+      "previous_completed_controls": 1,
+      "max_all_qpos_diff_rad": 0.0017735660076141357,
+      "max_first7_arm_qpos_diff_rad": 8.815895125735551e-05,
+      "max_part_translation_difference_m": 0.00010924600064754486,
+      "max_part_angle_difference_rad": 0.009908278808590498,
+      "max_raw_action_difference": 0.41940033435821533,
+      "policy_action_masked_by_warmup": true
+    },
+    {
+      "before_control": 3,
+      "previous_completed_controls": 2,
+      "max_all_qpos_diff_rad": 0.0009018182754516602,
+      "max_first7_arm_qpos_diff_rad": 0.00019663559214677662,
+      "max_part_translation_difference_m": 0.0005116945249028504,
+      "max_part_angle_difference_rad": 0.04886812310650297,
+      "max_raw_action_difference": 0.1196749210357666,
+      "policy_action_masked_by_warmup": true
+    },
+    {
+      "before_control": 5,
+      "previous_completed_controls": 4,
+      "max_all_qpos_diff_rad": 0.01740819215774536,
+      "max_first7_arm_qpos_diff_rad": 0.001165925175882876,
+      "max_part_translation_difference_m": 0.004414679016917944,
+      "max_part_angle_difference_rad": 0.040582280596932155,
+      "max_raw_action_difference": 0.8895517587661743,
+      "policy_action_masked_by_warmup": true
+    },
+    {
+      "before_control": 10,
+      "previous_completed_controls": 9,
+      "max_all_qpos_diff_rad": 0.01570725440979004,
+      "max_first7_arm_qpos_diff_rad": 0.01165306568145752,
+      "max_part_translation_difference_m": 0.010532713495194912,
+      "max_part_angle_difference_rad": 0.07472360182843799,
+      "max_raw_action_difference": 0.9850190877914429,
+      "policy_action_masked_by_warmup": true
+    },
+    {
+      "before_control": 11,
+      "previous_completed_controls": 10,
+      "max_all_qpos_diff_rad": 0.01959317922592163,
+      "max_first7_arm_qpos_diff_rad": 0.013254642486572266,
+      "max_part_translation_difference_m": 0.011120074428617954,
+      "max_part_angle_difference_rad": 0.071307165872853,
+      "max_raw_action_difference": 0.9885048866271973,
+      "policy_action_masked_by_warmup": false
+    },
+    {
+      "before_control": 20,
+      "previous_completed_controls": 19,
+      "max_all_qpos_diff_rad": 0.058238089084625244,
+      "max_first7_arm_qpos_diff_rad": 0.01798325404524803,
+      "max_part_translation_difference_m": 0.015434054657816887,
+      "max_part_angle_difference_rad": 0.0993481497648488,
+      "max_raw_action_difference": 3.0910494327545166,
+      "policy_action_masked_by_warmup": false
+    }
+  ],
+  "initial_observation_scope": "Cached33-value frame and first policy action captured; returned TensorDict observation was not recursively serialized by the dict-only helper. No full latent/history identity claim."
+}

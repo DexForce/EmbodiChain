@@ -1,0 +1,17 @@
+{
+  "scope": "Existing published source-contact patch applied to launch SDK revision in an isolated temporary tree; no installed/shared SDK edits",
+  "sdk_revision": "528daf12fd44b9383b30165ac484cf79b574e873",
+  "patch_sha256": "428209af237f915c197001a1e997e60ab1d525bfd9949221342dced45374346b",
+  "files": [
+    {
+      "relative": "spawn/descs.py",
+      "sha256": "493c1a031a96b23215a833b403028274ac697183701c9eca6615cbc4ff6396e4",
+      "matches_frozen_runtime": true
+    },
+    {
+      "relative": "engine/newton_physics/rigid_body/body.py",
+      "sha256": "8f7b7179ad98a4a506b3b3f6b976783d3437653b78fdc40205b800ded59cd58a",
+      "matches_frozen_runtime": true
+    }
+  ]
+}

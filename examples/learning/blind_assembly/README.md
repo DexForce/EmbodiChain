@@ -187,6 +187,13 @@ Pass the selected checkpoint's explicit path to the strict evaluator with a
 different seed. `rl_report --selection-report` verifies that final assessment
 used those weights and keeps its curve separate from training validation.
 
+The [measured default-asset result](validation/default_retrain_20261026/RESULTS.md)
+records 7240/8192 balanced independent successes (88.38%), below the 95% target.
+Its random-initialized lineage reaches 1000 updates after checkpoint recovery;
+validation selects update 850. The [experiment review](validation/default_retrain_20261026/EXPERIMENT_REVIEW.md)
+separates the unchanged fixture/arm settings from the changed hand mechanism,
+grasp drift, native execution sensitivity and remaining causal experiments.
+
 See [CAPACITY.md](CAPACITY.md) for measured synthetic 12,288-environment policy
 capacity, and [the implementation report](../../sim/assembly/IMPLEMENTATION.md)
 for actual task smoke checkpoints, evaluation results and outstanding gates.

@@ -1,0 +1,15 @@
+{
+  "qualification": "Local native model bundle, not a hosted release or private SDK distribution",
+  "path": "/home/dex/Downloads/EmbodiChain_Rizon4S_Robotiq2F85_retrained_peg_20261026.zip",
+  "bytes": 13196210,
+  "sha256": "6a8c6e092702e05e1686656b9c67a57ce16bfc126d0dc21b493696889d589dd1",
+  "checkpoint_sha256": "68c9625efbb7f85c07e22b1b2b0111e1a5e83d4ac386121927c57e0a898da116",
+  "verified_file_hashes": 156,
+  "zip_crc_verified": true,
+  "run_manifest": "default_assets_peg/run-manifest.json",
+  "relocation_test_archive_sha256": "abd111aa08077f71c560b772f68bc2d2a154a00f050a143fc9625366777f4370",
+  "relocation_test_archive_preserved": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/model_archive_before_publication_metadata.zip",
+  "runtime_payload_unchanged_after_metadata_refresh": true,
+  "runtime_payload_files_verified": 45,
+  "final_metadata_refresh_previous_archive_sha256": "dc03d134b2335b097cf558aced064511a13144393d4b70360bfc61f01dee48e7"
+}

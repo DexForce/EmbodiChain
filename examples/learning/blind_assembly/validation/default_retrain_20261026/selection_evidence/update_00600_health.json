@@ -1,0 +1,646 @@
+{
+  "schema": "embodichain-peg-native-evaluation-health/v1",
+  "created_at": "2026-10-26T17:31:59.704680+00:00",
+  "status": "completed",
+  "qualification": "Fresh strict evaluation of one nominal simulation checkpoint; no retroactive training-health or full paper-reproduction claim.",
+  "run": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568",
+  "episodes_requested": 512,
+  "evaluation_reset_seed": 10000,
+  "num_envs_requested": 64,
+  "software": {
+    "python": "3.11.14",
+    "embodichain": "0.3.2",
+    "dexsim-engine": "0.5.1+528daf12fd44b9383b30165ac484cf79b574e873",
+    "torch": "2.7.1+cu128",
+    "warp-lang": "1.17.0",
+    "newton": "1.7.0",
+    "mujoco": "3.15.0",
+    "mujoco-warp": "3.15.0",
+    "mjfit": "0.1.0",
+    "pytorch-kinematics": "0.10.0",
+    "git_head": "40e8ed41ab83cebdf1776a19a462172702ee4e63",
+    "git_dirty": false
+  },
+  "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+  "argv": [
+    "/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/benchmark/assembly/eval_peg.py",
+    "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568",
+    "--checkpoint",
+    "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/checkpoints/blind_peg_default_assets_epa128_seed0_step_78643200.pt",
+    "--episodes",
+    "512",
+    "--num-envs",
+    "64",
+    "--seed",
+    "10000",
+    "--device",
+    "cuda:0",
+    "--output",
+    "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/balanced_selection/update_00600",
+    "--raw-log",
+    "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/balanced_selection/update_00600.log"
+  ],
+  "wrapper_source": {
+    "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/benchmark/assembly/eval_peg.py",
+    "exists": true,
+    "bytes": 20258,
+    "sha256": "ded827d69033708be3e5dc31a1dba9069a76e3144349c10a7e9631ed4be0cacf"
+  },
+  "health_observer_source": {
+    "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/scripts/benchmark/assembly/peg_reachability.py",
+    "exists": true,
+    "bytes": 55769,
+    "sha256": "4007ebea2e317a39903330fa9ddb2c80bca9077b67f6d186987eae65f77a9582"
+  },
+  "raw_log": {
+    "capture": "caller-owned stdout/stderr; pass --raw-log when redirecting native and Python logs",
+    "file": {
+      "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/balanced_selection/update_00600.log",
+      "exists": true,
+      "bytes": 18940
+    },
+    "size_scope": "finalization-time snapshot of a caller-owned open log; final messages can append"
+  },
+  "episode_accounting": "runtime construction resets to infer policy shape before guard attachment; that reset and the build snapshot are unscored. evaluate_episodes resets with evaluation_reset_seed and scores fixed per-environment quotas summing exactly to the requested episode count. Rows that finish their quota keep stepping/resetting, but their extra episodes are unscored.",
+  "episode_allocation": "balanced",
+  "not_measured": [
+    "end_effector_path_length",
+    "raw_action_norm",
+    "actual_joint_torque",
+    "GPU_memory"
+  ],
+  "epa_preflight": {
+    "passed": true,
+    "mujoco_warp_version": "3.15.0",
+    "mujoco_version": "3.15.0",
+    "required": "Matching MuJoCo/MuJoCo Warp 3.12 or 3.15 with loaded EPA horizon capacity at least 128; versions are separate experiment profiles",
+    "loaded_constants": {
+      "types.MJ_MAX_EPAHORIZON": 128,
+      "collision_convex.MJ_MAX_EPAHORIZON": 128
+    },
+    "loaded_sources": {
+      "types": {
+        "path": "/tmp/embodichain-mjw315-epa128-default20261026/mujoco_warp/_src/types.py",
+        "exists": true,
+        "bytes": 123476,
+        "sha256": "21e2c4b19ad1d082bf572e4640b8345ec8b3c4fcec6198bf7da3f2357a0c0e5f"
+      },
+      "collision_convex": {
+        "path": "/tmp/embodichain-mjw315-epa128-default20261026/mujoco_warp/_src/collision_convex.py",
+        "exists": true,
+        "bytes": 47231,
+        "sha256": "3fd288f0cab3f5f444924d724362fd2cd2eab1281ab2dcb6bc3b48b9b3f30b92"
+      }
+    },
+    "scope": "loaded Python constants and source identities before any native training scene; runtime capacity flags remain guarded throughout training"
+  },
+  "checkpoint": {
+    "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/checkpoints/blind_peg_default_assets_epa128_seed0_step_78643200.pt",
+    "exists": true,
+    "bytes": 4363025,
+    "sha256": "97bb8efb7f2822087b04d04845ab3b9567a95d1740e27cbf7131543e7fe929ea",
+    "requested": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/checkpoints/blind_peg_default_assets_epa128_seed0_step_78643200.pt",
+    "selected": "explicit"
+  },
+  "configs": {
+    "gym": {
+      "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/configs/gym.yaml",
+      "exists": true,
+      "bytes": 4675,
+      "sha256": "33881d4cd40730517e01bdc2a1f139df93b057fcf8dfdf7d8a220751b763178a"
+    },
+    "train": {
+      "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/configs/train.yaml",
+      "exists": true,
+      "bytes": 1346,
+      "sha256": "c9c562206741db8225108b2bfb8b17578b603a4cc744e76a8db760b260dc2d94"
+    }
+  },
+  "runtime": {
+    "build_seed": 10000,
+    "evaluation_reset_seed": 10000,
+    "num_envs": 64,
+    "task_id": "BlindPegInsertionRL-v1",
+    "device": "cuda:0",
+    "simulation_device": "cuda:0",
+    "configured_physics_dt": 0.001,
+    "configured_control_dt": 0.02,
+    "configured_physics_frequency_hz": 1000.0,
+    "configured_policy_frequency_hz": 50.0,
+    "cadence_scope": "resolved configuration; actual first effective timestep and two control clocks are reported by native_health",
+    "asset_sha256": "ae3907d94cfd31237bdec545fbff0f5327d618c91244b288c1003756f06e716c",
+    "asset_generator_revision": "5833f465896e1e06bc4be4f003be847f5183a4db",
+    "asset_bottom_thickness": 0.002,
+    "fidelity": {
+      "profile": "study",
+      "geometry_per_run": 1,
+      "asset_sha256": "ae3907d94cfd31237bdec545fbff0f5327d618c91244b288c1003756f06e716c",
+      "robot_source_urdf": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/configs/resources/robot/rizon4s_2f85_default_47beba6e921706b7.urdf",
+      "source_contacts_preserved": true,
+      "contact_capacities": {
+        "assembly_contact_capacity": 256,
+        "grasp_contact_capacity": 64
+      },
+      "paper_robot_dynamics_identified": false,
+      "gripper_model": "four_bar_mimic",
+      "robot_asset_source": "default",
+      "grasp_contact_links": [
+        "right_inner_finger",
+        "left_inner_finger"
+      ],
+      "source_gripper_dynamics_preserved": false,
+      "reset_distribution": "local contact, fixed ready pose; workspace-wide IK reset not qualified",
+      "contact_labels": "public assembly_task.js peg signed-distance labels and seated interval; additional bilateral grasp, penetration and 3-control-step hold guards",
+      "proprioception_convention": "official_v1",
+      "gravity_compensation": "URDF COM potential gradient from encoders, held at 50 Hz",
+      "grasp_guard": "bilateral part-pad contact in the control interval, at most 5 ms current air time, force threshold 0.05 N"
+    }
+  },
+  "gpu": {
+    "name": "NVIDIA GeForce RTX 5090",
+    "torch_cuda_version": "12.8"
+  },
+  "postbuild_health_unscored": {
+    "observations": 0,
+    "control_boundaries_observed": 0,
+    "physical_substeps_observed": 0,
+    "physics_substeps_requested_in_completed_controls": 0,
+    "controls_without_explicit_substep_count": 0,
+    "overflow_available": false,
+    "overflow_seen": false,
+    "capacity_overflow_seen": false,
+    "convergence_budget_exhausted_seen": false,
+    "unclassified_overflow_seen": false,
+    "max_nonzero_overflow_flags": 0,
+    "overflow_flags": {},
+    "flagged_world_observation_counts": {},
+    "contact_maxima": {},
+    "scope": "after sim.update returns, before BaseEnv auto-reset; sticky overflow flags cover the full control interval, contact maxima sample its last physical substep",
+    "strict": true,
+    "control_clock_observations": [],
+    "control_clock_scope": "clock read immediately before/after the first two completed sim.update calls; no individual substep clock read is claimed",
+    "native_state": {
+      "fields": [
+        "qpos",
+        "qvel",
+        "qacc"
+      ],
+      "scope": "complete native qpos/qvel/qacc arrays after sim.update returns and before BaseEnv auto-reset; states between control boundaries are not sampled",
+      "readback": "synchronous native array copies followed by CPU finite reduction; summaries retain at most 16 first bad world IDs per field",
+      "available": true,
+      "missing_fields": [],
+      "observations": 0,
+      "complete_observations": 0,
+      "nonfinite_seen": false,
+      "all_samples_finite": null,
+      "first_nonfinite": null,
+      "field_summaries": {}
+    },
+    "overflow_masks": {
+      "capacity": 2559,
+      "convergence_budget": 1536,
+      "meaning": "ITERATIONS/LS_ITERATIONS are convergence budgets; other installed single-bit flags indicate capacity/collision loss. Composite aliases such as ALL are excluded. Flags are sticky until native reset."
+    },
+    "actual_capacities": {
+      "naconmax": 16384,
+      "njmax": 1024,
+      "njmax_nnz": 25600
+    },
+    "counter_scope": {
+      "nacon": "global batch contact count; naconmax is global allocation, not a hard per-world limit",
+      "ncollision": "global broadphase candidate count",
+      "nefc": "constraints per world; njmax is a hard per-world limit"
+    },
+    "prepared_solver_options": {
+      "cone": 1,
+      "impratio_invsqrt": {
+        "shape": [
+          64
+        ],
+        "constant": 0.3162277638912201
+      },
+      "impratio_from_invsqrt": {
+        "shape": [
+          64
+        ],
+        "constant": 10.0
+      },
+      "iterations": 100,
+      "ls_iterations": 50,
+      "ccd_iterations": 35,
+      "timestep": 0.0020000000949949026,
+      "integrator": 3,
+      "tolerance": {
+        "shape": [
+          64
+        ],
+        "constant": 9.999999974752427e-07
+      }
+    },
+    "prepared_solver_options_scope": "captured before the first live sim.update; timestep may still be the solver preparation default and is not evidence of the effective step duration",
+    "private_path": "peg._entities[0]._physics_binding._runtime.solver.mjw_data",
+    "solver_source": "/home/dex/miniconda3/envs/open/lib/python3.11/site-packages/newton/_src/solvers/mujoco/solver_mujoco.py",
+    "solver_source_sha256": "0fb93442c5424e3e320a9b2a8c35308a9ac14be49fd04dcfb76073a32f9fe051"
+  },
+  "episode_quotas": {
+    "num_envs": 64,
+    "minimum": 8,
+    "maximum": 8,
+    "extra_quota_first_rows": 0
+  },
+  "scored_control_budget": 2000,
+  "scored_control_steps": 626,
+  "episode_file_verified": true,
+  "metrics": {
+    "eval/avg_reward": 1.7265625,
+    "eval/avg_length": 50.6640625,
+    "eval/success_rate": 0.841796875,
+    "eval/completed_episodes": 512.0,
+    "eval/success_samples": 512.0,
+    "eval/episodes_per_env_min": 8.0,
+    "eval/episodes_per_env_max": 8.0,
+    "eval/success_ci95_low": 0.8076567590928229,
+    "eval/success_ci95_high": 0.8708462848466129,
+    "eval/metrics/radial_error": 0.001920406012999365,
+    "eval/metrics/tilt": 0.020290910700680342,
+    "eval/metrics/depth": 0.01504136725270655,
+    "eval/metrics/penetration": 3.080293636159581e-06,
+    "eval/metrics/grasped": 0.853515625,
+    "eval/metrics/captured": 0.8828125
+  },
+  "native_health": {
+    "observations": 626,
+    "control_boundaries_observed": 626,
+    "physical_substeps_observed": 0,
+    "physics_substeps_requested_in_completed_controls": 12520,
+    "controls_without_explicit_substep_count": 0,
+    "overflow_available": true,
+    "overflow_seen": true,
+    "capacity_overflow_seen": false,
+    "convergence_budget_exhausted_seen": true,
+    "unclassified_overflow_seen": false,
+    "max_nonzero_overflow_flags": 8,
+    "overflow_flags": {
+      "NEFC": 0,
+      "NJMAX_NNZ": 0,
+      "BROADPHASE": 0,
+      "NARROWPHASE": 0,
+      "CCD": 0,
+      "HFIELD": 0,
+      "CONTACT_MATCH": 0,
+      "NVMAX": 0,
+      "EPA_HORIZON": 0,
+      "ITERATIONS": 8,
+      "LS_ITERATIONS": 0,
+      "TACTILE": 0
+    },
+    "flagged_world_observation_counts": {
+      "NEFC": 0,
+      "NJMAX_NNZ": 0,
+      "BROADPHASE": 0,
+      "NARROWPHASE": 0,
+      "CCD": 0,
+      "HFIELD": 0,
+      "CONTACT_MATCH": 0,
+      "NVMAX": 0,
+      "EPA_HORIZON": 0,
+      "ITERATIONS": 2393,
+      "LS_ITERATIONS": 0,
+      "TACTILE": 0
+    },
+    "contact_maxima": {
+      "nacon": {
+        "max_element": 508,
+        "max_sum": 508,
+        "shape": [
+          1
+        ]
+      },
+      "ncollision": {
+        "max_element": 1462,
+        "max_sum": 1462,
+        "shape": [
+          1
+        ]
+      },
+      "nefc": {
+        "max_element": 81,
+        "max_sum": 1976,
+        "shape": [
+          64
+        ]
+      }
+    },
+    "scope": "after sim.update returns, before BaseEnv auto-reset; sticky overflow flags cover the full control interval, contact maxima sample its last physical substep",
+    "strict": true,
+    "control_clock_observations": [
+      {
+        "completed_update": 1,
+        "explicit_step_count": 20,
+        "requested_physics_dt_seconds": 0.001,
+        "expected_elapsed_seconds_from_request": 0.02,
+        "native_clock_available": true,
+        "individual_substep_clock_measured": false,
+        "native_clock_before": {
+          "shape": [
+            64
+          ],
+          "constant": 0.0
+        },
+        "native_clock_after": {
+          "shape": [
+            64
+          ],
+          "constant": 0.021000001579523087
+        },
+        "observed_control_elapsed_seconds": {
+          "shape": [
+            64
+          ],
+          "constant": 0.021000001579523087
+        },
+        "all_world_clock_deltas_match_request": false
+      },
+      {
+        "completed_update": 2,
+        "explicit_step_count": 20,
+        "requested_physics_dt_seconds": 0.001,
+        "expected_elapsed_seconds_from_request": 0.02,
+        "native_clock_available": true,
+        "individual_substep_clock_measured": false,
+        "native_clock_before": {
+          "shape": [
+            64
+          ],
+          "constant": 0.021000001579523087
+        },
+        "native_clock_after": {
+          "shape": [
+            64
+          ],
+          "constant": 0.04099998623132706
+        },
+        "observed_control_elapsed_seconds": {
+          "shape": [
+            64
+          ],
+          "constant": 0.01999998465180397
+        },
+        "all_world_clock_deltas_match_request": true
+      }
+    ],
+    "control_clock_scope": "clock read immediately before/after the first two completed sim.update calls; no individual substep clock read is claimed",
+    "native_state": {
+      "fields": [
+        "qpos",
+        "qvel",
+        "qacc"
+      ],
+      "scope": "complete native qpos/qvel/qacc arrays after sim.update returns and before BaseEnv auto-reset; states between control boundaries are not sampled",
+      "readback": "synchronous native array copies followed by CPU finite reduction; summaries retain at most 16 first bad world IDs per field",
+      "available": true,
+      "missing_fields": [],
+      "observations": 626,
+      "complete_observations": 626,
+      "nonfinite_seen": false,
+      "all_samples_finite": true,
+      "first_nonfinite": null,
+      "field_summaries": {
+        "qpos": {
+          "shape": [
+            64,
+            27
+          ],
+          "observations": 626,
+          "nonfinite_world_observations": 0,
+          "nonfinite_value_observations": 0,
+          "max_nonfinite_worlds": 0,
+          "first_bad_world_ids": []
+        },
+        "qvel": {
+          "shape": [
+            64,
+            25
+          ],
+          "observations": 626,
+          "nonfinite_world_observations": 0,
+          "nonfinite_value_observations": 0,
+          "max_nonfinite_worlds": 0,
+          "first_bad_world_ids": []
+        },
+        "qacc": {
+          "shape": [
+            64,
+            25
+          ],
+          "observations": 626,
+          "nonfinite_world_observations": 0,
+          "nonfinite_value_observations": 0,
+          "max_nonfinite_worlds": 0,
+          "first_bad_world_ids": []
+        }
+      }
+    },
+    "overflow_masks": {
+      "capacity": 2559,
+      "convergence_budget": 1536,
+      "meaning": "ITERATIONS/LS_ITERATIONS are convergence budgets; other installed single-bit flags indicate capacity/collision loss. Composite aliases such as ALL are excluded. Flags are sticky until native reset."
+    },
+    "actual_capacities": {
+      "naconmax": 16384,
+      "njmax": 1024,
+      "njmax_nnz": 25600
+    },
+    "counter_scope": {
+      "nacon": "global batch contact count; naconmax is global allocation, not a hard per-world limit",
+      "ncollision": "global broadphase candidate count",
+      "nefc": "constraints per world; njmax is a hard per-world limit"
+    },
+    "prepared_solver_options": {
+      "cone": 1,
+      "impratio_invsqrt": {
+        "shape": [
+          64
+        ],
+        "constant": 0.3162277638912201
+      },
+      "impratio_from_invsqrt": {
+        "shape": [
+          64
+        ],
+        "constant": 10.0
+      },
+      "iterations": 100,
+      "ls_iterations": 50,
+      "ccd_iterations": 35,
+      "timestep": 0.0020000000949949026,
+      "integrator": 3,
+      "tolerance": {
+        "shape": [
+          64
+        ],
+        "constant": 9.999999974752427e-07
+      }
+    },
+    "prepared_solver_options_scope": "captured before the first live sim.update; timestep may still be the solver preparation default and is not evidence of the effective step duration",
+    "private_path": "peg._entities[0]._physics_binding._runtime.solver.mjw_data",
+    "solver_source": "/home/dex/miniconda3/envs/open/lib/python3.11/site-packages/newton/_src/solvers/mujoco/solver_mujoco.py",
+    "solver_source_sha256": "0fb93442c5424e3e320a9b2a8c35308a9ac14be49fd04dcfb76073a32f9fe051",
+    "effective_solver_timestep_after_first_update": 0.0010000000474974513,
+    "last_flagged_world_count": 8,
+    "first_flagged_world_ids": [
+      1,
+      10,
+      16,
+      31,
+      38,
+      48,
+      52,
+      55
+    ]
+  },
+  "raw_episodes": {
+    "file": {
+      "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/balanced_selection/update_00600/20261026T173159.704045Z-strict-peg-health/episodes.jsonl",
+      "exists": true,
+      "bytes": 135696,
+      "sha256": "38640ab9d3faa736579539958d82a4f63b4e234d16f994bd3abf679e05df9788"
+    },
+    "records": 512,
+    "scored_counts_per_env": [
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8
+    ],
+    "expected_counts_per_env": [
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8
+    ],
+    "scope": "Only production-evaluator scored episodes; unscored fast completions and vector/matrix metrics are excluded. The success path rereads the JSONL to verify contiguous zero-based indexes and every fixed per-arena quota."
+  },
+  "elapsed_wall_seconds": 142.69135151593946,
+  "evaluation_report": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/balanced_selection/update_00600/20261026T173422.409828Z-policy/evaluation.json"
+}

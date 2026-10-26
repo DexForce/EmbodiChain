@@ -1,0 +1,42 @@
+[
+  {
+    "path": "embodichain/lab/sim/cfg/articulation.py",
+    "sha256": "fbff9651527108724d7066f7be0b8960944af93e301a43aff046fa9537a2daad"
+  },
+  {
+    "path": "embodichain/lab/sim/objects/articulation.py",
+    "sha256": "3f98fd84d8542b988c98bafd3513aa07e1aefbe2a6b4ae7cfe63a30f02f5cba5"
+  },
+  {
+    "path": "embodichain/lab/sim/objects/backends/newton.py",
+    "sha256": "9ec8507d748801583b031b99adc4140d84f0c31b43714b7f332f8e1d78fef23a"
+  },
+  {
+    "path": "extensions/embodichain_robots/flexiv/rizon4s_robotiq/cfg.py",
+    "sha256": "df75dc77d94ba46d47671f452d8d66d4b2086a124aa149a3ff0a98509f790db3"
+  },
+  {
+    "path": "scripts/benchmark/assembly/eval_peg.py",
+    "sha256": "ded827d69033708be3e5dc31a1dba9069a76e3144349c10a7e9631ed4be0cacf"
+  },
+  {
+    "path": "scripts/benchmark/assembly/peg_reachability.py",
+    "sha256": "646893562378f34872ab630ba2d3f3309334ccad7b95d2ccf3e3131a7ffc5c96"
+  },
+  {
+    "path": "scripts/benchmark/assembly/train_peg.py",
+    "sha256": "3a5cc1c4109a79ed7317a403ec9a57f3e2df97e77a27f36d9a6aa89e96ecbc7a"
+  },
+  {
+    "path": "tests/benchmark/test_peg_physics_health.py",
+    "sha256": "e99ce46c6f6a25da9e5ee13ab87b6437634de01d38ef8ac7a2e9253dc10ac298"
+  },
+  {
+    "path": "tests/sim/test_cfg.py",
+    "sha256": "8195a59f60efb7775d94f834f95ea3b7f2f8a8f151b9113387d5b3e64dac3f74"
+  },
+  {
+    "path": "extensions/embodichain_tasks/configs/tasks/manipulation/assembly/peg_insertion/agents/ppo.study.default_assets.dev.yaml",
+    "sha256": "2c4ebdd8f561130ce7c64a82c69caa136e2f356d8b86f9565736bda2bc899d25"
+  }
+]
