@@ -5,7 +5,7 @@ preset keeps the source ACD joint and link names and provides two seven-joint
 arm control parts with optional parallel-jaw grippers.
 
 <div style="text-align: center;">
-  <img src="../../_static/robots/tianji_marvin.png" alt="Tianji Marvin dual-arm robot" style="height: 400px; width: auto;"/>
+  <img src="../../../_static/robots/tianji_marvin.png" alt="Tianji Marvin dual-arm robot" style="height: 400px; width: auto;"/>
   <p><b>Tianji Marvin</b></p>
 </div>
 

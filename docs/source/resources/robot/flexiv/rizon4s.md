@@ -6,12 +6,12 @@ The preset has one `arm` control part, containing `joint1` through `joint7`;
 it does not attach a gripper or declare an `eef` control part.
 
 <div style="text-align: center;">
-  <img src="../../_static/robots/flexiv_rizon4s.png" alt="Flexiv Rizon 4S in its official ready pose" style="height: 400px; width: auto;"/>
+  <img src="../../../_static/robots/flexiv_rizon4s.png" alt="Flexiv Rizon 4S in its official ready pose" style="height: 400px; width: auto;"/>
 </div>
 
 The image uses the catalog defaults and native OfflineRT with the same default
 lighting/render settings as the other robot resource pages. Camera and renderer
-settings are recorded in the [render manifest](../../_static/robots/flexiv_rizon4s_render.json).
+settings are recorded in the [render manifest](../../../_static/robots/flexiv_rizon4s_render.json).
 
 ## Usage
 

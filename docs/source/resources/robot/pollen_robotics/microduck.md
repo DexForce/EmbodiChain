@@ -4,7 +4,7 @@
 including its floating base, standing pose and simulation PD drive defaults.
 
 <div style="text-align: center;">
-  <img src="../../_static/robots/microduck.png" alt="MicroDuck robot" style="height: 400px; width: auto;"/>
+  <img src="../../../_static/robots/microduck.png" alt="MicroDuck robot" style="height: 400px; width: auto;"/>
   <p><b>MicroDuck in the default joint pose</b></p>
 </div>
 
@@ -47,5 +47,5 @@ by `from_dict`. Locomotion tasks preserve these explicit overrides.
 
 ## See Also
 
-- [Shared locomotion defaults and render settings](locomotion.md)
-- [Locomotion robot API reference](../../api_reference/locomotion_robots.rst)
+- {doc}`Shared locomotion defaults and render settings </resources/robot/locomotion>`
+- {doc}`Locomotion robot API reference </api_reference/locomotion_robots>`

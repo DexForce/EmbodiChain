@@ -7,27 +7,27 @@ UR5 pair, and the long-reach UR10 pair, using their versioned asset materials.
 
 <div style="display: flex; justify-content: center; align-items: flex-start; gap: 20px; flex-wrap: wrap;">
   <figure style="text-align: center; margin: 10px;">
-    <img src="../../_static/robots/ur/ur3.png" alt="UR3" style="height: 220px; width: auto;"/>
+    <img src="../../../_static/robots/ur/ur3.png" alt="UR3" style="height: 220px; width: auto;"/>
     <figcaption><b>UR3</b></figcaption>
   </figure>
   <figure style="text-align: center; margin: 10px;">
-    <img src="../../_static/robots/ur/ur3e.png" alt="UR3e" style="height: 220px; width: auto;"/>
+    <img src="../../../_static/robots/ur/ur3e.png" alt="UR3e" style="height: 220px; width: auto;"/>
     <figcaption><b>UR3e</b></figcaption>
   </figure>
   <figure style="text-align: center; margin: 10px;">
-    <img src="../../_static/robots/ur/ur5.png" alt="UR5" style="height: 220px; width: auto;"/>
+    <img src="../../../_static/robots/ur/ur5.png" alt="UR5" style="height: 220px; width: auto;"/>
     <figcaption><b>UR5</b></figcaption>
   </figure>
   <figure style="text-align: center; margin: 10px;">
-    <img src="../../_static/robots/ur/ur5e.png" alt="UR5e" style="height: 220px; width: auto;"/>
+    <img src="../../../_static/robots/ur/ur5e.png" alt="UR5e" style="height: 220px; width: auto;"/>
     <figcaption><b>UR5e</b></figcaption>
   </figure>
   <figure style="text-align: center; margin: 10px;">
-    <img src="../../_static/robots/ur/ur10.png" alt="UR10" style="height: 220px; width: auto;"/>
+    <img src="../../../_static/robots/ur/ur10.png" alt="UR10" style="height: 220px; width: auto;"/>
     <figcaption><b>UR10</b></figcaption>
   </figure>
   <figure style="text-align: center; margin: 10px;">
-    <img src="../../_static/robots/ur/ur10e.png" alt="UR10e" style="height: 220px; width: auto;"/>
+    <img src="../../../_static/robots/ur/ur10e.png" alt="UR10e" style="height: 220px; width: auto;"/>
     <figcaption><b>UR10e</b></figcaption>
   </figure>
 </div>
@@ -35,7 +35,7 @@ UR5 pair, and the long-reach UR10 pair, using their versioned asset materials.
 Images use `RenderCfg(renderer="rt")` (OfflineRT), default lighting and a common
 display pose. The V4 asset bundle corrects the UR3/UR3e material colors while
 preserving geometry and kinematics. Camera and rendering settings are recorded
-in the [render manifest](../../_static/robots/ur/render_manifest.json).
+in the [render manifest](../../../_static/robots/ur/render_manifest.json).
 
 ## Key Features
 
@@ -92,5 +92,5 @@ robot = sim.add_robot(cfg=cfg)
 
 ## See Also
 
-- :doc:`/guides/add_robot` - Adding a new robot (quick reference)
-- :doc:`/overview/sim/motion/solvers/index` - IK solver reference
+- {doc}`/guides/add_robot` - Adding a new robot (quick reference)
+- {doc}`/overview/sim/motion/solvers/index` - IK solver reference

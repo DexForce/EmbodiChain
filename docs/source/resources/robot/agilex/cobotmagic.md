@@ -4,7 +4,7 @@ CobotMagic is a fixed-base dual-arm robot from AgileX Robotics. EmbodiChain's
 default preset combines two 6-DOF arms with V100 parallel grippers.
 
 <figure style="text-align: center; margin: 20px auto; max-width: 960px;">
-  <img src="../../_static/robots/cobotmagic.jpg" alt="CobotMagic with two V100 grippers, shown in an open-gripper display pose with both arm bases on the ground" width="1600" height="1080" style="display: block; width: 100%; height: auto;"/>
+  <img src="../../../_static/robots/cobotmagic.jpg" alt="CobotMagic with two V100 grippers, shown in an open-gripper display pose with both arm bases on the ground" width="1600" height="1080" style="display: block; width: 100%; height: auto;"/>
   <figcaption><b>CobotMagic · V100 grippers · 14 independent control DOFs</b></figcaption>
 </figure>
 
@@ -19,7 +19,7 @@ level; task deployments configure their mounting height through `init_pos`.
 tone mapping off; exposure 1.0. The default ground and environment emission
 are supplemented by neutral key, fill and rim rectangular lights. Exact
 camera, lighting and joint settings are recorded in the
-[render manifest](../../_static/robots/cobotmagic_render.json).
+[render manifest](../../../_static/robots/cobotmagic_render.json).
 :::
 
 ## Key Features

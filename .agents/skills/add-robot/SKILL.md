@@ -136,8 +136,12 @@ must match the matching `control_parts` entry (the test stub asserts this).
    `_asset_catalog.py`. The `embodichain.assets` entry point connects them to
    the core resolver and data CLI; listing must not construct datasets.
 
-7. **Add documentation:** create `docs/source/resources/robot/<name>.md` and add
-   it to `docs/source/resources/robot/index.rst`.
+7. **Add documentation:** create
+   `docs/source/resources/robot/<vendor>/<model>.md`, matching the source
+   namespace. Include the model in its vendor's `index.rst` and the Supported
+   Robots overview. Add an index for a new vendor and link it from
+   `docs/source/resources/robot/index.rst`. Community projects with an unknown
+   manufacturer use their project namespace; keep generic composition separate.
 8. **Add a test stub** with a `__main__` smoke test + the DOF drift guard. Use
    `/add-test` for full test scaffolding; the guard snippet is:
 
@@ -194,7 +198,7 @@ Do not copy those semantic declarations into the robot class.
 - Config: `extensions/embodichain_robots/<vendor>/<model>.py` or `<vendor>/<model>/`
 - Catalog / lazy exports: `extensions/embodichain_robots/_catalog.py`, `extensions/embodichain_robots/__init__.py`
 - Shared resolver: `embodichain/robot_registry.py`
-- Docs: `docs/source/resources/robot/<name>.md`
+- Docs: `docs/source/resources/robot/<vendor>/<model>.md` and the owning index
 - Tests: `tests/sim/objects/test_robot_cfg.py`
 - Base class: `embodichain/lab/sim/cfg/robot.py` (`RobotCfg`)
 - Guide: `docs/source/guides/add_robot.rst` · Tutorial: `docs/source/tutorial/add_robot.rst`

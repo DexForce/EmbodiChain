@@ -4,7 +4,7 @@
 renaming its joints or assembling separate arms.
 
 <figure style="text-align: center; margin: 20px auto; max-width: 540px;">
-  <img src="../../_static/robots/aloha_mini_2_pro.png" alt="Aloha Mini 2 Pro with its complete base, vertical column and two bent arms, rendered with soft studio lighting" width="960" height="1200" style="display: block; width: 100%; height: auto;"/>
+  <img src="../../../_static/robots/aloha_mini_2_pro.png" alt="Aloha Mini 2 Pro with its complete base, vertical column and two bent arms, rendered with soft studio lighting" width="960" height="1200" style="display: block; width: 100%; height: auto;"/>
   <figcaption><b>Aloha Mini 2 Pro · 15 DOFs across five control groups</b></figcaption>
 </figure>
 
@@ -17,7 +17,7 @@ the dark arm details while retaining the white body's surface definition.
 tone mapping off; exposure 1.0. The default ground and environment emission
 are supplemented by neutral key, fill and rim rectangular lights. Exact
 camera, lighting and joint settings are recorded in the
-[render manifest](../../_static/robots/aloha_mini_render.json).
+[render manifest](../../../_static/robots/aloha_mini_render.json).
 :::
 
 ```python
@@ -57,4 +57,4 @@ python -m embodichain_robots.alohamini.aloha_mini.cfg --headless --device cpu
 Omit `--headless` for the interactive simulation window. Select the physics
 backend with `--physics default` or `--physics newton`.
 
-See the [API reference](../../api_reference/aloha_mini.rst).
+See the {doc}`API reference </api_reference/aloha_mini>`.

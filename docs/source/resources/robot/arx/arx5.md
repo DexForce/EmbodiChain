@@ -6,7 +6,7 @@ bundled robot catalog registers it as `ARX5`. The package exports the class
 lazily; listing the catalog does not load the asset or simulation runtime.
 
 <div style="text-align: center;">
-  <img src="../../_static/robots/arx5.png" alt="ARX5 X5A robot with its native parallel-jaw gripper in the adjusted ready pose" width="1600" height="1080" style="height: 400px; width: auto; max-width: 100%; object-fit: contain;"/>
+  <img src="../../../_static/robots/arx5.png" alt="ARX5 X5A robot with its native parallel-jaw gripper in the adjusted ready pose" width="1600" height="1080" style="height: 400px; width: auto; max-width: 100%; object-fit: contain;"/>
   <p><b>ARX5 X5A with native parallel-jaw gripper</b></p>
 </div>
 
@@ -23,7 +23,7 @@ materials use the existing W1 V030 black display color (sRGB 46/255) and
 roughness (0.408248) to retain readable shading. These material overrides apply
 only to this illustration. Exact camera, lighting, material values and their
 reference manifests are recorded in the
-[render manifest](../../_static/robots/arx5_render.json).
+[render manifest](../../../_static/robots/arx5_render.json).
 :::
 
 ## Control and kinematics

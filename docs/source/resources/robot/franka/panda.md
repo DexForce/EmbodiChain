@@ -5,7 +5,7 @@ parallel-jaw hand. The bundled model contains the seven-joint arm and two
 finger joints in one URDF.
 
 <div style="text-align: center;">
-  <img src="../../_static/robots/franka_panda.png" alt="Franka Panda robot" style="height: 400px; width: auto;"/>
+  <img src="../../../_static/robots/franka_panda.png" alt="Franka Panda robot" style="height: 400px; width: auto;"/>
   <p><b>Franka Panda with parallel-jaw hand</b></p>
 </div>
 
@@ -109,9 +109,9 @@ cfg = DualArmRobotCfg.from_dict(
 robot = sim.add_robot(cfg=cfg)
 ```
 
-See :doc:`dual_arm` for the available mount presets and configuration options.
+See {doc}`/resources/robot/dual_arm` for the available mount presets and configuration options.
 
 ## See Also
 
-- :doc:`/overview/sim/motion/solvers/index` - IK solver reference
-- :doc:`/guides/add_robot` - Adding a new robot (quick reference)
+- {doc}`/overview/sim/motion/solvers/index` - IK solver reference
+- {doc}`/guides/add_robot` - Adding a new robot (quick reference)

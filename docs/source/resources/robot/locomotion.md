@@ -6,12 +6,12 @@ They can be selected independently of a task through the robot catalog:
 
 | Catalog ID | Configuration class | Controlled joints |
 | --- | --- | --- |
-| [`UnitreeGo1`](unitree_go1.md) | `UnitreeGo1Cfg` | 12 |
-| [`UnitreeGo2`](unitree_go2.md) | `UnitreeGo2Cfg` | 12 |
-| [`UnitreeG1`](unitree_g1.md) | `UnitreeG1Cfg` | 29 |
-| [`UnitreeH1_2`](unitree_h1_2.md) | `UnitreeH12Cfg` | 27 |
-| [`ANYmalC`](anymal_c.md) | `ANYmalCCfg` | 12 |
-| [`MicroDuck`](microduck.md) | `MicroDuckCfg` | 14 |
+| {doc}`UnitreeGo1 </resources/robot/unitree/go1>` | `UnitreeGo1Cfg` | 12 |
+| {doc}`UnitreeGo2 </resources/robot/unitree/go2>` | `UnitreeGo2Cfg` | 12 |
+| {doc}`UnitreeG1 </resources/robot/unitree/g1>` | `UnitreeG1Cfg` | 29 |
+| {doc}`UnitreeH1_2 </resources/robot/unitree/h1_2>` | `UnitreeH12Cfg` | 27 |
+| {doc}`ANYmalC </resources/robot/anybotics/anymal_c>` | `ANYmalCCfg` | 12 |
+| {doc}`MicroDuck </resources/robot/pollen_robotics/microduck>` | `MicroDuckCfg` | 14 |
 
 ```bash
 embodichain preview-robot --robot UnitreeGo2
@@ -36,7 +36,7 @@ keep their ordering when changing a model. Foot and IMU reference points are
 stored alongside the model. The presets retain `build_pk_chain=False` and
 provide no limb IK solver.
 
-See the [API reference](../../api_reference/locomotion_robots.rst) for the public
+See the {doc}`API reference </api_reference/locomotion_robots>` for the public
 configuration classes and model-profile reader.
 
 ## Render Settings
