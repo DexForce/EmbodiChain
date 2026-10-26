@@ -105,6 +105,8 @@
     .line { width: 22px; height: 0; border-top: 2px solid var(--blue); }
     .line.reference { border-color: #8f98a5; border-top-style: dashed; }
     .diamond { width: 8px; height: 8px; border: 1.5px solid #dde4ed; transform: rotate(45deg); }
+    .object-swatch { width: 9px; height: 9px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 2px rgba(240,179,90,.18); }
+    .target-swatch { width: 11px; height: 8px; border: 1.5px solid var(--green); border-radius: 50%; }
     .view-toggle { display: flex; gap: 5px; }
     .view-button { padding: 7px 10px; color: #95a0af; }
     .view-button.active { color: white; background: #263347; border-color: #3a4d69; }
@@ -193,6 +195,8 @@
             <span class="legend-item"><i class="line reference"></i>Reference</span>
             <span class="legend-item"><i class="line"></i>Variant</span>
             <span class="legend-item"><i class="diamond"></i>Phase boundary</span>
+            <span class="legend-item"><i class="object-swatch"></i>Object</span>
+            <span class="legend-item"><i class="target-swatch"></i>Target</span>
           </div>
           <div class="view-toggle">
             <button class="view-button active" data-view="path">EEF Path</button>
@@ -415,6 +419,84 @@
         context.fillStyle = axis.color; context.font = "10px ui-sans-serif, system-ui"; context.textAlign = "center"; context.fillText(axis.label, x, y - 5);
       });
     }
+    function translationTransform(center) {
+      const transform = identity4();
+      transform[3] = center[0]; transform[7] = center[1]; transform[11] = center[2];
+      return transform;
+    }
+    function drawBox(transform, size, project, fills, stroke) {
+      const [halfX, halfY, halfZ] = size.map(value => value / 2);
+      const local = [
+        [-halfX, -halfY, -halfZ], [halfX, -halfY, -halfZ],
+        [halfX, halfY, -halfZ], [-halfX, halfY, -halfZ],
+        [-halfX, -halfY, halfZ], [halfX, -halfY, halfZ],
+        [halfX, halfY, halfZ], [-halfX, halfY, halfZ]
+      ];
+      const points = local.map(point => transformPoint(transform, point));
+      const faces = [[0, 1, 2, 3], [4, 7, 6, 5], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]];
+      faces.map((face, index) => ({
+        face, index, depth: face.reduce((sum, corner) => sum + project(points[corner])[2], 0) / face.length
+      })).sort((a, b) => b.depth - a.depth).forEach(({ face, index }) => {
+        context.beginPath();
+        face.forEach((corner, pointIndex) => {
+          const [x, y] = project(points[corner]);
+          if (pointIndex === 0) context.moveTo(x, y); else context.lineTo(x, y);
+        });
+        context.closePath(); context.fillStyle = fills[index % fills.length]; context.fill();
+        context.strokeStyle = stroke; context.lineWidth = 1; context.stroke();
+      });
+    }
+    function drawRing(center, radius, project, color, dash = []) {
+      const points = [];
+      for (let index = 0; index <= 40; index += 1) {
+        const angle = index / 40 * Math.PI * 2;
+        points.push([center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle), center[2]]);
+      }
+      polyline(points, project, color, 2.2, dash);
+    }
+    function drawTaskLabel(label, point, project, color) {
+      const [x, y] = project(point);
+      context.font = "700 10px ui-sans-serif, system-ui"; context.textAlign = "center";
+      context.fillStyle = "rgba(9,12,16,.86)"; context.fillRect(x - 25, y + 22, 50, 17);
+      context.fillStyle = color; context.fillText(label, x, y + 34);
+    }
+    function drawTaskContext(project) {
+      const object = DATA.task.object, offset = object.tcp_offset_m;
+      const pickCenter = transformPoint(object.pick_transform, offset);
+      const placeCenter = transformPoint(object.place_transform, offset);
+      const pickTop = Math.max(.08, pickCenter[2] - object.radius_m);
+      const placeTop = Math.max(.08, placeCenter[2] - object.radius_m);
+      drawBox(translationTransform([pickCenter[0], pickCenter[1], pickTop / 2]), [.21, .21, pickTop], project,
+        ["rgba(55,64,76,.82)", "rgba(43,51,62,.82)", "rgba(34,41,51,.82)"], "#596575");
+      drawBox(translationTransform([placeCenter[0], placeCenter[1], placeTop / 2]), [.21, .21, placeTop], project,
+        ["rgba(42,66,57,.78)", "rgba(34,56,48,.78)", "rgba(29,47,41,.78)"], "#47735d");
+      drawRing([pickCenter[0], pickCenter[1], pickTop + .003], .071, project, "rgba(240,179,90,.8)", [4, 4]);
+      drawRing([placeCenter[0], placeCenter[1], placeTop + .003], .075, project, "#58d68d");
+      return {
+        pickCenter, placeCenter,
+        pickLabel: [pickCenter[0], pickCenter[1], pickTop + .003],
+        placeLabel: [placeCenter[0], placeCenter[1], placeTop + .003]
+      };
+    }
+    function currentObjectCenter(record, index, pose, taskContext) {
+      const grasp = record.phases.find(phase => phase.label === "grasp");
+      const release = record.phases.find(phase => phase.label === "release");
+      if (!grasp || !release || index < grasp.stop - 1) return taskContext.pickCenter;
+      if (index < release.start) return transformPoint(pose.transform, DATA.task.object.tcp_offset_m);
+      return taskContext.placeCenter;
+    }
+    function drawTaskObject(center, project) {
+      const radius = DATA.task.object.radius_m, [x, y] = project(center);
+      const axes = [[radius, 0, 0], [0, radius, 0], [0, 0, radius]];
+      const projectedRadius = Math.max(...axes.map(axis => {
+        const [edgeX, edgeY] = project(add3(center, axis));
+        return Math.hypot(edgeX - x, edgeY - y);
+      }), 5);
+      const gradient = context.createRadialGradient(x - projectedRadius * .28, y - projectedRadius * .32, 1, x, y, projectedRadius);
+      gradient.addColorStop(0, "#fff0c2"); gradient.addColorStop(.35, "#f0b35a"); gradient.addColorStop(1, "#9a5724");
+      context.beginPath(); context.arc(x, y, projectedRadius, 0, Math.PI * 2);
+      context.fillStyle = gradient; context.fill(); context.strokeStyle = "#ffd58b"; context.lineWidth = 1.5; context.stroke();
+    }
     function drawRobot(pose, project, reference = false) {
       const projectedLinks = pose.points.slice(1).map((point, index) => {
         const start = pose.points[index], startProjected = project(start), stopProjected = project(point);
@@ -450,12 +532,17 @@
     function drawPath(width, height) {
       const reference = DATA.reference, variant = candidate(), project = cameraProjection(width, height);
       drawGround(project);
+      const taskContext = drawTaskContext(project);
       polyline(reference.tool, project, colors.reference, 1.7, [6, 5]);
       polyline(variant.tool, project, colors.blue, 2.8);
       variant.phases.forEach(phase => diamond(variant.tool[phase.stop - 1], project, phase.kind === "bridge" ? colors.bridge : colors.boundary));
       const referenceIndex = sampleIndex(reference, state.progress), variantIndex = sampleIndex(variant, state.progress);
+      const variantPose = frankaPose(variant.q[variantIndex]);
       drawRobot(frankaPose(reference.q[referenceIndex]), project, true);
-      drawRobot(frankaPose(variant.q[variantIndex]), project);
+      drawTaskObject(currentObjectCenter(variant, variantIndex, variantPose, taskContext), project);
+      drawRobot(variantPose, project);
+      drawTaskLabel("PICK", taskContext.pickLabel, project, "#f0b35a");
+      drawTaskLabel("PLACE", taskContext.placeLabel, project, "#58d68d");
     }
     function drawJoints(width, height) {
       const reference = DATA.reference, variant = candidate();
@@ -539,7 +626,7 @@
       document.getElementById("method-implementation").textContent = value.implementation;
       document.getElementById("method-guarantee").textContent = value.guarantee;
       document.getElementById("strength-value").textContent = value.strength_labels[state.strength];
-      document.getElementById("chart-caption").textContent = state.view === "path" ? "3D EEF path and Franka Panda pose · drag to orbit · scroll to zoom" : "Reference vs. variant joint positions · dashed / solid";
+      document.getElementById("chart-caption").textContent = state.view === "path" ? "Pick and place · 3D EEF path and Franka pose · drag to orbit · scroll to zoom" : "Reference vs. variant joint positions · dashed / solid";
       canvas.classList.toggle("orbitable", state.view === "path");
       updateMetrics(); syncProgress();
     }

@@ -147,7 +147,7 @@ _SEEDS = tuple(range(9))
 _STRENGTHS = (0.01, 0.025, 0.04)
 _TASK_SPACE_STRENGTHS = (0.015, 0.03, 0.05)
 _APPROACH_ANGLES = (0.12, 0.24, 0.36)
-_STITCH_POSTURE_OFFSETS = (0.08, 0.14, 0.22)
+_STITCH_POSTURE_OFFSETS = (0.3, 0.5, 0.8)
 _TEMPLATE_PATH = Path(__file__).with_name("trajectory_augmentation_lab_template.html")
 
 
@@ -635,11 +635,26 @@ def _posture_shifted_template(
     pattern = reference.positions.new_tensor((0.35, -0.15, 0.8, 0.0, -0.6, 0.0, 0.5))
     phase_signs = reference.positions.new_tensor((1.0, 1.0, -1.0, -1.0, 0.7, 0.7))
     lower, upper = _JOINT_LIMITS[:, 0], _JOINT_LIMITS[:, 1]
-    waypoints = []
-    for index, sign in zip(indices, phase_signs, strict=True):
-        value = reference.positions[index] + sign * posture_offset * pattern
-        waypoints.append(value.clamp(min=lower + 1e-3, max=upper - 1e-3))
-    return _template_from_waypoints(source_id, tuple(waypoints))
+    reference_waypoints = reference.positions[indices]
+    initial = reference_waypoints + phase_signs[:, None] * posture_offset * pattern
+    initial = initial.clamp(min=lower + 1e-3, max=upper - 1e-3)
+    solved = solve_dls_ik(
+        _franka_kinematics(reference_waypoints)[0],
+        initial,
+        _franka_kinematics,
+        lower,
+        upper,
+        DifferentiableIKCfg(
+            max_iterations=40,
+            damping=2e-3,
+            step_size=0.7,
+            pos_eps=5e-6,
+            rot_eps=5e-6,
+        ),
+    )
+    if not bool(solved.success.all()):
+        raise RuntimeError(f"Franka demonstration {source_id} failed waypoint IK.")
+    return _template_from_waypoints(source_id, tuple(solved.qpos.unbind()))
 
 
 def _stitching_variants(
@@ -745,6 +760,24 @@ def _method(
     }
 
 
+def _task_context(reference: TrajectoryTemplate) -> dict[str, object]:
+    poses = _franka_kinematics(reference.positions)[0]
+    pick_index = reference.phases[0].stop_index - 1
+    place_index = reference.phases[2].stop_index - 1
+    return {
+        "instruction": "Pick the orange object and place it in the green target.",
+        "object": {
+            "radius_m": 0.045,
+            "tcp_offset_m": (0.0, 0.0, 0.065),
+            "pick_transform": poses[pick_index].round(decimals=8).reshape(-1).tolist(),
+            "place_transform": poses[place_index]
+            .round(decimals=8)
+            .reshape(-1)
+            .tolist(),
+        },
+    }
+
+
 def _payload() -> dict[str, object]:
     reference = _reference_template()
     reference_record = _record(reference, reference)
@@ -843,16 +876,16 @@ def _payload() -> dict[str, object]:
             implementation="TrajectorySegmentBank + stitch_trajectory_segments(..., bridge_planner)",
             guarantee="Compatibility covers phase semantics and joint layout. Minimum-jerk bridges are continuous but not collision-certified.",
             strength_labels=(
-                "±0.08 rad source range",
-                "±0.14 rad source range",
-                "±0.22 rad source range",
+                "±0.3 rad posture seed",
+                "±0.5 rad posture seed",
+                "±0.8 rad posture seed",
             ),
             variants=_stitching_variants(reference),
         ),
     }
     return {
         "title": "Trajectory Augmentation Lab",
-        "subtitle": "Compare trajectory variants for one task on the 7-DoF Franka Panda.",
+        "subtitle": "Pick the orange object and place it in the green target. Compare Franka Panda trajectory variants.",
         "robot": {
             "name": "Franka Panda",
             "dof": len(_FRANKA_JOINT_NAMES),
@@ -869,11 +902,12 @@ def _payload() -> dict[str, object]:
             ],
         },
         "seed_count": len(_SEEDS),
+        "task": _task_context(reference),
         "reference": reference_record,
         "methods": methods,
         "scope": {
             "included": "joint motion, EEF path, timing, approach, and demonstration segments",
-            "excluded": "task, contact poses, affordances, observations, and scene",
+            "excluded": "task, object/goal poses, contact poses, affordances, and scene layout",
         },
     }
 

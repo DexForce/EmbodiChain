@@ -23,7 +23,9 @@ python examples/expansion/trajectory/trajectory_augmentation_visualizer.py \
 ```
 
 The interactive 3D view uses the official Panda serial-chain geometry and can
-be orbited or zoomed without loading a simulator. The tabs cover
+be orbited or zoomed without loading a simulator. A fixed orange object and
+green placement target show the pick-and-place objective; they provide task
+context but never enter candidate generation. The tabs cover
 endpoint-preserving joint residuals, interior via points,
 Jacobian null-space residuals, manipulability-guided selection, task-space
 deformation with trajectory IK, temporal retiming, fixed-contact approach
@@ -35,8 +37,9 @@ augmentation operator.
 
 ![Interactive pure-trajectory augmentation laboratory](assets/trajectory_augmentation_lab.png)
 
-This laboratory is intentionally trajectory-only. It does not sample images,
-affordances, contact points, grasp poses, object layouts or scene appearance.
+This laboratory is intentionally trajectory-only. It visualizes one fixed
+object/target pair but does not sample images, affordances, contact points,
+grasp poses, object layouts or scene appearance.
 The fixed-contact approach tab varies the pre-contact standoff while preserving
 the contact transform, and is therefore kept separate from affordance
 augmentation. Every candidate remains subject to host-owned collision,
