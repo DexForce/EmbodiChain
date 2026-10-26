@@ -196,6 +196,12 @@ final assessment opts into balanced quotas; historical training validation keeps
 the default loaded by its running process.
 Optional `on_episode` receives CPU records only for scored completions; strict peg evaluation persists and verifies these records as a hashed JSONL file.
 
+Saved peg checkpoints can be ranked by the native balanced evaluator through
+`scripts/benchmark/assembly/select_peg.py` before independent testing. The
+learning report's `--selection-report` keeps this ranking separate from the
+trainer's compatibility diagnostics and verifies the final weight hash and
+independent seed. Selection never uses final-test episodes.
+
 Read [training and extension](training.md) for evaluation, checkpoints,
 distributed ownership, official examples and adding algorithms/policies/envs.
 

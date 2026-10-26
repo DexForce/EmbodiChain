@@ -27,8 +27,10 @@ import pytest
 from scripts.patches import apply_mujoco_warp_epa_horizon as patcher
 
 
-@pytest.fixture
-def source_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+@pytest.fixture(params=["3.12.0", "3.15.0"])
+def source_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Path:
     """Prepare a tiny dependency fixture with the patch's source context."""
     source = tmp_path / "source" / "mujoco_warp"
     (source / "_src").mkdir(parents=True)
@@ -38,6 +40,11 @@ def source_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         + "\n" * 26
         + "MJ_MINMU = mujoco.mjMINMU  # minimum friction\n"
         + "MJ_MINAWAKE = mujoco.mjMINAWAKE  # minimum number of timesteps before sleeping\n"
+        + (
+            'FLEX_STIFFNESS_3D = 24 if util_pkg.check_version("mujoco>=3.14.1.dev989511280") else 21\n'
+            if request.param == "3.15.0"
+            else ""
+        )
         + "# maximum size (by number of edges) of an horizon in EPA algorithm\n"
         + "MJ_MAX_EPAHORIZON = 24\n"
         + "# maximum average number of trianglarfaces EPA can insert at each iteration\n"
@@ -55,14 +62,18 @@ def source_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         patcher,
         "_SOURCE_SHA256",
         {
-            name: hashlib.sha256(text.encode()).hexdigest()
-            for name, text in sources.items()
+            request.param: {
+                name: hashlib.sha256(text.encode()).hexdigest()
+                for name, text in sources.items()
+            }
         },
     )
     monkeypatch.setattr(
         patcher.importlib.metadata,
         "distribution",
-        lambda name: SimpleNamespace(version="3.12.0", locate_file=lambda name: source),
+        lambda name: SimpleNamespace(
+            version=request.param, locate_file=lambda name: source
+        ),
     )
     return source
 
@@ -71,7 +82,10 @@ def test_epa_overlay_changes_only_copied_constant(
     tmp_path: Path, source_package: Path
 ) -> None:
     original = {
-        name: (source_package / name).read_bytes() for name in patcher._SOURCE_SHA256
+        name: (source_package / name).read_bytes()
+        for name in patcher._SOURCE_SHA256[
+            patcher.importlib.metadata.distribution("mujoco-warp").version
+        ]
     }
     output = patcher.apply_overlay(tmp_path / "overlay")
     for name, content in original.items():

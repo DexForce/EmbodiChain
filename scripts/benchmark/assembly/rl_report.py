@@ -275,6 +275,8 @@ def _heldout(
     if not result.get("episodes", 0) > 0:
         raise ValueError("Final evaluation must contain completed episodes.")
     health = _health_statuses({}, ("evaluation",))
+    checkpoint = None
+    evaluation_seed = None
     if health_path is not None:
         recorded = json.loads(health_path.read_text())
         if recorded.get("schema") != "embodichain-peg-native-evaluation-health/v1":
@@ -301,6 +303,8 @@ def _heldout(
             ),
             "guards": recorded.get("native_health", {}),
         }
+        checkpoint = recorded.get("checkpoint")
+        evaluation_seed = recorded.get("evaluation_reset_seed")
     return {
         "source": _file(path),
         "inputs": document["inputs"],
@@ -309,7 +313,65 @@ def _heldout(
             key: _number(value) for key, value in result.get("metrics", {}).items()
         },
         "health": health,
+        "checkpoint": checkpoint,
+        "evaluation_reset_seed": evaluation_seed,
         "scope": "independent final episodes; held-out geometry is not implied",
+    }
+
+
+def _selection(path: Path | None, run: Path, assessment: dict | None) -> dict | None:
+    """Bind a balanced validation decision to the actually tested weights."""
+    if path is None:
+        return None
+    from scripts.benchmark.assembly.select_peg import _select_best
+
+    document = json.loads(path.read_text())
+    if (
+        document.get("schema") != "embodichain-peg-balanced-selection/v1"
+        or document.get("status") != "completed"
+        or Path(document.get("run", "")).resolve() != run
+        or document.get("protocol", {}).get("episode_allocation") != "balanced"
+    ):
+        raise ValueError("Selection must complete balanced validation of this RUN.")
+    candidates = document["candidates"]
+    declared = document["declared_candidates"]
+    identity = lambda row: (row["num_updates"], row["sha256"])
+    if len(candidates) != len(declared) or {identity(row) for row in candidates} != {
+        identity(row) for row in declared
+    }:
+        raise ValueError("Every declared checkpoint must appear in selection evidence.")
+    selected = _select_best(candidates)
+    if identity(selected) != identity(document["selected_checkpoint"]):
+        raise ValueError("The selected checkpoint disagrees with validation ranking.")
+    if (
+        hashlib.sha256(Path(selected["path"]).read_bytes()).hexdigest()
+        != selected["sha256"]
+    ):
+        raise ValueError("Validation-selected checkpoint contents changed.")
+    if assessment is not None:
+        checkpoint = assessment.get("checkpoint") or {}
+        if checkpoint.get("sha256") != selected["sha256"]:
+            raise ValueError(
+                "Final evaluation used a different validation-selected checkpoint."
+            )
+        if (
+            assessment.get("evaluation_reset_seed") is None
+            or assessment.get("evaluation_reset_seed") == document["protocol"]["seed"]
+        ):
+            raise ValueError("Final evaluation seed must differ from selection seed.")
+    return {
+        "source": _file(path),
+        "protocol": document["protocol"],
+        "selected_checkpoint": selected,
+        "points": [
+            {
+                "global_step": row["global_step"],
+                "num_updates": row["num_updates"],
+                "success_rate": row["success_rate"],
+            }
+            for row in candidates
+        ],
+        "scope": "balanced development checkpoint selection before independent testing",
     }
 
 
@@ -333,7 +395,7 @@ def _plot(series: dict, validation: list[dict], report: dict, output: Path) -> N
             [100 * row["eval/success_rate"] for row in points],
             "o-",
             color=color,
-            label="Validation success",
+            label="Training validation (first_completed)",
         )
         if any(row.get("eval/success_ci95_low") is not None for row in points):
             axes[0].fill_between(
@@ -358,8 +420,7 @@ def _plot(series: dict, validation: list[dict], report: dict, output: Path) -> N
                 alpha=0.18,
                 label="Recorded 95% Wilson CI",
             )
-        axes[0].legend(loc="upper left", fontsize=8)
-    else:
+    elif report.get("checkpoint_selection") is None:
         axes[0].text(
             0.5,
             0.5,
@@ -367,7 +428,19 @@ def _plot(series: dict, validation: list[dict], report: dict, output: Path) -> N
             transform=axes[0].transAxes,
             ha="center",
         )
-    axes[0].set(ylim=(0, 100), ylabel="Validation success (%)")
+    selection = report.get("checkpoint_selection")
+    if selection is not None:
+        points = selection["points"]
+        axes[0].plot(
+            [row["global_step"] / 1e6 for row in points],
+            [100 * row["success_rate"] for row in points],
+            "s-",
+            color="#2b7c52",
+            label="Balanced checkpoint validation",
+        )
+    if validation or selection:
+        axes[0].legend(loc="upper left", fontsize=8)
+    axes[0].set(ylim=(0, 100), ylabel="Success (%)")
     for axis, tag, label in (
         (
             axes[1],
@@ -409,7 +482,18 @@ def _markdown(report: dict, output: Path) -> None:
 
     health = report["health"]
     validation = report["validation"]
-    rows = [("latest validation", validation[-1])] if validation else []
+    rows = (
+        [("latest training validation (first_completed)", validation[-1])]
+        if validation
+        else []
+    )
+    if report.get("checkpoint_selection") is not None:
+        rows.append(
+            (
+                "selected balanced development validation",
+                report["checkpoint_selection"]["selected_checkpoint"]["metrics"],
+            )
+        )
     final_health_note = ""
     if report["final_episode_evaluation"] is not None:
         final_health = report["final_episode_evaluation"]["health"]
@@ -472,7 +556,7 @@ def _markdown(report: dict, output: Path) -> None:
         "",
         "![Recorded learning curves](learning_curves.png)",
         "",
-        "One geometry per run, approximate parallel-jaw robot dynamics and local resets; this does not reproduce the full paper distribution or establish sim-to-real capability.",
+        "One geometry per run, uncalibrated robot/gripper dynamics and local resets; this does not reproduce the full paper distribution or establish sim-to-real capability.",
         "Confidence intervals are the recorded episode intervals, not uncertainty across training seeds. Curves are unsmoothed. A running health snapshot may lag TensorBoard events; no missing metrics are filled with zero.",
         "Finite RL losses or sanitized actor observations do not establish raw native state finiteness. Missing native-state checks remain unverified. Recorded clock checks cover only their explicitly observed initial controls, not all individual physics substeps.",
     ]
@@ -495,6 +579,15 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
         args.heldout_eval.resolve() if args.heldout_eval else None,
         run,
         args.heldout_health.resolve() if args.heldout_health else None,
+    )
+    selection = _selection(
+        (
+            args.selection_report.resolve()
+            if getattr(args, "selection_report", None)
+            else None
+        ),
+        run,
+        final_evaluation,
     )
     health_summaries = [health] + (
         [final_evaluation["health"]] if final_evaluation else []
@@ -527,6 +620,7 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
         },
         "health": health,
         "validation": validation,
+        "checkpoint_selection": selection,
         "final_episode_evaluation": final_evaluation,
         "tensorboard_sources": events,
         "scalar_policy": "Newest wall time wins at duplicate tag/step; non-finite recorded values remain null, never zero. Completed updates count unique auxiliary-loss events, not the configured budget.",
@@ -558,6 +652,7 @@ def main() -> None:
     parser.add_argument("--health", type=Path)
     parser.add_argument("--heldout-eval", type=Path)
     parser.add_argument("--heldout-health", type=Path)
+    parser.add_argument("--selection-report", type=Path)
     parser.add_argument(
         "--disposition", choices=("active", "superseded", "unsafe"), default="active"
     )

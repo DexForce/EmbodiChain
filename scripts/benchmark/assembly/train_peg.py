@@ -76,18 +76,23 @@ def _write(path: Path, document: dict[str, Any]) -> None:
 
 
 def _epa_preflight() -> dict[str, Any]:
-    """Fail closed unless the loaded MuJoCo Warp 3.12 EPA capacity is prepared."""
+    """Check the prepared EPA profile and matching native reference version."""
     from mujoco_warp._src import collision_convex, types
 
     installed = version("mujoco-warp")
+    mujoco_version = version("mujoco")
+    supported = installed.startswith(("3.12.", "3.15."))
     constants = {
         "types.MJ_MAX_EPAHORIZON": int(types.MJ_MAX_EPAHORIZON),
         "collision_convex.MJ_MAX_EPAHORIZON": int(collision_convex.MJ_MAX_EPAHORIZON),
     }
     return {
-        "passed": installed.startswith("3.12.") and min(constants.values()) >= 128,
+        "passed": supported
+        and installed == mujoco_version
+        and min(constants.values()) >= 128,
         "mujoco_warp_version": installed,
-        "required": "MuJoCo Warp 3.12 with loaded EPA horizon capacity at least 128",
+        "mujoco_version": mujoco_version,
+        "required": "Matching MuJoCo/MuJoCo Warp 3.12 or 3.15 with loaded EPA horizon capacity at least 128; versions are separate experiment profiles",
         "loaded_constants": constants,
         "loaded_sources": {
             name: _file_metadata(inspect.getfile(module), digest=True)
@@ -471,7 +476,7 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
         snapshot("native_dependency_preflight")
         if not document["epa_preflight"]["passed"]:
             raise RuntimeError(
-                "Loaded MuJoCo Warp lacks the required 3.12 EPA-horizon >= 128 capacity profile."
+                "Loaded MuJoCo Warp lacks the prepared EPA >= 128 profile or matching native MuJoCo reference."
             )
         discover_task_packages()
         execute_init_hooks()

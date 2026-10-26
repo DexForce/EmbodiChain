@@ -90,7 +90,10 @@ principal axes between two writes.
 MuJoCo-Warp mimic joints retain native equality constraints and contact-force
 coupling. `_configure_newton_mimic_compliance()` adjusts only the selected
 articulation's equality rows, respecting the solver's time-constant safety
-floor; a weak follower drive stabilizes updates. Command targets propagate the
+floor; a weak follower drive stabilizes updates. Optional root fields
+`newton_mimic_solref` and `newton_mimic_solimp` select a per-articulation
+MuJoCo profile; omission preserves the existing compliance approximation.
+Contact impedance remains separate. Command targets propagate the
 authored leader relation. Never copy measured follower state or disable the
 native equality, which would turn the follower into an independent servo.
 Keep private Newton runtime access in the backend helper, with generic

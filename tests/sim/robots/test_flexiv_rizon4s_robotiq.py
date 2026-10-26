@@ -139,7 +139,14 @@ def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
         _default_assets, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(tmp_path / "cache")
     )
     arm_module = importlib.import_module("embodichain_robots.flexiv.rizon4s.cfg")
-    monkeypatch.setattr(arm_module, "get_data_path", lambda path: str(arm))
+
+    def prepared_path(path: str) -> str:
+        # Once composed, the robot must not resolve the original catalog asset
+        # again; checkpoint resources can be restored without that cache.
+        assert Path(path).is_file()
+        return path
+
+    monkeypatch.setattr(arm_module, "get_data_path", prepared_path)
     cfg = FlexivRizon4SRobotiqCfg.from_dict({"asset_source": "default"})
     root = ET.parse(cfg._pk_urdf_path).getroot()
     assert (

@@ -75,7 +75,8 @@ and qualified smoke scope. This does not add PGS support to MuJoCo Warp.
 
 ## Optional MuJoCo Warp EPA horizon capacity
 
-`mujoco_warp_epa_horizon.patch` increases the MuJoCo Warp **3.12.0**
+`mujoco_warp_epa_horizon.patch` (MuJoCo Warp **3.12.0**) and
+`mujoco_warp_epa_horizon_3_15.patch` (**3.15.0**) increase the
 `MJ_MAX_EPAHORIZON` allocation from 24 to 128 integers per CCD candidate.
 The convex and flex collision allocators read this Python constant; EPA's
 algorithm, iteration limits, geometry, contact properties and overflow flags
@@ -89,7 +90,7 @@ Create a new isolated overlay using the same Python environment as training:
 python scripts/patches/apply_mujoco_warp_epa_horizon.py --output /tmp/embodichain-mjw-epa128
 ```
 
-The helper checks the installed distribution version and exact SHA-256 values
+The helper selects the matching version profile and checks exact SHA-256 values
 of `types.py`, `collision_convex.py`, `collision_flex.py` and `collision_gjk.py`
 before copying anything. It applies the included patch to the copy and verifies
 that only the constant changed. It writes `provenance.json`, refuses existing
@@ -106,3 +107,10 @@ This is an explicit memory tradeoff, not a solver accuracy or throughput claim.
 Re-run strict native overflow checks, the triggering contact scene, grip/reset
 checks and policy evaluation before qualifying a new training profile. The
 patch is optional; ordinary installation never applies it automatically.
+
+The default-asset retraining profile uses DexSim source revision
+`528daf12fd44b9383b30165ac484cf79b574e873`, the existing source-contact patch,
+Newton 1.7.0 and matching MuJoCo/MuJoCo Warp 3.15.0. Applying the contact patch
+to that revision reproduces both patched Python files in the recorded runtime.
+This profile is separate from the historical 3.12 measurements; version and
+source hashes belong to each experiment's provenance.

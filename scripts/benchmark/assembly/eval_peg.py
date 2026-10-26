@@ -174,7 +174,7 @@ def run(args: argparse.Namespace) -> Path:
         document["epa_preflight"] = _epa_preflight()
         if not document["epa_preflight"]["passed"]:
             raise RuntimeError(
-                "Strict evaluation requires the prepared MuJoCo Warp 3.12 EPA-horizon >=128 profile."
+                "Strict evaluation requires a prepared EPA >=128 profile and matching native MuJoCo reference."
             )
         resolved = _resolve_input(native_args)
         if args.checkpoint == "best" and resolved.selected_checkpoint != "best":

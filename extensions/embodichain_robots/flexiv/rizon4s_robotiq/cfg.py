@@ -45,7 +45,7 @@ __all__ = ["FlexivRizon4SRobotiqCfg"]
 
 @configclass
 class FlexivRizon4SRobotiqCfg(RobotCfg):
-    """Public Rizon arm with an explicitly approximate parallel mimic gripper.
+    """Public Rizon arm with selectable Robotiq development assets.
 
     ``asset_source="menagerie"`` preserves legacy checkpoint construction.
     ``asset_source="default"`` composes the registered FlexivRizon4S and
@@ -184,7 +184,10 @@ class FlexivRizon4SRobotiqCfg(RobotCfg):
         """Reuse the default arm configuration and the unconverted hand URDF."""
         from embodichain_robots.flexiv.rizon4s import FlexivRizon4SCfg
 
-        arm = FlexivRizon4SCfg.from_dict({})
+        # A prepared checkpoint URDF already contains both components. Reuse
+        # the arm preset's numerical defaults without downloading its raw asset
+        # again when restoring a self-contained run.
+        arm = FlexivRizon4SCfg.from_dict({"fpath": urdf})
         self.uid = "FlexivRizon4SRobotiq"
         self.urdf_cfg = URDFCfg(
             components=[{"component_type": "arm", "urdf_path": urdf}]
@@ -199,6 +202,11 @@ class FlexivRizon4SRobotiqCfg(RobotCfg):
             )
         }
         self.root_props = deepcopy(arm.root_props)
+        # The default four-bar is a mechanical linkage. The generic heavily
+        # overdamped equality approximation permits centimetres of pad slip.
+        # Use a critically damped, 1 kHz-compatible equality profile while
+        # preserving native force coupling and the source joint tree.
+        self.root_props.newton_mimic_solref = (0.002, 1.0)
         self.attrs = deepcopy(arm.attrs)
         self.joint_drive_props = deepcopy(arm.joint_drive_props)
         for field, value in (

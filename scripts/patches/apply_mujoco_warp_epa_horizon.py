@@ -32,13 +32,23 @@ import subprocess
 
 __all__: list[str] = []
 
-_VERSION = "3.12.0"
-_PATCH_NAME = "mujoco_warp_epa_horizon.patch"
+_PATCH_NAMES = {
+    "3.12.0": "mujoco_warp_epa_horizon.patch",
+    "3.15.0": "mujoco_warp_epa_horizon_3_15.patch",
+}
 _SOURCE_SHA256 = {
-    "_src/types.py": "a49625a8994db0d3b52dd34f98adac7f70882d473108c4e4793e4830e81ea71c",
-    "_src/collision_convex.py": "9a030d1756b0c0cc6bc9df818011b0c44859bc45420cd37254df7087773bc85c",
-    "_src/collision_flex.py": "40dbd903315a6005c169af4d1899fc61a1e01b2a5362737ca16de2e99c8ed151",
-    "_src/collision_gjk.py": "fe2741a492f4e108a776aeb64c67dacf518845b16087209a6b9edda6367affdb",
+    "3.12.0": {
+        "_src/types.py": "a49625a8994db0d3b52dd34f98adac7f70882d473108c4e4793e4830e81ea71c",
+        "_src/collision_convex.py": "9a030d1756b0c0cc6bc9df818011b0c44859bc45420cd37254df7087773bc85c",
+        "_src/collision_flex.py": "40dbd903315a6005c169af4d1899fc61a1e01b2a5362737ca16de2e99c8ed151",
+        "_src/collision_gjk.py": "fe2741a492f4e108a776aeb64c67dacf518845b16087209a6b9edda6367affdb",
+    },
+    "3.15.0": {
+        "_src/types.py": "5ff63b8186bafba2e2d51d5aae84875fb289411d9984f4e06b51813ea088491b",
+        "_src/collision_convex.py": "3fd288f0cab3f5f444924d724362fd2cd2eab1281ab2dcb6bc3b48b9b3f30b92",
+        "_src/collision_flex.py": "b42a68595bc385ce49197967f51b5f1a1250b27b5f8bea1801f33bbe9d6a5659",
+        "_src/collision_gjk.py": "c288f8f37e4b7f8f9e0e48a92a46c3eee0d0efc6dd7fac65bba2522e11f39e48",
+    },
 }
 
 
@@ -58,9 +68,10 @@ def apply_overlay(output: Path, source_package: Path | None = None) -> Path:
         Absolute overlay root to prepend to ``PYTHONPATH`` in a fresh process.
     """
     distribution = importlib.metadata.distribution("mujoco-warp")
-    if distribution.version != _VERSION:
+    if distribution.version not in _SOURCE_SHA256:
         raise RuntimeError(
-            f"Expected mujoco-warp {_VERSION}; found {distribution.version}."
+            f"Expected mujoco-warp {' or '.join(_SOURCE_SHA256)}; "
+            f"found {distribution.version}."
         )
     source = (
         Path(distribution.locate_file("mujoco_warp"))
@@ -75,7 +86,7 @@ def apply_overlay(output: Path, source_package: Path | None = None) -> Path:
     if output.is_relative_to(source) or source.is_relative_to(output):
         raise ValueError("Overlay and source package must be separate directories.")
     source_hashes = {}
-    for relative, expected in _SOURCE_SHA256.items():
+    for relative, expected in _SOURCE_SHA256[distribution.version].items():
         actual = _sha256(source / relative)
         if actual != expected:
             raise RuntimeError(
@@ -86,7 +97,7 @@ def apply_overlay(output: Path, source_package: Path | None = None) -> Path:
     before, after = b"MJ_MAX_EPAHORIZON = 24\n", b"MJ_MAX_EPAHORIZON = 128\n"
     if original.count(before) != 1:
         raise RuntimeError("Expected exactly one unpatched EPA horizon constant.")
-    patch = Path(__file__).with_name(_PATCH_NAME).resolve()
+    patch = Path(__file__).with_name(_PATCH_NAMES[distribution.version]).resolve()
     if shutil.which("patch") is None:
         raise RuntimeError(
             "The standard patch command is required to apply this overlay."

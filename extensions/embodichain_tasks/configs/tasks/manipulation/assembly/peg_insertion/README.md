@@ -15,6 +15,26 @@ For a smoke run, override trainer `num_envs: 1`, `iterations: 1`, `buffer_size: 
 `enable_eval: false`. The full nominal template retains the intended batch budget
 so capacity failures are visible. Do not label a reduced batch as paper reproduction.
 
+`agents/ppo.study.default_assets.dev.yaml` starts a fresh native PPO run with
+the registered default Rizon4S and Robotiq2F85 assets through
+`task.study.default_assets.yaml`: 4096 environments, 32 controls per rollout,
+and at most 1000 updates. It retains the full mimic hand and uses the preset's
+explicit MuJoCo-Warp linkage compliance profile. This is a single-geometry
+development experiment, separate from the earlier parallel-jaw checkpoints.
+For capacity and nonfinite-state guards, run the same config through
+`scripts/benchmark/assembly/train_peg.py`; final assessment uses
+`scripts/benchmark/assembly/eval_peg.py` with balanced episode allocation.
+
+The trainer's compatibility validation counts the first completed episodes;
+completion speeds can therefore affect its ranking. Before final testing, use
+`python -m scripts.benchmark.assembly.select_peg --run RUN --output SELECTION`
+to evaluate every saved update with balanced development quotas. Its default
+protocol uses 512 episodes, 64 arenas and seed 10000, and selects by success
+rate with earlier updates breaking ties. Pass the selected checkpoint path to
+`eval_peg.py` with a separate test seed. The optional learning-report
+`--selection-report SELECTION/selection.json` keeps both curves distinct and
+checks that independent testing used the selected weights and another seed.
+
 The actor receives 33 encoder-derived values per frame, 30 historical frames
 and the current frame. The critic sees actual mating pose, geometric progress
 and one-hot contact classes; true contact classes are separate training fields.

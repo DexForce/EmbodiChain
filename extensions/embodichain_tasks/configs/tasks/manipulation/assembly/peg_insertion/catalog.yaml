@@ -1,7 +1,7 @@
 task_key: peg_insertion
 title: Blind Peg Insertion
-summary: Native proprioceptive assembly development task with explicitly approximate
-  jaw carriages; formal reproduction profiles remain gated.
+summary: Native proprioceptive assembly development task with configurable public
+  robot and gripper assets; formal reproduction profiles remain gated.
 tags:
 - manipulation
 - assembly
@@ -11,6 +11,8 @@ default_deployment: study_nominal
 deployments:
   study_nominal:
     config: task.study.nominal.yaml
+  study_default_assets:
+    config: task.study.default_assets.yaml
   fullrange_nominal:
     config: task.fullrange.nominal.yaml
   study_reference:

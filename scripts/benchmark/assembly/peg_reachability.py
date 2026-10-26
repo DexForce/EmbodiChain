@@ -133,23 +133,21 @@ class _PhysicsHealth:
             from mujoco_warp._src.types import OverflowType
 
             self._overflow_names = {
-                name: int(value) for name, value in OverflowType.__members__.items()
+                name: int(value)
+                for name, value in OverflowType.__members__.items()
+                if int(value) > 0 and int(value) & (int(value) - 1) == 0
             }
-            convergence = {"ITERATIONS", "LS_ITERATIONS"}
-            self._convergence_mask = sum(
-                value
-                for name, value in self._overflow_names.items()
-                if name in convergence
+            self._convergence_mask = int(getattr(OverflowType, "ITERATIONS", 0)) | int(
+                getattr(OverflowType, "LS_ITERATIONS", 0)
             )
-            self._capacity_mask = sum(
-                value
-                for name, value in self._overflow_names.items()
-                if name not in convergence
-            )
+            self._capacity_mask = 0
+            for bit in self._overflow_names.values():
+                if not bit & self._convergence_mask:
+                    self._capacity_mask |= bit
             self.values["overflow_masks"] = {
                 "capacity": self._capacity_mask,
                 "convergence_budget": self._convergence_mask,
-                "meaning": "ITERATIONS/LS_ITERATIONS are convergence budgets; other installed enum bits indicate capacity/collision loss. Flags are sticky until native reset.",
+                "meaning": "ITERATIONS/LS_ITERATIONS are convergence budgets; other installed single-bit flags indicate capacity/collision loss. Composite aliases such as ALL are excluded. Flags are sticky until native reset.",
             }
             self.values["actual_capacities"] = {
                 name: int(getattr(self.data, name))
@@ -758,6 +756,7 @@ def _grip_snapshot(env: Any, initial_inhand_z: torch.Tensor) -> dict[str, Any]:
         "inhand_position_m": inhand[:, :3, 3].tolist(),
         "inhand_axial_slip_m": (inhand[:, 2, 3] - initial_inhand_z).tolist(),
         "jaw_qpos": env.robot.get_qpos(name="eef").tolist(),
+        "all_joint_qpos": env.robot.get_qpos().tolist(),
         "jaw_target_qpos": env.robot.get_qpos(name="eef", target=True).tolist(),
         "valid_contacts_per_pad": torch.stack(counts, dim=1).tolist(),
         "normal_impulse_sum_per_pad_Ns": torch.stack(normal, dim=1).tolist(),
@@ -819,7 +818,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     torch_baseline = torch.cuda.memory_allocated(device)
     try:
         root = Path(__file__).resolve().parents[3]
-        path = (
+        path = args.gym_config or (
             root
             / "extensions/embodichain_tasks/configs/tasks/manipulation/assembly/peg_insertion/task.study.nominal.yaml"
         )
@@ -1108,6 +1107,9 @@ def main() -> None:
     """Select a bounded diagnostic without changing nominal randomization."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--num-envs", type=int, default=64)
+    parser.add_argument(
+        "--gym-config", type=Path, help="Explicit native task deployment to diagnose."
+    )
     parser.add_argument("--steps", type=int, default=250)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(

@@ -209,7 +209,8 @@ construction and delegates it to `_menagerie.py` in its model package.
 `asset_source="default"` uses `_default_assets.py` to compose the registered
 FlexivRizon4S and Robotiq2F85 URDFs through `URDFCfg`, preserving source names,
 visual materials, collisions, inertials and mimic relations. The configured
-contact links and aperture geometry belong to the robot preset; tasks must not
+contact links, aperture geometry and explicit Newton linkage profile belong to
+the robot preset; tasks must not
 infer those capabilities from a joint-name prefix. Both paths record engineering
 TCP/gripper assumptions and remain distinct from qualified author-identified
 dynamics. Validate FK, physical grasp and policy transfer separately.

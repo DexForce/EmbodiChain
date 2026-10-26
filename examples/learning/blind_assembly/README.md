@@ -25,7 +25,7 @@ public actor export does not specify their training implementation.
 Install the optional assembly generator and the SDK capabilities described in
 `scripts/patches/README.md` in a source checkout. Wheels include the patch files
 under the installation prefix's `share/embodichain/assembly_patches/`.
-The public robot sources and both licenses are pinned by Git blob hashes.
+The Menagerie reference sources and both licenses are pinned by Git blob hashes.
 
 For a training attempt from random initialization, the peg study development
 configuration uses 4,096 environments, 32-step rollouts and at most 2,000 PPO
@@ -167,6 +167,25 @@ and TCP relative to the trained nominal parallel-jaw model; actual new FK is
 used for proprioception. The previous nominal success rate does not qualify
 this transfer. The first recorded default-asset replay completed all three
 episodes with **0/3 successes**, without retraining or forcing poses.
+
+For fresh training with those registered assets, select
+`agents/ppo.study.default_assets.dev.yaml` in the peg task directory. It uses
+4096 arenas and 1000 updates, with the default hand's full mimic tree and an
+explicit linkage `solref: [0.002, 1.0]`. The MuJoCo/Warp 3.15 profile uses the
+matching version-guarded EPA helper and source-contact SDK patch; it is a
+separate experiment from the earlier 3.12 nominal result.
+
+The trainer's first-completed validation remains diagnostic. Rank every saved
+checkpoint before independent testing with balanced development episodes:
+
+```bash
+python -m scripts.benchmark.assembly.select_peg --run RUN \
+  --output outputs/default_asset_selection --episodes 512 --num-envs 64 --seed 10000
+```
+
+Pass the selected checkpoint's explicit path to the strict evaluator with a
+different seed. `rl_report --selection-report` verifies that final assessment
+used those weights and keeps its curve separate from training validation.
 
 See [CAPACITY.md](CAPACITY.md) for measured synthetic 12,288-environment policy
 capacity, and [the implementation report](../../sim/assembly/IMPLEMENTATION.md)

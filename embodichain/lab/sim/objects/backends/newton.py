@@ -185,13 +185,16 @@ def _configure_newton_mimic_compliance(
     state_joint_names: Sequence[str],
     mimic_ids: Sequence[int],
     mimic_parents: Sequence[int],
+    solref: Sequence[float] | None = None,
+    solimp: Sequence[float] | None = None,
 ) -> bool:
     """Tune native MuJoCo-Warp mimic constraints toward Default behavior.
 
     MuJoCo's default equality solref is underdamped relative to Default's
     articulation mimic. Map Default's natural-frequency and damping-ratio
     parameters to MuJoCo's mass-scaled positive convention as a stable
-    approximation. A follower drive with one percent of its leader's gains also
+    approximation, unless an explicit per-articulation profile is supplied.
+    A follower drive with one percent of its leader's gains also
     tracks the leader's target relation between solver updates. Keeping the
     native equality rows enabled preserves mechanical force coupling; the drive
     is only a stabilizer and never mirrors measured follower state.
@@ -297,15 +300,24 @@ def _configure_newton_mimic_compliance(
             "MuJoCo-Warp mimic row mapping does not match the articulation."
         )
     eq_solref = np.asarray(mjw_model.eq_solref.numpy()).copy()
-    mimic_solref = _default_mujoco_mimic_solref(
-        float(backend.cfg.dt),
-        int(backend.cfg.num_substeps),
+    mimic_solref = (
+        np.asarray(solref, dtype=np.float32)
+        if solref is not None
+        else _default_mujoco_mimic_solref(
+            float(backend.cfg.dt), int(backend.cfg.num_substeps)
+        )
     )
     eq_solref[selected] = mimic_solref
     mjw_model.eq_solref.assign(eq_solref)
+    if solimp is not None:
+        eq_solimp = np.asarray(mjw_model.eq_solimp.numpy()).copy()
+        eq_solimp[selected] = np.asarray(solimp, dtype=np.float32)
+        mjw_model.eq_solimp.assign(eq_solimp)
 
     # Keep the optional CPU mirror coherent for debugging and CPU execution.
     mj_model = getattr(solver, "mj_model", None)
     if mj_model is not None and len(eq_solref) > 0:
         mj_model.eq_solref[:] = eq_solref[0]
+        if solimp is not None:
+            mj_model.eq_solimp[:] = eq_solimp[0]
     return True

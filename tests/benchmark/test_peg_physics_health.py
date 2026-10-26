@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import enum
 from types import SimpleNamespace
 from typing import Any
 
@@ -25,6 +26,69 @@ import numpy as np
 import pytest
 
 from scripts.benchmark.assembly.peg_reachability import _PhysicsHealth
+
+
+@pytest.mark.parametrize(
+    "flag,capacity,convergence,unknown",
+    [(1, True, False, False), (4, False, True, False), (16, False, False, True)],
+)
+def test_composite_enum_aliases_do_not_change_overflow_classification(
+    monkeypatch: pytest.MonkeyPatch,
+    flag: int,
+    capacity: bool,
+    convergence: bool,
+    unknown: bool,
+) -> None:
+    from mujoco_warp._src import types
+
+    class Flags(enum.IntFlag):
+        NONE = 0
+        NEFC = 1
+        BROADPHASE = 2
+        ITERATIONS = 4
+        LS_ITERATIONS = 8
+        ALL = 15
+
+    monkeypatch.setattr(types, "OverflowType", Flags)
+    env, data = _environment()
+    data.overflow.values[1] = flag
+    health = _PhysicsHealth(env, scope="control", strict=True)
+    if capacity or unknown:
+        with pytest.raises(RuntimeError, match="capacity/collision loss"):
+            env.sim.update(0.001, step=20)
+    else:
+        env.sim.update(0.001, step=20)
+    assert health.values["capacity_overflow_seen"] is capacity
+    assert health.values["convergence_budget_exhausted_seen"] is convergence
+    assert health.values["unclassified_overflow_seen"] is unknown
+    assert "ALL" not in health.values["overflow_flags"]
+
+
+@pytest.mark.parametrize(
+    "warp_version,mujoco_version,horizon,passed",
+    [
+        ("3.12.0", "3.12.0", 128, True),
+        ("3.15.0", "3.15.0", 128, True),
+        ("3.15.0", "3.12.0", 128, False),
+        ("3.15.0", "3.15.0", 24, False),
+    ],
+)
+def test_epa_preflight_requires_prepared_and_matching_reference(
+    monkeypatch, warp_version, mujoco_version, horizon, passed
+) -> None:
+    from mujoco_warp._src import collision_convex, types
+    from scripts.benchmark.assembly import train_peg
+
+    monkeypatch.setattr(
+        train_peg,
+        "version",
+        lambda package: {"mujoco-warp": warp_version, "mujoco": mujoco_version}[
+            package
+        ],
+    )
+    monkeypatch.setattr(types, "MJ_MAX_EPAHORIZON", horizon)
+    monkeypatch.setattr(collision_convex, "MJ_MAX_EPAHORIZON", horizon)
+    assert train_peg._epa_preflight()["passed"] is passed
 
 
 class _Array:
