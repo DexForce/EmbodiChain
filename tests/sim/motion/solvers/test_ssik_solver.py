@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 import sys
 from typing import Any
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import pytest
@@ -114,6 +115,36 @@ def _make_solver(
         **options,
     )
     return cfg.init_solver(device=device, pk_serial_chain=chain)
+
+
+def _make_multiturn_solver(
+    device: str,
+    *,
+    backend: str = "warp",
+    max_joint_step: float | None = 0.2,
+    wrist_limit: float = 10.0,
+) -> SSIKSolver:
+    """Author legal multiple windings in the original URDF, before extraction."""
+    preset = AlohaMiniCfg.from_dict({})
+    original = preset.solver_cfg["left_arm"]
+    root = ET.fromstring(Path(preset.fpath).read_text())
+    name = preset.control_parts["left_arm"][-1]
+    limit = root.find(f"joint[@name='{name}']/limit")
+    assert limit is not None
+    limit.set("lower", str(-wrist_limit))
+    limit.set("upper", str(wrist_limit))
+    chain = pk.build_serial_chain_from_urdf(
+        ET.tostring(root, encoding="unicode"),
+        end_link_name=original.end_link_name,
+        root_link_name=original.root_link_name,
+    ).to(device=device)
+    return SSIKSolverCfg(
+        backend=backend,
+        root_link_name=original.root_link_name,
+        end_link_name=original.end_link_name,
+        tcp=original.tcp,
+        max_joint_step=max_joint_step,
+    ).init_solver(device=device, pk_serial_chain=chain)
 
 
 @pytest.fixture(params=_DEVICE_CASES)
@@ -393,6 +424,113 @@ def test_continuous_candidates_defer_step_bounds_until_previous_frame(
     assert float((result[0, -1] - initial[0]).abs().max()) > 0.05
 
 
+@pytest.mark.parametrize(
+    "device,backend",
+    [
+        ("cpu", "warp"),
+        pytest.param(
+            "cuda",
+            "warp",
+            marks=[
+                pytest.mark.gpu,
+                pytest.mark.skipif(
+                    not torch.cuda.is_available(), reason="CUDA unavailable"
+                ),
+            ],
+        ),
+        ("cpu", "reference"),
+    ],
+)
+@pytest.mark.parametrize("max_joint_step", [None, 0.2])
+def test_continuous_multiturn_path_crosses_both_windings_and_holds_failure(
+    device: str, backend: str, max_joint_step: float | None
+) -> None:
+    from embodichain.lab.sim.objects.robot import Robot
+
+    if backend == "reference":
+        pytest.importorskip("ssik", reason="Optional pinned SSIK reference unavailable")
+    solver = _make_multiturn_solver(
+        device, backend=backend, max_joint_step=max_joint_step
+    )
+    initial = torch.tensor(
+        [[0.0, -1.5, 1.5, -0.5, 0.3, 0.2], [0.0, -1.5, 1.5, -0.5, 0.3, -0.2]],
+        device=device,
+    )
+    path = initial[:, None].expand(2, 61, solver.dof).clone()
+    path[:, :, -1] = torch.tensor([1.0, -1.0], device=device)[:, None] * torch.linspace(
+        0.2, 6.2, 61, device=device
+    )
+    targets = _pk_fk(solver, path.flatten(0, 1)).reshape(2, 61, 4, 4)
+    unreachable = torch.eye(4, device=device).repeat(2, 1, 1)
+    unreachable[:, 0, 3] = 1000
+    targets = torch.cat((targets[:, :32], unreachable[:, None], targets[:, 32:]), dim=1)
+    robot = object.__new__(Robot)
+    robot.device = torch.device(device)
+    robot._all_indices = [0, 1]
+    robot._solvers = {"arm": solver}
+    robot.get_link_pose = lambda **kwargs: torch.eye(4, device=device).repeat(2, 1, 1)
+
+    valid, result = robot.compute_batch_ik(targets, initial, "arm", continuous=True)
+    expected_valid = torch.ones((2, 62), dtype=torch.bool, device=device)
+    expected_valid[:, 32] = False
+    torch.testing.assert_close(valid, expected_valid)
+    torch.testing.assert_close(result[:, 32], result[:, 31], atol=0, rtol=0)
+    assert bool(
+        (
+            (result >= solver.lower_qpos_limits) & (result <= solver.upper_qpos_limits)
+        ).all()
+    )
+    _assert_pose(targets[valid], _pk_fk(solver, result[valid]))
+    # Even without a configured bound, choose the smooth winding rather than
+    # reporting a geometrically valid command with a nearly 2*pi jump.
+    steps = torch.diff(torch.cat((initial[:, None], result), dim=1), dim=1)
+    assert float(steps.abs().max()) <= 0.10001
+
+
+@pytest.mark.parametrize("device", _DEVICE_CASES)
+def test_continuous_winding_cannot_cross_a_real_joint_stop(device: str) -> None:
+    solver = _make_solver(device, max_joint_step=0.2)
+    initial = torch.tensor([[0.0, -1.5, 1.5, -0.5, 0.3, 3.0]], device=device)
+    path = initial[:, None].expand(1, 4, solver.dof).clone()
+    path[0, :, -1] = torch.tensor([3.0, 3.1, 3.2, 3.3], device=device)
+    targets = _pk_fk(solver, path[0])[None]
+    valid, result = solver._get_continuous_ik_path(targets, initial)
+    assert valid.tolist() == [[True, True, False, False]]
+    torch.testing.assert_close(
+        result[:, 2:], result[:, 1:2].expand(-1, 2, -1), atol=0, rtol=0
+    )
+    assert bool(
+        (
+            (result >= solver.lower_qpos_limits) & (result <= solver.upper_qpos_limits)
+        ).all()
+    )
+
+
+@pytest.mark.parametrize("device", _DEVICE_CASES)
+def test_continuous_winding_rechecks_original_fk_after_float32_rounding(
+    device: str,
+) -> None:
+    solver = _make_multiturn_solver(device, max_joint_step=1.0, wrist_limit=700000.0)
+    candidate = torch.tensor([[0.0, -1.5, 1.5, -0.5, 0.3, 0.3]], device=device)
+    target = _pk_fk(solver, candidate)[:, None]
+    initial = candidate.clone()
+    initial[:, -1] += 100000 * 2 * np.pi
+    # This many turns magnifies float32 quantization: the nearest in-limit
+    # output fits the step constraint but no longer closes the original goal.
+    bad_pose = _pk_fk(solver, initial)
+    expected = Rotation.from_matrix(target[0, 0, :3, :3].cpu().numpy())
+    actual = Rotation.from_matrix(bad_pose[0, :3, :3].cpu().numpy())
+    assert (expected.inv() * actual).magnitude() > solver.cfg.rotation_tolerance
+    valid, result = solver._select_continuous_ik_path(
+        candidate[:, None, None],
+        torch.ones((1, 1, 1), dtype=torch.bool, device=device),
+        initial,
+        target_xpos=target,
+    )
+    assert valid.tolist() == [[False]]
+    torch.testing.assert_close(result[:, 0], initial, atol=0, rtol=0)
+
+
 def _synthetic_srs(
     device: str,
     axes: np.ndarray,
@@ -643,6 +781,116 @@ def test_cuda_weight_updates_are_visible_to_another_stream() -> None:
     torch.cuda.synchronize()
     assert bool(valid.all())
     torch.testing.assert_close(result.cpu(), selections[1], atol=1e-6, rtol=0)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+@pytest.mark.parametrize(
+    "drop_index", [0, 1, 2], ids=["candidates", "validity", "seed"]
+)
+def test_continuous_selection_retains_borrowed_cuda_inputs(drop_index: int) -> None:
+    """Keep storage alive until pending Warp consumption has completed."""
+    import ctypes
+    import os
+    import subprocess
+
+    worker_key = "_EMBODICHAIN_SSIK_LIFETIME_WORKER"
+    if os.environ.get(worker_key) != "1":
+        # Bound a driver-level stream gate in its own process, including when
+        # a test failure or device error prevents its normal release.
+        script = """
+import runpy
+import sys
+import pytest
+namespace = runpy.run_path(sys.argv[1])
+try:
+    namespace['test_continuous_selection_retains_borrowed_cuda_inputs'](int(sys.argv[2]))
+except pytest.skip.Exception as error:
+    print(str(error))
+    raise SystemExit(77)
+"""
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                script,
+                str(Path(__file__).resolve()),
+                str(drop_index),
+            ],
+            env={**os.environ, worker_key: "1"},
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        if completed.returncode == 77:
+            pytest.skip(completed.stdout.strip().splitlines()[-1])
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        return
+
+    if (
+        torch.cuda.get_allocator_backend() != "native"
+        or os.environ.get("PYTORCH_NO_CUDA_MEMORY_CACHING")
+        or os.environ.get("CUDA_LAUNCH_BLOCKING") == "1"
+    ):
+        pytest.skip("This asynchronous allocator-reuse case needs native caching")
+    try:
+        driver = ctypes.CDLL("libcuda.so.1")
+        wait_value = driver.cuStreamWaitValue32_v2
+        write_value = driver.cuStreamWriteValue32_v2
+    except (OSError, AttributeError):
+        pytest.skip("CUDA stream memory operations unavailable")
+    for operation in (wait_value, write_value):
+        operation.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_uint32,
+            ctypes.c_uint,
+        ]
+        operation.restype = ctypes.c_int
+
+    solver = _make_solver("cuda", max_joint_step=0.05)
+    producer, consumer = torch.cuda.Stream(), torch.cuda.Stream()
+    midpoint = solver.get_default_qpos_seed().cpu()
+    expected = midpoint[None, None].expand(1, 32, solver.dof).clone()
+    expected[0, :, 0] += torch.arange(1, 33) * 0.001
+    with torch.cuda.stream(producer):
+        gate = torch.zeros((), dtype=torch.int32, device=solver.device)
+        candidates = expected.to(solver.device)[:, :, None].repeat(1, 1, 2, 1)
+        candidates[:, :, 1, 0] += 0.2
+        inputs = [
+            candidates,
+            torch.ones((1, 32, 2), dtype=torch.bool, device=solver.device),
+            midpoint.to(solver.device)[None],
+        ]
+    del candidates
+    consumer.wait_stream(producer)
+    with torch.cuda.stream(consumer):
+        warm_valid, warm_result = solver._select_continuous_ik_path(*inputs)
+    consumer.synchronize()
+    assert bool(warm_valid.all())
+    torch.testing.assert_close(warm_result.cpu(), expected)
+    del warm_valid, warm_result
+
+    shape, dtype = inputs[drop_index].shape, inputs[drop_index].dtype
+    # Hold the consumer without a sleep or an SM-occupying spin kernel, so
+    # replacement writes finish on the producer before selection can read.
+    status = wait_value(consumer.cuda_stream, gate.data_ptr(), 1, 1)
+    if status == 801:  # CUDA_ERROR_NOT_SUPPORTED; no wait was enqueued.
+        pytest.skip("CUDA device does not support stream memory operations")
+    assert status == 0
+    try:
+        with torch.cuda.stream(consumer):
+            valid, result = solver._select_continuous_ik_path(*inputs)
+        inputs[drop_index] = None
+        with torch.cuda.stream(producer):
+            replacement = torch.empty(shape, dtype=dtype, device=solver.device)
+            replacement.fill_([float("nan"), False, 100.0][drop_index])
+    finally:
+        status = write_value(producer.cuda_stream, gate.data_ptr(), 1, 0)
+        assert status == 0
+    consumer.synchronize()
+    assert bool(valid.all())
+    torch.testing.assert_close(result.cpu(), expected)
 
 
 @pytest.mark.parametrize(

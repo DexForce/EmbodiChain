@@ -242,6 +242,12 @@ def select_path(
     count: int,
     dof: int,
     max_joint_step: wp.float64,
+    model: _Model,
+    targets: wp.array2d(dtype=wp.mat44d),
+    tcp: wp.mat44d,
+    ptol: wp.float64,
+    rtol: wp.float64,
+    check_pose: bool,
     result_valid: wp.array2d(dtype=wp.bool),
     result: wp.array3d(dtype=wp.float32),
 ):
@@ -254,15 +260,43 @@ def select_path(
         previous[j] = wp.clamp(value, lower[j], upper[j])
     for step in range(steps):
         best = int(-1)
+        best_q = vec7d()
         cost = wp.float64(wp.inf)
         for k in range(count):
             if validity[i, step, k]:
                 distance = wp.float64(0.0)
                 allowed = bool(True)
+                changed = bool(False)
+                q = vec7d()
                 for j in range(dof):
-                    delta = wp.float64(candidates[i, step, k, j]) - previous[j]
+                    original = wp.float64(candidates[i, step, k, j])
+                    value = original
+                    # An already-near representative cannot be improved by
+                    # another winding. Keep the ordinary path inexpensive.
+                    if wp.isfinite(value) and wp.abs(value - previous[j]) > wp.float64(
+                        wp.pi
+                    ):
+                        period = wp.float64(2.0 * wp.pi)
+                        first = wp.ceil((lower[j] - wp.float64(1e-6) - value) / period)
+                        last = wp.floor((upper[j] + wp.float64(1e-6) - value) / period)
+                        turns = wp.clamp(
+                            wp.floor((previous[j] - value) / period + wp.float64(0.5)),
+                            first,
+                            last,
+                        )
+                        value = wp.float64(
+                            wp.float32(
+                                wp.clamp(value + period * turns, lower[j], upper[j])
+                            )
+                        )
+                        allowed = allowed and first <= last
+                    q[j] = value
+                    changed = changed or value != original
+                    delta = value - previous[j]
                     allowed = (
                         allowed
+                        and value >= lower[j]
+                        and value <= upper[j]
                         and wp.isfinite(delta)
                         and wp.abs(delta) <= max_joint_step
                     )
@@ -270,11 +304,19 @@ def select_path(
                         delta * delta * wp.float64(weights[j]) * wp.float64(weights[j])
                     )
                 if allowed and distance < cost:
-                    cost, best = distance, k
+                    # Changing a float32 winding can change its FK rounding.
+                    # Reject this branch, rather than the whole waypoint, if
+                    # its actual returned coordinates no longer close.
+                    if check_pose and changed:
+                        allowed = _pose_ok(
+                            _fk(model, q) @ tcp, targets[i, step], ptol, rtol
+                        )
+                    if allowed:
+                        cost, best, best_q = distance, k, q
         result_valid[i, step] = best >= 0
         for j in range(dof):
             if best >= 0:
-                previous[j] = wp.float64(candidates[i, step, best, j])
+                previous[j] = best_q[j]
             result[i, step, j] = wp.float32(previous[j])
 
 

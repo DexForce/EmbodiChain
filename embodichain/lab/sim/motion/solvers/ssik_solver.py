@@ -371,6 +371,13 @@ class SSIKSolver(BaseSolver):
     def _get_continuous_ik_path(
         self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if target_xpos.ndim != 4 or target_xpos.shape[-2:] != (4, 4):
+            raise ValueError("Continuous targets must have shape (B,N,4,4)")
+        if not target_xpos.is_floating_point():
+            raise ValueError("SSIK targets must be floating point")
+        b, n = target_xpos.shape[:2]
+        if qpos_seed.shape != (b, self.dof):
+            raise ValueError("Continuous initial seeds must have shape (B,dof)")
         if not (
             self._near is not None
             or (self._rr is not None and self.cfg.rr_search == "seed_local")
@@ -380,12 +387,21 @@ class SSIKSolver(BaseSolver):
                 and self.cfg.srs_search == "seed_local"
             )
         ):
-            return super()._get_continuous_ik_path(target_xpos, qpos_seed)
-        if target_xpos.ndim != 4 or target_xpos.shape[-2:] != (4, 4):
-            raise ValueError("Continuous targets must have shape (B,N,4,4)")
-        b, n = target_xpos.shape[:2]
-        if qpos_seed.shape != (b, self.dof):
-            raise ValueError("Continuous initial seeds must have shape (B,dof)")
+            # Generate the full pool in parallel, then choose each waypoint's
+            # winding against its preceding result. The selector needs the
+            # original targets to accept the adjusted float32 coordinates.
+            targets = target_xpos.to(device=self.device, dtype=torch.float64)
+            seeds = qpos_seed[:, None].expand(b, n, self.dof).reshape(-1, self.dof)
+            valid, candidates = self._get_continuous_ik_candidates(
+                targets.reshape(-1, 4, 4), seeds
+            )
+            k = valid.shape[-1]
+            return self._select_continuous_ik_path(
+                candidates.reshape(b, n, k, self.dof),
+                valid.reshape(b, n, k),
+                qpos_seed,
+                target_xpos=targets,
+            )
         import warp as wp
         from embodichain.compute.kinematics._warp.ssik_srs_path import (
             srs_continuous_path,
@@ -646,9 +662,18 @@ class SSIKSolver(BaseSolver):
         candidate_qpos: torch.Tensor,
         candidate_valid: torch.Tensor,
         qpos_seed: torch.Tensor,
+        *,
+        target_xpos: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Select legal windings against each preceding posture.
+
+        The public continuous hook supplies original targets so adjusted
+        float32 representatives retain the ordinary FK acceptance contract.
+        Warp consumers record their actual Torch storage on the current
+        stream; callers still own producer-to-consumer ordering.
+        """
         import warp as wp
-        from embodichain.compute.kinematics._warp.ssik import select_path
+        from embodichain.compute.kinematics._warp.ssik import _Model, select_path
 
         if candidate_qpos.ndim != 4 or candidate_qpos.shape[-1] != self.dof:
             raise ValueError("candidate_qpos must have shape (B,N,K,dof)")
@@ -663,6 +688,36 @@ class SSIKSolver(BaseSolver):
         ).contiguous()
         validity = candidate_valid.to(device=self.device, dtype=torch.bool).contiguous()
         seed = qpos_seed.to(device=self.device, dtype=torch.float32).contiguous()
+        lower = self.lower_qpos_limits.double().contiguous()
+        upper = self.upper_qpos_limits.double().contiguous()
+        weights = self.ik_nearest_weight.float().contiguous()
+        check_pose = target_xpos is not None
+        if check_pose:
+            if target_xpos.shape != (b, n, 4, 4):
+                raise ValueError("Continuous targets must match the path axes")
+            targets = target_xpos.to(
+                device=self.device, dtype=torch.float64
+            ).contiguous()
+        else:
+            targets = torch.empty((0, 0, 4, 4), dtype=torch.float64, device=self.device)
+        if not hasattr(self, "_warp_model"):
+            # Reference-only point queries do not initialize Warp. Its path
+            # selector packs just the original FK data on first use; it never
+            # constructs a geometric provider or changes the reference backend.
+            wp.init()
+            self._warp_model = _Model()
+            self._warp_model.dof = self.dof
+            self._model_frames = torch.tensor(
+                self._model.frames, dtype=torch.float64, device=self.device
+            )
+            self._model_local_axes = torch.tensor(
+                self._model.local_axes, dtype=torch.float64, device=self.device
+            )
+            self._warp_model.frames = wp.from_torch(self._model_frames)
+            self._warp_model.local_axes = wp.from_torch(self._model_local_axes)
+        self._record_warp_inputs(
+            candidates, validity, seed, lower, upper, weights, targets
+        )
         valid = torch.empty((b, n), dtype=torch.bool, device=self.device)
         result = torch.empty((b, n, self.dof), dtype=torch.float32, device=self.device)
         if b and n:
@@ -673,13 +728,19 @@ class SSIKSolver(BaseSolver):
                     wp.from_torch(candidates),
                     wp.from_torch(validity),
                     wp.from_torch(seed),
-                    wp.from_torch(self.lower_qpos_limits.double().contiguous()),
-                    wp.from_torch(self.upper_qpos_limits.double().contiguous()),
-                    wp.from_torch(self.ik_nearest_weight.float().contiguous()),
+                    wp.from_torch(lower),
+                    wp.from_torch(upper),
+                    wp.from_torch(weights),
                     n,
                     k,
                     self.dof,
                     self.cfg.max_joint_step or math.inf,
+                    self._warp_model,
+                    wp.from_torch(targets, dtype=wp.mat44d),
+                    wp.mat44d(self.tcp_xpos),
+                    self.cfg.position_tolerance,
+                    self.cfg.rotation_tolerance,
+                    check_pose,
                 ],
                 outputs=[wp.from_torch(valid), wp.from_torch(result)],
                 device=str(self.device),
