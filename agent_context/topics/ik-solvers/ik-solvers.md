@@ -30,7 +30,7 @@ current options and dependencies. The main change sites are:
 | Need | Solver module under `motion/solvers/` |
 |---|---|
 | Analytical structure for SRS, OPW, UR or Franka (FEP) arms | `srs_solver.py`, `opw_solver.py`, `ur_solver.py`, `fep_solver.py` |
-| Model-derived 6R / SRS 7R, opt-in near-parallel correction, prepared CUDA RR and optional pinned CPU reference | `ssik_solver.py` |
+| Model-derived 6R / SRS 7R, opt-in near-parallel correction, prepared Warp RR on CPU/CUDA and optional pinned CPU reference | `ssik_solver.py` |
 | General iterative PK solve and multi-start seeds | `pytorch_solver.py` |
 | Reduced Pinocchio model or task-based QP | `pinocchio_solver.py`, `pink_solver.py` |
 | Jacobian differential commands | `differential_solver.py` |
@@ -123,9 +123,10 @@ and adds a per-step joint bound for its 50 Hz commands.
 SSIK derives normalized POE geometry from the actual PK chain. Strict Warp accepts
 three-parallel 6R or concurrent-shoulder/wrist SRS 7R. Explicit near-parallel 6R
 mode generates geometric branches and applies bounded original-model numerical
-polishing; it must not be described as pure geometric IK. Prepared `cuda_rr`
-uses verified offline coefficients and device-resident matrix-pencil solving;
-it rejects unrelated joint prefixes and CPU devices. The runtime cannot derive
+polishing; it must not be described as pure geometric IK. Explicit Warp
+`geometry_mode="rr"` uses verified offline coefficients and matrix-pencil
+solving on CPU/CUDA, rejecting unrelated joint prefixes. `cuda_rr` remains
+a CUDA-only compatibility alias for the same provider. The runtime cannot derive
 coefficients or switch to another solver. The optional pinned reference is
 CPU-only; general algebraic models
 require an explicitly built artifact and matching manifest before initialization.
@@ -153,6 +154,9 @@ opt-in seed-local mode uses a separate parameterized POE coefficient bundle;
 local and Jacobian-predicted lock angles generate algebraic roots, never returned
 linearized joint solutions. Its path hook regenerates the full global/local
 pool from the preceding result. Fixed RR retains the original cached lock grid.
+Runtime CPU RR uses Warp kernels; its independent SciPy QZ oracle is never
+selected by production dispatch. Benchmark reference alignment is explicit and
+quality-only, keeping the official SSIK package outside normal execution.
 Parameterized RR conditions small valid-pose rotation roundoff only for its
 SO(3) coefficient identities; original targets still own final FK acceptance.
 Other modes use `_get_continuous_ik_candidates` and the shared

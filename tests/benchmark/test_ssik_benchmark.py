@@ -37,6 +37,7 @@ from scripts.benchmark.robotics.kinematic_solver.ssik_benchmark import (
     _memory,
     _evaluate_trajectories,
     _make_solver,
+    _implementation_name,
     _parse_reference_artifacts,
     benchmark_ssik_solver,
     evaluate_quality,
@@ -237,8 +238,7 @@ def test_streaming_uses_changing_goals_previous_results_and_path_resets(
 
 def test_reference_artifacts_are_explicit_and_model_specific(tmp_path: Path) -> None:
     assert SSIKBenchmarkOptions().models == DEFAULT_MODEL_NAMES
-    assert "arx5" not in DEFAULT_MODEL_NAMES
-    assert "flexiv_rizon4s" not in DEFAULT_MODEL_NAMES
+    assert {"arx5", "flexiv_rizon4s"} <= set(DEFAULT_MODEL_NAMES)
     assert {"arx5", "flexiv_rizon4s"} <= set(MODEL_NAMES)
     source = tmp_path / "a=b.py"
     assert _parse_reference_artifacts((f"arx5={source}",)) == {"arx5": source}
@@ -293,6 +293,7 @@ def test_unsupported_geometry_and_missing_artifacts_are_unmeasured(
         models=("arx5",),
         devices=("cpu",),
         skip_baseline=True,
+        skip_reference=False,
         artifact_dir=tmp_path,
         reference_artifacts=(
             (f"arx5={tmp_path / 'missing.py'}",) if specified_missing_artifact else ()
@@ -363,6 +364,7 @@ def test_explicit_cuda_rr_cannot_silently_skip_an_unsupported_workload(
         ("warp", "srs", "seed_local", "fixed"),
         ("warp", "near_parallel", "uniform", "fixed"),
         ("cuda_rr", "unsupported", "uniform", "seed_local"),
+        ("warp", "rr", "uniform", "seed_local"),
     ],
 )
 def test_seed_local_continuity_uses_the_public_path_hook(
@@ -387,6 +389,7 @@ def test_seed_local_continuity_uses_the_public_path_hook(
         cfg=SimpleNamespace(
             max_joint_step=None,
             backend=backend,
+            geometry_mode="rr" if family == "rr" else "strict",
             srs_search=srs_search,
             rr_search=rr_search,
         ),
@@ -434,8 +437,10 @@ def test_memory_attribution_includes_borrowed_numerical_workspace_once(
 @pytest.mark.parametrize(
     "options",
     [
-        SSIKBenchmarkOptions(rr_search="seed_local"),
+        SSIKBenchmarkOptions(geometry_mode="strict", rr_search="seed_local"),
         SSIKBenchmarkOptions(robot_e2e=True, quality_only=True),
+        SSIKBenchmarkOptions(skip_reference=False, timing_only=True),
+        SSIKBenchmarkOptions(reference_artifacts=("arx5=model.py",)),
     ],
 )
 def test_invalid_optional_scopes_reject_before_runtime_setup(
@@ -496,3 +501,274 @@ def test_real_robot_worker_serializes_numpy_configuration(
     if paired:
         assert captured["partner"]["model"] == "aloha_right"
         assert captured["partner"]["solver_cfg"]["tcp"] == np.eye(4).tolist()
+
+
+@pytest.mark.parametrize(
+    "mode,srs,rr",
+    [
+        ("strict", "uniform", "fixed"),
+        ("strict", "seed_local", "fixed"),
+        ("near_parallel", "uniform", "fixed"),
+        ("rr", "uniform", "seed_local"),
+    ],
+)
+def test_algorithm_defaults_inherit_presets_and_explicit_values_replace(
+    monkeypatch: pytest.MonkeyPatch, mode: str, srs: str, rr: str
+) -> None:
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
+    monkeypatch.setattr(SSIKSolverCfg, "init_solver", lambda self, **kwargs: self)
+    model = SimpleNamespace(
+        cfg=SimpleNamespace(fpath="actual.urdf"),
+        joint_names=["joint"],
+        manifest={"root": "root", "end": "end"},
+        tcp=torch.eye(4),
+        limits=torch.tensor([[-1.0], [1.0]]),
+        solver_options={"geometry_mode": mode, "srs_search": srs, "rr_search": rr},
+    )
+    options = SSIKBenchmarkOptions()
+    assert options.skip_reference
+    inherited = _make_solver(model, "warp", torch.device("cpu"), options=options)
+    assert (inherited.geometry_mode, inherited.srs_search, inherited.rr_search) == (
+        mode,
+        srs,
+        rr,
+    )
+    overridden = _make_solver(
+        model,
+        "warp",
+        torch.device("cpu"),
+        options=SSIKBenchmarkOptions(
+            geometry_mode="rr", srs_search="uniform", rr_search="fixed"
+        ),
+    )
+    assert (overridden.geometry_mode, overridden.srs_search, overridden.rr_search) == (
+        "rr",
+        "uniform",
+        "fixed",
+    )
+    assert model.solver_options == {
+        "geometry_mode": mode,
+        "srs_search": srs,
+        "rr_search": rr,
+    }
+
+
+def test_original_pytorch_baseline_ignores_new_robot_solver_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+
+    monkeypatch.setattr(PytorchSolverCfg, "init_solver", lambda self, **kwargs: self)
+    model = SimpleNamespace(
+        cfg=SimpleNamespace(fpath="actual.urdf"),
+        joint_names=["joint"],
+        manifest={"root": "root", "end": "end"},
+        tcp=torch.eye(4),
+        limits=torch.tensor([[-1.0], [1.0]]),
+        solver_options={
+            "geometry_mode": "rr",
+            "srs_search": "seed_local",
+            "rr_search": "seed_local",
+        },
+    )
+    original = _make_solver(model, "pytorch_original", torch.device("cpu"))
+    matched = _make_solver(model, "pytorch_matched", torch.device("cpu"))
+    assert original.num_samples == matched.num_samples == 30
+    assert original.max_iterations == matched.max_iterations == 500
+    assert original.pos_eps == original.rot_eps == 5e-4
+    assert matched.pos_eps == matched.rot_eps == 1e-5
+    assert original.root_link_name == "root" and original.end_link_name == "end"
+
+
+@pytest.mark.parametrize("search", ["fixed", "seed_local"])
+def test_rr_mode_reaches_cpu_runner_and_actual_mode_gate_metadata(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, search: str
+) -> None:
+    from embodichain.compute.kinematics import _ssik_model
+    from scripts.benchmark.robotics.kinematic_solver import ssik_benchmark as module
+
+    monkeypatch.setitem(sys.modules, "warp", SimpleNamespace(init=lambda: None))
+    monkeypatch.setattr(module, "_versions", lambda: {})
+    monkeypatch.setattr(
+        module,
+        "_load_model",
+        lambda name: SimpleNamespace(chain=object(), solver_options={}),
+    )
+    target, seed = torch.eye(4)[None], torch.zeros((1, 7))
+    monkeypatch.setattr(
+        module, "_build_workloads", lambda *args: {"wide": (target, seed)}
+    )
+    monkeypatch.setattr(
+        _ssik_model,
+        "_extract_model",
+        lambda *args, **kwargs: SimpleNamespace(
+            family="unsupported", fingerprint="actual"
+        ),
+    )
+    seen = []
+    monkeypatch.setattr(
+        module,
+        "_make_solver",
+        lambda model, backend, device, artifact, options: seen.append(
+            (backend, device.type, options.geometry_mode, options.rr_search)
+        )
+        or object(),
+    )
+    monkeypatch.setattr(
+        module, "_nearest", lambda *args: (torch.ones(1, dtype=torch.bool), seed)
+    )
+    monkeypatch.setattr(
+        module,
+        "_evaluate_workload",
+        lambda *args: {"success_rate": 1.0, "false_successes": 0},
+    )
+    options = SSIKBenchmarkOptions(
+        models=("flexiv_rizon4s",),
+        devices=("cpu",),
+        geometry_mode="rr",
+        rr_search=search,
+        skip_baseline=True,
+        quality_only=True,
+        artifact_dir=tmp_path,
+    )
+    performance, metrics, notes = benchmark_ssik_solver(options)
+    assert seen == [("warp", "cpu", "rr", search)]
+    impl = _implementation_name("warp", "cpu", options)
+    assert (
+        impl
+        == "ssik_warp_rr" + ("_seed_local" if search == "seed_local" else "") + "_cpu"
+    )
+    assert (
+        performance
+        and metrics
+        and all(
+            row["impl"] == impl and row["geometry_mode"] == "rr"
+            for row in performance + metrics
+        )
+    )
+    assert not any("Skipped flexiv_rizon4s/warp/cpu" in note for note in notes)
+
+
+def test_optional_reference_has_correctness_rows_without_timed_execution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from embodichain.compute.kinematics import _ssik_model
+    from scripts.benchmark.robotics.kinematic_solver import ssik_benchmark as module
+
+    monkeypatch.setitem(sys.modules, "warp", SimpleNamespace(init=lambda: None))
+    monkeypatch.setattr(module, "_versions", lambda: {})
+    monkeypatch.setattr(
+        module,
+        "_load_model",
+        lambda name: SimpleNamespace(chain=object(), solver_options={}),
+    )
+    target, seed = torch.eye(4)[None], torch.zeros((1, 6))
+    monkeypatch.setattr(
+        module, "_build_workloads", lambda *args: {"wide": (target, seed)}
+    )
+    monkeypatch.setattr(
+        _ssik_model,
+        "_extract_model",
+        lambda *args, **kwargs: SimpleNamespace(
+            family="three_parallel", fingerprint="actual"
+        ),
+    )
+    called = []
+    monkeypatch.setattr(
+        module,
+        "_make_solver",
+        lambda model, backend, *args: called.append(backend) or object(),
+    )
+    monkeypatch.setattr(
+        module,
+        "_evaluate_workload",
+        lambda *args: {"success_rate": 1.0, "false_successes": 0},
+    )
+
+    def no_timing(*args, **kwargs):
+        pytest.fail("optional reference alignment must not enter a timing path")
+
+    monkeypatch.setattr(module, "_nearest", no_timing)
+    monkeypatch.setattr(module, "_measure", no_timing)
+    monkeypatch.setattr(module, "_memory", no_timing)
+    performance, metrics, _ = benchmark_ssik_solver(
+        SSIKBenchmarkOptions(
+            models=("aloha_left",),
+            devices=("cpu",),
+            skip_reference=False,
+            skip_warp=True,
+            skip_baseline=True,
+            scenarios=("wide",),
+            artifact_dir=tmp_path,
+        )
+    )
+    assert called == ["reference"]
+    assert (
+        not performance
+        and len(metrics) == 1
+        and metrics[0]["impl"] == "ssik_reference_cpu"
+    )
+
+
+@pytest.mark.parametrize("rr_search", [None, "seed_local"])
+def test_legacy_cuda_rr_keeps_fixed_search_unless_explicit(
+    monkeypatch: pytest.MonkeyPatch, rr_search: str | None
+) -> None:
+    received = {}
+
+    def cfg(**kwargs):
+        received.update(kwargs)
+        return SimpleNamespace(init_solver=lambda **kwargs: kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "embodichain.lab.sim.motion.solvers",
+        SimpleNamespace(PytorchSolverCfg=cfg, SSIKSolverCfg=cfg),
+    )
+    model = SimpleNamespace(
+        cfg=SimpleNamespace(fpath="actual.urdf"),
+        joint_names=["joint"],
+        manifest={"root": "root", "end": "end"},
+        tcp=torch.eye(4),
+        limits=torch.tensor([[-1.0], [1.0]]),
+        solver_options={"geometry_mode": "rr", "rr_search": "seed_local"},
+    )
+    _make_solver(
+        model,
+        "cuda_rr",
+        torch.device("cuda"),
+        options=SSIKBenchmarkOptions(rr_search=rr_search),
+    )
+    assert received["rr_search"] == (rr_search or "fixed")
+    assert "geometry_mode" not in received
+
+
+@pytest.mark.parametrize("mode", ["strict", "near_parallel", "rr"])
+def test_global_rr_search_only_changes_real_rr_configurations(
+    monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
+    monkeypatch.setattr(SSIKSolverCfg, "init_solver", lambda self, **kwargs: self)
+    model = SimpleNamespace(
+        cfg=SimpleNamespace(fpath="actual.urdf"),
+        joint_names=["joint"],
+        manifest={"root": "root", "end": "end"},
+        tcp=torch.eye(4),
+        limits=torch.tensor([[-1.0], [1.0]]),
+        solver_options={
+            "geometry_mode": mode,
+            "srs_search": "uniform",
+            "rr_search": "fixed",
+        },
+    )
+    cfg = _make_solver(
+        model,
+        "warp",
+        torch.device("cpu"),
+        options=SSIKBenchmarkOptions(rr_search="seed_local"),
+    )
+    assert isinstance(cfg, SSIKSolverCfg) and cfg.backend == "warp"
+    assert cfg.geometry_mode == mode
+    assert cfg.rr_search == ("seed_local" if mode == "rr" else "fixed")

@@ -16,9 +16,9 @@
 
 """Parameterized POE RR candidates with explicit seed-local redundancy search.
 
-The CPU path is a private, independent SciPy QZ oracle. CUDA uses only its
-separate device kernels; it never calls this oracle or a numerical pose solver.
-Both enumerate the same sixteen global and nine local locked coordinates.
+CPU and CUDA evaluate the same sixteen global and nine local locked
+coordinates using Warp. The independent SciPy QZ implementation remains an
+explicit private oracle; runtime dispatch never calls it or a pose IK fallback.
 """
 
 from __future__ import annotations
@@ -255,11 +255,10 @@ class _ParametricRRCandidates:
         self._workspace: dict[str, torch.Tensor] = {}
         self._capacity = 0
         self._data = None
-        if self.device.type == "cuda":
-            self._prepare_cuda()
+        self._prepare_constants()
 
-    def _prepare_cuda(self) -> None:
-        # Implemented independently of the CPU QZ oracle below.
+    def _prepare_constants(self) -> None:
+        # Shared device-resident coefficient data, independent of the QZ oracle.
         from ._warp.ssik_rr_parametric import _ParametricData
 
         self._data = _ParametricData()
@@ -314,8 +313,6 @@ class _ParametricRRCandidates:
         if size <= self._capacity:
             return
         self._capacity = size
-        if self.device.type != "cuda":
-            return
         samples, slots = self.sample_count, self.candidate_count
         shapes = {
             "goal": (size, 4, 4),
@@ -330,6 +327,14 @@ class _ParametricRRCandidates:
             "back_matrix": (size, slots, 12, 12),
             "back_vectors": (size, slots, 2, 12),
         }
+        if self.device.type == "cpu":
+            shapes.update(
+                lhs=(size, samples, 24, 24),
+                rhs=(size, samples, 24, 24),
+                imag=(size, samples, 24, 24),
+                eigen_vectors=(size, samples, 4, 24),
+                root_imag=(size, samples, 24),
+            )
         for name, shape in shapes.items():
             self._workspace[name] = torch.empty(
                 shape, dtype=torch.float64, device=self.device
@@ -377,8 +382,116 @@ class _ParametricRRCandidates:
                 "Parameterized RR seeds and limits must be float64 on the prepared device"
             )
         if self.device.type == "cpu":
-            return self._cpu_qz(target_end, seed, lower, upper, max_step)
+            return self._warp_cpu(target_end, seed, lower, upper, max_step)
         return self._cuda(target_end, seed, lower, upper, max_step)
+
+    def _warp_cpu(
+        self,
+        target_end: torch.Tensor,
+        seed: torch.Tensor,
+        lower: torch.Tensor,
+        upper: torch.Tensor,
+        max_step: float,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        from ._warp.ssik_rr_parametric_cpu import (
+            parametric_target_prepare_cpu,
+            parametric_lock_predictor_cpu,
+            parametric_pencil_roots_cpu,
+        )
+        from ._warp.ssik_rr_parametric import parametric_back_substitute
+
+        n = len(target_end)
+        validity = torch.empty(
+            (n, self.candidate_count), dtype=torch.int32, device=self.device
+        )
+        candidates = torch.empty(
+            (n, self.candidate_count, 7), dtype=torch.float64, device=self.device
+        )
+        self.prepare_buffers(min(n, self.max_chunk_size))
+        for start in range(0, n, self.max_chunk_size):
+            stop = min(start + self.max_chunk_size, n)
+            count = stop - start
+            w = {
+                name: wp.from_torch(
+                    tensor[:count], dtype=wp.mat44d if name == "goal" else None
+                )
+                for name, tensor in self._workspace.items()
+            }
+            target = wp.from_torch(target_end[start:stop].contiguous(), dtype=wp.mat44d)
+            initial = wp.from_torch(seed[start:stop])
+            bounds = [wp.from_torch(lower), wp.from_torch(upper)]
+            wp.launch(
+                parametric_target_prepare_cpu,
+                dim=count,
+                inputs=[
+                    self._data,
+                    target,
+                    w["goal"],
+                    w["p_target"],
+                    w["q_basis"],
+                    w["q_inverse"],
+                    w["target_valid"],
+                ],
+                device="cpu",
+            )
+            wp.launch(
+                parametric_lock_predictor_cpu,
+                dim=count,
+                inputs=[
+                    self._data,
+                    target,
+                    initial,
+                    *bounds,
+                    max_step,
+                    w["predictions"],
+                ],
+                device="cpu",
+            )
+            wp.launch(
+                parametric_pencil_roots_cpu,
+                dim=(count, self.sample_count),
+                inputs=[
+                    self._data,
+                    w["p_target"],
+                    w["q_basis"],
+                    w["target_valid"],
+                    initial,
+                    *bounds,
+                    max_step,
+                    w["predictions"],
+                    w["angles"],
+                    w["pencil"],
+                    w["lhs"],
+                    w["rhs"],
+                    w["real"],
+                    w["imag"],
+                    w["eigen_vectors"],
+                    w["roots"],
+                    w["root_imag"],
+                    w["root_valid"],
+                ],
+                device="cpu",
+            )
+            wp.launch(
+                parametric_back_substitute,
+                dim=(count, self.sample_count, 24),
+                inputs=[
+                    self._data,
+                    w["goal"],
+                    w["p_target"],
+                    w["q_inverse"],
+                    w["pencil"],
+                    w["roots"],
+                    w["root_valid"],
+                    w["angles"],
+                    w["back_matrix"],
+                    w["back_vectors"],
+                    wp.from_torch(candidates[start:stop]),
+                    wp.from_torch(validity[start:stop]),
+                ],
+                device="cpu",
+            )
+        return validity, candidates
 
     def _cpu_qz(
         self,
@@ -388,6 +501,7 @@ class _ParametricRRCandidates:
         upper: torch.Tensor,
         max_step: float,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Explicit independent test oracle; never selected by runtime dispatch."""
         from scipy.linalg import eig
         from ._ssik_rr import _W_TRIG_TO_X
 

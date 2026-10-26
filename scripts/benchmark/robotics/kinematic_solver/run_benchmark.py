@@ -124,7 +124,20 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ssik-devices", nargs="+", choices=("cpu", "cuda"), default=["cpu", "cuda"]
     )
-    parser.add_argument("--ssik-skip-reference", action="store_true")
+    reference = parser.add_mutually_exclusive_group()
+    reference.add_argument(
+        "--ssik-reference",
+        dest="ssik_skip_reference",
+        action="store_false",
+        help="Align correctness with the optional pinned SSIK CPU reference; exclude reference timing.",
+    )
+    reference.add_argument(
+        "--ssik-skip-reference",
+        dest="ssik_skip_reference",
+        action="store_true",
+        help="Retain the default of no optional SSIK reference import.",
+    )
+    parser.set_defaults(ssik_skip_reference=True)
     parser.add_argument(
         "--ssik-skip-warp",
         action="store_true",
@@ -173,11 +186,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--ssik-cpu-threads", type=int, default=1)
     parser.add_argument("--ssik-artifact-dir", type=Path, default=None)
     parser.add_argument(
-        "--ssik-geometry-mode", choices=("strict", "near_parallel"), default="strict"
+        "--ssik-geometry-mode",
+        choices=("strict", "near_parallel", "rr"),
+        default=None,
+        help="Override the selected presets' geometry mode; otherwise inherit each preset.",
     )
     parser.add_argument("--ssik-axis-alignment-tolerance", type=float, default=1e-5)
     parser.add_argument(
-        "--ssik-srs-search", choices=("uniform", "seed_local"), default="uniform"
+        "--ssik-srs-search",
+        choices=("uniform", "seed_local"),
+        default=None,
+        help="Override SRS search; otherwise inherit each preset.",
     )
     parser.add_argument(
         "--ssik-cuda-rr",
@@ -185,7 +204,10 @@ def _parse_args() -> argparse.Namespace:
         help="Add the prepared Rizon4S CUDA RR backend to the selected CUDA workload.",
     )
     parser.add_argument(
-        "--ssik-rr-search", choices=("fixed", "seed_local"), default="fixed"
+        "--ssik-rr-search",
+        choices=("fixed", "seed_local"),
+        default=None,
+        help="Override RR search; presets are inherited, while the legacy CUDA RR comparison defaults to fixed.",
     )
     parser.add_argument(
         "--ssik-robot-e2e",

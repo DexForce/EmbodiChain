@@ -94,7 +94,9 @@ the 85 mm, quarter-turn TCP and validates returned float32 joints at the
 unchanged `1e-5` metre/radian gates. This mode is a geometric/numerical hybrid;
 it does not require SSIK installed. Continuous paths regenerate candidates
 from each preceding result, including its current winding; the complete
-continuation gate remains under qualification, so the default is unchanged.
+source and benchmark qualifications are recorded in the acceptance reports.
+Default switching additionally requires the matched original-Pytorch performance
+baseline and configuration regression checks.
 
 The optional CPU reference instead uses an offline-derived general 6R
 Raghavan–Roth artifact for this actual source model. Its final acceptance uses

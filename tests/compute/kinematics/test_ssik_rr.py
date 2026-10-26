@@ -219,11 +219,18 @@ def test_rr_cuda_chunking_noncontiguous_targets_and_stream_order(
     assert sum(t.nbytes for t in engine._workspace.values()) < 32 * 1024**2
 
 
-def test_rr_empty_batch(rr_chain: pk.SerialChain) -> None:
-    engine = _PreparedRRCandidates(_extract_model(rr_chain), "cpu")
-    valid, candidates = engine.generate(torch.empty((0, 4, 4), dtype=torch.float64))
-    assert valid.shape == (0, 384)
-    assert candidates.shape == (0, 384, 7)
+@pytest.mark.parametrize("search", ["fixed", "seed_local"])
+def test_rr_empty_batch(rr_chain: pk.SerialChain, search: str) -> None:
+    model = _extract_model(rr_chain)
+    engine = _PreparedRRCandidates(model, "cpu", search=search)
+    valid, candidates = engine.generate(
+        torch.empty((0, 4, 4), dtype=torch.float64),
+        torch.empty((0, 7), dtype=torch.float64),
+        torch.tensor(model.limits[:, 0]),
+        torch.tensor(model.limits[:, 1]),
+    )
+    assert valid.shape == (0, engine.candidate_count)
+    assert candidates.shape == (0, engine.candidate_count, 7)
 
 
 def test_parameterized_rr_follows_arbitrary_seed_lock_on_cpu(
@@ -290,9 +297,10 @@ def test_parameterized_rr_conditions_f32_pose_without_accepting_invalid_inputs(
     torch.testing.assert_close(targets, untouched, equal_nan=True)
 
 
-@pytest.mark.gpu
-def test_parameterized_rr_cuda_and_cpu_qz_have_the_same_conditional_branches(
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_parameterized_rr_matches_explicit_qz_conditional_branches(
     rr_chain: pk.SerialChain,
+    device: str,
 ) -> None:
     model = _extract_model(rr_chain)
     chain = rr_chain.to(dtype=torch.float64, device="cpu")
@@ -311,9 +319,15 @@ def test_parameterized_rr_cuda_and_cpu_qz_have_the_same_conditional_branches(
     q = torch.cat((q, roundtrip_seed, roundtrip_seed))
     lower, upper = torch.tensor(model.limits[:, 0]), torch.tensor(model.limits[:, 1])
     cpu = _PreparedRRCandidates(model, "cpu", search="seed_local")
-    cuda = _PreparedRRCandidates(model, "cuda", search="seed_local")
-    reference_flags, reference = cpu.generate(target, q, lower, upper)
-    flags, actual = cuda.generate(target.cuda(), q.cuda(), lower.cuda(), upper.cuda())
+    tested = _PreparedRRCandidates(model, device, search="seed_local")
+    # Independent QZ/SVD is explicitly invoked as a test oracle. CPU runtime
+    # dispatch must now exercise Warp rather than silently selecting this path.
+    reference_flags, reference = cpu._provider._cpu_qz(
+        target, q, lower, upper, float("inf")
+    )
+    flags, actual = tested.generate(
+        target.to(device), q.to(device), lower.to(device), upper.to(device)
+    )
     flags, actual = flags.cpu(), actual.cpu()
     assert not flags[-1].any() and not reference_flags[-1].any()
     reference_good = _check_candidates(chain, target, reference_flags, reference)
@@ -335,6 +349,59 @@ def test_parameterized_rr_cuda_and_cpu_qz_have_the_same_conditional_branches(
                     .amax(-1)
                 )
                 assert (error.amin(0) < 1e-3).all() and (error.amin(1) < 1e-3).all()
+
+
+def test_parameterized_cpu_runtime_is_warp_and_preserves_output_ownership(
+    rr_chain: pk.SerialChain,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import scipy.linalg
+
+    model = _extract_model(rr_chain)
+    chain = rr_chain.to(dtype=torch.float64, device="cpu")
+    engine = _PreparedRRCandidates(model, "cpu", search="seed_local")
+    q = torch.tensor(
+        [[0.2, 0.4, 0.137, 1.2, 0.6, 0.8, -1]], dtype=torch.float64, device="cpu"
+    )
+    targets = chain.forward_kinematics(q.expand(2, -1)).get_matrix().float().double()
+    storage = torch.empty((2, 4, 8), dtype=torch.float64, device="cpu")
+    storage[:, :, ::2] = targets
+    lower = torch.tensor(model.limits[:, 0], device="cpu")
+    upper = torch.tensor(model.limits[:, 1], device="cpu")
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError(
+            "Production CPU RR called the independent algebraic oracle"
+        )
+
+    monkeypatch.setattr(engine._provider, "_cpu_qz", forbidden)
+    monkeypatch.setattr(scipy.linalg, "eig", forbidden)
+    monkeypatch.setattr(scipy.linalg, "qz", forbidden)
+    with torch.device("meta"):
+        flags, candidates = engine.generate(storage[:1, :, ::2], q, lower, upper, 0.05)
+        original_flags, original_candidates = flags.clone(), candidates.clone()
+        newer_flags, newer = engine.generate(
+            storage[:, :, ::2], q.expand(2, -1), lower, upper, 0.05
+        )
+        empty_flags, empty_candidates = engine.generate(
+            storage[:0, :, ::2], q[:0], lower, upper, 0.05
+        )
+    for output in (
+        flags,
+        candidates,
+        newer_flags,
+        newer,
+        empty_flags,
+        empty_candidates,
+    ):
+        assert output.device.type == "cpu"
+    assert empty_flags.shape == (0, 600) and empty_candidates.shape == (0, 600, 7)
+    torch.testing.assert_close(flags, original_flags)
+    torch.testing.assert_close(candidates, original_candidates)
+    good = _check_candidates(chain, targets, newer_flags, newer)
+    within_step = (newer.float().double() - q[:, None]).abs().amax(-1) <= 0.05
+    assert (good & within_step).any(-1).all()
+    assert torch.isfinite(newer).all()
 
 
 @pytest.mark.gpu

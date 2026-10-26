@@ -131,8 +131,7 @@ source X5A six-joint `arm` and two
 independent prismatic fingers in `eef`; its simulation and PK share the selected
 URDF. ARX5 and Flexiv Rizon4S retain Pytorch defaults and can explicitly select
 the prepared SSIK CPU reference artifacts under
-`embodichain_robots/_ssik_artifacts/`, near-parallel Warp for ARX5 or prepared
-CUDA RR for Rizon4S. These models remain outside strict Warp geometry; see
+`embodichain_robots/_ssik_artifacts/`, near-parallel Warp for ARX5 or prepared Warp RR on CPU/CUDA for Rizon4S. These models remain outside strict Warp geometry; see
 [IK mode boundaries](../ik-solvers/ik-solvers.md) before selecting one.
 Typed `SolverCfg` overrides and dictionaries with `class_type` replace
 the selected part's solver; typed inputs are copied.

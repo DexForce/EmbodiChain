@@ -25,7 +25,7 @@ production acceptance gates.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
 from importlib import import_module
@@ -56,8 +56,10 @@ DEFAULT_MODEL_NAMES = (
     "marvin_bare_right",
     "marvin_gripper_left",
     "marvin_gripper_right",
+    "arx5",
+    "flexiv_rizon4s",
 )
-MODEL_NAMES = DEFAULT_MODEL_NAMES + ("arx5", "flexiv_rizon4s")
+MODEL_NAMES = DEFAULT_MODEL_NAMES
 
 
 @dataclass(frozen=True)
@@ -67,7 +69,7 @@ class SSIKBenchmarkOptions:
     smoke: bool = False
     models: tuple[str, ...] = DEFAULT_MODEL_NAMES
     devices: tuple[str, ...] = ("cpu", "cuda")
-    skip_reference: bool = False
+    skip_reference: bool = True
     skip_baseline: bool = False
     skip_warp: bool = False
     quality_only: bool = False
@@ -86,10 +88,10 @@ class SSIKBenchmarkOptions:
     cpu_threads: int = 1
     artifact_dir: Path | None = None
     reference_artifacts: tuple[str, ...] = ()
-    geometry_mode: str = "strict"
+    geometry_mode: str | None = None
     axis_alignment_tolerance: float = 1e-5
-    srs_search: str = "uniform"
-    rr_search: str = "fixed"
+    srs_search: str | None = None
+    rr_search: str | None = None
     cuda_rr: bool = False
     robot_e2e: bool = False
 
@@ -103,6 +105,7 @@ class _Model:
     limits: torch.Tensor
     tcp: torch.Tensor
     manifest: dict[str, Any]
+    solver_options: dict[str, str] | None = None
 
     def fk(self, qpos: torch.Tensor) -> torch.Tensor:
         return (
@@ -162,7 +165,12 @@ def _load_model(name: str) -> _Model:
     payload["preset_source_sha256"] = hashlib.sha256(
         preset_file.read_bytes()
     ).hexdigest()
-    return _Model(name, cfg, chain, joint_names, limits, tcp, payload)
+    solver_options = {
+        "geometry_mode": getattr(solver_cfg, "geometry_mode", "strict"),
+        "srs_search": getattr(solver_cfg, "srs_search", "uniform"),
+        "rr_search": getattr(solver_cfg, "rr_search", "fixed"),
+    }
+    return _Model(name, cfg, chain, joint_names, limits, tcp, payload, solver_options)
 
 
 def _singular_samples(
@@ -689,6 +697,36 @@ def _parse_reference_artifacts(entries: tuple[str, ...]) -> dict[str, Path]:
     return artifacts
 
 
+def _resolved_options(
+    model: _Model, options: SSIKBenchmarkOptions
+) -> SSIKBenchmarkOptions:
+    """Inherit preset algorithms without changing the physical-model fingerprint."""
+    defaults = getattr(model, "solver_options", None) or {}
+    geometry_mode = (
+        options.geometry_mode
+        if options.geometry_mode is not None
+        else defaults.get("geometry_mode", "strict")
+    )
+    return replace(
+        options,
+        geometry_mode=geometry_mode,
+        srs_search=(
+            options.srs_search
+            if options.srs_search is not None
+            else defaults.get("srs_search", "uniform")
+        ),
+        rr_search=(
+            (
+                options.rr_search
+                if options.rr_search is not None
+                else defaults.get("rr_search", "fixed")
+            )
+            if geometry_mode == "rr"
+            else "fixed"
+        ),
+    )
+
+
 def _make_solver(
     model: _Model,
     backend: str,
@@ -707,26 +745,32 @@ def _make_solver(
         user_qpos_limits=model.limits.tolist(),
     )
     if backend.startswith("pytorch"):
+        # Reconstruct the original numerical configuration independently of any
+        # new robot default; only the matched variant tightens its tolerances.
         matched = (
             {"pos_eps": 1e-5, "rot_eps": 1e-5} if backend == "pytorch_matched" else {}
         )
         cfg = PytorchSolverCfg(**common, **matched)
     else:
-        selected = options or SSIKBenchmarkOptions()
+        overrides = options or SSIKBenchmarkOptions()
+        selected = _resolved_options(model, overrides)
         geometry = (
             {
                 "geometry_mode": selected.geometry_mode,
                 "axis_alignment_tolerance": selected.axis_alignment_tolerance,
                 "srs_search": selected.srs_search,
+                "rr_search": selected.rr_search,
             }
             if backend == "warp"
             else {}
         )
+        if backend == "cuda_rr":
+            # The legacy comparison keeps its historical fixed chart pool.
+            geometry["rr_search"] = overrides.rr_search or "fixed"
         cfg = SSIKSolverCfg(
             **common,
             **geometry,
             backend=backend,
-            rr_search=selected.rr_search if backend == "cuda_rr" else "fixed",
             num_samples=128,
             chunk_size=512,
             position_tolerance=1e-5,
@@ -801,7 +845,11 @@ def _evaluate_trajectories(
                 seeds = previous.expand(len(block), -1)
                 torch.manual_seed(2531 + offset)
                 target_aware = (
-                    getattr(solver.cfg, "backend", None) == "cuda_rr"
+                    getattr(solver.cfg, "backend", None) in ("warp", "cuda_rr")
+                    and (
+                        getattr(solver.cfg, "backend", None) == "cuda_rr"
+                        or getattr(solver.cfg, "geometry_mode", None) == "rr"
+                    )
                     and getattr(solver.cfg, "rr_search", "fixed") == "seed_local"
                 ) or (
                     getattr(solver.cfg, "backend", None) == "warp"
@@ -928,6 +976,7 @@ def _versions() -> dict[str, Any]:
         "embodichain/compute/kinematics/_warp/ssik_rr_cuda.py",
         "embodichain/compute/kinematics/_warp/ssik_rr_parametric.py",
         "embodichain/compute/kinematics/_warp/ssik_rr_parametric_cuda.py",
+        "embodichain/compute/kinematics/_warp/ssik_rr_parametric_cpu.py",
         "embodichain/compute/kinematics/_warp/ssik_srs_path.py",
         "embodichain/compute/kinematics/_warp/ssik_srs_search.py",
         "embodichain/compute/kinematics/_warp/ssik_legacy.py",
@@ -1016,13 +1065,35 @@ def _versions() -> dict[str, Any]:
 def _implementation_name(
     backend: str, device: str, options: SSIKBenchmarkOptions
 ) -> str:
-    """Keep fixed RR records compatible while distinguishing adaptive search."""
-    suffix = (
-        "_seed_local"
-        if backend == "cuda_rr" and options.rr_search == "seed_local"
-        else ""
-    )
+    """Identify the actual algebraic/hybrid mode while retaining legacy names."""
+    suffix = ""
+    if backend == "warp" and options.geometry_mode in ("near_parallel", "rr"):
+        suffix = "_" + options.geometry_mode
+    if (
+        backend == "cuda_rr" or (backend == "warp" and options.geometry_mode == "rr")
+    ) and options.rr_search == "seed_local":
+        suffix += "_seed_local"
     return f"ssik_{backend}{suffix}_{device}"
+
+
+def _selected_implementation(
+    rows: list[dict[str, Any]],
+    model: str,
+    device: str,
+    backend: str,
+    options: SSIKBenchmarkOptions,
+) -> str:
+    """Use emitted per-model algorithm metadata rather than global overrides."""
+    return next(
+        (
+            row["impl"]
+            for row in rows
+            if row.get("model") == model
+            and row["impl"].startswith(f"ssik_{backend}_")
+            and row["impl"].endswith("_" + device)
+        ),
+        _implementation_name(backend, device, options),
+    )
 
 
 def _gate_notes(
@@ -1038,7 +1109,9 @@ def _gate_notes(
                 if options.cuda_rr and model == "flexiv_rizon4s" and device == "cuda"
                 else "warp"
             )
-            backend = _implementation_name(selected_backend, device, options)
+            backend = _selected_implementation(
+                perf + metrics, model, device, selected_backend, options
+            )
             quality = {
                 row["scenario"]: row
                 for row in metrics
@@ -1243,7 +1316,8 @@ def _gate_notes(
                     row
                     for row in perf
                     if row.get("model") == family + "pair"
-                    and row["impl"] == f"ssik_warp_{device}"
+                    and row["impl"].startswith("ssik_warp_")
+                    and row["impl"].endswith("_" + device)
                     and row.get("scope") == "paired_streaming_control"
                 ),
                 None,
@@ -1261,7 +1335,8 @@ def _gate_notes(
                         row
                         for row in perf
                         if row.get("model") == family + "pair"
-                        and row["impl"] == f"ssik_warp_{device}"
+                        and row["impl"].startswith("ssik_warp_")
+                        and row["impl"].endswith("_" + device)
                         and row.get("scope") == "robot_paired_streaming_control"
                     ),
                     None,
@@ -1312,18 +1387,28 @@ def _benchmark_ssik_solver(
     import warp as wp
 
     options = options or SSIKBenchmarkOptions()
-    if options.geometry_mode not in ("strict", "near_parallel"):
-        raise ValueError("SSIK geometry mode must be strict or near_parallel")
+    if options.geometry_mode not in (None, "strict", "near_parallel", "rr"):
+        raise ValueError("SSIK geometry mode must be strict, near_parallel or rr")
     if not math.isfinite(options.axis_alignment_tolerance) or not (
         0 < options.axis_alignment_tolerance <= 1e-3
     ):
         raise ValueError("SSIK axis alignment tolerance must be in (0, 1e-3]")
-    if options.srs_search not in ("uniform", "seed_local"):
+    if options.srs_search not in (None, "uniform", "seed_local"):
         raise ValueError("SSIK SRS search must be uniform or seed_local")
-    if options.rr_search not in ("fixed", "seed_local"):
+    if options.rr_search not in (None, "fixed", "seed_local"):
         raise ValueError("SSIK RR search must be fixed or seed_local")
-    if options.rr_search != "fixed" and not options.cuda_rr:
-        raise ValueError("--ssik-rr-search seed_local requires --ssik-cuda-rr")
+    if options.rr_search == "seed_local" and options.geometry_mode not in (None, "rr"):
+        raise ValueError(
+            "--ssik-rr-search seed_local requires rr geometry or --ssik-cuda-rr"
+        )
+    if not options.skip_reference and options.timing_only:
+        raise ValueError(
+            "--ssik-reference requires correctness measurements; omit --ssik-timing-only"
+        )
+    if options.reference_artifacts and options.skip_reference:
+        raise ValueError(
+            "A reference artifact requires explicit --ssik-reference correctness alignment"
+        )
     if options.cuda_rr and (
         "flexiv_rizon4s" not in options.models or "cuda" not in options.devices
     ):
@@ -1381,6 +1466,7 @@ def _benchmark_ssik_solver(
         "robot_e2e": options.robot_e2e,
         "cuda_rr": options.cuda_rr,
     }
+    versions["resolved_solver_options"] = {}
     versions["reference_artifacts"] = {
         name: {
             "path": str(path),
@@ -1412,9 +1498,9 @@ def _benchmark_ssik_solver(
         "Saved W1 V030 counterexamples are 14 historically reachable failures from pinned SSIK with allow_rescue=False (seed2531). Their provenance and URDF hash are preserved; this run does not claim to revalidate them.",
         "Cartesian lines/circles are small local paths; unlike joint-space trajectories their global reachability is not asserted. Seven-axis finite sampling cannot establish complete reachability.",
         "SSIK leaderboard entries retain model identity, weight standard reachable/trajectory success by attempted count, and exclude deliberately unreachable controls and the separate streaming-control certificate. Timing-only algorithms remain listed as UNMEASURED rather than receiving fabricated success scores. Rankings across different robot models do not establish unconditional algorithm superiority.",
-        "Reference adapter uses its documented rescue policy; upstream default-rescue comparison is not measured by this harness and remains unvalidated.",
+        "Official SSIK reference is opt-in correctness alignment only; its initialization/first-call/steady-state timing is excluded. It is not a core runtime dependency. The documented reference rescue policy is unchanged.",
         "The upstream ssik logger is temporarily set to WARNING during this benchmark and restored afterward; candidate trace logging is excluded from the measured reference scope.",
-        "Explicit near_parallel mode always evaluates eight analytical surrogate slots and one original-seed initialization, with bounded original-model polishing on the selected device. These nine candidates are not a pure closed-form solution or complete enumeration of general 6R roots. Fixed CUDA RR evaluates16 prepared joint-lock charts (384 slots). RR seed_local reevaluates one parameterized coefficient system at16 global and9 local lock angles (600 slots); two local angles are scalar tangent predictions, while every returned joint solution remains an algebraic RR root. Neither RR mode invokes CPU solving or a numerical IK fallback.",
+        "Explicit near_parallel mode always evaluates eight analytical surrogate slots and one original-seed initialization, with bounded original-model polishing on the selected device. These nine candidates are not a pure closed-form solution or complete enumeration of general 6R roots. Fixed Warp RR evaluates16 prepared joint-lock charts (384 slots). RR seed_local reevaluates one parameterized coefficient system at16 global and9 local lock angles (600 slots); two local angles are scalar tangent predictions, while every returned joint solution remains an algebraic RR root. Both RR modes use Warp on the selected CPU/CUDA device without an official SSIK, SciPy QZ or numerical IK fallback.",
     ]
     raw_timings: dict[str, list[float]] = {}
     solvers_for_pairs: dict[
@@ -1424,11 +1510,21 @@ def _benchmark_ssik_solver(
         model = _load_model(model_name)
         from embodichain.compute.kinematics._ssik_model import _extract_model
 
+        selected = _resolved_options(model, options)
         geometry = _extract_model(
             model.chain,
-            geometry_mode=options.geometry_mode,
-            axis_alignment_tolerance=options.axis_alignment_tolerance,
+            geometry_mode=(
+                "strict" if selected.geometry_mode == "rr" else selected.geometry_mode
+            ),
+            axis_alignment_tolerance=selected.axis_alignment_tolerance,
         )
+        versions["resolved_solver_options"][model_name] = {
+            "geometry_mode": selected.geometry_mode,
+            "srs_search": selected.srs_search,
+            "rr_search": selected.rr_search,
+            "actual_family": geometry.family,
+        }
+        (directory / "runtime.json").write_text(json.dumps(versions, indent=2) + "\n")
         notes.append(
             f"Geometry {model_name}: {geometry.family}; actual-chain fingerprint {geometry.fingerprint}."
         )
@@ -1452,7 +1548,11 @@ def _benchmark_ssik_solver(
             if not options.skip_reference and device.type == "cpu":
                 backends.append("reference")
             for backend in backends:
-                if backend == "warp" and geometry.family == "unsupported":
+                if (
+                    backend == "warp"
+                    and geometry.family == "unsupported"
+                    and selected.geometry_mode != "rr"
+                ):
                     notes.append(
                         f"Skipped {model_name}/warp/{device.type}: actual-chain geometry is unsupported; Warp requires three-parallel 6R or strict SRS 7R. No numerical fallback or acceptance result is substituted."
                     )
@@ -1470,8 +1570,31 @@ def _benchmark_ssik_solver(
                         f"Skipped {model_name}/reference: missing artifact source or adjacent manifest at {artifact}. Explicitly build a matching offline artifact, then pass --ssik-reference-artifacts {model_name}=PATH."
                     )
                     continue
-                impl = _implementation_name(backend, device.type, options)
-                common = {"model": model_name, "impl": impl, "component": "ssik_ik"}
+                implementation_options = (
+                    replace(selected, rr_search=options.rr_search or "fixed")
+                    if backend == "cuda_rr"
+                    else selected
+                )
+                impl = _implementation_name(
+                    backend, device.type, implementation_options
+                )
+                common = {
+                    "model": model_name,
+                    "impl": impl,
+                    "component": "ssik_ik",
+                    "backend": backend,
+                    "geometry_mode": (
+                        "rr"
+                        if backend == "cuda_rr"
+                        else selected.geometry_mode if backend == "warp" else None
+                    ),
+                    "srs_search": selected.srs_search if backend == "warp" else None,
+                    "rr_search": (
+                        implementation_options.rr_search
+                        if backend in ("warp", "cuda_rr")
+                        else None
+                    ),
+                }
                 print(
                     f"SSIK {model_name}/{backend}/{device.type}: building", flush=True
                 )
@@ -1497,32 +1620,33 @@ def _benchmark_ssik_solver(
                         f"Skipped {model_name}/reference: {error}. Build offline with python -m embodichain.lab.sim.motion.solvers._ssik_reference --urdf {model.cfg.fpath} --root {model.manifest['root']} --end {model.manifest['end']} --output MODEL.py; then pass --ssik-reference-artifacts {model_name}=MODEL.py. No derivation runs during this benchmark."
                     )
                     continue
-                _sync(device)
-                perf.append(
-                    {
-                        **common,
-                        "scope": "initialization",
-                        "cost_time_ms": (time.perf_counter() - started) * 1000,
-                    }
-                )
-                first_target, first_seed = (
-                    value[:1].to(device, dtype=torch.float32)
-                    for value in workloads["wide"]
-                )
-                torch.manual_seed(options.seed)
-                _sync(device)
-                started = time.perf_counter()
-                first_output = _nearest(solver, first_target, first_seed)
-                _sync(device)
-                perf.append(
-                    {
-                        **common,
-                        "scope": "first_call_including_jit",
-                        "sample_size": 1,
-                        "cost_time_ms": (time.perf_counter() - started) * 1000,
-                    }
-                )
-                del first_output
+                if backend != "reference":
+                    _sync(device)
+                    perf.append(
+                        {
+                            **common,
+                            "scope": "initialization",
+                            "cost_time_ms": (time.perf_counter() - started) * 1000,
+                        }
+                    )
+                    first_target, first_seed = (
+                        value[:1].to(device, dtype=torch.float32)
+                        for value in workloads["wide"]
+                    )
+                    torch.manual_seed(options.seed)
+                    _sync(device)
+                    started = time.perf_counter()
+                    first_output = _nearest(solver, first_target, first_seed)
+                    _sync(device)
+                    perf.append(
+                        {
+                            **common,
+                            "scope": "first_call_including_jit",
+                            "sample_size": 1,
+                            "cost_time_ms": (time.perf_counter() - started) * 1000,
+                        }
+                    )
+                    del first_output
                 for scenario, (target, seed) in (
                     [] if options.timing_only else workloads.items()
                 ):
@@ -1551,7 +1675,7 @@ def _benchmark_ssik_solver(
                     )
                 counts = (
                     ()
-                    if options.quality_only
+                    if options.quality_only or backend == "reference"
                     else (
                         options.batch_sizes
                         or ((1, 8) if options.smoke else (1, 8, 100, 1000, 10000))

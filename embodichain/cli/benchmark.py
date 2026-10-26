@@ -69,13 +69,26 @@ def _add_kinematic_solver_arguments(parser: argparse.ArgumentParser) -> None:
     )
     for name, description in (
         ("smoke", "Use small SSIK workloads; does not certify acceptance gates."),
-        ("skip-reference", "Skip the optional SSIK CPU reference."),
         ("skip-warp", "Measure baselines/reference without the Warp backend."),
         ("skip-baseline", "Run diagnostics without comparison baselines."),
         ("quality-only", "Validate SSIK fixtures without latency measurements."),
         ("timing-only", "Measure SSIK latency without rerunning fixture correctness."),
     ):
         parser.add_argument(f"--ssik-{name}", action="store_true", help=description)
+    reference = parser.add_mutually_exclusive_group()
+    reference.add_argument(
+        "--ssik-reference",
+        dest="ssik_skip_reference",
+        action="store_false",
+        help="Align correctness with the optional pinned SSIK CPU reference; exclude reference timing.",
+    )
+    reference.add_argument(
+        "--ssik-skip-reference",
+        dest="ssik_skip_reference",
+        action="store_true",
+        help="Retain the default of no optional SSIK reference import.",
+    )
+    parser.set_defaults(ssik_skip_reference=True)
     parser.add_argument(
         "--ssik-models",
         nargs="+",
@@ -128,11 +141,17 @@ def _add_kinematic_solver_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--ssik-cpu-threads", type=int, default=1)
     parser.add_argument("--ssik-artifact-dir", type=Path, default=None)
     parser.add_argument(
-        "--ssik-geometry-mode", choices=("strict", "near_parallel"), default="strict"
+        "--ssik-geometry-mode",
+        choices=("strict", "near_parallel", "rr"),
+        default=None,
+        help="Override the selected presets' geometry mode; otherwise inherit each preset.",
     )
     parser.add_argument("--ssik-axis-alignment-tolerance", type=float, default=1e-5)
     parser.add_argument(
-        "--ssik-srs-search", choices=("uniform", "seed_local"), default="uniform"
+        "--ssik-srs-search",
+        choices=("uniform", "seed_local"),
+        default=None,
+        help="Override SRS search; otherwise inherit each preset.",
     )
     parser.add_argument(
         "--ssik-cuda-rr",
@@ -140,7 +159,10 @@ def _add_kinematic_solver_arguments(parser: argparse.ArgumentParser) -> None:
         help="Add the prepared Rizon4S CUDA RR backend to the selected CUDA workload.",
     )
     parser.add_argument(
-        "--ssik-rr-search", choices=("fixed", "seed_local"), default="fixed"
+        "--ssik-rr-search",
+        choices=("fixed", "seed_local"),
+        default=None,
+        help="Override RR search; presets are inherited, while the legacy CUDA RR comparison defaults to fixed.",
     )
     parser.add_argument(
         "--ssik-robot-e2e",

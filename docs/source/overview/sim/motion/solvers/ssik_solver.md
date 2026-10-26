@@ -1,8 +1,8 @@
 # SSIKSolver
 
-`SSIKSolver` derives analytical IK geometry from the configured robot's actual
-serial chain. Its Warp backend runs the same double precision geometric
-calculation on CPU and CUDA, then filters candidates by joint limits and
+`SSIKSolver` derives geometric IK or selects a verified prepared algebraic
+model from the configured robot's actual serial chain. Its Warp backend runs
+double precision computation on CPU and CUDA, then filters candidates by joint limits and
 forward-kinematics error. Its optional reference backend uses the pinned
 [SSIK implementation](https://github.com/personalrobotics/ssik/tree/4109147f37a7ca3e2516c83853aca583612783f3)
 on CPU for cross-checking and offline-prepared algebraic models.
@@ -13,12 +13,13 @@ on CPU for cross-checking and offline-prepared algebraic models.
 |---|---|---|
 | `"warp"` | 6R with parallel joint axes 1, 2 and 3 (zero based); strict 7R with concurrent shoulder and wrist axes | CPU or CUDA; geometric candidates only |
 | `"warp"`, `geometry_mode="near_parallel"` | Certified small deviations from three-parallel 6R geometry, including ARX5 X5A | CPU or CUDA; geometric initialization plus bounded original-model numerical polishing |
-| `"cuda_rr"` | Verified prepared Rizon4 joint prefix, including Rizon4S with its actual terminal frame | CUDA only; algebraic matrix-pencil roots on the device |
+| `"warp"`, `geometry_mode="rr"` | Verified prepared Rizon4 joint prefix, including Rizon4S with its actual terminal frame | CPU or CUDA; Warp algebraic matrix-pencil roots |
+| `"cuda_rr"` | Compatibility alias for the prepared RR path | CUDA only; prefer `backend="warp", geometry_mode="rr"` for new configurations |
 | `"reference"` | SSIK-dispatched 6R/7R models, with an offline artifact required for generic algebraic paths | CPU only; optional SSIK dependency |
 
-The Warp paths cover the Aloha Mini arms and Tianji Marvin arms.
-ARX5 and Flexiv Rizon4S require the explicit modes above or prepared CPU
-reference artifacts; they do not meet the strict Warp geometry conditions. UR5 and strict
+The Warp paths cover Aloha Mini, Tianji Marvin, ARX5 and Flexiv Rizon4S on
+CPU and CUDA. ARX5 and Rizon4S use the explicit near-parallel and RR modes
+above; they do not meet the strict geometric conditions. UR5 and strict
 SRS W1 revisions provide additional geometry checks. Classification uses joint
 axes and transforms rather than robot names. Approximate SRS, Franka-specific
 geometry, and unprepared RR/HP algebraic models remain unsupported.
@@ -81,10 +82,10 @@ and is outside this solver's supported chain types.
 | Setting | Default | Meaning |
 |---|---|---|
 | `backend` | `"warp"` | Explicit execution backend; failures never switch backends |
-| `geometry_mode` | `"strict"` | `"near_parallel"` explicitly permits bounded 6R axis deviations and numerical polishing |
+| `geometry_mode` | `"strict"` | `"near_parallel"` permits bounded 6R deviations and polishing; `"rr"` explicitly selects a verified prepared algebraic Warp model |
 | `axis_alignment_tolerance` | `1e-5` | Maximum normalized-axis deviation in near-parallel mode; does not relax FK acceptance |
 | `srs_search` | `"uniform"` | `"seed_local"` adds scalar geometric redundancy optimization near the current seed |
-| `rr_search` | `"fixed"` | For `cuda_rr`, `"seed_local"` adds local and analytically predicted lock samples using the parameterized RR bundle |
+| `rr_search` | `"fixed"` | For Warp `geometry_mode="rr"` or legacy `cuda_rr`, `"seed_local"` adds local and analytically predicted lock samples using the parameterized RR bundle |
 | `num_samples` | `128` | Global SRS swivel samples, in addition to a defined seed swivel |
 | `position_tolerance` | `1e-5` | Maximum accepted position error, metres |
 | `rotation_tolerance` | `1e-5` | Maximum accepted orientation error, radians |
@@ -169,7 +170,9 @@ pool at each frame from the preceding result. Its scalar search optimizes
 analytical branches over swivel (or the free roll at a collapsed elbow circle),
 including Euler pole anchors. It does not solve a Cartesian Jacobian system.
 The global samples and unchanged final FK/step gates still apply.
-CPU evaluates a complete path in a fused kernel. CUDA queues frame-dependent
+CPU SRS evaluates a complete path in a fused kernel. Near-parallel and
+seed-local RR regenerate their pools from the previous result on either device.
+CUDA queues frame-dependent
 calls while parallelizing paths, redundancy samples and branches within each
 frame; the previous result stays on the device. This avoids serial FP64 work
 in one GPU lane without introducing host result reads or synchronization.
@@ -276,7 +279,7 @@ determined by upstream SSIK rather than the Warp fixed-slot layout.
 
 For device execution, preserve the preset's original root, end link and TCP as
 in the first example, then set `geometry_mode="near_parallel"` for ARX5, or
-`backend="cuda_rr"` with a CUDA device for Rizon4S. Neither requires installing
+`backend="warp", geometry_mode="rr"` on CPU or CUDA for Rizon4S. Neither requires installing
 SSIK. Both presets retain their Pytorch defaults pending complete performance
 acceptance. ARX5 keeps its authored 85 mm TCP and tool rotation.
 
@@ -286,10 +289,13 @@ the actual 6R model, with bounded joint updates. This is an explicitly selected 
 closed-form result. Failure is returned without trying another solver.
 
 The Rizon4S device path evaluates the prepared polynomial tensors, solves their
-24-by-24 complex matrix pencils using cooperative Warp QR, and back-substitutes
-roots entirely on CUDA. Workspaces are chunked to at most 32 targets; every
+24-by-24 shifted matrix pencils with Warp QR, and back-substitutes roots on
+the selected device. CPU uses scalar Warp scheduling and CUDA uses cooperative
+warps; they share the coefficient system, samples and projective recovery. Workspaces are chunked to at most 32 targets; every
 root slot passes through the original-model FK gate after float32 conversion.
-It neither invokes CPU LAPACK nor generates coefficients during a query.
+Production queries use neither SciPy/LAPACK nor the official SSIK package,
+and never generate symbolic coefficients. The private QZ oracle and optional
+SSIK reference are used only for explicit numerical validation.
 The default `rr_search="fixed"` preserves the 16-lock coefficient bundle.
 For continuous control, select `rr_search="seed_local"` explicitly. Its
 parameterized bundle evaluates arbitrary lock angles without runtime symbolic
@@ -329,8 +335,8 @@ with the same maintained builder, adding `--parameterized --urdf PATH` and
 validates the selected bundle and actual model before device execution.
 
 The bundled robot package contains explicit offline reference artifacts for
-`ARX5` (the registered X5A source) and `FlexivRizon4S`. Both presets retain
-Pytorch defaults. Install the pinned reference requirements above, then select the
+`ARX5` (the registered X5A source) and `FlexivRizon4S`. These artifacts are
+optional validation tools. Install the pinned reference requirements above, then select the
 prepared artifact explicitly:
 
 ```python
@@ -363,7 +369,7 @@ solver = robot_cfg.solver_cfg["arm"].init_solver(
 )
 ```
 
-The same configuration can be passed to a CPU-device `Robot` through the
+For explicit validation, the same configuration can be passed to a CPU-device `Robot` through the
 normal `solver_cfg` override. CUDA-device robots require a CUDA-capable solver;
 reference mode does not move targets to CPU implicitly. The artifacts are package resources, not an automatic
 fallback. A modified source chain requires its own verified artifact.
@@ -404,17 +410,21 @@ upstream mandatory polishing of already accepted roots, even with optional
 near-miss refinement and rescue disabled. These CPU reference paths do not
 establish pure geometric Warp or hard real-time performance.
 
-The unified benchmark accepts `--ssik-models arx5 flexiv_rizon4s` with explicit
-`--ssik-reference-artifacts MODEL=/absolute/artifact.py` entries. These models
-are opt-in; the existing default six-model benchmark remains unchanged.
-Unsupported Warp geometry and missing reference preparation are reported as
-unmeasured with a reason, while an incompatible supplied artifact is rejected.
-Device experiments select `--ssik-geometry-mode near_parallel`,
-`--ssik-srs-search seed_local` or `--ssik-cuda-rr`. Add
-`--ssik-rr-search seed_local` for parameterized RR. These flags do not change
-the default six-model benchmark or robot presets. Allocation counters and
-fresh-process driver memory observations must both be considered when
-certifying CUDA scratch; Torch allocator statistics alone omit driver stacks.
+The unified benchmark selects all eight arm/model cases by default and inherits
+mode and search settings from each preset. Explicit `--ssik-geometry-mode`,
+`--ssik-srs-search` and `--ssik-rr-search` override the corresponding algorithm.
+Use `--ssik-models` to select a smaller workload. New RR experiments use
+`--ssik-geometry-mode rr --ssik-rr-search seed_local --ssik-devices cpu cuda`;
+`--ssik-cuda-rr` retains the historical CUDA-only comparison.
+
+Official SSIK is never imported by a normal Warp benchmark. Enable numerical
+alignment explicitly with `--ssik-reference`, and provide
+`--ssik-reference-artifacts MODEL=/absolute/artifact.py` for prepared algebraic
+models. Reference rows report correctness only; they do not contribute timing
+or memory gates. Unsupported geometry and missing preparation remain explicitly
+unmeasured, while incompatible artifacts fail initialization. Allocation
+counters and fresh-process driver observations must both be considered for
+CUDA scratch; Torch statistics alone omit driver allocations.
 
 Add `--ssik-robot-e2e` to run an isolated, engine-backed `Robot` benchmark with
 the native `no-render` renderer. This preserves native physics and state

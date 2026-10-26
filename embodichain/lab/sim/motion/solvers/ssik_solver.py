@@ -40,14 +40,16 @@ class SSIKSolverCfg(SolverCfg):
 
     Warp supports three-parallel-axis 6R and concurrent shoulder/wrist SRS 7R
     models. Explicit ``near_parallel`` mode adds bounded original-model
-    polishing for small 6R axis deviations. ``cuda_rr`` evaluates a verified
-    offline algebraic bundle on CUDA. The optional CPU reference requires
+    polishing for small 6R axis deviations. Explicit ``geometry_mode="rr"``
+    evaluates a verified offline algebraic bundle on CPU or CUDA using Warp.
+    ``cuda_rr`` remains a CUDA-only compatibility alias. The optional CPU
+    reference is for numerical alignment and requires
     ``requirements/ssik-reference.txt``. Failure never invokes another solver.
     """
 
     class_type: str = "SSIKSolver"
     backend: Literal["warp", "reference", "cuda_rr"] = "warp"
-    geometry_mode: Literal["strict", "near_parallel"] = "strict"
+    geometry_mode: Literal["strict", "near_parallel", "rr"] = "strict"
     axis_alignment_tolerance: float = 1e-5
     srs_search: Literal["uniform", "seed_local"] = "uniform"
     rr_search: Literal["fixed", "seed_local"] = "fixed"
@@ -61,14 +63,24 @@ class SSIKSolverCfg(SolverCfg):
     def __post_init__(self) -> None:
         if self.backend not in ("warp", "reference", "cuda_rr"):
             raise ValueError("SSIK backend must be 'warp', 'reference' or 'cuda_rr'")
-        if self.geometry_mode not in ("strict", "near_parallel"):
-            raise ValueError("geometry_mode must be 'strict' or 'near_parallel'")
+        if self.geometry_mode not in ("strict", "near_parallel", "rr"):
+            raise ValueError("geometry_mode must be 'strict', 'near_parallel' or 'rr'")
+        if self.geometry_mode == "rr" and self.backend == "reference":
+            raise ValueError(
+                "geometry_mode='rr' selects the Warp runtime, not reference"
+            )
         if self.srs_search not in ("uniform", "seed_local"):
             raise ValueError("srs_search must be 'uniform' or 'seed_local'")
         if self.rr_search not in ("fixed", "seed_local"):
             raise ValueError("rr_search must be 'fixed' or 'seed_local'")
-        if self.rr_search != "fixed" and self.backend != "cuda_rr":
-            raise ValueError("rr_search='seed_local' requires backend='cuda_rr'")
+        if self.rr_search != "fixed" and not (
+            self.backend == "cuda_rr"
+            or (self.backend == "warp" and self.geometry_mode == "rr")
+        ):
+            raise ValueError(
+                "rr_search='seed_local' requires Warp geometry_mode='rr' "
+                "or the legacy cuda_rr backend"
+            )
         if not math.isfinite(self.axis_alignment_tolerance) or not (
             0 < self.axis_alignment_tolerance <= 1e-3
         ):
@@ -93,7 +105,7 @@ class SSIKSolverCfg(SolverCfg):
         """Build and validate the chain once, then initialize its chosen backend.
 
         Args:
-            device: CPU/CUDA for Warp, CUDA for RR, CPU for the reference.
+            device: CPU/CUDA for Warp geometry and RR; CPU for the reference.
             **kwargs: Optional ``pk_serial_chain`` in configured joint order.
 
         Returns:
@@ -117,7 +129,8 @@ class SSIKSolver(BaseSolver):
 
     Args:
         cfg: Geometry, backend and acceptance settings.
-        device: Execution device; reference is CPU-only and RR is CUDA-only.
+        device: CPU/CUDA for Warp; reference is CPU-only and the legacy
+            ``cuda_rr`` alias remains CUDA-only.
         **kwargs: Optional preconstructed PK serial chain.
     """
 
@@ -125,6 +138,7 @@ class SSIKSolver(BaseSolver):
         self, cfg: SSIKSolverCfg, device: str | torch.device = "cpu", **kwargs: Any
     ) -> None:
         cfg.__post_init__()
+        rr_mode = cfg.backend == "cuda_rr" or cfg.geometry_mode == "rr"
         if cfg.backend == "reference" and torch.device(device).type != "cpu":
             raise ValueError("SSIK reference backend accepts CPU devices only")
         if cfg.backend == "cuda_rr" and torch.device(device).type != "cuda":
@@ -145,12 +159,16 @@ class SSIKSolver(BaseSolver):
             )
         self._model = _extract_model(
             chain,
-            geometry_mode=cfg.geometry_mode,
+            geometry_mode="strict" if rr_mode else cfg.geometry_mode,
             axis_alignment_tolerance=cfg.axis_alignment_tolerance,
         )
         if cfg.joint_names is not None and tuple(cfg.joint_names) != self._model.names:
             raise ValueError("SSIK joint_names must match the serial-chain order")
-        if cfg.backend == "warp" and self._model.family == "unsupported":
+        if (
+            cfg.backend == "warp"
+            and not rr_mode
+            and self._model.family == "unsupported"
+        ):
             raise ValueError(
                 "SSIK Warp requires three-parallel 6R or strict SRS 7R geometry"
             )
@@ -159,7 +177,7 @@ class SSIKSolver(BaseSolver):
         resolved.joint_names = list(self._model.names)
         super().__init__(resolved, device=device, pk_serial_chain=chain, **kwargs)
         self.compiled_fk = chain.forward_kinematics_tensor
-        self.family = self._model.family
+        self.family = "rr" if rr_mode else self._model.family
         self.model_fingerprint = self._model.fingerprint
         self._reference = None
         self._rr = None
@@ -200,6 +218,7 @@ class SSIKSolver(BaseSolver):
             if (
                 self.device.type == "cuda"
                 and cfg.backend == "warp"
+                and not rr_mode
                 and model.family in ("three_parallel", "srs")
             ):
                 from embodichain.compute.kinematics._ssik_geometric import (
@@ -217,7 +236,7 @@ class SSIKSolver(BaseSolver):
                 self._near = _NearParallelCandidates(
                     model, self.device, cfg.axis_alignment_tolerance
                 )
-            if cfg.backend == "cuda_rr":
+            if rr_mode:
                 from embodichain.compute.kinematics._ssik_rr import (
                     _PreparedRRCandidates,
                 )
@@ -380,7 +399,7 @@ class SSIKSolver(BaseSolver):
         joints = torch.empty((b, n, self.dof), dtype=torch.float32, device=self.device)
         if not b or not n:
             return valid, joints
-        if self.device.type == "cuda" or self._near is not None:
+        if self.device.type == "cuda" or self._near is not None or self._rr is not None:
             # Frames depend on the preceding selection, but candidates within
             # each frame remain parallel. Near-parallel correction also needs
             # the current seed, including its appropriate periodic winding.

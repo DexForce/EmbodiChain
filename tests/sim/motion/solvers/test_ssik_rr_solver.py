@@ -14,11 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Public CUDA RR behavior on the unchanged original Rizon4S URDF."""
+"""Public Warp CPU/CUDA RR behavior on the original Rizon4S URDF."""
 
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 import numpy as np
 import pytest
@@ -28,18 +29,19 @@ from embodichain.lab.sim.motion.solvers import SSIKSolverCfg, SolverCfg
 from embodichain_robots import FlexivRizon4SCfg
 
 
-def _make_solver(**kwargs):
+def _make_solver(device: str = "cuda", *, legacy: bool = False, **kwargs: Any):
     preset = FlexivRizon4SCfg.from_dict({})
     original = preset.solver_cfg["arm"]
     return SSIKSolverCfg(
-        backend="cuda_rr",
+        backend="cuda_rr" if legacy else "warp",
+        geometry_mode="strict" if legacy else "rr",
         urdf_path=preset.fpath,
         root_link_name=original.root_link_name,
         end_link_name=original.end_link_name,
         tcp=original.tcp,
         **kwargs,
     ).init_solver(
-        "cuda", pk_serial_chain=preset.build_pk_serial_chain()["arm"].to(device="cuda")
+        device, pk_serial_chain=preset.build_pk_serial_chain()["arm"].to(device=device)
     )
 
 
@@ -67,13 +69,13 @@ def _pose_matches(target, actual):
     return (position <= 1e-5) & (angle <= 1e-5)
 
 
-def test_cuda_rr_rejects_cpu_device_before_loading_optional_reference() -> None:
+def test_legacy_rr_rejects_cpu_device_before_loading_optional_reference() -> None:
     with pytest.raises(ValueError, match="CUDA devices only"):
         SSIKSolverCfg(backend="cuda_rr").init_solver("cpu")
 
 
 @pytest.mark.parametrize("search", ["fixed", "seed_local"])
-def test_cuda_rr_search_configuration_round_trips_without_loading_gpu(
+def test_legacy_rr_search_configuration_round_trips(
     search: str,
 ) -> None:
     cfg = SSIKSolverCfg(backend="cuda_rr", rr_search=search)
@@ -84,23 +86,24 @@ def test_cuda_rr_search_configuration_round_trips_without_loading_gpu(
 
 
 @pytest.mark.parametrize("backend", ["warp", "reference"])
-def test_rr_seed_local_requires_the_explicit_cuda_rr_backend(backend: str) -> None:
+def test_rr_seed_local_requires_explicit_algebraic_mode(backend: str) -> None:
     with pytest.raises(ValueError, match="rr_search"):
         SSIKSolverCfg(backend=backend, rr_search="seed_local")
 
 
-@pytest.mark.gpu
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
 @pytest.mark.parametrize("search", ["fixed", "seed_local"])
-def test_cuda_rr_original_urdf_tcp_all_candidates_and_failure_hold(
+def test_rr_original_urdf_tcp_all_candidates_and_failure_hold(
     monkeypatch: pytest.MonkeyPatch,
     search: str,
+    device: str,
 ) -> None:
-    # CUDA preparation and solve must work without the optional reference.
+    # Warp preparation and solve must work without the optional reference.
     monkeypatch.setitem(sys.modules, "ssik", None)
-    solver = _make_solver(rr_search=search)
+    solver = _make_solver(device, rr_search=search)
     source = torch.tensor(
         [[0.2, 0.4, -0.7, 1.2, 0.6, 0.8, -1.0], [-0.5, -0.3, 1.1, -0.6, 0.7, 1.0, 0.2]],
-        device="cuda",
+        device=device,
     )
     target = _fk(solver, source)
     valid, result = solver.get_ik(target, source.flip(0))
@@ -132,10 +135,12 @@ def test_cuda_rr_original_urdf_tcp_all_candidates_and_failure_hold(
     assert _pose_matches(target, _fk(solver, result)).all()
 
 
-@pytest.mark.gpu
-def test_rr_seed_local_nearest_and_all_use_the_same_current_sample_pool() -> None:
-    solver = _make_solver(rr_search="seed_local", max_joint_step=0.05)
-    seed = torch.tensor([[0.2, 0.4, 0.137, 1.2, 0.6, 0.8, -1]], device="cuda")
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_rr_seed_local_nearest_and_all_use_the_same_current_sample_pool(
+    device: str,
+) -> None:
+    solver = _make_solver(device, rr_search="seed_local", max_joint_step=0.05)
+    seed = torch.tensor([[0.2, 0.4, 0.137, 1.2, 0.6, 0.8, -1]], device=device)
     moving = seed.clone()
     moving[0, 0] += 0.001
     moving[0, 2] += 0.0005
@@ -146,16 +151,18 @@ def test_rr_seed_local_nearest_and_all_use_the_same_current_sample_pool() -> Non
     score = ((candidates - seed[:, None]) * solver.ik_nearest_weight).square().sum(-1)
     best = score.masked_fill(~mask, float("inf")).argmin(-1)
     torch.testing.assert_close(
-        result, candidates[torch.arange(1, device="cuda"), best], atol=1e-6, rtol=0
+        result, candidates[torch.arange(1, device=device), best], atol=1e-6, rtol=0
     )
     assert _pose_matches(target, _fk(solver, result)).all()
     assert ((result - seed).abs() <= 0.05).all()
 
 
-@pytest.mark.gpu
-def test_cuda_rr_restores_leading_batch_axes_and_rejects_invalid_targets() -> None:
-    solver = _make_solver()
-    source = torch.tensor([[0.2, 0.4, 0.0, 1.2, 0.6, 0.8, -1.0]], device="cuda")
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_rr_restores_leading_batch_axes_and_rejects_invalid_targets(
+    device: str,
+) -> None:
+    solver = _make_solver(device)
+    source = torch.tensor([[0.2, 0.4, 0.0, 1.2, 0.6, 0.8, -1.0]], device=device)
     target = _fk(solver, source).expand(4, -1, -1).clone()
     target[1, :3, 3] += 5
     target[2, 0, 0] = float("nan")
@@ -171,10 +178,10 @@ def test_cuda_rr_restores_leading_batch_axes_and_rejects_invalid_targets() -> No
     )
 
 
-@pytest.mark.gpu
-def test_cuda_rr_effective_limits_and_step_constraint_are_hard() -> None:
-    solver = _make_solver(max_joint_step=0.05)
-    seed = torch.tensor([[0.2, 0.4, 0.0, 1.2, 0.6, 0.8, -1.0]], device="cuda")
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_rr_effective_limits_and_step_constraint_are_hard(device: str) -> None:
+    solver = _make_solver(device, max_joint_step=0.05)
+    seed = torch.tensor([[0.2, 0.4, 0.0, 1.2, 0.6, 0.8, -1.0]], device=device)
     target = _fk(solver, seed)
     assert solver.set_qpos_limits(
         seed[0].cpu().numpy() - 0.01, seed[0].cpu().numpy() + 0.01
@@ -187,3 +194,39 @@ def test_cuda_rr_effective_limits_and_step_constraint_are_hard() -> None:
     valid, result = solver.get_ik(_fk(solver, shifted), seed)
     assert not valid.any()
     torch.testing.assert_close(result, seed, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_warp_rr_continuous_path_regenerates_from_previous_result(device: str) -> None:
+    """CPU RR paths use their algebraic provider rather than SRS reconstruction."""
+    solver = _make_solver(device, rr_search="seed_local", max_joint_step=0.05)
+    seed = torch.tensor([[0.2, 0.4, 0.137, 1.2, 0.6, 0.8, -1.0]], device=device)
+    source = seed.expand(3, -1).clone()
+    source[:, 0] += torch.tensor([0.001, 0.002, 0.003], device=device)
+    source[:, 2] += torch.tensor([0.0005, 0.001, 0.0015], device=device)
+    target = _fk(solver, source)
+    far = target[1:2].clone()
+    far[:, :3, 3] += 5.0
+    sequence = torch.cat((target[:1], far, target[1:]), dim=0)[None]
+    valid, result = solver._get_continuous_ik_path(sequence, seed)
+    assert valid.tolist() == [[True, False, True, True]]
+    assert _pose_matches(sequence[valid], _fk(solver, result[valid])).all()
+    previous = torch.cat((seed[:, None], result[:, :-1]), dim=1)
+    assert ((result - previous).abs() <= 0.05).all()
+    torch.testing.assert_close(result[:, 1], result[:, 0], atol=0, rtol=0)
+
+
+@pytest.mark.gpu
+def test_legacy_cuda_rr_and_unified_warp_rr_return_the_same_sampled_pool() -> None:
+    """Existing CUDA-only configurations retain their candidate/selection behavior."""
+    modern = _make_solver(rr_search="seed_local", max_joint_step=0.05)
+    legacy = _make_solver(legacy=True, rr_search="seed_local", max_joint_step=0.05)
+    seed = torch.tensor([[0.2, 0.4, 0.137, 1.2, 0.6, 0.8, -1.0]], device="cuda")
+    source = seed.clone()
+    source[:, 0] += 0.001
+    target = _fk(modern, source)
+    for all_solutions in (False, True):
+        actual = modern.get_ik(target, seed, return_all_solutions=all_solutions)
+        expected = legacy.get_ik(target, seed, return_all_solutions=all_solutions)
+        torch.testing.assert_close(actual[0], expected[0], atol=0, rtol=0)
+        torch.testing.assert_close(actual[1], expected[1], atol=0, rtol=0)

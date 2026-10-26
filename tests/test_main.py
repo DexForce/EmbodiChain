@@ -738,6 +738,7 @@ def test_kinematic_solver_help_is_lightweight_and_exposes_ssik(
     for flag in (
         "--ssik-smoke",
         "--ssik-models",
+        "--ssik-reference",
         "--ssik-reference-artifacts",
         "--ssik-devices",
         "--ssik-quality-only",
@@ -755,7 +756,7 @@ def test_kinematic_solver_help_is_lightweight_and_exposes_ssik(
 
 
 def test_kinematic_solver_model_and_reference_defaults_are_unspecified() -> None:
-    """The options object retains ownership of the default six-model workload."""
+    """Unspecified algorithms inherit each selected preset without importing solvers."""
     from embodichain.cli.benchmark import _add_kinematic_solver_arguments
 
     parser = argparse.ArgumentParser()
@@ -764,11 +765,12 @@ def test_kinematic_solver_model_and_reference_defaults_are_unspecified() -> None
 
     assert args.ssik_models is None
     assert args.ssik_reference_artifacts is None
-    assert args.ssik_geometry_mode == "strict"
+    assert args.ssik_skip_reference is True
+    assert args.ssik_geometry_mode is None
     assert args.ssik_axis_alignment_tolerance == 1e-5
-    assert args.ssik_srs_search == "uniform"
+    assert args.ssik_srs_search is None
     assert args.ssik_cuda_rr is False
-    assert args.ssik_rr_search == "fixed"
+    assert args.ssik_rr_search is None
     assert args.ssik_robot_e2e is False
 
 
@@ -873,3 +875,20 @@ def test_kinematic_solver_dispatch_forwards_ssik_workload_options(
         *forwarded,
     ]
     assert sys.argv is original_argv
+
+
+@pytest.mark.parametrize(
+    "flag,skip_reference",
+    [(None, True), ("--ssik-reference", False), ("--ssik-skip-reference", True)],
+)
+def test_kinematic_reference_is_explicit_correctness_alignment(
+    flag: str | None, skip_reference: bool
+) -> None:
+    from embodichain.cli.benchmark import _add_kinematic_solver_arguments
+
+    parser = argparse.ArgumentParser()
+    _add_kinematic_solver_arguments(parser)
+    selected = [] if flag is None else [flag]
+    args = parser.parse_args(["--ssik-geometry-mode", "rr", *selected])
+    assert args.ssik_skip_reference is skip_reference
+    assert args.ssik_geometry_mode == "rr"

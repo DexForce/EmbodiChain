@@ -73,31 +73,28 @@ geometry without assuming Franka or spherical-wrist dimensions.
 The initial joint positions are the official ready pose, in source order:
 `[0, -0.69813, 0, 1.570796, 0, 0.69813, 0]` radians.
 
-## Optional SSIK CUDA and CPU reference
+## Warp IK and optional reference alignment
 
-Explicit `SSIKSolverCfg(backend="cuda_rr", ...)` runs the prepared
-Raghavan–Roth matrix-pencil solve entirely on CUDA, without installing SSIK.
-It enumerates all 384 slots on the verified 16-sample joint-lock grid, bridges
-the source terminal frame, and checks actual PK/TCP pose error after float32
-conversion. The coefficient bundle includes a corrected zero-lock DH chart
-and an offline build/consistency manifest. Finite-grid continuous coverage and
-single-call p99 have not passed the default-switch gates; Pytorch remains the
-default. Preserve the preset's root, flange and TCP when opting in.
+`SSIKSolverCfg(backend="warp", geometry_mode="rr", rr_search="seed_local", ...)`
+runs the prepared Raghavan–Roth matrix-pencil solve on CPU or CUDA using Warp,
+without installing SSIK. The seed-local pool contains all 600 root slots from
+16 global and nine local lock samples. The fixed search retains its 384-slot
+coefficient bundle. Preserve the preset's root, flange and TCP when selecting
+either mode. The old `backend="cuda_rr"` configuration remains a CUDA-only
+compatibility alias.
 
-The preset retains its Pytorch default. An explicit `SSIKSolverCfg` reference
-configuration can use the prepared `flexiv_rizon4s.py` package resource. See
+This source model is not strict SRS. Prepared bundles verify the joint prefix,
+bridge the source terminal frame, and check actual PK/TCP error after float32
+conversion. They include a corrected zero-lock chart and offline consistency
+certificates. Runtime CPU execution uses Warp rather than the independent
+SciPy QZ test oracle. Finite lock sampling can miss a feasible interval; every
+query returns a validity mask and failure never invokes another solver.
+
+The preset retains Pytorch pending default-switch acceptance. Optional pinned
+SSIK is used only for explicit numerical alignment with the packaged
+`flexiv_rizon4s.py` artifact. See
 [prepared SSIK models](../../overview/sim/motion/solvers/ssik_solver.md#prepared-arx5-and-rizon4s-models)
-for the complete selection and rebuild example.
-
-This source model is not strict SRS. The reference uses pinned SSIK's
-joint-lock and 6R algebraic path after verifying the source joint prefix,
-with an explicit correction for the 43 mm terminal offset relative to the
-upstream Rizon 4 artifact. Model, joint order, source and coefficient sidecar
-fingerprints are checked. Its fixed 16-sample cached RR grid never launches
-an unprepared HP secondary solve; a failed finite search is not proof of
-unreachability. Every accepted result is validated against the
-actual Rizon 4S PK chain and TCP. CPU reference and CUDA RR are separate,
-explicitly selected paths; failure does not invoke another solver.
+for configuration, acceptance and artifact rebuild details.
 
 ## Published dynamics and simulation drives
 
