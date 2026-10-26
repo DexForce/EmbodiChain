@@ -124,6 +124,40 @@ def test_arx5_source_chain_commands_and_ik_roundtrip(
     )
 
 
+@pytest.mark.no_sim
+def test_arx5_explicit_ssik_override_preserves_chain_source_and_tcp() -> None:
+    """Reference replacements preserve the X5A source and tool frame."""
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
+    source = Path(__file__).parents[2] / "fixtures/kinematics/arx5_x5a.urdf"
+    default = ARX5Cfg.from_dict({"fpath": str(source)})
+    original = default.solver_cfg["arm"]
+    cfg = ARX5Cfg.from_dict(
+        {
+            "fpath": str(source),
+            "solver_cfg": {
+                "arm": SSIKSolverCfg(
+                    backend="reference",
+                    root_link_name=original.root_link_name,
+                    end_link_name=original.end_link_name,
+                    tcp=original.tcp,
+                    reference_artifact="prepared_x5a.py",
+                )
+            },
+        }
+    )
+    assert isinstance(cfg.solver_cfg["arm"], SSIKSolverCfg)
+    assert cfg.solver_cfg["arm"].reference_artifact == "prepared_x5a.py"
+    assert len(cfg.build_pk_serial_chain()["arm"].get_joint_parameter_names()) == 6
+    restored = ARX5Cfg.from_dict(cfg.to_dict())
+    assert restored.solver_cfg["arm"].backend == "reference"
+    assert restored.fpath == str(source)
+    np.testing.assert_array_equal(
+        restored.solver_cfg["arm"].tcp,
+        [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.085], [0, 0, 0, 1]],
+    )
+
+
 def test_mounted_sensor_config_roundtrip_and_instance_isolation() -> None:
     from embodichain.lab.sim.sensors import CameraCfg, StereoCameraCfg
 

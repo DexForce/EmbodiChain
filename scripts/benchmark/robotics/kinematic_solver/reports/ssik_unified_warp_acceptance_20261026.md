@@ -3,6 +3,7 @@
 Status: **ACCEPTANCE_PASS_WITH_KNOWN_ENVIRONMENT_FAILURES**. Default checkpoint: `5bb718515226772f94c07511e1c50ef9cab0d814`; final receipts explicitly qualify validation, including the preserved full-fast environment failures.
 
 All four robot families use normal `backend="warp"` on CPU/CUDA. Optional pinned official SSIK is an accuracy oracle only. Success requires original-URDF/PK FK at returned float32 precision, ≤1e-5 m/rad, valid limits; no automatic fallback.
+
 ## Time & Memory
 
 Actual-Robot rows show the largest observed per-arm/variant median and p99 within each family; they do not construct a synthetic timing distribution. Each constituent uses 10,000 completed changing-target calls. Bulk uses5 warmups + 30 completed calls. Memory columns are MiB; — means unmeasured in that timing scope.
@@ -61,6 +62,8 @@ Rank is only within the same family and validation scope; CPU/CUDA Warp tie in v
 Original Pytorch retains30 samples/500 iterations/5e-4 internal tolerances. ARX strict0% refers only to external1e-5 acceptance, not a claim that the original solver violates its looser contract.
 
 ARX is an explicit 9-slot bounded numerical hybrid; Rizon uses 25 locked samples/600 algebraic slots plus bounded scalar pencil-root correction. Neither claims a complete general 6R/7R solution manifold. P99 values are measured acceptance results, not hard-real-time guarantees.
+
+Historical reports are removed from the current source tree; their original bytes remain at [immutable commit `f0d8a280f`](https://github.com/DexForce/EmbodiChain/tree/f0d8a280fde80e53944d67dd5ad62fe691c66f72/scripts/benchmark/robotics/kinematic_solver/reports). The JSON indexes all relocated files, hashes and the local cleanup copy. Full raw timing/vector archives remain local, separately hash-bound evidence. This cleanup does not claim new measurements.
 
 Prior report SHA256: `c959555f1937e6b7c336f6df4ed7af0b314ab440360c7f3b2183722c16890f02`. Prior immutable raw index: `edf7d3f47c7490c64ccb4c946cd6dd577275f22bccd1c0d3c93ef17c590f6884`. Current raw archive binding: `4d10f8c75f9c035efbffab6503128de28b4bc3ccc6517ea2c3b12f3b75641763`. Complete vectors/cohorts/source/process/isolation evidence resolve through the two indexes and bound receipts; the public report is excluded from its own raw checkpoint.
 

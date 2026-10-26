@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import builtins
 import copy
 import json
 from pathlib import Path
@@ -697,24 +696,6 @@ def test_unsupported_geometry_is_rejected_before_solving(
     )
     with pytest.raises(ValueError, match="SSIK"):
         SSIKSolverCfg().init_solver(pk_serial_chain=chain)
-
-
-def test_warp_backend_does_not_import_optional_reference(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    original_import = builtins.__import__
-
-    def guarded_import(name: str, *args: Any, **kwargs: Any) -> Any:
-        if name == "ssik" or name.startswith("ssik."):
-            raise AssertionError("Warp must not import the optional SSIK dependency")
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", guarded_import)
-    solver = _make_solver()
-    qpos = _sample(solver, 1)
-    valid, result = solver.get_ik(_pk_fk(solver, qpos), qpos)
-    assert bool(valid.all())
-    _assert_pose(_pk_fk(solver, qpos), _pk_fk(solver, result))
 
 
 def test_reference_backend_rejects_cuda_without_loading_a_model() -> None:

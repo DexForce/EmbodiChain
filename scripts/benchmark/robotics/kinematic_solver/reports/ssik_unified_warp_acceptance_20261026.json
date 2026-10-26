@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "generated_utc": "2026-10-26T09:29:20.360532+00:00",
   "status": "ACCEPTANCE_PASS_WITH_KNOWN_ENVIRONMENT_FAILURES",
   "intended_report": "/home/dex/.codex/worktrees/459c/EmbodiChain/scripts/benchmark/robotics/kinematic_solver/reports/ssik_unified_warp_acceptance_20261026",
@@ -142,9 +142,11 @@
   },
   "source_bindings": {
     "old_public_report": {
-      "path": "/home/dex/.codex/worktrees/459c/EmbodiChain/scripts/benchmark/robotics/kinematic_solver/reports/ssik_followup_acceptance_20261026.json",
+      "path_in_commit": "scripts/benchmark/robotics/kinematic_solver/reports/ssik_followup_acceptance_20261026.json",
+      "git_blob": "3506ef2e3c20db866f189dab461507fb72eacea8",
       "sha256": "c959555f1937e6b7c336f6df4ed7af0b314ab440360c7f3b2183722c16890f02",
-      "size_bytes": 2233976
+      "bytes": 2233976,
+      "url": "https://github.com/DexForce/EmbodiChain/blob/f0d8a280fde80e53944d67dd5ad62fe691c66f72/scripts/benchmark/robotics/kinematic_solver/reports/ssik_followup_acceptance_20261026.json"
     },
     "old_immutable_index": {
       "path": "/home/dex/.codex/worktrees/459c/EmbodiChain/outputs/benchmarks/ssik_followup_acceptance_20261026/indexes/index-edf7d3f47c7490c64ccb4c946cd6dd577275f22bccd1c0d3c93ef17c590f6884.json",
@@ -1347,5 +1349,93 @@
     "Official small precision alignment has different finite candidate pools and is not a throughput, latency or production-coverage certificate.",
     "Racecheck ran with explicitly authorized external training: zero hazards/errors/warnings is correctness-only, with no isolation/performance claim.",
     "P1 and ARX older controls/memory retain their measured source identities; source bindings justify carryforward, not new-head retiming. No cross-robot algorithm-superiority ranking is inferred."
-  ]
+  ],
+  "historical_evidence": {
+    "preserved_commit": "f0d8a280fde80e53944d67dd5ad62fe691c66f72",
+    "repository": "https://github.com/DexForce/EmbodiChain",
+    "history_is_not_rewritten": true,
+    "local_copy_manifest": {
+      "path": "/home/dex/.codex/worktrees/459c/EmbodiChain/outputs/benchmarks/ssik_pr873_cleanup_20261026/manifest.json",
+      "sha256": "4ad78283b1327d07c121fe09a4f58e2bd73c4da2510ee6f528f52d874032934f"
+    },
+    "files": [
+      {
+        "path_in_commit": "scripts/benchmark/robotics/kinematic_solver/reports/ssik_acceptance_20261025.json",
+        "git_blob": "69965b2d3b2a5e00c52b822c0f5036c1abe7b337",
+        "sha256": "ffbe66e4497a1c76effbf0e0ca3645b3a991559d183e300528aa6ee19ad60a73",
+        "bytes": 403305,
+        "url": "https://github.com/DexForce/EmbodiChain/blob/f0d8a280fde80e53944d67dd5ad62fe691c66f72/scripts/benchmark/robotics/kinematic_solver/reports/ssik_acceptance_20261025.json"
+      },
+      {
+        "path_in_commit": "scripts/benchmark/robotics/kinematic_solver/reports/ssik_acceptance_20261025.md",
+        "git_blob": "12e5730a1ccfb66514b77127d07f56b9fde34bce",
+        "sha256": "c3ca9d0bbe3fd4689cca1491384b1c45b8b706216908f9a3cfddb4e3354d068b",
+        "bytes": 83688,
+        "url": "https://github.com/DexForce/EmbodiChain/blob/f0d8a280fde80e53944d67dd5ad62fe691c66f72/scripts/benchmark/robotics/kinematic_solver/reports/ssik_acceptance_20261025.md"
+      },
+      {
+        "path_in_commit": "scripts/benchmark/robotics/kinematic_solver/reports/ssik_arx5_rizon4s_extension_20261025.json",
+        "git_blob": "724a0663b20cc8401391aa76ab56e2e9a14f4465",
+        "sha256": "c2a4a2868afd5c0e7c1bc0bdbca2ba46e62a8795b260f5faacc60aabc4576292",
+        "bytes": 27597,
+        "url": "https://github.com/DexForce/EmbodiChain/blob/f0d8a280fde80e53944d67dd5ad62fe691c66f72/scripts/benchmark/robotics/kinematic_solver/reports/ssik_arx5_rizon4s_extension_20261025.json"
+      },
+      {
+        "path_in_commit": "scripts/benchmark/robotics/kinematic_solver/reports/ssik_arx5_rizon4s_extension_20261025.md",
+        "git_blob": "1fa11180f33e26bc61116bcd81eadc1d9d5f1eb9",
+        "sha256": "456a8ced5f16aee1639d3052c9929ea6ca91454bd3b52c99a2a6ecf026f3090b",
+        "bytes": 11380,
+        "url": "https://github.com/DexForce/EmbodiChain/blob/f0d8a280fde80e53944d67dd5ad62fe691c66f72/scripts/benchmark/robotics/kinematic_solver/reports/ssik_arx5_rizon4s_extension_20261025.md"
+      },
+      {
+        "path_in_commit": "scripts/benchmark/robotics/kinematic_solver/reports/ssik_cuda_delivery_20261026.json",
+        "git_blob": "7356cb145171406a5422f24ba2044164e3f5ed51",
+        "sha256": "9077af4b1c55a6596ba886cb6f8ffb97d557ba4b12f1c4e5d6b0c212e818ffa4",
+        "bytes": 233762,
+        "url": "https://github.com/DexForce/EmbodiChain/blob/f0d8a280fde80e53944d67dd5ad62fe691c66f72/scripts/benchmark/robotics/kinematic_solver/reports/ssik_cuda_delivery_20261026.json"
+      },
+      {
+        "path_in_commit": "scripts/benchmark/robotics/kinematic_solver/reports/ssik_cuda_delivery_20261026.md",
+        "git_blob": "3aab900491bf68c03b1da36991b5581c05e122a6",
+        "sha256": "e6ed1596b23b506eadcebd05e2236a0ccae0c6a7d9101b056aa6a37b949020e8",
+        "bytes": 10661,
+        "url": "https://github.com/DexForce/EmbodiChain/blob/f0d8a280fde80e53944d67dd5ad62fe691c66f72/scripts/benchmark/robotics/kinematic_solver/reports/ssik_cuda_delivery_20261026.md"
+      },
+      {
+        "path_in_commit": "scripts/benchmark/robotics/kinematic_solver/reports/ssik_followup_acceptance_20261026.json",
+        "git_blob": "3506ef2e3c20db866f189dab461507fb72eacea8",
+        "sha256": "c959555f1937e6b7c336f6df4ed7af0b314ab440360c7f3b2183722c16890f02",
+        "bytes": 2233976,
+        "url": "https://github.com/DexForce/EmbodiChain/blob/f0d8a280fde80e53944d67dd5ad62fe691c66f72/scripts/benchmark/robotics/kinematic_solver/reports/ssik_followup_acceptance_20261026.json"
+      },
+      {
+        "path_in_commit": "scripts/benchmark/robotics/kinematic_solver/reports/ssik_followup_acceptance_20261026.md",
+        "git_blob": "39944960c80c27a9be07d3d2ea8d7874cfa3871a",
+        "sha256": "0bb5fac97e47ea3a5822c9460944ac7ce5360660c24994ce233c0c6d0550d6b3",
+        "bytes": 50302,
+        "url": "https://github.com/DexForce/EmbodiChain/blob/f0d8a280fde80e53944d67dd5ad62fe691c66f72/scripts/benchmark/robotics/kinematic_solver/reports/ssik_followup_acceptance_20261026.md"
+      },
+      {
+        "path_in_commit": "scripts/benchmark/robotics/kinematic_solver/reports/ssik_followup_review_20261026.md",
+        "git_blob": "5e6a41c98d306936665f9dcade16b4039b6f7862",
+        "sha256": "c65b144ca0de27c5828c2899a5c443fa464bb721805733e67daac38b7c381af7",
+        "bytes": 9862,
+        "url": "https://github.com/DexForce/EmbodiChain/blob/f0d8a280fde80e53944d67dd5ad62fe691c66f72/scripts/benchmark/robotics/kinematic_solver/reports/ssik_followup_review_20261026.md"
+      },
+      {
+        "path_in_commit": "scripts/benchmark/robotics/kinematic_solver/ssik_w1_v030_counterexamples.json",
+        "git_blob": "162ed79f769a3c9974999a249184c148ad15e57a",
+        "sha256": "1294a40151a40517c78ad7f1d40bd220b4caa73f69a1bdede2bb79d1c45cbf54",
+        "bytes": 17200,
+        "url": "https://github.com/DexForce/EmbodiChain/blob/f0d8a280fde80e53944d67dd5ad62fe691c66f72/scripts/benchmark/robotics/kinematic_solver/ssik_w1_v030_counterexamples.json"
+      }
+    ],
+    "scope": "Nine historical reports and the deferred W1 V030 research cases are retained at immutable commit URLs and in the ignored local cleanup archive. Full timing vectors remain in the separately hash-bound local raw archives; they are not GitHub-hosted artifacts."
+  },
+  "cleanup": {
+    "source_checkpoint": "f0d8a280fde80e53944d67dd5ad62fe691c66f72",
+    "change_scope": "Evidence relocation, benchmark removal of unrelated W1 copying, test consolidation and documentation. The solver mathematics, coefficients and default presets are unchanged.",
+    "measurement_policy": "No new measurements are claimed by this cleanup; existing qualification checkpoints and known environment failures are preserved.",
+    "ci_fix": "Cold-process tests inherit runner CUDA visibility so native dependencies retain their installed bindings; CPU chains, solver and tensor devices and official-SSIK import isolation are asserted explicitly. This changes the test environment, not the solver."
+  }
 }

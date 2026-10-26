@@ -1484,8 +1484,6 @@ def _benchmark_ssik_solver(
         for name, path in reference_artifacts.items()
     }
     (directory / "runtime.json").write_text(json.dumps(versions, indent=2) + "\n")
-    counterexamples = Path(__file__).with_name("ssik_w1_v030_counterexamples.json")
-    (directory / counterexamples.name).write_bytes(counterexamples.read_bytes())
     perf: list[dict[str, Any]] = []
     metrics: list[dict[str, Any]] = []
     notes = [
@@ -1495,7 +1493,6 @@ def _benchmark_ssik_solver(
         "Pytorch_original is explicitly reconstructed with original defaults (30 samples, 500 iterations, 5e-4 internal convergence tolerances), independent of robot default changes; acceptance is still rechecked at 1e-5, which can reduce its measured success rate. Pytorch_matched changes only internal convergence tolerances to 1e-5 for a quality-matched comparison. Default-switch throughput gates compare the original baseline.",
         "Resident fixed-workload, transfer-inclusive and initialization timings have distinct scopes. Warp N=1 also measures a streaming_control certificate: changing trajectory frames, preceding result as the next seed, path-boundary resets only, twenty excluded warmups and a 0.05 rad hard step bound. The 5 ms/8 ms control gates require these streaming scopes; repeated fixed targets are diagnostics. Public batch trajectory quality uses each complete 1,000-frame path with its fixed initial seed. Robot-interface end-to-end latency and branch equivalence are validated separately.",
         "Torch peak increments and Warp pool counters are distinct. SSIK candidate/numerical workspaces are Torch-owned zero-copy Warp views. Attributed tensor scratch includes retained workspace and peak transient Torch allocations minus final outputs (CPU uses explicit target/seed/limit conversion sizes); caller inputs and model constants are excluded. These warmed counters cannot capture CUDA driver local-stack reservation: a small attributed tensor workspace does not certify the complete 128 MiB GPU scratch gate, which requires fresh-process driver/NVML attribution. Warp pool high-water is process-global, not an attributable peak. Other backends retain an unvalidated scratch status.",
-        "Saved W1 V030 counterexamples are 14 historically reachable failures from pinned SSIK with allow_rescue=False (seed2531). Their provenance and URDF hash are preserved; this run does not claim to revalidate them.",
         "Cartesian lines/circles are small local paths; unlike joint-space trajectories their global reachability is not asserted. Seven-axis finite sampling cannot establish complete reachability.",
         "SSIK leaderboard entries retain model identity, weight standard reachable/trajectory success by attempted count, and exclude deliberately unreachable controls and the separate streaming-control certificate. Timing-only algorithms remain listed as UNMEASURED rather than receiving fabricated success scores. Rankings across different robot models do not establish unconditional algorithm superiority.",
         "Official SSIK reference is opt-in correctness alignment only; its initialization/first-call/steady-state timing is excluded. It is not a core runtime dependency. The documented reference rescue policy is unchanged.",
