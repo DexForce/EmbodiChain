@@ -58,6 +58,31 @@ launcher selects the concrete backend from the same deployment with
 `--physics`; the selected environment file remains the owner of its backend
 fields.
 
+Execution policies accept either the original string path or a component
+selection with deployment-specific tuning:
+
+```yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy:
+    component: ../../../components/execution_policies/motion_gen_verified.yaml
+    overrides:
+      motion:
+        velocity_limit: 0.5
+        dynamic_collision_mode: 'off'
+```
+
+Overrides are limited to `motion.sample_count`, `motion.velocity_limit`,
+`motion.acceleration_limit`, `motion.dynamic_collision_mode`,
+`recovery.action_timeout` and `recovery.goal_rotation_threshold`. They patch
+only the declared fields; all other base values are retained. The resolved
+values pass the normal policy decoders, including integer, finite-number and
+enum validation. Contracts, planner selection, tracking, runner and effect
+assurance stay in the base policy. The component path resolves from the
+deployment, just as a string reference does. Asset materialization writes the
+resolved policy into its standalone output.
+
 Task-facing trajectory expansion is an optional third owner. A runnable task
 can reference it without copying the robot or environment declaration:
 

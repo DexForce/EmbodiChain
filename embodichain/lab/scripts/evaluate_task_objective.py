@@ -144,8 +144,11 @@ def _component_snapshot(source: Path) -> dict[str, dict[str, str]]:
         program = data.get("task_program")
         if isinstance(program, Mapping):
             for name in ("program", "integration", "execution_policy"):
-                if isinstance(program.get(name), str):
-                    visit(path.parent / program[name])
+                selection = program.get(name)
+                if isinstance(selection, Mapping):
+                    selection = selection.get("component")
+                if isinstance(selection, str):
+                    visit(path.parent / selection)
 
     visit(source)
     return result

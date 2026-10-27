@@ -1,0 +1,320 @@
+# Reuse the V030 bare-body preset; append Pika tools and embodiment calibration.
+embodiment_id: dexforce_w1_030_pika
+simulation:
+  class_type: DexforceW1
+  version: v030
+  with_default_eef: false
+  uid: DexforceW1V030Pika
+  urdf_cfg:
+    fname: DexforceW1V030_pika
+    components:
+    - component_type: left_hand
+      urdf_path: PikaGripper/PikaGripper.urdf
+      transform:
+      - - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+    - component_type: right_hand
+      urdf_path: PikaGripper/PikaGripper.urdf
+      transform:
+      - - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+  control_parts:
+    left_eef:
+    - LEFT_FINGER1_JOINT
+    - LEFT_FINGER2_JOINT
+    right_eef:
+    - RIGHT_FINGER1_JOINT
+    - RIGHT_FINGER2_JOINT
+  solver_cfg:
+    left_arm:
+      tcp:
+      - - 0.0
+        - 1.0
+        - 0.0
+        - 0.00064
+      - - -1.0
+        - 0.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.16
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+    right_arm:
+      tcp:
+      - - 0.0
+        - 1.0
+        - 0.0
+        - 0.00064
+      - - -1.0
+        - 0.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.16
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+  init_pos:
+  - 0.25
+  - 0.0
+  - 0.0
+  init_rot:
+  - 0.0
+  - 0.0
+  - 0.0
+  init_qpos:
+  - -0.15
+  - 0.3
+  - -0.15
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.6981317007977318
+  - -1.25
+  - 1.25
+  - 0.0
+  - 0.0
+  - -1.7
+  - 1.7
+  - -0.32
+  - -0.32
+  - 0.3
+  - -0.3
+  - 0.0
+  - 0.0
+  - 0.05
+  - 0.05
+  - 0.05
+  - 0.05
+  root_props:
+    fixed_base: true
+  joint_drive_props:
+    stiffness:
+      left_eef: 1000.0
+      right_eef: 1000.0
+      head: 10000000.0
+    damping:
+      left_eef: 100.0
+      right_eef: 100.0
+      head: 10000.0
+    max_effort:
+      left_eef: 8.0
+      right_eef: 8.0
+    max_velocity:
+      left_eef: 0.25
+      right_eef: 0.25
+  link_attrs:
+    finger_pads:
+      link_names_expr:
+      - (left|right)_finger[12]
+      attrs:
+        material_props:
+          static_friction: 2.0
+          dynamic_friction: 2.0
+  sensors:
+  - sensor_type: Camera
+    uid: cam_high
+    width: 960
+    height: 540
+    intrinsics:
+    - 505.81446
+    - 487.09289
+    - 480.0
+    - 270.0
+    near: 0.05
+    far: 3.0
+    enable_color: true
+    enable_depth: true
+    extrinsics:
+      parent: head_pitch_j2_link
+      pos:
+      - 0.105
+      - 0.0
+      - 0.06
+      quat:
+      - 0.5
+      - -0.5
+      - -0.5
+      - 0.5
+  - sensor_type: Camera
+    uid: cam_left_wrist
+    width: 640
+    height: 360
+    intrinsics:
+    - 337.20964
+    - 324.7286
+    - 320.0
+    - 180.0
+    near: 0.01
+    far: 2.0
+    enable_color: true
+    enable_depth: true
+    extrinsics:
+      parent: left_gripper_base
+      pos:
+      - 0.055
+      - 0.0
+      - 0.135
+      quat:
+      - -0.2772974281791397
+      - 0.2772974281791397
+      - 0.6504660916029635
+      - -0.6504660916029635
+  - sensor_type: Camera
+    uid: cam_right_wrist
+    width: 640
+    height: 360
+    intrinsics:
+    - 337.20964
+    - 324.7286
+    - 320.0
+    - 180.0
+    near: 0.01
+    far: 2.0
+    enable_color: true
+    enable_depth: true
+    extrinsics:
+      parent: right_gripper_base
+      pos:
+      - 0.055
+      - 0.0
+      - 0.135
+      quat:
+      - -0.2772974281791397
+      - 0.2772974281791397
+      - 0.6504660916029635
+      - -0.6504660916029635
+sensor: []
+skill_profile:
+  contract_id: dual_arm_parallel_gripper
+  profile_id: dexforce_w1_030_pika
+  resources:
+  - resource_id: left
+    endpoints:
+    - endpoint_id: motion
+      control_part: left_arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: left_eef
+      capabilities:
+      - interaction.grasp
+      command_preset: left_parallel_gripper
+  - resource_id: right
+    endpoints:
+    - endpoint_id: motion
+      control_part: right_arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: right_eef
+      capabilities:
+      - interaction.grasp
+      command_preset: right_parallel_gripper
+  - resource_id: primary_manipulator
+    members:
+    - right
+    endpoints:
+    - endpoint_id: motion
+      control_part: right_arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: right_eef
+      capabilities:
+      - interaction.grasp
+      command_preset: right_parallel_gripper
+  - resource_id: secondary_manipulator
+    members:
+    - left
+    endpoints:
+    - endpoint_id: motion
+      control_part: left_arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: left_eef
+      capabilities:
+      - interaction.grasp
+      command_preset: left_parallel_gripper
+  command_presets:
+  - preset_id: left_parallel_gripper
+    control_part: left_eef
+    commands:
+      open:
+      - 0.05
+      - 0.05
+      grasp:
+      - 0.0
+      - 0.0
+  - preset_id: right_parallel_gripper
+    control_part: right_eef
+    commands:
+      open:
+      - 0.05
+      - 0.05
+      grasp:
+      - 0.0
+      - 0.0
+  runtime_services:
+    grasp_pose_generators:
+      left_eef:
+        kind: antipodal_parallel_jaw
+        model: pika_gripper
+      right_eef:
+        kind: antipodal_parallel_jaw
+        model: pika_gripper
+    control_part_evidence:
+      kind: joint_position_constraint
+      control_parts:
+      - left_eef
+      - right_eef
+      open_qpos:
+      - 0.05
+      - 0.05
+      minimum_displacement: 0.004

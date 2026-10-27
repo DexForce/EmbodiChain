@@ -52,7 +52,7 @@ from .push_object import (
     PushObjectOptions,
     PushObjectToolCalibration,
 )
-from .pour import Pour, PourGoal, PourOptions
+from .pour import Pour, PourGoal, PourOptions, PourTarget
 from .slide import (
     Slide,
     SlideGoal,
@@ -116,6 +116,7 @@ __all__ = [
     "Pour",
     "PourGoal",
     "PourOptions",
+    "PourTarget",
     "Press",
     "PressGoal",
     "PressOptions",

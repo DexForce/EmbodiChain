@@ -61,6 +61,7 @@ the host integration's responsibility.
 | `franka_panda_hand` | 0.001 | 0.080 | 0.054 | 0.022 | 0.027 | 0.092 |
 | `cobotmagic_v100_gripper` | 0.001 | 0.100 | 0.077 | 0.056 | 0.025 | 0.074 |
 | `tianji_marvin_gripper` | 0.001 | 0.095 | 0.103 | 0.043 | 0.034 | 0.082 |
+| `pika_gripper` | 0.001 | 0.094 | 0.113 | 0.039 | 0.057 | 0.085 |
 
 ## Versioned geometry sources
 
@@ -147,3 +148,24 @@ Collision meshes under `Collision/`:
 | `left_hand_finger_2_link_auto_convex.obj` | `e52c9365e6c67a0a99857364b11e64bbe65b2ed23861bb1e2fea956ccc12d25d` |
 | `right_hand_finger_1_link_auto_convex.obj` | `c28eb3fc1ce437c73413999a4d492787e2d98ace879e21672fa3ae052f90bcde` |
 | `right_hand_finger_2_link_auto_convex.obj` | `7925becf7dd7de15aab37f0d611eb81c89b2465ee8d6ee8dcdf202f16e788fb2` |
+
+### PikaGripper
+
+Source: `PikaGripper/PikaGripper.urdf`, registered by `eef_assets.PikaGripper`.
+Archive MD5: `8a9d0779e7dbfa7bf5d4713175df014e`; URDF SHA-256:
+`cb99efefd74f26011c56d5afcf13839c13a5374160fecb02ac02ba9fa172d952`.
+
+The asset includes its adapter. Native gripper-base X approaches, Y opens,
+and Z is the finger-width axis. The Pika TCP aligns these with grasp Z, X,
+and Y respectively. Source finger bounds give approach extent 0.11214 m,
+width 0.03811 m and thickness 0.05700 m; scalar collision sizes round upward
+to millimetres. Palm approach extent is 0.08480 m. The full open gap measured
+from opposing inner mesh bounds at q=0.05 m is about 0.09404 m; the preset
+rounds down to 0.094 m. Joint zero closes the jaws, and finger 2 mimics finger 1.
+These are simulation mesh dimensions, not hardware specifications.
+
+| Collision mesh | SHA-256 |
+| --- | --- |
+| `gripper_base_link.STL` | `ac4593d07d4d95436bb125e76df22332414c24f287ff3de0b35c3336cdfca5e6` |
+| `gripper_left_link.STL` | `16de0af984683c4286bf826557c1ea3c40380c64f890969cde5c880726c7474b` |
+| `gripper_right_link.STL` | `0a10906fa2ed940db0de90b0f171db3cc550c8cfd56b83bebd33b9a8955e0b66` |

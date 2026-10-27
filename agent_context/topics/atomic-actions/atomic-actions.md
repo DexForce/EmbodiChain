@@ -73,6 +73,15 @@ the directed axis goal. `alignment_offset_m` similarly selects a scalar-vector
 or per-row world translation from the lifted object centre; zero retains the
 fixed-centre target. Neither option establishes path or physical feasibility.
 
+`PourGoal.target` optionally supplies a `PourTarget` with a live receiving
+opening and source-mouth geometry. The action derives the tilt direction,
+source-body clearance and mouth-compensated approach/tilt/return path from the
+held transform. Omission retains the original local-axis rotation mode.
+Geometry belongs to the goal/integration; motion timing, IK and collision
+checks remain with the selected planning policy. Validate executed mouth
+alignment and height throughout tilted motion with host observations, rather
+than treating an accepted final pose as evidence of pouring.
+
 `SlideGoal.joint_target` optionally supplies a public `SlideJointTarget` with an
 absolute prismatic coordinate and a calibrated axis sign. Slide resolves the
 remaining distance from same-timestamp joint/robot observations per planning row;
