@@ -35,6 +35,7 @@ from embodichain_models.policy.bc.model import (
     ChunkBCExecutor,
 )
 from ._pick_place import CAMERAS, TARGET_SEMANTICS, decode_request
+from ._trace import save_replan_inputs, task_snapshot
 
 
 def _write(path: Path, value: dict[str, Any]) -> None:
@@ -86,12 +87,23 @@ def evaluate_checkpoint(
         ),
     )
     policy_calls = 0
+    latest_features: torch.Tensor | None = None
 
     def count_forward(_module: Any, _inputs: Any, _output: Any) -> None:
         nonlocal policy_calls
         policy_calls += 1
 
     forward_hook = model.register_forward_hook(count_forward)
+    feature_hook = None
+    if trace and model.encoder is not None:
+
+        def capture_features(
+            _module: Any, _inputs: Any, features: torch.Tensor
+        ) -> None:
+            nonlocal latest_features
+            latest_features = features.detach().cpu().clone()
+
+        feature_hook = model.encoder.register_forward_hook(capture_features)
     config = deepcopy(signature["environment"])
     config.update(
         device=sim_device,
@@ -138,6 +150,7 @@ def evaluate_checkpoint(
             reset_seconds += time.monotonic() - reset_started
             executor.reset()
             scene_calls_started = policy_calls
+            scene_replans = 0
             trace_rows = []
             terminal, truncated = False, False
             steps_started = time.monotonic()
@@ -164,10 +177,30 @@ def evaluate_checkpoint(
                             .to(policy_device)
                         )
                     calls_before = policy_calls
+                    before = task_snapshot(raw, geometry) if trace else None
+                    queue_before = (
+                        (None if executor._index is None else int(executor._index[0]))
+                        if trace
+                        else None
+                    )
                     target = executor.action(geometry[:, :27], images)
                     if not torch.isfinite(target).all():
                         raise FloatingPointError("Student produced non-finite targets")
                     action = decode_request(target, geometry)
+                    replanned = policy_calls != calls_before
+                    input_artifact = None
+                    if trace and replanned:
+                        scene_replans += 1
+                        # Keep the first two actual replans per scene, rather
+                        # than streaming every camera frame to disk.
+                        if scene_replans <= 2:
+                            input_artifact = save_replan_inputs(
+                                executor,
+                                output.with_suffix("")
+                                / "trace-assets"
+                                / f"scene-{ordinal:03d}-replan-{scene_replans:03d}.pt",
+                                latest_features,
+                            )
                     observation, _, terminated, timed_out, _ = env.step(
                         action.to(raw.device)
                     )
@@ -175,6 +208,8 @@ def evaluate_checkpoint(
                         torch.as_tensor(timed_out).any()
                     )
                     if trace:
+                        after_geometry = policy_observations(observation)
+                        after = task_snapshot(raw, after_geometry)
                         success, failed, metrics = raw.compute_task_state()
                         cube, tcp = geometry[0, 27:30], geometry[0, 18:21]
                         distance = float(torch.linalg.vector_norm(cube - tcp))
@@ -209,6 +244,26 @@ def evaluate_checkpoint(
                                 "policy_forward_calls": policy_calls - calls_before,
                                 "scene_policy_forward_calls": policy_calls
                                 - scene_calls_started,
+                                "before": before,
+                                "after": after,
+                                "replanned": replanned,
+                                "queue_index_before": queue_before,
+                                "executed_target_index": int(executor._index[0]) - 1,
+                                "queue_index_after": int(executor._index[0]),
+                                "encoder_features": (
+                                    latest_features.tolist()
+                                    if replanned and latest_features is not None
+                                    else None
+                                ),
+                                "replan_input_artifact": input_artifact,
+                                "stable_counter_transition_consistent": after[
+                                    "stable_steps"
+                                ]
+                                == (
+                                    before["stable_steps"] + 1
+                                    if after["instantaneously_accepted"]
+                                    else 0
+                                ),
                             }
                         )
                     if terminal or truncated:
@@ -241,7 +296,13 @@ def evaluate_checkpoint(
                     "records": records,
                 },
             )
-            print(json.dumps(record, allow_nan=False), flush=True)
+            print(
+                json.dumps(
+                    {key: value for key, value in record.items() if key != "trace"},
+                    allow_nan=False,
+                ),
+                flush=True,
+            )
         if getattr(raw, "_expert_engine", None) is not None:
             raise RuntimeError(
                 "Student evaluation unexpectedly initialized an expert engine"
@@ -249,6 +310,8 @@ def evaluate_checkpoint(
     finally:
         cleanup_started = time.monotonic()
         forward_hook.remove()
+        if feature_hook is not None:
+            feature_hook.remove()
         try:
             if env is not None:
                 env.unwrapped.close(exit_process=False)
@@ -282,6 +345,18 @@ def evaluate_checkpoint(
         "policy_forward_calls": policy_calls,
         "trace_enabled": trace,
     }
+    if trace:
+        report.update(
+            trace_schema="pickplace-diagnostic-v2",
+            trace_semantics={
+                "before": "measured state before executor.action and env.step",
+                "after": "measured state after env.step; counters are read-only",
+                "legacy_phase": "retained mixed-time geometric_phase field",
+                "features": "actual encoder output; history-major, camera-minor",
+                "rgb_history_limit": "first two replans per scene",
+                "policy_inputs": "proprio27 and measured camera histories only",
+            },
+        )
     _write(output, report)
     return report
 
