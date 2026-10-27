@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import sys
 
 import numpy as np
@@ -875,3 +876,42 @@ def test_failed_precision_measurements_preserve_json_and_failure_reason(
     assert result["metrics"]["distance"] is None
     assert result["final_state"]["peg"] == [0.0, None, 0.0]
     assert result["nonfinite_measurement_count"] == 2
+
+
+def test_compiled_robot_tree_preserves_nonzero_joint_frame(tmp_path: Path) -> None:
+    import xml.etree.ElementTree as ET
+    import torch
+
+    mujoco = pytest.importorskip("mujoco")
+    pk = pytest.importorskip("pytorch_kinematics")
+    from embodichain.gen_sim.assembly.robot_reference import _append_model
+
+    source = mujoco.MjModel.from_xml_string("""<mujoco><worldbody>
+      <body name="base"><geom type="box" size=".1 .1 .1"/>
+       <body name="arm" pos=".1 .2 .3" euler="15 20 5">
+        <joint name="joint" axis="0 1 0" pos=".01 .02 .03" range="-90 90"/>
+        <geom type="box" pos=".02 0 .1" size=".02 .03 .1" mass="1"/>
+        <body name="tool" pos=".1 0 .2"><geom type="sphere" size=".01" mass=".01"/></body>
+       </body>
+      </body></worldbody></mujoco>""")
+    urdf = ET.Element("robot", name="reference")
+    _append_model(urdf, source, tmp_path)
+    chain = pk.build_serial_chain_from_urdf(
+        ET.tostring(urdf, encoding="unicode"),
+        end_link_name="tool",
+        root_link_name="base",
+    ).to(dtype=torch.float64)
+    data = mujoco.MjData(source)
+    for angle in [-0.7, 0, 0.65]:
+        data.qpos[0] = angle
+        mujoco.mj_forward(source, data)
+        actual = (
+            chain.forward_kinematics(torch.tensor([[angle]], dtype=torch.float64))
+            .get_matrix()[0]
+            .numpy()
+        )
+        tool_id = mujoco.mj_name2id(source, mujoco.mjtObj.mjOBJ_BODY, "tool")
+        expected = np.eye(4)
+        expected[:3, 3] = data.xpos[tool_id]
+        expected[:3, :3] = data.xmat[tool_id].reshape(3, 3)
+        np.testing.assert_allclose(actual, expected, atol=1e-7, rtol=1e-7)

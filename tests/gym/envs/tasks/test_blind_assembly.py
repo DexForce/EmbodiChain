@@ -55,47 +55,24 @@ _CONFIG_ROOT = (
 )
 
 
-def test_default_asset_deployment_uses_production_component_loader(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    import importlib
-    from embodichain_robots import FlexivRizon4SRobotiqCfg
-
-    urdf = tmp_path / "robot.urdf"
-    urdf.write_text('<robot name="fixture"><link name="base_link"/></robot>')
-    monkeypatch.setattr(
-        FlexivRizon4SRobotiqCfg, "_pk_urdf_path", property(lambda self: str(urdf))
-    )
-    module = importlib.import_module("embodichain_robots.flexiv.rizon4s.cfg")
-    monkeypatch.setattr(module, "get_data_path", lambda path: str(urdf))
-    register_manager_modules(["embodichain.lab.gym.envs.managers.assembly"])
-    path = _CONFIG_ROOT / "peg_insertion/task.study.default_assets.yaml"
-    cfg = config_to_cfg(load_config(str(path)), source_path=path)
-    assert cfg.robot.asset_source == "default"
-    assert cfg.robot.control_parts["eef"] == ["finger_joint"]
-    assert cfg.robot.solver_cfg["arm"].root_link_name == "base_link"
-    assert cfg.sim_steps_per_control == 20
-
-
 @pytest.mark.parametrize("task", ["peg_insertion", "gear_meshing", "nut_threading"])
 @pytest.mark.parametrize("profile", ["study", "fullrange"])
 def test_nominal_task_uses_production_component_loader(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, task: str, profile: str
 ) -> None:
-    from embodichain_robots import FlexivRizon4SRobotiqCfg
-
     urdf = tmp_path / "robot.urdf"
     urdf.write_text('<robot name="test"><link name="base"/></robot>')
-    monkeypatch.setattr(
-        FlexivRizon4SRobotiqCfg, "_pk_urdf_path", property(lambda self: str(urdf))
-    )
+    import importlib
+
+    module = importlib.import_module("embodichain_robots.flexiv.rizon4s.cfg")
+    monkeypatch.setattr(module, "get_data_path", lambda path: str(urdf))
     register_manager_modules(["embodichain.lab.gym.envs.managers.assembly"])
     path = _CONFIG_ROOT / task / f"task.{profile}.nominal.yaml"
     cfg = config_to_cfg(load_config(str(path)), source_path=path)
     assert cfg.sim_cfg.physics_dt == pytest.approx(0.001)
     assert cfg.sim_steps_per_control == 20
     assert cfg.control_parts == ["arm"]
-    assert cfg.robot.gripper_model == "parallel_jaw"
+    assert cfg.extensions["gripper_model"] == "parallel_jaw"
     assert len(cfg.robot.control_parts["eef"]) == 2
     assert cfg.actions.arm_delta.params["part_name"] == "arm"
     assert cfg.extensions["require_heterogeneous_assets"] is False
@@ -455,7 +432,7 @@ def test_encoder_gravity_feedforward_matches_mujoco_bias(
     mujoco = pytest.importorskip("mujoco")
     pytest.importorskip("pytorch_kinematics")
     import xml.etree.ElementTree as ET
-    from embodichain_robots.flexiv.rizon4s_robotiq._menagerie import _append_model
+    from embodichain.gen_sim.assembly.robot_reference import _append_model
 
     model = ET.Element("mujoco")
     world = ET.SubElement(model, "worldbody")
@@ -559,8 +536,7 @@ def test_checkpoint_task_resources_relocate_without_generator(
             "id": "BlindPegInsertionRL-v1",
             "physics": "newton",
             "robot": {
-                "class_type": "FlexivRizon4SRobotiq",
-                "gripper_model": "parallel_jaw",
+                "class_type": "FlexivRizon4S",
             },
             "env": {"extensions": {}},
         },
@@ -575,7 +551,7 @@ def test_checkpoint_task_resources_relocate_without_generator(
 
     path.write_text(yaml.safe_dump(frozen))
     cfg = config_to_cfg(load_config(str(path)), source_path=path)
-    assert cfg.robot.source_urdf == str(target / "resources" / "robot" / "robot.urdf")
+    assert cfg.robot.fpath == str(target / "resources" / "robot" / "robot.urdf")
     asset = AssemblyAsset.load(cfg.extensions["assembly_manifest"])
     assert asset.content_hash == env.assembly_asset.content_hash
     assert (
@@ -587,3 +563,148 @@ def test_checkpoint_task_resources_relocate_without_generator(
         ]
         == 4
     )
+
+
+def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import importlib
+    import xml.etree.ElementTree as ET
+    from embodichain_robots import FlexivRizon4SCfg
+    from embodichain.lab.gym.envs.assembly_env import _assembly_kinematic_chain
+    from embodichain.robot_registry import list_robot_cfgs
+
+    def base_link(name: str, color: str, mass: str) -> str:
+        return f"""<link name="{name}"><inertial><mass value="{mass}"/>
+          <inertia ixx=".01" iyy=".01" izz=".01" ixy="0" ixz="0" iyz="0"/>
+          </inertial><visual><geometry><box size=".02 .02 .02"/></geometry>
+          <material name=""><color rgba="{color}"/></material></visual>
+          <collision><geometry><box size=".01 .01 .01"/></geometry></collision></link>"""
+
+    arm = tmp_path / "arm.urdf"
+    pieces = ['<robot name="arm">', base_link("base_link", ".97 .97 .97 1", "3")]
+    for i in range(1, 8):
+        parent = "base_link" if i == 1 else f"link{i-1}"
+        axis = "0 1 0" if i % 2 else "1 0 0"
+        pieces.append(
+            f"""<link name="link{i}"/><joint name="joint{i}" type="revolute">
+          <parent link="{parent}"/><child link="link{i}"/><origin xyz="0 0 .1"/>
+          <axis xyz="{axis}"/><limit lower="-3" upper="3" effort="10" velocity="2"/></joint>"""
+        )
+    pieces.append(
+        '<link name="flange"/><joint name="flange_fixed" type="fixed"><parent link="link7"/><child link="flange"/></joint></robot>'
+    )
+    arm.write_text("".join(pieces))
+    hand = tmp_path / "hand.urdf"
+    pieces = [
+        '<robot name="hand">',
+        base_link("robotiq_85_base_link", ".1 .1 .1 1", ".4"),
+    ]
+    joints = [
+        ("finger_joint", "left_outer_knuckle", None),
+        ("left_inner_knuckle_joint", "left_inner_knuckle", 1),
+        ("left_inner_finger_joint", "left_inner_finger", -1),
+        ("right_inner_knuckle_joint", "right_inner_knuckle", -1),
+        ("right_inner_finger_joint", "right_inner_finger", 1),
+        ("right_outer_knuckle_joint", "right_outer_knuckle", -1),
+    ]
+    for name, child, multiplier in joints:
+        mimic = (
+            ""
+            if multiplier is None
+            else f'<mimic joint="finger_joint" multiplier="{multiplier}" offset="0"/>'
+        )
+        pieces.append(
+            f'<link name="{child}"/><joint name="{name}" type="revolute"><parent link="robotiq_85_base_link"/><child link="{child}"/><axis xyz="0 1 0"/><limit lower="-1" upper="1" effort="5" velocity="2"/>{mimic}</joint>'
+        )
+    hand.write_text("".join(pieces) + "</robot>")
+    assets = {
+        "FlexivRizon4S/rizon4s.urdf": str(arm),
+        "Robotiq2F85/Robotiq2F85.urdf": str(hand),
+    }
+    from embodichain.lab.sim import cfg as cfg_module
+
+    monkeypatch.setattr(
+        cfg_module, "get_data_path", lambda path: assets.get(path, path)
+    )
+    arm_module = importlib.import_module("embodichain_robots.flexiv.rizon4s.cfg")
+    monkeypatch.setattr(
+        arm_module, "get_data_path", lambda path: assets.get(path, path)
+    )
+    register_manager_modules(["embodichain.lab.gym.envs.managers.assembly"])
+    path = _CONFIG_ROOT / "peg_insertion/task.study.default_assets.yaml"
+    config = load_config(str(path))
+    import yaml
+
+    component = (
+        _CONFIG_ROOT.parents[2]
+        / "components/embodiments/flexiv_rizon4s_robotiq2f85.yaml"
+    )
+    declaration = yaml.safe_load(component.read_text())
+    declaration["simulation"]["urdf_cfg"]["fpath_prefix"] = str(tmp_path / "assembled")
+    local_component = tmp_path / "embodiment.yaml"
+    local_component.write_text(yaml.safe_dump(declaration))
+    config["embodiment"] = {"component": str(local_component)}
+    cfg = config_to_cfg(config, source_path=path).robot
+    assert Path(cfg.fpath).is_relative_to(tmp_path)
+    root = ET.parse(cfg._pk_urdf_path).getroot()
+    assert (
+        root.find("link[@name='base_link']/visual/material/color").get("rgba")
+        == ".97 .97 .97 1"
+    )
+    assert (
+        root.find("link[@name='robotiq_85_base_link']/visual/material/color").get(
+            "rgba"
+        )
+        == ".1 .1 .1 1"
+    )
+    assert len(root.findall("./link/collision")) == 2
+    assert len(root.findall("./joint/mimic")) == 5
+    assert cfg.control_parts["eef"] == ["finger_joint"]
+    chain = _assembly_kinematic_chain(cfg, torch.device("cpu"))
+    assert chain.get_joint_parameter_names() == [f"joint{i}" for i in range(1, 8)]
+    pose = chain.forward_kinematics(torch.zeros(1, 7)).get_matrix()[0]
+    torch.testing.assert_close(pose[:3, 3], torch.tensor([0.0, 0.0, 0.845]))
+    shoulder = torch.zeros(1, 7)
+    shoulder[0, 0] = torch.pi / 2
+    moved = chain.forward_kinematics(shoulder).get_matrix()[0, :3, 3]
+    torch.testing.assert_close(
+        moved, torch.tensor([0.745, 0.0, 0.1]), atol=1e-6, rtol=1e-6
+    )
+    restored = FlexivRizon4SCfg.from_dict(cfg.to_dict())
+    assert restored.control_parts == cfg.control_parts
+    assert isinstance(cfg, FlexivRizon4SCfg)
+    assert not hasattr(cfg, "gripper_model")
+    assert "FlexivRizon4SRobotiq" not in list_robot_cfgs()
+    assert root.find("link[@name='assembled_base']") is not None
+    assert cfg.fpath == cfg.solver_cfg["arm"].urdf_path
+    assert tuple(cfg.root_props.newton_mimic_solref) == (0.002, 1.0)
+    env_cfg = config_to_cfg(config, source_path=path)
+    assert env_cfg.extensions["grasp_link_names"] == [
+        "right_inner_finger",
+        "left_inner_finger",
+    ]
+    assert env_cfg.sim_steps_per_control == 20
+    q = torch.tensor([[0.2, -0.1, 0.3, 0.4, -0.2, 0.1, 0.5]])
+    jacobian, _ = chain.jacobian(q, ret_eef_pose=True)
+    eps = 1e-3
+    for joint in range(7):
+        perturb = torch.zeros_like(q)
+        perturb[0, joint] = eps
+        numerical = (
+            chain.forward_kinematics(q + perturb).get_matrix()[0, :3, 3]
+            - chain.forward_kinematics(q - perturb).get_matrix()[0, :3, 3]
+        ) / (2 * eps)
+        torch.testing.assert_close(
+            jacobian[0, :3, joint], numerical, atol=1e-4, rtol=1e-3
+        )
+
+
+def test_exact_robot_dynamics_gate_belongs_to_task_environment(tmp_path: Path) -> None:
+    urdf = tmp_path / "robot.urdf"
+    urdf.write_text('<robot name="test"><link name="base"/></robot>')
+    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
+    env.require_exact_robot_dynamics = True
+    env.cfg = SimpleNamespace(robot=SimpleNamespace(_pk_urdf_path=str(urdf)))
+    with pytest.raises(ValueError, match="closed loops"):
+        env._setup_scene()

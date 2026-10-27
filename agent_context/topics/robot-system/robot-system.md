@@ -209,13 +209,12 @@ IK, inspect configured solver coverage; a gripper control part need not have a
 solver. For asset changes, validate round-trip and chain DOF/frame agreement
 before using executable robot smoke programs.
 
-`FlexivRizon4SRobotiqCfg` keeps `asset_source="menagerie"` for archived checkpoint
-construction and delegates it to `_menagerie.py` in its model package.
-`asset_source="default"` uses `_default_assets.py` to compose the registered
-FlexivRizon4S and Robotiq2F85 URDFs through `URDFCfg`, preserving source names,
-visual materials, collisions, inertials and mimic relations. The configured
-contact links, aperture geometry and explicit Newton linkage profile belong to
-the robot preset; tasks must not
-infer those capabilities from a joint-name prefix. Both paths record engineering
-TCP/gripper assumptions and remain distinct from qualified author-identified
-dynamics. Validate FK, physical grasp and policy transfer separately.
+`FlexivRizon4SCfg` remains the bare seven-joint arm. Application embodiments
+attach tools with `urdf_cfg.components` and own the mount, solver TCP, EEF
+control parts, hand drives and contact overrides. The preset assembles those
+ordinary component overrides into the same source for simulation and FK; it
+contains no hand selection or assembly-task metadata. The canonical example is
+`configs/components/embodiments/flexiv_rizon4s_robotiq2f85.yaml` under the tasks
+extension. Assembly grasp assumptions and exact-dynamics qualification gates
+belong to the physical task environment. Historical reference conversion is
+owned by [assembly asset preparation](../gen-sim/assembly.md), not a robot type.

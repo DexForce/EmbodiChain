@@ -28,6 +28,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RigidBodyPhysicsCfg,
     RobotCfg,
+    URDFCfg,
 )
 from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
@@ -73,7 +74,14 @@ class FlexivRizon4SCfg(RobotCfg):
         """
         cfg = cls()
         cfg._build_defaults(init_dict)
-        return merge_robot_cfg(cfg, init_dict)
+        cfg = merge_robot_cfg(cfg, init_dict)
+        # The application may attach tools through ordinary URDF components.
+        # Simulation and kinematics must use that same assembled source.
+        cfg.fpath = cfg.urdf_cfg.assemble_urdf()
+        for solver in cfg.solver_cfg.values():
+            if hasattr(solver, "urdf_path"):
+                solver.urdf_path = cfg.fpath
+        return cfg
 
     def _build_defaults(self, init_dict: dict[str, Any] | None = None) -> None:
         """Populate source dynamics, tuned simulation drives and the ready pose."""
@@ -81,6 +89,10 @@ class FlexivRizon4SCfg(RobotCfg):
         self.uid = "FlexivRizon4S"
         self.fpath = get_data_path(
             init_dict.get("fpath") or "FlexivRizon4S/rizon4s.urdf"
+        )
+        self.urdf_cfg = URDFCfg(
+            components=[{"component_type": "arm", "urdf_path": self.fpath}],
+            sensors=[],
         )
         self.control_parts = {"arm": [f"joint{i}" for i in range(1, 8)]}
         self.solver_cfg = {

@@ -308,23 +308,23 @@ pip install -e .
 ```
 
 
-## Flexiv Rizon 4S assembly development models
+## Flexiv Rizon 4S with application-selected tools
 
-`FlexivRizon4SRobotiqCfg` uses the pinned public Menagerie arm model and source
-Robotiq pad/base geometry. Its default `four_bar_mimic` variant is a URDF
-approximation of the gripper's closed-loop linkage; the current import boundary
-does not preserve the source connect constraints or tendon.
+`FlexivRizon4SCfg` defines the bare seven-axis arm. The tasks extension's
+`configs/components/embodiments/flexiv_rizon4s_robotiq2f85.yaml` adds the existing
+Robotiq URDF through `urdf_cfg.components` and owns its mount, solver TCP, EEF
+control group, drives and contact overrides. No combined robot type or gripper
+variant is registered in the robot catalog.
 
-The explicit `parallel_jaw` variant moves each source finger's full mass on a
-force-limited prismatic carriage, with the four-bar configuration fixed inside
-that carriage. The assembly `.nominal` embodiment selects it for native task
-and PPO development. It preserves source finger masses and inertias while
-changing linkage dynamics, controller gains, contact parameters and pad placement.
-`require_exact_dynamics` rejects both engineering models for formal reproduction.
-The public model is not the paper's identified hardware model.
+Historical nominal comparisons use the optional
+`embodichain.gen_sim.assembly.robot_reference` preparation utility and a separate
+application component selecting that prepared artifact. Its parallel-jaw and
+mimic approximations are not identified closed-loop dynamics. Source revision
+and licenses remain pinned by the `FlexivRizon4SMenagerie` data entry; the
+source manifest lives beside the bare model's assets.
 
-Source revision and licenses are retained by the `FlexivRizon4SMenagerie` data
-registry entry. Prepared URDFs, their meshes, both licenses, immutable source
-identities and a `fidelity.json` are copied into assembly training RUN bundles,
-alongside the generated assembly manifest. Replay uses these exact resources
-without regenerating geometry or consulting the original model cache.
+Task environments own grasp reset assumptions and exact-dynamics qualification.
+Training bundles freeze the prepared physical URDF, ordinary solver TCP and
+local resource references, so replay does not regenerate geometry or consult
+source caches. See `examples/learning/blind_assembly/README.md` for configuration
+migration of historical bundles and the distinct measured experiments.

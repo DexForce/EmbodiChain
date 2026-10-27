@@ -331,6 +331,14 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             # merge urdf components
             user_urdf_cfg = override_cfg_dict.get("urdf_cfg")
             if isinstance(user_urdf_cfg, dict):
+                for field in (
+                    "base_link_name",
+                    "fname",
+                    "fpath_prefix",
+                    "use_signature_check",
+                ):
+                    if field in user_urdf_cfg:
+                        setattr(base_cfg.urdf_cfg, field, user_urdf_cfg[field])
                 # Merge name_case policy if the override specifies one.
                 user_name_case = user_urdf_cfg.get("name_case")
                 if isinstance(user_name_case, dict):
@@ -347,10 +355,25 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                         {"component_type": k, **v} for k, v in components.items()
                     ]
                 for component in components:
+                    params = dict(component.get("params", {}))
+                    params.update(
+                        {
+                            k: v
+                            for k, v in component.items()
+                            if k
+                            not in {
+                                "component_type",
+                                "urdf_path",
+                                "transform",
+                                "params",
+                            }
+                        }
+                    )
                     base_cfg.urdf_cfg.add_component(
                         component_type=component.get("component_type"),
                         urdf_path=component.get("urdf_path"),
                         transform=component.get("transform"),
+                        **params,
                     )
             else:
                 logger.log_warning(

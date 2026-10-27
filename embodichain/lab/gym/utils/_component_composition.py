@@ -154,7 +154,6 @@ def _resolve_local_resource_paths(value: object, *, base_dir: Path) -> None:
                     "fpath",
                     "urdf_path",
                     "xml_path",
-                    "source_urdf",
                     "assembly_manifest",
                 }
                 and isinstance(child, str)

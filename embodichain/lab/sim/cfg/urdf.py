@@ -187,11 +187,15 @@ class URDFCfg:
                 transform = comp_config.get("transform", np.eye(4))
 
                 # Extract additional params (exclude known keys)
-                params = {
-                    k: v
-                    for k, v in comp_config.items()
-                    if k not in ["component_type", "urdf_path", "transform"]
-                }
+                params = dict(comp_config.get("params", {}))
+                params.update(
+                    {
+                        k: v
+                        for k, v in comp_config.items()
+                        if k
+                        not in ["component_type", "urdf_path", "transform", "params"]
+                    }
+                )
 
                 # Add the component
                 self.add_component(component_type, urdf_path, transform, **params)

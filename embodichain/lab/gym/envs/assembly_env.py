@@ -40,6 +40,31 @@ from embodichain.utils.math import (
 __all__ = ["BlindAssemblyEnv"]
 
 
+def _assembly_kinematic_chain(robot_cfg: Any, device: torch.device) -> Any:
+    """Include the application's solver TCP in encoder-only FK and Jacobians."""
+    chain = robot_cfg.build_pk_serial_chain(device=torch.device("cpu"))["arm"]
+    tcp = np.asarray(robot_cfg.solver_cfg["arm"].tcp)
+    if not np.array_equal(tcp, np.eye(4)):
+        import pytorch_kinematics as pk
+
+        end_frame = chain.find_frame(chain.get_frame_names(False)[-1])
+        name = end_frame.name + "_assembly_tcp"
+        end_frame.add_child(
+            pk.Frame(
+                name=name,
+                link=pk.Link(name=name),
+                joint=pk.Joint(
+                    offset=pk.Transform3d(
+                        matrix=torch.as_tensor(tcp, dtype=chain.dtype)
+                    ),
+                    joint_type="fixed",
+                ),
+            )
+        )
+        chain = pk.SerialChain(chain, name, dtype=chain.dtype)
+    return chain.to(device=device)
+
+
 def _grasp_joint_reset(
     robot: Any, value: float, rows: int, device: torch.device
 ) -> tuple[list[int], torch.Tensor]:
@@ -118,6 +143,18 @@ class BlindAssemblyEnv(EmbodiedEnv):
     assembly_kind: ClassVar[str]
 
     def _setup_scene(self, **kwargs: Any) -> None:
+        if getattr(self, "require_exact_robot_dynamics", False):
+            import json
+
+            marker = Path(self.cfg.robot._pk_urdf_path).with_name("fidelity.json")
+            fidelity = json.loads(marker.read_text()) if marker.is_file() else {}
+            if not fidelity.get("exact_source_dynamics", False):
+                raise ValueError(
+                    "Exact assembly training requires qualified robot dynamics; "
+                    "public URDFs and approximate gripper closed loops are not "
+                    "an identified model. Select a development environment or "
+                    "provide a physically qualified fidelity.json."
+                )
         if getattr(self, "require_heterogeneous_assets", False):
             raise RuntimeError(
                 "Formal assembly training requires per-arena geometry/COM/inertia "
@@ -204,14 +241,12 @@ class BlindAssemblyEnv(EmbodiedEnv):
         width = float(np.ptp(grip_vertices[:, 1]))
         # These coefficients are the pinned public Robotiq four-bar geometry,
         # including the two inner pad faces. Bisection is preparation-only.
-        a, b, c = getattr(
-            self.cfg.robot, "grasp_aperture_coefficients", (0.0057, 0.037, -0.044)
-        )
+        a, b, c = getattr(self, "grasp_aperture_coefficients", (0.0057, 0.037, -0.044))
         aperture = lambda angle: 2 * (a + b * np.cos(angle) + c * np.sin(angle))
-        upper = float(getattr(self.cfg.robot, "grasp_joint_upper", 0.8))
+        upper = float(getattr(self, "grasp_joint_upper", 0.8))
         self._assembly_grasp_links = list(
             getattr(
-                self.cfg.robot,
+                self,
                 "grasp_link_names",
                 ("gripper_right_pad", "gripper_left_pad"),
             )
@@ -233,7 +268,7 @@ class BlindAssemblyEnv(EmbodiedEnv):
             else:
                 high = middle
         self._parallel_jaw = (
-            getattr(self.cfg.robot, "gripper_model", "four_bar_mimic") == "parallel_jaw"
+            getattr(self, "gripper_model", "four_bar_mimic") == "parallel_jaw"
         )
         self._grasp_reset_joint = (
             (aperture(0) - width - 0.0005) / 2
@@ -302,8 +337,8 @@ class BlindAssemblyEnv(EmbodiedEnv):
             "source_contacts_preserved": source_contact,
             "contact_capacities": contact_capacities,
             "paper_robot_dynamics_identified": False,
-            "gripper_model": getattr(self.cfg.robot, "gripper_model", "custom"),
-            "robot_asset_source": getattr(self.cfg.robot, "asset_source", "menagerie"),
+            "gripper_model": getattr(self, "gripper_model", "custom"),
+            "robot_asset_source": getattr(self, "robot_asset_source", "default"),
             "grasp_contact_links": self._assembly_grasp_links,
             "source_gripper_dynamics_preserved": False,
             "reset_distribution": "local contact, fixed ready pose; workspace-wide IK reset not qualified",
@@ -326,9 +361,7 @@ class BlindAssemblyEnv(EmbodiedEnv):
         self._assembly_reset_rows = torch.ones(
             self.num_envs, dtype=torch.bool, device=self.device
         )
-        self._assembly_chain = self.cfg.robot.build_pk_serial_chain(device=self.device)[
-            "arm"
-        ]
+        self._assembly_chain = _assembly_kinematic_chain(self.cfg.robot, self.device)
         self._assembly_observation_convention = getattr(
             self, "proprioception_convention", "legacy_v1"
         )
@@ -1023,7 +1056,11 @@ class BlindAssemblyEnv(EmbodiedEnv):
                 getattr(self.cfg.robot, "link_attrs", None) or {}
             ).items()
         }
-        frozen["robot"]["source_urdf"] = f"./resources/robot/{source.name}"
+        prepared = f"./resources/robot/{source.name}"
+        frozen["robot"]["fpath"] = prepared
+        frozen["robot"].pop("urdf_cfg", None)
+        for solver in frozen["robot"].get("solver_cfg", {}).values():
+            solver["urdf_path"] = prepared
         frozen.setdefault("env", {}).setdefault("extensions", {})[
             "assembly_manifest"
         ] = f"./resources/assembly/{manifest_name}"

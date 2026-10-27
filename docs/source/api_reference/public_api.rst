@@ -2836,44 +2836,7 @@ Concrete robot preset exports resolve lazily through the official robot catalog.
 
 .. autosummary::
 
-   FlexivRizon4SRobotiqCfg
 
-
-
-embodichain_robots.flexiv.rizon4s_robotiq
-----------------------------------------
-
-Rizon4S with a Robotiq 2F-85 source conversion, pinned geometry and explicit model-fidelity metadata. The public model is not the unavailable author-identified dynamics.
-
-.. currentmodule:: embodichain_robots.flexiv.rizon4s_robotiq
-
-.. autosummary::
-
-   FlexivRizon4SRobotiqCfg
-
-
-embodichain_robots.flexiv.rizon4s_robotiq.assets
-------------------------------------------------
-
-Pinned public Menagerie source files, immutable blob identities and licenses for the assembly robot model.
-
-.. currentmodule:: embodichain_robots.flexiv.rizon4s_robotiq.assets
-
-.. autosummary::
-
-   FlexivRizon4SMenagerie
-
-
-embodichain_robots.flexiv.rizon4s_robotiq.cfg
----------------------------------------------
-
-The explicit assembly preset supports approximate four-bar mimic and nominal parallel-jaw models with a physical-fidelity gate.
-
-.. currentmodule:: embodichain_robots.flexiv.rizon4s_robotiq.cfg
-
-.. autosummary::
-
-   FlexivRizon4SRobotiqCfg
 
 
 embodichain_tasks.classic_control.cart_pole
@@ -3086,3 +3049,11 @@ Asset generalization contracts
    :maxdepth: 2
 
    asset_generalization
+
+Historical assembly reference preparation
+----------------------------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   assembly_robot_reference

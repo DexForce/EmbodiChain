@@ -88,6 +88,15 @@ def test_roundtrip_and_custom_asset_keep_kinematic_source(tmp_path: Path) -> Non
     cfg = FlexivRizon4SCfg.from_dict(
         {
             "fpath": str(custom),
+            "urdf_cfg": {
+                "components": [
+                    {
+                        "component_type": "arm",
+                        "urdf_path": str(custom),
+                        "params": {"color": "#e0e0e0"},
+                    }
+                ]
+            },
             "joint_drive_props": {"stiffness": {"joint[1-2]": 2500.0}},
             "solver_cfg": {"arm": {"num_samples": 4}},
         }
@@ -98,6 +107,7 @@ def test_roundtrip_and_custom_asset_keep_kinematic_source(tmp_path: Path) -> Non
     )
     assert cfg.joint_drive_props.stiffness["joint[1-2]"] == 2500.0
     assert cfg.solver_cfg["arm"].num_samples == 4
+    assert cfg.urdf_cfg.components["arm"]["params"] == {"color": "#e0e0e0"}
     assert original.joint_drive_props.stiffness["joint[1-2]"] == 4000.0
     snapshot = cfg.to_dict()
     assert FlexivRizon4SCfg.from_dict(snapshot).to_dict() == snapshot

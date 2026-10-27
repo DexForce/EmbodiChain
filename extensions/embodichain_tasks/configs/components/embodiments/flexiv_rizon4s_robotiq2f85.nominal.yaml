@@ -1,7 +1,119 @@
+# Historical parallel-jaw reference only. Prepare with:
+# python -m embodichain.gen_sim.assembly.robot_reference --gripper-model parallel_jaw
+# Explicit nulls retain source-authored fields instead of bare-arm overlays.
 embodiment_id: flexiv_rizon4s_robotiq2f85.nominal
 simulation:
-  class_type: FlexivRizon4SRobotiq
+  class_type: FlexivRizon4S
   uid: FlexivRizon4SRobotiq
-  gripper_model: parallel_jaw
-  require_exact_dynamics: false
+  fpath: FlexivRizon4SMenagerie/prepared_v4_parallel_jaw/rizon4s_robotiq2f85.urdf
+  control_parts:
+    arm:
+    - joint1
+    - joint2
+    - joint3
+    - joint4
+    - joint5
+    - joint6
+    - joint7
+    eef:
+    - gripper_right_jaw_joint
+    - gripper_left_jaw_joint
+  solver_cfg:
+    arm:
+      root_link_name: base
+      end_link_name: gripper_tcp
+      num_samples: 1
+  joint_drive_props:
+    drive_type: force
+    target_mode: position_velocity
+    stiffness:
+    - 289.0
+    - 673.0
+    - 224.0
+    - 373.0
+    - 237.0
+    - 232.0
+    - 186.0
+    - 5000.0
+    - 5000.0
+    damping:
+    - 61.0
+    - 143.0
+    - 36.0
+    - 59.0
+    - 13.0
+    - 12.0
+    - 9.9
+    - 10.0
+    - 10.0
+    max_effort:
+    - 123
+    - 123
+    - 64
+    - 64
+    - 39
+    - 39
+    - 39
+    - 30.0
+    - 30.0
+    max_velocity:
+    - 2.0
+    - 2.0
+    - 2.0
+    - 2.0
+    - 2.0
+    - 2.0
+    - 2.0
+    - 0.2
+    - 0.2
+    armature:
+    - 3.17
+    - 3.17
+    - 1.38
+    - 1.38
+    - 0.13
+    - 0.13
+    - 0.13
+    - 0.0
+    - 0.0
+    friction: null
+  root_props:
+    fixed_base: true
+    self_collision_enabled: false
+    sleep_threshold: null
+    min_position_iters: null
+    min_velocity_iters: null
+    newton_mimic_solref: null
+    newton_mimic_solimp: null
+  attrs:
+    mass_props: null
+    rigid_props: null
+    collision_props: null
+    material_props: null
+  link_attrs:
+    nominal_pad_contacts:
+      link_names_expr:
+      - gripper_(left|right)_pad
+      attrs:
+        collision_props:
+          contact_offset: 0.0
+          rest_offset: 0.0
+          condim: 4
+        material_props:
+          static_friction: 1.0
+          dynamic_friction: 1.0
+          ke: 40000.0
+          kd: 40.0
+          torsional_friction: 0.02
+          rolling_friction: 0.001
+  init_qpos:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.57
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
 sensor: []

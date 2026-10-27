@@ -24,7 +24,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-__all__: list[str] = []
+__all__ = ["prepare_rizon4s_urdf"]
 
 _CONVERTER_VERSION = 4
 
@@ -222,6 +222,17 @@ def prepare_rizon4s_urdf(
     two four-bar connect constraints and tendon are represented by a parallel
     mimic model, which is *not* dynamically equivalent to the source MJCF.
     A fidelity manifest records this restriction next to the prepared URDF.
+
+    Args:
+        source_root: Downloaded ``FlexivRizon4SMenagerie`` source bundle.
+        gripper_model: ``parallel_jaw`` or ``four_bar_mimic`` approximation.
+
+    Returns:
+        Path to the prepared URDF, reusing an existing versioned artifact.
+
+    Raises:
+        ValueError: If the requested gripper approximation is unsupported.
+        ImportError: If preparation needs the optional MuJoCo dependency.
     """
     root = Path(source_root)
     if gripper_model not in {"four_bar_mimic", "parallel_jaw"}:
@@ -328,3 +339,23 @@ def prepare_rizon4s_urdf(
         + "\n"
     )
     return str(urdf)
+
+
+if __name__ == "__main__":
+    import argparse
+    from embodichain.data import get_data_path
+
+    parser = argparse.ArgumentParser(
+        description="Prepare the historical nominal assembly robot reference."
+    )
+    parser.add_argument(
+        "--gripper-model",
+        choices=("parallel_jaw", "four_bar_mimic"),
+        default="parallel_jaw",
+    )
+    args = parser.parse_args()
+    print(
+        prepare_rizon4s_urdf(
+            get_data_path("FlexivRizon4SMenagerie"), gripper_model=args.gripper_model
+        )
+    )

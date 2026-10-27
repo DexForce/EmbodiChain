@@ -27,6 +27,29 @@ Install the optional assembly generator and the SDK capabilities described in
 under the installation prefix's `share/embodichain/assembly_patches/`.
 The Menagerie reference sources and both licenses are pinned by Git blob hashes.
 
+The default embodiment selects the bare `FlexivRizon4S` catalog robot, attaches
+`Robotiq2F85/Robotiq2F85.urdf` through `urdf_cfg.components`, and owns the mount,
+TCP, hand drives and contact overrides in
+`configs/components/embodiments/flexiv_rizon4s_robotiq2f85.yaml`.
+There is no combined arm/gripper robot preset. Grasp reset geometry and model
+qualification requirements belong to each task's physical environment config.
+The canonical study/fullrange environments require identified dynamics and
+therefore reject the public engineering model; development environments remain
+explicitly unqualified.
+
+Historical `.nominal` deployments select a prepared parallel-jaw reference
+artifact. Prepare it once before loading those configs:
+
+```bash
+python -m embodichain.gen_sim.assembly.robot_reference --gripper-model parallel_jaw
+```
+
+This optional preparation is separate from default-asset assembly and training.
+Old model bundles that name `FlexivRizon4SRobotiq` require configuration migration
+to `FlexivRizon4S` and their frozen local `fpath`; use the bundle's recorded code
+revision for an unchanged historical replay. The measured results below predate
+this ownership refactor and do not certify its native dynamics.
+
 For a training attempt from random initialization, the peg study development
 configuration uses 4,096 environments, 32-step rollouts and at most 2,000 PPO
 updates (262,144,000 transitions). It retains 1 kHz physics, a 50 Hz policy, sparse capture/success rewards,

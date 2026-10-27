@@ -186,7 +186,7 @@ def main():
             "embodichain": ["VERSION"],
             "embodichain_models.dynamics.nerd": ["THIRD_PARTY_LICENSES"],
             "embodichain.data": ["default_materials.json"],
-            "embodichain_robots.flexiv.rizon4s_robotiq": ["rizon4s_sources.json"],
+            "embodichain_robots.flexiv.rizon4s": ["rizon4s_sources.json"],
             "embodichain_robots.unitree.go1": ["profile.json"],
             "embodichain_robots.unitree.go2": ["profile.json"],
             "embodichain_robots.unitree.g1": ["profile.json"],

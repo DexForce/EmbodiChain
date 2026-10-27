@@ -37,6 +37,12 @@ unchanged. Existing manifests pin their geometry, including an open bottom,
 and do not acquire later task defaults. Task registration, manager
 semantics and training deployment belong to the environment/RL owners.
 
+`robot_reference.py` prepares the historical public Rizon/Robotiq approximation
+from pinned source assets, with explicit gripper approximation and fidelity
+metadata. Preparation is optional and runs before config loading; replay uses
+frozen resources. Default arm/tool assembly belongs to task embodiment YAML,
+not this converter or a combined robot preset.
+
 `precision.py` checks geometry/USD ownership and runs passive source/native
 comparisons. MuJoCo Warp references declare their constants protocol through
 `PrecisionRunCfg.warp_reference_initialization`: `cpu_compiled` preserves the

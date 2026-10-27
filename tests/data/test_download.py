@@ -143,7 +143,7 @@ def test_asset_resolution_preserves_explicit_extra_modules(monkeypatch) -> None:
     [
         "embodichain_robots.arx.arx5.assets",
         "embodichain_robots.franka.assets",
-        "embodichain_robots.flexiv.rizon4s_robotiq.assets",
+        "embodichain_robots.flexiv.rizon4s._menagerie_assets",
         "embodichain_robots.the_robot_studio.so101.assets",
         "embodichain_robots.unitree.go2.assets",
         "embodichain_robots.anybotics.anymal_c.assets",

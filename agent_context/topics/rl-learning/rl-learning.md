@@ -279,7 +279,7 @@ relative to their declaring deployment before moving configs into a run.
 An optional unwrapped environment `export_checkpoint_gym_config` hook owns
 materialized task resources; assembly uses it to pin the actual robot and
 manifest. Explicit `./` resource paths resolve relative to the saved config,
-including `source_urdf` and `assembly_manifest`. Raw checkpoint context remains
+including robot `fpath`/solver `urdf_path` and `assembly_manifest`. Raw checkpoint context remains
 unchanged so resource packaging does not redefine resume compatibility.
 
 - The selected environment must expose batched observation/action spaces and

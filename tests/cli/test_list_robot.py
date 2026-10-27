@@ -102,7 +102,7 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     output = capsys.readouterr().out
     assert output.startswith("╭")
     assert output.rstrip().endswith("╯")
-    assert "EmbodiChain · Robot Catalog · 17 robots" in output
+    assert "EmbodiChain · Robot Catalog · 16 robots" in output
     assert "Robot ID" in output
     assert "Config Class" not in output
     assert "Variants" in output
@@ -116,7 +116,6 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "CobotMagic",
         "FrankaPanda",
         "FlexivRizon4S",
-        "FlexivRizon4SRobotiq",
         "SO101Follower",
         "URRobot",
         "UnitreeGo1",
@@ -221,7 +220,7 @@ main(["list-robot"])
         check=True,
     )
 
-    assert "17 robots" in result.stdout
+    assert "16 robots" in result.stdout
     assert result.stderr == ""
 
 
