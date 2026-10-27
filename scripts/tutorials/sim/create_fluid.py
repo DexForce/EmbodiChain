@@ -16,7 +16,7 @@
 
 """Drop a procedural water block into a box using DexSim SPH.
 
-Run ``python scripts/tutorials/sim/create_fluid.py`` for native particles, or
+Run ``python scripts/tutorials/sim/create_fluid.py`` for a reconstructed mesh surface, or
 add ``--headless --renderer no-render`` for physics only. The scene uses five
 primitive walls and needs no task assets, robot, Gym or Task Program.
 """
@@ -124,7 +124,7 @@ def main(args: argparse.Namespace | None = None) -> None:
                 init_pos=(0, 0, 0.16),
                 spawn=FluidSpawnCfg(kind="box", size=(0.12, 0.12, 0.12)),
                 render=FluidRenderCfg(
-                    mode="none" if args.renderer == "no-render" else "particles"
+                    mode="none" if args.renderer == "no-render" else "mesh_surface"
                 ),
             )
         )
