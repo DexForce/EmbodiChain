@@ -32,6 +32,7 @@ _COMMANDS = {
     "reference-parity": "_reference_parity",
     "runtime-oracle": "_runtime_oracle",
     "window-candidate": "_window_candidate",
+    "offline-audit": "_offline_audit",
 }
 
 
