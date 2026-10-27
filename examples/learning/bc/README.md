@@ -6,15 +6,15 @@ The production model, objective and HDF5 reader do not import this task or any
 ODS example. The evaluation adapter reuses the original task measurements and
 success predicate; it never constructs an expert during student execution.
 
-Current status: the same-H32 tail-conditioning comparison completed 2,000 new
-updates per arm and evaluated only the final checkpoints on the same four held
-auxiliary states. Full control scored 0/4 successes (2/4 lifts, mean goal error
-0.180703 m); partial scored 0/4 (3/4 lifts, 0.099315 m). The predeclared ≥3/4
-successes plus paired gain ≥2 gate failed. Keep the PR draft; the original
-three-seed formal failures and sealed test remain unchanged. Execution source
-is `f881407ff2e8b0f233f816d52fabaea36e3b9226`; this documentation update does
-not relabel the execution source. See the [actual results and preserved
-preregistration](research/acceptance.md). A next recipe remains pending.
+Current status: the first-eight-episode learnability check completed exactly
+2,000 updates. Fixed-panel normalized MSE fell 98.38%, but grasp-phase TCP p95
+remained 7.51 mm against the preregistered 5 mm gate; the other four phases
+passed. The planned sampling comparison and formal training therefore did not
+start. Keep the PR draft. A separate four-scene diagnostic with the original
+20k checkpoint scored 2/4 successes; its new scenes/runtime do not establish a
+training gain. See the [current diagnostics and stopping decision](research/improvement-v2.md)
+and [preserved historical experiments](research/acceptance.md). The original
+three-seed formal failures and sealed test remain unchanged.
 
 ## Numerical migration
 

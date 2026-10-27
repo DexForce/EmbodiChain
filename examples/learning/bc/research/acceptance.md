@@ -1,4 +1,9 @@
-# Frozen result and next controlled recipe
+# Historical formal result and tail-conditioning protocol
+
+This page preserves the original formal failure and completed tail-conditioning
+comparison. The subsequent [supervision, closed-loop and first-eight learnability
+diagnostics](improvement-v2.md) have their own source identities and stopping
+decision; they do not replace these historical results.
 
 The historical `sl-bc-offline-pickplace-v1` learning target failed. All three
 training seeds (`20261025`, `20261026`, `20261027`) completed 20,000 updates;
