@@ -63,6 +63,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
         self._configured_solver_type: str | None = None
         self._fluid_render_clip_key: tuple[object, ...] | None = None
         self._fluid_render_clip_z: torch.Tensor | None = None
+        self._fluid_render_dirty = False
 
     @property
     def solver_type(self) -> str | None:
@@ -118,31 +119,67 @@ class NewtonPhysicsBackend(PhysicsBackend):
             )
         fluids = getattr(self._manager, "_fluid_objects", {})
         clipped = [f for f in fluids.values() if f.cfg.render.clip_below_z is not None]
+        native_stream = producer_stream = None
+        if fluids and str(backend.state_0.particle_q.device).startswith("cuda"):
+            import torch
+
+            # DexSim stages fluid positions asynchronously on CUDA's default
+            # stream. Order the Newton step and clipping before that copy, and
+            # complete the copy before a camera consumes the staged geometry.
+            device = torch.device(str(backend.state_0.particle_q.device))
+            producer_stream = torch.cuda.current_stream(device)
+            warp_stream = wp.stream_to_torch(backend.state_0.particle_q.device)
+            if producer_stream.cuda_stream != warp_stream.cuda_stream:
+                producer_stream.wait_stream(warp_stream)
+            native_stream = torch.cuda.default_stream(device)
+            if self._fluid_render_dirty:
+                # A previous staged copy may still occupy the native double
+                # buffer. Drain it before submitting a newer explicit write;
+                # otherwise the renderer can silently discard the new state.
+                flush = getattr(result.world, "_flush_render_updates", None)
+                if not callable(flush):
+                    raise RuntimeError(
+                        "This DexSim build cannot synchronize fluid render updates."
+                    )
+                status = flush()
+                if status is not None and int(status) < 0:
+                    raise RuntimeError("Could not drain previous fluid render updates.")
         if not clipped:
             self._fluid_render_clip_key = None
             self._fluid_render_clip_z = None
-            backend.sync_to_dexsim(result.world)
-            return
-        ranges = []
-        for fluid in clipped:
-            for entity in fluid._entities:
-                start = entity._physics_binding.particle_start
-                ranges.append(
-                    (
-                        start,
-                        start + entity.particle_count,
-                        fluid.cfg.render.clip_below_z,
+            positions = None
+        else:
+            ranges = []
+            for fluid in clipped:
+                for entity in fluid._entities:
+                    start = entity._physics_binding.particle_start
+                    ranges.append(
+                        (
+                            start,
+                            start + entity.particle_count,
+                            fluid.cfg.render.clip_below_z,
+                        )
                     )
+            positions = self._clip_fluid_render_positions(
+                wp.to_torch(backend.state_0.particle_q), tuple(ranges)
+            )
+        if native_stream is not None:
+            if native_stream.cuda_stream != producer_stream.cuda_stream:
+                native_stream.wait_stream(producer_stream)
+        try:
+            if positions is None:
+                backend.sync_to_dexsim(result.world)
+            else:
+                backend.render_sync.sync(
+                    result.world,
+                    backend.state_0.body_q,
+                    wp.from_torch(positions, dtype=wp.vec3),
+                    simulation_time=backend.sim_time,
                 )
-        positions = self._clip_fluid_render_positions(
-            wp.to_torch(backend.state_0.particle_q), tuple(ranges)
-        )
-        backend.render_sync.sync(
-            result.world,
-            backend.state_0.body_q,
-            wp.from_torch(positions, dtype=wp.vec3),
-            simulation_time=backend.sim_time,
-        )
+        finally:
+            if native_stream is not None:
+                native_stream.synchronize()
+        self._fluid_render_dirty = False
 
     def _clip_fluid_render_positions(
         self,
@@ -186,9 +223,18 @@ class NewtonPhysicsBackend(PhysicsBackend):
         )
 
     @property
+    def supports_dexuni_fluids(self) -> bool:
+        """Whether DexSim exposes the composed DexUni/DFSPH configuration."""
+        if self.solver_type != "dexuni":
+            return False
+        from dexsim.engine.newton_physics import DexUniSolverCfg
+
+        return "sph_cfg" in getattr(DexUniSolverCfg, "__dataclass_fields__", {})
+
+    @property
     def supports_fluid_worlds(self) -> bool:
         """Whether the loaded SPH artifact supports isolated worlds and reset."""
-        if self.solver_type != "sph":
+        if not self.supports_dexuni_fluids:
             return False
         from dexsim.engine.newton_physics.solver_runtime import ensure_solver_available
 
@@ -209,10 +255,13 @@ class NewtonPhysicsBackend(PhysicsBackend):
         from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
         backend = get_newton_backend(self._manager._world)
-        if backend is None or backend.solver_type != "sph":
-            raise RuntimeError("Prepared SPH backend required.")
+        if backend is None or backend.solver_type != "dexuni":
+            raise RuntimeError("Prepared DexUni fluid backend required.")
+        solver = getattr(backend, "sph_solver", None)
+        if solver is None:
+            raise RuntimeError("Prepared DexUni SPH solver required.")
         backend.invalidate_cuda_graph("fluid state write")
-        solver = getattr(backend, "sph_solver", backend.solver)
+        self._fluid_render_dirty = True
         if getattr(solver, "supports_world_reset", False):
             mask = [
                 env_ids is None or i in env_ids
@@ -234,7 +283,9 @@ class NewtonPhysicsBackend(PhysicsBackend):
         import torch
 
         backend = get_newton_backend(self._manager._world)
-        solver = getattr(backend, "sph_solver", backend.solver)
+        solver = getattr(backend, "sph_solver", None)
+        if solver is None:
+            raise RuntimeError("Prepared DexUni SPH solver required.")
         density = wp.to_torch(solver.particle_density)
         values = []
         for entity in fluid._entities:
@@ -268,6 +319,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
 
         self._fluid_render_clip_key = None
         self._fluid_render_clip_z = None
+        self._fluid_render_dirty = False
 
         world = getattr(self._manager, "_world", None)
         if world is None:

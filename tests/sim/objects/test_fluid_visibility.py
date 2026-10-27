@@ -28,9 +28,21 @@ import pytest
 pytestmark = [pytest.mark.gpu, pytest.mark.subprocess_sim]
 
 
-def test_fluid_surface_changes_record_camera_pixels_in_every_environment(tmp_path):
+@pytest.mark.parametrize("clipping", [False, True])
+def test_fluid_surface_changes_record_camera_pixels_in_every_environment(
+    tmp_path, clipping
+):
+    from dexsim.engine.newton_physics import DexUniSolverCfg
+
+    if "sph_cfg" not in getattr(DexUniSolverCfg, "__dataclass_fields__", {}):
+        pytest.skip("This DexSim build does not compose SPH through DexUni.")
     result = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), str(tmp_path)],
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            str(tmp_path),
+            str(int(clipping)),
+        ],
         capture_output=True,
         text=True,
         timeout=180,
@@ -40,10 +52,14 @@ def test_fluid_surface_changes_record_camera_pixels_in_every_environment(tmp_pat
     assert results
     for row in results:
         assert row["visible_blue_pixels"] > 100
-        assert row["visible_blue_pixels"] > 4 * row["hidden_blue_pixels"]
+        for hidden, restored in zip(
+            row["hidden_blue_pixels"], row["restored_blue_pixels"]
+        ):
+            assert row["visible_blue_pixels"] > 4 * hidden
+            assert restored > 100 and restored > 4 * hidden
 
 
-def _run_visibility_worker(output: Path) -> None:
+def _run_visibility_worker(output: Path, clipping: bool) -> None:
     import numpy as np
     import torch
     from PIL import Image
@@ -78,11 +94,14 @@ def _run_visibility_worker(output: Path) -> None:
                 num_substeps=1,
                 collision_cfg=None,
                 solver_cfg={
-                    "solver_type": "sph",
-                    "volume_map_boundary_enabled": False,
-                    "particle_support_radius": 0.00675,
-                    "pressure_relaxation": 0.2,
-                    "max_velocity": 2.0,
+                    "solver_type": "dexuni",
+                    "sph_cfg": {
+                        "sph_method": "dfsph",
+                        "volume_map_boundary_enabled": False,
+                        "particle_support_radius": 0.00675,
+                        "pressure_relaxation": 0.2,
+                        "max_velocity": 2.0,
+                    },
                 },
             ),
         )
@@ -98,7 +117,7 @@ def _run_visibility_worker(output: Path) -> None:
                 render=FluidRenderCfg(
                     mode="mesh_surface",
                     render_radius=0.0009,
-                    clip_below_z=0.05,
+                    clip_below_z=0.05 if clipping else None,
                     material=VisualMaterialCfg(
                         base_color=[0.05, 0.35, 0.9, 1],
                         roughness=0.1,
@@ -139,10 +158,30 @@ def _run_visibility_worker(output: Path) -> None:
         before = fluid.data.particle_state_w
         hidden_state = before.clone()
         hidden_state[..., 0] += 10
-        fluid.write_particle_state_to_sim(hidden_state)
-        hidden = capture()
-        # Visibility captures do not advance physics; state restoration is exact.
+        hidden_frames = []
+        restored_frames = []
+        # Several publications may occur before the next camera consumes one.
+        for state in (before, hidden_state):
+            fluid.write_particle_state_to_sim(state)
+            sim.sync_render_state()
+        hidden_frames.append(capture())
         fluid.write_particle_state_to_sim(before)
+        restored_frames.append(capture())
+        for _ in range(3):
+            fluid.write_particle_state_to_sim(hidden_state)
+            hidden_frames.append(capture())
+            # Visibility captures do not advance physics.
+            fluid.write_particle_state_to_sim(before)
+            restored_frames.append(capture())
+        stream = torch.cuda.Stream(device=fluid.device)
+        stream.wait_stream(torch.cuda.current_stream(fluid.device))
+        with torch.cuda.stream(stream):
+            fluid.write_particle_state_to_sim(hidden_state)
+            # Force the renderer's staging copy to wait for producer work.
+            torch.cuda._sleep(20_000_000)
+            hidden_frames.append(capture())
+            fluid.write_particle_state_to_sim(before)
+            restored_frames.append(capture())
         torch.testing.assert_close(fluid.data.particle_state_w, before, rtol=0, atol=0)
 
         def blue_pixels(frame):
@@ -157,12 +196,19 @@ def _run_visibility_worker(output: Path) -> None:
         results = []
         for env_id in range(num_envs):
             Image.fromarray(visible[env_id]).save(output / f"visible_env{env_id}.png")
-            Image.fromarray(hidden[env_id]).save(output / f"hidden_env{env_id}.png")
+            Image.fromarray(hidden_frames[-1][env_id]).save(
+                output / f"hidden_env{env_id}.png"
+            )
             results.append(
                 {
                     "env_id": env_id,
                     "visible_blue_pixels": blue_pixels(visible[env_id]),
-                    "hidden_blue_pixels": blue_pixels(hidden[env_id]),
+                    "hidden_blue_pixels": [
+                        blue_pixels(frame[env_id]) for frame in hidden_frames
+                    ],
+                    "restored_blue_pixels": [
+                        blue_pixels(frame[env_id]) for frame in restored_frames
+                    ],
                 }
             )
         (output / "visibility.json").write_text(json.dumps(results, indent=2) + "\n")
@@ -173,4 +219,4 @@ def _run_visibility_worker(output: Path) -> None:
 
 
 if __name__ == "__main__":
-    _run_visibility_worker(Path(sys.argv[1]))
+    _run_visibility_worker(Path(sys.argv[1]), bool(int(sys.argv[2])))

@@ -96,6 +96,10 @@ The Newton backend step hook suppresses automatic DexSim publication during
 manager-owned updates to avoid publishing twice. The manager honors explicit
 `sync_to_renderer=True` even without consumers; `None`/`False` publish only for
 consumers. Raw DexSim `World.update()` retains its configured automatic policy.
+When fluids are present, publication orders Newton and Torch work before the
+native CUDA staging copy and waits for that copy before a camera reads the frame.
+After an explicit fluid-state write, it first drains prior staged updates so a
+busy native double buffer cannot silently discard the newer state.
 Render-thread recording only consumes already-published state and must never
 call the blocking physics-to-render bridge. Marker publication while paused uses
 `capture_visualization(force=True)` without advancing physics.

@@ -38,10 +38,18 @@ pytestmark = [pytest.mark.gpu, pytest.mark.subprocess_sim]
 
 
 class TestFluidRuntime:
-    @pytest.mark.parametrize("num_envs", [1, 2])
+    @pytest.mark.parametrize(
+        "num_envs,automatic",
+        [(1, False), (2, False), (1, True)],
+        ids=["single-explicit", "two-explicit", "single-default"],
+    )
     def test_prepare_write_reset_and_repeat(
-        self, tmp_path: Path, num_envs: int
+        self, tmp_path: Path, num_envs: int, automatic: bool
     ) -> None:
+        from dexsim.engine.newton_physics import DexUniSolverCfg
+
+        if "sph_cfg" not in getattr(DexUniSolverCfg, "__dataclass_fields__", {}):
+            pytest.skip("This DexSim build does not compose SPH through DexUni.")
         if num_envs > 1:
             from dexsim.engine.newton_physics.solver_runtime import (
                 ensure_solver_available,
@@ -54,14 +62,15 @@ class TestFluidRuntime:
             ):
                 pytest.skip("This DexSim SPH build supports only a single world.")
 
-        def run_worlds(count: int) -> dict:
-            result_path = tmp_path / f"lifecycle-{count}.json"
+        def run_worlds(count: int, use_default: bool) -> dict:
+            result_path = tmp_path / f"lifecycle-{count}-{use_default}.json"
             result = subprocess.run(
                 [
                     sys.executable,
                     str(Path(__file__).resolve()),
                     str(result_path),
                     str(count),
+                    str(int(use_default)),
                 ],
                 capture_output=True,
                 text=True,
@@ -71,11 +80,12 @@ class TestFluidRuntime:
             state = json.loads(result_path.read_text())
             assert state["num_particles"] == 64
             assert state["num_envs"] == count
+            assert state["automatic"] is use_default
             return state
 
-        result = run_worlds(num_envs)
+        result = run_worlds(num_envs, automatic)
         if num_envs > 1:
-            reference = run_worlds(1)
+            reference = run_worlds(1, automatic)
             torch.testing.assert_close(
                 torch.tensor(result["first_velocity"]),
                 torch.tensor(reference["first_velocity"]),
@@ -84,9 +94,10 @@ class TestFluidRuntime:
             )
 
 
-def _run_fluid_lifecycle(num_envs: int) -> dict[str, object]:
+def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
     """Run the complete NoRender lifecycle in a fresh native process."""
-    from dexsim.engine.newton_physics import SPHSolverCfg
+    from dexsim.engine.newton_physics import DexUniSolverCfg, SPHSolverCfg
+    from dexsim.engine.newton_physics.backend_registry import get_newton_backend
     from embodichain.lab.sim.cfg import RigidObjectCfg
     from embodichain.lab.sim.shapes import CubeCfg
 
@@ -103,19 +114,33 @@ def _run_fluid_lifecycle(num_envs: int) -> dict[str, object]:
             physics_cfg=NewtonPhysicsCfg(
                 num_substeps=2,
                 collision_cfg=None,
-                solver_cfg=SPHSolverCfg(
-                    sph_method="dfsph",
-                    particle_support_radius=0.0225,
-                    volume_map_boundary_enabled=False,
+                solver_cfg=(
+                    None
+                    if automatic
+                    else DexUniSolverCfg(
+                        sph_cfg=SPHSolverCfg(
+                            sph_method="dfsph",
+                            particle_support_radius=0.0225,
+                            volume_map_boundary_enabled=False,
+                        )
+                    )
                 ),
             ),
         )
     )
-    fluid = rigid = None
+    fluid = rigid = moving = None
     try:
         rigid = sim.add_rigid_object(
             RigidObjectCfg(
                 uid="boundary", body_type="kinematic", shape=CubeCfg(size=[0.1] * 3)
+            )
+        )
+        moving = sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="moving",
+                body_type="dynamic",
+                init_pos=(0.2, 0.0, 1.0),
+                shape=CubeCfg(size=[0.04] * 3),
             )
         )
         fluid = sim.add_fluid_object(
@@ -130,6 +155,10 @@ def _run_fluid_lifecycle(num_envs: int) -> dict[str, object]:
         with pytest.raises(RuntimeError, match="prepare"):
             _ = fluid.data
         sim.prepare()
+        backend = get_newton_backend(sim.spawn_result.world)
+        assert backend.solver_type == "dexuni"
+        assert backend.sph_solver is not None
+        assert backend.cfg.solver_cfg.sph_cfg.sph_method == "dfsph"
         assert sim.get_fluid_object("water") is fluid
         assert sim.get_asset("water") is fluid
         assert fluid.num_particles == 64
@@ -141,11 +170,16 @@ def _run_fluid_lifecycle(num_envs: int) -> dict[str, object]:
         first = fluid.data.particle_state_w
         assert torch.isfinite(first).all()
         assert torch.all(first[..., 2].mean(dim=1) < original[..., 2].mean(dim=1))
+        diagnostics = sim.get_fluid_diagnostics("water")
+        assert diagnostics["particle_density"].shape == (num_envs, 64)
+        assert torch.isfinite(diagnostics["particle_density"]).all()
         if num_envs > 1:
             torch.testing.assert_close(
                 first[0, :, 3:], first[1, :, 3:], rtol=1e-4, atol=1e-5
             )
+            body_before = moving.body_state.clone()
             fluid.reset(env_ids=[0])
+            torch.testing.assert_close(moving.body_state, body_before, rtol=0, atol=0)
             selected = fluid.data.particle_state_w
             torch.testing.assert_close(selected[0], original[0], rtol=0, atol=0)
             torch.testing.assert_close(selected[1:], first[1:], rtol=0, atol=0)
@@ -164,15 +198,17 @@ def _run_fluid_lifecycle(num_envs: int) -> dict[str, object]:
         return {
             "num_particles": fluid.num_particles,
             "num_envs": num_envs,
+            "automatic": automatic,
             "first_velocity": first[0, :, 3:].cpu().tolist(),
         }
     finally:
-        fluid = rigid = None
+        fluid = rigid = moving = None
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
 
 
 if __name__ == "__main__":
     Path(sys.argv[1]).write_text(
-        json.dumps(_run_fluid_lifecycle(int(sys.argv[2]))) + "\n"
+        json.dumps(_run_fluid_lifecycle(int(sys.argv[2]), bool(int(sys.argv[3]))))
+        + "\n"
     )

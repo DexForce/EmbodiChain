@@ -1,8 +1,9 @@
 # Initial-fill fluids
 
-`cfg/fluid.py` owns source, object and render configuration. Numerical settings
-remain DexSim `SPHSolverCfg`, accepted directly or through
-`NewtonPhysicsCfg.solver_cfg` with `solver_type: sph`.
+`cfg/fluid.py` owns source, object and render configuration. Fluids use DexUni,
+which dispatches DFSPH when the scene contains fluid particles. Optional
+numerical settings belong to DexSim `SPHSolverCfg`, nested under
+`NewtonPhysicsCfg.solver_cfg.sph_cfg`; omitting them uses native DFSPH defaults.
 `SimulationManager.add_fluid_object()` declares through SpawnScene and binds
 `objects/fluid.py` in place at `prepare()`.
 
@@ -13,17 +14,20 @@ DexSim derives the effective solver values from the fluid descriptors.
 
 ## Runtime requirements
 
-Fluid simulation requires Newton CUDA, no gradients and fixed particle topology.
+Fluid simulation requires Newton CUDA, a DexSim build exposing
+`DexUniSolverCfg.sph_cfg`, no gradients and fixed particle topology.
 Multiple environments require a DexSim SPH solver that explicitly advertises
 both world isolation and selected-world reset; arena spacing alone does not
 establish isolation. The development build
 `0.5.1+0b8422cc6f6717058bd15371e61bd35cdbbe3c0c` supports both. The published
-`0.5.1rc1` SPH solver lacks them and is limited to one fluid environment; its
-compatibility with the current DexSim adaptation has not been requalified.
+`0.5.1rc1` artifact does not provide the DexUni/DFSPH composition and cannot
+run this fluid path.
 
+The current native DexUni/DFSPH implementation is a prototype: DFSPH follows
+the rigid step with one-way rigid-to-fluid interaction. It requires the pure
+MuJoCo rigid path and cannot mix fluids with cloth or soft-body particles.
 Online robot pouring, Gym declarations and replay belong to the dependent task
-layer and require their respective DexSim capabilities. Do not infer those
-features from support for independent initial-fill SPH worlds.
+layer; two-way fluid feedback is not implied by DexUni's rigid/soft coupling.
 
 ## State and sampling
 
@@ -68,7 +72,8 @@ follow the renderer requirements of the [material system](materials.md).
 `scripts/tutorials/sim/create_fluid.py` demonstrates procedural box sampling,
 five primitive container walls, prepare, step, state reads and reset. Pass
 `--num-envs` to use multiple independent worlds on a capable SPH build. It
-needs no robot, task configuration or downloaded assets:
+disables MuJoCo rigid-rigid contacts for its fixed container while retaining
+DFSPH boundary collision. It needs no robot, task configuration or downloaded assets:
 
 ```bash
 python scripts/tutorials/sim/create_fluid.py --headless --renderer no-render

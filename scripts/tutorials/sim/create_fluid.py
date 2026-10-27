@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Drop a procedural water block into a box using DexSim SPH.
+"""Drop a procedural water block into a box using DexUni and DFSPH.
 
 Run ``python scripts/tutorials/sim/create_fluid.py`` for a reconstructed mesh surface, or
 add ``--headless --renderer no-render`` for physics only. The scene uses five
@@ -85,10 +85,14 @@ def main(args: argparse.Namespace | None = None) -> None:
                 num_substeps=4,
                 collision_cfg=None,
                 solver_cfg={
-                    "solver_type": "sph",
-                    "sph_method": "dfsph",
-                    "particle_diameter": spacing,
-                    "particle_support_radius": 2.25 * spacing,
+                    "solver_type": "dexuni",
+                    # The container is fixed; DFSPH still collides with its SDF.
+                    "mujoco_options": {"disable_contacts": True},
+                    "sph_cfg": {
+                        "sph_method": "dfsph",
+                        "particle_diameter": spacing,
+                        "particle_support_radius": 2.25 * spacing,
+                    },
                 },
             ),
             visualization=visualization_cfg_from_args(args),

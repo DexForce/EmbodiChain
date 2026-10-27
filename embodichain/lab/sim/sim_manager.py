@@ -2937,17 +2937,25 @@ class SimulationManager:
 
         if self.physics.name != "newton" or self.device.type != "cuda":
             raise NotImplementedError("Fluid objects require Newton on CUDA.")
+        if (
+            getattr(self, "_active_newton_solver_type", None) != "dexuni"
+            or self.sim_config.physics_cfg.requires_grad
+        ):
+            raise NotImplementedError(
+                "Fluid objects require non-differentiable DexUni."
+            )
+        if not getattr(self.physics, "supports_dexuni_fluids", False):
+            raise NotImplementedError(
+                "Fluid objects require a DexSim build supporting DexUniSolverCfg.sph_cfg."
+            )
+        if getattr(self, "_deformable_objects", {}):
+            raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
         if self.num_envs != 1 and not getattr(
             self.physics, "supports_fluid_worlds", False
         ):
             raise NotImplementedError(
                 "Batch fluids require a DexSim SPH build with world isolation and selected-world reset."
             )
-        if (
-            self._active_newton_solver_type != "sph"
-            or self.sim_config.physics_cfg.requires_grad
-        ):
-            raise NotImplementedError("Fluid objects require non-differentiable SPH.")
         if self.spawn_result is not None:
             raise NotImplementedError("Declare fluids before prepare().")
         if not isinstance(cfg, FluidObjectCfg):
@@ -2981,6 +2989,11 @@ class SimulationManager:
             ):
                 raise ValueError("All fluids must share density and particle_spacing.")
         configured = self.sim_config.physics_cfg.solver_cfg
+        configured = (
+            configured.get("sph_cfg")
+            if isinstance(configured, Mapping)
+            else getattr(configured, "sph_cfg", None)
+        )
         from dexsim.engine.newton_physics import SPHSolverCfg
 
         defaults = SPHSolverCfg()
@@ -2998,7 +3011,9 @@ class SimulationManager:
                 and not np.isclose(existing, getattr(defaults, key), rtol=1e-7, atol=0)
                 and not np.isclose(existing, value, rtol=1e-7, atol=0)
             ):
-                raise ValueError(f"Fluid {key} conflicts with solver_cfg.{key}.")
+                raise ValueError(
+                    f"Fluid {key} conflicts with solver_cfg.sph_cfg.{key}."
+                )
         points = cfg.spawn.sample(cfg.particle_spacing)
         pose = _pose_from_cfg(cfg)
         if cfg.spawn.reference_uid is not None:
@@ -3091,6 +3106,8 @@ class SimulationManager:
                 "Newton deformable particle sets currently require a CUDA device."
             )
         solver_type = self._active_newton_solver_type
+        if solver_type == "dexuni" and getattr(self, "_fluid_objects", {}):
+            raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
         supported_solvers = {"auto", "dexuni", "xpbd", "semi_implicit", "vbd"}
         if solver_type not in supported_solvers:
             raise NotImplementedError(

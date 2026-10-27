@@ -221,7 +221,13 @@ def _benchmark_native(
             physics_cfg=NewtonPhysicsCfg(
                 num_substeps=1,
                 collision_cfg=None,
-                solver_cfg={"solver_type": "sph", "volume_map_boundary_enabled": False},
+                solver_cfg={
+                    "solver_type": "dexuni",
+                    "sph_cfg": {
+                        "sph_method": "dfsph",
+                        "volume_map_boundary_enabled": False,
+                    },
+                },
             ),
         )
     )
@@ -265,6 +271,10 @@ def _benchmark_native(
                 for item in sim._fluid_objects.values()
                 if item.cfg.render.clip_below_z is not None
             ]
+            producer = torch.cuda.current_stream(device)
+            warp_stream = wp.stream_to_torch(current.state_0.particle_q.device)
+            if producer.cuda_stream != warp_stream.cuda_stream:
+                producer.wait_stream(warp_stream)
             clipped = wp.to_torch(current.state_0.particle_q).clone()
             for item in clipped_fluids:
                 for entity in item._entities:
@@ -273,12 +283,18 @@ def _benchmark_native(
                     selected[selected[:, 2] < item.cfg.render.clip_below_z] = float(
                         "nan"
                     )
-            current.render_sync.sync(
-                result.world,
-                current.state_0.body_q,
-                wp.from_torch(clipped, dtype=wp.vec3),
-                simulation_time=current.sim_time,
-            )
+            staging = torch.cuda.default_stream(device)
+            if staging.cuda_stream != producer.cuda_stream:
+                staging.wait_stream(producer)
+            try:
+                current.render_sync.sync(
+                    result.world,
+                    current.state_0.body_q,
+                    wp.from_torch(clipped, dtype=wp.vec3),
+                    simulation_time=current.sim_time,
+                )
+            finally:
+                staging.synchronize()
             if sim._render_state_published is not None:
                 sim._render_state_published = True
 
@@ -415,10 +431,21 @@ def run_all_benchmarks(args: argparse.Namespace) -> None:
                     perf_rows.extend(perf)
                     metric_rows.extend(metrics)
             if args.native and device.type == "cuda":
-                for count in args.native_sizes:
-                    perf, metrics = _benchmark_native(count, device, args)
-                    perf_rows.extend(perf)
-                    metric_rows.extend(metrics)
+                try:
+                    from dexsim.engine.newton_physics import DexUniSolverCfg
+                except ImportError:
+                    DexUniSolverCfg = None
+                if "sph_cfg" not in getattr(
+                    DexUniSolverCfg, "__dataclass_fields__", {}
+                ):
+                    notes.append(
+                        "- Native publication skipped: DexUni/DFSPH is unavailable."
+                    )
+                else:
+                    for count in args.native_sizes:
+                        perf, metrics = _benchmark_native(count, device, args)
+                        perf_rows.extend(perf)
+                        metric_rows.extend(metrics)
             elif args.native:
                 notes.append("- Native publication skipped: CUDA is required.")
     _write_report(args.output, perf_rows, metric_rows, notes)
