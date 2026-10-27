@@ -622,6 +622,63 @@ def _reference_path_deviation(
     return float(values.mean()), float(values.max())
 
 
+def _policy_step_metrics(
+    result: PlanResult,
+    case: BenchmarkCase,
+    robot: "Robot",
+    control_part: str,
+    *,
+    position_threshold_m: float,
+    rotation_threshold_rad: float,
+    start_state_tolerance_rad: float,
+) -> list[dict[str, object]]:
+    """Match constraints on original policy controls, independently of timing."""
+    from ._constraints import match_constraints
+
+    rollout = result.policy_rollout_positions
+    if rollout is None:
+        return [{} for _ in range(case.batch_size)]
+    lengths = result.policy_rollout_lengths
+    assert lengths is not None  # PlanResult validates the paired trace fields.
+    rollout = rollout.to(robot.device)
+    poses = robot.compute_batch_fk(qpos=rollout, name=control_part, to_matrix=True)
+    modalities = case.case_parameters.get("constraint_modalities")
+    if modalities is None:
+        joint = case.case_parameters.get("motion_validity") == "ordered_joint_waypoints"
+        modalities = ["joint" if joint else "pose"] * case.num_waypoints
+    rows: list[dict[str, object]] = []
+    for row, length in enumerate(lengths.tolist()):
+        qpos = rollout[row, :length]
+        valid = bool(torch.isfinite(qpos).all()) and bool(
+            (qpos[0] - case.start_qpos[row].to(qpos)).abs().max()
+            <= start_state_tolerance_rad
+        )
+        matching = match_constraints(
+            qpos if valid else qpos[:0],
+            poses[row, :length] if valid else poses[row, :0],
+            case.reference_qpos[row],
+            case.target_waypoints[row],
+            modalities,
+            position_threshold_m=position_threshold_m,
+            rotation_threshold_rad=rotation_threshold_rad,
+            joint_threshold_rad=float(
+                case.case_parameters.get("joint_threshold_rad", 0.01)
+            ),
+        )
+        arrivals = matching["arrival_indices"]
+        rows.append(
+            {
+                "policy_steps_used": length - 1,
+                "policy_completion_step": (
+                    arrivals[-1] if matching["ordered_waypoints_reached"] else None
+                ),
+                "policy_waypoint_arrival_steps": tuple(arrivals)
+                + (None,) * (case.num_waypoints - len(arrivals)),
+            }
+        )
+    return rows
+
+
 def compute_case_outcomes(
     result: PlanResult,
     case: BenchmarkCase,
@@ -643,6 +700,15 @@ def compute_case_outcomes(
     if not math.isfinite(start_state_tolerance_rad) or start_state_tolerance_rad < 0:
         raise ValueError("start_state_tolerance_rad must be finite and non-negative.")
     planning_success = _success_tensor(result.success, case.batch_size)
+    policy_metrics = _policy_step_metrics(
+        result,
+        case,
+        robot,
+        control_part,
+        position_threshold_m=position_threshold_m,
+        rotation_threshold_rad=rotation_threshold_rad,
+        start_state_tolerance_rad=start_state_tolerance_rad,
+    )
     if result.positions is None or result.positions.ndim != 3:
         return tuple(
             replace(
@@ -658,6 +724,7 @@ def compute_case_outcomes(
                     ),
                 )[0],
                 env_index=env_index,
+                **policy_metrics[env_index],
             )
             for env_index in range(case.batch_size)
         )
@@ -961,6 +1028,7 @@ def compute_case_outcomes(
             CaseOutcome(
                 env_index=env_index,
                 planning_success=planner_ok,
+                **policy_metrics[env_index],
                 constraint_metrics=(
                     semantic_matching
                     if "constraint_modalities" in case.case_parameters

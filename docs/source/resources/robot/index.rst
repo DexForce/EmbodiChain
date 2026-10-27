@@ -34,7 +34,7 @@ Manufacturers
    * - :doc:`ARX <arx/index>`
      - :doc:`ARX5 X5A <arx/arx5>`
      - ``ARX5Cfg``
-     - Six-joint arm with two independent parallel fingers and numerical IK.
+     - Six-joint arm with two independent parallel fingers, Warp near-parallel IK on CPU/CUDA and optional SSIK reference alignment.
    * - :doc:`DexForce <dexforce/index>`
      - :doc:`Dexforce W1 <dexforce/w1>`
      - ``DexforceW1Cfg``
@@ -42,7 +42,7 @@ Manufacturers
    * - :doc:`Flexiv <flexiv/index>`
      - :doc:`Flexiv Rizon 4S <flexiv/rizon4s>`
      - ``FlexivRizon4SCfg``
-     - Seven-axis bare arm with numerical IK and published Flexiv simulation dynamics.
+     - Seven-axis bare arm with Warp RR IK on CPU/CUDA, optional SSIK reference alignment and published Flexiv simulation dynamics.
    * - :doc:`Franka <franka/index>`
      - :doc:`Franka Panda <franka/panda>`
      - ``FrankaPandaCfg``
@@ -58,7 +58,7 @@ Manufacturers
    * - :doc:`Tianji <tianji/index>`
      - :doc:`Tianji Marvin <tianji/marvin>`
      - ``TianjiMarvinCfg``
-     - Dual 7-DOF arms with optional parallel-jaw grippers.
+     - Dual 7-DOF arms with optional parallel-jaw grippers and Warp SRS IK on CPU/CUDA.
    * - :doc:`Unitree <unitree/index>`
      - :doc:`Unitree G1 <unitree/g1>`
      - ``UnitreeG1Cfg``
@@ -115,7 +115,7 @@ currently unknown in the robot catalog.
    * - :doc:`AlohaMini <alohamini/index>`
      - :doc:`Aloha Mini 2 Pro <alohamini/aloha_mini>`
      - ``AlohaMiniCfg``
-     - Mobile dual-arm platform with torso, arms, and grippers.
+     - Mobile dual-arm platform with torso, grippers and Warp IK for both arms on CPU/CUDA.
 
 .. toctree::
    :maxdepth: 2

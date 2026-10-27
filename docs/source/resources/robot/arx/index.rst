@@ -14,7 +14,7 @@ Official ARX robot configurations live in the
      - Current coverage
    * - :doc:`ARX5 X5A <arx5>`
      - ``ARX5Cfg``
-     - Six-joint arm with two independent parallel fingers and numerical IK.
+     - Six-joint arm with two independent parallel fingers and Warp near-parallel IK on CPU/CUDA.
 
 .. toctree::
    :maxdepth: 1

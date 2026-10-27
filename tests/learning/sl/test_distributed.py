@@ -396,6 +396,29 @@ def _artifact_worker(rank: int, directory: Path) -> None:
     assert saved["learner"]["num_updates"] == 3
 
 
+def _source_resume_worker(rank: int, directory: Path) -> None:
+    from .test_sequence import _build_trainer
+
+    original = _build_trainer(directory / "original")
+    original.fit(stop_after=2)
+    for boundary in ("unverified", "quota"):
+        candidate = _build_trainer(
+            directory / boundary, immutable=not (rank == 1 and boundary == "unverified")
+        )
+        if rank == 1 and boundary == "quota":
+            candidate.source.source.configure_sampling_budget(5, 5)
+        before = _snapshot(candidate)
+        run_id = candidate._artifacts.run_id
+        with pytest.raises(RuntimeError, match="immutable|unbudgeted"):
+            candidate.resume(original.output / "last.pt")
+        _assert_tree_equal(_snapshot(candidate), before)
+        assert not candidate.output.exists()
+        assert not candidate._distributed_prepared
+        assert candidate._artifacts.run_id == run_id
+        assert not candidate._artifacts._claimed
+        dist.barrier()
+
+
 def _distributed_worker(
     rank: int, group_file: str, directory: str, scenario: str
 ) -> None:
@@ -414,6 +437,8 @@ def _distributed_worker(
             _failure_worker(rank, Path(directory))
         elif scenario == "artifacts":
             _artifact_worker(rank, Path(directory))
+        elif scenario == "source-resume":
+            _source_resume_worker(rank, Path(directory))
         else:
             _recovery_worker(rank, Path(directory), scenario)
     finally:
@@ -480,6 +505,12 @@ def test_output_identity_and_history_admission_reaches_all_ranks(
     tmp_path: Path,
 ) -> None:
     _spawn("artifacts", tmp_path)
+
+
+def test_source_resume_preflight_rejection_reaches_all_ranks_without_mutation(
+    tmp_path: Path,
+) -> None:
+    _spawn("source-resume", tmp_path)
 
 
 def test_torchrun_cli_initializes_cleans_up_and_resumes(tmp_path: Path) -> None:

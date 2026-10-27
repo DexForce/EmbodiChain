@@ -123,7 +123,7 @@ def test_roundtrip_and_custom_asset_keep_kinematic_source(tmp_path: Path) -> Non
 
 
 @pytest.mark.no_sim
-def test_flange_chain_and_numerical_ik_agree() -> None:
+def test_flange_chain_and_default_ik_agree() -> None:
     """The seven-joint chain and solver target the official bare flange."""
     cfg = FlexivRizon4SCfg.from_dict({})
     chain = cfg.build_pk_serial_chain()["arm"]
@@ -138,6 +138,11 @@ def test_flange_chain_and_numerical_ik_agree() -> None:
         rtol=0,
     )
     solver_cfg = cfg.solver_cfg["arm"]
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
+    assert isinstance(solver_cfg, SSIKSolverCfg)
+    assert solver_cfg.backend == "warp" and solver_cfg.geometry_mode == "rr"
+    assert solver_cfg.rr_search == "seed_local"
     solver_cfg.joint_names = cfg.control_parts["arm"]
     solver = solver_cfg.init_solver(device=torch.device("cpu"))
     qpos = torch.tensor([[0.1, -0.5, 0.2, 1.3, -0.3, 0.8, 0.1]])
@@ -146,7 +151,7 @@ def test_flange_chain_and_numerical_ik_agree() -> None:
     success, solved = solver.get_ik(target, qpos_seed=qpos + 0.01)
     assert bool(success.all())
     torch.testing.assert_close(
-        solver.get_fk(solved.reshape_as(qpos)), target, atol=1e-3, rtol=0
+        solver.get_fk(solved.reshape_as(qpos)), target, atol=1e-5, rtol=0
     )
 
 

@@ -33,6 +33,8 @@ TCP, hand drives and contact overrides in
 `configs/components/embodiments/flexiv_rizon4s_robotiq2f85.yaml`.
 There is no combined arm/gripper robot preset. Grasp reset geometry and model
 qualification requirements belong to each task's physical environment config.
+The assembly components explicitly select `PytorchSolver` for the recorded
+profile; standalone bare-arm configurations retain the catalog's SSIK default.
 The canonical study/fullrange environments require identified dynamics and
 therefore reject the public engineering model; development environments remain
 explicitly unqualified.

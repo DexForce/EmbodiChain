@@ -1530,6 +1530,34 @@ def test_normalization_preserves_native_derivatives_and_zeros_failed_rows() -> N
     assert torch.equal(result.velocities[1], torch.zeros_like(native[1]))
 
 
+def test_toppra_native_sampling_preserves_the_solved_profile() -> None:
+    """A solved parabola retains acceleration1 instead of interpolation spikes."""
+    from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanner
+
+    positions = torch.tensor([[[0.0], [0.5], [2.0]]])
+    dt = torch.tensor([[0.0, 1.0, 1.0]])
+    raw = PlanResult(
+        success=True,
+        positions=positions,
+        dt=dt,
+        velocities=torch.tensor([[[0.0], [1.0], [2.0]]]),
+        accelerations=torch.ones_like(positions),
+    )
+    generator = _mock_generator(
+        batch_size=1,
+        controlled_dof=1,
+        preserve_plan_samples=ToppraPlanner.preserve_plan_samples,
+    )
+    result = generator._normalize_plan_result(
+        raw,
+        [PlanState.from_qpos(positions[:, -1])],
+        MotionGenOptions(start_qpos=positions[:, 0], sample_count=5),
+    )
+    torch.testing.assert_close(result.positions, positions, rtol=0, atol=0)
+    torch.testing.assert_close(result.dt, dt, rtol=0, atol=0)
+    torch.testing.assert_close(result.accelerations, torch.ones_like(positions))
+
+
 def test_normalization_resamples_by_time_and_recomputes_derivatives() -> None:
     generator = _mock_generator()
     positions = (

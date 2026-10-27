@@ -55,6 +55,8 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    opening and approach for parallel-jaw grasp generation.
    The default ready pose unfolds the elbow and wrist, and self-collision is
    enabled. Task-specific IK branch limits belong to the caller's scene.
+   An explicit SSIK CPU reference can use the prepared actual-model artifact;
+   see :doc:`/overview/sim/motion/solvers/ssik_solver`.
 
 .. py:class:: embodichain_robots.AlohaMiniCfg
    :no-index:
@@ -119,7 +121,7 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 .. py:class:: embodichain_robots.FlexivRizon4SCfg
 
    Seven-axis bare Rizon 4S arm with published Flexiv dynamics, tuned simulation
-   damping and a numerical flange IK solver. Construct with ``from_dict()`` and use
+   damping and a Warp RR flange IK solver on CPU/CUDA. Construct with ``from_dict()`` and use
    ``build_pk_serial_chain()`` for the matching differentiable flange chain.
    Source inertials are preserved; public dynamics are manufacturer-blurred.
    See :doc:`/resources/robot/flexiv/rizon4s` for units and pinned provenance.

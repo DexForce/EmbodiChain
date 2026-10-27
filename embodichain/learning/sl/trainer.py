@@ -396,6 +396,12 @@ class SupervisedTrainer:
         self._artifacts.adopt_resume(run_id)
 
     def _validate_checkpoint(self, state: Mapping[str, Any]) -> None:
+        # This preflight runs collectively before output admission, DDP setup,
+        # or model/optimizer/RNG restoration. Mutable delivery state may not be
+        # recoverable merely by restoring the trainer's sampling generator.
+        validate_source = getattr(self.source, "validate_resume", None)
+        if validate_source is not None:
+            validate_source()
         distributed = state.get("distributed", {})
         if distributed.get("world_size", 1) != self._context.world_size:
             raise ValueError(

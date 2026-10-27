@@ -20,6 +20,7 @@ simulation:
     - gripper_left_jaw_joint
   solver_cfg:
     arm:
+      class_type: PytorchSolver
       root_link_name: base
       end_link_name: gripper_tcp
       num_samples: 1

@@ -39,6 +39,10 @@ training and reference experiments. Reusable models and codecs are installed
 as `embodichain_models`; downloaded datasets, weights and raw reference assets
 are stored outside the repository and wheel.
 
+The [SL data-source example](learning/sl_data_source/README.md) connects resident
+causal windows to explicit action or state-transition encoders, and describes
+caller-owned online sampling and the limits of exact recovery.
+
 The [RWM fitting example](learning/rwm/README.md) qualifies controlled supervised
 state-transition fitting and state/action gradients. Its generated recipes use
 the installable `embodichain_models.dynamics.rwm` model family and shared SL

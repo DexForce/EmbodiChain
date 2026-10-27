@@ -106,7 +106,7 @@ topics:
   title: IK Solver System
   aliases: [ik solver, inverse kinematics, IK 求解器, 逆运动学]
   keywords: [BaseSolver, SolverCfg, SRSSolver, OPWSolver, URSolver, PinkSolver, PytorchSolver, PinocchioSolver,
-    DifferentialSolver, NeuralIKSolver, FEPSolver, FEPSolverCfg, FEP, QposSeedSampler, QposSeedSelSampler, NullSpacePostureTask, compute kinematics, Warp
+    DifferentialSolver, NeuralIKSolver, FEPSolver, FEPSolverCfg, FEP, SSIKSolver, SSIKSolverCfg, SSIK, QposSeedSampler, QposSeedSelSampler, NullSpacePostureTask, compute kinematics, Warp
       kinematics]
   paths: [topics/ik-solvers/ik-solvers.md]
   source_of_truth:
@@ -125,7 +125,7 @@ topics:
 - id: robot-system
   title: Robot System
   aliases: [robot system, robot config, robot catalog, list robot, robot preview, 机器人配置, 机器人系统, 机型解析, 列出机器人, 机器人预览]
-  keywords: [UnitreeGo1Cfg, UnitreeGo2Cfg, UnitreeG1Cfg, UnitreeH12Cfg, ANYmalCCfg, MicroDuckCfg, load_locomotion_robot_profile, RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg,
+  keywords: [UnitreeGo1Cfg, UnitreeGo2Cfg, UnitreeG1Cfg, UnitreeH12Cfg, ANYmalCCfg, MicroDuckCfg, load_locomotion_robot_profile, RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg, ARX5Cfg, ARX5, FlexivRizon4SCfg, FlexivRizon4S,
     FrankaPandaCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
     asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot,
     FlexivRizon4SCfg, Rizon4S]
@@ -553,7 +553,7 @@ topics:
 - id: supervised-learning
   title: Supervised Learning
   aliases: [supervised learning, SL learning, 监督学习, 统一监督学习]
-  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
+  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, SequenceBatchSource, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
   paths: [topics/supervised-learning/supervised-learning.md]
   source_of_truth:
   - embodichain/learning/sl/

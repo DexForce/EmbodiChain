@@ -126,7 +126,30 @@ against part names (including patterns); it need not configure every part.
 and synchronizes effective robot limits. Check the resolved part and joint
 order before diagnosing an IK algorithm.
 
+Aloha Mini and Marvin use strict Warp SSIK arm defaults on CPU/CUDA; Marvin
+selects seed-local SRS search in both gripper variants. Aloha's torso retains
+its position-only Pytorch solver. Numerical restoration requires a complete
+replacement with the existing root/end/TCP and original Pytorch settings; see
+the [solver guide](../../../docs/source/overview/sim/motion/solvers/ssik_solver.md#selecting-the-numerical-solver).
+ARX5 uses the
+source X5A six-joint `arm` and two
+independent prismatic fingers in `eef`; its simulation and PK share the selected
+URDF. ARX5 defaults to near-parallel Warp SSIK, and Flexiv Rizon4S defaults to
+prepared Warp RR with seed-local search. Both run on CPU/CUDA without the
+official SSIK dependency; the prepared CPU reference artifacts under
+`embodichain_robots/_ssik_artifacts/` are explicit precision-alignment tools.
+These models remain outside strict Warp geometry; see
+[IK mode boundaries](../ik-solvers/ik-solvers.md) before selecting one.
+Typed `SolverCfg` overrides and dictionaries with `class_type` replace
+the selected part's solver; typed inputs are copied.
+Provide complete root/end/TCP configuration for replacements. Partial
+dictionaries without `class_type` update the selected default's attributes.
+
 Robot owns arena/root frame conversion; solvers consume chain-root poses.
+Native root poses are rigid transforms. Single and batch IK use the existing
+`pose_inv` rigid inverse, preserving gradients and avoiding the additional
+CUDA/CPU synchronization of a general matrix inverse. Native state retrieval
+has its own backend synchronization boundary.
 `RobotCfg.from_dict()` resolves configured solver types through
 `embodichain.lab.sim.motion.solvers`. For batch/candidate shapes and continuous
 IK support, read [IK contracts](../ik-solvers/ik-solvers.md). Pose conventions

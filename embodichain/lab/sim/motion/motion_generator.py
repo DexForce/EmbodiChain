@@ -1567,6 +1567,8 @@ class MotionGenerator:
             accelerations=accelerations,
             dt=dt,
             constraint_report=constraint_report,
+            policy_rollout_positions=result.policy_rollout_positions,
+            policy_rollout_lengths=result.policy_rollout_lengths,
         )
 
     def _runtime_device(self) -> torch.device:

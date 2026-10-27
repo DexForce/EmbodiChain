@@ -674,6 +674,7 @@ def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
     restored = FlexivRizon4SCfg.from_dict(cfg.to_dict())
     assert restored.control_parts == cfg.control_parts
     assert isinstance(cfg, FlexivRizon4SCfg)
+    assert cfg.solver_cfg["arm"].class_type == "PytorchSolver"
     assert not hasattr(cfg, "gripper_model")
     assert "FlexivRizon4SRobotiq" not in list_robot_cfgs()
     assert root.find("link[@name='assembled_base']") is not None

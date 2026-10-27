@@ -2059,7 +2059,10 @@ def test_move_joints_visits_waypoints_and_rejects_unknown_names() -> None:
         )
 
 
-def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
+@pytest.mark.parametrize("per_row_approach", [False, True])
+def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp(
+    per_row_approach,
+) -> None:
     generator = _motion_generator()
     affordance = AntipodalAffordance()
     semantics = ObjectSemantics(
@@ -2098,6 +2101,11 @@ def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
             skill_options=PickUpOptions(
                 downstream_object_target_poses=(SceneEntityPose("downstream"),),
                 grasp_commit_fraction=0.6,
+                approach_direction=(
+                    torch.tensor([[0.0, 0.0, -2.0], [-3.0, 0.0, -3.0]])
+                    if per_row_approach
+                    else torch.tensor([0.0, 0.0, -1.0])
+                ),
             ),
         )
     )
@@ -2121,6 +2129,15 @@ def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     assert plan.scene_dependency_monitor_until == {
         "target": math.ceil(plan.segment("approach").stop * 0.6)
     }
+
+    expected_pregrasp = torch.tensor(
+        [[0.1, 0.0, 0.15], [0.2 + 0.15 / math.sqrt(2), 0.0, 0.15 / math.sqrt(2)]]
+        if per_row_approach
+        else [[0.1, 0.0, 0.15], [0.2, 0.0, 0.15]]
+    )
+    torch.testing.assert_close(
+        _cartesian_targets(generator)[0][:, :3, 3], expected_pregrasp
+    )
 
 
 def test_pick_explicit_batched_object_pose_is_scene_independent() -> None:
@@ -2230,7 +2247,12 @@ def test_pick_fixed_object_to_eef_bypasses_sampling_and_adjustments() -> None:
     )
 
 
-def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
+@pytest.mark.parametrize("translated", [False, True])
+@pytest.mark.parametrize("twisted", [False, True])
+def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis(
+    twisted: bool,
+    translated: bool,
+) -> None:
     generator = _motion_generator()
     generator.generate = Mock(wraps=generator.generate)
 
@@ -2275,7 +2297,20 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
             motion_policy=MotionPolicy(sample_count=20),
             skill_options=AxisAlignOptions(
                 target_axis=torch.tensor([1.0, 0.0, 0.0]),
+                alignment_twist_rad=(
+                    torch.tensor([0.0, math.pi / 2]) if twisted else 0.0
+                ),
+                alignment_offset_m=(
+                    torch.tensor([[0.07, -0.03, 0.02], [-0.08, 0.04, 0.0]])
+                    if translated
+                    else torch.zeros(3)
+                ),
                 lift_height=0.1,
+                approach_direction=(
+                    torch.tensor([[0.0, 0.0, -2.0], [-3.0, 0.0, -3.0]])
+                    if translated
+                    else torch.tensor([0.0, 0.0, -1.0])
+                ),
             ),
         ),
         context,
@@ -2294,6 +2329,12 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
     ]
     assert generator.generate.call_count == 2
     assert len(solved_poses) == 4
+    expected_pregrasp = torch.tensor(
+        [[0.0, 0.0, 0.15], [0.15 / math.sqrt(2), 0.0, 0.15 / math.sqrt(2)]]
+        if translated
+        else [[0.0, 0.0, 0.15], [0.0, 0.0, 0.15]]
+    )
+    torch.testing.assert_close(solved_poses[0][:, :3, 3], expected_pregrasp)
     projected = plan.expected_effects.apply(context.task, plan.plan_success)
     held = projected.get_held_object("arm")
     assert held is not None
@@ -2313,7 +2354,18 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
         torch.tensor([1.0, 0.0, 0.0]).expand(NUM_ENVS, -1),
         atol=1.0e-6,
     )
-    assert solved_poses[-1][:, 2, 3].tolist() == pytest.approx([0.1, 0.1])
+    expected_centres = torch.tensor(
+        [[0.07, -0.03, 0.12], [-0.08, 0.04, 0.1]]
+        if translated
+        else [[0.0, 0.0, 0.1], [0.0, 0.0, 0.1]]
+    )
+    torch.testing.assert_close(solved_poses[-1][:, :3, 3], expected_centres)
+    expected_x = torch.tensor(
+        [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0] if twisted else [0.0, 0.0, -1.0]]
+    )
+    torch.testing.assert_close(
+        final_object_rotation[:, :, 0], expected_x, atol=1e-6, rtol=0
+    )
     assert torch.all(trajectory.positions[:, -1, ARM_DOF:] == 1.0)
 
 
@@ -2760,7 +2812,10 @@ def test_pick_forced_infeasible_variant_does_not_use_feasible_counterpart(
     assert torch.allclose(default_pose, expected_default)
 
 
-def test_pick_candidate_pregrasp_uses_configured_world_approach_direction() -> None:
+@pytest.mark.parametrize("per_row_approach", [False, True])
+def test_pick_candidate_pregrasp_uses_configured_world_approach_direction(
+    per_row_approach,
+) -> None:
     """Candidate screening and trajectory generation share one approach frame."""
     generator = _motion_generator()
     action = _bind_action(generator, PickUp())
@@ -2793,7 +2848,11 @@ def test_pick_candidate_pregrasp_uses_configured_world_approach_direction() -> N
         pre_grasp_distance=0.15,
         grasp_frame_to_eef=grasp_frame_to_eef,
     )
-    approach_direction = torch.tensor((0.0, 0.0, -1.0))
+    approach_direction = (
+        torch.tensor([[0.0, 0.0, -1.0], [1.0, 0.0, 0.0]])
+        if per_row_approach
+        else torch.tensor((0.0, 0.0, -1.0))
+    )
 
     action._select_feasible_grasp_variants(
         grasp_xpos,
@@ -2807,8 +2866,25 @@ def test_pick_candidate_pregrasp_uses_configured_world_approach_direction() -> N
     pre_grasp_poses = action._compute_batch_candidate_ik.call_args_list[0].args[0]
     torch.testing.assert_close(
         pre_grasp_poses[..., :3, 3],
-        torch.tensor((0.0, 0.0, 0.15)).expand(NUM_ENVS, 1, 2, -1),
+        (
+            torch.tensor([[0.0, 0.0, 0.15], [-0.15, 0.0, 0.0]])[
+                :, None, None, :
+            ].expand(-1, 1, 2, -1)
+            if per_row_approach
+            else torch.tensor((0.0, 0.0, 0.15)).expand(NUM_ENVS, 1, 2, -1)
+        ),
     )
+
+    grasp_variants = action._compute_batch_candidate_ik.call_args_list[1].args[0]
+    aligned = action._approach_alignment_mask(
+        grasp_variants,
+        replace(options, approach_alignment_max_angle=math.radians(10)),
+        approach_direction,
+    )
+    expected = torch.ones(NUM_ENVS, 1, 2, dtype=torch.bool)
+    if per_row_approach:
+        expected[1] = False
+    assert torch.equal(aligned, expected)
 
 
 def test_pick_resolves_late_bound_scene_grasp_and_declares_dependency() -> None:
@@ -7812,3 +7888,26 @@ def test_push_object_motion_gen_rejects_uncertified_contact_path() -> None:
     with pytest.raises(ValueError, match="requires strategy='ik_interp'"):
         _plan_action(action, invocation, _context(scene=scene))
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    "twist", [float("nan"), torch.tensor([0.0, float("inf")]), torch.zeros(2, 1)]
+)
+def test_axis_align_rejects_invalid_frozen_twists(twist) -> None:
+    with pytest.raises(ValueError, match="alignment_twist_rad"):
+        AxisAlignOptions(alignment_twist_rad=twist)
+
+
+@pytest.mark.parametrize(
+    "offset",
+    [torch.zeros(2), torch.zeros(2, 2), torch.tensor([float("nan"), 0.0, 0.0])],
+)
+def test_axis_align_rejects_invalid_alignment_offsets(offset: torch.Tensor) -> None:
+    with pytest.raises(ValueError, match="alignment_offset_m"):
+        AxisAlignOptions(alignment_offset_m=offset)
+
+
+@pytest.mark.parametrize("direction", [torch.zeros(2, 3), torch.ones(2, 2)])
+def test_pickup_rejects_invalid_per_row_approach(direction: torch.Tensor) -> None:
+    with pytest.raises(ValueError, match="approach_direction"):
+        PickUpOptions(approach_direction=direction)

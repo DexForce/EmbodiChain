@@ -14,7 +14,7 @@ Official Flexiv robot configurations live in the
      - Current coverage
    * - :doc:`Flexiv Rizon 4S <rizon4s>`
      - ``FlexivRizon4SCfg``
-     - Seven-axis bare arm with numerical IK and published Flexiv simulation dynamics.
+     - Seven-axis bare arm with Warp RR IK on CPU/CUDA and published Flexiv simulation dynamics.
 
 .. toctree::
    :maxdepth: 1

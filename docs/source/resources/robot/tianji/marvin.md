@@ -16,8 +16,8 @@ arm control parts with optional parallel-jaw grippers.
   `with_gripper`.
 - **Source-compatible asset naming** using the original ACD URDF joint and link
   names.
-- **PyTorch FK/IK solvers** with a documented tool-center-point transform for
-  each arm.
+- **Warp SSIK on CPU and CUDA** with seed-local redundancy search and a
+  documented tool-center-point transform for each arm.
 - **Simulation-ready configuration** for `SimulationManager`, including fixed
   base properties and configurable joint drives.
 
@@ -78,8 +78,10 @@ robot = sim.add_robot(cfg=cfg)
   simulation and serial-chain FK/IK construction.
 - **`control_parts`**: Joint groups for the two arms and, when enabled, the two
   hands. Joint names retain the source asset naming.
-- **`solver_cfg`**: Per-arm `PytorchSolverCfg` entries. The default roots are
-  `left_arm_base` and `right_arm_base`.
+- **`solver_cfg`**: Per-arm `SSIKSolverCfg(backend="warp", srs_search="seed_local")`
+  entries for both variants. The default roots are `left_arm_base` and
+  `right_arm_base`. Explicit replacements remain authoritative; see the
+  [original numerical solver settings](../../../overview/sim/motion/solvers/ssik_solver.md#selecting-the-numerical-solver).
 - **`joint_drive_props`**: Simulation drive gains. The preset uses simulation
   defaults and does not claim to reproduce factory motor specifications.
 

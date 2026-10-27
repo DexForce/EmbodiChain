@@ -56,6 +56,7 @@ def test_planner_defaults_use_time_sampling_without_a_sample_count() -> None:
     planner.cfg = ToppraPlannerCfg(robot_uid="unused")
     options = planner.default_plan_options()
     assert options.sample_method is TrajectorySampleMethod.TIME
+    assert options.stop_at_waypoints is False
     result = planner.plan(
         [PlanState.from_qpos(torch.full((1, 7), q)) for q in (0.0, 0.2)], options
     )
@@ -499,9 +500,7 @@ def test_toppra_option_copies_preserve_tensor_graphs_and_isolate_containers() ->
 
 
 @pytest.mark.no_sim
-def test_motion_generator_keeps_toppra_gradients_through_option_copy_and_resampling() -> (
-    None
-):
+def test_motion_generator_keeps_toppra_gradients_and_native_samples() -> None:
     from embodichain.lab.sim.motion.motion_generator import (
         MotionGenerator,
         MotionGenOptions,
@@ -536,7 +535,7 @@ def test_motion_generator_keeps_toppra_gradients_through_option_copy_and_resampl
             ),
         ),
     )
-    assert result.success.all() and result.positions.shape == (1, 29, 1)
+    assert result.success.all() and result.positions.shape == (1, 17, 1)
     duration = result.duration.sum()
     dq, da = torch.autograd.grad(duration, (distance, parameter))
     torch.testing.assert_close(dq, duration.detach().double() / (2 * distance.detach()))
@@ -717,3 +716,129 @@ def test_shared_retimer_failure_preserves_promoted_dtype(dtype: torch.dtype) -> 
     for key in ("positions", "velocities", "accelerations", "dt"):
         value = getattr(result, key)
         assert value.dtype == expected and value.count_nonzero() == 0
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("batch", [1, 4])
+def test_stopped_waypoints_keep_rest_goals_on_exact_control_grid(batch: int) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+        _trajectory_derivatives,
+    )
+
+    # Analytic rest-to-rest times with v=1,a=2: 1.5s for distance1,
+    # .5s for distance.125. Round each segment up to the .04s clock.
+    points = torch.tensor(
+        [
+            [0.0, 1.0, 0.0],
+            [0.0, 0.125, 0.0],
+            [0.0, 0.125, float("nan")],
+            [2.0, 2.0, 2.0],
+        ]
+    )[:batch, :, None]
+    planner = object.__new__(ToppraPlanner)
+    planner.robot = _UnboundedRobot()
+    planner.device = torch.device("cpu")
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused")
+    result = planner.plan(
+        [PlanState.from_qpos(points[:, k]) for k in range(3)],
+        ToppraPlanOptions(
+            stop_at_waypoints=True,
+            sample_interval=0.04,
+            constraints={"velocity": 1.0, "acceleration": 2.0},
+        ),
+    )
+    assert result.success.tolist() == (
+        [True] if batch == 1 else [True, True, False, True]
+    )
+    for row, (duration, stop_index, goal) in enumerate(
+        [(3.04, 38, 1.0), (1.04, 13, 0.125)][:batch]
+    ):
+        assert result.duration[row].item() == pytest.approx(duration, abs=1e-5)
+        assert result.positions[row, stop_index, 0].item() == pytest.approx(
+            goal, abs=1e-6
+        )
+        assert result.velocities[row, stop_index, 0].item() == 0
+        positive = result.dt[row] > 0
+        torch.testing.assert_close(
+            result.dt[row, positive], torch.full_like(result.dt[row, positive], 0.04)
+        )
+        velocity, acceleration, _ = _trajectory_derivatives(
+            result.positions[row], result.dt[row]
+        )
+        assert float(velocity.abs().max()) <= 1.001
+        assert float(acceleration.abs().max()) <= 2.002
+        tail = int(round(duration / 0.04)) + 1
+        assert not bool(result.positions[row, tail:].any())
+        assert not bool(result.velocities[row, tail:].any())
+        assert not bool(result.dt[row, tail:].any())
+    if batch == 4:
+        for name in ("positions", "velocities", "accelerations", "dt"):
+            assert not bool(getattr(result, name)[2].any())
+        torch.testing.assert_close(
+            result.positions[3], torch.full_like(result.positions[3], 2.0)
+        )
+        assert result.duration[3] == 0 and not bool(result.velocities[3].any())
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "options,error",
+    [
+        ({"stop_at_waypoints": 1}, TypeError),
+        (
+            {
+                "stop_at_waypoints": True,
+                "sample_method": TrajectorySampleMethod.QUANTITY,
+            },
+            ValueError,
+        ),
+    ],
+)
+def test_stopped_waypoint_options_require_a_boolean_and_time_sampling(
+    options, error
+) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
+
+    with pytest.raises(error, match="stop_at_waypoints"):
+        ToppraPlanOptions(**options)
+
+
+@pytest.mark.no_sim
+def test_stopped_waypoints_keep_waypoint_and_limit_gradients() -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    points = torch.tensor([[[0.0], [0.4], [1.0]]], requires_grad=True)
+    velocity = torch.tensor(1.0, requires_grad=True)
+    acceleration = torch.tensor(2.0, requires_grad=True)
+    planner = object.__new__(ToppraPlanner)
+    planner.robot = _UnboundedRobot()
+    planner.device = torch.device("cpu")
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused")
+    result = planner.plan(
+        [PlanState.from_qpos(points[:, k]) for k in range(3)],
+        ToppraPlanOptions(
+            stop_at_waypoints=True,
+            sample_interval=0.047,
+            constraints={"velocity": velocity, "acceleration": acceleration},
+        ),
+    )
+    assert bool(result.success.all())
+    loss = sum(
+        getattr(result, name).square().mean()
+        for name in ("positions", "velocities", "accelerations")
+    )
+    gradients = torch.autograd.grad(loss, (points, velocity, acceleration))
+    assert all(
+        bool(torch.isfinite(g).all()) and bool((g != 0).any()) for g in gradients
+    )

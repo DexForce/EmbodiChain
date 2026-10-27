@@ -221,8 +221,44 @@ class PlanResult:
     assess heterogeneous limits.
     """
 
+    policy_rollout_positions: torch.Tensor | None = None
+    """Original policy joint states ``(B, S, DOF)``, before output retiming.
+
+    Sample zero is the requested initial state. Subsequent samples correspond
+    to one policy control step each; output interpolation never changes this
+    trace. Non-policy planners leave both rollout fields unavailable.
+    """
+
+    policy_rollout_lengths: torch.Tensor | None = None
+    """Valid prefix lengths ``(B,)``, including sample zero and excluding holds.
+
+    Batched rows may finish at different steps. The remaining terminal holds
+    are padding and must not establish later constraint arrivals.
+    """
+
     def __post_init__(self) -> None:
-        """Validate the explicit trajectory-timing contract."""
+        """Validate trajectory timing and optional original policy traces."""
+        rollout, lengths = self.policy_rollout_positions, self.policy_rollout_lengths
+        if rollout is not None or lengths is not None:
+            if not isinstance(rollout, torch.Tensor) or rollout.dim() != 3:
+                raise ValueError(
+                    "Policy rollout positions must have shape (B, S, DOF)."
+                )
+            if (
+                not isinstance(lengths, torch.Tensor)
+                or lengths.shape != rollout.shape[:1]
+                or lengths.dtype not in (torch.int32, torch.int64)
+                or lengths.device != rollout.device
+                or bool(((lengths < 1) | (lengths > rollout.shape[1])).any())
+            ):
+                raise ValueError("Policy rollout lengths must identify valid prefixes.")
+            if self.positions is not None and (
+                rollout.shape[::2] != self.positions.shape[::2]
+                or rollout.device != self.positions.device
+            ):
+                raise ValueError(
+                    "Policy rollout must match the output batch, DoF and device."
+                )
         if self.positions is None:
             if self.dt is not None:
                 raise ValueError("PlanResult timing requires positions.")

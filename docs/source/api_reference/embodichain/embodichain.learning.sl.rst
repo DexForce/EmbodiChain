@@ -102,6 +102,7 @@ embodichain.learning.sl
    SupervisedLearner
    SupervisedSource
    TensorBatchSource
+   SequenceBatchSource
    SupervisedTrainer
    SupervisedTrainerCfg
    distributed_run
@@ -122,6 +123,9 @@ embodichain.learning.sl
    :members:
 
 .. autoclass:: TensorBatchSource
+   :members:
+
+.. autoclass:: SequenceBatchSource
    :members:
 
 .. autoclass:: SupervisedTrainer
@@ -154,6 +158,39 @@ embodichain.learning.sl.learner
 
 .. autoclass:: SupervisedLearner
    :members:
+
+embodichain.learning.sl.sequence
+--------------------------------
+
+.. currentmodule:: embodichain.learning.sl.sequence
+
+.. autosummary::
+
+   SequenceBatchSource
+
+.. autoclass:: SequenceBatchSource
+   :members:
+
+The optional bridge samples one canonical causal window and calls an explicit,
+versioned encoder. It preserves original masks and provenance under the reserved
+``metadata['sequence_source']`` namespace, excluding observations and actions
+from that diagnostic context. The encoder deliberately selects measured inputs
+and supervision; the adapter infers neither action meaning nor feature layout.
+The runnable ``examples/learning/sl_data_source`` example demonstrates action
+targets and causal state-transition targets using a tiny synthetic CPU corpus.
+
+Exact recovery is disabled by default. ``immutable=True`` requires an unchanged,
+content-hashed resident ``TensorDataSource`` (including ``LeRobotDataSource``)
+without sampling quotas. Schema, window, encoder version, language and semantic
+metadata enter identity; storage paths and read/cache diagnostics do not.
+Construction and resume hash CPU content using bounded blocks. Sampling checks
+the immutable promise without rehashing the corpus at every update.
+
+Live or quota-managed sources can train and save snapshots, but exact
+``SupervisedTrainer.resume()`` is rejected collectively before learning, RNG or
+output admission state changes. Producer state and delivery credits are not
+restored by the trainer. Start/stop, refill, waits and handling sampling failures
+remain caller-owned; the bridge performs no retry or quota refund.
 
 embodichain.learning.sl.sources
 -------------------------------
