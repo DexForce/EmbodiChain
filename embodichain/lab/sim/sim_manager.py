@@ -33,6 +33,7 @@ import numpy as np
 import warp as wp
 
 from pathlib import Path
+from uuid import uuid4
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property, partial
@@ -138,6 +139,7 @@ from embodichain.lab.sim.spawn.usd import (
 )
 from embodichain.lab.sim.spawn.scene import SpawnScene
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
+from embodichain.lab.sim.material import _material_desc_from_cfg
 from embodichain.lab.sim.profiler import Profiler, ProfilerCfg
 from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.utils import configclass, logger
@@ -627,9 +629,9 @@ class SimulationManager:
         self._requested_renderer = sim_config.render_cfg.renderer
         solver_cfg = getattr(sim_config.physics_cfg, "solver_cfg", None)
         self._requested_solver = str(
-            solver_cfg.get("solver_type", solver_cfg.get("class_type", "auto"))
+            solver_cfg.get("solver_type", solver_cfg.get("class_type", "dexuni"))
             if isinstance(solver_cfg, Mapping)
-            else getattr(solver_cfg, "solver_type", "auto")
+            else getattr(solver_cfg, "solver_type", "dexuni")
         )
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
@@ -731,6 +733,7 @@ class SimulationManager:
             self._world,
             num_envs=sim_config.num_envs,
             spacing=(sim_config.arena_space, sim_config.arena_space, 0.0),
+            renderer=sim_config.render_cfg.renderer,
         )
         self._arenas = list(self._spawn_scene.builder.prepare_arenas())
         self._prepared_spawn_topology_revision = -1
@@ -1518,26 +1521,31 @@ class SimulationManager:
     def register_particle_contact_material_schedule(
         self,
         keyframes: Mapping[str, Sequence[Sequence[float]]],
+        *,
+        uid: str | None = None,
     ) -> None:
         """Register time-varying Newton particle contact properties.
 
         Supported tracks are ``dynamic_friction``, ``stiffness``, and
-        ``damping``. Values apply scene-wide to particle-versus-rigid contacts
-        and are sampled piecewise-constantly in simulation time.
+        ``damping``. Values are sampled piecewise-constantly in simulation
+        time. Supply ``uid`` for a DexUni cloth/soft-body material; otherwise
+        register the legacy scene-wide control for other Newton solvers.
 
         .. attention::
-            Register this control before :meth:`prepare`. This host-side
-            control requires direct Newton stepping and therefore disables
-            CUDA Graph replay for the finalized simulation.
+            Register before :meth:`prepare`. Targeted DexUni controls support
+            CUDA Graph replay. The legacy scene-wide host control requires
+            direct Newton stepping and disables graph replay.
 
         Args:
             keyframes: Particle contact-property tracks containing ``(time,
                 value)`` pairs.
+            uid: Optional declared deformable UID for DexUni object materials.
 
         Raises:
             RuntimeError: If the backend is not Newton or the scene is already
                 finalized.
             ValueError: If the keyframes are invalid.
+            KeyError: If ``uid`` is not a declared deformable.
         """
         if not self.is_newton_backend:
             raise RuntimeError(
@@ -1549,6 +1557,31 @@ class SimulationManager:
                 "Particle contact material schedules must be registered before "
                 "SimulationManager.prepare()."
             )
+
+        if uid is not None:
+            if uid not in self._deformable_objects:
+                raise KeyError(f"Deformable object {uid!r} is not declared.")
+            arena_names = scene.arena_names
+            if len(arena_names) != self.num_envs:
+                raise RuntimeError(
+                    "Spawn arena count does not match SimulationManager.num_envs."
+                )
+            from dexsim.engine import newton_physics
+
+            control_type = getattr(
+                newton_physics, "DexUniParticleContactMaterialSchedule", None
+            )
+            if control_type is None:
+                raise RuntimeError(
+                    "Targeted particle materials require a supporting DexSim build."
+                )
+            controls = tuple(
+                control_type(keyframes, target=f"{arena_name}/{uid}")
+                for arena_name in arena_names
+            )
+            for control in controls:
+                scene.builder.add_runtime_control(control)
+            return
 
         from dexsim.engine.newton_physics import ParticleContactMaterialSchedule
 
@@ -1714,6 +1747,71 @@ class SimulationManager:
         )
         for control in controls:
             scene.builder.add_runtime_control(control)
+
+    def add_runtime_control(
+        self,
+        control: Any | Callable[[str, int], Any],
+    ) -> tuple[Any, ...]:
+        """Register DexSim Newton runtime controls before :meth:`prepare`.
+
+        Use this for controls that have no dedicated ``register_*`` method,
+        such as ``RealtimeJointTargetControl``, ``PinnedParticleControl`` or
+        ``IndexedConveyorControl`` from ``dexsim.engine.newton_physics``.
+
+        Pass either one control instance, which is registered once for the
+        whole scene, or a factory called as ``factory(arena_name, env_index)``
+        for every environment. Controls address entities by Spawn path, which
+        is ``f"{arena_name}/{uid}"`` for an object declared with ``uid``.
+
+        Args:
+            control: A ``RuntimeControl`` instance, or a per-environment
+                factory returning one.
+
+        Returns:
+            The registered controls, in environment order for a factory.
+            Keep them to drive live controls such as joint targets.
+
+        Raises:
+            RuntimeError: If the backend is not Newton, the Spawn scene is
+                already finalized, or its arena count is inconsistent.
+            TypeError: If a control is not a ``RuntimeControl``.
+        """
+        from dexsim.engine.newton_physics.runtime_control import RuntimeControl
+
+        if not self.is_newton_backend:
+            raise RuntimeError("Runtime controls require the Newton backend.")
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError(
+                "Runtime controls must be registered before "
+                "SimulationManager.prepare()."
+            )
+        if isinstance(control, RuntimeControl):
+            controls: tuple[Any, ...] = (control,)
+        elif callable(control):
+            arena_names = scene.arena_names
+            if len(arena_names) != self.num_envs:
+                raise RuntimeError(
+                    "Spawn arena count does not match SimulationManager.num_envs: "
+                    f"{len(arena_names)} != {self.num_envs}."
+                )
+            controls = tuple(
+                control(arena_name, env_index)
+                for env_index, arena_name in enumerate(arena_names)
+            )
+        else:
+            raise TypeError(
+                "control must be a RuntimeControl or a factory returning one."
+            )
+        for item in controls:
+            if not isinstance(item, RuntimeControl):
+                raise TypeError(
+                    "Runtime control factories must return RuntimeControl "
+                    f"instances; got {type(item).__name__}."
+                )
+        for item in controls:
+            scene.builder.add_runtime_control(item)
+        return controls
 
     def prepare(self) -> None:
         """Materialize declarations, bind state, and restore camera parents."""
@@ -4122,8 +4220,8 @@ class SimulationManager:
             sensor_factory, ContactSensor
         ):
             self.prepare()
-            # ``solver_type='auto'`` is resolved while preparing the Spawn
-            # scene, so the early capability check above is not sufficient.
+            # DexUni resolves its contact path while preparing the Spawn scene,
+            # so the early capability check above is not sufficient.
             if not self.physics.supports_contact_sensor:
                 raise NotImplementedError(
                     f"ContactSensor is not supported by the {self.physics.name} "
@@ -4955,19 +5053,37 @@ class SimulationManager:
         """
 
         self._require_native_renderer("Native visual materials")
+        cfg = cfg.replace(uid=cfg.uid or f"visual_material_{uuid4().hex}")
+        descriptor = _material_desc_from_cfg(cfg, cfg.uid)
+        definitions = self._spawn_scene.builder.materials
+        registered = self._spawn_scene._material_definition(cfg.uid)
+        if registered is not None and registered != descriptor:
+            raise ValueError(f"Conflicting visual material definition for {cfg.uid!r}.")
         if cfg.uid in self._visual_materials:
-            logger.log_warning(
-                f"Visual material {cfg.uid} already exists. Returning the existing one."
+            existing = self._visual_materials[cfg.uid]
+            if _material_desc_from_cfg(existing.cfg, cfg.uid) != descriptor:
+                raise ValueError(
+                    f"Conflicting visual material definition for {cfg.uid!r}."
+                )
+            return existing
+
+        if cfg.preset is not None or cfg.parameters:
+            self._spawn_scene._resolve_materials({cfg.uid: descriptor})
+            mat, native_inst = self._spawn_scene._material_resources.resolve(descriptor)
+            visual_mat = VisualMaterial(
+                cfg, mat, initialize_default=False, mat_inst=native_inst
             )
-            return self._visual_materials[cfg.uid]
-
-        mat: Material = self._env.create_pbr_material(cfg.uid, True)
-        visual_mat = VisualMaterial(cfg, mat)
-
+        else:
+            mat: Material | None = self._env.find_material(cfg.uid)
+            initialize_default = mat is None or registered is None
+            if mat is None:
+                mat = self._env.create_pbr_material(cfg.uid, True)
+            visual_mat = VisualMaterial(cfg, mat, initialize_default=initialize_default)
+            definitions[cfg.uid] = descriptor
         self._visual_materials[cfg.uid] = visual_mat
         return visual_mat
 
-    def get_visual_material(self, uid: str) -> VisualMaterial:
+    def get_visual_material(self, uid: str) -> VisualMaterial | None:
         """Get visual material by UID.
 
         Args:
@@ -4979,7 +5095,13 @@ class SimulationManager:
 
         return self._visual_materials[uid]
 
-    def clean_materials(self):
+    def clean_materials(self) -> None:
+        """Clear runtime wrappers and ask the native owner to release unused materials.
+
+        Explicit material definitions remain reserved in the Scene for the World
+        lifetime. Cleaning does not permit a conflicting definition to replace a
+        UID that declarations or live native handles may still reference.
+        """
         self._visual_materials = {}
         if self._env:
             self._env.clean_materials()
@@ -5014,6 +5136,7 @@ class SimulationManager:
             None,
             "auto",
             "mujoco_warp",
+            "dexuni",
         }
         if (
             use_coordinated_newton_clear
@@ -5044,7 +5167,7 @@ class SimulationManager:
                 else:
                     articulation.reset(env_ids)
         for uid, visual in getattr(self, "_visual_objects", {}).items():
-            if uid not in excluded_uids:
+            if uid not in excluded_uids and visual.is_spawn_bound:
                 visual.reset(env_ids)
         for uid, rigid_obj in self._rigid_objects.items():
             if uid not in excluded_uids:
@@ -5124,6 +5247,9 @@ class SimulationManager:
             bool: True if export is successful, False otherwise.
         """
         try:
+            # The optional USD kit registers the export methods on DexSim Env.
+            import dexsim.kit.usd
+
             self._env.export_to_usd_file(fpath)
             logger.log_info(f"Simulation scene exported to USD file: {fpath}")
             return True
@@ -5244,6 +5370,14 @@ class SimulationManager:
                 for asset in getattr(self, registry_name, {}).values():
                     if isinstance(asset, VisualObject):
                         asset._release_spawn_references()
+                    # Parsed material wrappers must die before their native renderer.
+                    for material_attr in (
+                        "_visual_material",
+                        "_original_visual_material",
+                        "_original_visual_material_inst",
+                    ):
+                        if hasattr(asset, material_attr):
+                            setattr(asset, material_attr, [])
                     if hasattr(asset, "_data"):
                         asset._data = None
                     if hasattr(asset, "_spawn_result"):

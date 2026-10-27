@@ -60,7 +60,12 @@ def _run_visibility_worker(output: Path) -> None:
     from embodichain.lab.sim.sensors import CameraCfg
 
     solver = ensure_solver_available("sph")
-    num_envs = 2 if getattr(solver, "supports_world_isolation", False) else 1
+    num_envs = (
+        2
+        if getattr(solver, "supports_world_isolation", False)
+        and getattr(solver, "supports_world_reset", False)
+        else 1
+    )
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
@@ -95,7 +100,8 @@ def _run_visibility_worker(output: Path) -> None:
                     render_radius=0.0009,
                     clip_below_z=0.05,
                     material=VisualMaterialCfg(
-                        base_color=[0.05, 0.35, 0.9, 1], transmission=0, roughness=0.1
+                        base_color=[0.05, 0.35, 0.9, 1],
+                        roughness=0.1,
                     ),
                     mesh_surface={
                         "gpu_enabled": True,

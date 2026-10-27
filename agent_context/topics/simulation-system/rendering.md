@@ -147,11 +147,9 @@ Configuration tests do not prove GPU/NGX/NRD runtime support, which initializes
 on a rendered frame. Read exact renderer and algorithm defaults in the config
 source.
 
-`VisualMaterialCfg` optical settings apply to direct material creation and
-shape-owned materials. Spawn carries transmission in its material descriptor;
-rigid, visual and deformable facades apply explicit volume parameters to every
-native material when binding. The captured defaults retain these properties
-through material reset; absent settings preserve imported native values.
+Optical settings use `VisualMaterialCfg.parameters` for direct and shape-owned
+materials. Resource definitions and their reset baselines are owned by the
+[material system](materials.md).
 
 ## Startup summaries
 

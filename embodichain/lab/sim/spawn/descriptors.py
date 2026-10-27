@@ -30,13 +30,14 @@ properties must be committed to its immutable model.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import MISSING, dataclass, field, fields, replace
 import math
+import hashlib
 import numbers
 import os
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from embodichain.lab.sim.cfg.source import _asset_file_path
 
@@ -73,6 +74,7 @@ from embodichain.lab.sim.cfg import (
     DefaultRigidBodyPropertiesCfg,
     MassPropertiesCfg,
     NewtonCollisionPropertiesCfg,
+    NewtonJointDrivePropertiesCfg,
     NewtonRigidBodyMaterialCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
@@ -501,6 +503,92 @@ def _mesh_geometry_from_cfg(shape: MeshCfg, *, segment_name: str) -> GeometryDes
     )
 
 
+def _particle_contact_material_options(
+    value: Mapping[str, float] | None,
+) -> dict[str, Any]:
+    """Lower optional object materials without requiring the new API on old wheels."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise TypeError("Deformable contact_material must be a mapping.")
+    import dexsim.spawn as spawn
+
+    material_type = getattr(spawn, "NewtonParticleContactMaterialDesc", None)
+    if material_type is None:
+        raise RuntimeError(
+            "Deformable contact_material requires DexSim per-object particle materials."
+        )
+    return {"contact_material": material_type(**dict(value))}
+
+
+def _explicit_tet_mesh_from_cfg(
+    cfg: VolumeDeformableObjectCfg, uid: str
+) -> dict[str, Any]:
+    """Validate an explicit tetrahedral mesh and build its render surface.
+
+    Mirrors DexSim ``SceneBuilder.create_soft_mesh``: particles keep the
+    order of ``shape.vertices`` and the render mesh holds only surface nodes.
+    """
+    from dexsim.spawn.soft_body_meshing import (
+        SoftBodyMeshingStats,
+        extract_tet_surface_triangles,
+    )
+
+    shape = cfg.shape
+    if shape.vertices is None or (
+        not _is_missing(shape.fpath)
+        and shape.fpath is not None
+        and bool(str(shape.fpath).strip())
+    ):
+        raise ValueError(
+            "Volume deformable tetrahedra require an array-backed shape with "
+            "vertices and no fpath."
+        )
+    positions = np.asarray(shape.vertices, dtype=np.float32)
+    if positions.ndim != 2 or positions.shape[1:] != (3,) or len(positions) == 0:
+        raise ValueError("Volume deformable vertices must have shape (N, 3).")
+    if not np.isfinite(positions).all():
+        raise ValueError("Volume deformable vertices must be finite.")
+    tetrahedra = np.asarray(cfg.tetrahedra, dtype=np.int32).reshape(-1, 4)
+    if tetrahedra.min() < 0 or tetrahedra.max() >= len(positions):
+        raise ValueError("Volume deformable tetrahedra index outside the vertices.")
+    if shape.triangles is None:
+        surface_triangles = extract_tet_surface_triangles(tetrahedra)
+    else:
+        surface_triangles = np.asarray(shape.triangles)
+        if surface_triangles.dtype.kind not in "iu":
+            raise TypeError("Volume deformable triangles must be integer indices.")
+        surface_triangles = surface_triangles.astype(np.int32).reshape(-1, 3)
+        if surface_triangles.min() < 0 or surface_triangles.max() >= len(positions):
+            raise ValueError("Volume deformable triangles index outside the vertices.")
+    if shape.normals is not None or shape.uv_coords is not None:
+        raise ValueError(
+            "Volume deformable tetrahedra do not support shape normals or uv_coords."
+        )
+    surface_ids = np.unique(surface_triangles)
+    render_geometry = GeometryDesc.mesh(
+        vertices=positions[surface_ids],
+        triangles=np.searchsorted(surface_ids, surface_triangles).astype(np.int32),
+        segment_name=uid,
+    )
+    return {
+        "positions": positions,
+        "tetrahedra": tetrahedra,
+        "surface_triangles": surface_triangles,
+        "render_geometry": render_geometry,
+        "meshing_stats": SoftBodyMeshingStats(
+            source_kind="tet_mesh",
+            source_vertex_count=len(positions),
+            source_triangle_count=len(surface_triangles),
+            proxy_vertex_count=0,
+            proxy_triangle_count=0,
+            particle_count=len(positions),
+            tetrahedron_count=len(tetrahedra),
+            surface_triangle_count=len(surface_triangles),
+        ),
+    }
+
+
 def volume_deformable_desc_from_cfg(
     cfg: VolumeDeformableObjectCfg,
     *,
@@ -508,7 +596,14 @@ def volume_deformable_desc_from_cfg(
 ) -> tuple[SoftBodyDesc, dict[str, MaterialDesc]]:
     """Translate a volume deformable into a Newton particle-set descriptor."""
     uid = _required_uid(cfg.uid, "Volume deformable")
-    geometry = _mesh_geometry_from_cfg(cfg.shape, segment_name=uid)
+    explicit_tets = (
+        None if cfg.tetrahedra is None else _explicit_tet_mesh_from_cfg(cfg, uid)
+    )
+    geometry = (
+        _mesh_geometry_from_cfg(cfg.shape, segment_name=uid)
+        if explicit_tets is None
+        else explicit_tets["render_geometry"]
+    )
     material_ref, material_entry = _compile_visual_material(
         uid, cfg.shape.visual_material
     )
@@ -543,6 +638,7 @@ def volume_deformable_desc_from_cfg(
         ),
         physics=SoftBodyPhysicsDesc(
             volume_density=density,
+            **_particle_contact_material_options(attrs.contact_material),
             k_mu=youngs / (2.0 * (1.0 + poissons)),
             k_lambda=(youngs * poissons / ((1.0 + poissons) * (1.0 - 2.0 * poissons))),
             k_damp=float(attrs.elasticity_damping),
@@ -556,14 +652,28 @@ def volume_deformable_desc_from_cfg(
                 for item in fields(surface_props)
             },
         ),
-        meshing=SoftBodyMeshingDesc(
-            proxy_simplify_target=cfg.meshing.triangle_simplify_target,
-            proxy_remesh_resolution=cfg.meshing.triangle_remesh_resolution,
-            voxel_resolution=cfg.meshing.simulation_mesh_resolution,
-            voxel_num_relaxation_iters=cfg.meshing.voxel_num_relaxation_iters,
-            voxel_rel_min_tet_volume=cfg.meshing.voxel_rel_min_tet_volume,
-            voxel_surface_dist_ratio=cfg.meshing.voxel_surface_dist_ratio,
-            embedding_impl=cfg.meshing.embedding_impl,
+        meshing=(
+            None
+            if explicit_tets is not None
+            else SoftBodyMeshingDesc(
+                proxy_simplify_target=cfg.meshing.triangle_simplify_target,
+                proxy_remesh_resolution=cfg.meshing.triangle_remesh_resolution,
+                voxel_resolution=cfg.meshing.simulation_mesh_resolution,
+                voxel_num_relaxation_iters=cfg.meshing.voxel_num_relaxation_iters,
+                voxel_rel_min_tet_volume=cfg.meshing.voxel_rel_min_tet_volume,
+                voxel_surface_dist_ratio=cfg.meshing.voxel_surface_dist_ratio,
+                embedding_impl=cfg.meshing.embedding_impl,
+            )
+        ),
+        **(
+            {}
+            if explicit_tets is None
+            else {
+                "positions": explicit_tets["positions"],
+                "tetrahedra": explicit_tets["tetrahedra"],
+                "surface_triangles": explicit_tets["surface_triangles"],
+                "meshing_stats": explicit_tets["meshing_stats"],
+            }
         ),
         particle_flags=_particle_flags_from_cfg(cfg.particle_flags),
         particle_radius=particle_radius,
@@ -572,6 +682,27 @@ def volume_deformable_desc_from_cfg(
     )
     materials = {} if material_entry is None else {material_entry[0]: material_entry[1]}
     return descriptor, materials
+
+
+def _pneumatic_cloth_options(
+    values: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Lower an optional cavity without importing unsupported wheel symbols."""
+    if values is None:
+        return {}
+    if not isinstance(values, Mapping):
+        raise TypeError("Cloth pneumatic must be a mapping when configured.")
+    from dexsim import spawn
+
+    native_type = getattr(spawn, "PneumaticPhysicsDesc", None)
+    if native_type is None or "pneumatic" not in {
+        item.name for item in fields(ClothPhysicsDesc)
+    }:
+        raise NotImplementedError(
+            "Cloth pneumatic requires a DexSim build with PneumaticPhysicsDesc "
+            "and ClothPhysicsDesc.pneumatic support."
+        )
+    return {"pneumatic": native_type(**dict(values))}
 
 
 def surface_deformable_desc_from_cfg(
@@ -602,6 +733,9 @@ def surface_deformable_desc_from_cfg(
     attrs = cfg.attrs
     surface_props = attrs.surface_props
     density = float(attrs.density)
+    rest_angle = None if attrs.edge_rest_angle is None else float(attrs.edge_rest_angle)
+    if rest_angle is not None and not math.isfinite(rest_angle):
+        raise ValueError("Cloth edge_rest_angle must be finite when set.")
     particle_radius = (
         None if cfg.particle_radius is None else float(cfg.particle_radius)
     )
@@ -635,6 +769,9 @@ def surface_deformable_desc_from_cfg(
         visual_binding_mode=cfg.visual_binding_mode,
         physics=ClothPhysicsDesc(
             surface_density=density,
+            **({"edge_rest_angle": rest_angle} if rest_angle is not None else {}),
+            **_pneumatic_cloth_options(attrs.pneumatic),
+            **_particle_contact_material_options(attrs.contact_material),
             add_springs=bool(attrs.add_springs),
             spring_ke=attrs.spring_ke,
             spring_kd=attrs.spring_kd,
@@ -675,6 +812,7 @@ def articulation_desc_from_cfg(
             newton_solver_type=newton_solver_type,
         )
     fixed_base, self_collision_enabled = _articulation_root_values(cfg)
+    newton_options = _articulation_newton_options(cfg, newton_solver_type)
     return ArticulationDesc(
         name=_articulation_uid(cfg.uid, str(path)),
         pose=_pose_from_cfg(cfg),
@@ -689,7 +827,85 @@ def articulation_desc_from_cfg(
         urdf_read_inertia=True,
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),
+        **newton_options,
     )
+
+
+def _articulation_gravity_compensation(
+    cfg: ArticulationCfg, newton_solver_type: str | None
+) -> float | None:
+    """Validate explicit Newton articulation creation intent."""
+    value = cfg.root_props.newton_gravity_compensation
+    if value is None:
+        return None
+    if (
+        not isinstance(value, numbers.Real)
+        or not np.isfinite(value)
+        or not 0 <= value <= 1
+    ):
+        raise ValueError("newton_gravity_compensation must be finite and in [0, 1].")
+    if newton_solver_type is None:
+        raise ValueError("newton_gravity_compensation requires the Newton backend.")
+    if not hasattr(ArticulationDesc, "newton_gravity_compensation"):
+        raise RuntimeError(
+            "newton_gravity_compensation requires DexSim dev f32785317 or newer."
+        )
+    return float(value)
+
+
+_ARTICULATION_NEWTON_CREATION_FIELDS = (
+    "newton_kinematic",
+    "newton_sleep_policy",
+    "newton_shape_collision",
+    "newton_shape_collision_links",
+    "newton_particle_collision_links",
+    "newton_mesh_approximation",
+    "newton_force_sdf",
+)
+
+
+def _articulation_newton_options(
+    cfg: ArticulationCfg, newton_solver_type: str | None
+) -> dict[str, Any]:
+    """Collect explicit Newton articulation creation options from root props.
+
+    Unset (``None``) fields are omitted so DexSim keeps its own defaults.
+    """
+    options: dict[str, Any] = {}
+    compensation = _articulation_gravity_compensation(cfg, newton_solver_type)
+    if compensation is not None:
+        options["newton_gravity_compensation"] = compensation
+    root = cfg.root_props
+    for name in _ARTICULATION_NEWTON_CREATION_FIELDS:
+        value = getattr(root, name)
+        if value is None:
+            continue
+        if newton_solver_type is None:
+            raise ValueError(f"{name} requires the Newton backend.")
+        if name == "newton_force_sdf":
+            if not isinstance(value, (bool, np.bool_)):
+                raise TypeError("newton_force_sdf must be a boolean when configured.")
+            options["newton_collision"] = NewtonCollisionDesc(
+                **{
+                    item.name: bool(value) if item.name == "force_sdf" else None
+                    for item in fields(NewtonCollisionDesc)
+                }
+            )
+            continue
+        if name == "newton_sleep_policy":
+            from dexsim.spawn import NewtonSleepPolicy
+
+            value = NewtonSleepPolicy(value)
+        elif name == "newton_mesh_approximation":
+            from dexsim.spawn import NewtonMeshApproximationDesc
+
+            value = NewtonMeshApproximationDesc(**dict(value))
+        elif name in ("newton_kinematic", "newton_shape_collision"):
+            value = bool(value)
+        else:
+            value = tuple(value)
+        options[name] = value
+    return options
 
 
 def _validate_articulation_rigid_physics(
@@ -788,6 +1004,8 @@ def configure_articulation_desc(
             f"Articulation source {desc.name!r} must be resolved before "
             "configuration."
         )
+    for name, value in _articulation_newton_options(cfg, newton_solver_type).items():
+        setattr(desc, name, value)
     preserve_source_physics = cfg.resolve_asset_physics_mode() == "preserve"
     setattr(desc, "_embodichain_preserve_source_physics", preserve_source_physics)
     for link in desc.links:
@@ -808,6 +1026,7 @@ def configure_articulation_desc(
                 stacklevel=2,
             )
         _apply_articulation_newton_gap_default(desc, newton_solver_type)
+        _apply_articulation_sdf_request(desc, cfg.root_props.newton_force_sdf)
         return desc
     default_physics = _resolve_rigid_physics(
         cfg.attrs,
@@ -949,8 +1168,36 @@ def configure_articulation_desc(
             newton=newton_desc,
             newton_target_mode=joint_target_modes.get(joint_name),
         )
+        if (
+            newton_desc.damping is not None
+            and desc.get_joint_desc(joint_name).newton.damping != newton_desc.damping
+        ):
+            raise RuntimeError(
+                "DexSim did not retain passive_damping; install DexSim dev "
+                "f32785317 or newer."
+            )
     _apply_articulation_newton_gap_default(desc, newton_solver_type)
+    _apply_articulation_sdf_request(desc, cfg.root_props.newton_force_sdf)
     return desc
+
+
+def _apply_articulation_sdf_request(
+    desc: ArticulationDesc, force_sdf: bool | None
+) -> None:
+    """Carry SDF intent onto resolved or newly inserted URDF attribute entries."""
+    if force_sdf is None:
+        return
+    # Per-link entries override articulation-wide defaults in the native
+    # adapter. URDF resolution retains geometry in its native skeleton and
+    # inserts these attribute-only entries during configuration.
+    for link in desc.links:
+        for collision in link.collisions:
+            source = collision.newton
+            if source is None:
+                source = NewtonCollisionDesc(
+                    **{item.name: None for item in fields(NewtonCollisionDesc)}
+                )
+            collision.newton = replace(source, force_sdf=bool(force_sdf))
 
 
 def _apply_newton_gap_default(
@@ -1205,6 +1452,27 @@ def _compile_joint_properties(
                     setattr(default_desc, default_field, scalar)
                     setattr(newton_desc, newton_field, scalar)
 
+    if (
+        isinstance(cfg.joint_drive_props, NewtonJointDrivePropertiesCfg)
+        and cfg.joint_drive_props.passive_damping is not None
+    ):
+        if newton_solver_type is None:
+            raise ValueError("passive_damping requires the Newton backend.")
+        matches = _joint_property_matches(
+            cfg.joint_drive_props.passive_damping,
+            joint_names,
+            property_name="passive_damping",
+            control_parts=control_parts,
+        )
+        for joint_name, value in matches:
+            if (
+                not isinstance(value, numbers.Real)
+                or not np.isfinite(value)
+                or value < 0
+            ):
+                raise ValueError("passive_damping must be finite and nonnegative.")
+            joint_properties[joint_name][1].damping = float(value)
+
     # Solvers that ignore Newton's target-mode enum still consume drive gains.
     # Masking inactive components makes NONE, EFFORT, and VELOCITY deterministic
     # across the currently supported solver set.
@@ -1224,9 +1492,13 @@ def _compile_joint_properties(
         if newton_solver_type is None
         else newton_solver_type.replace("-", "_").lower()
     )
-    if normalized_solver not in {None, "auto", "mujoco_warp", "mjwarp"} and any(
-        mode == 1 for mode in joint_target_modes.values()
-    ):
+    if normalized_solver not in {
+        None,
+        "auto",
+        "mujoco_warp",
+        "mjwarp",
+        "dexuni",
+    } and any(mode == 1 for mode in joint_target_modes.values()):
         warnings.warn(
             f"Newton solver {newton_solver_type!r} does not consume "
             "joint_target_mode. POSITION is emulated with its configured "
@@ -1723,29 +1995,16 @@ def _compile_visual_material(
 ) -> tuple[str | None, tuple[str, MaterialDesc] | None]:
     if cfg is None:
         return None, None
-    key = str(cfg.uid or f"{object_uid}_material")
-    base_color = tuple(float(value) for value in cfg.base_color)
-    if len(base_color) != 4:
-        raise ValueError("VisualMaterialCfg.base_color must be RGBA.")
-    emissive_rgb = tuple(
-        float(value) * float(cfg.emissive_intensity) for value in cfg.emissive
-    )
-    if len(emissive_rgb) != 3:
-        raise ValueError("VisualMaterialCfg.emissive must be RGB.")
-    desc = MaterialDesc(
-        name=key,
-        base_color=base_color,
-        base_color_map=cfg.base_color_texture,
-        normal_map=cfg.normal_texture,
-        emissive=(*emissive_rgb, 1.0),
-        roughness=float(cfg.roughness),
-        roughness_map=cfg.roughness_texture,
-        metallic=float(cfg.metallic),
-        metallic_map=cfg.metallic_texture,
-        ao_map=cfg.ao_texture,
-        ior=float(cfg.ior),
-        transmission=cfg.transmission,
-    )
+    from embodichain.lab.sim.material import _material_desc_from_cfg
+
+    key = cfg.uid or f"{object_uid}_material"
+    desc = _material_desc_from_cfg(cfg, key)
+    if not cfg.uid:
+        # Replacements may keep the object UID while changing appearance. Reuse
+        # an implicit template only for the same normalized material definition.
+        digest = hashlib.sha256(repr(desc).encode("utf-8")).hexdigest()[:16]
+        key = f"{key}_{digest}"
+        desc.name = key
     return key, (key, desc)
 
 

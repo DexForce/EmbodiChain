@@ -14,15 +14,9 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from __future__ import annotations
+"""Compatible public imports for robot-owned assets."""
 
-import os
-import open3d as o3d
-from embodichain.data.dataset import EmbodiChainDataset
-from embodichain.data.constants import (
-    EMBODICHAIN_DOWNLOAD_PREFIX,
-    EMBODICHAIN_DEFAULT_DATA_ROOT,
-)
+from __future__ import annotations
 
 __all__ = [
     "DexforceW1V021",
@@ -37,215 +31,29 @@ __all__ = [
     "DexforceW1RightArmV021",
 ]
 
-# ================= Dexforce W1 Asset Dataset Overview =================
-# This file provides dataset classes for the Dexforce W1 humanoid robot
-# and its individual components.
-#
-# Main Asset:
-#   - DexforceW1V021:
-#       Represents the complete humanoid robot asset.
-#   - DexforceW1V022 / DexforceW1V025:
-#       Unified release archives containing the full robot and all component
-#       URDFs used by runtime assembly.
-#
-# Component Assets:
-#   - DexforceW1ChassisV021:   Chassis component
-#   - DexforceW1TorsoV021:     Torso component
-#   - DexforceW1EyesV021:      Eyes component
-#   - DexforceW1HeadV021:      Head component
-#
-# Arm Assets:
-#   - DexforceW1LeftArmV021 / DexforceW1RightArmV021:
-#       Left and right arms.
-#
-# All classes inherit from EmbodiChainDataset and are responsible for
-# downloading and managing the data resources for their respective components.
-# ======================================================================
+from importlib import import_module
+
+_ASSET_EXPORTS = {
+    "DexforceW1V021": "embodichain_robots.dexforce.w1.assets",
+    "DexforceW1V022": "embodichain_robots.dexforce.w1.assets",
+    "DexforceW1V025": "embodichain_robots.dexforce.w1.assets",
+    "DexforceW1V030": "embodichain_robots.dexforce.w1.assets",
+    "DexforceW1ChassisV021": "embodichain_robots.dexforce.w1.assets",
+    "DexforceW1TorsoV021": "embodichain_robots.dexforce.w1.assets",
+    "DexforceW1EyesV021": "embodichain_robots.dexforce.w1.assets",
+    "DexforceW1HeadV021": "embodichain_robots.dexforce.w1.assets",
+    "DexforceW1LeftArmV021": "embodichain_robots.dexforce.w1.assets",
+    "DexforceW1RightArmV021": "embodichain_robots.dexforce.w1.assets",
+}
 
 
-w1_assets = "dexforce_w1"
+def __getattr__(name: str) -> type:
+    if name not in _ASSET_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(_ASSET_EXPORTS[name]), name)
+    globals()[name] = value
+    return value
 
 
-class DexforceW1V021(EmbodiChainDataset):
-    """Dataset class for the Dexforce W1 V021.
-
-    Directory structure:
-        DexforceW1V021/DexforceW1V021.urdf
-
-    Example usage:
-        >>> from embodichain.data import get_data_path
-        >>> print(get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf"))
-    """
-
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "DexforceW1V021.zip"),
-            "3cc3a0bfd1c50ebed5bee9dadeee6756",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
-class DexforceW1V022(EmbodiChainDataset):
-    """Dataset class for the unified Dexforce W1 V022 release archive.
-
-    Expected Hugging Face path and archive layout::
-
-        dexforce_w1/v022/w1.zip
-        w1/robot.urdf
-        w1/chassis.urdf
-        w1/torso.urdf
-        w1/head.urdf
-        w1/left_arm.urdf
-        w1/right_arm.urdf
-
-    """
-
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX,
-                w1_assets,
-                "v022",
-                "w1.zip",
-            ),
-            # Recalculate this if the archive is cleaned or rebuilt before upload.
-            "867f52d684b8cf5161f9c8e53ff493d2",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
-class DexforceW1V025(EmbodiChainDataset):
-    """Dataset class for the unified Dexforce W1 V025 release archive.
-
-    Expected Hugging Face path and archive layout::
-
-        dexforce_w1/v025/w1.zip
-        w1/robot.urdf
-        w1/chassis.urdf
-        w1/torso.urdf
-        w1/head.urdf
-        w1/left_arm.urdf
-        w1/right_arm.urdf
-
-    The same archive supports both direct full-robot loading and component
-    assembly, so runtime code does not download duplicate component archives.
-    """
-
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX,
-                w1_assets,
-                "v025",
-                "w1.zip",
-            ),
-            "a983814a05b20ba12fce02883cfd1d7e",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
-class DexforceW1V030(EmbodiChainDataset):
-    """Standard V030 body archive, excluding detachable end effectors.
-
-    The archive is published at ``dexforce_w1/v030/w1.zip`` with
-    ``w1/robot.urdf`` and the five component URDFs. Component visuals and
-    inertials match the corrected full body. Wrist camera and gripper assets
-    belong to independently assembled attachments.
-
-    Args:
-        data_root: Download and extraction cache root. Defaults to the configured
-            EmbodiChain asset cache.
-    """
-
-    def __init__(self, data_root: str | None = None) -> None:
-        descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "v030", "w1.zip"),
-            "45fd6e516997d85cbac01f3d955acb4f",
-        )
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-        super().__init__(type(self).__name__, descriptor, path)
-
-
-class DexforceW1ChassisV021(EmbodiChainDataset):
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_Chassis_v021.zip"),
-            "6b0517a4d92a572988641d46269d063f",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
-class DexforceW1TorsoV021(EmbodiChainDataset):
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_Torso_v021.zip"),
-            "4f762a3ae6ef2acbe484c915cf80da7b",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
-class DexforceW1EyesV021(EmbodiChainDataset):
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_Eyes_v021.zip"),
-            "80e0b86ef2e934f439c99b79074f6f3c",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
-class DexforceW1HeadV021(EmbodiChainDataset):
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_Head_v021.zip"),
-            "ba72805828c5fd62ad55d6a1458893d0",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
-class DexforceW1LeftArmV021(EmbodiChainDataset):
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_LeftArm_1_v021.zip"
-            ),
-            "c3cacda7bd36389ed98620047bff6216",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
-class DexforceW1RightArmV021(EmbodiChainDataset):
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_RightArm_1_v021.zip"
-            ),
-            "456c9495748171003246a3f6626bb0db",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

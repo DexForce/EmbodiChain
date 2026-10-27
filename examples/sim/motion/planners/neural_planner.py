@@ -84,7 +84,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg, physics_cfg_for_backend
 from embodichain.lab.sim.objects import Robot
-from embodichain_robots.franka_panda import FrankaPandaCfg
+from embodichain_robots.franka.panda import FrankaPandaCfg
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,

@@ -38,6 +38,7 @@ from dexsim.engine import MaterialInst
 from embodichain.lab.sim import VisualMaterialInst, VisualMaterial, ReuseSegmentState
 from embodichain.lab.sim.material import (
     _capture_render_materials,
+    _is_same_material_inst,
     _restore_render_materials,
     _set_render_material,
     _wrap_first_render_material,
@@ -935,7 +936,10 @@ class Articulation(BatchEntity):
         spawn_result = getattr(self, "_spawn_result", None)
         self._prepare_spawn_runtime_config(spawn_result)
 
-        self._newton_mimic_compliance_configured = _configure_newton_mimic_compliance(
+        root_props = getattr(self.cfg, "root_props", None)
+        self._newton_mimic_compliance_configured = getattr(
+            root_props, "newton_mimic_stabilizer", False
+        ) and _configure_newton_mimic_compliance(
             result=spawn_result,
             entities=self._entities,
             state_joint_names=self._state_joint_names(),
@@ -1049,7 +1053,7 @@ class Articulation(BatchEntity):
         Returns:
             str: The name of the root link.
         """
-        return self.entities[0].get_root_link_name()
+        return self._entities[0].get_root_link_name()
 
     @cached_property
     def joint_names(self) -> List[str]:
@@ -3407,8 +3411,10 @@ class Articulation(BatchEntity):
                         )
                     if working_inst is None:
                         working_name = f"{self.uid}_reuse_{env_idx}_{link_name}"
-                        template.create_inst(working_name)
-                        working_inst = VisualMaterialInst(working_name, template)
+                        native_inst = template.create_inst(working_name)
+                        working_inst = VisualMaterialInst(
+                            working_name, template, mat_inst=native_inst
+                        )
                     segments.append(
                         ReuseSegmentState(
                             mesh_id=mesh_id,
@@ -3438,6 +3444,14 @@ class Articulation(BatchEntity):
         _set_render_material(
             self._entities[env_idx].get_render_body(link_name), mesh_id, mat_inst
         )
+        if mesh_id == 0:
+            current = self._visual_material[env_idx].get(link_name)
+            if current is None or not _is_same_material_inst(current.mat, mat_inst):
+                wrapped = _wrap_first_render_material([mat_inst])
+                if wrapped is None:
+                    self._visual_material[env_idx].pop(link_name, None)
+                else:
+                    self._visual_material[env_idx][link_name] = wrapped
 
     def set_physical_visible(
         self,

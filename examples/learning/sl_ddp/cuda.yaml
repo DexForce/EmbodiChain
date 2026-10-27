@@ -1,0 +1,19 @@
+factory: examples.learning.sl_ddp.recipe:build_trainer
+model:
+  hidden_dim: 32
+  seed: 29
+data:
+  train_count: 1024
+  validation_count: 128
+  seed: 17
+optimizer:
+  lr: 0.001
+  weight_decay: 0.0
+trainer:
+  total_updates: 200
+  batch_size: 32
+  device: cuda
+  seed: 101
+  output_dir: outputs/sl_ddp_cuda
+  checkpoint_interval: 100
+  validation_interval: 50

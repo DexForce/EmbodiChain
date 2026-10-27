@@ -11,6 +11,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 |---|---|
 | Online worker and sample selection | `embodichain/data_pipeline/engine/data.py`: `OnlineDataEngine` |
 | Throughput-derived settings and protected reuse profiles | `embodichain/data_pipeline/configuration.py`: `configure_ods`; sampler enforcement in `engine/data.py` |
+| Explicit owner-side refill, waits and pacing | `embodichain/data_pipeline/runtime.py`: `ODSFlowController`; compact READY-only flow status in `engine/data.py` |
 | PyTorch iteration | `embodichain/data_pipeline/datasets/`: `sequence_data.py` owns `SequenceDataset`; `online_data.py` preserves `OnlineDataset`; `OfflineDataset` is an alias |
 | Shared sequence contract and sources | `embodichain/data_pipeline/datasets/sequence.py`, `sources.py`, `_sampling.py` |
 | Bounded numeric LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping |
@@ -22,6 +23,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Offline collection retries and final partial batch | `embodichain/lab/scripts/run_task.py` |
 | File-only validation and grouped quality splits | `embodichain/data_pipeline/datasets/inspection.py`; `embodichain dataset validate\|split` |
 | Durable commit diagnostics and metadata repair | `embodichain/data_pipeline/recording/journal.py`; `embodichain dataset recover` |
+| NeRD-specific HDF5 windows and teacher collection | `extensions/embodichain_models/embodichain_models/dynamics/nerd/data.py` and `examples/learning/nerd/_support/_generation.py`; contracts in [neural dynamics](../neural-dynamics/neural-dynamics.md) |
 | Isolated LeRobot 0.6.1 language/depth conversion | `tools/lerobot_export/` (Python >=3.12, independent dependencies) |
 
 Read [online sampling](online-sampling.md) for worker states, refill, shared
@@ -47,6 +49,11 @@ requires explicit action semantics, step duration, field mapping and a resident
 memory limit; imports do not initialize simulation or import the SDK until load.
 The first backend samples resident numeric tensors after bounded SDK reads.
 
+`learning/sl/sequence.py` bridges these sources through an explicit encoder;
+the [SL context](../supervised-learning/supervised-learning.md) owns its identity
+and recovery admission. Online lifecycle and delivery credits remain here.
+Neither trainer RNG restoration nor encoding failure rewinds source quotas.
+
 The demo's `lerobot.py` owns writing and sidecar/hash auditing around the public
 reader. It measures initial loading rather than per-batch disk reads and does
 not replace recording or offline-inspection tools. See the
@@ -70,10 +77,14 @@ shared memory: `CREATED → STARTING → READY`; `FAILED` and `STOPPED` are term
 Startup waits for initial fill with a timeout and demonstration generation has
 bounded attempts. Worker errors are published to all consumers; failed engines
 are replaced with new instances rather than restarted.
+The monitor waits for sentinel readiness without consuming the forkserver's
+single-reader exit-status pipe. Owner and monitor serialize status reads and
+process-handle closure with a local lock; shutdown releases it before joining
+the monitor. Consumer deserialization recreates that process-local lock.
 
 `sample_batch()` is READY-only. Selection excludes the currently written range,
-checks validity/continuity/segment boundaries, and clones the result while
-holding the shared write lock. Moving selection or cloning outside that scope
+checks validity/continuity/segment boundaries, and copies the selected payload
+while holding the shared write lock. Moving selection or copying outside that scope
 can expose partially overwritten rows. Refill follows the configured automatic
 or manual policy. Explicit raw-policy recording validates its ordered live
 action contracts independently of the expert-controller schema; see
@@ -82,7 +93,9 @@ action contracts independently of the expert-controller schema; see
 Distinguish a terminal worker failure from a sampling request with no eligible
 unlocked window. The latter raises `DataUnavailableError` (a `RuntimeError`)
 immediately without itself setting `FAILED` or triggering a refill. Datasets
-propagate both kinds of exception without an automatic retry loop.
+propagate both kinds of exception without an automatic retry loop. Applications
+can opt into `ODSFlowController` around their manual engine for bounded retries,
+refill and plan-based pacing; start/stop and training stay application-owned.
 
 ## Persistence contract
 

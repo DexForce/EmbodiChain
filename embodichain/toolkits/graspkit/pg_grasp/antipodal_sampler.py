@@ -98,15 +98,34 @@ class AntipodalSampler:
         vertices_y_range = vertices[:, 1].max() - vertices[:, 1].min()
         vertices_z_range = vertices[:, 2].max() - vertices[:, 2].min()
         max_range = max(vertices_x_range, vertices_y_range, vertices_z_range)
-        # generate rays
-        ray_direc = sample_normals
-        ray_origin = (
-            sample_points - 2.0 * max_range * ray_direc
-        )  # ray origin in the other side of the mesh
-        ray_origin_2 = sample_points - 2.0 * self.cfg.max_length * ray_direc
-        all_ray_origin = torch.cat([ray_origin, ray_origin_2], dim=0)
-        all_ray_direc = torch.cat([ray_direc, ray_direc], dim=0)
-        all_surface_origin = torch.cat([sample_points, sample_points], dim=0)
+        # Retain normal rays and add the configured directional coverage.
+        # Normal-only rays on a box otherwise yield only three closing axes.
+        directions = [sample_normals]
+        if self.cfg.max_angle > 0.0:
+            # Geometry annotations must not depend on which task seed first
+            # populates the shared cache, or consume the caller's RNG stream.
+            directions.append(
+                self._random_rotate_unit_vectors(
+                    sample_normals.to("cpu"),
+                    self.cfg.max_angle,
+                    generator=torch.Generator(device="cpu").manual_seed(0),
+                ).to(sample_normals)
+            )
+        ray_origins = []
+        ray_directions = []
+        surface_origins = []
+        for direction in directions:
+            ray_origins.extend(
+                [
+                    sample_points - 2.0 * max_range * direction,
+                    sample_points - 2.0 * self.cfg.max_length * direction,
+                ]
+            )
+            ray_directions.extend([direction, direction])
+            surface_origins.extend([sample_points, sample_points])
+        all_ray_origin = torch.cat(ray_origins, dim=0)
+        all_ray_direc = torch.cat(ray_directions, dim=0)
+        all_surface_origin = torch.cat(surface_origins, dim=0)
         return self._get_raycast_result(
             all_ray_origin,
             all_ray_direc,
@@ -232,10 +251,15 @@ class AntipodalSampler:
         normals = torch.from_numpy(np.asarray(ans["primitive_normals"].numpy())).to(
             device=ray_origin.device, dtype=ray_origin.dtype
         )
-        normal_angle = torch.acos(
-            torch.abs(torch.clamp(torch.sum(normals * ray_direc, dim=-1), -1.0, 1.0))
+        normal_cosine = torch.abs(
+            torch.sum(
+                F.normalize(normals, dim=-1) * F.normalize(ray_direc, dim=-1), dim=-1
+            )
         )
-        angle_valid_mask = normal_angle < self.cfg.max_angle
+        # Avoid acos cancellation at zero deviation; Open3D normals can differ
+        # from exact unit length by floating-point roundoff.
+        roundoff = 4.0 * torch.finfo(normal_cosine.dtype).eps
+        angle_valid_mask = normal_cosine >= float(np.cos(self.cfg.max_angle)) - roundoff
 
         hit_points = ray_origin + t_hit[:, None] * ray_direc
         antipodal_len = torch.norm(hit_points - surface_origin, dim=-1)
@@ -258,6 +282,8 @@ class AntipodalSampler:
         max_angle: float,
         degrees: bool = False,
         eps: float = 1e-8,
+        *,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """
         Apply random small rotations to a batch of unit vectors [N, 3].
@@ -267,6 +293,7 @@ class AntipodalSampler:
             max_angle: Maximum rotation angle
             degrees: If True, `max_angle` is given in degrees
             eps: Numerical stability constant
+            generator: Optional owned random stream matching the vector device.
 
         Returns:
             rotated: [N, 3], rotated unit vectors
@@ -284,14 +311,22 @@ class AntipodalSampler:
 
         # 1) Generate a random direction for each vector
         #   then project it onto the plane perpendicular to v to get the rotation axis k
-        rand_dir = torch.randn_like(v) + eps
+        rand_dir = (
+            torch.randn_like(v)
+            if generator is None
+            else torch.randn(
+                v.shape, device=v.device, dtype=v.dtype, generator=generator
+            )
+        ) + eps
         proj = (rand_dir * v).sum(dim=-1, keepdim=True) * v
         k = rand_dir - proj
         k = F.normalize(k, dim=-1)
 
         # 2) Sample rotation angles in the range [eps, max_angle]
         theta = (
-            torch.rand(n, 1, device=v.device, dtype=v.dtype) * (max_angle - eps) + eps
+            torch.rand(n, 1, device=v.device, dtype=v.dtype, generator=generator)
+            * (max_angle - eps)
+            + eps
         )
 
         # 3) Rodrigues' rotation formula

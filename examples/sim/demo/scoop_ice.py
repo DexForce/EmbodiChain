@@ -34,6 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
     """Build CLI options without initializing simulation resources."""
     parser = argparse.ArgumentParser(description="Scoop ice task simulation")
     add_sim_args_to_parser(parser)
+    # The ice material uses authored transmission and requires OfflineRT.
+    parser.set_defaults(renderer="rt")
     add_seed_arg_to_parser(parser, default=0, scope="ice placement")
     return parser
 
@@ -79,9 +81,12 @@ def initialize_simulation(args):
     """
     physics_cfg = physics_cfg_for_backend(args.physics)
     if args.physics == "newton":
-        # Hundreds of free bodies make dense Newton Hessian factorization
-        # expensive. CG avoids that factorization while retaining contacts.
-        physics_cfg.solver_cfg = {"solver_type": "mujoco_warp", "solver": "cg"}
+        physics_cfg.solver_cfg = {
+            "solver_type": "dexuni",
+            "mujoco_options": {"solver": "cg"},
+            # Dense ice contacts exceed VBD's default per-body capacity of 64.
+            "vbd_options": {"rigid_body_contact_buffer_size": 256},
+        }
     config = SimulationManagerCfg(
         headless=True,
         device=args.device,
@@ -351,14 +356,13 @@ def create_ice_cubes(sim: SimulationManager):
     ice_cubes: RigidObjectGroup = sim.add_rigid_object_group(cfg=ice_cubes_cfg)
 
     # Set visual material for ice cubes.
-    # The material below only works for ray tracing backend.
-    # Set ior to 1.31 and material type to "BSDF" for better ice appearance.
+    # Explicit optical parameters select ice scattering in OfflineRT.
     ice_mat = sim.create_visual_material(
         cfg=VisualMaterialCfg(
             base_color=[1.0, 1.0, 1.0, 1.0],
             ior=1.31,
             roughness=0.2,
-            material_type="BSDF",
+            parameters={"transmission": 1.0},
         )
     )
     sim.prepare()

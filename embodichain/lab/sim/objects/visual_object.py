@@ -139,12 +139,11 @@ class VisualObject(BatchEntity):
         self._pose_view = _SceneVisualObjectView(result, self._entities, self.device)
         poses = self._pose_view.fetch_pose(self._pose_view.rows)
         self._apply_visual_uv()
-        material_cfg = getattr(self.cfg.shape, "visual_material", None)
         materials = [
             (
                 []
                 if e.get_render_body() is None
-                else _capture_render_materials(e.get_render_body(), cfg=material_cfg)
+                else _capture_render_materials(e.get_render_body())
             )
             for e in self._entities
         ]

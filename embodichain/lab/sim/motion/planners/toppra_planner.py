@@ -24,6 +24,7 @@ import torch
 
 from embodichain.compute.trajectory._toppra_common import _validate_grid_size
 from embodichain.compute.trajectory._toppra_warp import _retime_toppra_warp
+from embodichain.compute.trajectory._toppra_stopped import _retime_toppra_stopped
 from embodichain.utils import logger, configclass
 from .base_planner import (
     validate_plan_options,
@@ -224,8 +225,22 @@ class ToppraPlanOptions(PlanOptions):
     Both modes support first-order gradients of waypoints and tensor motion limits.
     """
 
+    stop_at_waypoints: bool = False
+    """Require rest at every supplied waypoint on the TIME control grid.
+
+    Available only with TIME sampling. Each adjacent pair is solved separately,
+    and its duration is conservatively rounded up to whole sample intervals.
+    Shared endpoints are retained exactly, with zero velocity, so a caller may
+    insert a stationary hand command there. The default preserves the existing
+    continuous spline and upper-bound time spacing.
+    """
+
     def __post_init__(self) -> None:
-        """Preserve tensor graphs before configclass copies mutable fields."""
+        """Preserve tensor graphs and validate the optional stopped path mode."""
+        if type(self.stop_at_waypoints) is not bool:
+            raise TypeError("stop_at_waypoints must be boolean.")
+        if self.stop_at_waypoints and self.sample_method != TrajectorySampleMethod.TIME:
+            raise ValueError("stop_at_waypoints requires TIME sampling.")
         self.constraints = _ToppraConstraints(self.constraints)
 
 
@@ -237,6 +252,13 @@ class ToppraPlanner(BasePlanner):
     """
 
     supported_move_types = frozenset({MoveType.JOINT_MOVE})
+    preserve_plan_samples = True
+    """Keep the solved native time grid through MotionGenerator normalization.
+
+    A facade-level linear resampling can invalidate the solved derivatives.
+    Backend-neutral counts still configure the planner when no explicit native
+    options are supplied; explicit native sampling options remain authoritative.
+    """
 
     def __init__(self, cfg: ToppraPlannerCfg) -> None:
         """Validate the timing grid and resolve the configured robot."""
@@ -290,22 +312,31 @@ class ToppraPlanner(BasePlanner):
         if waypoints_tensor.dtype not in (torch.float32, torch.float64):
             waypoints_tensor = waypoints_tensor.to(torch.float64)
         try:
-            result = _retime_toppra_warp(
-                waypoints_tensor,
-                constraints["velocity"],
-                constraints["acceleration"],
-                sample_count=(
-                    int(options.sample_interval)
-                    if options.sample_method == TrajectorySampleMethod.QUANTITY
-                    else None
-                ),
-                sample_dt=(
-                    options.sample_interval
-                    if options.sample_method == TrajectorySampleMethod.TIME
-                    else None
-                ),
-                grid_size=self.cfg.grid_size,
-            )
+            if options.stop_at_waypoints:
+                result = _retime_toppra_stopped(
+                    waypoints_tensor,
+                    constraints["velocity"],
+                    constraints["acceleration"],
+                    sample_dt=float(options.sample_interval),
+                    grid_size=self.cfg.grid_size,
+                )
+            else:
+                result = _retime_toppra_warp(
+                    waypoints_tensor,
+                    constraints["velocity"],
+                    constraints["acceleration"],
+                    sample_count=(
+                        int(options.sample_interval)
+                        if options.sample_method == TrajectorySampleMethod.QUANTITY
+                        else None
+                    ),
+                    sample_dt=(
+                        options.sample_interval
+                        if options.sample_method == TrajectorySampleMethod.TIME
+                        else None
+                    ),
+                    grid_size=self.cfg.grid_size,
+                )
         except (ValueError, FloatingPointError, OverflowError):
             return _failed_result(b, dofs, self.device, torch.float32)
         # The existing planner contract returns float32 for all floating

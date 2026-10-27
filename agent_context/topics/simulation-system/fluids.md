@@ -13,18 +13,17 @@ DexSim derives the effective solver values from the fluid descriptors.
 
 ## Runtime requirements
 
-The foundation supports the published `dexsim_engine==0.5.1rc1` artifact
-(`56c12415053617cb0ffad6881ed57a45541a6da6`) with Newton CUDA, no gradients,
-one environment and fixed particle topology. Its SPH solver has no world
-isolation or selected-world solver reset. Requests for multiple environments
-fail before declaration unless the loaded solver explicitly advertises both
-capabilities. Arena spacing alone does not establish isolation.
+Fluid simulation requires Newton CUDA, no gradients and fixed particle topology.
+Multiple environments require a DexSim SPH solver that explicitly advertises
+both world isolation and selected-world reset; arena spacing alone does not
+establish isolation. The development build
+`0.5.1+0b8422cc6f6717058bd15371e61bd35cdbbe3c0c` supports both. The published
+`0.5.1rc1` SPH solver lacks them and is limited to one fluid environment; its
+compatibility with the current DexSim adaptation has not been requalified.
 
-The release provides SPH/DFSPH and particle/surface rendering. It does not
-provide `SPHSolverCfg.rigid_solver_cfg`, `rigid_solver_substeps`, or DexUni's
-`sph_cfg` prototype. Online robot pouring, batch fluid tasks, Gym declarations
-and replay belong to the dependent task layer and require their respective
-DexSim development implementations. Basic fluid use does not require them.
+Online robot pouring, Gym declarations and replay belong to the dependent task
+layer and require their respective DexSim capabilities. Do not infer those
+features from support for independent initial-fill SPH worlds.
 
 ## State and sampling
 
@@ -63,11 +62,13 @@ primary surface lacks the OptiX liquid geometry, so the manager rejects Hybrid
 before sampling or declaration, including an already initialized Hybrid
 process. Use `no-render` for physics only; fluid mode `none` requires it.
 Display clipping changes only a render copy. Viser consumes detached particle
-point clouds. NoRender needs no optical material.
+point clouds. NoRender needs no optical material. Advanced optical parameters
+follow the renderer requirements of the [material system](materials.md).
 
 `scripts/tutorials/sim/create_fluid.py` demonstrates procedural box sampling,
-five primitive container walls, prepare, step, state reads and reset with one
-environment. It needs no robot, task configuration or downloaded assets:
+five primitive container walls, prepare, step, state reads and reset. Pass
+`--num-envs` to use multiple independent worlds on a capable SPH build. It
+needs no robot, task configuration or downloaded assets:
 
 ```bash
 python scripts/tutorials/sim/create_fluid.py --headless --renderer no-render

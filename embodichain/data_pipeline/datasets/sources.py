@@ -165,7 +165,11 @@ class OnlineDataSource:
             if native in raw.keys():
                 result[canonical] = raw[native]
         _check_features(result, self.schema)
-        return _pad_context(result, raw["valid"], raw["loss_mask"])
+        if self.observation_transform is not None:
+            # The engine already padded every copied leaf. Only a transform
+            # can make invalid observations nonzero again.
+            _pad_context(result.select("obs"), raw["valid"], raw["loss_mask"])
+        return result
 
     def resolve_language(self, batch: TensorDict) -> dict[str, object]:
         """Resolve copied task/subtask IDs through the engine's text registry.

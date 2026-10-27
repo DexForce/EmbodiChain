@@ -332,16 +332,11 @@ class DeformableObject(BatchEntity):
         """Capture and wrap materials parsed from the source asset."""
         self._original_visual_material = [[] for _ in self._entities]
         self._original_visual_material_inst = [None] * len(self._entities)
-        cfg = getattr(self, "cfg", None)
-        shape = getattr(cfg, "visual_shape", None) or getattr(cfg, "shape", None)
-        material_cfg = getattr(shape, "visual_material", None)
         for env_idx, entity in enumerate(self._entities):
             render_body = entity.get_render_body()
             if render_body is None:
                 continue
-            original_materials = _capture_render_materials(
-                render_body, cfg=material_cfg
-            )
+            original_materials = _capture_render_materials(render_body)
             self._original_visual_material[env_idx] = original_materials
             wrapped = _wrap_first_render_material(original_materials)
             if wrapped is not None:
@@ -429,6 +424,41 @@ class DeformableObject(BatchEntity):
             )
         self._apply_local_pose(
             pose4x4.to(device=self.device, dtype=torch.float32),
+            local_env_ids,
+        )
+
+    def set_nodal_state(
+        self,
+        nodal_state: torch.Tensor,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Write world-frame particle positions and velocities.
+
+        This is the inverse of :attr:`DeformableObjectData.nodal_state_w`.
+        Use it to start from a deformed configuration while keeping the
+        authored rest shape, for example a pre-compressed block.
+
+        Args:
+            nodal_state: Tensor of shape ``(len(env_ids), num_nodes, 6)``
+                holding ``[position, velocity]`` per node in world frame.
+            env_ids: Environments to write. ``None`` selects all.
+
+        Raises:
+            ValueError: If the shape does not match or values are not finite.
+        """
+        local_env_ids = self._resolve_env_ids(env_ids)
+        self._require_data()
+        state = torch.as_tensor(nodal_state, dtype=torch.float32, device=self.device)
+        if state.dim() != 3 or state.shape[-1] != 6:
+            raise ValueError(
+                "nodal_state must have shape (len(env_ids), num_nodes, 6); got "
+                f"{tuple(state.shape)}."
+            )
+        if not torch.isfinite(state).all():
+            raise ValueError("nodal_state must contain only finite values.")
+        self._data._apply_nodal_state(
+            state[..., :3],
+            state[..., 3:],
             local_env_ids,
         )
 

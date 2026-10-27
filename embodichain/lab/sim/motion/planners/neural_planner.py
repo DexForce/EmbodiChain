@@ -202,9 +202,16 @@ class _OnnxPolicy:
             ) from exc
 
         options = ort.SessionOptions()
+        # Respect the host's CPU budget, including isolated benchmark workers;
+        # ORT's default otherwise creates its own machine-sized thread pool.
+        options.intra_op_num_threads = torch.get_num_threads()
+        options.inter_op_num_threads = 1
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         self.session = ort.InferenceSession(
             str(path), sess_options=options, providers=providers
+        )
+        logger.log_info(
+            "NMG ONNX execution providers: " + ", ".join(self.session.get_providers())
         )
         inputs = self.session.get_inputs()
         outputs = self.session.get_outputs()
@@ -329,8 +336,8 @@ class NeuralPlannerCfg(BasePlannerCfg):
     rot_eps: float = 0.1
     """Waypoint rotation threshold in radians."""
 
-    joint_eps: float = 0.02
-    """Waypoint joint-position threshold in radians."""
+    joint_eps: float = 0.01
+    """Maximum absolute per-joint arrival error in radians (L-infinity)."""
 
     onnx_providers: list[str] | None = None
     """Optional ONNX Runtime execution-provider priority list."""
@@ -378,6 +385,8 @@ class NeuralPlanOptions(PlanOptions):
     control_part: str | None = None
     start_qpos: torch.Tensor | None = None
     max_steps: int | None = None
+    waypoint_modalities: list[str] | None = None
+    """Optional explicit joint/position/orientation/pose semantics per waypoint."""
 
 
 class NeuralPlanner(BasePlanner):
@@ -564,7 +573,7 @@ class NeuralPlanner(BasePlanner):
             rot_mask,
             joint_mask,
             episode_k,
-        ) = self._parse_waypoints(target_states)
+        ) = self._parse_waypoints(target_states, options.waypoint_modalities)
         qpos = self._initial_qpos(control_part, options.start_qpos)
         b = qpos.shape[0]
         limits = self.robot.get_qpos_limits(name=control_part)[0].to(self.device)
@@ -575,13 +584,13 @@ class NeuralPlanner(BasePlanner):
         active_idx = torch.zeros(b, dtype=torch.long, device=self.device)
         positions = [qpos.clone()]
         xpos_list = [self._fk_matrix(qpos, control_part)]
+        ee_pose = self._policy_pose_xyzw(xpos_list[0])
         converged = torch.zeros(b, dtype=torch.bool, device=self.device)
         path_lengths = torch.ones(b, dtype=torch.int32, device=self.device)
         max_steps = int(options.max_steps or self._max_steps)
 
         with torch.no_grad():
             for _ in range(max_steps):
-                ee_pose = self._fk_pose_xyzw(qpos, control_part)
                 obs = self._build_obs(
                     qpos[:, : self._action_dim],
                     ee_pose,
@@ -615,7 +624,9 @@ class NeuralPlanner(BasePlanner):
                 xpos_list.append(self._fk_matrix(qpos, control_part))
                 path_lengths += not_converged.to(path_lengths.dtype)
 
-                ee_pose = self._fk_pose_xyzw(qpos, control_part)
+                # The updated FK supplies both arrival checks and the next
+                # observation; qpos stays unchanged between those consumers.
+                ee_pose = self._policy_pose_xyzw(xpos_list[-1])
                 reached = self._is_active_reached(
                     qpos[:, : self._action_dim],
                     ee_pose,
@@ -672,6 +683,8 @@ class NeuralPlanner(BasePlanner):
             accelerations=accelerations_t,
             xpos_list=xpos_t,
             dt=dt,
+            policy_rollout_positions=positions_t,
+            policy_rollout_lengths=path_lengths,
         )
 
     def _retimed_result(
@@ -745,6 +758,8 @@ class NeuralPlanner(BasePlanner):
             accelerations=retimed.accelerations,
             xpos_list=poses,
             dt=retimed.dt,
+            policy_rollout_positions=positions,
+            policy_rollout_lengths=path_lengths,
         )
 
     def _retimed_is_executable(
@@ -827,7 +842,9 @@ class NeuralPlanner(BasePlanner):
             ).amin(dim=-1)
         return reached_at < samples
 
-    def _parse_waypoints(self, target_states: list[PlanState]) -> tuple[
+    def _parse_waypoints(
+        self, target_states: list[PlanState], modalities: list[str] | None = None
+    ) -> tuple[
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
@@ -843,6 +860,26 @@ class NeuralPlanner(BasePlanner):
                 f"at most {self._num_waypoints}.",
                 ValueError,
             )
+        if modalities is not None:
+            if len(modalities) != len(target_states):
+                raise ValueError("waypoint_modalities must match the target count.")
+            for target, modality in zip(target_states, modalities):
+                expected = (
+                    MoveType.JOINT_MOVE if modality == "joint" else MoveType.EEF_MOVE
+                )
+                if (
+                    modality not in {"joint", "position", "orientation", "pose"}
+                    or target.move_type != expected
+                ):
+                    raise ValueError(
+                        "waypoint_modalities must agree with each target's move_type."
+                    )
+        if modalities is not None and "position" in modalities:
+            offset = self._runtime_tcp_from_policy_tcp[:3, 3]
+            if bool(torch.any(offset.abs() > 1.0e-8)):
+                raise ValueError(
+                    "Position-only constraints require the runtime and policy TCP origins to coincide."
+                )
         b = _infer_batch_size(target_states) or 1
         waypoint_pos = torch.zeros(b, self._num_waypoints, 3, device=self.device)
         waypoint_quat = torch.zeros(b, self._num_waypoints, 4, device=self.device)
@@ -896,7 +933,11 @@ class NeuralPlanner(BasePlanner):
                     ValueError,
                 )
             valid_mask[:, idx] = 1.0
-        if not self._intermediate_orientation:
+        if modalities is not None:
+            for idx, modality in enumerate(modalities):
+                pos_mask[:, idx] = float(modality in {"position", "pose"})
+                rot_mask[:, idx] = float(modality in {"orientation", "pose"})
+        if modalities is None and not self._intermediate_orientation:
             final_mask = torch.zeros_like(rot_mask)
             final_mask[:, len(target_states) - 1] = 1.0
             rot_mask *= final_mask
@@ -930,10 +971,6 @@ class NeuralPlanner(BasePlanner):
 
     def _fk_matrix(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
         return self.robot.compute_fk(qpos=qpos, name=control_part, to_matrix=True)
-
-    def _fk_pose_xyzw(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
-        """Return the policy-frame FK pose as ``xyz + xyzw``."""
-        return self._policy_pose_xyzw(self._fk_matrix(qpos, control_part))
 
     def _policy_pose_xyzw(self, fk_matrix: torch.Tensor) -> torch.Tensor:
         """Map ``(M, 4, 4)`` runtime TCP poses to policy-frame ``xyz + xyzw``."""
@@ -1075,7 +1112,7 @@ class NeuralPlanner(BasePlanner):
         joint_dist = torch.amax(torch.abs(joint_pos - active_joint), dim=-1)
         joint_ok = torch.where(
             active_joint_mask,
-            joint_dist < self._joint_eps,
+            joint_dist <= self._joint_eps,
             torch.ones_like(joint_dist, dtype=torch.bool),
         )
         reached = pos_ok & rot_ok & joint_ok

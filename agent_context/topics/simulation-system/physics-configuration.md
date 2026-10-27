@@ -6,7 +6,7 @@ Return to the [simulation overview](simulation-system.md) for lifecycle entry.
 ## Backend, solver and device resolution
 
 `SimulationManagerCfg.physics_cfg` selects the backend by config type.
-`cfg/simulation.py` owns `PhysicsBackendCfg`, `DefaultPhysicsCfg` and
+`cfg/physics.py` owns `PhysicsBackendCfg`, `DefaultPhysicsCfg` and
 `NewtonPhysicsCfg`; do not add another backend string to the manager config.
 Gym's file-owned selector and composition rules belong to
 [environment configuration](../env-framework/configuration.md).
@@ -21,12 +21,13 @@ device, not a separate environment tensor device.
 `None` retains the native default. Gym accepts the former in `physics_config`
 and the latter at the top level through `config_to_cfg()`.
 
-Newton `solver_cfg=None` preserves DexSim's scene-aware `AutoSolverCfg`.
-The concrete solver is resolved from the complete Spawn scene, then exposed
-through `NewtonPhysicsBackend.solver_type`. Do not guess a solver-specific robot
-preset while it is unresolved. Gradient mode requires an explicit
+Newton `solver_cfg=None` preserves DexSim's `DexUniSolverCfg` default.
+DexUni owns scene-based partitioning between MuJoCo, VBD and supported particle
+paths; `NewtonPhysicsBackend.solver_type` remains `dexuni`. Legacy `auto` and
+`AutoSolverCfg` mappings select DexUni. Robot presets select `newton_dexuni`
+before the MuJoCo aliases and portable fallbacks. Gradient mode requires an explicit
 `semi_implicit` solver. Read exact solver options/defaults in
-`cfg/simulation.py` and the installed DexSim config types; do not substitute a
+`cfg/physics.py` and the installed DexSim config types; do not substitute a
 hardcoded fallback when an expected DexSim API is absent.
 
 `collision_cfg` owns the external Newton contact pipeline. Its
@@ -38,10 +39,24 @@ external-pipeline tuning does not configure internal contact generation.
 The manual differentiable trajectory requires the external pipeline; see
 [differentiable environment](../differentiable-env/differentiable-env.md).
 
+DexUni preserves its one-way contact policy unless `coupling="two_way"` is
+explicit. Two-way feedback requires dynamically integrated MuJoCo joints and
+supports full-surface rigid-soft feedback in current DexSim builds. Native
+validation owns compatible contact modes and option combinations. Prescribed kinematic trajectories
+cannot respond to contact reactions. Forward solver expert options through
+`NewtonPhysicsCfg.solver_cfg`; DexSim owns their validation and dispatch.
+Articulation gravity compensation and passive damping are separate creation
+settings; see [articulation adapters](articulation-adapters.md).
+`async_sync`, `rigid_transform_sync_mode`, `capture_acquire_timeout` and
+`capture_wait_log_interval` pass straight to DexSim `NewtonCfg`. Solver
+diagnostics (graph status, effective VBD options, contact capacity) are read
+from `sim.spawn_result.get_solver_diagnostics()` after `prepare()`.
+
 Capability checks remain explicit: Default owns native rigid constraints and
 Newton deformables are separate. Contact support is rechecked after Newton
-solver resolution; DexUni and MuJoCo-Warp on CPU do not expose the supported
-ContactQuery path. See `physics/` and [sensors](../sensor-system/sensor-system.md).
+solver resolution; capabilities depend on the concrete DexUni contact path
+and whether MuJoCo runs on CUDA. See `physics/` and the
+[contact capability contract](../sensor-system/lifecycle.md#contact-queries).
 
 ## Sparse source physics
 

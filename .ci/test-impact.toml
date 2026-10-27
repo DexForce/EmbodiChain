@@ -340,7 +340,7 @@ risk = "medium"
 [[rules]]
 id = "atomic-actions"
 paths = ["embodichain/lab/sim/atomic_actions/**"]
-tests = ["tests/sim/atomic_actions/**"]
+tests = ["tests/sim/atomic_actions/**", "tests/examples/atomic_action/test_support.py"]
 resource_hints = ["sim"]
 risk = "medium"
 
@@ -361,8 +361,7 @@ risk = "medium"
 [[rules]]
 id = "atomic-action-tutorials"
 paths = ["scripts/tutorials/atomic_action/*.py"]
-tests = ["tests/sim/atomic_actions/**"]
-resource_hints = ["sim"]
+tests = ["tests/visualization/test_example_tutorial_coverage.py"]
 risk = "medium"
 
 [[rules]]

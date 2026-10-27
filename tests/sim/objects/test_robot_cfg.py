@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import enum
+from copy import deepcopy
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -33,27 +34,128 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
 )
 from embodichain.lab.sim.motion.workspace import RobotWorkspaceCfg
-from embodichain_robots.dexforce_w1 import DexforceW1Cfg
-from embodichain_robots.dexforce_w1.params import W1ArmKineParams
-from embodichain_robots.dexforce_w1.types import (
+from embodichain_robots.dexforce.w1 import DexforceW1Cfg
+from embodichain_robots.dexforce.w1.params import W1ArmKineParams
+from embodichain_robots.dexforce.w1.types import (
     DexforceW1ArmSide,
     DexforceW1HandBrand,
     DexforceW1HandVersion,
     DexforceW1Type,
     DexforceW1Version,
 )
-from embodichain_robots.dexforce_w1.hand_specs import (
+from embodichain_robots.dexforce.w1.hand_specs import (
     get_default_w1_hand_version,
     get_w1_hand_spec,
 )
-from embodichain_robots.dexforce_w1.specs import get_w1_version_spec
-from embodichain_robots.dexforce_w1.utils import (
+from embodichain_robots.dexforce.w1.specs import get_w1_version_spec
+from embodichain_robots.dexforce.w1.utils import (
     build_dexforce_w1_assembly_urdf_cfg,
     build_dexforce_w1_control_parts,
 )
 from embodichain.lab.sim.motion.solvers import SRSSolverCfg
 from embodichain.utils import configclass
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+
+
+@pytest.mark.no_sim
+def test_arx5_source_chain_commands_and_ik_roundtrip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """X5A retains two independent fingers and a six-joint flange/TCP chain."""
+    from embodichain_robots.arx.arx5 import cfg as arx5
+
+    source = Path(__file__).parents[2] / "fixtures/kinematics/arx5_x5a.urdf"
+    monkeypatch.setattr(arx5, "get_data_path", lambda _: str(source))
+    cfg = arx5.ARX5Cfg.from_dict({})
+    restored = arx5.ARX5Cfg.from_dict(cfg.to_dict())
+    assert restored.control_parts == {
+        "arm": [f"joint{i}" for i in range(1, 7)],
+        "eef": ["joint7", "joint8"],
+    }
+    assert not ET.parse(source).findall(".//mimic")
+    assert restored.fpath == str(source)
+    assert restored.init_qpos == cfg.init_qpos
+    assert restored.root_props.self_collision_enabled is True
+    chain = restored.build_pk_serial_chain()["arm"]
+    assert chain.get_joint_parameter_names() == restored.control_parts["arm"]
+    solver_cfg = restored.solver_cfg["arm"]
+    solver_cfg.urdf_path = str(source)
+    solver_cfg.joint_names = restored.control_parts["arm"]
+    solver = solver_cfg.init_solver("cpu")
+    q = torch.tensor([restored.init_qpos[:6], [0.2, -0.5, 1.2, -0.7, 0.3, -0.2]])
+    reference = chain.forward_kinematics(q).get_matrix() @ torch.tensor(
+        solver_cfg.tcp, dtype=q.dtype
+    )
+    torch.testing.assert_close(solver.get_fk(q), reference)
+    success, solution = solver.get_ik(reference, q + 0.02)
+    assert bool(success.all())
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
+    assert isinstance(solver_cfg, SSIKSolverCfg)
+    assert solver_cfg.backend == "warp" and solver_cfg.geometry_mode == "near_parallel"
+    actual = solver.get_fk(solution.reshape_as(q))
+    torch.testing.assert_close(actual[:, :3, 3], reference[:, :3, 3], atol=1e-5, rtol=0)
+    torch.testing.assert_close(
+        actual[:, :3, :3], reference[:, :3, :3], atol=1e-5, rtol=0
+    )
+
+    # Local source and end-frame overrides must reach kinematics as well as
+    # simulation; a standalone local asset must not require a catalog download.
+    def unexpected_download(_: str) -> str:
+        raise AssertionError("A local fpath must not download the default asset")
+
+    monkeypatch.setattr(arx5, "get_data_path", unexpected_download)
+    custom = arx5.ARX5Cfg.from_dict(
+        {
+            "fpath": str(source),
+            "solver_cfg": {"arm": {"end_link_name": "link6"}},
+            "root_props": {"self_collision_enabled": False},
+        }
+    )
+    assert custom.root_props.self_collision_enabled is False
+    import pytorch_kinematics as pk
+
+    reference_chain = pk.build_serial_chain_from_urdf(
+        source.read_bytes(), "link6", "base_link"
+    )
+    torch.testing.assert_close(
+        custom.build_pk_serial_chain()["arm"].forward_kinematics(q).get_matrix(),
+        reference_chain.forward_kinematics(q).get_matrix(),
+    )
+
+
+@pytest.mark.no_sim
+def test_arx5_explicit_ssik_override_preserves_chain_source_and_tcp() -> None:
+    """Reference replacements preserve the X5A source and tool frame."""
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
+    source = Path(__file__).parents[2] / "fixtures/kinematics/arx5_x5a.urdf"
+    default = ARX5Cfg.from_dict({"fpath": str(source)})
+    original = default.solver_cfg["arm"]
+    cfg = ARX5Cfg.from_dict(
+        {
+            "fpath": str(source),
+            "solver_cfg": {
+                "arm": SSIKSolverCfg(
+                    backend="reference",
+                    root_link_name=original.root_link_name,
+                    end_link_name=original.end_link_name,
+                    tcp=original.tcp,
+                    reference_artifact="prepared_x5a.py",
+                )
+            },
+        }
+    )
+    assert isinstance(cfg.solver_cfg["arm"], SSIKSolverCfg)
+    assert cfg.solver_cfg["arm"].reference_artifact == "prepared_x5a.py"
+    assert len(cfg.build_pk_serial_chain()["arm"].get_joint_parameter_names()) == 6
+    restored = ARX5Cfg.from_dict(cfg.to_dict())
+    assert restored.solver_cfg["arm"].backend == "reference"
+    assert restored.fpath == str(source)
+    np.testing.assert_array_equal(
+        restored.solver_cfg["arm"].tcp,
+        [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.085], [0, 0, 0, 1]],
+    )
 
 
 def test_mounted_sensor_config_roundtrip_and_instance_isolation() -> None:
@@ -90,7 +192,7 @@ def test_cobotmagic_mounted_defaults_replace_and_clear(monkeypatch) -> None:
     from embodichain_robots import CobotMagicCfg
 
     monkeypatch.setattr(
-        "embodichain_robots.cobotmagic.get_data_path", lambda value: value
+        "embodichain_robots.agilex.cobotmagic.cfg.get_data_path", lambda value: value
     )
     cfg = CobotMagicCfg.from_dict({})
     assert cfg.enable_sensor is False
@@ -124,7 +226,7 @@ def test_cobotmagic_mounted_defaults_replace_and_clear(monkeypatch) -> None:
 
 def _mock_w1_asset_paths(monkeypatch, tmp_path):
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain_robots.dexforce_w1 import utils as w1_utils
+    from embodichain_robots.dexforce.w1 import utils as w1_utils
 
     def resolve(path):
         resolved = tmp_path / path
@@ -298,7 +400,7 @@ def test_w1_v022_provisional_eef_baseline_is_composed_consistently():
 
 def test_w1_v022_cfg_uses_registered_asset_paths(tmp_path, monkeypatch):
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain_robots.dexforce_w1 import utils as w1_utils
+    from embodichain_robots.dexforce.w1 import utils as w1_utils
 
     registered_paths = []
 
@@ -350,7 +452,7 @@ def test_w1_cfg_builds_complete_dual_arm_robot(monkeypatch, tmp_path):
 
 def test_w1_hand_version_is_independent_of_robot_version(monkeypatch, tmp_path):
     _mock_w1_asset_paths(monkeypatch, tmp_path)
-    from embodichain_robots.dexforce_w1 import utils as w1_utils
+    from embodichain_robots.dexforce.w1 import utils as w1_utils
 
     selected_versions = []
     original_get_urdf = w1_utils.hand_manager.get_urdf
@@ -598,10 +700,48 @@ def test_robotcfg_to_dict_roundtrip():
     assert cfg2.joint_drive_props.stiffness == {"J[1-2]": 1e4}
 
 
-from embodichain_robots.cobotmagic import CobotMagicCfg
-from embodichain_robots import AlohaMiniCfg, TianjiMarvinCfg
-from embodichain_robots.franka_panda import FrankaPandaCfg, FrankaPandaPgiCfg
-from embodichain_robots.ur_robot import URRobotCfg
+@pytest.mark.parametrize(
+    "override,expected",
+    [
+        ({"self_collision_enabled": True}, (False, True, 0.05, 8, 4)),
+        ({"min_position_iters": 16}, (False, False, 0.05, 16, 4)),
+        ({"fixed_base": True, "min_velocity_iters": 0}, (True, False, 0.05, 8, 0)),
+        ({"fixed_base": None, "sleep_threshold": None}, (None, False, None, 8, 4)),
+        ({}, (False, False, 0.05, 8, 4)),
+    ],
+)
+def test_root_property_overrides_preserve_unspecified_preset_fields(
+    override: dict[str, object], expected: tuple[object, ...]
+) -> None:
+    """Sparse root overlays keep floating bases and validate complete iter pairs."""
+    from copy import deepcopy
+
+    cfg = RobotCfg(
+        root_props=ArticulationRootPropertiesCfg(
+            fixed_base=False,
+            self_collision_enabled=False,
+            sleep_threshold=0.05,
+            min_position_iters=8,
+            min_velocity_iters=4,
+        )
+    )
+    original = deepcopy(override)
+    result = merge_robot_cfg(cfg, {"root_props": override}).root_props
+
+    assert (
+        result.fixed_base,
+        result.self_collision_enabled,
+        result.sleep_threshold,
+        result.min_position_iters,
+        result.min_velocity_iters,
+    ) == expected
+    assert override == original
+
+
+from embodichain_robots.agilex.cobotmagic.cfg import CobotMagicCfg
+from embodichain_robots import AlohaMiniCfg, TianjiMarvinCfg, ARX5Cfg, FlexivRizon4SCfg
+from embodichain_robots.franka.panda import FrankaPandaCfg
+from embodichain_robots.universal_robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import OPWSolverCfg
 
 
@@ -621,9 +761,9 @@ def test_control_part_naming_convention_does_not_rewrite_user_names(
 @pytest.mark.parametrize(
     ("robot_class", "module_path", "expected_eef_parts"),
     [
-        (FrankaPandaCfg, "franka_panda", {"eef"}),
-        (AlohaMiniCfg, "aloha_mini", {"left_eef", "right_eef"}),
-        (TianjiMarvinCfg, "tianji_marvin", {"left_eef", "right_eef"}),
+        (FrankaPandaCfg, "franka.panda", {"eef"}),
+        (AlohaMiniCfg, "alohamini.aloha_mini.cfg", {"left_eef", "right_eef"}),
+        (TianjiMarvinCfg, "tianji.marvin.cfg", {"left_eef", "right_eef"}),
     ],
 )
 def test_specified_robot_defaults_use_eef_control_part_names(
@@ -705,7 +845,7 @@ def test_aloha_mini_overrides_and_roundtrip():
     assert cfg.joint_drive_props.stiffness["torso"] == 2e4
     assert cfg.joint_drive_props.stiffness["left_arm"] == 7e4
     assert cfg.solver_cfg["left_arm"].num_samples == 8
-    assert cfg.solver_cfg["right_arm"].num_samples == 30
+    assert cfg.solver_cfg["right_arm"].num_samples == 128
     assert AlohaMiniCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
 
 
@@ -725,15 +865,19 @@ def test_aloha_mini_serial_chains_match_control_joint_order():
 
 
 def test_aloha_mini_solvers_use_local_frames_and_source_tcp():
-    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg, SSIKSolverCfg
 
     cfg = AlohaMiniCfg.from_dict({})
     chains = cfg.build_pk_serial_chain()
     assert set(cfg.solver_cfg) == {"left_arm", "right_arm", "torso"}
     for part, solver_cfg in cfg.solver_cfg.items():
-        assert isinstance(solver_cfg, PytorchSolverCfg)
-        assert solver_cfg.is_only_position_constraint == (part == "torso")
-        if part.endswith("_arm"):
+        if part == "torso":
+            assert isinstance(solver_cfg, PytorchSolverCfg)
+            assert solver_cfg.is_only_position_constraint
+        else:
+            assert isinstance(solver_cfg, SSIKSolverCfg)
+            assert solver_cfg.backend == "warp"
+            assert solver_cfg.geometry_mode == "strict"
             side = part.removesuffix("_arm")
             assert solver_cfg.root_link_name == f"{side}_Base"
             assert solver_cfg.end_link_name == f"{side}_tcp"
@@ -741,10 +885,74 @@ def test_aloha_mini_solvers_use_local_frames_and_source_tcp():
         solver_cfg.joint_names = cfg.control_parts[part]
         solver = solver_cfg.init_solver(device=torch.device("cpu"))
         assert solver.dof == len(cfg.control_parts[part])
-        qpos = torch.zeros((1, solver.dof))
-        torch.testing.assert_close(
-            solver.get_fk(qpos), chains[part].forward_kinematics(qpos).get_matrix()
-        )
+        qpos = torch.tensor(chains[part].get_joint_limits()).mean(dim=0, keepdim=True)
+        expected = chains[part].forward_kinematics(qpos).get_matrix()
+        torch.testing.assert_close(solver.get_fk(qpos), expected)
+        if part != "torso":
+            success, result = solver.get_ik(expected, qpos_seed=qpos)
+            assert bool(success.all())
+            actual = chains[part].forward_kinematics(result).get_matrix()
+            torch.testing.assert_close(actual, expected, atol=1e-5, rtol=0)
+
+
+@pytest.mark.parametrize(
+    ("robot_class", "variant", "part"),
+    [
+        pytest.param(AlohaMiniCfg, {}, "left_arm", id="aloha"),
+        pytest.param(
+            TianjiMarvinCfg, {"with_gripper": True}, "left_arm", id="marvin-gripper"
+        ),
+        pytest.param(
+            TianjiMarvinCfg, {"with_gripper": False}, "left_arm", id="marvin-bare"
+        ),
+        pytest.param(ARX5Cfg, {}, "arm", id="arx5"),
+        pytest.param(FlexivRizon4SCfg, {}, "arm", id="rizon4s"),
+    ],
+)
+@pytest.mark.parametrize("typed", [False, True])
+def test_arm_pytorch_restore_replaces_default_and_roundtrips(
+    robot_class: type[RobotCfg], variant: dict[str, bool], part: str, typed: bool
+) -> None:
+    """Complete replacements restore numerical defaults and retain model frames."""
+    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg, SSIKSolverCfg
+
+    defaults = robot_class.from_dict(variant)
+    previous = defaults.solver_cfg[part]
+    assert isinstance(previous, SSIKSolverCfg)
+    explicit = PytorchSolverCfg(
+        urdf_path=defaults.fpath,
+        joint_names=defaults.control_parts[part],
+        root_link_name=previous.root_link_name,
+        end_link_name=previous.end_link_name,
+        tcp=deepcopy(previous.tcp),
+        ik_nearest_weight=[1.0] * len(defaults.control_parts[part]),
+    )
+    provided = explicit if typed else explicit.to_dict()
+    cfg = robot_class.from_dict({**variant, "solver_cfg": {part: provided}})
+    selected = cfg.solver_cfg[part]
+    assert isinstance(selected, PytorchSolverCfg)
+    assert selected.num_samples == 30 and selected.max_iterations == 500
+    assert selected.pos_eps == 5e-4 and selected.rot_eps == 5e-4
+    assert selected.root_link_name == previous.root_link_name
+    assert selected.end_link_name == previous.end_link_name
+    np.testing.assert_array_equal(selected.tcp, previous.tcp)
+    if part == "left_arm":
+        assert isinstance(cfg.solver_cfg["right_arm"], SSIKSolverCfg)
+        assert cfg.solver_cfg["right_arm"].num_samples == 128
+    if robot_class is AlohaMiniCfg:
+        assert isinstance(cfg.solver_cfg["torso"], PytorchSolverCfg)
+        assert cfg.solver_cfg["torso"].is_only_position_constraint
+    restored = robot_class.from_dict(cfg.to_dict())
+    assert restored.to_dict() == cfg.to_dict()
+    assert isinstance(restored.solver_cfg[part], PytorchSolverCfg)
+    assert selected is not explicit
+    selected.num_samples = 12
+    selected.ik_nearest_weight[0] = 3.0
+    assert explicit.num_samples == 30
+    assert explicit.ik_nearest_weight == [1.0] * len(defaults.control_parts[part])
+    if not typed:
+        assert provided["num_samples"] == 30
+        assert provided["ik_nearest_weight"] == explicit.ik_nearest_weight
 
 
 def test_aloha_mini_pk_chains_follow_overridden_asset(tmp_path):
@@ -774,7 +982,7 @@ def test_tianji_marvin_custom_asset_does_not_inherit_demo_inertials(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     asset = tmp_path / "custom.urdf"
     asset.write_text('<robot name="custom"/>')
@@ -845,7 +1053,7 @@ def test_tianji_marvin_overrides_and_roundtrip(with_gripper):
     assert cfg.joint_drive_props.stiffness["left_arm"] == 2e4
     assert cfg.joint_drive_props.stiffness["right_arm"] == 7e4
     assert cfg.solver_cfg["left_arm"].num_samples == 8
-    assert cfg.solver_cfg["right_arm"].num_samples == 30
+    assert cfg.solver_cfg["right_arm"].num_samples == 128
     assert cfg.root_props.fixed_base
     assert TianjiMarvinCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
 
@@ -958,7 +1166,7 @@ def test_tianji_marvin_camera_overrides_are_isolated_and_roundtrip():
 def test_tianji_marvin_serial_chains_and_solvers_match_source(
     with_gripper, use_link_frame
 ):
-    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
 
     init_dict = {"with_gripper": with_gripper}
     if use_link_frame:
@@ -978,7 +1186,8 @@ def test_tianji_marvin_serial_chains_and_solvers_match_source(
         assert chain.get_joint_parameter_names() == cfg.control_parts[part]
         side = part.removesuffix("_arm")
         solver_cfg = cfg.solver_cfg[part]
-        assert isinstance(solver_cfg, PytorchSolverCfg)
+        assert isinstance(solver_cfg, SSIKSolverCfg)
+        assert solver_cfg.backend == "warp" and solver_cfg.srs_search == "seed_local"
         assert solver_cfg.root_link_name == f"{side}_arm_base"
         assert solver_cfg.end_link_name == (
             f"{side}_hand_tool_link" if with_gripper else f"{side}_ee"
@@ -995,9 +1204,10 @@ def test_tianji_marvin_serial_chains_and_solvers_match_source(
         success, solved_qpos = solver.get_ik(expected_pose, qpos_seed=qpos)
         assert bool(success.all())
         torch.testing.assert_close(
-            solver.get_fk(solved_qpos.reshape_as(qpos)),
+            chain.forward_kinematics(solved_qpos.reshape_as(qpos)).get_matrix()
+            @ expected_tcp,
             expected_pose,
-            atol=1e-3,
+            atol=1e-5,
             rtol=0,
         )
 
@@ -1275,7 +1485,6 @@ def test_cobotmagic_control_part_speed_override_retains_direct_rule_priority() -
     [
         (CobotMagicCfg, {}),
         (FrankaPandaCfg, {}),
-        (FrankaPandaPgiCfg, {}),
         (URRobotCfg, {}),
         (DexforceW1Cfg, {}),
     ],
@@ -1292,14 +1501,10 @@ def test_specified_robots_use_portable_joint_drive_semantics(
     assert cfg.joint_drive_props._resolve_modes() == ("position_velocity", "force")
 
 
-_PGI_FINGER_LINKS = {"gripper_finger1_link_1", "gripper_finger2_link_1"}
-
-
 @pytest.mark.parametrize(
     ("cfg_type", "expected_links"),
     [
         (FrankaPandaCfg, {"fr3_leftfinger|fr3_rightfinger"}),
-        (FrankaPandaPgiCfg, _PGI_FINGER_LINKS),
     ],
 )
 def test_franka_variants_own_newton_gripper_contact_defaults(
@@ -1316,117 +1521,6 @@ def test_franka_variants_own_newton_gripper_contact_defaults(
     assert group.attrs.material_props.kd == pytest.approx(400.0)
     assert group.attrs.material_props.torsional_friction == pytest.approx(0.1)
     assert group.attrs.material_props.rolling_friction == pytest.approx(0.01)
-
-
-def _assembled_link_and_joint_names(cfg: RobotCfg) -> tuple[list[str], list[str]]:
-    tree = ET.parse(cfg.urdf_cfg.assemble_urdf())
-    links = [link.get("name") for link in tree.findall("link")]
-    joints = [
-        joint.get("name")
-        for joint in tree.findall("joint")
-        if joint.get("type") != "fixed"
-    ]
-    return links, joints
-
-
-def test_franka_panda_pgi_selectors_resolve_on_the_assembled_robot() -> None:
-    from embodichain.utils.string import resolve_matching_names
-
-    cfg = FrankaPandaPgiCfg.from_dict({})
-    links, joints = _assembled_link_and_joint_names(cfg)
-
-    # Spawn rejects any selector that matches nothing; every key must resolve.
-    for group in cfg.link_attrs.values():
-        resolve_matching_names(group.link_names_expr, links)
-    _, contact_links = resolve_matching_names(
-        cfg.link_attrs["newton_gripper_contacts"].link_names_expr, links
-    )
-    assert set(contact_links) == _PGI_FINGER_LINKS
-    assert resolve_matching_names(cfg.control_parts["arm"], joints)[1] == [
-        f"fr3_joint{i}" for i in range(1, 8)
-    ]
-    assert resolve_matching_names(cfg.control_parts["eef"], joints)[1] == [
-        "gripper_finger1_joint_1"
-    ]
-    drives = cfg.joint_drive_props
-    for rules in (drives.stiffness, drives.damping, drives.max_effort):
-        resolve_matching_names(list(rules), joints)
-    solver = cfg.solver_cfg["arm"]
-    assert {solver.root_link_name, solver.end_link_name} <= set(links)
-    assert len(cfg.init_qpos) == len(joints)
-    assert cfg.init_qpos[-2:] == [0.0, 0.0]
-
-
-def test_franka_panda_pgi_roundtrip_keeps_the_assembly_and_other_groups() -> None:
-    wrist = {
-        "link_names_expr": ["fr3_link7"],
-        "attrs": {"material_props": {"static_friction": 0.5}},
-    }
-    cfg = FrankaPandaPgiCfg.from_dict(
-        {
-            "uid": "franka_pgi",
-            "init_rot": [0.0, 0.0, 180.0],
-            "solver_cfg": {"arm": {"tcp": np.eye(4).tolist()}},
-            "link_attrs": {"wrist": wrist},
-        }
-    )
-
-    restored = FrankaPandaPgiCfg.from_dict(cfg.to_dict())
-
-    assert restored.to_dict() == cfg.to_dict()
-    assert set(restored.link_attrs) == {"newton_gripper_contacts", "wrist"}
-    assert restored.link_attrs["wrist"].link_names_expr == ["fr3_link7"]
-    assert list(restored.init_rot) == [0.0, 0.0, 180.0]
-    assert restored.solver_cfg["arm"].end_link_name == "fr3_link8"
-    assert [
-        Path(component["urdf_path"]).name
-        for component in restored.urdf_cfg.components.values()
-    ] == ["Panda.urdf", "DH_PGI_140_80.urdf"]
-
-    # The merge contract removes one group without touching the others.
-    without_contacts = FrankaPandaPgiCfg.from_dict(
-        {"link_attrs": {"wrist": wrist, "newton_gripper_contacts": None}}
-    )
-    assert set(without_contacts.link_attrs) == {"wrist"}
-
-
-def test_franka_panda_pgi_leaves_the_stock_panda_defaults_intact() -> None:
-    before = FrankaPandaCfg.from_dict({}).to_dict()
-
-    FrankaPandaPgiCfg.from_dict({})
-    stock = FrankaPandaCfg.from_dict({})
-
-    assert stock.to_dict() == before
-    assert stock.control_parts["eef"] == ["fr3_finger_joint1", "fr3_finger_joint2"]
-    assert stock.solver_cfg["arm"].end_link_name == "fr3_hand_tcp"
-    assert stock.link_attrs["newton_gripper_contacts"].link_names_expr == [
-        "fr3_leftfinger|fr3_rightfinger"
-    ]
-    assert stock._pk_urdf_path.endswith("PandaWithHand.urdf")
-
-
-def test_franka_panda_pgi_kinematic_chain_matches_the_assembled_solver() -> None:
-    pytest.importorskip("pytorch_kinematics")
-    cfg = FrankaPandaPgiCfg.from_dict({})
-    solver_cfg = cfg.solver_cfg["arm"]
-    assert cfg._pk_urdf_path == cfg.urdf_cfg.components["arm"]["urdf_path"]
-
-    chain = cfg.build_pk_serial_chain()["arm"]
-    assert chain.get_joint_parameter_names() == cfg.control_parts["arm"]
-
-    # The solver plans on the assembled robot; the chain must end at the same
-    # flange so that composing it with the solver TCP gives the same pose.
-    solver_cfg.urdf_path = cfg.urdf_cfg.assemble_urdf()
-    solver_cfg.joint_names = cfg.control_parts["arm"]
-    solver = solver_cfg.init_solver(device=torch.device("cpu"))
-    qpos = torch.tensor(
-        [cfg.init_qpos[:7], [0.3, -0.2, 0.1, -2.0, 0.2, 2.5, 0.4]],
-        dtype=torch.float32,
-    )
-    tcp = torch.tensor(solver_cfg.tcp, dtype=torch.float32)
-    torch.testing.assert_close(
-        solver.get_fk(qpos), chain.forward_kinematics(qpos).get_matrix() @ tcp
-    )
 
 
 def test_robotcfg_save_to_file(tmp_path):

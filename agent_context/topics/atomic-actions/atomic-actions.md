@@ -44,7 +44,10 @@ ActionInvocation                       semantic program
 ```
 
 Planning never steps simulation and never treats command completion as proof of
-a physical effect. Runtime hosts may collect versioned physical evidence after
+a physical effect. A gripper-close hold inserted into a moving arm path does not
+preserve solved timing: retain required stop boundaries and validate the compiled
+control-grid path, not only native planner samples. Runtime hosts may collect
+versioned physical evidence after
 each fresh observation and pass it to an evidence-aware effect verifier, phase
 gate, or held-object guard. Evidence acquisition stays outside planning and
 does not mutate symbolic task state; verification results are the only path
@@ -56,6 +59,19 @@ goals remain exact. Heading alternatives are checked as complete motion paths,
 with accepted rows retained independently and selected offsets in diagnostics.
 Held-object transport and Pour keep the binding's configured grasp command; a
 contact-blocked measured aperture does not retain closing effort.
+
+`PickUpOptions.approach_direction` accepts one world vector or one vector per
+planning row. PickUp and AxisAlign normalize each row independently and use the
+same direction for candidate eligibility and pre-grasp translation. A benchmark
+that freezes per-row grasp realisations must forward their directions to the
+actual action; replacing them with one shared vector changes the request.
+
+`AxisAlignOptions.alignment_twist_rad` selects a scalar or per-row rotation
+about the aligned target axis. Zero keeps shortest-arc behavior; an independent
+benchmark generator can freeze another full-pose realisation without changing
+the directed axis goal. `alignment_offset_m` similarly selects a scalar-vector
+or per-row world translation from the lifted object centre; zero retains the
+fixed-centre target. Neither option establishes path or physical feasibility.
 
 `SlideGoal.joint_target` optionally supplies a public `SlideJointTarget` with an
 absolute prismatic coordinate and a calibrated axis sign. Slide resolves the
@@ -97,6 +113,16 @@ Author contact dimensions and material settings before `prepare()`, never by
 rewriting captured solver arrays. The current values live in
 `examples/sim/atomic_action/support.py` and the selected physical components.
 
+Scene-specific DexUni contact options are authored through
+`create_tutorial_simulation(newton_solver_options=...)` before model construction.
+`add_tutorial_robot` owns optional `newton_gripper_friction` and `arm_damping`
+overrides; `scenario.add_dual_tutorial_robot` owns the dual-arm friction override.
+Scene modules retain calibrated close targets, fixture TCPs and grippers, including
+Handover's Robotiq 2F-140 fixture. Read those example owners for current values;
+calibration does not establish generic physical success or solver equivalence.
+The launcher preserves an omitted device through simulation configuration so the
+selected backend owns its default; explicit device selections retain priority.
+
 ## Semantic integration boundary
 
 `semantics` contains:
@@ -133,7 +159,18 @@ The example lives in `examples/sim/atomic_action/` and is shipped as ordinary
 distribution data with the rest of that tree. Its `__main__.py` owns
 typed configuration and validated selection; `host.py` owns compilation,
 expansion and output. Scene modules own physical setup and local defaults.
-Tutorial files forwarding there are compatibility entries. Read the
+Runnable scene demonstrations and physical helpers live there. Specialized
+examples such as coordinated manipulation and observed recovery run by file path through
+`embodichain run-example`. The tutorial directory contains `single_arm.py`
+(PickUp→Place), `dual_arm.py` (HandOver), and `embodiment_switching.py`
+(robot/tool configuration reuse). They reuse example setup while explaining
+typed application composition. The switching walkthrough owns its CLI matrix;
+`examples/sim/atomic_action/embodiments.py` owns its fixtures and measured playback
+checks and recording cameras. Its task recipes remain hardware-independent;
+swapping embodiments requires compatible resources and a physically feasible scene. The
+[switching tutorial README](../../../scripts/tutorials/atomic_action/README.md)
+owns its eight-combination matrix and links the checked-in MP4 previews under
+`docs/source/_static/atomic_actions/embodiment_switching/`. Read the
 [example README](../../../examples/sim/atomic_action/README.md)
 for supported combinations, fixture calibration, playback and output artifacts.
 

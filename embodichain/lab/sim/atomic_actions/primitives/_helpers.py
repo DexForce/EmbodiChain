@@ -28,7 +28,7 @@ from embodichain.compute.trajectory import (
     retime_to_control_grid,
 )
 
-from embodichain.utils.math import get_relative_rotation
+from embodichain.compute.geometry import nearest_half_turn_pose
 
 from ..bindings import EndpointBinding
 from ..state import PlanningContext
@@ -429,13 +429,4 @@ def find_symmetric_nearest_xpos(
     target_xpos: torch.Tensor, reference_xpos: torch.Tensor
 ) -> torch.Tensor:
     """Find the nearest symmetric pose to the reference pose."""
-    symmetric_xpos = target_xpos.clone()
-    symmetric_xpos[:, :3, 0] = -symmetric_xpos[:, :3, 0]
-    symmetric_xpos[:, :3, 1] = -symmetric_xpos[:, :3, 1]
-    angle_a = get_relative_rotation(reference_xpos[:, :3, :3], target_xpos[:, :3, :3])
-    angle_b = get_relative_rotation(
-        reference_xpos[:, :3, :3], symmetric_xpos[:, :3, :3]
-    )
-    choose_target = (angle_a < angle_b)[..., None, None]
-    target_xpos = torch.where(choose_target, target_xpos, symmetric_xpos)
-    return target_xpos
+    return nearest_half_turn_pose(target_xpos, reference_xpos)

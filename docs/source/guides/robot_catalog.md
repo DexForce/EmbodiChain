@@ -17,6 +17,14 @@ table columns.
 
 ## Read the Control Summary
 
+The `Class` column reports explicit vendor, morphology, and arm count metadata.
+Morphology describes the authored body, for example `fixed_manipulator`,
+`wheeled_manipulator`, or `wheeled_humanoid`. It is independent of the number of
+arms and whether the simulation anchors the base. `-` means unknown; an arm
+count of zero means a known absence. Missing variant fields inherit the family
+metadata, while explicit `None` stays unknown. Differently classified variants
+remain separate rows even if they share control DOFs.
+
 `Control DOF` counts unique independent joints in the default control parts.
 The count excludes mimic followers and counts joints shared by groups such as
 `dual_arm` and `full_body` once. It describes the configured control groups;
@@ -42,11 +50,14 @@ The official catalog currently groups configurations into these families:
 
 | Robot ID | Independent control DOF | Variant coverage |
 |---|---|---|
+| `ARX5` | 8 | Six arm joints and two independent parallel fingers |
 | `AlohaMini` | 15 | Complete Aloha Mini 2 Pro default control groups |
 | `CobotMagic` | 14 | Default dual six-joint arms and two independent gripper commands |
 | `DexforceW1` | 20, 22, or 32 | Four body releases: six profiles per V021/V022/V025 and standard V030 bare body |
 | `DualArmRobot` | 12 or 16 | Six UR bases or a pair of Franka Panda arms with grippers |
 | `FrankaPanda` | 8 | Seven arm joints and one independent gripper command |
+| `FlexivRizon4S` | 7 | Seven-joint Rizon 4S arm |
+| `SO101Follower` | 6 | Five arm axes and one jaw command |
 | `TianjiMarvin` | 16 | Default dual seven-joint arms with grippers |
 | `URRobot` | 6 | `ur3`, `ur3e`, `ur5`, `ur5e`, `ur10`, and `ur10e` |
 
@@ -141,7 +152,7 @@ w1_bare_cfg = resolve_robot_cfg(
 )
 ```
 
-See {doc}`/resources/robot/dexforce_w1` for hardware releases and calibration.
+See {doc}`/resources/robot/dexforce/w1` for hardware releases and calibration.
 
 ## Register a Third-party Catalog
 

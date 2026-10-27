@@ -12,10 +12,13 @@
 | Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
+| Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
 | Distinct trajectory variants for fixed waypoints | `embodichain/lab/sim/motion/expansion/variants.py` |
+| Endpoint-preserving task-space deformation and trajectory IK | `embodichain/lab/sim/motion/expansion/task_space.py` |
+| Phase-aligned demonstration banks, stitching and bridges | `embodichain/lab/sim/motion/expansion/stitching.py` |
 
 ## Choose the layer
 
@@ -86,6 +89,20 @@ substeps; Gym experts use the environment-owned command period and
 [expert execution contract](../env-framework/env-framework.md). Dataset writers
 encode prepared actions rather than retiming a second time.
 
+For Atomic case preparation, preserve the original batched grasp-pool RNG scope.
+An explicitly configured finite position search reuses that pool; an approach
+search constructs one original batched pool per direction. Both freeze successful
+rows independently, while the public grasp screen still raises for unresolved
+rows. Per-row sampler resets and hard approach filtering before NMS/ranking can
+change the selected full-pose population. Freeze the chosen grasp, direction and
+position before evaluating planners, and review population fingerprints when the
+selection law changes. See the benchmark package README for the case options;
+preparation diagnostics and incomplete corpora are not formal quality results.
+MoveHeldObject/Place may explicitly condition goal-local streams on complete
+reference endpoint evidence with `target_candidate_count`; freeze each accepted
+row and retain rejected goals. This changes the population, requires reviewed
+fingerprints, and supplies no path or physical-success certificate.
+
 ## Trajectory augmentation boundary
 
 Scene layout proposals and their Task Program execution adapter belong to
@@ -121,47 +138,89 @@ state or coverage contracts out of `motion/expansion/`.
 Motion-limit checks are not collision/task-success certification.
 `rotate_grasp_about_object_axis` and `perturb_approach_direction` change TCP
 candidates around a fixed object axis or approach cone; both emit Cartesian
-poses that callers must replan, and neither certifies the contact. Grasp
-grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed by
+poses that callers must replan, and neither certifies the contact.
+Grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed by
 Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
 
-`variants.py` varies execution when waypoints are already fixed. Its qpos
-operators (`joint_residual`, `via_points`, `nullspace_residual`, `retime`
-profiles) vanish with
+`variants.py` is the common candidate-generation path for joint-space,
+task-space and manipulability-guided expansion; `CandidateCoordinator` supplies
+the same host-owned kinematics callable to these factors. Its qpos operators
+(`joint_residual`, `via_points`, `nullspace_residual`, `retime` profiles) vanish with
 zero derivative at every phase endpoint and never touch `contact`/`hold`
 phases, so annotated waypoints stay exact. Joint-limit rejection covers only
 the joints an operator moved; an observed reference can hold an untouched joint
 microradians outside its range, and checking it would reject every proposal.
 `nullspace_residual` holds the caller's declared task rows to first order only;
 the caller owns the Jacobian frame and column order, and a fully constrained
-task raises. At most one joint-path operator runs per variant, though `spatial.method`
+task raises. At most one joint-path operator runs per proposal, though `spatial.method`
 may name several so each becomes its own variant; a single name is still
-accepted.
+accepted. A task-space proposal projects before joint edits and re-projects
+after them; null-space edits use Jacobians of the projected path. Retiming runs
+last. Reference FK and guidance normalization are cached per expansion call.
 `expand_trajectory_variants` deduplicates one fixed scene on measured
 geometry/timing and counts every rejection under a key naming its reason. Only
 `ProposalRejected` is a rejection; malformed arguments stay plain `ValueError`
-and propagate rather than hiding in a rejection count.
+and propagate rather than hiding in a rejection count. `max_attempts` bounds all
+numerical draws, including guidance's inner proposals; valid unselected draws
+are counted as `guidance_unselected`. The nominal branch remains unchanged.
 Configuration is optional: omitting it resolves `default_variant_factors`,
-which enables every implemented factor the inputs support and drops the ik
-factor when no Jacobians are supplied. An explicit config is never overridden, and an
+which enables the joint-path factors the inputs support and drops the ik
+factor when neither Jacobians nor kinematics are supplied. Task-space and
+manipulability guidance remain explicit opt-ins. An explicit config is never overridden, and an
 explicitly enabled factor that cannot produce a qpos variant raises rather than
-disappearing: `ik` without Jacobians, and `approach`, which owns Cartesian
+disappearing: `ik` without Jacobians or kinematics, task-space/guidance without
+kinematics, and `approach`, which owns Cartesian
 standoff poses the caller must replan. The resolved config is reported on the result.
 
-`scripts/tutorials/atomic_action/place.py` is the demonstration host, hooked
-the way the Affordance sampling tutorials are: shared helpers live in
-`examples/sim/atomic_action/support.py` through the `tutorial_utils.py` adapter;
-the tutorial declares only which named segments may move,
-and one variant replays per simulation row. Phases come from the action's own
-`TrajectorySegment` ranges; only motion at or after the lift is retimed so the
-shared `clear_dynamics()` step stays aligned. `--variant_plot_dir` writes a
-joint-trajectory figure and a tool-path figure with waypoint markers. Task
-Program, Gym lifecycle, dataset persistence and `ExpansionSession` collection
-bookkeeping are deliberately out of scope; this is a direct-simulation
-contract. Keep `joint_dedup_normalized_tol` below `joint_offset_scale`, or
-genuinely different variants are discarded as duplicates; an enabled spatial
-factor at or below the tolerance now fails configuration decoding instead of
-silently keeping the nominal variant alone.
+`task_space.py` is the host-independent route when fixed joint waypoints are too
+restrictive. It evaluates one controlled frame through an injected batched
+kinematics callable, applies bounded root-frame translation/rotation residuals
+only to explicitly authorized free phases, and preserves each phase endpoint.
+`project_task_space_trajectory` solves all editable interior samples with the
+shared fixed-step DLS compute API and returns a normal full-joint
+`TrajectoryTemplate` plus per-sample pose residuals and success evidence.
+Locked samples keep the reference qpos. Task-space permissions must be present
+globally and on each editable phase. Conversion only grants new permissions
+when the caller explicitly names `editable_phase_ids`; segment extraction
+retains the intersection of source template and phase permissions.
+The caller still owns frame binding,
+collision/dynamics checks, task validation and rejection of unsuccessful rows.
+
+`stitching.py` extracts annotated phases as source-owned, local-time
+`TrajectorySegment` values. `TrajectorySegmentBank` admits replacements only
+when semantic phase, motion kind, joint layout, controlled joints and tensor
+contracts agree; selection is deterministic. Stitching de-duplicates shared
+boundaries while adjacent output phases share that one endpoint index, so every
+phase remains independently extractable and augmentable. It gives every output
+phase a unique identity and retains multi-source lineage. A discontinuous
+boundary must go through an injected
+`TrajectoryBridgePlanner`; `MinimumJerkBridgePlanner` is only a sampled
+velocity/acceleration-limited geometric fallback and makes no collision claim.
+The resulting template enters the existing `TemplateSourceAdapter` path, so
+execution, reset, validation and persistence remain host responsibilities.
+`examples/expansion/trajectory/pure_trajectory_augmentation_showcase.py`
+renders both paths analytically on CPU and records IK residuals, source lineage
+and bridge phases without constructing a simulator.
+
+`examples/sim/atomic_action/place.py` is the demonstration host. Shared helpers
+in `examples/sim/atomic_action/support.py` convert the compiled action's named
+segments to the expansion contracts and replay one variant per simulation row.
+The default `joint_space` mode retains the earlier residual/via/null-space and
+retiming behavior. The optional `task_space` mode deforms only selected free
+lift/transport/retract segments, projects them through the production
+trajectory-IK API, and requires every requested row to be distinct and IK-valid.
+`examples/expansion/trajectory/task_environment_augmentation_showcase.py`
+selects that mode and defaults to one nominal plus eight variants in nine
+parallel arenas; recording frames the complete arena grid. `--variant_plot_dir`
+writes joint and tool-path figures with waypoint markers. Task Program, Gym
+lifecycle, dataset persistence and `ExpansionSession` collection bookkeeping
+remain out of scope; this is a direct-simulation contract. In joint-space mode,
+keep `joint_dedup_normalized_tol` below `joint_offset_scale`, or genuinely
+different variants are discarded as duplicates.
+
+For joint-space replay, only motion at or after the lift is retimed so the
+shared `clear_dynamics()` callback stays aligned. Enabled joint residual
+scales at or below the deduplication tolerance fail configuration validation.
 
 The twelve-scene Atomic CLI uses the same variant operators through the
 shared Atomic plan adapter and owns its replay provenance; see the
@@ -173,16 +232,85 @@ the Gym Task Program collection lifecycle.
 Jacobians, so the module stays host-independent. `ManipulabilityBands`
 normalizes scores against a reference bottleneck held per initial state, and
 `manipulability_guided_residual` keeps whichever of several `joint_residual`
-draws from one local generator lands nearest a requested band. The factor is
-opt-in through `augmentation.factors.manipulability` and disabled by default.
+draws from one local generator lands nearest a requested band. The shared
+selector also accepts task-space and combined proposals from `variants.py`.
+The factor is opt-in through `augmentation.factors.manipulability` and disabled
+by default. `guided_proposals > 1` enables bounded guided sampling;
+`guided_proposals == 1` retains coverage-only behavior.
 Once enabled, `register_case` requires a positive `manipulability_reference`
 for each initial state, which may differ within one case; `CoverageIndex`
 enforces a per-band quota so one well-conditioned posture cannot absorb the
 collection budget; and `ExpansionSession` classifies bands from the measured
 `manipulability` observation rather than any planned score. Band guidance ranks
-postures only: path, dynamic and task validation stay separate.
+postures only: path, dynamic and task validation stay separate. The coordinator
+uses `ExpansionSession.manipulability_reference(case)` for proposal guidance so
+its normalization agrees with the registered initial state. Selection scores,
+actual bands and scored-proposal counts remain candidate metadata.
 
 ## Focused validation
+
+The installed benchmark host lives in `embodichain_benchmarks.motion_generation`.
+`run_benchmark()` accepts a packaged suite, external YAML or assembled `SuiteCfg`,
+optional explicit planner specs and a run-local adapter mapping. It copies caller
+configuration; explicit planners replace the suite list and are enabled.
+`PlannerAdapter` owns build/prepare/plan/close and returns `PlanResult` for
+free-space evaluation; Atomic Skills also require an exposed `MotionGenerator`.
+The host owns simulation lifetime, seeded cases, evaluation, and artifacts.
+Canonical case tensors and nested parameters stay independent of adapter
+mutations through untimed copies at capacity, preparation and plan boundaries.
+Free-space Cartesian populations, bounded FK-only numerical reachability screening,
+measured difficulty and batch semantics live in
+`scenarios/_free_space_sampling.py`. Optional mask projections reuse screened
+Cartesian bases, retain `base_case_id`, and share independent maximum-joint/constrained
+matching in `metrics/_constraints.py`. Homogeneous Joint/FullPose cases keep
+classical input contracts; partial/mixed cases require `masked_constraints`.
+Validation preserves native samples with deterministic joint subdivisions.
+`NeuralPlanOptions.waypoint_modalities` supplies explicit meanings, and
+position-only goals require coincident runtime/policy TCP origins. The public
+API accepts a hashed `case_manifest` to replay fixed inputs without regeneration;
+scenario `bind_cases()` restores runtime bindings for both generated and loaded
+inputs, including Atomic skill providers and grasp resources. Experiment owners
+keep repeated timing subsets out of quality denominators. The
+configuration retains explicit legacy joint templates. Reports preserve workload strata and provide seed-cluster intervals at both
+condition and workload levels; balanced geometry allocations must not hide the
+independent seed count. Measured difficulty partitions batch rows by conditioning
+and joint margin separately. The screener's solver and selection condition stay
+explicit; decoupling runtime IK does not remove solver-conditioned sampling.
+Distances can use an explicit robot-reach reference. Waypoint layouts do not
+promise path following; sampled polyline deviations and native start-error
+quantiles remain diagnostics.
+Geometry validation includes the requested initial joint state. Atomic providers
+declare gripper requirements; typed pose settings flow through generation rather
+than being expanded into private configuration keys. Object antipodal screening
+samples the pose batch once, then freezes each row's first aligned, independently
+IK-feasible candidate from its own pool; AxisAlign ranks against each row's
+rotation axis. Failed chains do not truncate other rows or change their choices.
+Built-in Atomic suites
+compile and replay on their declared command clock; compiled replay consumes
+arrival intervals on physics ticks and preserves observation segment indices.
+Legacy fixed-sample replay remains explicit in trial metadata. The benchmark
+README and design contract own population and protocol details.
+Run host calls serially within a process. `run_benchmark(workers>1)` isolates
+quality shards with spawned processes after freezing the full input corpus;
+`prepare_case_manifest()` can prepare that corpus without running planners.
+Frozen B=1 Free-space NMG-only replay optionally uses `quality_batch_size` to
+pack compatible requests into a larger simulator. `_quality_batching.py` owns
+packing, valid-prefix recovery and explicit environment-row FK mapping; the
+runner validates original cases separately and preserves their manifest and
+trial identities. Raw endpoint derivatives are recomputed after trimming, and
+retimed zero-dt holds are excluded. A single batch measurement is metadata,
+not a per-case latency. The option composes with spawn workers; Atomic,
+traditional backends and performance replay retain their declared batches.
+The parent validates complete case/method/repeat evidence and recomputes
+aggregates from raw trials. Parallel raw timing is marked contended and excluded
+from timing reports; performance replay stays serial. Planner RNG is
+backend-owned, so frozen-input pairing does not guarantee identical stochastic
+solver outcomes across schedules. Worker thread limits also bound ONNX Runtime
+through the host Torch intra-op setting. Suite resources ship in the wheel;
+the installed CLI dispatches through `embodichain/cli/benchmark.py`. Source
+launchers under `scripts/benchmark/` forward motion-generation evaluation.
+`tests/benchmark/motion_generation/` covers contracts and lifecycle, while
+`tests/test_benchmark_package.py` builds and installs the wheel outside the checkout.
 
 | Changed boundary | Existing coverage |
 |---|---|

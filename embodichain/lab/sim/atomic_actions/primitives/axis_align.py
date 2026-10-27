@@ -101,6 +101,21 @@ class AxisAlignOptions(PickUpOptions):
     target_axis: torch.Tensor = torch.tensor([0.0, 0.0, 1.0])
     """Desired world-frame axis, shape ``(3,)`` or ``(B, 3)``."""
 
+    alignment_offset_m: torch.Tensor = torch.zeros(3)
+    """World translation from the lifted object centre, ``(3,)`` or ``(B,3)``.
+
+    This freezes a position realisation without changing the directed axis.
+    Zero retains the original fixed-centre behavior.
+    """
+
+    alignment_twist_rad: float | torch.Tensor = 0.0
+    """Rotation about the aligned world target axis after the shortest arc.
+
+    A scalar applies to every row; a tensor may be scalar or shaped ``(B,)``.
+    This chooses the otherwise free object heading without changing its directed
+    axis goal. Zero preserves the shortest-arc realisation.
+    """
+
     def __post_init__(self) -> None:
         PickUpOptions.__post_init__(self)
         if (
@@ -113,6 +128,26 @@ class AxisAlignOptions(PickUpOptions):
         if torch.any(torch.linalg.vector_norm(self.target_axis, dim=-1) <= 1.0e-6):
             raise ValueError("target_axis must be non-zero.")
         object.__setattr__(self, "target_axis", self.target_axis.clone())
+        offset = self.alignment_offset_m
+        if (
+            not isinstance(offset, torch.Tensor)
+            or offset.ndim not in (1, 2)
+            or offset.shape[-1] != 3
+            or not torch.isfinite(offset).all()
+        ):
+            raise ValueError(
+                "alignment_offset_m must be a finite (3,) or (B,3) tensor."
+            )
+        object.__setattr__(self, "alignment_offset_m", offset.clone())
+        twist = self.alignment_twist_rad
+        if isinstance(twist, torch.Tensor):
+            if twist.ndim > 1 or not twist.numel() or not torch.isfinite(twist).all():
+                raise ValueError(
+                    "alignment_twist_rad must be finite and scalar or (B,)."
+                )
+            object.__setattr__(self, "alignment_twist_rad", twist.clone())
+        elif type(twist) not in (int, float) or not math.isfinite(twist):
+            raise ValueError("alignment_twist_rad must be finite and scalar or (B,).")
 
 
 class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
@@ -190,8 +225,13 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         approach_direction = options.approach_direction.to(
             device=self.device, dtype=torch.float32
         )
+        if (
+            approach_direction.ndim == 2
+            and approach_direction.shape[0] != self.num_envs
+        ):
+            raise ValueError("approach_direction must match the planning batch.")
         approach_direction = approach_direction / torch.linalg.vector_norm(
-            approach_direction
+            approach_direction, dim=-1, keepdim=True
         )
         object_pose = _resolve_object_pose(
             target.semantics,
@@ -310,6 +350,8 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             affordance.internal_axis,
             options.target_axis,
             waypoint_count=1,
+            alignment_twist_rad=options.alignment_twist_rad,
+            alignment_offset_m=options.alignment_offset_m,
         )
 
         # CuRobo planning is grouped by gripper state.  The open-gripper phase
@@ -537,9 +579,11 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         target_axis: torch.Tensor,
         *,
         waypoint_count: int,
+        alignment_twist_rad: float | torch.Tensor = 0.0,
+        alignment_offset_m: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Rotate the object in place along the shortest axis-alignment arc."""
-        _, _, axis, angle = self._axis_alignment_parameters(
+        """Align the directed object axis and apply the specified free twist."""
+        _, target, axis, angle = self._axis_alignment_parameters(
             object_pose,
             internal_axis,
             target_axis,
@@ -556,10 +600,37 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             axis[:, None, :] * angle[:, None, None] * fractions[None, :, None]
         )
         delta_rotation = axis_angle_to_rotation_matrix(rotation_vectors)
+        twists = torch.as_tensor(
+            alignment_twist_rad, dtype=object_pose.dtype, device=self.device
+        ).reshape(-1)
+        if (
+            twists.numel() not in (1, object_pose.shape[0])
+            or not torch.isfinite(twists).all()
+        ):
+            raise ValueError(
+                "alignment_twist_rad must be scalar or match the object batch."
+            )
+        twists = twists.expand(object_pose.shape[0])
+        twist_rotation = axis_angle_to_rotation_matrix(
+            target[:, None, :] * twists[:, None, None] * fractions[None, :, None]
+        )
+        delta_rotation = torch.matmul(twist_rotation, delta_rotation)
         object_keyframes = object_pose[:, None].repeat(1, waypoint_count, 1, 1)
         object_keyframes[:, :, :3, :3] = torch.matmul(
             delta_rotation, object_pose[:, None, :3, :3]
         )
+        if alignment_offset_m is not None:
+            offset = alignment_offset_m.to(
+                device=object_pose.device, dtype=object_pose.dtype
+            )
+            if offset.shape == (3,):
+                offset = offset.expand(object_pose.shape[0], -1)
+            if (
+                offset.shape != (object_pose.shape[0], 3)
+                or not torch.isfinite(offset).all()
+            ):
+                raise ValueError("alignment_offset_m must match the object batch.")
+            object_keyframes[:, :, :3, 3] += offset[:, None] * fractions[None, :, None]
         return torch.matmul(object_keyframes, object_to_eef[:, None])
 
     def _axis_alignment_parameters(

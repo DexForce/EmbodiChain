@@ -37,6 +37,8 @@ class _CudaQuery:
             ContactActorInfo(20, "arena_1/cube", None, "arena_1", 1),
         )
         self.buffer = ContactBuffer.allocate(4, str(device))
+        if hasattr(self.buffer, "quantity_valid"):
+            self.buffer.quantity_valid.fill_(True)
         self.buffer.data.zero_()
         self.buffer.data[:2, 5] = 1.0
         self.buffer.data[:2, 9] = 0.2
@@ -158,4 +160,32 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
         assert sensor._sample_graph is recaptured
         assert not history.contact.any()
         assert_air_time(0.3)
+
+        if hasattr(query.buffer, "quantity_valid"):
+            # Replay reads changed masks without recapture and never evaluates
+            # unavailable poisoned force components.
+            query.buffer.quantity_valid.zero_()
+            query.buffer.data[:2, 6:10] = float("nan")
+            sensor.update_physics_step(0.1)
+            assert sensor._sample_graph is recaptured
+            assert not history.force.any()
+            assert not sensor.get_data()["impulse_valid"].any()
+            assert not sensor.get_data()["friction_valid"].any()
+
+            # A topology refresh can replace the native mask storage. The
+            # captured pointer must be refreshed before the next sample.
+            query.buffer.quantity_valid = torch.ones_like(query.buffer.quantity_valid)
+            query.buffer.data[:2, 6:9] = 0.0
+            query.buffer.data[:2, 9] = 0.4
+            sensor.update_physics_step(0.1)
+            assert sensor._sample_graph is None
+            assert history.contact.all()
+            torch.testing.assert_close(
+                history.force,
+                torch.tensor([[[0.0, 0.0, 4.0]], [[0.0, 0.0, 4.0]]], device=device),
+            )
+            sensor.update_physics_step(0.1)
+            assert sensor._sample_graph is not None
+            assert sensor._sample_graph is not recaptured
+            assert history.contact.all()
     caller.synchronize()

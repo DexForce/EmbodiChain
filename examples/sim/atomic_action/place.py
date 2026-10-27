@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 
 import torch
 
@@ -36,6 +37,8 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from examples.sim.atomic_action.support import (
+    DEFAULT_GRIPPER_CLOSE_QPOS,
+    DEXUNI_CUBE_CLOSE_QPOS,
     create_affordance_sampling_context,
     add_tutorial_robot,
     broadcast_pose_batch,
@@ -52,6 +55,7 @@ from examples.sim.atomic_action.support import (
     initialize_pre_pick_robot_pose,
     make_clear_dynamics_callback,
     prepare_tutorial_scene,
+    expand_tutorial_task_space_variants,
     expand_tutorial_trajectory_variants,
     log_trajectory_variant_diagnostics,
     parse_trajectory_variant_arguments,
@@ -82,11 +86,35 @@ def parse_arguments() -> argparse.Namespace:
         "Pick up a cube and place it at a target pose.",
         features=("grasp_sampling", "trajectory_variants", "visualize_axes"),
     )
-    return parse_trajectory_variant_arguments(parser)
+    parser.add_argument(
+        "--trajectory_strategy",
+        choices=("motion_gen", "ik_interp"),
+        default="motion_gen",
+        help=(
+            "Generate the PickUp/Place reference with the selected planner or "
+            "bounded IK interpolation (default: motion_gen)."
+        ),
+    )
+    parser.add_argument(
+        "--trajectory_control_dt",
+        type=float,
+        default=None,
+        help=(
+            "Reference-trajectory command period in seconds; defaults to the "
+            "physics period. It must be an integer multiple of physics_dt."
+        ),
+    )
+    args = parse_trajectory_variant_arguments(parser)
+    if args.trajectory_control_dt is not None and (
+        not math.isfinite(args.trajectory_control_dt) or args.trajectory_control_dt <= 0
+    ):
+        parser.error("--trajectory_control_dt must be finite and positive.")
+    return args
 
 
 def create_pick_object(sim) -> RigidObject:
     """Create a settled cube for the PickUp and Place sequence."""
+    ground_clearance = 0.001 if sim.physics.solver_type == "dexuni" else 0.0
     obj = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="cube",
@@ -99,7 +127,7 @@ def create_pick_object(sim) -> RigidObject:
                 angular_damping=0.2,
                 newton_contact=sim.is_newton_backend,
             ),
-            init_pos=[*OBJECT_XY, 0.5 * OBJECT_SIZE[2]],
+            init_pos=[*OBJECT_XY, 0.5 * OBJECT_SIZE[2] + ground_clearance],
         )
     )
     sim.prepare()
@@ -134,15 +162,56 @@ def run(args: argparse.Namespace) -> None:
     Args:
         args: Resolved standalone or configured host arguments.
     """
-    sim = create_tutorial_simulation(args)
-    robot = add_tutorial_robot(sim, args.robot, tcp_point="grasp")
+    sim = create_tutorial_simulation(
+        args,
+        newton_solver_options=(
+            {
+                "vbd_options": {
+                    "rigid_contact_history": True,
+                    "rigid_avbd_contact_alpha": 0.5,
+                },
+                "collision_options": {"contact_matching": "latest"},
+            }
+            if args.physics == "newton" and args.robot == "ur5"
+            else None
+        ),
+    )
+    use_vbd_grasp = args.robot == "ur5" and sim.physics.solver_type == "dexuni"
+    robot = add_tutorial_robot(
+        sim,
+        args.robot,
+        tcp_point="grasp",
+        newton_gripper_friction=4.0 if use_vbd_grasp else None,
+        arm_damping=1000.0 if use_vbd_grasp else None,
+    )
     obj = create_pick_object(sim)
     sim.prepare()
+    trajectory_strategy = getattr(args, "trajectory_strategy", "motion_gen")
+    trajectory_control_dt = getattr(args, "trajectory_control_dt", None)
+    physics_dt = float(sim.sim_config.physics_dt)
+    if trajectory_control_dt is None:
+        trajectory_control_dt = physics_dt
+    control_ratio = trajectory_control_dt / physics_dt
+    if control_ratio < 1.0 or not math.isclose(
+        control_ratio,
+        round(control_ratio),
+        rel_tol=1e-6,
+        abs_tol=1e-8,
+    ):
+        raise ValueError(
+            "trajectory_control_dt must be an integer multiple of physics_dt "
+            f"({physics_dt:g}); got {trajectory_control_dt:g}."
+        )
     motion_gen = create_curobo_motion_generator(
         robot,
         planner=getattr(args, "planner", "trapezoidal"),
     )
-    hand_open, hand_close = get_hand_open_close_qpos(robot)
+    hand_open, hand_close = get_hand_open_close_qpos(
+        robot,
+        close_qpos=(
+            DEXUNI_CUBE_CLOSE_QPOS if use_vbd_grasp else DEFAULT_GRIPPER_CLOSE_QPOS
+        ),
+    )
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
 
     engine = create_simulation_atomic_action_engine(
@@ -187,7 +256,7 @@ def run(args: argparse.Namespace) -> None:
                 GraspGoal(semantics),
                 control_parts=endpoint_mapping,
                 motion_policy=MotionPolicy(
-                    strategy="motion_gen",
+                    strategy=trajectory_strategy,
                     sample_count=PICK_SAMPLE_INTERVAL,
                 ),
                 skill_options=PickUpOptions(
@@ -205,7 +274,7 @@ def run(args: argparse.Namespace) -> None:
                 ),
                 control_parts=endpoint_mapping,
                 motion_policy=MotionPolicy(
-                    strategy="motion_gen",
+                    strategy=trajectory_strategy,
                     sample_count=PLACE_SAMPLE_INTERVAL,
                 ),
                 skill_options=PlaceOptions(
@@ -215,7 +284,7 @@ def run(args: argparse.Namespace) -> None:
             ),
         ),
         engine.initial_context(
-            control_dt=sim.sim_config.physics_dt,
+            control_dt=trajectory_control_dt,
             **(
                 {"affordance_sampling": create_affordance_sampling_context(args)}
                 if getattr(args, "run", None) is not None
@@ -235,18 +304,31 @@ def run(args: argparse.Namespace) -> None:
         # Each row replays a different way of executing the same plan. Only the
         # free motion changes: the grasp and the release keep their planned
         # waypoints, so every row picks and places the cube identically.
-        variants = expand_tutorial_trajectory_variants(
-            compiled,
-            robot,
-            args,
-            phase_kinds=(
-                {"approach": "free", "close": "contact", "lift": "free"},
-                {"approach": "free", "release": "contact", "retract": "free"},
-            ),
-            # Retiming anything before the lift would move the step index at which
-            # the executor clears the cube's dynamics.
-            retimable=(("lift",), ("approach", "retract")),
+        phase_kinds = (
+            {"approach": "free", "close": "contact", "lift": "free"},
+            {"approach": "free", "release": "contact", "retract": "free"},
         )
+        if args.trajectory_variant_mode == "task_space":
+            variants = expand_tutorial_task_space_variants(
+                compiled,
+                robot,
+                args,
+                phase_kinds=phase_kinds,
+                # Keep the pre-grasp approach nominal. The visible variants bend
+                # the held-object lift/transport and post-release retract while
+                # retaining the grasp and placement endpoints exactly.
+                editable=(("lift",), ("approach", "retract")),
+            )
+        else:
+            variants = expand_tutorial_trajectory_variants(
+                compiled,
+                robot,
+                args,
+                phase_kinds=phase_kinds,
+                # Retiming anything before the lift would move the step index at
+                # which the executor clears the cube's dynamics.
+                retimable=(("lift",), ("approach", "retract")),
+            )
         log_trajectory_variant_diagnostics(variants, args.trajectory_variants)
 
         if args.variant_plot_dir:

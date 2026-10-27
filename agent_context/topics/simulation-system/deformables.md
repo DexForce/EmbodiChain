@@ -12,7 +12,7 @@ binding. Return to the [simulation overview](simulation-system.md).
 uses one registry and backend dispatch for both topologies.
 
 The supported path is Newton on CUDA, without gradient mode. Declarations
-accept unresolved AutoSolver or a supported particle solver (`xpbd`,
+accept a supported particle solver (`xpbd`,
 `semi_implicit`, `vbd`, `dexuni`); they reject unsupported backends/solvers and
 post-finalization additions. Default soft/cloth compatibility is absent.
 Future backend support belongs at dispatch, not inside a monolithic config.
@@ -30,7 +30,12 @@ order; node selection for a runtime control is not a render vertex selection.
 For surfaces requiring stable authored node indices, array-backed `MeshCfg`
 preserves the supplied order; native file importers can reorder vertices.
 Volume voxelization creates tetrahedral particles whose indices do not match
-the source mesh vertices.
+the source mesh vertices. When stable volume node ids matter (material lines,
+benchmarks), set `VolumeDeformableObjectCfg.tetrahedra` with an array-backed
+`shape`: its vertices become the particles in order, meshing is skipped, and
+`shape.triangles` is the optional boundary (derived from the tets if omitted).
+`set_nodal_state()` writes world `[position, velocity]` nodes, the inverse of
+`data.nodal_state_w`, without changing the rest shape.
 
 A surface's optional `visual_shape` can have independent indexing and UV seams;
 `visual_binding_mode` controls mapping from particles. Visual material/UVs
@@ -45,6 +50,25 @@ parser. Volume-only `meshing` and common `surface_props` preserve topology
 ownership. Volume elasticity uses Young's modulus/Poisson's ratio, translated
 to Lamé coefficients at Spawn; density units differ (kg/m³ volume, kg/m²
 surface). Exact fields and defaults stay in the typed config source.
+
+Surface cloth can author a constant signed rest dihedral angle through
+`attrs.edge_rest_angle`; omitting it preserves the mesh-inferred rest geometry.
+The surface descriptor compiler validates and forwards it to native cloth
+physics. This is a rest-shape choice separate from bending stiffness and is not
+a volume-surface material field.
+
+`attrs.contact_material` optionally owns a DexUni particle object's contact
+stiffness, damping and dynamic friction; it is independent of elasticity and
+lowers to the native cloth/soft-body physics descriptor. Native validation and
+pair-material mixing remain DexSim-owned. Older wheels still support omitted
+materials and reject an explicit block if their descriptor API is unavailable.
+
+Surface `attrs.pneumatic` optionally lowers a mapping to native
+`PneumaticPhysicsDesc`. Closed-surface topology, pressure-law validation and
+solver compatibility remain DexSim-owned. A closed cloth mesh alone has no
+gas pressure; callers must author this block for an inflatable cavity. Omission
+keeps ordinary cloth compatible with older wheels; explicit cavities fail
+before declaration if the installed descriptor API cannot represent them.
 
 ## Kinematic node controls
 

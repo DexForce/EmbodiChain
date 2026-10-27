@@ -24,8 +24,9 @@ import pathlib
 import re
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence, Iterable
-from typing import TYPE_CHECKING, Literal
+from typing import Any, TYPE_CHECKING, Literal
 
+import numpy as np
 import torch
 
 from embodichain.data import get_data_path
@@ -56,6 +57,8 @@ from embodichain.lab.sim.cfg import (
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
     RobotCfg,
+    JointDrivePropertiesCfg,
+    URDFCfg,
     physics_cfg_for_backend,
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
@@ -65,7 +68,7 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlannerCfg,
     TrapezoidalPlannerCfg,
 )
-from embodichain_robots import FrankaPandaPgiCfg, URRobotCfg
+from embodichain_robots import URRobotCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
@@ -73,7 +76,9 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     ParallelJawGraspCollisionCfg,
 )
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
-from embodichain.utils import logger
+from embodichain.utils import configclass, logger
+from embodichain.lab.sim.motion.solvers import FEPSolverCfg
+from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from .tcp_presets import (
     ToolPoint,
     UR10_ROBOTIQ_2F_140_TCP as ROBOTIQ_2F_140_TCP,
@@ -81,7 +86,11 @@ from .tcp_presets import (
 )
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.motion.expansion import TrajectoryVariantSet
+    import pytorch_kinematics as pk
+    from embodichain.lab.sim.motion.expansion import (
+        TrajectoryVariant,
+        TrajectoryVariantSet,
+    )
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
         ActionInvocation,
@@ -122,6 +131,8 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     palm_depth=0.096,
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
+# UR5/DH-PGI calibration for the 5 cm cube with one-way DexUni contacts.
+DEXUNI_CUBE_CLOSE_QPOS = 0.013
 NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
 NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
 # MuJoCo-Warp's default contact dimension (3) has no torsional friction.  A
@@ -146,7 +157,7 @@ DEFAULT_TUTORIAL_SUN_DIRECTION = (0.0, 0.0, -1.0)
 DEFAULT_TUTORIAL_SUN_INTENSITY = 5.0
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 _GRIPPER_CONTACT_LINK_PATTERN = (
-    r"(?:.*_)?(?:gripper_finger[12]_link_1|"
+    r"(?:.*_)?(?:gripper_finger[12]_link_1|finger[12]_link|"
     r"(?:left|right)_(?:outer|inner)_(?:finger(?:_pad)?|knuckle))"
 )
 TOP_DOWN_EEF_ROTATION = (
@@ -185,6 +196,8 @@ def create_tutorial_argument_parser(
     default_device: str | None = None,
     default_renderer: str | None = None,
     default_planner: TutorialPlanner = "trapezoidal",
+    robot_choices: Collection[str] = TUTORIAL_ROBOTS,
+    default_robot: str | None = "ur5",
 ) -> argparse.ArgumentParser:
     """Create a launcher parser with the shared atomic-tutorial switches.
 
@@ -195,6 +208,8 @@ def create_tutorial_argument_parser(
         default_renderer: Optional renderer override for the launcher arguments.
         default_planner: Planner selected when ``--planner`` is omitted. The
             shared default is deterministic ``trapezoidal`` timing.
+        robot_choices: Robot selectors owned by the calling walkthrough.
+        default_robot: Default selector; ``None`` lets the caller select by task.
 
     Returns:
         The configured argument parser.
@@ -230,9 +245,9 @@ def create_tutorial_argument_parser(
     )
     parser.add_argument(
         "--robot",
-        choices=TUTORIAL_ROBOTS,
-        default="ur5",
-        help="Robot construction to use (default: ur5).",
+        choices=robot_choices,
+        default=default_robot,
+        help="Robot construction to use (default: %(default)s).",
     )
     parser.add_argument(
         "--planner",
@@ -288,6 +303,15 @@ def create_tutorial_argument_parser(
                 "exceed --num_envs, in which case only the first ones replay."
             ),
         )
+        parser.add_argument(
+            "--trajectory_variant_mode",
+            choices=("joint_space", "task_space"),
+            default="joint_space",
+            help=(
+                "Generate the established joint-space variants or project "
+                "endpoint-preserving task-space deformations through trajectory IK."
+            ),
+        )
         variants = parser.add_argument_group(
             "advanced variant options",
             "Override the default augmentation policy. Omit them all and the "
@@ -305,6 +329,18 @@ def create_tutorial_argument_parser(
         variants.add_argument("--duration_scales", type=float, nargs="+", default=None)
         variants.add_argument("--dedup_tolerance", type=float, default=None)
         variants.add_argument("--no_redundancy", action="store_true")
+        variants.add_argument(
+            "--task_space_translation_m",
+            type=float,
+            default=0.04,
+            help="Maximum horizontal task-space path offset in metres.",
+        )
+        variants.add_argument(
+            "--task_space_rotation_rad",
+            type=float,
+            default=0.0,
+            help="Maximum root-frame task-space rotation-vector norm in radians.",
+        )
         variants.add_argument(
             "--variant_plot_dir",
             type=str,
@@ -479,6 +515,18 @@ def parse_trajectory_variant_arguments(
         parser.error("--joint_offset_scale must lie in (0, 1].")
     if args.dedup_tolerance is not None and not 0 < args.dedup_tolerance <= 1:
         parser.error("--dedup_tolerance must lie in (0, 1].")
+    for name in ("task_space_translation_m", "task_space_rotation_rad"):
+        value = getattr(args, name)
+        if not math.isfinite(value) or value < 0:
+            parser.error(f"--{name} must be finite and non-negative.")
+    if (
+        args.trajectory_variant_mode == "task_space"
+        and args.task_space_translation_m == 0
+        and args.task_space_rotation_rad == 0
+    ):
+        parser.error(
+            "task-space variants require a positive translation or rotation bound."
+        )
     # Variants are generated from one reference, so their count is independent
     # of how many of them a run replays in parallel. Only default the two to
     # each other; an explicit --trajectory_variants may exceed --num_envs, and
@@ -551,6 +599,62 @@ def _variant_arm_columns(robot: Robot, control_part: str) -> tuple[int, ...]:
     return tuple(robot_names.index(name) for name in solver_names)
 
 
+def _tutorial_trajectory_template(
+    compiled: CompiledTrajectory,
+    robot: Robot,
+    *,
+    phase_kinds: Sequence[Mapping[str, str]],
+    path_operators: tuple[str, ...],
+    retimable: Sequence[Collection[str]] = (),
+    include_retime: bool = False,
+    control_part: str = "arm",
+) -> tuple["TrajectoryTemplate", float]:
+    """Convert a compiled tutorial plan to the shared expansion contract."""
+    from embodichain.lab.sim.motion.expansion import TrajectoryPhase, TrajectoryTemplate
+
+    arm_columns = _variant_arm_columns(robot, control_part)
+    positions = compiled.trajectory.positions[0]
+    intervals = compiled.trajectory.dt[0].clone()
+    intervals[0] = 0
+    positions, intervals, remap = _drop_action_junctions(positions, intervals)
+    spacing = intervals[1:]
+    control_dt = float(spacing[0]) if spacing.numel() else 0.0
+    if control_dt <= 0 or bool((spacing - control_dt).abs().max() > 1e-6):
+        raise ValueError(
+            "Trajectory expansion needs a reference on a fixed command clock; "
+            "this action produced non-uniform arrival intervals."
+        )
+    phases = []
+    for index, kinds in enumerate(phase_kinds):
+        allowed = set(retimable[index]) if index < len(retimable) else set()
+        for name, kind in kinds.items():
+            segment = compiled.segment(index, name)
+            start, stop = int(remap[segment.start]), int(remap[segment.stop])
+            operators: tuple[str, ...] = ()
+            if kind == "free":
+                operators = path_operators + (
+                    ("retime",) if include_retime and name in allowed else ()
+                )
+            phases.append(
+                TrajectoryPhase(f"{index}_{name}", start, stop, kind, operators)
+            )
+    allowed_operators = path_operators + (("retime",) if include_retime else ())
+    return (
+        TrajectoryTemplate(
+            source_id="atomic_action_tutorial",
+            source_revision=f"waypoints{positions.shape[0]}",
+            template_id="tutorial_reference",
+            joint_names=tuple(robot.joint_names),
+            positions=positions,
+            dt=intervals,
+            phases=tuple(phases),
+            allowed_operators=allowed_operators,
+            controlled_joint_indices=arm_columns,
+        ),
+        control_dt,
+    )
+
+
 def expand_tutorial_trajectory_variants(
     compiled: CompiledTrajectory,
     robot: Robot,
@@ -584,47 +688,21 @@ def expand_tutorial_trajectory_variants(
     """
     from embodichain.lab.sim.motion.expansion import (
         SceneCase,
-        TrajectoryPhase,
-        TrajectoryTemplate,
         expand_trajectory_variants,
     )
 
     path_operators = ("joint_residual", "via_points", "nullspace_residual")
-    arm_columns = _variant_arm_columns(robot, control_part)
-    positions = compiled.trajectory.positions[0]
-    intervals = compiled.trajectory.dt[0].clone()
-    intervals[0] = 0
-    positions, intervals, remap = _drop_action_junctions(positions, intervals)
-    spacing = intervals[1:]
-    control_dt = float(spacing[0]) if spacing.numel() else 0.0
-    if control_dt <= 0 or bool((spacing - control_dt).abs().max() > 1e-6):
-        raise ValueError(
-            "Variant retiming needs a reference on a fixed command clock; this "
-            "action produced non-uniform arrival intervals."
-        )
-    phases = []
-    for index, kinds in enumerate(phase_kinds):
-        allowed = set(retimable[index]) if index < len(retimable) else set()
-        for name, kind in kinds.items():
-            segment = compiled.segment(index, name)
-            start, stop = int(remap[segment.start]), int(remap[segment.stop])
-            operators: tuple[str, ...] = ()
-            if kind == "free":
-                operators = path_operators + (("retime",) if name in allowed else ())
-            phases.append(
-                TrajectoryPhase(f"{index}_{name}", start, stop, kind, operators)
-            )
-    template = TrajectoryTemplate(
-        source_id="atomic_action_tutorial",
-        source_revision=f"waypoints{positions.shape[0]}",
-        template_id="tutorial_reference",
-        joint_names=tuple(robot.joint_names),
-        positions=positions,
-        dt=intervals,
-        phases=tuple(phases),
-        allowed_operators=path_operators + ("retime",),
-        controlled_joint_indices=arm_columns,
+    template, control_dt = _tutorial_trajectory_template(
+        compiled,
+        robot,
+        phase_kinds=phase_kinds,
+        path_operators=path_operators,
+        retimable=retimable,
+        include_retime=True,
+        control_part=control_part,
     )
+    arm_columns = template.controlled_joint_indices
+    positions = template.positions
     cfg = create_trajectory_variant_cfg(args)
     jacobians = None
     if cfg is None or cfg.factors.ik.enabled:
@@ -650,6 +728,141 @@ def expand_tutorial_trajectory_variants(
     )
 
 
+def expand_tutorial_task_space_variants(
+    compiled: CompiledTrajectory,
+    robot: Robot,
+    args: argparse.Namespace,
+    *,
+    phase_kinds: Sequence[Mapping[str, str]],
+    editable: Sequence[Collection[str]],
+    control_part: str = "arm",
+) -> "TrajectoryVariantSet":
+    """Generate distinct endpoint-preserving task-space variants for replay.
+
+    The nominal reference is row zero. Every later row samples horizontal TCP
+    deformation in the selected free phases and projects all editable samples
+    together through the production trajectory-IK API. Unlike the general
+    row-assignment helper, this showcase route refuses to reuse rows: requesting
+    nine variants either produces nine distinct trajectories or raises.
+
+    Args:
+        compiled: Compiled PickUp -> Place trajectory.
+        robot: Tutorial robot supplying FK, Jacobians, and joint limits.
+        args: Parsed tutorial arguments and task-space bounds.
+        phase_kinds: Semantic phase kinds for each compiled action.
+        editable: Free segment names that may receive task-space deformation.
+        control_part: Kinematic control part to project.
+
+    Returns:
+        Exactly ``args.trajectory_variants`` distinct replay rows.
+    """
+    from dataclasses import replace
+    from embodichain.lab.sim.motion.expansion import (
+        TASK_SPACE_RESIDUAL_OPERATOR,
+        SceneCase,
+        TrajectoryAugmentationCfg,
+        expand_trajectory_variants,
+    )
+
+    template, control_dt = _tutorial_trajectory_template(
+        compiled,
+        robot,
+        phase_kinds=phase_kinds,
+        path_operators=(),
+        control_part=control_part,
+    )
+    selected_names = {
+        f"{index}_{name}" for index, names in enumerate(editable) for name in names
+    }
+    known_free = {phase.phase_id for phase in template.phases if phase.kind == "free"}
+    if not selected_names or not selected_names <= known_free:
+        raise ValueError("editable task-space segments must name known free phases")
+    template = replace(
+        template,
+        phases=tuple(
+            (
+                replace(phase, allowed_operators=(TASK_SPACE_RESIDUAL_OPERATOR,))
+                if phase.phase_id in selected_names
+                else phase
+            )
+            for phase in template.phases
+        ),
+        allowed_operators=(TASK_SPACE_RESIDUAL_OPERATOR,),
+    )
+    solver = robot.get_solver(control_part)
+    if solver is None:
+        raise RuntimeError(f"No kinematic solver is available for {control_part!r}.")
+
+    def kinematics(qpos: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        poses = solver.get_fk(qpos).to(qpos)
+        tcp = torch.as_tensor(solver.get_tcp(), device=qpos.device, dtype=qpos.dtype)
+        return poses, solver.get_jacobian(
+            qpos,
+            locations=tcp[:3, 3],
+            jac_type="full",
+        ).to(qpos)
+
+    # Controller columns belong to the host and may use an authored command
+    # range wider than raw simulated state limits. They are copied exactly.
+    limits = robot.get_qpos_limits()[0].to(template.positions).clone()
+    uncontrolled = sorted(
+        set(range(template.positions.shape[1])) - set(template.controlled_joint_indices)
+    )
+    if uncontrolled:
+        copied = template.positions[:, uncontrolled]
+        margin = torch.finfo(copied.dtype).eps
+        limits[uncontrolled, 0] = torch.minimum(
+            limits[uncontrolled, 0], copied.min(0).values - margin
+        )
+        limits[uncontrolled, 1] = torch.maximum(
+            limits[uncontrolled, 1], copied.max(0).values + margin
+        )
+    cfg = TrajectoryAugmentationCfg.from_mapping(
+        {
+            "seed": args.variant_seed or 0,
+            "factors": {
+                "task_space": {
+                    "enabled": True,
+                    "frame_id": f"{control_part}_tcp",
+                    "translation_axes": [True, True, False],
+                    "max_translation_m": args.task_space_translation_m,
+                    "max_rotation_rad": args.task_space_rotation_rad,
+                    "ik": {
+                        "max_iterations": 32,
+                        "damping": 0.05,
+                        "step_size": 0.5,
+                        "pos_eps": 1e-3,
+                        "rot_eps": 1e-3,
+                    },
+                }
+            },
+            "coverage": {"joint_dedup_normalized_tol": args.dedup_tolerance or 1e-4},
+        }
+    )
+    result = expand_trajectory_variants(
+        template,
+        case=SceneCase(
+            "atomic_action_tutorial",
+            "tutorial_initial_state",
+            str(robot.uid),
+            "place",
+            getattr(args, "robot", "ur5"),
+        ),
+        count=args.trajectory_variants,
+        cfg=cfg,
+        joint_limits=limits,
+        control_dt=control_dt,
+        kinematics=kinematics,
+        max_attempts=max(16 * args.trajectory_variants, args.trajectory_variants),
+    )
+    if len(result.variants) != args.trajectory_variants:
+        raise RuntimeError(
+            f"Only {len(result.variants)} of {args.trajectory_variants} distinct task-space variants "
+            f"survived {result.attempted} attempts: {result.rejected}."
+        )
+    return result
+
+
 def log_trajectory_variant_diagnostics(
     result: TrajectoryVariantSet, requested: int
 ) -> None:
@@ -662,7 +875,7 @@ def log_trajectory_variant_diagnostics(
     batch = result.candidates
     for row, variant in enumerate(result.variants):
         logger.log_info(
-            f"Trajectory variant {row}: operator={variant.spatial_operator}, "
+            f"Trajectory variant {row}: operator={_variant_operator_name(variant)}, "
             f"duration_scale={variant.duration_scale}, "
             f"profile={variant.timing_profile}, "
             f"samples={int(batch.valid_length[row])}, "
@@ -740,6 +953,26 @@ def _contact_phase_drift(result) -> float:
     return worst
 
 
+def _free_phase_deviation(result) -> float:
+    """Return the largest free-phase deviation from the reference trajectory."""
+    batch = result.candidates
+    reference = {phase.phase_id: phase for phase in batch.phases[0]}
+    worst = 0.0
+    for row in range(1, len(result.variants)):
+        for phase in batch.phases[row]:
+            source = reference.get(phase.phase_id)
+            if source is None or phase.kind != "free":
+                continue
+            variant_window = batch.positions[row, phase.start_index : phase.stop_index]
+            reference_window = batch.positions[
+                0, source.start_index : source.stop_index
+            ]
+            if variant_window.shape != reference_window.shape:
+                continue
+            worst = max(worst, float((variant_window - reference_window).abs().max()))
+    return worst
+
+
 def save_variant_joint_plot(
     result: TrajectoryVariantSet, robot: Robot, path: str | pathlib.Path
 ) -> None:
@@ -766,6 +999,7 @@ def save_variant_joint_plot(
     figure, axes = plt.subplots(rows, 3, figsize=(13, 3.1 * rows), sharex=True)
     flat = axes.flatten()
     drift = _contact_phase_drift(result)
+    free_deviation = _free_phase_deviation(result)
     styles, groups = _variant_styles(result)
     for position, joint in enumerate(arm):
         axis = flat[position]
@@ -827,8 +1061,8 @@ def save_variant_joint_plot(
                 title_fontsize=9,
             )
     figure.suptitle(
-        "Trajectory variants: curves separate between waypoints and rejoin inside "
-        f"the shaded contact phases (max contact deviation {drift:.2e} rad)",
+        f"Trajectory variants: max free-phase joint deviation {free_deviation:.2f} "
+        f"rad; max shaded contact-phase deviation {drift:.2e} rad",
         fontsize=11,
     )
     figure.tight_layout(rect=(0, 0.1, 1, 0.97))
@@ -897,6 +1131,18 @@ def _timing_key(variant) -> str:
     return f"{variant.timing_profile} x{variant.duration_scale:g}"
 
 
+def _variant_operator_name(variant: TrajectoryVariant) -> str:
+    """Keep tool-path and combined factors visible in plot/log provenance."""
+    operator = variant.spatial_operator
+    if variant.task_space:
+        return (
+            "task_space_residual"
+            if operator == "none"
+            else f"task_space_residual+{operator}"
+        )
+    return operator
+
+
 def _variant_styles(result) -> tuple[list, dict | None]:
     """Return per-variant plot keywords, grouping the legend when crowded.
 
@@ -925,7 +1171,7 @@ def _variant_styles(result) -> tuple[list, dict | None]:
                 "label": (
                     "reference"
                     if variant.is_nominal
-                    else f"{variant.spatial_operator} {_timing_key(variant)}"
+                    else f"{_variant_operator_name(variant)} {_timing_key(variant)}"
                 ),
             }
             for variant in result.variants
@@ -934,13 +1180,13 @@ def _variant_styles(result) -> tuple[list, dict | None]:
 
     timings = sorted({_timing_key(variant) for variant in result.variants})
     dashes = dict(zip(timings, _timing_linestyles(len(timings))))
-    operators = sorted({variant.spatial_operator for variant in result.variants})
+    operators = sorted({_variant_operator_name(variant) for variant in result.variants})
     styles = []
     for variant in result.variants:
         nominal = variant.is_nominal
         styles.append(
             {
-                "color": OPERATOR_COLOURS.get(variant.spatial_operator),
+                "color": OPERATOR_COLOURS.get(_variant_operator_name(variant)),
                 "linewidth": 2.6 if nominal else 0.9,
                 "linestyle": "-" if nominal else dashes[_timing_key(variant)],
                 "alpha": 1.0 if nominal else 0.35,
@@ -1173,10 +1419,8 @@ def _tutorial_physics_cfg(
 ) -> PhysicsBackendCfg:
     """Build the shared physics configuration for atomic-action tutorials.
 
-    Newton tutorials intentionally use MuJoCo Warp's native collision path.
-    It generates contacts inside every solver substep, so an external Newton
-    collision pipeline would be unused and would only allocate unnecessary
-    contact buffers.
+    DexUni owns collision detection and retains MuJoCo articulation drives.
+    Free rigid bodies use VBD with the solver's native one-way coupling.
     """
     physics_cfg = physics_cfg_for_backend(backend)
     if isinstance(physics_cfg, NewtonPhysicsCfg):
@@ -1185,20 +1429,21 @@ def _tutorial_physics_cfg(
         # contacts and fast-changing manipulator loads. DexSim sizes
         # contact/constraint buffers from the finalized scene, including the
         # contact dimensions authored on gripper and object surfaces.
-        # MultiCCD retains up to four contacts per gripper-mesh/object pair,
-        # which prevents a marginal two-finger grasp from sliding away.
+        # Retain the existing MuJoCo articulation tuning. Free-body contacts
+        # remain VBD-owned and do not inherit these MuJoCo contact options.
         physics_cfg.num_substeps = 20
         physics_cfg.collision_cfg = None
         physics_cfg.solver_cfg = {
-            "solver_type": "mujoco_warp",
-            "solver": "newton",
-            "integrator": "implicitfast",
-            "iterations": 20,
-            "ls_iterations": 100,
-            "cone": "elliptic",
-            "impratio": 1_000.0,
-            "use_mujoco_contacts": True,
-            "enable_multiccd": True,
+            "solver_type": "dexuni",
+            "mujoco_options": {
+                "solver": "newton",
+                "integrator": "implicitfast",
+                "iterations": 20,
+                "ls_iterations": 100,
+                "cone": "elliptic",
+                "impratio": 1_000.0,
+                "enable_multiccd": True,
+            },
         }
     return physics_cfg
 
@@ -1208,6 +1453,7 @@ def create_tutorial_simulation(
     *,
     arena_space: float = 2.5,
     sun_direction: Sequence[float] = DEFAULT_TUTORIAL_SUN_DIRECTION,
+    newton_solver_options: Mapping[str, object] | None = None,
 ) -> SimulationManager:
     """Create the shared simulation setup used by atomic-action tutorials.
 
@@ -1217,10 +1463,17 @@ def create_tutorial_simulation(
         arena_space: Spacing between parallel simulation arenas in meters.
         sun_direction: Direction of the single global sun light. The vector
             points from the light toward the scene.
+        newton_solver_options: Scene-specific Newton solver options, applied
+            before model construction.
 
     Returns:
         A simulation manager with the tutorial key light configured.
     """
+    physics_cfg = _tutorial_physics_cfg(getattr(args, "physics", "default"))
+    if newton_solver_options is not None:
+        if not isinstance(physics_cfg, NewtonPhysicsCfg):
+            raise ValueError("Newton solver options require the Newton backend.")
+        physics_cfg.solver_cfg = {**physics_cfg.solver_cfg, **newton_solver_options}
     if (
         getattr(args, "arena_space", None) is not None
         and getattr(args, "run", None) is not None
@@ -1234,7 +1487,7 @@ def create_tutorial_simulation(
             num_envs=args.num_envs,
             device=args.device,
             gpu_id=getattr(args, "gpu_id", 0),
-            physics_cfg=_tutorial_physics_cfg(getattr(args, "physics", "default")),
+            physics_cfg=physics_cfg,
             render_cfg=RenderCfg(renderer=args.renderer),
             physics_dt=1.0 / 100.0,
             arena_space=arena_space,
@@ -1324,6 +1577,9 @@ def add_tutorial_robot(
     robot_type: TutorialRobot,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    *,
+    newton_gripper_friction: float | None = None,
+    arm_damping: float | None = None,
     **kwargs: object,
 ) -> Robot:
     """Add a selected tutorial robot with the shared PGI gripper.
@@ -1333,6 +1589,8 @@ def add_tutorial_robot(
         robot_type: Tutorial robot family to construct.
         init_pos: Root position of the robot in its arena.
         init_qpos: Optional full robot joint configuration.
+        newton_gripper_friction: Optional sliding friction for gripper links.
+        arm_damping: Optional arm drive damping applied before spawning.
 
     Returns:
         The added robot instance.
@@ -1346,7 +1604,9 @@ def add_tutorial_robot(
         init_qpos=init_qpos,
         **kwargs,
     )
-    configure_newton_gripper_contacts(sim, robot_cfg)
+    if arm_damping is not None:
+        robot_cfg.joint_drive_props.damping["arm"] = arm_damping
+    configure_newton_gripper_contacts(sim, robot_cfg, friction=newton_gripper_friction)
     return sim.add_robot(cfg=robot_cfg)
 
 
@@ -1535,9 +1795,19 @@ def configure_newton_link_contacts(
 def configure_newton_gripper_contacts(
     sim: SimulationManager,
     robot_cfg: RobotCfg,
+    *,
+    friction: float | None = None,
 ) -> None:
-    """Configure Newton gripper contacts and recompute their source inertia."""
+    """Configure Newton gripper contacts and recompute their source inertia.
+
+    Args:
+        sim: Simulation manager that owns the robot.
+        robot_cfg: Robot configuration to update before spawning.
+        friction: Optional static and dynamic sliding-friction coefficient.
+    """
     if not sim.is_newton_backend:
+        if friction is not None:
+            raise ValueError("Newton gripper friction requires the Newton backend.")
         return
 
     configure_newton_link_contacts(
@@ -1546,9 +1816,11 @@ def configure_newton_gripper_contacts(
         group_name="newton_gripper_contacts",
         link_names_expr=[_GRIPPER_CONTACT_LINK_PATTERN],
     )
-    robot_cfg.link_attrs["newton_gripper_contacts"].attrs.mass_props = (
-        MassPropertiesCfg(recompute_inertia=True)
-    )
+    attrs = robot_cfg.link_attrs["newton_gripper_contacts"].attrs
+    attrs.mass_props = MassPropertiesCfg(recompute_inertia=True)
+    if friction is not None:
+        attrs.material_props.static_friction = friction
+        attrs.material_props.dynamic_friction = friction
 
 
 def create_trapezoidal_motion_generator(
@@ -1606,7 +1878,7 @@ def get_hand_open_close_qpos(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return open and closed positions for a tutorial parallel gripper.
 
-    PGI hands use their lower position limit as the open command. A Robotiq
+    PGI and PGC hands use their lower position limit as the open command. A Robotiq
     2F-140 hand is recognized from its six expanded finger/knuckle joint names;
     its open command is zero and a scalar close magnitude is negated for the
     three knuckle joints according to the URDF mimic directions. Supplying a
@@ -2204,7 +2476,7 @@ def start_auto_play_recording(
         return False
 
     # Frame all requested variants rather than recording only reference row 0.
-    if getattr(args, "run", None) is not None and args.num_envs > 1:
+    if args.num_envs > 1:
         offsets = sim.arena_offsets.detach().cpu()
         center = (offsets.max(dim=0).values + offsets.min(dim=0).values) * 0.5
         eye, target, up = (
@@ -2354,7 +2626,7 @@ def create_ur5_gripper_robot_cfg(
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
 
-    The arm is taken from :class:`~embodichain_robots.ur_robot.URRobotCfg`
+    The arm is taken from :class:`~embodichain_robots.universal_robots.ur_robot.URRobotCfg`
     so the URDF, joint names and drive defaults match the canonical UR family
     config. The gripper and tool-center-point offset are added on top to match
     the existing atomic-action tutorial setups.
@@ -2367,7 +2639,7 @@ def create_ur5_gripper_robot_cfg(
         assembled robot keeps the source URDF's lowercase joint names
         (``joint1``..``joint6`` and ``gripper_finger1_joint_1``), matching the
         control parts produced by
-        :class:`~embodichain_robots.ur_robot.URRobotCfg`.
+        :class:`~embodichain_robots.universal_robots.ur_robot.URRobotCfg`.
 
     Args:
         init_pos: Initial root position of the robot in the arena.
@@ -2423,6 +2695,194 @@ def create_ur5_gripper_robot_cfg(
     )
 
 
+_FRANKA_URDF_DIR: dict[str, str] = {
+    "panda": "Panda",
+}
+
+# Default init_qpos: arm in a neutral ready pose, fingers open.
+# Derived from the Isaac Lab Franka Emika Panda reference configuration.
+_FRANKA_DEFAULT_INIT_QPOS = [
+    0.0,  # Joint1
+    -0.569,  # Joint2
+    0.0,  # Joint3
+    -2.810,  # Joint4
+    0.0,  # Joint5
+    3.037,  # Joint6
+    0.741,  # Joint7
+    0.04,  # finger_joint1
+    0.04,  # finger_joint2 (mimic of finger_joint1)
+]
+
+_FRANKA_ARM_JOINTS = [f"fr3_joint{i}" for i in range(1, 8)]
+
+# DH Robotics PGI-140-80 parallel gripper mounted on the arm-only Panda flange.
+_PGI_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
+_PGI_JOINT = "gripper_finger1_joint_1"
+_PGI_FINGER_LINKS = ["gripper_finger1_link_1", "gripper_finger2_link_1"]
+_PGI_TCP = [
+    [1.0, 0.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.17],
+    [0.0, 0.0, 0.0, 1.0],
+]
+
+
+def _newton_gripper_contacts(link_names_expr: list[str]) -> LinkPhysicsOverrideCfg:
+    """Return the Newton fingertip contact group for the given finger links."""
+    return LinkPhysicsOverrideCfg(
+        link_names_expr=list(link_names_expr),
+        attrs=RigidBodyPhysicsCfg(
+            collision_props=NewtonCollisionPropertiesCfg(condim=4),
+            material_props=NewtonRigidBodyMaterialCfg(
+                ke=40000.0,
+                kd=400.0,
+                torsional_friction=0.1,
+                rolling_friction=0.01,
+            ),
+        ),
+    )
+
+
+def _resolve_robot_type(init_dict: dict, default: str) -> str:
+    """Return the requested Franka variant, rejecting unknown ones."""
+    robot_type = init_dict.get("robot_type", default)
+    if robot_type not in _FRANKA_URDF_DIR:
+        raise ValueError(
+            f"Unknown Franka robot_type: {robot_type!r}. "
+            f"Expected one of {sorted(_FRANKA_URDF_DIR)}."
+        )
+    return robot_type
+
+
+@configclass
+class _FrankaPgiCfg(RobotCfg):
+    """Scene-local Panda and PGI assembly, outside the official robot catalog.
+
+    The arm-only Panda URDF is assembled with the ``DH_PGI_140_80`` parallel
+    gripper on the ``fr3_link8`` flange. The configuration owns the whole
+    assembly: the ``arm`` and ``eef`` control parts, the PGI finger drive and
+    open initial state, the PGI tool center point, and the Newton fingertip
+    contacts on the PGI finger links. The stock Panda hand settings of
+    :class:`FrankaPandaCfg` do not apply.
+
+    The arm solver and the FK/IK serial chain both end at ``fr3_link8`` on the
+    arm URDF used by the assembly. The solver's ``tcp`` gives the PGI tool
+    center point in that frame; :meth:`build_pk_serial_chain` returns the
+    flange pose without it.
+
+    Example:
+
+        cfg = _FrankaPgiCfg.from_dict({"init_pos": [0.5, 0.0, 0.0]})
+        robot = sim.add_robot(cfg=cfg)
+    """
+
+    robot_type: str = "panda"
+
+    @classmethod
+    def from_dict(cls, init_dict: dict[str, Any]) -> _FrankaPgiCfg:
+        """Initialize ``_FrankaPgiCfg`` from a dictionary.
+
+        Args:
+            init_dict: Dictionary of configuration parameters. ``robot_type``
+                selects the Franka arm variant (currently ``"panda"``). All
+                other keys are merged on top of the defaults via
+                :func:`merge_robot_cfg`.
+
+        Returns:
+            A ``_FrankaPgiCfg`` instance.
+        """
+        cfg = cls()
+        cfg._build_defaults(init_dict)
+        return merge_robot_cfg(cfg, init_dict)
+
+    def _build_defaults(self, init_dict: dict | None = None) -> None:
+        """Populate the arm-only Panda and PGI assembly defaults.
+
+        Args:
+            init_dict: The raw override dict passed to ``from_dict``.
+                ``robot_type`` is read from here (falling back to the class
+                default).
+        """
+        init_dict = init_dict or {}
+        self.robot_type = _resolve_robot_type(init_dict, self.robot_type)
+        self.uid = "FrankaPandaPgi"
+
+        self.urdf_cfg = URDFCfg(
+            components=[
+                {
+                    "component_type": "arm",
+                    "urdf_path": self._pk_urdf_path,
+                    "transform": np.eye(4),
+                },
+                {
+                    "component_type": "hand",
+                    "urdf_path": get_data_path(_PGI_URDF_PATH),
+                    "transform": np.eye(4),
+                },
+            ]
+        )
+
+        self.control_parts = {
+            "arm": list(_FRANKA_ARM_JOINTS),
+            "eef": [_PGI_JOINT],
+        }
+
+        self.solver_cfg = {
+            "arm": FEPSolverCfg(
+                end_link_name="fr3_link8",
+                root_link_name="base",
+                tcp=[list(row) for row in _PGI_TCP],
+                redundancy_search=True,
+            ),
+        }
+
+        self.joint_drive_props = JointDrivePropertiesCfg(
+            drive_type="force",
+            stiffness={"fr3_joint[1-7]": 1e4, _PGI_JOINT: 1e3},
+            damping={"fr3_joint[1-7]": 1e3, _PGI_JOINT: 1e2},
+            max_effort={"fr3_joint[1-7]": 1e5, _PGI_JOINT: 1e4},
+        )
+        self.link_attrs = {
+            "newton_gripper_contacts": _newton_gripper_contacts(_PGI_FINGER_LINKS)
+        }
+
+        # Arm in the stock ready pose; both PGI finger joints open.
+        self.init_qpos = [*_FRANKA_DEFAULT_INIT_QPOS[:7], 0.0, 0.0]
+
+    @property
+    def _pk_urdf_path(self) -> str:
+        """Arm-only URDF used by both the assembly and the FK/IK chain."""
+        urdf_dir = _FRANKA_URDF_DIR[self.robot_type]
+        return get_data_path(f"Franka/{urdf_dir}/{urdf_dir}.urdf")
+
+    def build_pk_serial_chain(
+        self, device: torch.device = torch.device("cpu"), **kwargs: Any
+    ) -> dict[str, pk.SerialChain]:
+        """Build the pytorch-kinematics serial chain for the arm.
+
+        The chain uses the arm solver's root and end links, so its end pose is
+        the ``fr3_link8`` flange; compose it with the solver ``tcp`` to obtain
+        the PGI tool center point.
+
+        Args:
+            device: The device to which the chain will be moved. Defaults to CPU.
+            **kwargs: Additional arguments for building the serial chain.
+
+        Returns:
+            A ``{"arm": pk.SerialChain}`` mapping.
+        """
+        from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
+
+        solver = self.solver_cfg["arm"]
+        chain = create_pk_serial_chain(
+            urdf_path=self._pk_urdf_path,
+            device=device,
+            end_link_name=solver.end_link_name,
+            root_link_name=solver.root_link_name,
+        )
+        return {"arm": chain}
+
+
 def create_franka_panda_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
@@ -2433,7 +2893,7 @@ def create_franka_panda_robot_cfg(
 ) -> RobotCfg:
     """Build the Franka arm + PGI gripper configuration for the tutorials.
 
-    :class:`~embodichain_robots.FrankaPandaPgiCfg` owns the assembly,
+    The local assembly configuration owns the assembly,
     control parts, drives, gripper contacts, and flange kinematic chain. The
     sample owns its placement, initial pose, and TCP calibration in
     ``tcp_presets.py``. The shared scenes place manipulation targets on the
@@ -2460,7 +2920,7 @@ def create_franka_panda_robot_cfg(
     }
     if init_qpos is not None:
         overrides["init_qpos"] = list(init_qpos)
-    return FrankaPandaPgiCfg.from_dict(overrides)
+    return _FrankaPgiCfg.from_dict(overrides)
 
 
 def create_ur10_robotiq_robot_cfg(
@@ -2577,6 +3037,7 @@ __all__ = [
     "save_variant_joint_plot",
     "trajectory_variant_rows",
     "log_trajectory_variant_diagnostics",
+    "expand_tutorial_task_space_variants",
     "expand_tutorial_trajectory_variants",
     "create_trajectory_variant_cfg",
     "parse_trajectory_variant_arguments",
@@ -2584,6 +3045,7 @@ __all__ = [
     "DEFAULT_AXIS_LEN",
     "DEFAULT_AXIS_SIZE",
     "DEFAULT_GRIPPER_CLOSE_QPOS",
+    "DEXUNI_CUBE_CLOSE_QPOS",
     "DEFAULT_TUTORIAL_SUN_DIRECTION",
     "DEFAULT_TUTORIAL_SUN_INTENSITY",
     "GRIPPER_HAND_JOINT_PATTERN",
