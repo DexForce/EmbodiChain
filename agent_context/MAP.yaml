@@ -270,10 +270,10 @@ topics:
   status: active
 - id: neural-dynamics
   title: Neural Dynamics Models and Training
-  aliases: [neural dynamics, neural robot dynamics, NeRD, 神经动力学, 动力学模型训练, NeRD 示例]
+  aliases: [neural dynamics, neural robot dynamics, NeRD, RigidFormer, 神经动力学, 动力学模型训练, NeRD 示例, RigidFormer 示例]
   keywords: [NeRDStateCodec, NeRDModel, DynamicsGenerationCfg,
     DynamicsShardWriter, DynamicsWindowDataset, DynamicsTrainer, embodichain_models,
-    learning/nerd, nerd reference assets,
+    learning/nerd, nerd reference assets, RigidFormerModel,
     官方训练精度对比]
   paths: [topics/neural-dynamics/neural-dynamics.md]
   source_of_truth:
@@ -282,6 +282,7 @@ topics:
   - examples/learning/nerd/_resources.py
   - examples/learning/nerd/_support/
   - examples/learning/nerd/configs/
+  - extensions/embodichain_models/embodichain_models/dynamics/rigidformer/
   watch_paths: [extensions/embodichain_models/, examples/learning/nerd/,
     docs/source/features/neural_dynamics.md,
     docs/source/api_reference/model_catalogs.rst]

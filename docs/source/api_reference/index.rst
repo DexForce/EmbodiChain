@@ -94,6 +94,7 @@ documentation. CI runs this same checker after style checks and before tests.
 
    robot_catalogs
    model_catalogs
+   model_rigidformer
 
 
 .. toctree::
