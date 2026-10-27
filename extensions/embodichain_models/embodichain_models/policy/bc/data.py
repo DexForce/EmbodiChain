@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import h5py
 import torch
@@ -43,6 +43,9 @@ class BCWindowDataset:
             history and at least one target. Missing future targets are finite
             zeros with ``target_valid=False``. The default preserves complete
             future windows and their historical source identity/sampling.
+        sampling_mode: Draw an episode uniformly first (the historical default),
+            or draw uniformly among all eligible frames across episodes. Both
+            modes sample with replacement and obey the same window boundaries.
         observation_key: Numeric HDF5 dataset containing measured observations.
         observation_slice: Optional feature slice selected before model input.
         target_key: HDF5 physical targets, when no encoder is supplied.
@@ -56,7 +59,8 @@ class BCWindowDataset:
         max_open_files: Positive bound on cached HDF5 handles.
         verify_checksums: Verify each file once before first reading it.
 
-    Sampling is episode-uniform with replacement and uses the caller's CPU RNG.
+    Sampling uses the caller's CPU RNG. Frame-uniform sampling stores one
+    cumulative count per episode, rather than materializing every frame index.
     Only history camera frames are read; future geometry may construct targets
     but is never placed in the input tree. Every returned tensor owns storage.
     """
@@ -68,6 +72,7 @@ class BCWindowDataset:
         history_length: int = 1,
         prediction_horizon: int = 1,
         include_partial_targets: bool = False,
+        sampling_mode: Literal["episode_uniform", "frame_uniform"] = "episode_uniform",
         observation_key: str = "observations",
         observation_slice: slice | None = None,
         target_key: str = "targets",
@@ -90,7 +95,12 @@ class BCWindowDataset:
             raise ValueError("History, prediction and handle capacity must be positive")
         if type(include_partial_targets) is not bool:
             raise ValueError("include_partial_targets must be a Boolean")
+        if sampling_mode not in ("episode_uniform", "frame_uniform"):
+            raise ValueError(
+                "BC sampling mode must be episode_uniform or frame_uniform"
+            )
         self.include_partial_targets = include_partial_targets
+        self.sampling_mode = sampling_mode
         self.history_length, self.prediction_horizon = (
             history_length,
             prediction_horizon,
@@ -129,6 +139,12 @@ class BCWindowDataset:
                 if include_partial_targets
                 else "Every BC episode must contain a complete requested window"
             )
+        self._frame_ends: torch.Tensor | None = None
+        if sampling_mode == "frame_uniform":
+            self._frame_ends = torch.tensor(
+                [record["length"] - minimum_length + 1 for record in self.episodes],
+                dtype=torch.int64,
+            ).cumsum(0)
         # The manifest binds content hashes and all physical/camera metadata;
         # source identity cannot be changed by reusing a display source_id.
         canonical = json.dumps(self.manifest, sort_keys=True, allow_nan=False)
@@ -160,6 +176,12 @@ class BCWindowDataset:
                 include_partial_targets=True,
                 target_padding="finite-zero-right-padding-valid-mask@1",
                 sampling="episode-uniform-complete-history-partial-targets@1",
+            )
+        if sampling_mode == "frame_uniform":
+            view["sampling"] = (
+                "frame-uniform-complete-history-partial-targets@1"
+                if include_partial_targets
+                else "frame-uniform-complete-windows@1"
             )
         self.view_id = hashlib.sha256(
             json.dumps(view, sort_keys=True, allow_nan=False).encode()
@@ -258,9 +280,25 @@ class BCWindowDataset:
         """
         if type(batch_size) is not int or batch_size < 1:
             raise ValueError("BC batch size must be a positive integer")
-        ordinals = torch.randint(len(self.episodes), (batch_size,), generator=generator)
-        anchor_draws = torch.rand(batch_size, generator=generator)
-        anchors = []
+        if self._frame_ends is None:
+            ordinals = torch.randint(
+                len(self.episodes), (batch_size,), generator=generator
+            )
+            anchor_draws = torch.rand(batch_size, generator=generator)
+            anchors = []
+            for ordinal, draw in zip(ordinals.tolist(), anchor_draws.tolist()):
+                length = self.episodes[ordinal]["length"]
+                count = length - self.history_length - self.prediction_horizon + 2
+                if self.include_partial_targets:
+                    count = length - self.history_length + 1
+                anchors.append(self.history_length - 1 + int(draw * count))
+        else:
+            draws = torch.randint(
+                int(self._frame_ends[-1]), (batch_size,), generator=generator
+            )
+            ordinals = torch.searchsorted(self._frame_ends, draws, right=True)
+            previous = torch.cat((self._frame_ends.new_zeros(1), self._frame_ends[:-1]))
+            anchors = (draws - previous[ordinals] + self.history_length - 1).tolist()
         target_lengths = []
         observations, targets = [], []
         fields: dict[str, list[torch.Tensor]] = {
@@ -272,15 +310,8 @@ class BCWindowDataset:
             )
             for camera in self.cameras
         }
-        for row, (ordinal, draw) in enumerate(
-            zip(ordinals.tolist(), anchor_draws.tolist())
-        ):
+        for row, (ordinal, anchor) in enumerate(zip(ordinals.tolist(), anchors)):
             length = self.episodes[ordinal]["length"]
-            count = length - self.history_length - self.prediction_horizon + 2
-            if self.include_partial_targets:
-                count = length - self.history_length + 1
-            anchor = self.history_length - 1 + int(draw * count)
-            anchors.append(anchor)
             start = anchor - self.history_length + 1
             stop = min(anchor + self.prediction_horizon, length)
             target_length = stop - anchor

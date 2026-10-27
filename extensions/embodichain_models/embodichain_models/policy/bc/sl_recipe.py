@@ -51,7 +51,8 @@ def build_supervised_trainer(config: dict[str, Any]) -> SupervisedTrainer:
             a pure target encoder/fields/version through the reader mapping;
             the model package never imports the host's task/controller.
             ``data.prefetch_batches`` is zero or one. ``optimizer`` accepts
-            AdamW ``learning_rate``, ``weight_decay`` and ``max_grad_norm``;
+            ``type`` (``Adam`` or ``AdamW``), ``learning_rate``,
+            ``weight_decay`` and ``max_grad_norm``; zero disables clipping.
             ``objective`` accepts masked normalized target MSE and optional
             training-only ``observation_noise`` in normalized input units.
             ``trainer`` uses the shared ``SupervisedTrainerCfg``.
@@ -79,18 +80,21 @@ def build_supervised_trainer(config: dict[str, Any]) -> SupervisedTrainer:
     if bc_objective.observation_noise:
         objective["observation_noise"] = bc_objective.observation_noise
     optimizer_cfg = config.get("optimizer", {})
-    if set(optimizer_cfg) - {"learning_rate", "weight_decay", "max_grad_norm"}:
-        raise ValueError("Unknown BC AdamW optimizer setting")
+    if set(optimizer_cfg) - {"type", "learning_rate", "weight_decay", "max_grad_norm"}:
+        raise ValueError("Unknown BC optimizer setting")
+    optimizer_type = optimizer_cfg.get("type", "AdamW")
+    if optimizer_type not in ("Adam", "AdamW"):
+        raise ValueError("BC optimizer type must be Adam or AdamW")
     rate = float(optimizer_cfg.get("learning_rate", 3e-4))
     decay = float(optimizer_cfg.get("weight_decay", 1e-6))
     maximum = float(optimizer_cfg.get("max_grad_norm", 1.0))
     if not (
         0 < rate < float("inf")
         and 0 <= decay < float("inf")
-        and 0 < maximum < float("inf")
+        and 0 <= maximum < float("inf")
     ):
         raise ValueError(
-            "BC optimizer values must be finite with positive rate/clipping"
+            "BC optimizer values must be finite with positive rate and nonnegative clipping"
         )
     torch.manual_seed(cfg.seed)
     model = ChunkBCModel(ChunkBCModelCfg(**config["model"]))
@@ -111,7 +115,10 @@ def build_supervised_trainer(config: dict[str, Any]) -> SupervisedTrainer:
     try:
         if dataset.cameras != model.cfg.cameras:
             raise ValueError("BC dataset camera order differs from the model contract")
-        optimizer = torch.optim.AdamW(model.parameters(), lr=rate, weight_decay=decay)
+        optimizer_class = (
+            torch.optim.Adam if optimizer_type == "Adam" else torch.optim.AdamW
+        )
+        optimizer = optimizer_class(model.parameters(), lr=rate, weight_decay=decay)
         learner = SupervisedLearner(
             model, bc_objective, optimizer, max_grad_norm=maximum
         )
@@ -135,7 +142,7 @@ def build_supervised_trainer(config: dict[str, Any]) -> SupervisedTrainer:
                 "model": model.get_extra_state(),
                 "objective": objective,
                 "optimizer": {
-                    "type": "AdamW",
+                    "type": optimizer_type,
                     "learning_rate": rate,
                     "weight_decay": decay,
                     "max_grad_norm": maximum,
