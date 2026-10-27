@@ -42,6 +42,10 @@ ACTION_CONTRACTS = ("eef_pose.relative@1", "gripper.parallel@1")
 ACTION_SEMANTICS = "policy_request:eef_pose.relative@1+gripper.parallel@1"
 OBSERVATION_SCHEMA = "pick_place.geometry@2"
 STEP_DT = 1 / 30
+TIMING_VERSION = "pickplace-preaction-policy-request@1"
+HISTORICAL_MANIFEST_SHA256 = (
+    "6b757b0f2d1343ead3d9812abf8652757825981a64fe9a84042dcd8e9c558093"
+)
 
 
 def validate_environment(config: Mapping[str, Any]) -> None:
@@ -123,7 +127,7 @@ def _write_json(path: Path, data: Any) -> None:
         stream.write("\n")
 
 
-def _validate_manifest(data: Mapping[str, Any]) -> None:
+def _validate_manifest(data: Mapping[str, Any], *, manifest_sha256: str) -> str:
     if (
         data.get("complete") is not True
         or data.get("geometry_width") != 51
@@ -136,6 +140,26 @@ def _validate_manifest(data: Mapping[str, Any]) -> None:
         raise ValueError(
             "State BC requires the declared PickPlace action/physics schema"
         )
+    timing = data.get("observation_timing")
+    version = data.get("observation_timing_version")
+    if timing == "pre_action" and version == TIMING_VERSION:
+        return "explicit-versioned-pre-action"
+    # The sole legacy exception binds the previously audited immutable source.
+    if timing is None and manifest_sha256 == HISTORICAL_MANIFEST_SHA256:
+        return "historical-manifest-sha256-pre-action"
+    # Views generated before timing metadata was introduced remain valid only
+    # when they bind that same audited original. Parent records are checked
+    # against the original below before any numeric payload is loaded.
+    parent = data.get("parent_manifest")
+    if (
+        timing == "pre_action"
+        and version is None
+        and data.get("state_view_format") == "pick-place-state-view-v1"
+        and isinstance(parent, Mapping)
+        and parent.get("sha256") == HISTORICAL_MANIFEST_SHA256
+    ):
+        return "historical-state-view-sha256-pre-action"
+    raise ValueError("State BC requires explicit versioned pre-action timing")
 
 
 def load_numeric(
@@ -144,20 +168,34 @@ def load_numeric(
     """Load only aligned numeric states/actions, checking their declared identity."""
     path = Path(view_path).resolve()
     view = json.loads(path.read_text())
-    _validate_manifest(view)
+    _validate_manifest(view, manifest_sha256=sha256(path))
     if view.get("state_view_format") != "pick-place-state-view-v1":
         raise ValueError("State data view format differs")
     if view.get("cameras") != []:
         raise ValueError("A state data view must not declare cameras")
     parent = view.get("parent_manifest", {})
-    if sha256(parent["path"]) != parent["sha256"]:
+    parent_path = Path(parent["path"]).resolve()
+    if sha256(parent_path) != parent["sha256"]:
         raise ValueError("Parent manifest changed after state view creation")
+    parent_manifest = json.loads(parent_path.read_text())
+    _validate_manifest(parent_manifest, manifest_sha256=parent["sha256"])
     records = view.get("episodes", [])
     if not records or len(records) != view.get("requested_episodes"):
         raise ValueError("State data view must list every selected episode")
+    parents = parent_manifest.get("episodes", [])
+    if len(parents) < len(records):
+        raise ValueError("State view selects more episodes than its parent")
     observations, actions = [], []
-    for record in records:
+    for record, original in zip(records, parents, strict=False):
         episode_path = Path(record["path"])
+        if (
+            record.get("physical_success") is not True
+            or record.get("sha256") != original.get("sha256")
+            or record.get("length") != original.get("length")
+            or episode_path.resolve()
+            != (parent_path.parent / original["path"]).resolve()
+        ):
+            raise ValueError("State episode is not an accepted ordered parent record")
         if verify_checksums and sha256(episode_path) != record["sha256"]:
             raise ValueError("State episode differs from the frozen manifest")
         with h5py.File(episode_path, "r") as episode:
@@ -187,7 +225,8 @@ def prepare_state_view(
     if type(episode_count) is not int or episode_count < 1:
         raise ValueError("episode_count must be positive")
     manifest = json.loads(manifest_path.read_text())
-    _validate_manifest(manifest)
+    manifest_digest = sha256(manifest_path)
+    timing_evidence = _validate_manifest(manifest, manifest_sha256=manifest_digest)
     records = manifest.get("episodes", [])
     if len(records) < episode_count:
         raise ValueError("The corpus contains fewer than the requested episodes")
@@ -203,7 +242,7 @@ def prepare_state_view(
         "complete": True,
         "parent_manifest": {
             "path": str(manifest_path),
-            "sha256": sha256(manifest_path),
+            "sha256": manifest_digest,
         },
         "requested_episodes": episode_count,
         "episodes": [
@@ -219,6 +258,8 @@ def prepare_state_view(
         "physics": "default",
         "observation_schema": OBSERVATION_SCHEMA,
         "observation_timing": "pre_action",
+        "observation_timing_version": TIMING_VERSION,
+        "observation_timing_evidence": timing_evidence,
         "state_only": True,
     }
     view_path = output / "manifest.json"
@@ -274,27 +315,78 @@ def state_schema() -> dict[str, Any]:
     names = (
         [f"qpos_{i}" for i in range(9)]
         + [f"qvel_{i}" for i in range(9)]
-        + [f"tcp_position_{axis}" for axis in "xyz"]
-        + [f"tcp_rotation6d_{i}" for i in range(6)]
-        + [f"cube_position_{axis}" for axis in "xyz"]
-        + [f"cube_rotation6d_{i}" for i in range(6)]
-        + [f"goal_position_{axis}" for axis in "xyz"]
-        + [f"cube_minus_tcp_{axis}" for axis in "xyz"]
-        + [f"goal_minus_cube_{axis}" for axis in "xyz"]
+        + [f"tcp_{i}" for i in range(9)]
+        + [f"cube_{i}" for i in range(9)]
+        + [f"goal_{i}" for i in range(3)]
+        + [f"relative_{i}" for i in range(6)]
         + [f"cube_velocity_{i}" for i in range(6)]
     )
     assert len(names) == 51
     return {
         "version": OBSERVATION_SCHEMA,
-        "observation": {"names": names, "dtype": "float32", "timing": "pre_action"},
+        "observation": {
+            "names": names,
+            "dtype": "float32",
+            "timing": "pre_action",
+            "version": OBSERVATION_SCHEMA,
+            "frame": "arena",
+            "rotation": "matrix_first_two_columns",
+        },
         "action": {
-            "names": ["dx", "dy", "dz", "rx", "ry", "rz", "gripper"],
+            "names": ["dx", "dy", "dz", "drx", "dry", "drz", "gripper"],
             "dtype": "float32",
             "semantics": "policy_request",
             "step_dt": STEP_DT,
-            "terms": [{"term": {"contract": name}} for name in ACTION_CONTRACTS],
+            "terms": [
+                {
+                    "name": "arm",
+                    "slice": [0, 6],
+                    "term": {
+                        "contract": ACTION_CONTRACTS[0],
+                        "representation": "relative_eef_pose",
+                        "action_dim": 6,
+                        "feature_names": [
+                            "delta_x",
+                            "delta_y",
+                            "delta_z",
+                            "delta_rx",
+                            "delta_ry",
+                            "delta_rz",
+                        ],
+                        "units": ["normalized"] * 6,
+                        "normalization": "minus_one_to_one",
+                        "metadata": {
+                            "frame": "arena",
+                            "rotation": "rotation_vector",
+                            "rotation_composition": "left",
+                            "target_reference": "measured_pose",
+                            "translation_scale": 0.02,
+                            "rotation_scale": 0.1,
+                            "translation_units": "m",
+                            "rotation_units": "rad",
+                            "clip": [-1.0, 1.0],
+                            "ik_method": "dls",
+                        },
+                    },
+                },
+                {
+                    "name": "eef",
+                    "slice": [6, 7],
+                    "term": {
+                        "contract": ACTION_CONTRACTS[1],
+                        "representation": "parallel_gripper",
+                        "action_dim": 1,
+                        "feature_names": ["gripper"],
+                        "units": ["normalized"],
+                        "normalization": "minus_one_to_one",
+                        "metadata": {"command_mode": "continuous"},
+                    },
+                },
+            ],
             "translation_scale_m": 0.02,
             "rotation_scale_rad": 0.1,
+            "gripper_range_m": [0.0, 0.04],
+            "request_clip": [-1.0, 1.0],
         },
     }
 

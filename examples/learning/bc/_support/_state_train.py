@@ -19,8 +19,10 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,10 @@ import torch
 from tensordict import TensorDictBase
 
 from embodichain.data_pipeline.datasets.sequence import BatchSource, SequenceSpecCfg
+from embodichain.data_pipeline.datasets.sources import (
+    OnlineDataSource,
+    TensorDataSource,
+)
 from embodichain.learning.sl import (
     SequenceBatchSource,
     SupervisedBatch,
@@ -36,6 +42,7 @@ from embodichain.learning.sl import (
     SupervisedTrainerCfg,
 )
 from embodichain_models.policy.bc import ChunkBCModel, ChunkBCModelCfg, ChunkBCObjective
+from examples.ods.simple_bc_demo.observations import policy_observations
 
 from ._pick_place import TARGET_SEMANTICS, pose_targets
 from ._state_data import (
@@ -53,6 +60,13 @@ from ._state_data import (
 __all__: list[str] = []
 
 
+def _declared_world_size() -> int:
+    raw = os.environ.get("WORLD_SIZE", "1")
+    if not raw.isdecimal() or int(raw) < 1:
+        raise ValueError("WORLD_SIZE must be a positive integer")
+    return int(raw)
+
+
 def _check_context(context: TensorDictBase, history: int, horizon: int) -> None:
     expected = (context.batch_size[0], history + horizon - 1)
     if (
@@ -61,12 +75,30 @@ def _check_context(context: TensorDictBase, history: int, horizon: int) -> None:
         or context["actions"].shape != (*expected, 7)
         or context["obs"].dtype != torch.float32
         or context["actions"].dtype != torch.float32
+        or context["valid"].shape != expected
+        or context["loss_mask"].shape != expected
         or context["valid"].dtype != torch.bool
         or context["loss_mask"].dtype != torch.bool
         or not context["valid"][:, history - 1].all()
         or (context["loss_mask"] & ~context["valid"]).any()
+        or context["loss_mask"][:, : history - 1].any()
+        or not context["loss_mask"][:, history - 1].all()
     ):
         raise ValueError("State BC context must contain aligned causal numeric frames")
+    history_valid = context["valid"][:, :history]
+    target_valid = context["loss_mask"][:, history - 1 :]
+    history_values = context["obs"][:, :history][history_valid]
+    target_observations = context["obs"][:, history - 1 :][target_valid]
+    target_actions = context["actions"][:, history - 1 :][target_valid]
+    if (
+        not torch.isfinite(history_values).all()
+        or not torch.isfinite(target_observations).all()
+        or not torch.isfinite(target_actions).all()
+        or (target_actions.abs() > 1.000001).any()
+    ):
+        raise ValueError(
+            "Valid state/action targets must be finite and within normalized bounds"
+        )
 
 
 def encode_action(context: TensorDictBase) -> SupervisedBatch:
@@ -97,6 +129,70 @@ def encode_chunk(context: TensorDictBase) -> SupervisedBatch:
     return SupervisedBatch({"history": history}, target, {"target_valid": mask})
 
 
+def _require_semantics(expected: Any, actual: Any, path: str) -> None:
+    """Match mandatory semantics while allowing additional metadata fields."""
+    if isinstance(expected, Mapping):
+        if not isinstance(actual, Mapping):
+            raise ValueError(f"State data schema requires mapping {path}")
+        for key, value in expected.items():
+            if key not in actual:
+                raise ValueError(f"State data schema lacks {path}.{key}")
+            _require_semantics(value, actual[key], f"{path}.{key}")
+    elif isinstance(expected, list):
+        if not isinstance(actual, (list, tuple)) or len(actual) != len(expected):
+            raise ValueError(f"State data schema has a different ordered {path}")
+        for index, (value, received) in enumerate(zip(expected, actual, strict=True)):
+            _require_semantics(value, received, f"{path}[{index}]")
+    elif actual != expected:
+        raise ValueError(f"State data schema differs at {path}")
+
+
+def validate_sequence_source(source: BatchSource) -> None:
+    """Validate all state/control semantics before sampling or creating a model."""
+    schema = getattr(source, "schema", None)
+    if not isinstance(schema, Mapping):
+        raise ValueError("State data source requires an explicit semantic schema")
+    # The existing ODS example records some known semantics in its producer
+    # config/descriptor rather than duplicating them at the schema top level.
+    # Fill only these verified values in an owned comparison copy; never mutate
+    # the caller's schema or infer unknown feature/rotation/controller meaning.
+    compared = deepcopy(dict(schema))
+    if isinstance(source, OnlineDataSource):
+        validate_environment(source.engine.cfg.gym_config)
+        if source.observation_transform is policy_observations:
+            observation = compared.get("observation")
+            action = compared.get("action")
+            if not isinstance(observation, dict) or not isinstance(action, dict):
+                raise ValueError(
+                    "State ODS source requires explicit observation/action declarations"
+                )
+            observation.setdefault("dtype", "float32")
+            observation.setdefault("timing", "pre_action")
+            action.setdefault("dtype", "float32")
+            action.setdefault("translation_scale_m", 0.02)
+            action.setdefault("rotation_scale_rad", 0.1)
+            action.setdefault("gripper_range_m", [0.0, 0.04])
+            action.setdefault("request_clip", [-1.0, 1.0])
+    expected = state_schema()
+    if compared.get("version", OBSERVATION_SCHEMA) != OBSERVATION_SCHEMA:
+        raise ValueError("State data schema version differs")
+    for section in ("observation", "action"):
+        _require_semantics(expected[section], compared.get(section), section)
+    if isinstance(source, TensorDataSource):
+        # Immutable resident data can be checked without consuming a producer.
+        valid = source.data["valid"]
+        observation = source.data["obs"][valid]
+        action = source.data["actions"][valid]
+        if (
+            not torch.isfinite(observation).all()
+            or not torch.isfinite(action).all()
+            or (action.abs() > 1.000001).any()
+        ):
+            raise ValueError(
+                "Resident state/action payload is nonfinite or outside normalized bounds"
+            )
+
+
 def sequence_source(
     source: BatchSource, *, recipe: str, immutable: bool = False
 ) -> SequenceBatchSource:
@@ -107,17 +203,7 @@ def sequence_source(
     source with no delivery quota. Producer start, waits and refill remain owned
     by the host. Source-native sampling does not claim frame-uniform draws.
     """
-    action = source.schema.get("action", {})
-    terms = tuple(
-        entry.get("term", {}).get("contract") for entry in action.get("terms", ())
-    )
-    if (
-        action.get("semantics") != "policy_request"
-        or action.get("step_dt") != STEP_DT
-        or terms != ACTION_CONTRACTS
-        or source.schema.get("version") != OBSERVATION_SCHEMA
-    ):
-        raise ValueError("Data source differs from the state PickPlace action schema")
+    validate_sequence_source(source)
     if recipe == "maniskill_action":
         spec, encoder = (
             SequenceSpecCfg(history_length=1, prediction_horizon=1),
@@ -146,6 +232,10 @@ def build_trainer(
     immutable: bool = False,
 ) -> SupervisedTrainer:
     """Compose one fixed-corpus or caller-owned ODS recipe with shared SL."""
+    if _declared_world_size() > 1 and not torch.distributed.is_initialized():
+        raise RuntimeError(
+            "Distributed state BC requires an initialized process group; use distributed_run"
+        )
     recipe = config["recipe"]
     if recipe not in {"maniskill_action", "legacy_chunk"}:
         raise ValueError("State BC recipe must be maniskill_action or legacy_chunk")
@@ -172,6 +262,8 @@ def build_trainer(
     environment_path = Path(config["environment"]).resolve()
     environment = json.loads(environment_path.read_text())
     validate_environment(environment)
+    if source is not None:
+        validate_sequence_source(source)
     cfg = SupervisedTrainerCfg(**config["trainer"])
     cfg.validate()
     torch.manual_seed(cfg.seed)
@@ -314,6 +406,10 @@ def main() -> None:
     operation.add_argument("--prepare-only", action="store_true")
     operation.add_argument("--train", action="store_true")
     args = parser.parse_args()
+    if _declared_world_size() > 1:
+        raise RuntimeError(
+            "The state BC showcase CLI is single-process; use distributed_run programmatically"
+        )
     import yaml
 
     torch.set_num_threads(1)
