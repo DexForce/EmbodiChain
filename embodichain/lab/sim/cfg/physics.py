@@ -511,6 +511,10 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
 def _normalize_newton_solver_type(solver_type: str) -> str:
     """Normalize public EmbodiChain and DexSim Newton solver aliases."""
     key = solver_type.replace("-", "_").lower()
+    if key in {"sph", "sphsolvercfg"}:
+        logger.log_error(
+            "Standalone SPH is not supported by this mapping; configure DexUni with sph_cfg instead."
+        )
     aliases = {
         "auto": "dexuni",
         "autosolver": "dexuni",

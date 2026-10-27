@@ -22,6 +22,16 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.compute.geometry.particles
+--------------------------------------
+
+Deterministic lattice sampling for primitive, revolved and closed mesh fill volumes.
+
+.. autosummary::
+
+   embodichain.compute.geometry.particles.sample_volume_particles
+
+.. autofunction:: embodichain.compute.geometry.particles.sample_volume_particles
 embodichain.data
 ----------------
 
@@ -682,6 +692,37 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.sim.cfg.fluid
+-----------------------------
+
+Fixed-count fluid sources, physical properties and native particle or surface display.
+
+.. autosummary::
+
+   embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+   embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+   embodichain.lab.sim.cfg.fluid.FluidObjectCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidObjectCfg
+
+embodichain.lab.sim.objects.fluid
+---------------------------------
+
+Scene-owned fluid state snapshots, explicit writes and initial-state restoration.
+
+.. autosummary::
+
+   embodichain.lab.sim.objects.fluid.FluidObject
+   embodichain.lab.sim.objects.fluid.FluidObjectData
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObject
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObjectData
 
 embodichain.lab.sim.scene.expansion.layout
 ------------------------------------------

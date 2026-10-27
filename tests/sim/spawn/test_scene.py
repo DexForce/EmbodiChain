@@ -26,6 +26,7 @@ from embodichain.lab.sim.cfg import ArticulationRootPropertiesCfg, RigidObjectCf
 from embodichain.lab.sim.objects import (
     Articulation,
     DeformableObject,
+    FluidObject,
     RigidObject,
     RigidObjectGroup,
     Robot,
@@ -279,7 +280,7 @@ def test_rigid_object_receives_instance_count_only_when_declared() -> None:
 
 @pytest.mark.parametrize(
     "facade_type",
-    [RigidObject, Articulation, Robot, RigidObjectGroup, DeformableObject],
+    [RigidObject, Articulation, Robot, RigidObjectGroup, DeformableObject, FluidObject],
 )
 def test_object_constructors_hide_spawn_lifecycle_parameters(
     facade_type: type[object],
@@ -288,6 +289,9 @@ def test_object_constructors_hide_spawn_lifecycle_parameters(
 
     assert "declared_num_instances" not in parameters
     assert "spawn_result" not in parameters
+    assert "positions" not in parameters
+    assert "pose" not in parameters
+    assert "on_write" not in parameters
 
 
 def test_runtime_config_attaches_articulation_before_preparing_it() -> None:

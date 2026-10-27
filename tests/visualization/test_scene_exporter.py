@@ -730,6 +730,27 @@ def test_rigid_groups_and_deformable_meshes_are_exported() -> None:
     )
 
 
+def test_fluid_point_overlay_is_detached_and_display_filtered():
+    import torch
+    from types import SimpleNamespace
+    from embodichain.lab.sim.cfg import FluidObjectCfg, FluidRenderCfg
+
+    sim = _EmptySimulation()
+    original = torch.tensor([[[0.0, 0, -1], [0.0, 0, 1]]])
+    sim._fluid_objects = {
+        "water": SimpleNamespace(
+            is_declared=False,
+            cfg=FluidObjectCfg(render=FluidRenderCfg(clip_below_z=0.0)),
+            data=SimpleNamespace(particle_pos_w=original),
+        )
+    }
+    exporter = SceneExporter(sim, VisualizationCfg(backend="viser", env_ids=[0]))
+    overlays = exporter._prepare_overlays(None)
+    assert len(overlays.point_clouds) == 1
+    np.testing.assert_array_equal(overlays.point_clouds[0].points, [[0, 0, 1]])
+    torch.testing.assert_close(original, torch.tensor([[[0.0, 0, -1], [0.0, 0, 1]]]))
+
+
 def test_visual_objects_export_pose_and_live_visibility_without_topology_refresh():
     """Render-only assets publish their own node kind and visibility state."""
     asset = _RigidObject()
