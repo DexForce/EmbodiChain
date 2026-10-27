@@ -72,6 +72,7 @@ from embodichain.lab.sim import (
 )
 from embodichain.lab.sim.material import (
     _capture_render_materials,
+    _is_same_material_inst,
     _restore_render_materials,
     _set_render_material,
     _wrap_first_render_material,
@@ -1585,8 +1586,10 @@ class RigidObject(BatchEntity):
                     )
                 if working_inst is None:
                     working_name = f"{self.uid}_reuse_{env_idx}"
-                    template.create_inst(working_name)
-                    working_inst = VisualMaterialInst(working_name, template)
+                    native_inst = template.create_inst(working_name)
+                    working_inst = VisualMaterialInst(
+                        working_name, template, mat_inst=native_inst
+                    )
                 segments.append(
                     ReuseSegmentState(
                         mesh_id=mesh_id,
@@ -1613,6 +1616,10 @@ class RigidObject(BatchEntity):
         _set_render_material(
             self._entities[env_idx].get_render_body(), mesh_id, mat_inst
         )
+        if mesh_id == 0:
+            current = self._visual_material[env_idx]
+            if current is None or not _is_same_material_inst(current.mat, mat_inst):
+                self._visual_material[env_idx] = _wrap_first_render_material([mat_inst])
 
     def share_visual_material_inst(self, mat_insts: List[VisualMaterialInst]) -> None:
         """Share material instances for the rigid object.

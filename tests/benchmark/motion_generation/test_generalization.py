@@ -23,11 +23,13 @@ from dataclasses import replace
 import pytest
 import torch
 
-from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.config import SuiteCfg
-from scripts.benchmark.motion_generation.contracts import EvaluationDomain
-from scripts.benchmark.motion_generation.generalization import aggregate_generalization
-from scripts.benchmark.motion_generation.models import (
+from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
+from embodichain_benchmarks.motion_generation.config import SuiteCfg
+from embodichain_benchmarks.motion_generation.contracts import EvaluationDomain
+from embodichain_benchmarks.motion_generation.generalization import (
+    aggregate_generalization,
+)
+from embodichain_benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -251,7 +253,7 @@ def test_suite_ignores_disabled_free_space_tracks_when_syncing_defaults() -> Non
         }
     )
 
-    assert suite.free_space.batch_sizes == [8]
+    assert suite.tracks[0].config["batch_sizes"] == [8]
     assert suite.tracks[0].config["batch_sizes"] == [8]
     assert [track.id for track in suite.evaluation_tracks()] == ["enabled"]
 
@@ -674,3 +676,18 @@ def test_spatial_bucket_rates_count_missing_repeats_as_failures() -> None:
         "mid": {"missing_outcome": 2},
         "near": {"missing_outcome": 1},
     }
+
+
+def test_seed_cluster_uncertainty_is_deterministic_and_requires_independent_seeds():
+    from embodichain_benchmarks.motion_generation.metrics.stats import (
+        _seed_cluster_interval,
+    )
+
+    assert _seed_cluster_interval([(11, 0.5)] * 20, 0.95) == (None, None, 1)
+    observations = [(11, 0.0), (23, 1.0), (37, 0.5)]
+    first = _seed_cluster_interval(observations, 0.95)
+    assert first == _seed_cluster_interval(list(reversed(observations)), 0.95)
+    low, high, count = first
+    assert count == 3
+    assert low <= 0.5 <= high
+    assert 0 <= low < high <= 1

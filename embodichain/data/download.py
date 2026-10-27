@@ -37,8 +37,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import importlib
-import inspect
 import os
 import shutil
 import sys
@@ -50,46 +48,23 @@ from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 if TYPE_CHECKING:
     import open3d
 
-# Mapping from category name to the module path that defines the asset classes.
-CATEGORY_MODULES: dict[str, str] = {
-    "demo": "embodichain.data.assets.demo_assets",
-    "eef": "embodichain.data.assets.eef_assets",
-    "materials": "embodichain.data.assets.materials",
-    "obj": "embodichain.data.assets.obj_assets",
-    "robot": "embodichain.data.assets.robot_assets",
-    "scene": "embodichain.data.assets.scene_assets",
-    "w1": "embodichain.data.assets.w1_assets",
-}
+from embodichain.data._asset_registry import (
+    _COMPAT_CATEGORY_MODULES,
+    _categories,
+    _get_registry,
+)
 
-
-def _get_asset_classes(module_path: str) -> list[tuple[str, type]]:
-    """Return (name, cls) pairs for all DownloadDataset subclasses in *module_path*."""
-    import open3d
-
-    module = importlib.import_module(module_path)
-    results: list[tuple[str, type]] = []
-    for name, obj in inspect.getmembers(module, inspect.isclass):
-        if (
-            not name.startswith("_")
-            and issubclass(obj, open3d.data.DownloadDataset)
-            and obj is not open3d.data.DownloadDataset
-            and obj.__module__ == module.__name__
-        ):
-            results.append((name, obj))
-    results.sort(key=lambda x: x[0])
-    return results
+CATEGORY_MODULES: dict[str, str] = dict(_COMPAT_CATEGORY_MODULES)
 
 
 def get_registry() -> dict[str, list[tuple[str, type]]]:
-    """Build ``{category: [(class_name, class), ...]}`` for every category."""
-    registry: dict[str, list[tuple[str, type]]] = {}
-    for category, module_path in CATEGORY_MODULES.items():
-        registry[category] = _get_asset_classes(module_path)
-    registry["robot"].extend(
-        _get_asset_classes("embodichain.data.assets.locomotion_assets")
-    )
-    registry["robot"].sort(key=lambda asset: asset[0])
-    return registry
+    """List asset classes from core modules and installed asset catalogs.
+
+    Returns:
+        Fresh category lists containing public asset IDs and their classes.
+        Classes are resolved without constructing datasets or downloading files.
+    """
+    return _get_registry()
 
 
 def find_asset_class(
@@ -142,7 +117,7 @@ def download_asset(cls_name: str, cls: type) -> bool:
     print(f"  Downloading {cls_name} ...")
     try:
         data_obj = cls()
-        _ensure_extract(data_obj, cls_name)
+        _ensure_extract(data_obj, getattr(cls, "cache_prefix", cls_name))
         print(f"  ✓ {cls_name} ready")
         return True
     except Exception as exc:
@@ -170,10 +145,12 @@ def cmd_list(args: argparse.Namespace) -> None:
             sys.exit(1)
 
         print(f"\n[{category}] ({len(assets)} assets)")
-        for cls_name, _ in assets:
+        for cls_name, cls in assets:
             # Show whether it is already downloaded
             extract_dir = os.path.join(
-                EMBODICHAIN_DEFAULT_DATA_ROOT, "extract", cls_name
+                EMBODICHAIN_DEFAULT_DATA_ROOT,
+                "extract",
+                getattr(cls, "cache_prefix", cls_name),
             )
             status = (
                 "✓" if os.path.isdir(extract_dir) and os.listdir(extract_dir) else " "
@@ -244,7 +221,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     list_parser = subparsers.add_parser("list", help="List available assets.")
     list_parser.add_argument(
         "--category",
-        choices=sorted(CATEGORY_MODULES),
+        choices=_categories(),
         help="Show only assets in this category.",
     )
 
@@ -254,7 +231,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     dl_group.add_argument("--name", help="Download a single asset by class name.")
     dl_group.add_argument(
         "--category",
-        choices=sorted(CATEGORY_MODULES),
+        choices=_categories(),
         help="Download all assets in a category.",
     )
     dl_group.add_argument(

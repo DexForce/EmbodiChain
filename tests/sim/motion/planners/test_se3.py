@@ -184,19 +184,6 @@ def test_plan_se3_line_respects_six_dimensional_limits() -> None:
     assert torch.all(result.jerks.abs().amax(dim=0) <= jerk_limit + 1e-12)
 
 
-def test_se3_screw_midpoint_matches_holistic_motion_binding() -> None:
-    start = torch.eye(4, dtype=torch.float64)
-    end = torch.tensor(
-        [
-            [0.0, -1.0, 0.0, 0.3],
-            [1.0, 0.0, 0.0, -0.2],
-            [0.0, 0.0, 1.0, 0.1],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=torch.float64,
-    )
-
-
 @pytest.mark.parametrize(
     ("profile", "duration", "mid_velocity", "mid_jerk"),
     [

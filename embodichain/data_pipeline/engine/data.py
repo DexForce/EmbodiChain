@@ -31,6 +31,7 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Literal
 from multiprocessing.sharedctypes import Synchronized, SynchronizedArray
 from multiprocessing.synchronize import Event as MpEvent
+from multiprocessing.connection import wait as wait_for_process_events
 
 import torch
 from tensordict import TensorDict
@@ -188,6 +189,7 @@ def _publish_worker_error(
 
 def _monitor_worker_process(
     process: mp.Process,
+    process_status_lock: threading.RLock,
     close_signal: MpEvent,
     error_buffer: SynchronizedArray,
     error_length: Synchronized,
@@ -196,13 +198,19 @@ def _monitor_worker_process(
 ) -> None:
     """Broadcast hard worker exits without retaining the engine instance."""
     try:
-        process.join()
-        if close_signal.is_set() or failed_signal.is_set():
-            return
-        error = RuntimeError(
-            "OnlineDataEngine simulation worker exited unexpectedly "
-            f"(exit code {process.exitcode})."
-        )
+        # Forkserver status lives in a single-consumer pipe: concurrent
+        # Process.join()/is_alive()/exitcode reads can replace a valid status
+        # with 255 after the second reader gets EOF. Readiness waiting does not
+        # consume that pipe and must not hold the owner-side shutdown lock.
+        wait_for_process_events([process.sentinel])
+        with process_status_lock:
+            if close_signal.is_set() or failed_signal.is_set():
+                return
+            process.join(timeout=0)
+            error = RuntimeError(
+                "OnlineDataEngine simulation worker exited unexpectedly "
+                f"(exit code {process.exitcode})."
+            )
     except BaseException as caught_error:
         if close_signal.is_set():
             return
@@ -1276,6 +1284,7 @@ class OnlineDataEngine:
         # Handle to the simulation subprocess, set in start() and used in stop().
         self._sim_process: mp.Process | None = None
         self._monitor_thread: threading.Thread | None = None
+        self._process_status_lock = threading.RLock()
         self._channel_error: BaseException | None = None
         self._worker_error: BaseException | None = None
 
@@ -1324,6 +1333,7 @@ class OnlineDataEngine:
                     target=_monitor_worker_process,
                     args=(
                         process,
+                        self._process_status_lock,
                         self._close_signal,
                         self._worker_error_buffer,
                         self._worker_error_length,
@@ -1427,19 +1437,23 @@ class OnlineDataEngine:
                 )
             return
 
-        if self._sim_process is None:
-            error = RuntimeError("OnlineDataEngine simulation worker was not created.")
-            self._record_worker_error(error)
-            raise error
-        if self._sim_process.is_alive():
-            return
-
-        self._sim_process.join(timeout=0)
+        with self._process_status_lock:
+            process = self._sim_process
+            if process is None:
+                error = RuntimeError(
+                    "OnlineDataEngine simulation worker was not created."
+                )
+                self._record_worker_error(error)
+                raise error
+            if process.is_alive():
+                return
+            process.join(timeout=0)
+            exit_code = process.exitcode
         worker_error = self._receive_worker_error()
         if worker_error is None:
             worker_error = RuntimeError(
                 "OnlineDataEngine simulation worker exited unexpectedly "
-                f"(exit code {self._sim_process.exitcode})."
+                f"(exit code {exit_code})."
             )
             self._record_worker_error(worker_error)
         self._set_state(OnlineDataEngineState.FAILED)
@@ -1602,6 +1616,19 @@ class OnlineDataEngine:
         """Whether the engine is ready to serve initialized data."""
         return self.state is OnlineDataEngineState.READY
 
+    def check_health(self) -> None:
+        """Require a ready engine and surface existing worker failures.
+
+        This check neither samples data nor requests a refill. It checks worker
+        liveness through the existing owner/consumer error channel.
+
+        Raises:
+            RuntimeError: If the engine is not READY or its worker has exited.
+            BaseException: The original reported worker or startup exception.
+        """
+        self._check_sampling_budget_health()
+        self._require_state(OnlineDataEngineState.READY, "check_health")
+
     # -----------------------------------------------------------------------
     # Sampling
     # -----------------------------------------------------------------------
@@ -1743,7 +1770,7 @@ class OnlineDataEngine:
         if sampling_mode == "boundary" and chunk_size < 2:
             raise ValueError("boundary sampling requires chunk_size >= 2.")
 
-        # Hold the producer's window lock through the final clone. The worker
+        # Hold the producer's window lock through the indexed copy. The worker
         # may continue writing its already-advertised window, which is excluded
         # below, but cannot switch to one of our selected rows until the copy is
         # complete.
@@ -1880,15 +1907,17 @@ class OnlineDataEngine:
                     future,
                     segment_ids if sampling_mode == "segment" else None,
                 )
-                result = self.shared_buffer[row_indices[:, None], indices].clone()
+                # Two tensor indices gather independent storage for every leaf;
+                # cloning that owned result would copy the complete batch twice.
+                result = self.shared_buffer[row_indices[:, None], indices]
                 _pad_context(result, mask, loss_mask)
             else:
                 time_offsets = torch.arange(chunk_size, device=start_indices.device)
                 time_indices = start_indices[:, None] + time_offsets[None, :]
-                result = self.shared_buffer[row_indices[:, None], time_indices].clone()
+                result = self.shared_buffer[row_indices[:, None], time_indices]
 
             if sampling_budget is not None:
-                # Clone and padding must succeed before any quota is spent.
+                # Copy and padding must succeed before any quota is spent.
                 # A later optimizer/consumer failure does not refund delivery.
                 error = self._receive_worker_error()
                 if error is not None:
@@ -2035,6 +2064,70 @@ class OnlineDataEngine:
         if self.state is OnlineDataEngineState.READY:
             self._ensure_worker_alive()
 
+    def _unlocked_sampling_chunks(
+        self, quota_rows: list[int], write_start: int, write_end: int
+    ) -> int:
+        """Sum coarse eligible quota while the caller holds the copy lock."""
+        valid = self.shared_buffer["valid"].bool()
+        continuity = self.shared_buffer.get("continuity_id", None)
+        eligible = (
+            (valid if continuity is None else valid & (continuity >= 0))
+            .any(-1)
+            .tolist()
+        )
+        return sum(
+            quota_rows[slot * 4 + 2] - quota_rows[slot * 4 + 3]
+            for slot in range(self.buffer_size)
+            if quota_rows[slot * 4] >= 0
+            and not write_start <= slot < write_end
+            and eligible[slot]
+        )
+
+    def get_flow_status(self) -> dict[str, int | None]:
+        """Return detached counters for READY-only host flow control.
+
+        Producer counters and quota totals use separate lock snapshots. The
+        quota sum includes only published, unlocked rows with a valid anchor
+        and nonnegative continuity when continuity metadata is present. It is
+        a coarse bound; sequence lengths and filters may reduce eligibility.
+        This method creates no per-row audit records or payload copies.
+
+        Returns:
+            Requested/completed generations and successful episodes, plus
+            ``unlocked_remaining_chunks`` and lifetime ``total_delivered_chunks``.
+            Quota counters are None when protection is disabled.
+
+        Raises:
+            RuntimeError: If the engine is not READY or its worker has exited.
+            BaseException: The original reported worker or startup exception.
+        """
+        self.check_health()
+        with self._progress.values.get_lock():
+            values = self._progress.values[:3]
+        status: dict[str, int | None] = {
+            name: int(value)
+            for name, value in zip(
+                ("requested_generation", "completed_generation", "successful_episodes"),
+                values,
+            )
+        }
+        quota = getattr(self, "_sampling_budget", None)
+        if quota is None:
+            return {
+                **status,
+                "unlocked_remaining_chunks": None,
+                "total_delivered_chunks": None,
+            }
+        with self._lock_index.get_lock():
+            self.check_health()
+            start, end = self._lock_index[:]
+            quota_rows = quota.rows[:]
+            status["unlocked_remaining_chunks"] = self._unlocked_sampling_chunks(
+                quota_rows, start, end
+            )
+            status["total_delivered_chunks"] = quota.meta[1]
+        return status
+
     def get_sampling_budget_snapshot(self) -> dict[str, object]:
         """Return a detached quota audit under the producer/sampling copy lock.
 
@@ -2060,17 +2153,11 @@ class OnlineDataEngine:
         with self._lock_index.get_lock():
             self._check_sampling_budget_health()
             start, end = self._lock_index[:]
-            valid = self.shared_buffer["valid"].bool()
-            continuity = self.shared_buffer.get("continuity_id", None)
-            eligible = (
-                (valid if continuity is None else valid & (continuity >= 0))
-                .any(-1)
-                .tolist()
-            )
+            quota_rows = quota.rows[:]
+            unlocked = self._unlocked_sampling_chunks(quota_rows, start, end)
             rows = []
-            unlocked = 0
             for slot in range(self.buffer_size):
-                episode_id, generation, assigned, delivered = quota.rows[
+                episode_id, generation, assigned, delivered = quota_rows[
                     slot * 4 : slot * 4 + 4
                 ]
                 if episode_id < 0:
@@ -2089,8 +2176,6 @@ class OnlineDataEngine:
                         "locked": locked,
                     }
                 )
-                if not locked and eligible[slot]:
-                    unlocked += remaining
             return {
                 "enabled": True,
                 "rows": rows,
@@ -2180,10 +2265,11 @@ class OnlineDataEngine:
             return error
 
         try:
-            if process.is_alive():
-                return None
-            process.join(timeout=0)
-            exit_code = process.exitcode
+            with self._process_status_lock:
+                if process.is_alive():
+                    return None
+                process.join(timeout=0)
+                exit_code = process.exitcode
         except BaseException as inspection_error:
             error = RuntimeError(
                 "OnlineDataEngine could not inspect its simulation worker before "
@@ -2215,46 +2301,49 @@ class OnlineDataEngine:
 
         forced_shutdown = False
 
-        try:
-            is_alive = process.is_alive()
-        except ValueError:
-            is_alive = False
+        with self._process_status_lock:
+            try:
+                is_alive = process.is_alive()
+            except ValueError:
+                is_alive = False
 
-        try:
-            process.join(timeout=self.cfg.shutdown_timeout if is_alive else 0)
-        except (AssertionError, ValueError):
-            pass
+            try:
+                process.join(timeout=self.cfg.shutdown_timeout if is_alive else 0)
+            except (AssertionError, ValueError):
+                pass
 
-        try:
-            is_alive = process.is_alive()
-        except ValueError:
-            is_alive = False
-        if is_alive:
-            forced_shutdown = True
-            self._forced_shutdown_attempted = True
-            process.terminate()
-            process.join(timeout=3.0)
+            try:
+                is_alive = process.is_alive()
+            except ValueError:
+                is_alive = False
+            if is_alive:
+                forced_shutdown = True
+                self._forced_shutdown_attempted = True
+                process.terminate()
+                process.join(timeout=3.0)
 
-        try:
-            is_alive = process.is_alive()
-        except ValueError:
-            is_alive = False
-        if is_alive and hasattr(process, "kill"):
-            forced_shutdown = True
-            self._forced_shutdown_attempted = True
-            process.kill()
-            process.join(timeout=1.0)
+            try:
+                is_alive = process.is_alive()
+            except ValueError:
+                is_alive = False
+            if is_alive and hasattr(process, "kill"):
+                forced_shutdown = True
+                self._forced_shutdown_attempted = True
+                process.kill()
+                process.join(timeout=1.0)
 
-        try:
-            is_alive = process.is_alive()
-        except ValueError:
-            is_alive = False
-        if is_alive:
-            raise RuntimeError(
-                "OnlineDataEngine simulation worker remained alive after "
-                "graceful shutdown, terminate(), and kill()."
-            )
+            try:
+                is_alive = process.is_alive()
+            except ValueError:
+                is_alive = False
+            if is_alive:
+                raise RuntimeError(
+                    "OnlineDataEngine simulation worker remained alive after "
+                    "graceful shutdown, terminate(), and kill()."
+                )
 
+        # The monitor may be waiting for the status lock after its sentinel
+        # became ready. Never join that thread while holding the same lock.
         monitor_thread = self._monitor_thread
         if (
             monitor_thread is not None
@@ -2266,9 +2355,10 @@ class OnlineDataEngine:
                     "OnlineDataEngine worker monitor did not stop after the worker exited."
                 )
 
-        if hasattr(process, "close"):
-            process.close()
-        self._sim_process = None
+        with self._process_status_lock:
+            if hasattr(process, "close"):
+                process.close()
+            self._sim_process = None
         self._monitor_thread = None
         return forced_shutdown
 
@@ -2388,6 +2478,7 @@ class OnlineDataEngine:
         state["_sim_process"] = None
         state["_monitor_thread"] = None
         state["_lifecycle_condition"] = None
+        state["_process_status_lock"] = None
         state["_channel_error"] = None
         state["_worker_error"] = None
         return state
@@ -2396,6 +2487,7 @@ class OnlineDataEngine:
         """Restore process-local synchronization after consumer deserialization."""
         self.__dict__.update(state)
         self._lifecycle_condition = threading.Condition(threading.RLock())
+        self._process_status_lock = threading.RLock()
 
     def __del__(self) -> None:
         try:

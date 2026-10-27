@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import torch
 import pytest
+
+from solver_support import assert_pose_ik_roundtrip
 import numpy as np
 import warp as wp
 
@@ -422,46 +424,6 @@ def test_ur_nearest_cuda_matches_full_candidates(seed_dtype: torch.dtype) -> Non
     assert valid.all()
 
 
-def grid_sample_qpos_from_limits(
-    qpos_limits: torch.Tensor,
-    steps_per_joint: int = 4,
-    device=None,
-    max_samples: int = 4096,
-    safe_margin: float = 5 / 180 * np.pi,  # 5 degrees in radians
-) -> torch.Tensor:
-    """Generate grid samples for qpos from qpos_limits.
-
-    Args:
-        qpos_limits: tensor of shape (1, n, 2) or (n, 2) where each row is [low, high].
-        steps_per_joint: number of values per joint (defaults to 2: low and high).
-        device: torch device to place the samples on.
-        max_samples: cap the number of returned samples (take first N if grid is larger).
-
-    Returns:
-        Tensor of shape (N, n) where N <= max_samples.
-    """
-    if device is None:
-        device = qpos_limits.device
-
-    limits = qpos_limits.squeeze(0) if qpos_limits.dim() == 3 else qpos_limits
-    lows = limits[:, 0].to(device) + safe_margin * 1.01
-    highs = limits[:, 1].to(device) - safe_margin * 1.01
-
-    # create per-joint linspaces
-    grids = [
-        torch.linspace(l.item(), h.item(), steps_per_joint, device=device)
-        for l, h in zip(lows, highs)
-    ]
-
-    # meshgrid and stack
-    mesh = torch.meshgrid(*grids, indexing="ij")
-    stacked = torch.stack([m.reshape(-1) for m in mesh], dim=1)
-
-    if stacked.shape[0] > max_samples:
-        return stacked[:max_samples]
-    return stacked
-
-
 class BaseSolverTest:
     """Shared FK/IK contract for UR arms on CPU and CUDA."""
 
@@ -521,63 +483,8 @@ class BaseSolverTest:
         self.robot: Robot = self.sim.add_robot(cfg=cfg)
         self.sim.prepare()
 
-    def test_ik(self):
-        # Test inverse kinematics (IK) with a 1x4x4 homogeneous matrix pose and a joint_seed
-        arm_name = "arm"
-        # generate a small grid of qpos samples from the joint limits (low/high)
-        qpos_limit = self.robot.get_qpos_limits(name=arm_name)
-        sample_qpos = grid_sample_qpos_from_limits(
-            qpos_limit, steps_per_joint=8, device=self.robot.device, max_samples=65536
-        )
-        sample_qpos = sample_qpos[None, :, :]
-        fk_xpos = self.robot.compute_batch_fk(
-            qpos=sample_qpos, name=arm_name, to_matrix=True
-        )
-        fk_xpos_xyzquat = self.robot.compute_batch_fk(
-            qpos=sample_qpos, name=arm_name, to_matrix=False
-        )
-
-        matrix_success, ik_qpos = self.robot.compute_batch_ik(
-            pose=fk_xpos, joint_seed=sample_qpos, name=arm_name
-        )
-
-        xyzquat_success, ik_qpos_xyzquat = self.robot.compute_batch_ik(
-            pose=fk_xpos_xyzquat, joint_seed=sample_qpos, name=arm_name
-        )
-
-        assert torch.equal(matrix_success, xyzquat_success)
-        assert matrix_success.all()
-        matrix_ik_xpos = self.robot.compute_batch_fk(
-            qpos=ik_qpos, name=arm_name, to_matrix=True
-        )
-        xyzquat_ik_xpos = self.robot.compute_batch_fk(
-            qpos=ik_qpos_xyzquat, name=arm_name, to_matrix=True
-        )
-        assert torch.allclose(
-            fk_xpos, matrix_ik_xpos, atol=5e-3, rtol=5e-3
-        ), f"Matrix-pose IK does not reconstruct FK for {arm_name}"
-        assert torch.allclose(
-            fk_xpos, xyzquat_ik_xpos, atol=5e-3, rtol=5e-3
-        ), f"XYZ-quaternion IK does not reconstruct FK for {arm_name}"
-        # test for failed xpos
-        invalid_pose = torch.tensor(
-            [
-                [
-                    [1.0, 0.0, 0.0, 10.0],
-                    [0.0, 1.0, 0.0, 10.0],
-                    [0.0, 0.0, 1.0, 10.0],
-                    [0.0, 0.0, 0.0, 1.0],
-                ]
-            ],
-            dtype=torch.float32,
-            device=self.robot.device,
-        )
-        res, ik_qpos = self.robot.compute_ik(
-            pose=invalid_pose, joint_seed=ik_qpos[:, 0, :], name=arm_name
-        )
-        dof = ik_qpos.shape[-1]
-        assert res[0] == False
-        assert ik_qpos.shape == (1, dof)
+    def test_ik(self) -> None:
+        assert_pose_ik_roundtrip(self.robot, "arm", safe_margin=5 / 180 * np.pi)
 
     def teardown_method(self):
         """Clean up resources after each test method."""

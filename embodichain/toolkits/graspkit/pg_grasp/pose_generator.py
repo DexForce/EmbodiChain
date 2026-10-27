@@ -72,6 +72,13 @@ class AntipodalGraspPoseGeneratorCfg:
     approach_deviation_angle: float = math.pi / 6
     """Maximum candidate deviation from the requested approach direction."""
 
+    approach_alignment_angle: float | None = None
+    """Hard TCP-Z approach angle in radians, applied before NMS and ranking.
+
+    ``None`` retains the unconstrained candidate pool. Proposal cones remain
+    controlled separately by ``approach_deviation_angle``.
+    """
+
     approach_direction_samples: int = 4
     """Number of approach-direction variants evaluated per antipodal pair."""
 
@@ -104,6 +111,14 @@ class AntipodalGraspPoseGeneratorCfg:
             field_name="approach_deviation_angle",
             minimum=0.0,
         )
+        if self.approach_alignment_angle is not None:
+            self.approach_alignment_angle = _real_number(
+                self.approach_alignment_angle,
+                field_name="approach_alignment_angle",
+                minimum=0.0,
+            )
+            if self.approach_alignment_angle > math.pi:
+                raise ValueError("approach_alignment_angle must be at most pi.")
         if self.center_mode not in {"bounds", "centroid"}:
             raise ValueError("center_mode must be 'bounds' or 'centroid'.")
 
@@ -326,6 +341,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 open_check_margin=collision.opening_margin,
             ),
             max_deviation_angle=algorithm.approach_deviation_angle,
+            approach_alignment_angle=algorithm.approach_alignment_angle,
             approach_direction_samples=algorithm.approach_direction_samples,
             max_candidates=algorithm.max_candidates,
             interactive_annotation=annotation.selection_mode == "interactive",

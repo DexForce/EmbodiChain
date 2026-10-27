@@ -42,19 +42,19 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import CuroboPlanner
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult
 from embodichain.toolkits.graspkit import GraspPoseGenerator
-from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.config import DomainCfg, load_suite
-from scripts.benchmark.motion_generation.metrics.trajectory import (
+from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
+from embodichain_benchmarks.motion_generation.config import DomainCfg, load_suite
+from embodichain_benchmarks.motion_generation.metrics.trajectory import (
     _trajectory_derivatives,
     compute_case_outcomes,
     compute_waypoint_errors,
     match_ordered_joint_waypoints,
     match_ordered_waypoints,
 )
-from scripts.benchmark.motion_generation import (
+from embodichain_benchmarks.motion_generation import (
     scenarios as _scenarios,
 )  # noqa: F401
-from scripts.benchmark.motion_generation.models import (
+from embodichain_benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -62,26 +62,26 @@ from scripts.benchmark.motion_generation.models import (
     TrialPhase,
     TrialRecord,
 )
-from scripts.benchmark.motion_generation.registry import (
+from embodichain_benchmarks.motion_generation.registry import (
     create_scenario_provider,
     scenario_provider_names,
 )
-from scripts.benchmark.motion_generation.reporting import (
+from embodichain_benchmarks.motion_generation.reporting import (
     write_markdown_report,
 )
-from scripts.benchmark.motion_generation.run_benchmark import (
+from embodichain_benchmarks.motion_generation.cli import (
     _apply_overrides,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_grasps import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_grasps import (
     FrozenArticulationGraspPoseGenerator,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_evaluation import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_evaluation import (
     executed_final_pose_errors,
 )
-from scripts.benchmark.motion_generation.atomic_skill import (
+from embodichain_benchmarks.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 
@@ -493,7 +493,7 @@ def _json_round_tripped_outcomes(trial: TrialRecord) -> tuple[CaseOutcome, ...]:
 
 
 def test_motion_across_a_zero_interval_is_an_unbounded_velocity_violation(tmp_path):
-    from scripts.benchmark.motion_generation.artifacts import (
+    from embodichain_benchmarks.motion_generation.artifacts import (
         TrialJsonlWriter,
         write_json,
     )
@@ -610,9 +610,11 @@ def test_suite_stated_velocity_limit_overrides_a_placeholder_asset():
 
 def _nmg_adapter(**config):
     """Build an NMG adapter against a stub context, without loading a policy."""
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     robot = Mock(device=torch.device("cpu"))
     robot.get_qvel_limits = Mock(
@@ -694,7 +696,7 @@ def test_nmg_cli_overrides_reach_every_nmg_row():
     # A checkpoint supplied on the command line must reach the paired row too;
     # otherwise its availability check skips it and no comparison runs.
     suite = load_suite(
-        "scripts/benchmark/motion_generation/suites/motion_panda_free_space_smoke.yaml"
+        "extensions/embodichain_benchmarks/motion_generation/suites/motion_panda_free_space_smoke.yaml"
     )
     _apply_overrides(suite, nmg_onnx_path="/tmp/policy.onnx", nmg_pos_eps=0.02)
     rows = {
@@ -710,7 +712,9 @@ def test_nmg_cli_overrides_reach_every_nmg_row():
     "suite_name", ["motion_panda_free_space_coverage", "motion_panda_free_space_smoke"]
 )
 def test_free_space_suites_pair_a_nominal_and_a_retimed_nmg_row(suite_name):
-    suite = load_suite(f"scripts/benchmark/motion_generation/suites/{suite_name}.yaml")
+    suite = load_suite(
+        f"extensions/embodichain_benchmarks/motion_generation/suites/{suite_name}.yaml"
+    )
     rows = {
         spec.id: bool(spec.config.get("retime", False))
         for spec in suite.planners
@@ -923,12 +927,12 @@ def test_dynamic_limit_tolerance_must_be_finite_and_non_negative(tolerance):
 
 
 def test_only_planners_that_solve_timing_declare_it():
-    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
-    from scripts.benchmark.motion_generation.planners.curobo import CuroboAdapter
-    from scripts.benchmark.motion_generation.planners.ik_interpolate import (
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerAdapter
+    from embodichain_benchmarks.motion_generation.planners.curobo import CuroboAdapter
+    from embodichain_benchmarks.motion_generation.planners.ik_interpolate import (
         IkInterpolateAdapter,
     )
-    from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
+    from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
 
     # An adapter that declares nothing is not judged on an unsolved clock.
     assert PlannerAdapter.timing_is_solved is False
@@ -1047,7 +1051,7 @@ def test_missing_positions_and_joint_limit_violation_fail_motion_valid():
     # Reach the waypoint at x=2 while joint 0 is outside [-1, 1].
     case.target_waypoints[0, 0, 0, 3] = 2.0
     positions = torch.zeros(1, 2, 7)
-    positions[0, :, 0] = 2.0
+    positions[0, -1, 0] = 2.0
     violated = compute_case_outcomes(
         _timed_plan_result(positions, success=True),
         case,
@@ -1062,6 +1066,39 @@ def test_missing_positions_and_joint_limit_violation_fail_motion_valid():
     assert violated[0].joint_limit_violation is True
     assert violated[0].motion_valid is False
     assert violated[0].failure_code == "joint_limit_violation"
+
+
+@pytest.mark.parametrize("point_count", [1, 2])
+@pytest.mark.parametrize("invalid", [math.nan, math.inf])
+def test_validation_resampling_isolates_non_finite_batch_rows(
+    point_count: int, invalid: float
+) -> None:
+    case = replace(
+        _case(),
+        batch_size=2,
+        start_qpos=torch.zeros(2, 7),
+        target_waypoints=torch.eye(4).repeat(2, 1, 1, 1),
+        reference_qpos=torch.zeros(2, 1, 7),
+    )
+    positions = torch.zeros(2, point_count, 7, dtype=torch.float64)
+    positions[1, -1, 0] = invalid
+    original = positions.clone()
+
+    outcomes = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )
+
+    assert outcomes[0].geometry_valid is True
+    assert outcomes[1].finite is False
+    assert outcomes[1].failure_code == "non_finite_trajectory"
+    torch.testing.assert_close(positions, original, equal_nan=True)
 
 
 def test_non_finite_trajectory_skips_joint_limit_metrics():
@@ -1104,9 +1141,11 @@ def test_nmg_precision_and_external_accuracy_are_independently_configurable():
 
 
 def test_nmg_model_revision_is_derived_from_runtime_model_path():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1127,9 +1166,11 @@ def test_nmg_model_revision_is_derived_from_runtime_model_path():
 
 
 def test_nmg_over_capacity_case_is_explicitly_unsupported_without_truncation():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1160,10 +1201,59 @@ def test_nmg_over_capacity_case_is_explicitly_unsupported_without_truncation():
     assert "not truncated or split" in reason
 
 
+@pytest.mark.parametrize(
+    "modalities,translation,supported",
+    [
+        (["position"], None, True),
+        (["position"], (0.0, 0.0, 0.0), True),
+        (["position"], (0.0, 0.0, 1.0e-8), True),
+        (["position"], (0.0, 0.0, 0.1), False),
+        (["joint", "position"], (-0.1, 0.0, 0.0), False),
+        (["pose", "position"], (0.0, 0.1, 0.0), False),
+        (["joint", "orientation", "pose"], (0.1, 0.0, 0.0), True),
+    ],
+)
+def test_nmg_case_support_respects_position_only_tcp_origin_requirement(
+    modalities: list[str],
+    translation: tuple[float, float, float] | None,
+    supported: bool,
+) -> None:
+    transform = None
+    if translation is not None:
+        tcp_pose = torch.eye(4)
+        # A rotation between coincident TCP origins remains representable.
+        tcp_pose[:2, :2] = torch.tensor([[0.0, -1.0], [1.0, 0.0]])
+        tcp_pose[:3, 3] = torch.tensor(translation)
+        transform = tcp_pose.tolist()
+    adapter = _nmg_adapter(runtime_tcp_from_policy_tcp=transform)
+    waypoint_count = len(modalities)
+    case = replace(
+        _case(),
+        num_waypoints=waypoint_count,
+        target_waypoints=torch.eye(4).repeat(1, waypoint_count, 1, 1),
+        reference_qpos=torch.zeros(1, waypoint_count, 7),
+        case_parameters={
+            "motion_validity": "ordered_constraint_waypoints",
+            "constraint_modalities": modalities,
+        },
+    )
+
+    actual_supported, reason = adapter.supports_case(case)
+
+    assert actual_supported is supported
+    if supported:
+        assert reason is None
+    else:
+        assert reason is not None
+        assert "TCP origins" in reason
+
+
 def test_nmg_case_budget_is_thirty_steps_per_waypoint():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1186,9 +1276,11 @@ def test_nmg_case_budget_is_thirty_steps_per_waypoint():
 
 
 def test_nmg_joint_case_uses_joint_constraint_waypoints():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1236,9 +1328,9 @@ def test_nmg_joint_case_uses_joint_constraint_waypoints():
 
 
 def _curobo_adapter():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.curobo import CuroboAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.curobo import CuroboAdapter
 
     adapter = CuroboAdapter(
         PlannerSpecCfg(
@@ -1330,9 +1422,11 @@ def test_curobo_joint_case_uses_reference_joint_waypoints():
 
 
 def test_nmg_rejects_unknown_motion_validity():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1367,7 +1461,7 @@ def test_seed_override_applies_to_atomic_tracks():
 
     _apply_overrides(suite, seeds=[104])
 
-    assert suite.free_space.seeds == [104]
+    assert suite.tracks[0].config["seeds"] == [104]
     assert suite.enabled_tracks()[0].config["seeds"] == [104]
 
 
@@ -1382,7 +1476,7 @@ def test_seed_override_adds_missing_atomic_track_seeds():
 
 
 def test_free_space_overrides_reach_each_configured_track():
-    from scripts.benchmark.motion_generation.config import SuiteCfg
+    from embodichain_benchmarks.motion_generation.config import SuiteCfg
 
     suite = SuiteCfg.from_dict(
         {
@@ -1418,8 +1512,16 @@ def test_free_space_overrides_reach_each_configured_track():
     ]
 
 
-def test_atomic_skill_antipodal_grasp_uses_standalone_generator(monkeypatch):
-    from scripts.tutorials.atomic_action import tutorial_utils
+@pytest.mark.parametrize("batch_size,unreachable_row", [(1, None), (8, None), (8, 7)])
+def test_atomic_skill_antipodal_grasp_uses_standalone_generator(
+    monkeypatch, batch_size, unreachable_row
+):
+    from contextlib import nullcontext
+    from types import MethodType, SimpleNamespace
+
+    from embodichain_benchmarks.motion_generation import _atomic_fixtures
+
+    from embodichain.lab.sim.objects.robot import Robot
 
     vertices = torch.tensor(
         [[-0.025, -0.025, -0.025], [0.025, 0.025, 0.025]],
@@ -1434,41 +1536,181 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(monkeypatch):
     candidate = torch.eye(4)
     candidate[1, 1] = -1.0
     candidate[2, 2] = -1.0
+    alternative = candidate.clone()
+    alternative[0, 3] = 0.02
     generator = Mock()
-    generator.get_valid_grasp_poses.return_value = [
-        (candidate.unsqueeze(0), torch.tensor([0.25]))
-    ]
     generator_factory = Mock(return_value=generator)
     monkeypatch.setattr(
-        tutorial_utils,
+        _atomic_fixtures,
         "create_parallel_jaw_grasp_pose_generator",
         generator_factory,
     )
+    object_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    angles = torch.arange(batch_size) * 0.1
+    object_pose[:, 0, 0] = angles.cos()
+    object_pose[:, 0, 1] = -angles.sin()
+    object_pose[:, 1, 0] = angles.sin()
+    object_pose[:, 1, 1] = angles.cos()
+    object_pose[:, 0, 3] = torch.arange(batch_size) * 0.1
+    pools = []
+    for row in range(batch_size):
+        row_candidates = object_pose[row] @ torch.stack([candidate, alternative])
+        # Row-specific offsets cannot be reconstructed by copying row zero.
+        row_candidates[:, 1, 3] += row * 0.001
+        pools.append((row_candidates, torch.tensor([0.25, 0.5])))
+    generator.get_valid_grasp_poses.return_value = pools
+    starts = torch.arange(batch_size).unsqueeze(1).expand(-1, 7) * 0.01
+    calls = []
 
+    def solve(*, target_xpos, qpos_seed, return_all_solutions):
+        assert bool(torch.isfinite(qpos_seed).all())
+        calls.append((target_xpos.clone(), qpos_seed.clone()))
+        success = torch.ones(batch_size, dtype=torch.bool)
+        solved = qpos_seed + 0.01
+        if batch_size > 1:
+            # Row one needs the half-turn: its original fails at the middle
+            # waypoint and returns NaNs, while other rows must finish the chain.
+            original_x = pools[1][0][0, :3, 0]
+            if (
+                torch.dot(target_xpos[1, :3, 0], original_x) > 0
+                and abs(float(target_xpos[1, 2, 3])) < 0.001
+            ):
+                success[1] = False
+                solved[1] = torch.nan
+            # The final row needs the next candidate: both half-turns fail
+            # only at the lift, after its first two waypoints have succeeded.
+            if (
+                torch.linalg.vector_norm(
+                    target_xpos[-1, :2, 3] - object_pose[-1, :2, 3]
+                )
+                < 0.01
+                and abs(float(target_xpos[-1, 2, 3]) - 0.16) < 0.001
+            ):
+                success[-1] = False
+        if unreachable_row is not None:
+            success[unreachable_row] = False
+        return success, solved
+
+    robot = SimpleNamespace(
+        device=torch.device("cpu"),
+        _all_indices=torch.arange(batch_size),
+        _solvers={"arm": SimpleNamespace(root_link_name="base", get_ik=solve)},
+        get_link_pose=lambda **kwargs: torch.eye(4).repeat(
+            len(kwargs["env_ids"]), 1, 1
+        ),
+    )
+    # Keep the real row-count and environment selection boundary, mocking only
+    # the native solver/scene. A shape-permissive Mock concealed the B8 bug.
+    robot.compute_ik = MethodType(Robot.compute_ik, robot)
     scenario = AtomicSkillScenario()
-    scenario.robot = Mock(device=torch.device("cpu"))
-    scenario.robot.compute_ik.return_value = (
-        torch.tensor([True]),
-        torch.zeros(1, 7),
+    scenario.robot = robot
+    expectation = (
+        nullcontext()
+        if unreachable_row is None
+        else pytest.raises(RuntimeError, match=r"environment rows \[7\]")
     )
-    result = scenario.resolve_antipodal_grasp(
-        handle,
-        torch.eye(4).unsqueeze(0),
-        torch.tensor([0.0, 0.0, -1.0]),
-        seed=11,
-        start_qpos=torch.zeros(1, 7),
-        pre_grasp_distance=0.15,
-        lift_height=0.16,
-        n_sample=321,
-        max_candidates=8,
-        alignment_max_angle_deg=10.0,
-    )
+    with expectation:
+        result = scenario.resolve_antipodal_grasp(
+            handle,
+            object_pose,
+            torch.tensor([0.0, 0.0, -1.0]),
+            seed=11,
+            start_qpos=starts,
+            pre_grasp_distance=0.15,
+            lift_height=0.16,
+            n_sample=321,
+            max_candidates=8,
+            alignment_max_angle_deg=10.0,
+        )
 
-    generator_factory.assert_called_once_with(n_sample=321, force_refresh=False)
+    generator_factory.assert_called_once_with(
+        n_sample=321, force_refresh=False, max_candidates=8
+    )
     call = generator.get_valid_grasp_poses.call_args.kwargs
     assert torch.equal(call["mesh_vertices"], vertices)
     assert torch.equal(call["mesh_triangles"], triangles)
-    assert torch.equal(result, candidate.unsqueeze(0))
+    if unreachable_row is not None:
+        return
+    expected = torch.stack([pool[0][0] for pool in pools])
+    if batch_size > 1:
+        expected[1, :3, :2] *= -1
+        expected[-1] = pools[-1][0][1]
+    torch.testing.assert_close(result, expected)
+    assert len(calls) == (3 if batch_size == 1 else 9)
+    # Every candidate starts from the original per-row seed. Accepted and
+    # rejected rows remain isolated while the still-eligible row progresses.
+    for index, (_pose, seed) in enumerate(calls[-3:]):
+        torch.testing.assert_close(seed[-1], starts[-1] + index * 0.01)
+    torch.testing.assert_close(calls[-2][0][-1], expected[-1])
+
+
+@pytest.mark.parametrize("env_ids", [[3], [3, 1]])
+def test_atomic_screen_selects_its_robot_environments(monkeypatch, env_ids):
+    from types import MethodType, SimpleNamespace
+
+    from embodichain_benchmarks.motion_generation import _atomic_fixtures
+
+    from embodichain.lab.sim.objects.robot import Robot
+
+    object_pose = torch.eye(4).repeat(len(env_ids), 1, 1)
+    object_pose[:, 0, 3] = torch.tensor(env_ids) * 0.1
+    candidates = object_pose.clone()
+    candidates[:, 1, 1] = candidates[:, 2, 2] = -1.0
+    generator = Mock()
+    generator.get_valid_grasp_poses.return_value = [
+        (candidate.unsqueeze(0), torch.tensor([0.25])) for candidate in candidates
+    ]
+    monkeypatch.setattr(
+        _atomic_fixtures,
+        "create_parallel_jaw_grasp_pose_generator",
+        lambda **kw: generator,
+    )
+    monkeypatch.setattr(
+        _atomic_fixtures,
+        "create_antipodal_semantics",
+        lambda *args, **kwargs: SimpleNamespace(
+            affordance=SimpleNamespace(
+                mesh_vertices=torch.zeros(3, 3), mesh_triangles=torch.zeros(1, 3)
+            )
+        ),
+    )
+    selections = []
+    solved = []
+
+    def root_pose(*, env_ids, **kwargs):
+        selections.append(list(env_ids))
+        pose = torch.eye(4).repeat(len(env_ids), 1, 1)
+        pose[:, 0, 3] = torch.as_tensor(env_ids) * 0.1
+        return pose
+
+    def solve(*, target_xpos, qpos_seed, **kwargs):
+        solved.append(target_xpos.clone())
+        return torch.ones(len(qpos_seed), dtype=torch.bool), qpos_seed.clone()
+
+    robot = SimpleNamespace(
+        device=torch.device("cpu"),
+        _all_indices=torch.arange(8),
+        _solvers={"arm": SimpleNamespace(root_link_name="base", get_ik=solve)},
+        get_link_pose=root_pose,
+    )
+    robot.compute_ik = MethodType(Robot.compute_ik, robot)
+    scenario = AtomicSkillScenario()
+    scenario.robot = robot
+    result = scenario.screen_antipodal_grasp(
+        Mock(object_id="cube"),
+        object_pose,
+        torch.tensor([0.0, 0.0, -1.0]),
+        seed=11,
+        start_qpos=torch.zeros(len(env_ids), 7),
+        n_sample=321,
+        max_candidates=8,
+        alignment_max_angle_deg=10.0,
+        waypoint_poses=lambda grasp: [grasp],
+        env_ids=env_ids,
+    )
+    assert selections == [env_ids]
+    torch.testing.assert_close(result, candidates)
+    torch.testing.assert_close(solved[0][:, :3, 3], torch.zeros(len(env_ids), 3))
 
 
 def test_atomic_skill_pickup_builds_engine_owned_endpoint_binding():
@@ -1997,7 +2239,7 @@ class _FrankaLimitRobot(_MetricRobot):
         return torch.stack([lower, upper], dim=-1).unsqueeze(0)
 
 
-def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
+def test_suite_loads_tracks_and_keeps_mutable_track_config():
     suite = load_suite("motion_panda_free_space_smoke")
 
     assert [track.id for track in suite.enabled_tracks()] == ["free-space-common"]
@@ -2006,14 +2248,17 @@ def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
     provider = create_scenario_provider("free_space")
     assert provider.batch_sizes(suite, suite.enabled_tracks()[0]) == [1]
 
-    suite.free_space.batch_sizes = [1, 8]
+    suite.tracks[0].config["batch_sizes"] = [1, 8]
     suite.validate_benchmark()
     assert suite.enabled_tracks()[0].config["batch_sizes"] == [1, 8]
 
 
 def test_free_space_domain_overrides_change_the_generated_case_matrix():
     suite = load_suite("motion_panda_free_space_smoke")
-    suite.free_space.target_types = ["eef"]
+    suite.tracks[0].config[
+        "sampling_method"
+    ] = "joint_templates"  # legacy template contract
+    suite.tracks[0].config["target_types"] = ["eef"]
     suite.enabled_tracks()[0].domains = [
         DomainCfg(
             id="shifted",
@@ -2052,11 +2297,14 @@ class _Ur5LimitRobot(_MetricRobot):
 
 def test_motion_ur5_free_space_coverage_suite_generates_six_joint_cases():
     suite = load_suite("motion_ur5_free_space_coverage")
+    suite.tracks[0].config[
+        "sampling_method"
+    ] = "joint_templates"  # legacy template contract
     assert suite.robot.id == "ur5"
-    assert suite.free_space.batch_sizes == [1, 8, 64]
-    suite.free_space.seeds = [11]
-    suite.free_space.path_shapes = ["direct"]
-    suite.free_space.waypoint_counts = [1]
+    assert suite.tracks[0].config["batch_sizes"] == [1, 8, 64]
+    suite.tracks[0].config["seeds"] = [11]
+    suite.tracks[0].config["path_shapes"] = ["direct"]
+    suite.tracks[0].config["waypoint_counts"] = [1]
     track = suite.enabled_tracks()[0]
     cases = create_scenario_provider("free_space").generate_cases(
         suite, track, _Ur5LimitRobot(), "arm", batch_size=8
@@ -2073,6 +2321,9 @@ def test_motion_ur5_free_space_coverage_suite_generates_six_joint_cases():
 
 def test_free_space_manifest_is_seed_stable_and_algorithm_independent():
     suite = load_suite("motion_panda_free_space_smoke")
+    suite.tracks[0].config[
+        "sampling_method"
+    ] = "joint_templates"  # legacy template contract
     robot = _FrankaLimitRobot()
     provider = create_scenario_provider("free_space")
     track = suite.enabled_tracks()[0]
@@ -2088,12 +2339,15 @@ def test_free_space_manifest_is_seed_stable_and_algorithm_independent():
 
 def test_free_space_cases_use_one_start_state_bin_each():
     suite = load_suite("motion_panda_free_space_coverage")
-    suite.free_space.target_types = ["eef"]
-    suite.free_space.batch_sizes = [2]
-    suite.free_space.waypoint_counts = [1]
-    suite.free_space.path_shapes = ["direct"]
-    suite.free_space.seeds = [11]
-    suite.free_space.start_state_bins = ["nominal", "near_limit"]
+    suite.tracks[0].config[
+        "sampling_method"
+    ] = "joint_templates"  # legacy template contract
+    suite.tracks[0].config["target_types"] = ["eef"]
+    suite.tracks[0].config["batch_sizes"] = [2]
+    suite.tracks[0].config["waypoint_counts"] = [1]
+    suite.tracks[0].config["path_shapes"] = ["direct"]
+    suite.tracks[0].config["seeds"] = [11]
+    suite.tracks[0].config["start_state_bins"] = ["nominal", "near_limit"]
     track = suite.enabled_tracks()[0]
     cases = create_scenario_provider("free_space").generate_cases(
         suite, track, _FrankaLimitRobot(), "arm", batch_size=2
@@ -2106,12 +2360,15 @@ def test_free_space_cases_use_one_start_state_bin_each():
 def test_free_space_starts_align_across_path_shape_and_waypoint_count():
     """random_reachable starts must be shared across shapes/W for fair compares."""
     suite = load_suite("motion_panda_free_space_smoke")
-    suite.free_space.target_types = ["eef"]
-    suite.free_space.batch_sizes = [2]
-    suite.free_space.waypoint_counts = [1, 5]
-    suite.free_space.path_shapes = ["direct", "s_curve"]
-    suite.free_space.seeds = [11]
-    suite.free_space.start_state_bins = ["random_reachable"]
+    suite.tracks[0].config[
+        "sampling_method"
+    ] = "joint_templates"  # legacy template contract
+    suite.tracks[0].config["target_types"] = ["eef"]
+    suite.tracks[0].config["batch_sizes"] = [2]
+    suite.tracks[0].config["waypoint_counts"] = [1, 5]
+    suite.tracks[0].config["path_shapes"] = ["direct", "s_curve"]
+    suite.tracks[0].config["seeds"] = [11]
+    suite.tracks[0].config["start_state_bins"] = ["random_reachable"]
     track = suite.enabled_tracks()[0]
     cases = create_scenario_provider("free_space").generate_cases(
         suite, track, _FrankaLimitRobot(), "arm", batch_size=2
@@ -2674,7 +2931,7 @@ def test_cold_plan_ms_only_attaches_to_matching_waypoint_row():
     assert by_waypoints[5]["planner_construct_ms"] == pytest.approx(50.0)
 
 
-def test_report_contains_exactly_three_markdown_tables(tmp_path):
+def test_report_includes_workload_and_measured_difficulty_tables(tmp_path):
     suite = load_suite("motion_panda_free_space_smoke")
     aggregates = {
         "report_views": [{"view": "motion_planning", "title": "Motion Planning"}],
@@ -2701,7 +2958,10 @@ def test_report_contains_exactly_three_markdown_tables(tmp_path):
     report = write_markdown_report(tmp_path / "report.md", suite, aggregates)
     text = report.read_text(encoding="utf-8")
 
-    assert text.count("\n| ---") == 3
+    assert text.count("\n| ---") == 6
+    assert "### Common Joint / FullPose comparison" in text
+    assert "### Workload Success & Uncertainty" in text
+    assert "### Measured Start Difficulty" in text
     assert text.count("## Time & Memory") == 1
     assert text.count("## Success & Other Metrics") == 1
     assert text.count("## Leaderboard") == 1
@@ -2734,9 +2994,9 @@ def test_curobo_prepare_backend_exposes_actual_graph_mode():
 
 
 def test_toppra_adapter_close_releases_planner():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
 
     planner = Mock()
     adapter = ToppraAdapter(
@@ -2855,7 +3115,7 @@ def test_success_table_uses_case_macro_and_counts_cases_not_env_slots():
 
 
 def test_timed_call_reports_null_peak_gpu_without_cuda(monkeypatch):
-    from scripts.benchmark.motion_generation.metrics import performance
+    from embodichain_benchmarks.motion_generation.metrics import performance
 
     monkeypatch.setattr(performance.torch.cuda, "is_available", lambda: False)
     measured = performance.timed_call(lambda: 42)
@@ -2865,18 +3125,18 @@ def test_timed_call_reports_null_peak_gpu_without_cuda(monkeypatch):
 
 def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
     """Exercise AVAILABILITY gating and MEASURED aggregation without DexSim."""
-    from scripts.benchmark.motion_generation.artifacts import TrialJsonlWriter
-    from scripts.benchmark.motion_generation.config import (
+    from embodichain_benchmarks.motion_generation.artifacts import TrialJsonlWriter
+    from embodichain_benchmarks.motion_generation.config import (
         PlannerSpecCfg,
         ProtocolCfg,
         SuiteCfg,
     )
-    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
-    from scripts.benchmark.motion_generation.registry import (
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerAdapter
+    from embodichain_benchmarks.motion_generation.registry import (
         register_planner_adapter,
         unregister_planner_adapter,
     )
-    from scripts.benchmark.motion_generation.runner import BenchmarkRunner
+    from embodichain_benchmarks.motion_generation.runner import BenchmarkRunner
 
     prepared_case_sets: list[tuple[str, ...]] = []
 
@@ -3117,18 +3377,18 @@ def test_runner_preserves_case_attribution_across_lifecycle_failures(
     tmp_path, failure_mode, failure_phase, failure_code
 ):
     """Every early exit preserves planner attribution for every case."""
-    from scripts.benchmark.motion_generation.artifacts import TrialJsonlWriter
-    from scripts.benchmark.motion_generation.config import (
+    from embodichain_benchmarks.motion_generation.artifacts import TrialJsonlWriter
+    from embodichain_benchmarks.motion_generation.config import (
         PlannerSpecCfg,
         ProtocolCfg,
         SuiteCfg,
     )
-    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
-    from scripts.benchmark.motion_generation.registry import (
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerAdapter
+    from embodichain_benchmarks.motion_generation.registry import (
         register_planner_adapter,
         unregister_planner_adapter,
     )
-    from scripts.benchmark.motion_generation.runner import BenchmarkRunner
+    from embodichain_benchmarks.motion_generation.runner import BenchmarkRunner
 
     adapter_name = "fake_lifecycle_failure"
 
@@ -3228,7 +3488,7 @@ def test_scenario_reset_publishes_frozen_start_without_stepping(
     full_state: bool,
 ) -> None:
     from types import SimpleNamespace
-    from scripts.benchmark.motion_generation.scenarios.base import ScenarioProvider
+    from embodichain_benchmarks.motion_generation.scenarios.base import ScenarioProvider
 
     class Provider(ScenarioProvider):
         def batch_sizes(self, *args):
@@ -3266,3 +3526,152 @@ def test_scenario_reset_publishes_frozen_start_without_stepping(
     assert state.time == 0.0
     sim.sync_render_state.assert_called_once()
     sim.update.assert_not_called()
+
+
+@pytest.mark.parametrize("output_samples,planner_success", [(4, True), (41, False)])
+def test_policy_completion_uses_original_steps_and_excludes_hold_padding(
+    output_samples, planner_success
+):
+    trace = torch.zeros(3, 4, 7)
+    trace[0, 1:, 0] = 0.1
+    trace[1, 1:, 0] = torch.tensor([0.2, 0.1, 0.1])
+    trace[2, 1:, 0] = 0.1
+    goals = torch.eye(4).repeat(3, 2, 1, 1)
+    goals[:, :, 0, 3] = 0.1
+    joints = torch.zeros(3, 2, 7)
+    joints[:, :, 0] = 0.1
+    case = replace(
+        _case(),
+        batch_size=3,
+        num_waypoints=2,
+        start_qpos=torch.zeros(3, 7),
+        target_waypoints=goals,
+        reference_qpos=joints,
+        case_parameters={
+            "constraint_modalities": ["position", "joint"],
+            "joint_threshold_rad": 0.01,
+        },
+    )
+    positions = torch.zeros(3, output_samples, 7)
+    result = PlanResult(
+        success=planner_success,
+        positions=positions,
+        dt=torch.zeros(3, output_samples),
+        policy_rollout_positions=trace,
+        policy_rollout_lengths=torch.tensor([3, 4, 2]),
+    )
+
+    def score(plan, current_case=case):
+        return compute_case_outcomes(
+            plan,
+            current_case,
+            _MetricRobot(),
+            "arm",
+            validation_samples=51,
+            position_threshold_m=0.01,
+            rotation_threshold_rad=0.1,
+            joint_limit_tolerance_rad=1e-5,
+            timing_is_solved=False,
+        )
+
+    outcomes = score(result)
+    assert [row.policy_completion_step for row in outcomes] == [2, 3, None]
+    assert [row.policy_steps_used for row in outcomes] == [2, 3, 1]
+    assert [row.policy_waypoint_arrival_steps for row in outcomes] == [
+        (1, 2),
+        (2, 3),
+        (1, None),
+    ]
+    # Dense output interpolation and even a retiming/planner failure cannot
+    # rewrite an independently successful original policy rollout.
+    assert not any(row.geometry_valid for row in outcomes)
+    initially_satisfied = replace(
+        case,
+        num_waypoints=1,
+        target_waypoints=torch.eye(4).repeat(3, 1, 1, 1),
+        reference_qpos=torch.zeros(3, 1, 7),
+        case_parameters={
+            "constraint_modalities": ["joint"],
+            "joint_threshold_rad": 0.01,
+        },
+    )
+    assert [
+        row.policy_completion_step for row in score(result, initially_satisfied)
+    ] == [0, 0, 0]
+    unavailable = score(
+        replace(result, policy_rollout_positions=None, policy_rollout_lengths=None)
+    )
+    assert all(
+        row.policy_completion_step is None and row.policy_steps_used is None
+        for row in unavailable
+    )
+    missing_output = score(replace(result, positions=None, dt=None))
+    assert [row.policy_completion_step for row in missing_output] == [2, 3, None]
+
+
+def test_policy_completion_curve_keeps_failures_and_missing_cases_in_denominator():
+    cases = [replace(_case(), case_id=f"case-{index}") for index in range(3)]
+    success = replace(_outcome(), policy_steps_used=5, policy_completion_step=2)
+    failed = replace(_outcome(), policy_steps_used=5, policy_completion_step=None)
+    records = [
+        replace(
+            _record(TrialPhase.MEASURED, 1.0), case_id=case.case_id, outcomes=(outcome,)
+        )
+        for case, outcome in zip(cases, (success, failed))
+    ]
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+
+    def summarize(trials, population):
+        aggregates = aggregate_results(
+            trials,
+            metadata,
+            population,
+            measured_trials=1,
+            track_scenarios={case.track: "free_space" for case in population},
+        )
+        return aggregates["motion_planning_success_and_metrics"][0]
+
+    summary = summarize(records, cases)
+    assert summary["policy_trace_coverage_rate"] == pytest.approx(2 / 3)
+    assert summary["policy_completion_rate"] == pytest.approx(1 / 3)
+    assert summary["policy_completion_steps_mean"] == 2
+    assert summary["policy_steps_used_mean"] == 5
+    assert summary["policy_completion_curve"] == [
+        {"step": 0, "completion_rate": 0.0},
+        {"step": 2, "completion_rate": 1 / 3},
+        {"step": 5, "completion_rate": 1 / 3},
+    ]
+    # Missing environment rows retain their place in the B=8 denominator.
+    large = replace(
+        cases[1],
+        batch_size=8,
+        start_qpos=torch.zeros(8, 7),
+        target_waypoints=torch.eye(4).repeat(8, 1, 1, 1),
+        reference_qpos=torch.zeros(8, 1, 7),
+    )
+    partial_record = replace(
+        records[0],
+        case_id=large.case_id,
+        batch_size=8,
+        outcomes=(success,),
+    )
+    partial = summarize([partial_record], [large])
+    assert partial["policy_completion_rate"] == pytest.approx(1 / 8)
+    assert partial["policy_trace_coverage_rate"] == pytest.approx(1 / 8)
+
+
+@pytest.mark.parametrize("lengths", [None, torch.tensor([4]), torch.tensor([1.5])])
+def test_policy_trace_requires_valid_prefix_lengths(lengths):
+    with pytest.raises(ValueError, match="Policy rollout lengths"):
+        PlanResult(
+            policy_rollout_positions=torch.zeros(1, 3, 7),
+            policy_rollout_lengths=lengths,
+        )

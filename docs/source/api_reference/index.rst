@@ -15,7 +15,7 @@ The pages are organized from high-level package namespaces to concrete submodule
 Core Framework
 --------------
 
-The core ``embodichain`` framework is split into six top-level packages:
+The core ``embodichain`` framework includes these top-level packages:
 
 ``compute``
     Shared numerical computations: analytical kinematics, trajectory
@@ -41,9 +41,10 @@ The core ``embodichain`` framework is split into six top-level packages:
     independently of the simulation loop.
 
 ``learning``
-    Learning systems, currently the ``rl`` subpackage: on-policy RL algorithms
-    (PPO/GRPO), rollout buffers, collectors, policy/model builders, and the
-    training entry point.
+    Shared trainable components, supervised updates and offline orchestration,
+    plus on-policy RL algorithms (PPO/GRPO), rollout buffers, collectors and
+    RL policy builders. Concrete model families live in the bundled
+    ``embodichain_models`` library.
 
 ``utils``
     Shared utilities: the ``@configclass`` decorator, logging, math/tensor
@@ -84,6 +85,7 @@ documentation. CI runs this same checker after style checks and before tests.
    :maxdepth: 1
 
    public_api
+   benchmarks
    locomotion_tasks
 
 
@@ -91,3 +93,11 @@ documentation. CI runs this same checker after style checks and before tests.
    :maxdepth: 2
 
    robot_catalogs
+   model_catalogs
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Locomotion robots
+
+   locomotion_robots

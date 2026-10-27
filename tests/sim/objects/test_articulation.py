@@ -63,8 +63,8 @@ def _inertia_tensor(inertia: torch.Tensor, com_pose: torch.Tensor) -> torch.Tens
 
 @pytest.mark.parametrize("device", ["cpu", "cuda:0"])
 @pytest.mark.parametrize("env_ids", [None, [0]], ids=["all", "selected"])
-@pytest.mark.parametrize("operation", ["reset", "root_pose"])
-def test_reset_and_root_pose_write_preserve_physics_state(
+@pytest.mark.parametrize("operation", ["reset", "root_pose", "qpos"])
+def test_reset_root_and_joint_pose_writes_preserve_physics_state(
     tmp_path: Path, device: str, env_ids: list[int] | None, operation: str
 ) -> None:
     """State restoration publishes link poses without advancing any body."""
@@ -135,6 +135,9 @@ def test_reset_and_root_pose_write_preserve_physics_state(
             art.reset(env_ids=env_ids)
             expected_qpos[selected_rows] = initial_angle
             expected_qvel[selected_rows] = 0.0
+        elif operation == "qpos":
+            expected_qpos[selected_rows] = 0.6
+            art.set_qpos(expected_qpos[selected_rows], env_ids=env_ids, target=False)
         else:
             # Binary fractions stay exact when arena offsets are added/subtracted.
             root_pose[selected_rows, :3] = torch.tensor(
@@ -960,18 +963,12 @@ class BaseArticulationTest:
         assert (
             "handle_xpos" in mat_insts[0]
         ), "FAIL: 'handle_xpos' not in material instances"
-        assert mat_insts[0]["outer_box"].base_color == [
-            0.0,
-            0.0,
-            1.0,
-            1.0,
-        ], f"FAIL: 'outer_box' base color not set correctly: {mat_insts[0]['outer_box'].base_color}"
-        assert mat_insts[0]["handle_xpos"].base_color == [
-            0.0,
-            0.0,
-            1.0,
-            1.0,
-        ], f"FAIL: 'handle_xpos' base color not set correctly: {mat_insts[0]['handle_xpos'].base_color}"
+        assert mat_insts[0]["outer_box"].base_color == pytest.approx(
+            [0.0, 0.0, 1.0]
+        ), f"FAIL: 'outer_box' base color not set correctly: {mat_insts[0]['outer_box'].base_color}"
+        assert mat_insts[0]["handle_xpos"].base_color == pytest.approx(
+            [0.0, 0.0, 1.0]
+        ), f"FAIL: 'handle_xpos' base color not set correctly: {mat_insts[0]['handle_xpos'].base_color}"
 
     # TODO: Open this test will cause segfault in CI env
     # def test_get_link_pose(self):

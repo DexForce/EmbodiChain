@@ -31,6 +31,7 @@ from .srs_solver import SRSSolverCfg, SRSSolver
 from .neural_ik_solver import NeuralIKSolverCfg, NeuralIKSolver
 from .ur_solver import URSolverCfg, URSolver
 from .fep_solver import FEPSolverCfg, FEPSolver
+from .ssik_solver import SSIKSolverCfg, SSIKSolver
 
 __all__ = [
     "SolverCfg",
@@ -51,6 +52,8 @@ __all__ = [
     "NeuralIKSolver",
     "FEPSolverCfg",
     "FEPSolver",
+    "SSIKSolverCfg",
+    "SSIKSolver",
     "URSolverCfg",
     "URSolver",
 ]

@@ -18,6 +18,12 @@
 
 from __future__ import annotations
 
+import numpy as np
+import xml.etree.ElementTree as ET
+from embodichain.lab.sim.cfg import RobotCfg
+from embodichain_robots import FrankaPandaCfg
+from embodichain_benchmarks.motion_generation._atomic_fixtures import _FrankaPgiCfg
+
 import argparse
 import json
 import math
@@ -30,21 +36,27 @@ import pytest
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     ArticulationAffordanceGeometry,
+    JointPositionGoal,
     MotionPolicy,
 )
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory, TimedTrajectory
+from embodichain.lab.sim.motion.planners import ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.utils.math import axis_angle_to_rotation_matrix
-from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.artifacts import (
+from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
+from embodichain_benchmarks.motion_generation.artifacts import (
     TrialJsonlWriter,
     write_case_manifest,
 )
-from scripts.benchmark.motion_generation.config import load_suite
-from scripts.benchmark.motion_generation.contracts import ReplayObservationTrace
-from scripts.benchmark.motion_generation.metrics.trajectory import compute_case_outcomes
-from scripts.benchmark.motion_generation.models import (
+from embodichain_benchmarks.motion_generation.config import load_suite
+from embodichain_benchmarks.motion_generation.contracts import ReplayObservationTrace
+from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+    compute_case_outcomes,
+)
+from embodichain_benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -52,21 +64,21 @@ from scripts.benchmark.motion_generation.models import (
     TrialPhase,
     TrialRecord,
 )
-from scripts.benchmark.motion_generation.registry import create_robot_provider
-from scripts.benchmark.motion_generation.runner import BenchmarkRunner
-from scripts.benchmark.motion_generation import robots as _robots  # noqa: F401
-from scripts.benchmark.motion_generation.scenarios.atomic_objects import (
+from embodichain_benchmarks.motion_generation.registry import create_robot_provider
+from embodichain_benchmarks.motion_generation.runner import BenchmarkRunner
+from embodichain_benchmarks.motion_generation import robots as _robots  # noqa: F401
+from embodichain_benchmarks.motion_generation.scenarios.atomic_objects import (
     atomic_object_kind_names,
     create_atomic_object,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_replay import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
     AtomicReplayRuntime,
 )
-from scripts.benchmark.motion_generation.contracts import ExecutionObservation
-from scripts.benchmark.motion_generation.scenarios.atomic_case_utils import (
+from embodichain_benchmarks.motion_generation.contracts import ExecutionObservation
+from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
     atomic_case_id,
     canonical_case_qpos,
     case_generation_seed,
@@ -74,17 +86,19 @@ from scripts.benchmark.motion_generation.scenarios.atomic_case_utils import (
     seeded_jitter,
     snapshot_case_qpos,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_policy import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
     benchmark_motion_attribution,
     benchmark_motion_policy_strategy,
 )
-from scripts.benchmark.motion_generation.atomic_skill import (
+from embodichain_benchmarks.motion_generation.atomic_skill import (
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
-from scripts.benchmark.motion_generation.scenarios.base import ScenarioProvider
-from scripts.benchmark.motion_generation.scenarios.free_space import FreeSpaceScenario
-from scripts.benchmark.motion_generation.video import (
+from embodichain_benchmarks.motion_generation.scenarios.base import ScenarioProvider
+from embodichain_benchmarks.motion_generation.scenarios.free_space import (
+    FreeSpaceScenario,
+)
+from embodichain_benchmarks.motion_generation.video import (
     VideoRecordCfg,
     build_video_path,
     record_with_window,
@@ -280,7 +294,7 @@ def test_move_end_effector_provider_uses_settled_tcp_standard_evidence() -> None
         target_waypoints=torch.eye(4).repeat(2, 1, 1, 1),
     )
     final_tcp = torch.eye(4).repeat(2, 1, 1)
-    final_tcp[:, 0, 3] = torch.tensor([0.002, 0.004])
+    final_tcp[:, 0, 3] = torch.tensor([0.009, 0.011])
     observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=final_tcp,
@@ -295,7 +309,9 @@ def test_move_end_effector_provider_uses_settled_tcp_standard_evidence() -> None
     results = evaluator.evaluate(case, observation, outcomes)
 
     assert [result.task_success for result in results] == [True, False]
-    assert results[0].protocol_version == "atomic-skill-v1"
+    from embodichain_benchmarks.motion_generation.evaluation import STANDARD_VERSION
+
+    assert results[0].protocol_version == STANDARD_VERSION
     assert results[0].stages[0].evidence_source == (
         "simulation_state:terminal_tcp_pose"
     )
@@ -371,7 +387,7 @@ def test_move_joints_provider_uses_l2_settled_joint_error() -> None:
         joint_tracking_rmse_rad=torch.zeros(2),
         execution_time_ms=1.0,
         task_completion_time_s=0.5,
-        final_arm_qpos=torch.tensor([[0.003, 0.003], [0.004, 0.004]]),
+        final_arm_qpos=torch.tensor([[0.06, 0.06], [0.08, 0.08]]),
     )
     outcomes = (_atomic_outcome(), replace(_atomic_outcome(), env_index=1))
 
@@ -382,7 +398,7 @@ def test_move_joints_provider_uses_l2_settled_joint_error() -> None:
     assert [result.task_success for result in results] == [True, False]
     assert results[1].failure_code == "task_goal_miss"
     assert results[0].stages[0].measurements["joint_error_l2_rad"] == pytest.approx(
-        2**0.5 * 0.003
+        2**0.5 * 0.06
     )
 
 
@@ -861,7 +877,7 @@ def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
 def test_atomic_suite_is_franka_pgi_and_curobo_only():
     suite = load_suite("atomic_franka_pgi_smoke")
 
-    assert suite.suite_version == "atomic_franka_pgi_smoke_v4"
+    assert suite.suite_version == "atomic_franka_pgi_smoke_v5"
     assert suite.robot.id == "franka_pgi"
     assert suite.robot.provider == "franka_pgi"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo"]
@@ -992,7 +1008,7 @@ def test_randomized_atomic_suite_covers_four_interaction_skills_with_fixed_seed_
     suite = load_suite("atomic_franka_pgi_randomized")
     track = suite.enabled_tracks()[0]
 
-    assert suite.suite_version == "atomic_franka_pgi_randomized_v2"
+    assert suite.suite_version == "atomic_franka_pgi_randomized_v3"
     assert track.id == "atomic-skill-randomized"
     assert track.config["seeds"] == list(range(101, 117))
     assert [item["id"] for item in track.config["skills"]] == [
@@ -1105,12 +1121,10 @@ def test_randomization_manifest_records_contract_and_seed():
 
 
 def test_franka_pgi_robot_provider_exposes_arm_hand_and_tcp():
-    from embodichain_robots import FrankaPandaPgiCfg
-
     suite = load_suite("atomic_franka_pgi_smoke")
     cfg = create_robot_provider(suite.robot).build_cfg()
 
-    assert isinstance(cfg, FrankaPandaPgiCfg)
+    assert isinstance(cfg, RobotCfg)
     assert cfg.uid == "benchmark_franka_pgi"
     # The suites were authored with the tutorial scenes' rotated base.
     assert list(cfg.init_rot) == [0.0, 0.0, 180.0]
@@ -1126,6 +1140,16 @@ def test_franka_pgi_robot_provider_exposes_arm_hand_and_tcp():
         "fr3_leftfinger" not in str(override.link_names_expr)
         for override in cfg.link_attrs.values()
     )
+    contacts = cfg.link_attrs["newton_gripper_contacts"]
+    assert set(contacts.link_names_expr) == {
+        "gripper_finger1_link_1",
+        "gripper_finger2_link_1",
+    }
+    assert contacts.attrs.collision_props.condim == 4
+    assert contacts.attrs.material_props.ke == pytest.approx(40000.0)
+    assert contacts.attrs.material_props.kd == pytest.approx(400.0)
+    assert contacts.attrs.material_props.torsional_friction == pytest.approx(0.1)
+    assert contacts.attrs.material_props.rolling_friction == pytest.approx(0.01)
 
 
 def test_atomic_invocation_uses_motion_generator_policy():
@@ -1203,6 +1227,62 @@ def test_atomic_scenario_accepts_required_contact_strategy(skill_id: str) -> Non
 
     assert scenario.plan_case(adapter, case) is compiled
     engine.compile.assert_called_once()
+
+
+@pytest.mark.parametrize("clock_aware", [False, True])
+@pytest.mark.parametrize("hook_fails", [False, True])
+def test_atomic_scenario_supports_existing_adapter_options_hooks(
+    clock_aware: bool, hook_fails: bool
+) -> None:
+    case = replace(_atomic_case(), skill_id="move_joints")
+    options = ToppraPlanOptions(sample_interval=17)
+    calls: list[float | None] = []
+    hook_error = TypeError("adapter options failed")
+
+    def legacy_options() -> ToppraPlanOptions:
+        calls.append(None)
+        if hook_fails:
+            raise hook_error
+        return options
+
+    def clock_options(*, control_dt: float) -> ToppraPlanOptions:
+        calls.append(control_dt)
+        if hook_fails:
+            raise hook_error
+        return options
+
+    adapter = Mock()
+    adapter.atomic_plan_options = clock_options if clock_aware else legacy_options
+    invocation = ActionInvocation(
+        skill_id="move_joints",
+        goal=JointPositionGoal(torch.zeros(1, 7)),
+        binding=Mock(spec=ActionBinding),
+        motion_policy=MotionPolicy(strategy="motion_gen"),
+    )
+    provider = Mock(samples_grasps=False)
+    provider.build_invocation.return_value = invocation
+    provider.prefix_invocations.return_value = ()
+    provider.frozen_grasps.return_value = {}
+    engine = Mock(motion_generator=adapter.require_motion_generator())
+    scenario = AtomicSkillScenario()
+    scenario.simulation = SimpleNamespace(sim_config=SimpleNamespace(physics_dt=0.01))
+    scenario.track = SimpleNamespace(
+        config={"physics": {"clock": "compiled", "steps_per_waypoint": 4}}
+    )
+    scenario._engine = engine
+    scenario._case_providers[case.case_id] = provider
+
+    if hook_fails:
+        with pytest.raises(TypeError) as raised:
+            scenario.plan_case(adapter, case)
+        assert raised.value is hook_error
+        engine.compile.assert_not_called()
+    else:
+        assert scenario.plan_case(adapter, case) is engine.compile.return_value
+        compiled_invocation = engine.compile.call_args.args[0][0]
+        assert compiled_invocation.motion_policy.plan_opts.sample_interval == 17
+        assert engine.initial_context.call_args.kwargs["control_dt"] == 0.04
+    assert calls == [0.04 if clock_aware else None]
 
 
 def test_atomic_skill_and_object_extensions_are_registry_driven():
@@ -1563,6 +1643,7 @@ def test_execute_masks_failed_plan_rows_from_execution_success() -> None:
         return_value=Mock(
             squared_tracking_error=torch.zeros(batch_size),
             tracking_value_count=7,
+            physics_steps=None,
             articulation_joint_initial=None,
             articulation_joint_final=None,
             articulation_joint_peak_signed_delta=None,
@@ -1840,6 +1921,7 @@ def test_runner_preserves_preplan_attribution_after_planner_error(tmp_path):
     provider.plan_case.side_effect = RuntimeError("planner failed")
     provider.failure_outcomes.return_value = ()
     runner = object.__new__(BenchmarkRunner)
+    runner.execution = {"timing_comparable": True}
     runner.control_part = "arm"
     runner.suite = Mock()
     runner.video = VideoRecordCfg()
@@ -2079,8 +2161,8 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
     monkeypatch, execution_ok: bool, motion_ok: bool
 ) -> None:
     """Physical evidence stays row-local and cannot override failed execution."""
-    from scripts.benchmark.motion_generation import contracts
-    from scripts.benchmark.motion_generation.scenarios import atomic_skill
+    from embodichain_benchmarks.motion_generation import contracts
+    from embodichain_benchmarks.motion_generation.scenarios import atomic_skill
 
     case = replace(
         _atomic_case(), batch_size=2, target_waypoints=torch.eye(4).repeat(2, 1, 1, 1)
@@ -2166,8 +2248,8 @@ def test_runner_freezes_domain_manifest_before_each_planner(
     monkeypatch, tmp_path
 ) -> None:
     """The same case population and provenance reach all candidate records."""
-    from scripts.benchmark.motion_generation import runner as runner_module
-    from scripts.benchmark.motion_generation.config import DomainCfg
+    from embodichain_benchmarks.motion_generation import runner as runner_module
+    from embodichain_benchmarks.motion_generation.config import DomainCfg
 
     suite = load_suite("atomic_franka_pgi_smoke")
     suite.tracks = [suite.enabled_tracks()[0]]
@@ -2533,3 +2615,529 @@ def test_nonfinite_press_joint_evidence_does_not_count_as_contact_failure(
     assert results[1].stages[0].status == "unavailable"
     assert results[1].stages[1].status == "not_reached"
     assert results[1].failure_code == "evidence_unavailable"
+
+
+def test_compiled_replay_clock_preserves_intervals_and_zero_time_boundaries():
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
+        _PhysicsReplaySettings,
+    )
+
+    runtime = AtomicReplayRuntime(
+        simulation=Mock(sim_config=Mock(physics_dt=0.01)),
+        robot=Mock(),
+        control_part="arm",
+        track_config={},
+        objects={},
+        articulations={},
+        gripper_states={},
+    )
+    compiled = SimpleNamespace(
+        trajectory=SimpleNamespace(
+            positions=torch.zeros(2, 5, 7),
+            dt=torch.tensor(
+                [[0.0, 0.025, 0.0, 0.025, 0.0], [0.0, 0.025, 0.0, 0.025, 0.0]]
+            ),
+        )
+    )
+    settings = _PhysicsReplaySettings(
+        steps_per_waypoint=16,
+        hold_steps=0,
+        hold_sim_steps=1,
+        joint_tracking_tolerance_rad=0.05,
+        clock="compiled",
+    )
+    assert runtime._arrival_steps(compiled, settings) == [0, 3, 0, 2, 0]
+    # The two 25 ms intervals occupy five physics ticks, independent of the
+    # historical sixteen-ticks-per-sample setting.
+    settings = replace(settings, clock="fixed_samples")
+    assert runtime._arrival_steps(compiled, settings) == [16] * 5
+
+
+def test_compiled_replay_uses_scheduled_ticks_for_completion_time():
+    scenario = AtomicSkillScenario()
+    scenario.simulation = Mock(sim_config=Mock(physics_dt=0.01))
+    scenario.robot = Mock()
+    scenario.robot.get_qpos.return_value = torch.zeros(1, 7)
+    scenario.robot.compute_fk.return_value = torch.eye(4).unsqueeze(0)
+    scenario.track = Mock(
+        config={
+            "physics": {
+                "clock": "compiled",
+                "steps_per_waypoint": 16,
+                "hold_steps": 0,
+                "hold_sim_steps": 1,
+            }
+        }
+    )
+    runtime = scenario._replay_runtime()
+    runtime.replay_physics = Mock(
+        return_value=SimpleNamespace(
+            squared_tracking_error=torch.zeros(1),
+            tracking_value_count=7,
+            physics_steps=5,
+            articulation_joint_initial=None,
+            articulation_joint_final=None,
+            articulation_joint_peak_signed_delta=None,
+            articulation_joint_effect_end=None,
+            object_rotation_peak_signed_rad=None,
+            replay_traces={},
+        )
+    )
+    observation = runtime.execute(
+        _compiled_replay_batch([True]), _atomic_case(), Mock()
+    )
+    assert observation.task_completion_time_s == pytest.approx(0.05)
+
+
+def test_compiled_clock_synchronizes_unequal_row_intervals():
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
+        _PhysicsReplaySettings,
+    )
+
+    runtime = AtomicReplayRuntime(
+        simulation=Mock(sim_config=Mock(physics_dt=0.01)),
+        robot=Mock(),
+        control_part="arm",
+        track_config={},
+        objects={},
+        articulations={},
+        gripper_states={},
+    )
+    compiled = SimpleNamespace(
+        trajectory=SimpleNamespace(
+            positions=torch.zeros(2, 3, 7),
+            dt=torch.tensor([[0.0, 0.01, 0.03], [0.0, 0.03, 0.01]]),
+        )
+    )
+    settings = _PhysicsReplaySettings(
+        steps_per_waypoint=4,
+        hold_steps=0,
+        hold_sim_steps=1,
+        joint_tracking_tolerance_rad=0.05,
+        clock="compiled",
+    )
+    # Both rows reach each indexed command before the next shared phase.
+    assert runtime._arrival_steps(compiled, settings) == [0, 3, 3]
+
+
+def test_atomic_reset_restores_frozen_robot_state_after_settling() -> None:
+    case = _atomic_case()
+    frozen_qpos = case.full_start_qpos.clone()
+    state = {"qpos": frozen_qpos.clone(), "target": frozen_qpos.clone()}
+    events = []
+
+    def set_qpos(qpos: torch.Tensor, *, target: bool) -> None:
+        state["target" if target else "qpos"] = qpos.clone()
+        events.append(("set_qpos", target))
+
+    def settle(*, step: int) -> None:
+        # Model the observed driven-joint drift during the reset window.
+        state["qpos"].add_(0.002)
+        events.append(("settle", step))
+
+    robot = SimpleNamespace(
+        set_qpos=set_qpos,
+        clear_dynamics=lambda: events.append(("clear_dynamics",)),
+        device=torch.device("cpu"),
+    )
+    simulation = SimpleNamespace(update=settle)
+    scenario = AtomicSkillScenario()
+    scenario.reset_case(simulation, robot, case, "arm")
+
+    torch.testing.assert_close(state["qpos"], frozen_qpos, rtol=0, atol=0)
+    torch.testing.assert_close(state["target"], frozen_qpos, rtol=0, atol=0)
+    torch.testing.assert_close(case.full_start_qpos, frozen_qpos, rtol=0, atol=0)
+    assert events[-3:] == [
+        ("set_qpos", False),
+        ("set_qpos", True),
+        ("clear_dynamics",),
+    ]
+    assert ("settle", 2) in events
+
+
+def test_loaded_cases_bind_atomic_providers_without_regeneration(monkeypatch):
+    scenario = AtomicSkillScenario()
+    case = _atomic_case()
+    provider = Mock()
+    factory = Mock(return_value=provider)
+    monkeypatch.setattr(
+        "embodichain_benchmarks.motion_generation.scenarios.atomic_skill.create_atomic_skill_provider",
+        factory,
+    )
+    monkeypatch.setattr(scenario, "restore_base_robot", Mock())
+    scenario.bind_cases([case])
+    factory.assert_called_once_with(case.skill_id)
+    assert scenario._case_providers == {case.case_id: provider}
+    assert scenario._cases_by_id == {case.case_id: case}
+    provider.generate_case.assert_not_called()
+    scenario.bind_cases([case])
+    factory.assert_called_once()
+
+
+def test_atomic_reference_ik_recovery_preserves_rows_and_original_targets():
+    """An IK success near a probe must still satisfy the original arrival ball."""
+    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
+
+    batch = 3
+    targets = torch.eye(4).repeat(batch, 1, 1)
+    targets[:, 0, 3] = torch.tensor([0.0, 1.0, 2.0])
+    saved = targets.clone()
+    attempts = []
+    row_two_attempts = 0
+    robot = Mock()
+
+    def inverse(*, pose, joint_seed, name, env_ids=None):
+        nonlocal row_two_attempts
+        assert name == "arm"
+        if env_ids is None:
+            return torch.tensor([True, False, False]), torch.zeros(batch, 1)
+        attempts.append(list(env_ids))
+        assert 0 not in env_ids
+        assert pose.shape[0] == joint_seed.shape[0] == len(env_ids)
+        qpos = []
+        for row in env_ids:
+            if row == 1:
+                qpos.append([1.0])
+            else:
+                row_two_attempts += 1
+                qpos.append([2.0 if row_two_attempts == 1 else 3.0])
+        return torch.ones(len(env_ids), dtype=torch.bool), torch.tensor(qpos)
+
+    def forward(*, qpos, name, env_ids, to_matrix):
+        assert to_matrix and name == "arm"
+        poses = targets[env_ids].clone()
+        for index, value in enumerate(qpos[:, 0].tolist()):
+            if value == 1.0:
+                poses[index, :3, :3] = axis_angle_to_rotation_matrix(
+                    torch.tensor([0.05, 0.0, 0.0])
+                )
+            elif value == 2.0:
+                # Inside the first 0.04 rad probe's tolerance, but OUTSIDE
+                # the ORIGINAL request's 0.1 rad tolerance: must be rejected.
+                poses[index, :3, :3] = axis_angle_to_rotation_matrix(
+                    torch.tensor([0.12, 0.0, 0.0])
+                )
+            else:
+                poses[index, 1, 3] += 0.005
+        return poses
+
+    robot.compute_ik.side_effect = inverse
+    robot.compute_fk.side_effect = forward
+    robot.get_qpos_limits.side_effect = lambda *, name, env_ids: torch.tensor(
+        [[[-10.0, 10.0]]]
+    ).repeat(len(env_ids), 1, 1)
+    scenario = AtomicSkillScenario()
+    scenario.robot = robot
+    scenario.suite = SimpleNamespace(protocol=ProtocolCfg())
+    references = scenario.solve_reference_qpos(torch.zeros(batch, 1), targets[:, None])
+    assert torch.equal(references[:, 0], torch.tensor([[0.0], [1.0], [3.0]]))
+    assert torch.equal(targets, saved)
+    assert sum(1 in ids for ids in attempts) == 1
+    assert row_two_attempts >= 2
+
+
+@pytest.mark.parametrize("failure", ["joint_bounds", "nonfinite", "unreachable"])
+def test_atomic_reference_ik_recovery_keeps_unqualified_rows_failed(failure):
+    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
+
+    robot = Mock()
+    calls = 0
+
+    def inverse(*, pose, joint_seed, name, env_ids=None):
+        nonlocal calls
+        calls += 1
+        if env_ids is None or failure == "unreachable":
+            return torch.tensor([False]), torch.zeros(1, 1)
+        value = float("nan") if failure == "nonfinite" else 2.0
+        return torch.tensor([True]), torch.tensor([[value]])
+
+    robot.compute_ik.side_effect = inverse
+    robot.get_qpos_limits.return_value = torch.tensor([[[-1.0, 1.0]]])
+    scenario = AtomicSkillScenario()
+    scenario.robot = robot
+    scenario.suite = SimpleNamespace(protocol=ProtocolCfg())
+    with pytest.raises(RuntimeError, match="Independent IK rejected atomic target"):
+        scenario.solve_reference_qpos(torch.zeros(1, 1), torch.eye(4)[None, None])
+    assert calls <= 91  # One exact call plus the bounded arrival-window grid.
+    robot.compute_fk.assert_not_called()
+
+
+def test_atomic_reference_exact_success_retains_existing_path_without_probes():
+    robot = Mock()
+    robot.compute_ik.return_value = (torch.tensor([True]), torch.tensor([[0.123456]]))
+    scenario = AtomicSkillScenario()
+    scenario.robot = robot
+    reference = scenario.solve_reference_qpos(
+        torch.zeros(1, 1), torch.eye(4)[None, None]
+    )
+    assert torch.equal(reference, canonical_case_qpos(torch.tensor([[[0.123456]]])))
+    robot.compute_ik.assert_called_once()
+    robot.compute_fk.assert_not_called()
+    robot.get_qpos_limits.assert_not_called()
+
+
+class _TargetReferenceRobot:
+    """Three independent prismatic axes with a one-sided reachable workspace."""
+
+    def __init__(self, *, incorrect_fk: bool = False):
+        self.calls = []
+        self.incorrect_fk = incorrect_fk
+
+    def compute_ik(self, *, pose, joint_seed, name, env_ids):
+        self.calls.append(list(env_ids))
+        return pose[:, 0, 3] >= 0.0, pose[:, :3, 3].clone()
+
+    def compute_fk(self, *, qpos, name, env_ids, to_matrix):
+        result = torch.eye(4).repeat(len(qpos), 1, 1)
+        result[:, :3, 3] = qpos
+        if self.incorrect_fk:
+            result[:, 0, 3] += 0.5
+        return result
+
+    def get_qpos_limits(self, *, name, env_ids):
+        return torch.tensor([[[-1.0, 1.0]]]).repeat(len(env_ids), 3, 1)
+
+
+def test_held_target_candidates_freeze_successful_rows_and_keep_original_inputs(
+    monkeypatch,
+):
+    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
+    from embodichain_benchmarks.motion_generation.scenarios import (
+        _atomic_targets as targets,
+    )
+
+    offsets = {
+        321: torch.tensor([[0.2, 0.0, 0.0], [-0.2, 0.0, 0.0]]),
+        1000324: torch.tensor([[0.4, 0.0, 0.0], [0.3, 0.0, 0.0]]),
+    }
+    monkeypatch.setattr(
+        targets,
+        "randomized_vector_batch",
+        lambda *a, stream, **k: offsets[stream].clone(),
+    )
+    robot = _TargetReferenceRobot()
+    scenario = SimpleNamespace(
+        robot=robot, control_part="arm", suite=SimpleNamespace(protocol=ProtocolCfg())
+    )
+    objects = torch.eye(4).repeat(2, 1, 1)
+    relation = objects.clone()
+    start = torch.zeros(2, 3)
+    chosen, poses, reference, record = targets._held_target_reference(
+        scenario,
+        {"target_candidate_count": 2},
+        seed=7,
+        start=start,
+        table_object_pose=objects,
+        object_to_eef=relation,
+        translation_stream=321,
+        rotation_stream=322,
+        default_offset=(0.0, 0.0, 0.0),
+        height=0.0,
+        waypoint_heights=(0.1, 0.0, 0.1),
+    )
+    torch.testing.assert_close(chosen[:, 0, 3], torch.tensor([0.2, 0.3]))
+    torch.testing.assert_close(
+        poses[:, :, 2, 3], torch.tensor([[0.1, 0.0, 0.1]]).expand(2, -1)
+    )
+    torch.testing.assert_close(reference, poses[:, :, :3, 3])
+    assert record["target_selection"]["selected_attempts"] == [0, 1]
+    assert record["target_selection"]["attempts"][0]["qualified"] == [True, False]
+    assert record["target_selection"]["attempts"][1]["environment_rows"] == [1]
+    assert sum(0 in ids for ids in robot.calls) == 3  # Once per original waypoint.
+    assert torch.equal(objects, torch.eye(4).repeat(2, 1, 1))
+    assert torch.equal(relation, objects) and torch.equal(start, torch.zeros(2, 3))
+
+
+@pytest.mark.parametrize("incorrect_fk", [False, True])
+def test_held_target_candidate_exhaustion_is_an_error(monkeypatch, incorrect_fk):
+    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
+    from embodichain_benchmarks.motion_generation.scenarios import (
+        _atomic_targets as targets,
+    )
+
+    x = 0.2 if incorrect_fk else -0.2
+    monkeypatch.setattr(
+        targets,
+        "randomized_vector_batch",
+        lambda *a, **k: torch.tensor([[x, 0.0, 0.0]]),
+    )
+    scenario = SimpleNamespace(
+        robot=_TargetReferenceRobot(incorrect_fk=incorrect_fk),
+        control_part="arm",
+        suite=SimpleNamespace(protocol=ProtocolCfg()),
+    )
+    with pytest.raises(RuntimeError, match="exhausted 2 target candidates for rows"):
+        targets._held_target_reference(
+            scenario,
+            {"target_candidate_count": 2},
+            seed=7,
+            start=torch.zeros(1, 3),
+            table_object_pose=torch.eye(4)[None],
+            object_to_eef=torch.eye(4)[None],
+            translation_stream=321,
+            rotation_stream=322,
+            default_offset=(0.0, 0.0, 0.0),
+            height=0.0,
+            waypoint_heights=(0.0,),
+        )
+
+
+def test_reference_recovery_maps_nested_environment_ids():
+    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
+    from embodichain_benchmarks.motion_generation.scenarios._atomic_reference import (
+        _recover_reference_ik,
+    )
+
+    robot = _TargetReferenceRobot()
+    goal = torch.eye(4).repeat(2, 1, 1)
+    goal[:, 0, 3] = 0.2
+    valid, qpos = _recover_reference_ik(
+        robot,
+        goal,
+        torch.zeros(2, 3),
+        torch.tensor([True, False]),
+        torch.zeros(2, 3),
+        control_part="arm",
+        protocol=ProtocolCfg(),
+        env_ids=[2, 7],
+    )
+    assert valid.tolist() == [True, True]
+    assert robot.calls == [[7]]
+    assert torch.equal(qpos[0], torch.zeros(3))
+    torch.testing.assert_close(qpos[1], torch.tensor([0.2, 0.0, 0.0]))
+
+
+@pytest.mark.parametrize("count", [0, 33, True])
+def test_held_target_candidate_count_bounds_precede_sampling(count):
+    from embodichain_benchmarks.motion_generation.scenarios._atomic_targets import (
+        _held_target_reference,
+    )
+
+    with pytest.raises(ValueError, match="target_candidate_count"):
+        _held_target_reference(
+            Mock(),
+            {"target_candidate_count": count},
+            seed=7,
+            start=torch.zeros(1, 3),
+            table_object_pose=torch.eye(4)[None],
+            object_to_eef=torch.eye(4)[None],
+            translation_stream=321,
+            rotation_stream=322,
+            default_offset=(0.0, 0.0, 0.0),
+            height=0.0,
+            waypoint_heights=(0.0,),
+        )
+
+
+_PGI_FINGER_LINKS = {"gripper_finger1_link_1", "gripper_finger2_link_1"}
+
+
+def _assembled_link_and_joint_names(cfg: RobotCfg) -> tuple[list[str], list[str]]:
+    tree = ET.parse(cfg.urdf_cfg.assemble_urdf())
+    links = [link.get("name") for link in tree.findall("link")]
+    joints = [
+        joint.get("name")
+        for joint in tree.findall("joint")
+        if joint.get("type") != "fixed"
+    ]
+    return links, joints
+
+
+def test_franka_panda_pgi_selectors_resolve_on_the_assembled_robot() -> None:
+    from embodichain.utils.string import resolve_matching_names
+
+    cfg = _FrankaPgiCfg.from_dict({})
+    links, joints = _assembled_link_and_joint_names(cfg)
+
+    # Spawn rejects any selector that matches nothing; every key must resolve.
+    for group in cfg.link_attrs.values():
+        resolve_matching_names(group.link_names_expr, links)
+    _, contact_links = resolve_matching_names(
+        cfg.link_attrs["newton_gripper_contacts"].link_names_expr, links
+    )
+    assert set(contact_links) == _PGI_FINGER_LINKS
+    assert resolve_matching_names(cfg.control_parts["arm"], joints)[1] == [
+        f"fr3_joint{i}" for i in range(1, 8)
+    ]
+    assert resolve_matching_names(cfg.control_parts["eef"], joints)[1] == [
+        "gripper_finger1_joint_1"
+    ]
+    drives = cfg.joint_drive_props
+    for rules in (drives.stiffness, drives.damping, drives.max_effort):
+        resolve_matching_names(list(rules), joints)
+    solver = cfg.solver_cfg["arm"]
+    assert {solver.root_link_name, solver.end_link_name} <= set(links)
+    assert len(cfg.init_qpos) == len(joints)
+    assert cfg.init_qpos[-2:] == [0.0, 0.0]
+
+
+def test_franka_panda_pgi_roundtrip_keeps_the_assembly_and_other_groups() -> None:
+    wrist = {
+        "link_names_expr": ["fr3_link7"],
+        "attrs": {"material_props": {"static_friction": 0.5}},
+    }
+    cfg = _FrankaPgiCfg.from_dict(
+        {
+            "uid": "franka_pgi",
+            "init_rot": [0.0, 0.0, 180.0],
+            "solver_cfg": {"arm": {"tcp": np.eye(4).tolist()}},
+            "link_attrs": {"wrist": wrist},
+        }
+    )
+
+    restored = _FrankaPgiCfg.from_dict(cfg.to_dict())
+
+    assert restored.to_dict() == cfg.to_dict()
+    assert set(restored.link_attrs) == {"newton_gripper_contacts", "wrist"}
+    assert restored.link_attrs["wrist"].link_names_expr == ["fr3_link7"]
+    assert list(restored.init_rot) == [0.0, 0.0, 180.0]
+    assert restored.solver_cfg["arm"].end_link_name == "fr3_link8"
+    assert [
+        Path(component["urdf_path"]).name
+        for component in restored.urdf_cfg.components.values()
+    ] == ["Panda.urdf", "DH_PGI_140_80.urdf"]
+
+    # The merge contract removes one group without touching the others.
+    without_contacts = _FrankaPgiCfg.from_dict(
+        {"link_attrs": {"wrist": wrist, "newton_gripper_contacts": None}}
+    )
+    assert set(without_contacts.link_attrs) == {"wrist"}
+
+
+def test_franka_panda_pgi_leaves_the_stock_panda_defaults_intact() -> None:
+    before = FrankaPandaCfg.from_dict({}).to_dict()
+
+    _FrankaPgiCfg.from_dict({})
+    stock = FrankaPandaCfg.from_dict({})
+
+    assert stock.to_dict() == before
+    assert stock.control_parts["eef"] == ["fr3_finger_joint1", "fr3_finger_joint2"]
+    assert stock.solver_cfg["arm"].end_link_name == "fr3_hand_tcp"
+    assert stock.link_attrs["newton_gripper_contacts"].link_names_expr == [
+        "fr3_leftfinger|fr3_rightfinger"
+    ]
+    assert stock._pk_urdf_path.endswith("PandaWithHand.urdf")
+
+
+def test_franka_panda_pgi_kinematic_chain_matches_the_assembled_solver() -> None:
+    pytest.importorskip("pytorch_kinematics")
+    cfg = _FrankaPgiCfg.from_dict({})
+    solver_cfg = cfg.solver_cfg["arm"]
+    assert cfg._pk_urdf_path == cfg.urdf_cfg.components["arm"]["urdf_path"]
+
+    chain = cfg.build_pk_serial_chain()["arm"]
+    assert chain.get_joint_parameter_names() == cfg.control_parts["arm"]
+
+    # The solver plans on the assembled robot; the chain must end at the same
+    # flange so that composing it with the solver TCP gives the same pose.
+    solver_cfg.urdf_path = cfg.urdf_cfg.assemble_urdf()
+    solver_cfg.joint_names = cfg.control_parts["arm"]
+    solver = solver_cfg.init_solver(device=torch.device("cpu"))
+    qpos = torch.tensor(
+        [cfg.init_qpos[:7], [0.3, -0.2, 0.1, -2.0, 0.2, 2.5, 0.4]],
+        dtype=torch.float32,
+    )
+    tcp = torch.tensor(solver_cfg.tcp, dtype=torch.float32)
+    torch.testing.assert_close(
+        solver.get_fk(qpos), chain.forward_kinematics(qpos).get_matrix() @ tcp
+    )

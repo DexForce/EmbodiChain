@@ -10,6 +10,7 @@ Lightweight RL environments have a separate owner in
 | Request | Owning file / resolution path |
 |---|---|
 | Command dispatch | `embodichain/cli/main.py`; `embodichain/__main__.py` is the module entry wrapper |
+| Example discovery / launch | `embodichain/cli/run_example.py` → script path in the ordinary `examples/` tree → `_example_runner.py`; see [running and adding examples](../../../examples/README.md) |
 | Task discovery / gallery / `show-task` | `embodichain/cli/_task_catalog.py` → shared logical-task/deployment records; `list_task.py` and `show_task.py` render them |
 | Launch / CLI overrides | `embodichain/lab/scripts/run_task.py` → `build_env_cfg_from_args()` → `config_to_cfg()` |
 | Generic component expansion | `embodichain/lab/gym/utils/_component_composition.py` |
@@ -29,6 +30,13 @@ Read [configuration and registration](configuration.md) for task-first layout,
 component ownership, path resolution, config-owned IDs, and task listing.
 Read [execution](execution.md) for hooks, bridge acceptance, reset ordering,
 wrappers, and replay. Read [profiling](profiling.md) only for instrumentation.
+
+Velocity locomotion deployments select catalog robot IDs in both backends.
+Their `contracts/_config.py` expands the task JSON's matching model selection
+using the backend-free robot profile reader. Task-specific actions, observations,
+rewards and contact termination rules remain in the task package; robot defaults
+and the distinct asset/contract joint orders are owned by
+[robot-system](../robot-system/robot-system.md).
 
 ## Launcher argument ownership
 

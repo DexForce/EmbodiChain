@@ -22,6 +22,30 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.data
+----------------
+
+The public data namespace exposes dataset resolution, legacy database locations,
+and resource metadata. Its asset namespace loads on first access so extension
+asset definitions can import the dataset base without circular initialization.
+
+.. currentmodule:: embodichain.data
+
+.. autosummary::
+
+   assets
+   EMBODICHAIN_DEFAULT_DATABASE_ROOT
+   database_dir
+   database_2d_dir
+   database_agent_prompt_dir
+   database_demo_dir
+   EmbodiChainDataset
+   DEFAULT_DATA_MODULES
+   get_data_class
+   get_data_path
+   list_default_materials
+   get_default_material_info
+
 embodichain.data.assets.demo_assets
 -----------------------------------
 
@@ -39,6 +63,26 @@ EmbodiChain data cache.
    RubiksCube
    ScoopIceNewEnv
    TabletopFourBases
+
+embodichain.data.assets.materials
+------------------------------------
+
+Material, environment-map and background bundles use the shared asset cache.
+``DefaultMaterials`` downloads the pinned 18-preset collection and its auxiliary
+soap-film layer; it does not create a simulator World.
+
+.. currentmodule:: embodichain.data.assets.materials
+
+.. autosummary::
+
+   SimResources
+   EnvMapHDR
+   CocoBackground
+   BackgroundTexture
+   DefaultMaterials
+
+.. autoclass:: DefaultMaterials
+   :members: get_material_path
 
 embodichain.data.assets.planner_assets
 --------------------------------------
@@ -73,8 +117,83 @@ embodichain.data.assets.solver_assets
 
    download_neural_ik_checkpoint
 
+embodichain.data.assets.w1_assets
+---------------------------------
+
+Versioned W1 URDF archives use the shared data-root and download cache. V021
+provides separate body components; V022 and V025 bundle the full robot and
+components. V030 packages the standard 20-DOF body without detachable grippers
+or wrist-camera attachments. Its component visuals and inertials match the
+corrected full-body definition.
+
+.. currentmodule:: embodichain.data.assets.w1_assets
+
+.. autosummary::
+   :nosignatures:
+
+   DexforceW1V021
+   DexforceW1V022
+   DexforceW1V025
+   DexforceW1V030
+   DexforceW1ChassisV021
+   DexforceW1TorsoV021
+   DexforceW1EyesV021
+   DexforceW1HeadV021
+   DexforceW1LeftArmV021
+   DexforceW1RightArmV021
+
+.. autoclass:: DexforceW1V021
+
+.. autoclass:: DexforceW1V022
+
+.. autoclass:: DexforceW1V025
+
+.. autoclass:: DexforceW1V030
+
+.. autoclass:: DexforceW1ChassisV021
+
+.. autoclass:: DexforceW1TorsoV021
+
+.. autoclass:: DexforceW1EyesV021
+
+.. autoclass:: DexforceW1HeadV021
+
+.. autoclass:: DexforceW1LeftArmV021
+
+.. autoclass:: DexforceW1RightArmV021
+
+embodichain.data.default_materials
+------------------------------------
+
+The wheel includes catalog metadata so these functions work offline without
+asset downloads. Both functions are also available from ``embodichain.data``. The 24-preset
+catalog combines six built-in parameter definitions and 18 downloadable
+resources; metadata identifies their source and download requirement.
+Metadata includes compatible renderer names, source revision, dependencies,
+auxiliary resources and suggested physical texture dimensions. Dimensions do
+not change geometry or UVs.
+
+.. currentmodule:: embodichain.data.default_materials
+
+.. autosummary::
+
+   list_default_materials
+   get_default_material_info
+
+.. autofunction:: list_default_materials
+
+.. autofunction:: get_default_material_info
+
+.. currentmodule:: embodichain.data
+
+.. autofunction:: list_default_materials
+   :no-index:
+
+.. autofunction:: get_default_material_info
+   :no-index:
+
 embodichain.data_pipeline
-------------------------
+-------------------------
 
 The configuration submodule derives bounded pipeline settings without starting
 an online worker. Importing the data-pipeline package remains lazy.
@@ -86,7 +205,7 @@ an online worker. Importing the data-pipeline package remains lazy.
    configuration
 
 embodichain.data_pipeline.configuration
---------------------------------------
+---------------------------------------
 
 Configure ODS from measured generation and training capacities. A versioned
 profile bounds selections per trajectory; the planner never promotes provisional
@@ -823,6 +942,24 @@ embodichain.lab.scripts.preview_lerobot_data
    inspect_dataset
    main
    resolve_dataset_root
+
+embodichain.lab.scripts.preview_material
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_material
+
+Query the default catalog without loading simulation dependencies, or render
+presets and parameter variants with fixed preview settings and managed cleanup.
+
+.. autosummary::
+
+   main
+   cli
+
+.. autofunction:: main
+
+.. autofunction:: cli
+
 
 embodichain.lab.scripts.preview_robot
 -------------------------------------

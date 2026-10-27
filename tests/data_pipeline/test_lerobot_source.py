@@ -165,6 +165,8 @@ def test_padding_capacity_cannot_exceed_resident_allowance(official_dataset):
 
 
 def test_fixed_capacity_and_read_chunking_preserve_numeric_results(official_dataset):
+    from embodichain.learning.sl import SequenceBatchSource, SupervisedBatch
+
     mapping = LeRobotFieldMappingCfg(provenance_key="source.trace")
     first = _load(
         official_dataset, mapping=mapping, max_episode_steps=8, read_batch_size=1
@@ -177,6 +179,36 @@ def test_fixed_capacity_and_read_chunking_preserve_numeric_results(official_data
         torch.equal(first.data[key], second.data[key]) for key in first.data.keys()
     )
     assert first.source_id == second.source_id
+
+    def encode(context):
+        return SupervisedBatch(
+            context["obs"][:, :2],
+            context["actions"][:, 1:],
+            {"target": context["loss_mask"][:, 1:]},
+        )
+
+    bridges = [
+        SequenceBatchSource(
+            source,
+            SequenceSpecCfg(2, 4),
+            encoder=encode,
+            encoder_version="sdk-toy-actions-v1",
+            immutable=True,
+        )
+        for source in (first, second)
+    ]
+    assert bridges[0].source_id == bridges[1].source_id
+    batches = [
+        bridge.sample(16, generator=torch.Generator().manual_seed(13))
+        for bridge in bridges
+    ]
+    torch.testing.assert_close(batches[0].inputs, batches[1].inputs)
+    torch.testing.assert_close(batches[0].targets, batches[1].targets)
+    for key in ("valid", "loss_mask", "frame_ids", "generations"):
+        torch.testing.assert_close(
+            batches[0].metadata["sequence_source"]["context"][key],
+            batches[1].metadata["sequence_source"]["context"][key],
+        )
 
 
 def test_ordered_feature_names_are_checked(official_dataset):

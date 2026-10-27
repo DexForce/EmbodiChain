@@ -19,11 +19,12 @@
 from __future__ import annotations
 
 import json
-import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from embodichain.learning.rl.checkpoint import _atomic_write
 
 __all__ = ["RUN_MANIFEST_NAME", "RunManifest", "write_run_manifest"]
 
@@ -44,11 +45,14 @@ class RunManifest:
         object.__setattr__(self, "checkpoints", dict(self.checkpoints))
 
     @classmethod
-    def load(cls, run: str | Path) -> RunManifest:
+    def load(cls, run: str | Path, *, check_files: bool = True) -> RunManifest:
         """Load ``run-manifest.json`` and resolve its referenced files.
 
         Args:
             run: EmbodiChain training run directory.
+            check_files: Require every referenced file to exist. Set to False
+                when the caller checks only the files needed for its operation.
+                Manifest structure and path containment are always validated.
 
         Returns:
             Resolved manifest.
@@ -60,12 +64,15 @@ class RunManifest:
         value = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(value, Mapping) or value.get("schema_version") != 1:
             raise ValueError(f"Unsupported run manifest: {path}")
-        configs = _resolve_group(root, value.get("configs"), "configs")
+        configs = _resolve_group(
+            root, value.get("configs"), "configs", check_files=check_files
+        )
         checkpoints = _resolve_group(
             root,
             value.get("checkpoints"),
             "checkpoints",
             allow_none=True,
+            check_files=check_files,
         )
         return cls(root, configs, checkpoints)
 
@@ -132,10 +139,10 @@ def write_run_manifest(
         "checkpoints": checkpoints,
     }
     path = root / RUN_MANIFEST_NAME
-    path.write_text(
-        json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    contents = (
+        json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    ).encode("utf-8")
+    _atomic_write(path, lambda stream: stream.write(contents))
     return path
 
 
@@ -145,7 +152,8 @@ def _snapshot_config(source: str | Path, target: Path, name: str) -> str:
         raise FileNotFoundError(f"Training config does not exist: {path}")
     suffix = path.suffix.lower() if path.suffix else ".yaml"
     destination = target / f"{name}{suffix}"
-    shutil.copyfile(path, destination)
+    if path != destination:
+        _atomic_write(destination, lambda stream: stream.write(path.read_bytes()))
     return destination.relative_to(target.parent).as_posix()
 
 
@@ -167,6 +175,7 @@ def _resolve_group(
     field: str,
     *,
     allow_none: bool = False,
+    check_files: bool = True,
 ) -> dict[str, Path | None]:
     if not isinstance(value, Mapping):
         raise TypeError(f"Run manifest {field} must be a mapping")
@@ -187,7 +196,9 @@ def _resolve_group(
             raise ValueError(
                 f"Run manifest {field}.{name} escapes the run directory"
             ) from error
-        if not path.is_file():
-            raise FileNotFoundError(f"Run manifest file does not exist: {path}")
+        if check_files and not path.is_file():
+            raise FileNotFoundError(
+                f"Run manifest file does not exist ({field}.{name}): {path}"
+            )
         result[str(name)] = path
     return result

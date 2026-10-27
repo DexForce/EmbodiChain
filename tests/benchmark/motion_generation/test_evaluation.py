@@ -25,15 +25,15 @@ from pathlib import Path
 import pytest
 import torch
 
-from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.artifacts import TrialJsonlWriter
-from scripts.benchmark.motion_generation.config import SuiteCfg, TrackCfg
-from scripts.benchmark.motion_generation.contracts import (
+from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
+from embodichain_benchmarks.motion_generation.artifacts import TrialJsonlWriter
+from embodichain_benchmarks.motion_generation.config import SuiteCfg, TrackCfg
+from embodichain_benchmarks.motion_generation.contracts import (
     PhysicalEvaluation,
     StageOutcome,
     validate_physical_evaluations,
 )
-from scripts.benchmark.motion_generation.evaluation import (
+from embodichain_benchmarks.motion_generation.evaluation import (
     STANDARD_VERSION,
     SKILL_CRITERIA,
     StageEvidence,
@@ -41,7 +41,7 @@ from scripts.benchmark.motion_generation.evaluation import (
     evaluate_skill_stages,
     validate_standard_evaluation,
 )
-from scripts.benchmark.motion_generation.models import (
+from embodichain_benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -50,7 +50,7 @@ from scripts.benchmark.motion_generation.models import (
     TrialRecord,
     with_physical_evaluation,
 )
-from scripts.benchmark.motion_generation.reporting import write_markdown_report
+from embodichain_benchmarks.motion_generation.reporting import write_markdown_report
 
 
 def _evidence(window: str, **measurements: float | bool) -> StageEvidence:
@@ -160,23 +160,50 @@ def _aggregates(
 
 
 @pytest.mark.parametrize(
-    "error,passed", [(0.0029, True), (0.003, True), (0.0031, False), (-0.001, False)]
+    "position,rotation,passed",
+    [
+        (0.0099, 0.0, True),
+        (0.01, 0.0, True),
+        (0.0101, 0.0, False),
+        (-0.001, 0.0, False),
+        (0.0, 0.0999, True),
+        (0.01, 0.1, True),
+        (0.0, 0.1001, False),
+        (0.0, -0.001, False),
+    ],
 )
-def test_measured_primitive_boundary(error: float, passed: bool) -> None:
-    result = _primitive(error)
+def test_measured_primitive_boundary(
+    position: float, rotation: float, passed: bool
+) -> None:
+    result = evaluate_skill_stages(
+        "move_end_effector",
+        {
+            "reached": _evidence(
+                "terminal_settle",
+                tcp_position_error_m=position,
+                tcp_rotation_error_rad=rotation,
+            )
+        },
+        env_index=0,
+    )
     assert result.task_success is passed
     validate_standard_evaluation("move_end_effector", result)
 
 
-def test_joint_criterion_uses_l2_measurement_not_max_joint_error() -> None:
+@pytest.mark.parametrize("error,passed", [(0.0999, True), (0.1, True), (0.1001, False)])
+def test_joint_criterion_uses_l2_measurement_not_max_joint_error(
+    error: float, passed: bool
+) -> None:
     result = evaluate_skill_stages(
         "move_joints",
         {
-            "reached": _evidence("terminal_settle", joint_error_l2_rad=0.006),
+            "reached": _evidence("terminal_settle", joint_error_l2_rad=error),
         },
         env_index=0,
     )
-    assert result.failure_code == "task_goal_miss"
+    assert result.task_success is passed
+    assert result.failure_code == (None if passed else "task_goal_miss")
+    validate_standard_evaluation("move_joints", result)
 
 
 def test_batched_stage_evidence_preserves_environment_order() -> None:
@@ -193,7 +220,7 @@ def test_batched_stage_evidence_preserves_environment_order() -> None:
             {
                 "reached": _evidence(
                     "terminal_settle",
-                    tcp_position_error_m=0.004,
+                    tcp_position_error_m=0.02,
                     tcp_rotation_error_rad=0.0,
                 )
             },
@@ -347,7 +374,7 @@ def test_handover_signed_height_bounds(height: float, passed: bool) -> None:
     ["missing_stage", "fake_pass", "no_provenance", "wrong_version", "inapplicable"],
 )
 def test_claimed_standard_cannot_bypass_criteria(mutation: str) -> None:
-    result = _primitive(0.004)
+    result = _primitive(0.02)
     if mutation == "missing_stage":
         result = replace(result, stages=(StageOutcome("different", "passed"),))
     elif mutation == "fake_pass":
@@ -403,7 +430,7 @@ def test_jsonl_and_report_preserve_layers_and_stage_denominators(
     physical = (
         _primitive(0.002),
         evaluate_skill_stages("move_end_effector", {}, env_index=1),
-        _primitive(0.004, 2),
+        _primitive(0.02, 2),
     )
     outcomes = tuple(
         with_physical_evaluation(_outcome(i), value, skill_id=case.skill_id)
@@ -551,3 +578,27 @@ def test_suite_can_explicitly_rank_physical_success() -> None:
     assert metrics["physical_skill_success_rate"] == 1.0
     assert metrics["end_to_end_success_rate"] == 0.0
     assert aggregates["atomic_skills_leaderboard"][0]["overall_success_rate"] == 1.0
+
+
+@pytest.mark.parametrize(
+    "attribute,ranking,expected",
+    [
+        ("task_success", "end_to_end", 0.0),
+        ("physical_skill_success", "physical_skill", 1.0),
+    ],
+)
+def test_atomic_ranking_label_matches_actual_success_metric(
+    attribute, ranking, expected
+):
+    case = replace(_case(), primary_success=attribute)
+    outcome = with_physical_evaluation(
+        replace(_outcome(), motion_valid=False),
+        _primitive(0.002),
+        skill_id=case.skill_id,
+    )
+    row = _aggregates([case], [_record(case, (outcome,))])["atomic_skills_leaderboard"][
+        0
+    ]
+    assert row["ranking"] == ranking
+    assert row["overall_success_rate"] == expected
+    assert row["physical_skill_success_rate"] == 1.0

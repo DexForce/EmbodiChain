@@ -44,7 +44,10 @@ ActionInvocation                       semantic program
 ```
 
 Planning never steps simulation and never treats command completion as proof of
-a physical effect. Runtime hosts may collect versioned physical evidence after
+a physical effect. A gripper-close hold inserted into a moving arm path does not
+preserve solved timing: retain required stop boundaries and validate the compiled
+control-grid path, not only native planner samples. Runtime hosts may collect
+versioned physical evidence after
 each fresh observation and pass it to an evidence-aware effect verifier, phase
 gate, or held-object guard. Evidence acquisition stays outside planning and
 does not mutate symbolic task state; verification results are the only path
@@ -56,6 +59,19 @@ goals remain exact. Heading alternatives are checked as complete motion paths,
 with accepted rows retained independently and selected offsets in diagnostics.
 Held-object transport and Pour keep the binding's configured grasp command; a
 contact-blocked measured aperture does not retain closing effort.
+
+`PickUpOptions.approach_direction` accepts one world vector or one vector per
+planning row. PickUp and AxisAlign normalize each row independently and use the
+same direction for candidate eligibility and pre-grasp translation. A benchmark
+that freezes per-row grasp realisations must forward their directions to the
+actual action; replacing them with one shared vector changes the request.
+
+`AxisAlignOptions.alignment_twist_rad` selects a scalar or per-row rotation
+about the aligned target axis. Zero keeps shortest-arc behavior; an independent
+benchmark generator can freeze another full-pose realisation without changing
+the directed axis goal. `alignment_offset_m` similarly selects a scalar-vector
+or per-row world translation from the lifted object centre; zero retains the
+fixed-centre target. Neither option establishes path or physical feasibility.
 
 `SlideGoal.joint_target` optionally supplies a public `SlideJointTarget` with an
 absolute prismatic coordinate and a calibrated axis sign. Slide resolves the
@@ -95,7 +111,7 @@ Sample Newton contact overlays are local to the selected scene and gripper;
 they are not world defaults or a guarantee of open-loop physical success.
 Author contact dimensions and material settings before `prepare()`, never by
 rewriting captured solver arrays. The current values live in
-`lab/scripts/_atomic_action/support.py` and the selected physical components.
+`examples/sim/atomic_action/support.py` and the selected physical components.
 
 For UR5 with `dexuni`, the paper-cup `move_held_object.py` tutorial opts into
 VBD contact history with `latest` collision matching, sliding friction 4 on the
@@ -145,25 +161,54 @@ Projected assurance is not physical task success.
 Use `/add-atomic-action` to extend goals, planners, registration and focused tests.
 Keep planning side-effect-free; actions do not own task sequencing or simulator stepping.
 
-## Direct-simulation sample host
+## Direct-simulation example
 
-`embodichain run-atomic-action --skill` selects a sample scene.
-`lab/scripts/run_atomic_action.py` owns selection, batching and cleanup;
-`lab/scripts/_atomic_action/` owns scenes, robot compatibility, solver choices,
-and local defaults. Tutorial files forwarding there are compatibility entries.
-Read the [host README](../../../embodichain/lab/scripts/_atomic_action/README.md)
-for supported combinations, fixture calibration, expansion and output artifacts.
+`embodichain run-example sim/atomic_action --skill` selects a fixed sample scene;
+`run-atomic-action` remains a compatibility alias. The generic launcher in
+`embodichain/cli/run_example.py` resolves scripts directly from the ordinary
+`examples/` tree and forwards arguments through `_example_runner.py`.
 
-Mounted-gripper TCPs belong to `lab/scripts/_atomic_action/tcp_presets.py`.
-They are independent full poses per fixture, forwarded to single/dual-arm
-solvers; changing a TCP changes the kinematic tool frame, not physical geometry.
+The example lives in `examples/sim/atomic_action/` and is shipped as ordinary
+distribution data with the rest of that tree. Its `__main__.py` owns
+typed configuration and validated selection; `host.py` owns compilation,
+expansion and output. Scene modules own physical setup and local defaults.
+Runnable scene demonstrations and physical helpers live there. Specialized
+examples such as coordinated manipulation and observed recovery run by file path through
+`embodichain run-example`. The tutorial directory contains `single_arm.py`
+(PickUp→Place), `dual_arm.py` (HandOver), and `embodiment_switching.py`
+(robot/tool configuration reuse). They reuse example setup while explaining
+typed application composition. The switching walkthrough owns its CLI matrix;
+`examples/sim/atomic_action/embodiments.py` owns its fixtures and measured playback
+checks and recording cameras. Its task recipes remain hardware-independent;
+swapping embodiments requires compatible resources and a physically feasible scene. The
+[switching tutorial README](../../../scripts/tutorials/atomic_action/README.md)
+owns its eight-combination matrix and links the checked-in MP4 previews under
+`docs/source/_static/atomic_actions/embodiment_switching/`. Read the
+[example README](../../../examples/sim/atomic_action/README.md)
+for supported combinations, fixture calibration, playback and output artifacts.
 
-Affordance branch identity stays separate from physical slots. The host adapts
-compiled references to `motion.expansion` while preserving contact/hand samples,
-action boundaries and callback timing. Measured state remains row-local,
-including Slide's replanned push after pull. Completion reports planning and
-playback only; it does not establish measured success or Gym dataset collection.
-See [motion expansion](../motion-planning/motion-planning.md) for the shared
+`--variants N` requests N executions including the reference and creates N
+parallel environments; the default is one. Supported affordance and trajectory
+factors apply without a Cartesian recipe bank or collection lifecycle.
+Unsupported explicit factors fail before simulation. Mounted-gripper TCPs are
+example-owned full poses forwarded to single/dual-arm solvers.
+
+The engine's optional `plan_transform` runs before concatenation and projected
+state propagation. The example and Task Program share
+`atomic_actions/_plan_expansion.py`, using `ActionPlanTemplateAdapter` and
+`motion.expansion` to rebuild commands, velocities and phase metadata together.
+Core simulation and Task Program code do not depend on example modules.
+Built-in phase permissions may only narrow; editable joints come from explicit
+motion bindings. Contact/hand samples, endpoints, required targets, stationary
+participants, zero-time joins and callback indices remain exact.
+
+Logical variant identity stays separate from physical slots. Measured state
+remains row-local, including Slide's replanned push after pull. Playback and
+exports share a control clock with explicit settling and final holds.
+Completion reports planning and playback; it does not establish measured
+success or Gym dataset collection. Scenes remain fixed; spatial generalization
+belongs to benchmark hosts. See
+[motion expansion](../motion-planning/motion-planning.md) for the shared
 operators and host ownership boundary.
 
 ## Recommended change sites

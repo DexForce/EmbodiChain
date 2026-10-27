@@ -34,6 +34,10 @@ _vec9 = wp.types.vector(length=9, dtype=wp.float64)
 _solutions = wp.types.matrix(shape=(8, 7), dtype=wp.float32)
 wp.set_module_options({"enable_backward": False})
 
+# Model constants: dimensions[0:9] hold lengths/triangle angles and [9:16]
+# the URDF reference posture. Geometric angles are scale * (q - reference);
+# returned candidates, pruning, limits and FK validation use original q.
+
 
 @wp.func
 def _home_axes() -> _axes:
@@ -101,7 +105,7 @@ def _arm_angle(
     for i in range(6):
         # Accumulate the canonical rotation once, instead of rotating all
         # remaining axes (21 Rodrigues operations per candidate).
-        angle = scales[i] * qpos[i]
+        angle = scales[i] * (qpos[i] - dimensions[9 + i])
         if i % 2 == 0:
             axes[i] = z
             c, s = wp.cos(angle), wp.sin(angle)
@@ -489,7 +493,9 @@ def solve(
     endpoint = frames[0] @ target @ frames[1]
     s7 = wp.normalize(wp.vec3d(endpoint[0, 2], endpoint[1, 2], endpoint[2, 2]))
     radial = _rotate(
-        wp.vec3d(endpoint[0, 0], endpoint[1, 0], endpoint[2, 0]), s7, -scales[6] * q7
+        wp.vec3d(endpoint[0, 0], endpoint[1, 0], endpoint[2, 0]),
+        s7,
+        -scales[6] * (q7 - dimensions[15]),
     )
     # Remove float32 FK rotation drift before intersecting geometric objects.
     s6 = wp.normalize(wp.cross(s7, radial))
@@ -519,11 +525,16 @@ def solve(
     q4 = elbow_sign * bend - beta1 - dimensions[8]
     # The triangle already determines q4: reject its out-of-limit elbow
     # branch before reconstructing axes and recovering the other angles.
-    joint4 = q4 / scales[3]
+    # Allow near-limit projection within the configured angular accuracy,
+    # including inverse-model error from admitted CAD-axis deviations. This
+    # only broadens candidate generation: original limits and actual URDF FK
+    # still decide whether the rounded, clamped result can be returned.
+    boundary_tolerance = wp.max(wp.float64(1e-6), rotation_tolerance)
+    joint4 = q4 / scales[3] + dimensions[12]
     period4 = wp.float64(6.283185307179586) / wp.abs(scales[3])
-    if wp.ceil((wp.float64(lower[3]) - joint4 - wp.float64(1e-6)) / period4) > wp.floor(
-        (wp.float64(upper[3]) - joint4 + wp.float64(1e-6)) / period4
-    ):
+    if wp.ceil(
+        (wp.float64(lower[3]) - joint4 - boundary_tolerance) / period4
+    ) > wp.floor((wp.float64(upper[3]) - joint4 + boundary_tolerance) / period4):
         nearest4 = joint4 + period4 * wp.round(
             ((wp.float64(lower[3]) + wp.float64(upper[3])) * wp.float64(0.5) - joint4)
             / period4
@@ -543,7 +554,7 @@ def solve(
     if radius <= wp.float64(1e-10) or wp.abs(cross_scale) <= wp.float64(1e-10):
         for i in range(5):
             axis = seed_axes[i]
-            angle = scales[i] * wp.float64(seeds[row, i])
+            angle = scales[i] * (wp.float64(seeds[row, i]) - dimensions[9 + i])
             for j in range(i + 1, 5):
                 seed_axes[j] = _rotate(seed_axes[j], axis, angle)
     wrist_sign = wp.float64(1.0)
@@ -586,7 +597,7 @@ def solve(
     s3 = wp.normalize(s3)
     s2 = wp.vec3d(-s3[1], s3[0], wp.float64(0.0))
     if wp.length(s2) <= wp.float64(1e-6):
-        q1 = scales[0] * wp.float64(seeds[row, 0])
+        q1 = scales[0] * (wp.float64(seeds[row, 0]) - dimensions[9])
         s2 = wp.vec3d(-wp.sin(q1), wp.cos(q1), wp.float64(0.0))
     else:
         s2 = wp.normalize(s2)
@@ -616,12 +627,12 @@ def solve(
         angle = wp.atan2(
             wp.dot(axes[i], wp.cross(before, after)), wp.dot(before, after)
         )
-        joint = angle / scales[i]
+        joint = angle / scales[i] + dimensions[9 + i]
         period = wp.float64(6.283185307179586) / wp.abs(scales[i])
-        # Small boundary allowance for float32 URDF/target input; the kernel
-        # verifies every rounded/clamped candidate against the actual FK.
-        first = wp.ceil((wp.float64(lower[i]) - joint - wp.float64(1e-6)) / period)
-        last = wp.floor((wp.float64(upper[i]) - joint + wp.float64(1e-6)) / period)
+        # Use the same projection allowance as elbow pruning, then verify
+        # every rounded/clamped candidate against the original URDF FK.
+        first = wp.ceil((wp.float64(lower[i]) - joint - boundary_tolerance) / period)
+        last = wp.floor((wp.float64(upper[i]) - joint + boundary_tolerance) / period)
         if first > last:
             if not guide_limits:
                 return

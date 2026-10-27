@@ -39,8 +39,8 @@ solvers, and composition stay in `embodichain/lab/sim/`.
 
 | Layout | When | Files |
 |--------|------|-------|
-| Single-file | Variant-less robot | `my_robot.py` |
-| Package | Robot with variants (versions / arm kinds / hand brands) | `types.py`, `cfg.py`, optional `params.py`/`utils.py`, `__init__.py` |
+| Single-file | Model using a vendor-shared archive | `<vendor>/<model>.py` |
+| Package | Model-owned assets or versions/calibrations | `<vendor>/<model>/cfg.py`, `assets.py`, optional specifications, lazy `__init__.py` |
 
 ## The Contract (read first)
 
@@ -65,8 +65,8 @@ must match the matching `control_parts` entry (the test stub asserts this).
 
 ## Steps
 
-1. **Pick a layout** using the table above. Single-file for variant-less robots;
-   package for robots with variants.
+1. **Pick a vendor/model owner** and a layout from the table above. Keep vendor
+   and model initializers lazy. Asset-only imports must not load configurations.
 2. **Create the cfg file(s).** Subclass `RobotCfg`. Declare variant fields (enums)
    if using the package layout.
 3. **Implement `_build_defaults(self, init_dict=None)`.** Set variant fields from
@@ -114,7 +114,7 @@ must match the matching `control_parts` entry (the test stub asserts this).
 
    ```python
    # Catalog entry; importing the catalog must not import the robot module.
-   "MyRobot": {"class_path": "embodichain_robots.my_robot:MyRobotCfg"}
+   "MyRobot": {"class_path": "embodichain_robots.my_vendor.my_robot:MyRobotCfg"}
    ```
 
    The main wheel already advertises this catalog through `embodichain.robots`.
@@ -128,10 +128,20 @@ must match the matching `control_parts` entry (the test stub asserts this).
    must not inflate DOF. Declare `supports_dual_arm` only for a compatible default
    single-arm URDF/control-part/solver contract. Families may declare `variants`
    with control profiles and a `default_variant`; flat preset IDs use `variant_of`.
-   Keep the catalog free of robot/configuration imports.
+   Add explicit `vendor`, `morphology` and `arm_count` metadata when known;
+   unknown fields stay `None`. Variant classification inherits parent values
+   unless explicitly overridden. Keep the catalog free of runtime imports.
+   Put model-owned asset classes in `assets.py` (shared archives at vendor level)
+   and register their unchanged asset IDs, class paths and categories in
+   `_asset_catalog.py`. The `embodichain.assets` entry point connects them to
+   the core resolver and data CLI; listing must not construct datasets.
 
-7. **Add documentation:** create `docs/source/resources/robot/<name>.md` and add
-   it to `docs/source/resources/robot/index.rst`.
+7. **Add documentation:** create
+   `docs/source/resources/robot/<vendor>/<model>.md`, matching the source
+   namespace. Include the model in its vendor's `index.rst` and the Supported
+   Robots overview. Add an index for a new vendor and link it from
+   `docs/source/resources/robot/index.rst`. Community projects with an unknown
+   manufacturer use their project namespace; keep generic composition separate.
 8. **Add a test stub** with a `__main__` smoke test + the DOF drift guard. Use
    `/add-test` for full test scaffolding; the guard snippet is:
 
@@ -185,10 +195,10 @@ Do not copy those semantic declarations into the robot class.
 
 **File locations:**
 
-- Config: `extensions/embodichain_robots/<name>.py` or `extensions/embodichain_robots/<name>/`
+- Config: `extensions/embodichain_robots/<vendor>/<model>.py` or `<vendor>/<model>/`
 - Catalog / lazy exports: `extensions/embodichain_robots/_catalog.py`, `extensions/embodichain_robots/__init__.py`
 - Shared resolver: `embodichain/robot_registry.py`
-- Docs: `docs/source/resources/robot/<name>.md`
+- Docs: `docs/source/resources/robot/<vendor>/<model>.md` and the owning index
 - Tests: `tests/sim/objects/test_robot_cfg.py`
 - Base class: `embodichain/lab/sim/cfg/robot.py` (`RobotCfg`)
 - Guide: `docs/source/guides/add_robot.rst` · Tutorial: `docs/source/tutorial/add_robot.rst`

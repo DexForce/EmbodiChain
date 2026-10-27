@@ -38,6 +38,11 @@ class Command:
 
 COMMANDS = (
     Command(
+        name="train-sl",
+        target="embodichain.learning.sl.workflow:cli",
+        help="Train a supervised policy or dynamics recipe from YAML or JSON.",
+    ),
+    Command(
         name="data",
         target="embodichain.data.download:main",
         help="List and download EmbodiChain data assets.",
@@ -73,14 +78,24 @@ COMMANDS = (
         help="Preview a robot with control-part Gizmos and Viser joint controls.",
     ),
     Command(
+        name="preview-material",
+        target="embodichain.lab.scripts.preview_material:cli",
+        help="Preview default materials or export rendered images and galleries.",
+    ),
+    Command(
         name="run-task",
         target="embodichain.lab.scripts.run_task:cli",
         help="Run a task for data generation or preview.",
     ),
     Command(
+        name="run-example",
+        target="embodichain.cli.run_example:main",
+        help="List and run Python scripts from the examples directory.",
+    ),
+    Command(
         name="run-atomic-action",
-        target="embodichain.lab.scripts.run_atomic_action:cli",
-        help="Replay Atomic Skill scenes with grasp and trajectory expansion.",
+        target="embodichain.cli.run_example:atomic_action_cli",
+        help="Alias for run-example sim/atomic_action.",
     ),
     Command(
         name="list-task",
@@ -129,7 +144,7 @@ COMMANDS = (
     ),
     Command(
         name="benchmark",
-        target="scripts.benchmark.__main__:main",
+        target="embodichain.cli.benchmark:main",
         help="Run EmbodiChain performance benchmarks.",
     ),
     Command(

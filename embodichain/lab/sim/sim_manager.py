@@ -29,6 +29,7 @@ import numpy as np
 import warp as wp
 
 from pathlib import Path
+from uuid import uuid4
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property, partial
@@ -134,6 +135,7 @@ from embodichain.lab.sim.spawn.usd import (
 )
 from embodichain.lab.sim.spawn.scene import SpawnScene
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
+from embodichain.lab.sim.material import _material_desc_from_cfg
 from embodichain.lab.sim.profiler import Profiler, ProfilerCfg
 from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.utils import configclass, logger
@@ -726,6 +728,7 @@ class SimulationManager:
             self._world,
             num_envs=sim_config.num_envs,
             spacing=(sim_config.arena_space, sim_config.arena_space, 0.0),
+            renderer=sim_config.render_cfg.renderer,
         )
         self._arenas = list(self._spawn_scene.builder.prepare_arenas())
         self._prepared_spawn_topology_revision = -1
@@ -4844,19 +4847,37 @@ class SimulationManager:
         """
 
         self._require_native_renderer("Native visual materials")
+        cfg = cfg.replace(uid=cfg.uid or f"visual_material_{uuid4().hex}")
+        descriptor = _material_desc_from_cfg(cfg, cfg.uid)
+        definitions = self._spawn_scene.builder.materials
+        registered = self._spawn_scene._material_definition(cfg.uid)
+        if registered is not None and registered != descriptor:
+            raise ValueError(f"Conflicting visual material definition for {cfg.uid!r}.")
         if cfg.uid in self._visual_materials:
-            logger.log_warning(
-                f"Visual material {cfg.uid} already exists. Returning the existing one."
+            existing = self._visual_materials[cfg.uid]
+            if _material_desc_from_cfg(existing.cfg, cfg.uid) != descriptor:
+                raise ValueError(
+                    f"Conflicting visual material definition for {cfg.uid!r}."
+                )
+            return existing
+
+        if cfg.preset is not None or cfg.parameters:
+            self._spawn_scene._resolve_materials({cfg.uid: descriptor})
+            mat, native_inst = self._spawn_scene._material_resources.resolve(descriptor)
+            visual_mat = VisualMaterial(
+                cfg, mat, initialize_default=False, mat_inst=native_inst
             )
-            return self._visual_materials[cfg.uid]
-
-        mat: Material = self._env.create_pbr_material(cfg.uid, True)
-        visual_mat = VisualMaterial(cfg, mat)
-
+        else:
+            mat: Material | None = self._env.find_material(cfg.uid)
+            initialize_default = mat is None or registered is None
+            if mat is None:
+                mat = self._env.create_pbr_material(cfg.uid, True)
+            visual_mat = VisualMaterial(cfg, mat, initialize_default=initialize_default)
+            definitions[cfg.uid] = descriptor
         self._visual_materials[cfg.uid] = visual_mat
         return visual_mat
 
-    def get_visual_material(self, uid: str) -> VisualMaterial:
+    def get_visual_material(self, uid: str) -> VisualMaterial | None:
         """Get visual material by UID.
 
         Args:
@@ -4868,7 +4889,13 @@ class SimulationManager:
 
         return self._visual_materials[uid]
 
-    def clean_materials(self):
+    def clean_materials(self) -> None:
+        """Clear runtime wrappers and ask the native owner to release unused materials.
+
+        Explicit material definitions remain reserved in the Scene for the World
+        lifetime. Cleaning does not permit a conflicting definition to replace a
+        UID that declarations or live native handles may still reference.
+        """
         self._visual_materials = {}
         if self._env:
             self._env.clean_materials()
@@ -4934,7 +4961,7 @@ class SimulationManager:
                 else:
                     articulation.reset(env_ids)
         for uid, visual in getattr(self, "_visual_objects", {}).items():
-            if uid not in excluded_uids:
+            if uid not in excluded_uids and visual.is_spawn_bound:
                 visual.reset(env_ids)
         for uid, rigid_obj in self._rigid_objects.items():
             if uid not in excluded_uids:

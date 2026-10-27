@@ -1,0 +1,180 @@
+schema_version: 1
+name: atomic_franka_pgi_randomized
+suite_version: atomic_franka_pgi_randomized_v3
+profile: coverage
+
+robot:
+  id: franka_pgi
+  provider: franka_pgi
+  config: {}
+
+planners:
+  - id: nmg
+    adapter: nmg_onnx
+    role: candidate
+    enabled: false
+    config:
+      onnx_model_path: null
+      num_waypoints: 5
+      steps_per_waypoint: 30
+      max_steps: 150
+      action_scale: 0.2
+      use_relative_obs: true
+      intermediate_orientation: true
+      pos_eps: 0.01
+      rot_eps: 0.1
+      joint_eps: 0.01
+      policy_frame_from_world:
+        - [-1.0, 0.0, 0.0, 0.0]
+        - [0.0, -1.0, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, 0.0]
+        - [0.0, 0.0, 0.0, 1.0]
+      runtime_tcp_from_policy_tcp:
+        - [0.70710678, 0.70710678, 0.0, 0.0]
+        - [-0.70710678, 0.70710678, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, -0.0466]
+        - [0.0, 0.0, 0.0, 1.0]
+  - id: curobo
+    adapter: curobo
+    role: primary_baseline
+    enabled: true
+    config:
+      max_attempts: 5
+      max_planning_time: null
+      interpolation_dt: 0.025
+      collision_activation_distance: 0.01
+      use_cuda_graph: true
+      cuda_graph_fallback: true
+      warmup_iterations: 1
+      preserve_plan_samples: false
+      world:
+        obstacle_representation: sphere
+        multi_env: false
+      auto_gen:
+        sphere_density: 0.1
+        collision_sphere_buffer: 0.0
+
+protocol:
+  report_schema_version: "3"
+  warmup_trials: 0
+  measured_trials: 1
+  sample_interval: 80
+  validation_samples: 128
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
+  joint_limit_tolerance_rad: 0.00001
+  # Suite budgets; valid assembled Robot velocity caps remain authoritative.
+  joint_velocity_limit_rad_s: [2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26]
+  joint_acceleration_limit_rad_s2: 10.0
+  joint_jerk_limit_rad_s3: 5000.0
+
+tracks:
+  - id: atomic-skill-randomized
+    scenario: atomic_skill
+    enabled: true
+    config:
+      batch_sizes: [1]
+      seeds: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116]
+      physics:
+        clock: compiled
+        steps_per_waypoint: 4
+        hold_steps: 80
+        hold_sim_steps: 2
+        joint_tracking_tolerance_rad: 0.05
+      gripper:
+        control_part: eef
+        open_qpos: [0.0]
+        grasp_qpos: [0.024]
+      articulations:
+        - id: microwave
+          asset_path: Microwave/microwave.urdf
+          position: [-1.0, -0.30, 0.4]
+          rotation_deg: [0.0, 0.0, 90.0]
+          init_qpos: [0.0, 0.0, 0.0, 0.0]
+          drive:
+            stiffness: 0.001
+            damping: 100.0
+            max_effort: 0.01
+          fix_base: true
+          settle_steps: 10
+      objects:
+        - id: cube_50mm
+          kind: cube
+          size: [0.05, 0.05, 0.05]
+          position: [-0.42, -0.08, 0.05]
+          mass: 0.05
+          dynamic_friction: 0.97
+          static_friction: 0.99
+          contact_offset: 0.003
+          rest_offset: 0.001
+          settle_steps: 10
+      skills:
+        - id: pick_up
+          sample_count: 120
+          grasp_source: fixed
+          hand_interp_steps: 12
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
+          approach_direction: [0.0, 0.0, -1.0]
+          pre_pick_height_m: 0.36
+          object_position_jitter_m: [0.05, 0.05, 0.0]
+          object_yaw_jitter_rad: 0.40
+          cases:
+            - name: randomized_cube_pick
+              object: cube_50mm
+              task_difficulty: medium
+              grasp_offset_m: [0.0, 0.0, 0.0]
+              difficulty_factors:
+                approach: top
+                randomized_object_pose: true
+        - id: move_held_object
+          sample_count: 80
+          held_object_offset_m: [0.0, 0.0, 0.18]
+          held_object_offset_jitter_m: [0.02, 0.02, 0.015]
+          target_object_offset_m: [0.08, 0.08, 0.04]
+          target_object_offset_jitter_m: [0.04, 0.04, 0.02]
+          object_position_jitter_m: [0.04, 0.04, 0.0]
+          object_yaw_jitter_rad: 0.40
+          cases:
+            - name: randomized_cube_transport
+              object: cube_50mm
+              task_difficulty: medium
+              difficulty_factors:
+                object_preheld: true
+                randomized_start_and_target: true
+        - id: place
+          sample_count: 120
+          held_object_offset_m: [0.0, 0.0, 0.18]
+          held_object_offset_jitter_m: [0.02, 0.02, 0.015]
+          target_object_offset_m: [0.10, 0.10, 0.0]
+          target_object_offset_jitter_m: [0.04, 0.04, 0.0]
+          object_position_jitter_m: [0.04, 0.04, 0.0]
+          object_yaw_jitter_rad: 0.40
+          retract_height_m: 0.10
+          hand_interp_steps: 12
+          cases:
+            - name: randomized_cube_place
+              object: cube_50mm
+              task_difficulty: medium
+              difficulty_factors:
+                object_preheld: true
+                randomized_start_and_target: true
+        - id: press
+          sample_count: 256
+          hand_interp_steps: 12
+          approach_distance_m: 0.12
+          press_distance_m: 0.03
+          articulation: microwave
+          target_link: button_link
+          target_joint: button_joint
+          articulation_position_jitter_m: [0.03, 0.03, 0.015]
+          effect_joint_sign: 1.0
+          geometry_seed: 11
+          start_qpos_jitter_rad: [0.15, 0.15, 0.15, 0.12, 0.15, 0.12, 0.15]
+          cases:
+            - name: randomized_vertical_press
+              task_difficulty: medium
+              target_offset_m: [0.0, 0.0, -0.08]
+              difficulty_factors:
+                randomized_start: true
+                randomized_articulation_pose: true

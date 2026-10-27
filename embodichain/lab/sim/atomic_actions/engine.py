@@ -491,6 +491,8 @@ class AtomicActionEngine:
         self,
         invocations: Iterable[ActionInvocation],
         context: PlanningContext | None = None,
+        *,
+        plan_transform: PlanTransform | None = None,
     ) -> CompiledTrajectory:
         """Compile a static sequence of grounded invocations.
 
@@ -502,6 +504,8 @@ class AtomicActionEngine:
         Args:
             invocations: Grounded action requests in execution order.
             context: Optional initial planning context captured by the caller.
+            plan_transform: Optional same-grid transform applied to each plan
+                before concatenation and projected-state propagation.
 
         Returns:
             Concatenated timed trajectory, individual plans, and projected state.
@@ -523,7 +527,7 @@ class AtomicActionEngine:
             if not alive.any():
                 break
             previous_qpos = projected.robot.qpos
-            plan = self.plan(invocation, projected)
+            plan = self.plan(invocation, projected, plan_transform=plan_transform)
             step_success = alive & plan.plan_success.to(self.device)
             if plan.joint_trajectory is None:
                 raise ValueError(

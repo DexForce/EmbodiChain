@@ -30,6 +30,7 @@ from dataclasses import fields
 import math
 from typing import Any, get_args, get_origin, get_type_hints
 
+from embodichain.compute.kinematics import DifferentiableIKCfg
 from embodichain.utils import configclass
 
 from .operators import TIMING_PROFILES
@@ -237,6 +238,42 @@ class _IkCfg:
 
 
 @configclass
+class _TaskSpaceCfg:
+    """Root-frame deformation bounds and fixed-step trajectory IK options."""
+
+    enabled: bool = False
+    frame_id: str = "tool"
+    translation_axes: tuple[bool, bool, bool] = (True, True, True)
+    rotation_axes: tuple[bool, bool, bool] = (True, True, True)
+    max_translation_m: float = 0.02
+    max_rotation_rad: float = 0.05
+    ik: DifferentiableIKCfg = DifferentiableIKCfg()
+
+    def __post_init__(self) -> None:
+        _boolean(self.enabled, "task_space.enabled")
+        _id(self.frame_id, "task_space.frame_id")
+        for name in ("translation_axes", "rotation_axes"):
+            axes = tuple(getattr(self, name))
+            if len(axes) != 3 or any(type(value) is not bool for value in axes):
+                raise ValueError(f"task_space.{name} must contain three booleans")
+            setattr(self, name, axes)
+        for name in ("max_translation_m", "max_rotation_rad"):
+            _positive(getattr(self, name), f"task_space.{name}", allow_zero=True)
+        if self.enabled and not (
+            any(self.translation_axes)
+            and self.max_translation_m > 0
+            or any(self.rotation_axes)
+            and self.max_rotation_rad > 0
+        ):
+            raise ValueError(
+                "enabled task_space deformation must permit a non-zero change"
+            )
+        if not isinstance(self.ik, DifferentiableIKCfg):
+            raise ValueError("task_space.ik must be a DifferentiableIKCfg")
+        _decode(DifferentiableIKCfg, self.ik.to_dict(), "task_space.ik")
+
+
+@configclass
 class _ApproachCfg:
     enabled: bool = False
     cone_half_angle_rad: float = 0.0
@@ -334,6 +371,7 @@ class _FactorsCfg:
     ik: _IkCfg = _IkCfg()
     approach: _ApproachCfg = _ApproachCfg()
     spatial: _SpatialCfg = _SpatialCfg()
+    task_space: _TaskSpaceCfg = _TaskSpaceCfg()
     timing: _TimingCfg = _TimingCfg()
     manipulability: _ManipulabilityCfg = _ManipulabilityCfg()
     contact_timing: _DisabledFactorCfg = _DisabledFactorCfg()
@@ -404,14 +442,19 @@ class TrajectoryAugmentationCfg:
             "max_variants_per_reference",
         )
         spatial = self.factors.spatial
+        guided_residual = (
+            self.factors.manipulability.enabled
+            and self.factors.manipulability.guided_proposals > 1
+            and not self.factors.task_space.enabled
+            and not self.factors.ik.enabled
+        )
         # A spatial offset at or below the deduplication tolerance measures as a
         # duplicate of the reference, so the reference survives alone and the
         # enabled factor silently contributes nothing. Only a disabled factor
         # may hold a scale that low.
         if (
-            spatial.enabled
-            and spatial.joint_offset_scale <= self.coverage.joint_dedup_normalized_tol
-        ):
+            spatial.enabled or guided_residual
+        ) and spatial.joint_offset_scale <= self.coverage.joint_dedup_normalized_tol:
             raise ValueError(
                 "factors.spatial.joint_offset_scale must exceed "
                 "coverage.joint_dedup_normalized_tol; a combined expansion "
@@ -822,6 +865,8 @@ class TrajectoryExpansionJobCfg:
             raise ValueError(
                 f"ik operator capability unavailable: {factors.ik.method!r}"
             )
+        if factors.task_space.enabled and "task_space_residual" not in operators:
+            raise ValueError("task-space operator capability unavailable")
         if factors.approach.enabled and "perturb_approach_direction" not in operators:
             raise ValueError("approach operator capability unavailable")
         if factors.timing.enabled and "retime" not in operators:

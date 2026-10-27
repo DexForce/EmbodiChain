@@ -766,7 +766,11 @@ class BaseEnv(gym.Env):
                 )
                 self._proprio_joint_index_cache = cached
             obs = TensorDict(
-                dict(robot=self.robot.get_proprioception()[:, cached[1]]),
+                dict(
+                    robot=self.robot.get_proprioception().apply(
+                        lambda x: x[:, cached[1]]
+                    )
+                ),
                 batch_size=[self.num_envs],
                 device=self.device,
             )

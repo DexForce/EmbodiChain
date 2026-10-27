@@ -28,6 +28,8 @@ from embodichain.compute.trajectory import (
     retime_to_control_grid,
 )
 
+from embodichain.compute.geometry import nearest_half_turn_pose
+
 from ..bindings import EndpointBinding
 from ..state import PlanningContext
 from ..trajectory_ops import build_pose_plan_states
@@ -421,3 +423,10 @@ __all__ = [
     "resolve_object_target",
     "split_joint_trajectory_at_pose",
 ]
+
+
+def find_symmetric_nearest_xpos(
+    target_xpos: torch.Tensor, reference_xpos: torch.Tensor
+) -> torch.Tensor:
+    """Find the nearest symmetric pose to the reference pose."""
+    return nearest_half_turn_pose(target_xpos, reference_xpos)

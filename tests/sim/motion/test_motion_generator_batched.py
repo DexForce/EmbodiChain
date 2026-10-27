@@ -182,31 +182,64 @@ def test_trapezoidal_generator_holds_stationary_sparse_joint_goal() -> None:
 
 
 def test_trapezoidal_generator_covers_dense_ik_waypoints() -> None:
-    """Quantity sampling grows to retain all Cartesian-to-joint waypoints."""
-    generator = _trapezoidal_generator()
-    generator.robot = SimpleNamespace(
-        compute_fk=lambda *, qpos, name, to_matrix: torch.eye(
-            4, dtype=qpos.dtype, device=qpos.device
-        ).expand(qpos.shape[0], -1, -1),
-        get_qvel_limits=lambda *, name=None: torch.full((1, 2), 10.0),
-    )
-    dense_qpos = torch.linspace(0.0, 0.5, 6, dtype=torch.float64).reshape(1, 6, 1)
-    dense_qpos = dense_qpos.expand(-1, -1, 2).clone()
-    generator._interpolate_waypoints = Mock(
-        return_value=(dense_qpos, None, torch.ones(1, dtype=torch.bool))
-    )
+    """An explicit Cartesian line retains its required dense IK waypoints."""
+    generator = _trapezoidal_generator(robot=_CartesianRobot())
+    goal = torch.eye(4).repeat(2, 1, 1)
+    goal[:, 0, 3] = 0.5
 
     result = generator.generate(
-        [PlanState.from_xpos(torch.eye(4, dtype=torch.float64).unsqueeze(0))],
+        [PlanState.from_xpos(goal)],
         MotionGenOptions(
-            start_qpos=torch.zeros(1, 2, dtype=torch.float64),
+            start_qpos=torch.zeros(2, 1),
+            control_part="arm",
             sample_count=3,
             is_interpolate=True,
+            is_linear=True,
+            # A 0.5 m line at 0.125 m spacing requests four IK samples.
+            interpolate_position_step=0.125,
         ),
     )
 
+    assert result.success.tolist() == [True, True]
     assert result.positions is not None
-    assert result.positions.shape[1] == dense_qpos.shape[1]
+    expected = torch.linspace(0.0, 0.5, 4).view(1, 4, 1).expand(2, -1, -1)
+    torch.testing.assert_close(result.positions, expected)
+
+
+@pytest.mark.parametrize("explicit_options", [False, True])
+def test_trapezoidal_cartesian_goals_keep_sparse_joint_timing(
+    explicit_options: bool,
+) -> None:
+    """IK preparation must not turn free-motion samples into mandatory stops."""
+    generator = _trapezoidal_generator(robot=_CartesianRobot())
+    start = torch.zeros(2, 1)
+    goals = [torch.eye(4).repeat(2, 1, 1) for _ in range(2)]
+    for goal, position in zip(goals, (0.1, 0.2)):
+        goal[:, 0, 3] = position
+    options = MotionGenOptions(
+        start_qpos=start,
+        control_part="arm",
+        sample_count=9,
+        is_interpolate=True,
+        interpolate_position_step=0.01,
+        acceleration_limit=0.5,
+        plan_opts=(
+            TrapezoidalPlanOptions(sample_interval=9, backend="torch")
+            if explicit_options
+            else None
+        ),
+    )
+    expected = generator.generate(
+        [PlanState.from_qpos(goal[:, 0, 3:4]) for goal in goals], options
+    )
+
+    result = generator.generate([PlanState.from_xpos(goal) for goal in goals], options)
+
+    assert result.success.tolist() == [True, True]
+    torch.testing.assert_close(result.dt, expected.dt)
+    torch.testing.assert_close(result.positions, expected.positions)
+    torch.testing.assert_close(result.velocities, expected.velocities)
+    torch.testing.assert_close(result.accelerations, expected.accelerations)
 
 
 def test_trapezoidal_generator_preserves_native_derivatives() -> None:
@@ -1497,6 +1530,34 @@ def test_normalization_preserves_native_derivatives_and_zeros_failed_rows() -> N
     assert torch.equal(result.velocities[1], torch.zeros_like(native[1]))
 
 
+def test_toppra_native_sampling_preserves_the_solved_profile() -> None:
+    """A solved parabola retains acceleration1 instead of interpolation spikes."""
+    from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanner
+
+    positions = torch.tensor([[[0.0], [0.5], [2.0]]])
+    dt = torch.tensor([[0.0, 1.0, 1.0]])
+    raw = PlanResult(
+        success=True,
+        positions=positions,
+        dt=dt,
+        velocities=torch.tensor([[[0.0], [1.0], [2.0]]]),
+        accelerations=torch.ones_like(positions),
+    )
+    generator = _mock_generator(
+        batch_size=1,
+        controlled_dof=1,
+        preserve_plan_samples=ToppraPlanner.preserve_plan_samples,
+    )
+    result = generator._normalize_plan_result(
+        raw,
+        [PlanState.from_qpos(positions[:, -1])],
+        MotionGenOptions(start_qpos=positions[:, 0], sample_count=5),
+    )
+    torch.testing.assert_close(result.positions, positions, rtol=0, atol=0)
+    torch.testing.assert_close(result.dt, dt, rtol=0, atol=0)
+    torch.testing.assert_close(result.accelerations, torch.ones_like(positions))
+
+
 def test_normalization_resamples_by_time_and_recomputes_derivatives() -> None:
     generator = _mock_generator()
     positions = (
@@ -2090,3 +2151,36 @@ def test_mutated_options_cannot_restore_implicit_planner_bypass() -> None:
         generator.generate(
             [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))], options
         )
+
+
+def test_cartesian_timing_budget_exhaustion_returns_failed_safe_hold(monkeypatch):
+    from embodichain.lab.sim.motion.motion_generator import (
+        MotionGenerator,
+        MotionGenOptions,
+    )
+
+    generator = object.__new__(MotionGenerator)
+    monkeypatch.setattr(
+        generator,
+        "_resolve_velocity_limits",
+        lambda **kwargs: torch.tensor([1e-6, 1e-6]),
+    )
+    monkeypatch.setattr(
+        generator,
+        "_sample_cartesian_path",
+        lambda *args, **kwargs: pytest.fail("allocated over-budget path"),
+    )
+    q = torch.tensor([[[0.1, 0.2], [1.0, 1.0]]])
+    success, positions = generator._interpolate_cartesian_with_limits(
+        torch.eye(4)[None, None].repeat(1, 2, 1, 1),
+        q,
+        MotionGenOptions(
+            control_part="arm",
+            sample_count=2,
+            interpolation_dt=0.01,
+            velocity_limit=1e-6,
+            acceleration_limit=1.0,
+        ),
+    )
+    assert success.tolist() == [False]
+    assert torch.equal(positions, q[:, :1].repeat(1, 2, 1))

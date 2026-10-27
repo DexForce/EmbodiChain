@@ -1,0 +1,228 @@
+{
+  "description": "W1 documentation images captured through registered robot presets with shared native rendering and camera settings.",
+  "source_commit": "b6d8a232930a054a5d69607e48f9c7b5cb04d8d8",
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "window": "dlss",
+      "offscreen": "dlss"
+    },
+    "dlss": {
+      "dlss_quality": 2,
+      "upsample_ratio": null,
+      "render_width": 0,
+      "render_height": 0,
+      "target_width": 0,
+      "target_height": 0,
+      "tiled_enabled": true,
+      "exposure_compensation": 1.0
+    },
+    "nrd": {
+      "max_indirect_bounces": 1,
+      "denoising_range": 500000.0,
+      "disocclusion_threshold": 0.01,
+      "disocclusion_threshold_alternate": 0.05,
+      "disocclusion_threshold_mix_enabled": true,
+      "history_confidence_enabled": true,
+      "history_confidence_probe_stride": 5,
+      "history_confidence_sigma_scale": 2.0,
+      "history_confidence_sensitivity": 1.0,
+      "max_accumulated_frame_num": 30,
+      "max_fast_accumulated_frame_num": 6,
+      "history_fix_frame_num": 3,
+      "diffuse_prepass_blur_radius": 30.0,
+      "specular_prepass_blur_radius": 50.0,
+      "anti_firefly_enabled": false,
+      "sh_mode_enabled": false,
+      "validation_enabled": false,
+      "max_stabilized_frame_num": 63,
+      "min_blur_radius": 1.0,
+      "max_blur_radius": 30.0,
+      "antilag_luminance_sigma_scale": 2.0,
+      "antilag_luminance_sensitivity": 3.0,
+      "taa_min_current_weight": 0.0625,
+      "taa_sigma_scale": 2.0,
+      "taa_depth_rejection_enabled": true,
+      "taa_tone_mapping_enabled": false
+    },
+    "tone_mapping_enabled": false,
+    "tone_mapping_exposure": 1.0,
+    "min_bounces": 4,
+    "max_bounces": 8
+  },
+  "camera": {
+    "width": 960,
+    "height": 1200,
+    "intrinsics": [
+      2350.0,
+      2350.0,
+      480.0,
+      600.0
+    ],
+    "eye": [
+      2.4,
+      -3.2,
+      2.2
+    ],
+    "target": [
+      0.06,
+      0.0,
+      0.94
+    ],
+    "up": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "near": 0.03,
+    "far": 60.0
+  },
+  "scene": {
+    "presentation": "SimulationManager defaults",
+    "direct_lights": [],
+    "emission_color": [
+      0.92,
+      0.95,
+      1.0
+    ],
+    "emission_intensity": 80.0
+  },
+  "physics_stepped": false,
+  "warmup_frames": 48,
+  "images": {
+    "dexforcew1_v021.jpg": {
+      "variant": "v021/BrainCo",
+      "hand_asset_version": "v021",
+      "independent_control_dof": 32,
+      "joint_positions": {
+        "ANKLE": 0.0,
+        "KNEE": 0.0,
+        "BUTTOCK": 0.0,
+        "WAIST": 0.0,
+        "NECK1": 0.0,
+        "NECK2": 0.0,
+        "LEFT_J1": 0.0,
+        "RIGHT_J1": 0.0,
+        "LEFT_J2": -1.2000000476837158,
+        "RIGHT_J2": 1.2000000476837158,
+        "LEFT_J3": 0.0,
+        "RIGHT_J3": 0.0,
+        "LEFT_J4": -1.399999976158142,
+        "RIGHT_J4": 1.399999976158142,
+        "LEFT_J5": 0.0,
+        "RIGHT_J5": 0.0,
+        "LEFT_J6": 0.0,
+        "RIGHT_J6": 0.0,
+        "LEFT_J7": 0.0,
+        "RIGHT_J7": 0.0,
+        "LEFT_HAND_INDEX": 0.0,
+        "LEFT_HAND_MIDDLE": 0.0,
+        "LEFT_HAND_PINKY": 0.0,
+        "LEFT_HAND_RING": 0.0,
+        "LEFT_HAND_THUMB2": 0.0,
+        "RIGHT_HAND_INDEX": 0.0,
+        "RIGHT_HAND_MIDDLE": 0.0,
+        "RIGHT_HAND_PINKY": 0.0,
+        "RIGHT_HAND_RING": 0.0,
+        "RIGHT_HAND_THUMB2": 0.0,
+        "LEFT_INDEX_PIP": 0.0,
+        "LEFT_MIDDLE_PIP": 0.0,
+        "LEFT_PINKY_PIP": 0.0,
+        "LEFT_RING_PIP": 0.0,
+        "LEFT_HAND_THUMB1": 0.0,
+        "RIGHT_INDEX_PIP": 0.0,
+        "RIGHT_MIDDLE_PIP": 0.0,
+        "RIGHT_PINKY_PIP": 0.0,
+        "RIGHT_RING_PIP": 0.0,
+        "RIGHT_HAND_THUMB1": 0.0
+      },
+      "rendered_from_catalog": true,
+      "image_sha256": "d55f90e1859df58c16a3a10b5e057275f251506ed2afec00282a4e66c3a7a39a"
+    },
+    "dexforcew1_v030.jpg": {
+      "variant": "v030/bare",
+      "hand_asset_version": null,
+      "independent_control_dof": 20,
+      "joint_positions": {
+        "ANKLE": 0.0,
+        "KNEE": 0.0,
+        "BUTTOCK": 0.0,
+        "WAIST": 0.0,
+        "NECK1": 0.0,
+        "LEFT_J1": 0.0,
+        "RIGHT_J1": 0.0,
+        "NECK2": 0.0,
+        "LEFT_J2": -1.2000000476837158,
+        "RIGHT_J2": 1.2000000476837158,
+        "LEFT_J3": 0.0,
+        "RIGHT_J3": 0.0,
+        "LEFT_J4": -1.399999976158142,
+        "RIGHT_J4": 1.399999976158142,
+        "LEFT_J5": 0.0,
+        "RIGHT_J5": 0.0,
+        "LEFT_J6": 0.0,
+        "RIGHT_J6": 0.0,
+        "LEFT_J7": 0.0,
+        "RIGHT_J7": 0.0
+      },
+      "rendered_from_catalog": true,
+      "image_sha256": "4532f067e0717390cbdf020b7d0fbcf1c56affdff7176552259b9dd4a809dfc8",
+      "asset": {
+        "dataset_id": "DexforceW1V030",
+        "cache_prefix": "DexforceW1V030",
+        "repo_id": "DexForceAI/embodichain_data",
+        "repo_type": "dataset",
+        "revision": "cbaab0e32fdee1c9ecc6e69a1561f9a7b8851e29",
+        "path": "dexforce_w1/v030/w1.zip",
+        "md5": "c3fa8994563f729a0e8387e2129a28c1",
+        "sha256": "5ee5109781efde2c1b57e9d5a544f4eec4dcfd2f591832bd4cb4edf873a51286",
+        "material_alignment": {
+          "source_asset": {
+            "repo_id": "DexForceAI/embodichain_data",
+            "repo_type": "dataset",
+            "revision": "3544bad4b6f8c7bc4b3263473b4a04e18db20fff",
+            "path": "dexforce_w1/v030/w1.zip",
+            "md5": "74ff7e835160f7309d32ade116172c52",
+            "sha256": "2cd4b2dbdfa5cbd3238d16e23d927f03a8e7c06f42a29846c633f60a636fc0e5"
+          },
+          "reference_variant": "v021/BrainCo",
+          "yellow_srgb": [
+            248,
+            195,
+            73
+          ],
+          "black_srgb": [
+            46,
+            46,
+            46
+          ],
+          "roughness": 0.408248290463863,
+          "metallic": 0.0,
+          "baked_shell_normals": false,
+          "baked_grille_normals": false,
+          "geometry_modified": false
+        }
+      },
+      "capture_date": "2026-10-24",
+      "runtime": {
+        "dexsim": "0.5.1+18e1c7f5902ecf20c103ab6d5153528d43395dbd",
+        "torch": "2.7.1+cu128",
+        "gpu": "NVIDIA GeForce RTX 5090"
+      },
+      "source_commit": "54870f2549ff4a0363dbb18c5d1fa57fd8e744c3"
+    }
+  },
+  "source_worktree_modified": true,
+  "capture_date": "2026-10-23",
+  "runtime": {
+    "dexsim": "0.5.1rc1",
+    "torch": "2.7.1+cu128",
+    "gpu": "NVIDIA GeForce RTX 5090"
+  },
+  "image_encoding": {
+    "format": "JPEG",
+    "quality": 95,
+    "subsampling": 0
+  }
+}

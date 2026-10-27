@@ -40,18 +40,55 @@ from embodichain.utils.math import (
 @pytest.mark.parametrize(
     "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
 )
-def test_look_at_keeps_vertical_camera_pose_on_eye_device(device: str) -> None:
-    eye = torch.tensor([[0.0, 0.0, 1.0], [1.0, 0.0, 1.0]], device=device)
+@pytest.mark.parametrize("custom_up", [False, True])
+def test_look_at_keeps_degenerate_rows_independent(
+    device: str, custom_up: bool
+) -> None:
+    eye = torch.tensor(
+        [[1.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]], device=device
+    )
+    target = torch.zeros_like(eye)
+    up = torch.tensor(
+        [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]], device=device
+    )
 
-    pose = look_at_to_pose(eye, [[0.0, 0.0, 0.0]] * 2)
+    pose = (
+        look_at_to_pose(eye, target, up) if custom_up else look_at_to_pose(eye, target)
+    )
+    isolated = torch.cat(
+        [
+            (
+                look_at_to_pose(eye[row], target[row], up[row])
+                if custom_up
+                else look_at_to_pose(eye[row], target[row])
+            )
+            for row in range(len(eye))
+        ]
+    )
 
     assert pose.device == eye.device
     assert torch.isfinite(pose).all()
+    torch.testing.assert_close(pose, isolated)
     torch.testing.assert_close(pose[:, :3, 3], eye)
+    root_half = 2.0**-0.5  # The first camera looks diagonally down the X/Z plane.
+    torch.testing.assert_close(
+        pose[0, :3, :3],
+        eye.new_tensor(
+            [
+                [0.0, root_half, -root_half],
+                [1.0, 0.0, 0.0],
+                [0.0, -root_half, -root_half],
+            ]
+        ),
+    )
+    # Keep the existing default-up convention for the vertical camera.
+    torch.testing.assert_close(
+        pose[1, :3, :3], torch.diag(eye.new_tensor([-1.0, 1.0, -1.0]))
+    )
     rotation = pose[:, :3, :3]
     torch.testing.assert_close(
         rotation.transpose(1, 2) @ rotation,
-        torch.eye(3, device=device).expand(2, 3, 3),
+        torch.eye(3, device=device).expand(len(eye), 3, 3),
     )
 
 

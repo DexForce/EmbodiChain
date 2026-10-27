@@ -13,6 +13,7 @@ delivery budgets make data use auditable. Shared APIs live in
 | `SequenceDataset` | Iterate causal contexts from a source; the caller owns production, loading, retry and refill. |
 | `OnlineDataset`, `ChunkSizeSampler` | Preserve item/batch chunk iteration and dynamic chunk lengths. |
 | `configure_ods()` | Calculate bounded reuse, cache and pacing/refill targets from measurements and a versioned profile; the host applies the plan. |
+| `ODSFlowController` | Apply an optional measured plan to a caller-managed manual engine: explicit refill, bounded waits, lifecycle draining and batch-start pacing. |
 
 ## Guides and ownership
 
@@ -108,6 +109,8 @@ identities.
 
 | Interface | Information and limits |
 | --- | --- |
+| `check_health()` | Require READY and surface worker failures without sampling or requesting refill. |
+| `get_flow_status()` | Compact READY-only generation/accepted-episode counters and optional unlocked/lifetime delivery totals. Counters use separate lock snapshots; quota is a coarse scheduling bound, not proof that a specific context/filter can be sampled. |
 | `get_stats()` | Production counts/time, refill generations and sampled chunks. Readable-frame counts exclude the active write window. Sampled chunks count deliveries, not completed optimizer work. |
 | `get_sampling_budget_snapshot()` | With quotas enabled, retained identities and assigned/delivered/remaining allowances, plus lifetime delivered chunks. Unlocked quota is a scheduling hint; context and generation filters can further restrict eligibility. |
 | `drain_lifecycle_events()` | Optional publication/eviction records and monotonic timestamps. Enable `lifecycle_event_capacity` and drain during production and waits; a full log backpressures the producer. |
@@ -264,6 +267,11 @@ errors are immediate and Dataset wrappers do not silently retry. Worker health
 errors take precedence. Quota depletion does not automatically request refill.
 Use the [configuration guide](ods/configuration.md) to connect strict sampling
 protection to an explicit host pacing/refill policy.
+
+For a caller-managed manual engine, the optional
+[`ODSFlowController`](ods/configuration.md#apply-the-plan) provides reusable
+bounded retries, refill and pacing. It does not change Source or Dataset error
+semantics, own the optimizer, or start/stop the engine.
 
 ## Shared online and offline context sources
 

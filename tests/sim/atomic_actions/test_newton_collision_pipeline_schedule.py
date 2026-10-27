@@ -26,7 +26,7 @@ from embodichain.lab.sim.cfg.simulation import NewtonPhysicsCfg
 
 @pytest.mark.no_sim
 def test_atomic_action_tutorial_disables_external_collision_pipeline() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.tutorial_utils")
+    module = importlib.import_module("examples.sim.atomic_action.support")
 
     physics_cfg = module._tutorial_physics_cfg("newton")
 

@@ -20,7 +20,6 @@ import cv2
 import pickle
 import argparse
 import time
-import torch
 import open3d as o3d
 import numpy as np
 
@@ -32,7 +31,9 @@ from typing import Any, Dict, List, Tuple, Callable
 
 from embodichain.utils.config_paths import resolve_config_path as _resolve_config_path
 from embodichain.utils.math import inv_transform  # Backward-compatible import path.
-from embodichain.utils.string import callable_to_string
+from embodichain.utils.configclass import (
+    class_to_dict as class_to_dict,
+)  # Compatibility export.
 
 
 def timer(func):
@@ -592,57 +593,6 @@ def key_in_nested_dict(d: Dict, key: str) -> bool:
             ):  # Recursively check the nested dictionary
                 return True
     return False
-
-
-def class_to_dict(obj: object) -> dict[str, Any]:
-    """Convert an object into dictionary recursively.
-
-    Note:
-        Ignores all names starting with "__" (i.e. built-in methods).
-
-    Args:
-        obj: An instance of a class to convert.
-
-    Raises:
-        ValueError: When input argument is not an object.
-
-    Returns:
-        Converted dictionary mapping.
-    """
-    # check that input data is class instance
-    if not hasattr(obj, "__class__"):
-        raise ValueError(f"Expected a class instance. Received: {type(obj)}.")
-    # convert object to dictionary
-    if isinstance(obj, dict):
-        obj_dict = obj
-    elif isinstance(obj, torch.Tensor):
-        # We have to treat torch tensors specially because `torch.tensor.__dict__` returns an empty
-        # dict, which would mean that a torch.tensor would be stored as an empty dict. Instead we
-        # want to store it directly as the tensor.
-        return obj
-    elif hasattr(obj, "__dict__"):
-        obj_dict = obj.__dict__
-    else:
-        return obj
-
-    # convert to dictionary
-    data = dict()
-    for key, value in obj_dict.items():
-        # disregard builtin attributes
-        if key.startswith("__"):
-            continue
-        # check if attribute is callable -- function
-        if callable(value):
-            data[key] = callable_to_string(value)
-        # check if attribute is a dictionary
-        elif hasattr(value, "__dict__") or isinstance(value, dict):
-            data[key] = class_to_dict(value)
-        # check if attribute is a list or tuple
-        elif isinstance(value, (list, tuple)):
-            data[key] = type(value)([class_to_dict(v) for v in value])
-        else:
-            data[key] = value
-    return data
 
 
 def get_mesh_md5(mesh: o3d.t.geometry.TriangleMesh) -> str:

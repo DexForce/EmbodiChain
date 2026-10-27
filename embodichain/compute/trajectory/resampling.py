@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import torch
 import warp as wp
 
@@ -78,7 +80,9 @@ def _resample_with_distance_torch(
     lower_distance = cumulative.gather(1, lower_index)
     upper_distance = cumulative.gather(1, upper_index)
     denominator = upper_distance - lower_distance
-    safe_denominator = denominator.clamp_min(torch.finfo(trajectory.dtype).eps)
+    safe_denominator = torch.where(
+        denominator > 0.0, denominator, torch.ones_like(denominator)
+    )
     alpha = torch.where(
         denominator > 0.0,
         (distances - lower_distance) / safe_denominator,
@@ -104,6 +108,8 @@ def resample_with_distance(
     trajectory: torch.Tensor,
     interp_num: int,
     device: torch.device | str = torch.device("cuda"),
+    *,
+    backend: Literal["auto", "torch"] = "auto",
 ) -> torch.Tensor:
     """Resample a batched path at uniform cumulative-distance positions.
 
@@ -120,19 +126,27 @@ def resample_with_distance(
         trajectory: Path tensor with shape ``(B, N, M)``.
         interp_num: Target number of samples ``T``.
         device: Device on which to perform interpolation.
+        backend: ``auto`` uses the existing float32 Warp path with a Torch
+            fallback. ``torch`` uses only Torch, preserves floating-point
+            dtype and never initializes Warp.
 
     Returns:
         Resampled trajectories with shape ``(B, T, M)``.
 
     Raises:
         ValueError: If ``trajectory`` is not three-dimensional, contains no
-            points for a non-empty output, or ``interp_num`` is negative.
+            points for a non-empty output, ``interp_num`` is negative, or
+            ``backend`` is unknown.
     """
     if trajectory.ndim != 3:
         raise ValueError("`trajectory` must have shape (B, N, M).")
+    if backend not in {"auto", "torch"}:
+        raise ValueError("`backend` must be 'auto' or 'torch'.")
 
     trajectory = trajectory.contiguous().to(device)
-    if not torch.is_floating_point(trajectory) or trajectory.dtype != torch.float32:
+    if not torch.is_floating_point(trajectory) or (
+        backend == "auto" and trajectory.dtype != torch.float32
+    ):
         trajectory = trajectory.float()
 
     batch_size, point_count, dimension = trajectory.shape
@@ -145,6 +159,8 @@ def resample_with_distance(
         raise ValueError("Cannot resample a trajectory with no points.")
     if batch_size == 0 or sample_count == 0:
         return trajectory.new_empty((batch_size, sample_count, dimension))
+    if backend == "torch":
+        return _resample_with_distance_torch(trajectory, sample_count)
 
     try:
         # Flatten input trajectory for Warp kernels (avoids multidimensional
