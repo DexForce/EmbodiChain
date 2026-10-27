@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import math
+
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,
@@ -83,9 +85,28 @@ class ToppraAdapter(PlannerAdapter):
             sample_interval=self.context.sample_interval,
         )
 
-    def atomic_plan_options(self) -> ToppraPlanOptions:
-        """Use the suite limits and sample count for Atomic Skill calls."""
-        return self._plan_options()
+    def atomic_plan_options(
+        self, *, control_dt: float | None = None
+    ) -> ToppraPlanOptions:
+        """Sample Atomic motion on the host's control clock under suite limits.
+
+        Rest boundaries preserve timing when Atomic Skills insert hand holds.
+        Each stopped segment uses the exact destination period after conservative
+        duration rounding. Direct callers without a host period retain the suite
+        quantity default.
+        """
+        options = self._plan_options()
+        if control_dt is not None:
+            if (
+                isinstance(control_dt, bool)
+                or not math.isfinite(control_dt)
+                or control_dt <= 0
+            ):
+                raise ValueError("control_dt must be positive and finite.")
+            options.sample_method = TrajectorySampleMethod.TIME
+            options.sample_interval = float(control_dt)
+            options.stop_at_waypoints = True
+        return options
 
     def plan(self, case: BenchmarkCase) -> PlanResult:
         """Plan ordered EEF or joint waypoints through the IK-to-TOPPRA pipeline."""

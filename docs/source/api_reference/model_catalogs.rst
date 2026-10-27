@@ -394,3 +394,10 @@ mapping without making the model package depend on task/controller code.
    build_supervised_trainer
 
 .. autofunction:: build_supervised_trainer
+Other dynamics families
+-----------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   rwm

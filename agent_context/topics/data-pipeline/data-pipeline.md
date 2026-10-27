@@ -49,6 +49,11 @@ requires explicit action semantics, step duration, field mapping and a resident
 memory limit; imports do not initialize simulation or import the SDK until load.
 The first backend samples resident numeric tensors after bounded SDK reads.
 
+`learning/sl/sequence.py` bridges these sources through an explicit encoder;
+the [SL context](../supervised-learning/supervised-learning.md) owns its identity
+and recovery admission. Online lifecycle and delivery credits remain here.
+Neither trainer RNG restoration nor encoding failure rewinds source quotas.
+
 The demo's `lerobot.py` owns writing and sidecar/hash auditing around the public
 reader. It measures initial loading rather than per-batch disk reads and does
 not replace recording or offline-inspection tools. See the

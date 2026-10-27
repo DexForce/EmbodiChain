@@ -34,7 +34,7 @@ Use the following canonical packages for the four current model directions:
 | --- | --- | --- |
 | Ordinary state/visual BC | `embodichain_models.policy.bc` | Implemented; state and RGB share one family. |
 | NeRD | `embodichain_models.dynamics.nerd` | Implemented in this change. |
-| Robot world model (RWM) | `embodichain_models.dynamics.rwm` | Target for the RWM follow-up; not created yet. |
+| Robot world model (RWM) | `embodichain_models.dynamics.rwm` | Implemented. |
 | RigidFormer | `embodichain_models.dynamics.rigidformer` | Target for the RigidFormer follow-up; not created yet. |
 
 RWM predicts action-conditioned robot state transitions, so it belongs to

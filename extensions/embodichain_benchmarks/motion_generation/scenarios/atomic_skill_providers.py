@@ -26,12 +26,13 @@ held object's axis after alignment, and the pushed object's final pose.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 import torch
 
 from embodichain.compute.geometry import nearest_half_turn_pose, rotate_rigid_grasp
+from embodichain.compute.kinematics import pose_error
 
 from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
@@ -74,6 +75,7 @@ from .atomic_case_utils import (
     snapshot_case_qpos,
 )
 from ..contracts import ExecutionObservation
+from .atomic_grasps import _AntipodalGraspSearchError
 from .atomic_policy import benchmark_motion_policy
 from .atomic_evaluation import (
     gripper_holding,
@@ -158,7 +160,7 @@ class _OpenDoorEvaluator:
 
 
 class _PourEvaluator:
-    """Evaluate the pour rotation plus settled lift and retention."""
+    """Evaluate tilt, return orientation, settled lift and retention."""
 
     def evaluate(
         self,
@@ -223,6 +225,9 @@ class _PourEvaluator:
                                 settle.object_pose[-1, :, 2, 3] - initial[:, 2, 3]
                             ),
                             "min_height_above_support_m": min_height,
+                            "return_rotation_error_rad": torch.linalg.vector_norm(
+                                pose_error(settle.object_pose[-1], initial)[1], dim=-1
+                            ),
                         },
                         method="terminal_object_pose_trace",
                     )
@@ -504,7 +509,7 @@ def _grasp_source(config: Mapping[str, object]) -> str:
 
 def _grasp_parameters(config: Mapping[str, object]) -> dict[str, object]:
     """Return the antipodal sampling settings recorded with a case."""
-    return {
+    parameters = {
         "grasp_source": _grasp_source(config),
         "grasp_sample_count": int(config.get("grasp_sample_count", 10_000)),
         "grasp_max_candidates": int(config.get("grasp_max_candidates", 128)),
@@ -512,6 +517,15 @@ def _grasp_parameters(config: Mapping[str, object]) -> dict[str, object]:
             config.get("grasp_alignment_max_angle_deg", 10.0)
         ),
     }
+
+    if "grasp_filter_before_ranking" in config:
+        value = config["grasp_filter_before_ranking"]
+        if type(value) is not bool:
+            raise TypeError("grasp_filter_before_ranking must be boolean.")
+        if value and parameters["grasp_source"] != "antipodal":
+            raise ValueError("Early grasp filtering requires antipodal grasps.")
+        parameters["grasp_filter_before_ranking"] = value
+    return parameters
 
 
 def _articulation_target(
@@ -947,6 +961,157 @@ def _pour_poses(
     return torch.stack((pre_grasp, grasp_pose, lift, poured, lift), dim=1)
 
 
+def _pour_approach_candidates(
+    config: Mapping[str, object],
+) -> tuple[tuple[float, int], ...] | None:
+    """Validate explicit yaw choices and a total per-row grasp-screen budget."""
+    if "grasp_approach_candidates" not in config:
+        return None
+    values = config["grasp_approach_candidates"]
+    if not isinstance(values, (list, tuple)) or not values:
+        raise ValueError("grasp_approach_candidates must be a non-empty list.")
+    if _grasp_source(config) != "antipodal":
+        raise ValueError("Approach choices require antipodal grasps.")
+    result = []
+    for value in values:
+        if not isinstance(value, Mapping) or set(value) != {
+            "yaw_offset_rad",
+            "max_candidates",
+        }:
+            raise ValueError(
+                "Each approach choice needs yaw_offset_rad and max_candidates."
+            )
+        angle, count = value["yaw_offset_rad"], value["max_candidates"]
+        if (
+            type(angle) not in (int, float)
+            or not math.isfinite(angle)
+            or not -math.pi < angle <= math.pi
+        ):
+            raise ValueError("Approach yaw must be finite and in (-pi, pi].")
+        if type(count) is not int or count < 1:
+            raise ValueError(
+                "Approach candidate allocations must be positive integers."
+            )
+        result.append((float(angle), count))
+    total = config.get("grasp_max_candidates", 128)
+    if type(total) is not int or total < 1 or sum(count for _, count in result) > total:
+        raise ValueError("Approach allocations exceed grasp_max_candidates.")
+    if result[0][0] != 0 or len({angle for angle, _ in result}) != len(result):
+        raise ValueError("Approach yaw choices must be unique and start at zero.")
+    return tuple(result)
+
+
+def _select_pour_approach_grasp(
+    scenario: "AtomicSkillScenario",
+    handle: "AtomicObjectHandle",
+    object_pose: torch.Tensor,
+    base_approach: torch.Tensor,
+    start_qpos: torch.Tensor,
+    candidates: tuple[tuple[float, int], ...],
+    *,
+    grasp_parameters: Mapping[str, object],
+    build_poses: Callable[..., torch.Tensor],
+    seed: int,
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, object]]:
+    """Choose an independent oblique azimuth before any evaluated planning.
+
+    Rotation about world Z retains the configured elevation. Each row visits
+    choices in order and freezes its first complete reference chain. Allocation
+    sums are bounded by the original per-row candidate budget.
+    """
+    batch = len(object_pose)
+    selected = torch.eye(4, device=object_pose.device, dtype=object_pose.dtype).repeat(
+        batch, 1, 1
+    )
+    selected_directions = base_approach.expand(batch, -1).clone()
+    found = torch.zeros(batch, device=object_pose.device, dtype=torch.bool)
+    rows: list[dict[str, object]] = [
+        {"env_index": row, "selected_yaw_offset_rad": None, "rejected": []}
+        for row in range(batch)
+    ]
+    for angle, allocation in candidates:
+        c, s = math.cos(angle), math.sin(angle)
+        rotation = object_pose.new_tensor([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+        candidate_direction = rotation @ base_approach
+        candidate_direction = candidate_direction / candidate_direction.norm()
+        directions = torch.where(
+            found[:, None], selected_directions, candidate_direction[None]
+        )
+        pools = scenario._ranked_antipodal_grasp_pools(
+            handle,
+            object_pose,
+            directions,
+            seed=seed,
+            n_sample=int(grasp_parameters["grasp_sample_count"]),
+            max_candidates=allocation,
+            alignment_max_angle_deg=(
+                float(grasp_parameters["grasp_alignment_max_angle_deg"])
+                if grasp_parameters.get("grasp_filter_before_ranking", False)
+                else None
+            ),
+            allow_empty=True,
+        )
+
+        def waypoint_poses(grasp: torch.Tensor) -> Sequence[torch.Tensor]:
+            return build_poses(
+                object_pose, grasp, approach_direction=directions
+            ).unbind(dim=1)
+
+        previous_found = found
+        selected, found = scenario._screen_antipodal_grasp_rows(
+            pools,
+            directions,
+            start_qpos,
+            alignment_max_angle_deg=float(
+                grasp_parameters["grasp_alignment_max_angle_deg"]
+            ),
+            waypoint_poses=waypoint_poses,
+            initial_selection=selected,
+            initial_found=found,
+        )
+        accepted = found & ~previous_found
+        selected_directions = torch.where(
+            accepted[:, None], directions, selected_directions
+        )
+        for row, (already, solved) in enumerate(
+            zip(previous_found.tolist(), found.tolist())
+        ):
+            if already:
+                continue
+            if solved:
+                rows[row]["selected_yaw_offset_rad"] = angle
+            else:
+                rows[row]["rejected"].append(
+                    {
+                        "yaw_offset_rad": angle,
+                        "allocated_candidates": allocation,
+                        "available_candidates": len(pools[row]),
+                        "result": "unresolved_search",
+                    }
+                )
+        if bool(found.all().item()):
+            break
+    if not bool(found.all().item()):
+        failed = torch.nonzero(~found, as_tuple=False).flatten().cpu().tolist()
+        raise _AntipodalGraspSearchError(
+            f"Pour environment rows {failed} have no independently reachable "
+            f"approach realisation under {list(candidates)}: {[rows[row] for row in failed]}"
+        )
+    return (
+        selected,
+        selected_directions,
+        {
+            "kind": "ordered_oblique_azimuth_then_grasp",
+            "nominal_direction": base_approach.detach().cpu().tolist(),
+            "choices": [
+                {"yaw_offset_rad": a, "max_candidates": n} for a, n in candidates
+            ],
+            "total_candidate_allocation": sum(n for _, n in candidates),
+            "rows": rows,
+        },
+    )
+
+
 class _PourCases(AtomicSkillCaseProvider):
     """Pick up an object, rotate it about its own axis, and rotate it back."""
 
@@ -966,6 +1131,7 @@ class _PourCases(AtomicSkillCaseProvider):
         object_id = config.get("object")
         if not isinstance(object_id, str) or not object_id:
             raise ValueError("Pour cases must reference a non-empty object id.")
+        approach_candidates = _pour_approach_candidates(config)
         handle = scenario.activate_object(object_id)
         scenario.restore_base_robot()
         object_pose, settle_steps = _settle_object_pose(
@@ -996,11 +1162,16 @@ class _PourCases(AtomicSkillCaseProvider):
         pre_grasp_distance = float(config.get("pre_grasp_distance_m", 0.15))
         lift_height = float(config.get("lift_height_m", 0.16))
 
-        def poses(pose_object: torch.Tensor, grasp: torch.Tensor) -> torch.Tensor:
+        def poses(
+            pose_object: torch.Tensor,
+            grasp: torch.Tensor,
+            *,
+            approach_direction: torch.Tensor | None = None,
+        ) -> torch.Tensor:
             return _pour_poses(
                 pose_object,
                 grasp,
-                approach,
+                approach if approach_direction is None else approach_direction,
                 pre_grasp_distance=pre_grasp_distance,
                 lift_height=lift_height,
                 internal_axis=internal_axis,
@@ -1009,22 +1180,42 @@ class _PourCases(AtomicSkillCaseProvider):
 
         screen_start = scenario.robot.get_qpos(name=scenario.control_part).clone()
         grasp = _grasp_parameters(config)
-        if grasp["grasp_source"] == "antipodal":
+        approach_realisation = None
+        if approach_candidates is not None:
+            grasp_pose, approach, approach_realisation = _select_pour_approach_grasp(
+                scenario,
+                handle,
+                object_pose,
+                approach,
+                screen_start,
+                approach_candidates,
+                grasp_parameters=grasp,
+                build_poses=poses,
+                seed=seed,
+            )
+        elif grasp["grasp_source"] == "antipodal":
             grasp_pose = scenario.screen_antipodal_grasp(
                 handle,
                 object_pose,
                 approach,
                 seed=seed,
-                start_qpos=screen_start[:1],
+                start_qpos=screen_start,
                 n_sample=int(grasp["grasp_sample_count"]),
                 max_candidates=int(grasp["grasp_max_candidates"]),
                 alignment_max_angle_deg=float(grasp["grasp_alignment_max_angle_deg"]),
-                waypoint_poses=lambda pose: poses(object_pose[:1], pose).unbind(dim=1),
+                **(
+                    {"filter_alignment_before_ranking": True}
+                    if grasp.get("grasp_filter_before_ranking", False)
+                    else {}
+                ),
+                waypoint_poses=lambda pose: poses(object_pose, pose).unbind(dim=1),
             )
         else:
             grasp_pose = _fixed_grasp(object_pose, config, seed=seed, stream=402)
-        object_to_eef = torch.bmm(pose_inv(object_pose[:1]), grasp_pose)
-        grasp_pose = torch.bmm(object_pose, object_to_eef.expand(batch_size, -1, -1))
+            object_to_eef = torch.bmm(pose_inv(object_pose[:1]), grasp_pose)
+            grasp_pose = torch.bmm(
+                object_pose, object_to_eef.expand(batch_size, -1, -1)
+            )
         targets = poses(object_pose, grasp_pose)
         success, pre_pick_qpos = scenario.robot.compute_ik(
             pose=targets[:, 0], joint_seed=screen_start, name=scenario.control_part
@@ -1065,6 +1256,11 @@ class _PourCases(AtomicSkillCaseProvider):
                 **grasp,
                 "hand_interp_steps": int(config.get("hand_interp_steps", 12)),
                 "approach_direction": approach.detach().cpu().tolist(),
+                **(
+                    {"approach_realisation": approach_realisation}
+                    if approach_realisation is not None
+                    else {}
+                ),
                 "pre_grasp_distance_m": pre_grasp_distance,
                 "lift_height_m": lift_height,
                 "pre_action_settle_steps": settle_steps,
@@ -1232,8 +1428,10 @@ def _axis_align_poses(
     lift_height: float,
     internal_axis: torch.Tensor,
     target_axis: torch.Tensor,
+    alignment_twist_rad: float | torch.Tensor = 0.0,
+    alignment_offset_m: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Mirror AxisAlign for an explicit grasp: pre-grasp, grasp, lift, aligned."""
+    """Mirror AxisAlign for an explicit grasp and frozen axis-compatible twist."""
     source, target, rotation_axis, angle = _axis_alignment_parameters(
         object_pose, internal_axis, target_axis
     )
@@ -1256,8 +1454,181 @@ def _axis_align_poses(
         axis_angle_to_rotation_matrix(rotation_axis * angle[:, None]),
         lifted_object[:, :3, :3],
     )
+    twists = torch.as_tensor(
+        alignment_twist_rad, dtype=object_pose.dtype, device=object_pose.device
+    ).reshape(-1)
+    if (
+        twists.numel() not in (1, object_pose.shape[0])
+        or not torch.isfinite(twists).all()
+    ):
+        raise ValueError(
+            "alignment_twist_rad must be scalar or match the object batch."
+        )
+    twist_rotation = axis_angle_to_rotation_matrix(
+        target * twists.expand(object_pose.shape[0])[:, None]
+    )
+    aligned_object[:, :3, :3] = torch.bmm(twist_rotation, aligned_object[:, :3, :3])
+    if alignment_offset_m is not None:
+        offset = alignment_offset_m.to(
+            device=object_pose.device, dtype=object_pose.dtype
+        )
+        if offset.shape == (3,):
+            offset = offset.expand(object_pose.shape[0], -1)
+        if (
+            offset.shape != (object_pose.shape[0], 3)
+            or not torch.isfinite(offset).all()
+        ):
+            raise ValueError("alignment_offset_m must match the object batch.")
+        aligned_object[:, :3, 3] += offset
     aligned = torch.bmm(aligned_object, object_to_eef)
     return torch.stack((pre_grasp, grasp, lift, aligned), dim=1)
+
+
+def _axis_align_inward_distances(
+    config: Mapping[str, object],
+) -> tuple[float, ...] | None:
+    """Validate an explicitly configured, ordered position realisation search."""
+    if "alignment_inward_candidates_m" not in config:
+        return None
+    if "alignment_offset_m" in config:
+        raise ValueError("Choose alignment_offset_m or alignment_inward_candidates_m.")
+    values = config["alignment_inward_candidates_m"]
+    if (
+        not isinstance(values, (list, tuple))
+        or not values
+        or any(
+            type(v) not in (int, float) or not math.isfinite(v) or v < 0 for v in values
+        )
+        or values[0] != 0
+        or any(right <= left for left, right in zip(values, values[1:]))
+    ):
+        raise ValueError(
+            "alignment_inward_candidates_m must be finite, nonnegative, strictly "
+            "increasing and start at zero."
+        )
+    return tuple(float(v) for v in values)
+
+
+def _axis_align_grasp_order(
+    rotation_axis: torch.Tensor, candidates: torch.Tensor, costs: torch.Tensor
+) -> torch.Tensor:
+    """Keep perpendicular-first grasp ranking, with cost breaking equal scores."""
+    error = torch.abs(
+        torch.nn.functional.normalize(candidates[:, :3, 1], dim=1)
+        @ rotation_axis.to(device=candidates.device)
+    )
+    by_cost = torch.argsort(costs)
+    quantized = torch.round(error[by_cost] / 1.0e-6)
+    return by_cost[torch.argsort(quantized, stable=True)]
+
+
+def _select_inward_axis_grasp(
+    scenario: "AtomicSkillScenario",
+    handle: "AtomicObjectHandle",
+    object_pose: torch.Tensor,
+    approach: torch.Tensor,
+    start_qpos: torch.Tensor,
+    start_pose: torch.Tensor,
+    rotation_axis: torch.Tensor,
+    distances: tuple[float, ...],
+    *,
+    grasp_parameters: Mapping[str, object],
+    build_poses: Callable[..., torch.Tensor],
+    seed: int,
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, object]]:
+    """Freeze the first independently reachable position/grasp for every row.
+
+    Offset order has priority over the existing grasp ranking. Each bounded
+    search reuses the same declared geometry pool and original environment;
+    only ordinary exhausted-pool results allow the next offset. No evaluated
+    planner or physical policy outcome participates in this preparation rule.
+    """
+    base = scenario.robot.get_control_part_base_pose(
+        name=scenario.control_part, to_matrix=True
+    ).to(object_pose)
+    inward = torch.zeros_like(object_pose[:, :3, 3])
+    inward[:, :2] = base[:, :2, 3] - object_pose[:, :2, 3]
+    inward = torch.nn.functional.normalize(inward, dim=-1)
+    pools = scenario._ranked_antipodal_grasp_pools(
+        handle,
+        object_pose,
+        approach,
+        seed=seed,
+        n_sample=int(grasp_parameters["grasp_sample_count"]),
+        max_candidates=int(grasp_parameters["grasp_max_candidates"]),
+        alignment_max_angle_deg=(
+            float(grasp_parameters["grasp_alignment_max_angle_deg"])
+            if grasp_parameters.get("grasp_filter_before_ranking", False)
+            else None
+        ),
+        row_rank=lambda row, candidates, costs: _axis_align_grasp_order(
+            rotation_axis[row], candidates, costs
+        ),
+    )
+    selected = torch.stack([pool[0] for pool in pools])
+    found = torch.zeros(len(object_pose), device=object_pose.device, dtype=torch.bool)
+    selected_offsets = torch.zeros_like(inward)
+    rows: list[dict[str, object]] = [
+        {"env_index": row, "selected_inward_distance_m": None, "rejected": []}
+        for row in range(len(object_pose))
+    ]
+    for distance in distances:
+        offsets = torch.where(found[:, None], selected_offsets, inward * distance)
+
+        def waypoint_poses(grasp: torch.Tensor) -> Sequence[torch.Tensor]:
+            return build_poses(
+                object_pose,
+                nearest_half_turn_pose(grasp, start_pose),
+                alignment_offset_m=offsets,
+            ).unbind(dim=1)
+
+        previous_found = found
+        selected, found = scenario._screen_antipodal_grasp_rows(
+            pools,
+            approach,
+            start_qpos,
+            alignment_max_angle_deg=float(
+                grasp_parameters["grasp_alignment_max_angle_deg"]
+            ),
+            waypoint_poses=waypoint_poses,
+            initial_selection=selected,
+            initial_found=found,
+        )
+        accepted = found & ~previous_found
+        selected_offsets = torch.where(accepted[:, None], offsets, selected_offsets)
+        for row, (already, solved) in enumerate(
+            zip(previous_found.tolist(), found.tolist())
+        ):
+            if already:
+                continue
+            if solved:
+                rows[row]["selected_inward_distance_m"] = distance
+            else:
+                rows[row]["rejected"].append(
+                    {
+                        "inward_distance_m": distance,
+                        "result": "unresolved_search",
+                        "reason": "Declared grasp pool has no independently solved complete pose chain.",
+                    }
+                )
+        if bool(found.all().item()):
+            break
+    if not bool(found.all().item()):
+        failed = torch.nonzero(~found, as_tuple=False).flatten().cpu().tolist()
+        raise _AntipodalGraspSearchError(
+            f"AxisAlign environment rows {failed} have no independently reachable "
+            f"realisation at declared inward offsets {list(distances)}: "
+            f"{[rows[row] for row in failed]}"
+        )
+    return (
+        nearest_half_turn_pose(selected, start_pose),
+        selected_offsets,
+        {
+            "kind": "ordered_inward_offsets_then_grasp",
+            "inward_candidates_m": list(distances),
+            "rows": rows,
+        },
+    )
 
 
 class _AxisAlignCases(AtomicSkillCaseProvider):
@@ -1279,6 +1650,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
         object_id = config.get("object")
         if not isinstance(object_id, str) or not object_id:
             raise ValueError("AxisAlign cases must reference a non-empty object id.")
+        inward_distances = _axis_align_inward_distances(config)
         handle = scenario.activate_object(object_id)
         scenario.restore_base_robot()
         object_pose, settle_steps = _settle_object_pose(
@@ -1320,7 +1692,12 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
             start_qpos, name=scenario.control_part, to_matrix=True
         )
 
-        def poses(pose_object: torch.Tensor, grasp: torch.Tensor) -> torch.Tensor:
+        def poses(
+            pose_object: torch.Tensor,
+            grasp: torch.Tensor,
+            *,
+            alignment_offset_m: torch.Tensor | None = None,
+        ) -> torch.Tensor:
             return _axis_align_poses(
                 pose_object,
                 grasp,
@@ -1329,49 +1706,76 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
                 lift_height=lift_height,
                 internal_axis=internal_axis,
                 target_axis=target_axis,
+                alignment_twist_rad=torch.as_tensor(
+                    config.get("alignment_twist_rad", 0.0),
+                    dtype=object_pose.dtype,
+                    device=device,
+                ),
+                alignment_offset_m=(
+                    torch.as_tensor(
+                        config["alignment_offset_m"],
+                        dtype=object_pose.dtype,
+                        device=device,
+                    )
+                    if alignment_offset_m is None and "alignment_offset_m" in config
+                    else alignment_offset_m
+                ),
             )
 
         _, _, rotation_axis, _ = _axis_alignment_parameters(
-            object_pose[:1], internal_axis, target_axis
+            object_pose, internal_axis, target_axis
         )
 
         def perpendicular_first(
-            candidates: torch.Tensor, costs: torch.Tensor
+            row: int, candidates: torch.Tensor, costs: torch.Tensor
         ) -> torch.Tensor:
-            # AxisAlign prefers grasps whose finger axis is perpendicular to the
-            # rotation axis; grasp cost orders the equally perpendicular ones.
-            error = torch.abs(
-                torch.nn.functional.normalize(candidates[:, :3, 1], dim=1)
-                @ rotation_axis[0].to(device=candidates.device)
-            )
-            by_cost = torch.argsort(costs)
-            quantized = torch.round(error[by_cost] / 1.0e-6)
-            return by_cost[torch.argsort(quantized, stable=True)]
+            return _axis_align_grasp_order(rotation_axis[row], candidates, costs)
 
         grasp = _grasp_parameters(config)
-        if grasp["grasp_source"] == "antipodal":
+        selected_offsets = None
+        realisation = None
+        if inward_distances is not None:
+            if grasp["grasp_source"] != "antipodal":
+                raise ValueError("Inward AxisAlign search requires antipodal grasps.")
+            sampled, selected_offsets, realisation = _select_inward_axis_grasp(
+                scenario,
+                handle,
+                object_pose,
+                approach,
+                start_qpos,
+                start_pose,
+                rotation_axis,
+                inward_distances,
+                grasp_parameters=grasp,
+                build_poses=poses,
+                seed=seed,
+            )
+        elif grasp["grasp_source"] == "antipodal":
             sampled = scenario.screen_antipodal_grasp(
                 handle,
                 object_pose,
                 approach,
                 seed=seed,
-                start_qpos=start_qpos[:1],
+                start_qpos=start_qpos,
                 n_sample=int(grasp["grasp_sample_count"]),
                 max_candidates=int(grasp["grasp_max_candidates"]),
                 alignment_max_angle_deg=float(grasp["grasp_alignment_max_angle_deg"]),
+                **(
+                    {"filter_alignment_before_ranking": True}
+                    if grasp.get("grasp_filter_before_ranking", False)
+                    else {}
+                ),
                 waypoint_poses=lambda pose: poses(
-                    object_pose[:1], nearest_half_turn_pose(pose, start_pose[:1])
+                    object_pose, nearest_half_turn_pose(pose, start_pose)
                 ).unbind(dim=1),
-                rank=perpendicular_first,
+                row_rank=perpendicular_first,
             )
         else:
             sampled = _fixed_grasp(object_pose, config, seed=seed, stream=502)
-        object_to_eef = torch.bmm(pose_inv(object_pose[:1]), sampled)
-        grasp_pose = nearest_half_turn_pose(
-            torch.bmm(object_pose, object_to_eef.expand(batch_size, -1, -1)),
-            start_pose,
-        )
-        targets = poses(object_pose, grasp_pose)
+            object_to_eef = torch.bmm(pose_inv(object_pose[:1]), sampled)
+            sampled = torch.bmm(object_pose, object_to_eef.expand(batch_size, -1, -1))
+        grasp_pose = nearest_half_turn_pose(sampled, start_pose)
+        targets = poses(object_pose, grasp_pose, alignment_offset_m=selected_offsets)
         references = scenario.solve_reference_qpos(start_qpos, targets)
         return BenchmarkCase(
             suite_version=suite.suite_version,
@@ -1407,6 +1811,23 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
                 "object_config": dict(handle.config),
                 "internal_axis": internal_axis.detach().cpu().tolist(),
                 "target_axis": target_axis.detach().cpu().tolist(),
+                **(
+                    {"alignment_twist_rad": config["alignment_twist_rad"]}
+                    if "alignment_twist_rad" in config
+                    else {}
+                ),
+                **(
+                    {
+                        "alignment_offset_m": selected_offsets.detach().cpu().tolist(),
+                        "alignment_realisation": realisation,
+                    }
+                    if selected_offsets is not None
+                    else (
+                        {"alignment_offset_m": config["alignment_offset_m"]}
+                        if "alignment_offset_m" in config
+                        else {}
+                    )
+                ),
                 "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -1442,6 +1863,16 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
                 sample_count=int(parameters["sample_count"]),
             ),
             skill_options=AxisAlignOptions(
+                alignment_twist_rad=torch.as_tensor(
+                    parameters.get("alignment_twist_rad", 0.0),
+                    dtype=torch.float32,
+                    device=device,
+                ),
+                alignment_offset_m=torch.as_tensor(
+                    parameters.get("alignment_offset_m", [0.0, 0.0, 0.0]),
+                    dtype=torch.float32,
+                    device=device,
+                ),
                 target_axis=torch.tensor(
                     parameters["target_axis"], dtype=torch.float32, device=device
                 ),

@@ -45,6 +45,21 @@ UR5_DH_PARAMETERS = {
 }
 
 
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
+def test_nearest_weight_numpy_dtypes_update_tensor_in_place(dtype) -> None:
+    solver = object.__new__(OPWSolver)
+    solver.dof = 6
+    solver.ik_nearest_weight = torch.ones(6)
+    original = solver.ik_nearest_weight
+    assert solver.set_ik_nearest_weight(
+        np.array([2.5, 0.25], dtype=dtype), np.array([4, 1], dtype=np.int32)
+    )
+    torch.testing.assert_close(
+        solver.get_ik_nearest_weight(), torch.tensor([1.0, 0.25, 1.0, 1.0, 2.5, 1.0])
+    )
+    assert solver.ik_nearest_weight is original
+
+
 @pytest.mark.parametrize(
     "cfg_type",
     [

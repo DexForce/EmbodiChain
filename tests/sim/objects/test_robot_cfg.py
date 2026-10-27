@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import enum
+from copy import deepcopy
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -88,10 +89,14 @@ def test_arx5_source_chain_commands_and_ik_roundtrip(
     torch.testing.assert_close(solver.get_fk(q), reference)
     success, solution = solver.get_ik(reference, q + 0.02)
     assert bool(success.all())
-    actual = solver.get_fk(solution[:, 0])
-    torch.testing.assert_close(actual[:, :3, 3], reference[:, :3, 3], atol=5e-4, rtol=0)
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
+    assert isinstance(solver_cfg, SSIKSolverCfg)
+    assert solver_cfg.backend == "warp" and solver_cfg.geometry_mode == "near_parallel"
+    actual = solver.get_fk(solution.reshape_as(q))
+    torch.testing.assert_close(actual[:, :3, 3], reference[:, :3, 3], atol=1e-5, rtol=0)
     torch.testing.assert_close(
-        actual[:, :3, :3], reference[:, :3, :3], atol=1e-3, rtol=0
+        actual[:, :3, :3], reference[:, :3, :3], atol=1e-5, rtol=0
     )
 
     # Local source and end-frame overrides must reach kinematics as well as
@@ -116,6 +121,40 @@ def test_arx5_source_chain_commands_and_ik_roundtrip(
     torch.testing.assert_close(
         custom.build_pk_serial_chain()["arm"].forward_kinematics(q).get_matrix(),
         reference_chain.forward_kinematics(q).get_matrix(),
+    )
+
+
+@pytest.mark.no_sim
+def test_arx5_explicit_ssik_override_preserves_chain_source_and_tcp() -> None:
+    """Reference replacements preserve the X5A source and tool frame."""
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
+    source = Path(__file__).parents[2] / "fixtures/kinematics/arx5_x5a.urdf"
+    default = ARX5Cfg.from_dict({"fpath": str(source)})
+    original = default.solver_cfg["arm"]
+    cfg = ARX5Cfg.from_dict(
+        {
+            "fpath": str(source),
+            "solver_cfg": {
+                "arm": SSIKSolverCfg(
+                    backend="reference",
+                    root_link_name=original.root_link_name,
+                    end_link_name=original.end_link_name,
+                    tcp=original.tcp,
+                    reference_artifact="prepared_x5a.py",
+                )
+            },
+        }
+    )
+    assert isinstance(cfg.solver_cfg["arm"], SSIKSolverCfg)
+    assert cfg.solver_cfg["arm"].reference_artifact == "prepared_x5a.py"
+    assert len(cfg.build_pk_serial_chain()["arm"].get_joint_parameter_names()) == 6
+    restored = ARX5Cfg.from_dict(cfg.to_dict())
+    assert restored.solver_cfg["arm"].backend == "reference"
+    assert restored.fpath == str(source)
+    np.testing.assert_array_equal(
+        restored.solver_cfg["arm"].tcp,
+        [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.085], [0, 0, 0, 1]],
     )
 
 
@@ -661,8 +700,46 @@ def test_robotcfg_to_dict_roundtrip():
     assert cfg2.joint_drive_props.stiffness == {"J[1-2]": 1e4}
 
 
+@pytest.mark.parametrize(
+    "override,expected",
+    [
+        ({"self_collision_enabled": True}, (False, True, 0.05, 8, 4)),
+        ({"min_position_iters": 16}, (False, False, 0.05, 16, 4)),
+        ({"fixed_base": True, "min_velocity_iters": 0}, (True, False, 0.05, 8, 0)),
+        ({"fixed_base": None, "sleep_threshold": None}, (None, False, None, 8, 4)),
+        ({}, (False, False, 0.05, 8, 4)),
+    ],
+)
+def test_root_property_overrides_preserve_unspecified_preset_fields(
+    override: dict[str, object], expected: tuple[object, ...]
+) -> None:
+    """Sparse root overlays keep floating bases and validate complete iter pairs."""
+    from copy import deepcopy
+
+    cfg = RobotCfg(
+        root_props=ArticulationRootPropertiesCfg(
+            fixed_base=False,
+            self_collision_enabled=False,
+            sleep_threshold=0.05,
+            min_position_iters=8,
+            min_velocity_iters=4,
+        )
+    )
+    original = deepcopy(override)
+    result = merge_robot_cfg(cfg, {"root_props": override}).root_props
+
+    assert (
+        result.fixed_base,
+        result.self_collision_enabled,
+        result.sleep_threshold,
+        result.min_position_iters,
+        result.min_velocity_iters,
+    ) == expected
+    assert override == original
+
+
 from embodichain_robots.agilex.cobotmagic.cfg import CobotMagicCfg
-from embodichain_robots import AlohaMiniCfg, TianjiMarvinCfg
+from embodichain_robots import AlohaMiniCfg, TianjiMarvinCfg, ARX5Cfg, FlexivRizon4SCfg
 from embodichain_robots.franka.panda import FrankaPandaCfg
 from embodichain_robots.universal_robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import OPWSolverCfg
@@ -768,7 +845,7 @@ def test_aloha_mini_overrides_and_roundtrip():
     assert cfg.joint_drive_props.stiffness["torso"] == 2e4
     assert cfg.joint_drive_props.stiffness["left_arm"] == 7e4
     assert cfg.solver_cfg["left_arm"].num_samples == 8
-    assert cfg.solver_cfg["right_arm"].num_samples == 30
+    assert cfg.solver_cfg["right_arm"].num_samples == 128
     assert AlohaMiniCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
 
 
@@ -788,15 +865,19 @@ def test_aloha_mini_serial_chains_match_control_joint_order():
 
 
 def test_aloha_mini_solvers_use_local_frames_and_source_tcp():
-    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg, SSIKSolverCfg
 
     cfg = AlohaMiniCfg.from_dict({})
     chains = cfg.build_pk_serial_chain()
     assert set(cfg.solver_cfg) == {"left_arm", "right_arm", "torso"}
     for part, solver_cfg in cfg.solver_cfg.items():
-        assert isinstance(solver_cfg, PytorchSolverCfg)
-        assert solver_cfg.is_only_position_constraint == (part == "torso")
-        if part.endswith("_arm"):
+        if part == "torso":
+            assert isinstance(solver_cfg, PytorchSolverCfg)
+            assert solver_cfg.is_only_position_constraint
+        else:
+            assert isinstance(solver_cfg, SSIKSolverCfg)
+            assert solver_cfg.backend == "warp"
+            assert solver_cfg.geometry_mode == "strict"
             side = part.removesuffix("_arm")
             assert solver_cfg.root_link_name == f"{side}_Base"
             assert solver_cfg.end_link_name == f"{side}_tcp"
@@ -804,10 +885,74 @@ def test_aloha_mini_solvers_use_local_frames_and_source_tcp():
         solver_cfg.joint_names = cfg.control_parts[part]
         solver = solver_cfg.init_solver(device=torch.device("cpu"))
         assert solver.dof == len(cfg.control_parts[part])
-        qpos = torch.zeros((1, solver.dof))
-        torch.testing.assert_close(
-            solver.get_fk(qpos), chains[part].forward_kinematics(qpos).get_matrix()
-        )
+        qpos = torch.tensor(chains[part].get_joint_limits()).mean(dim=0, keepdim=True)
+        expected = chains[part].forward_kinematics(qpos).get_matrix()
+        torch.testing.assert_close(solver.get_fk(qpos), expected)
+        if part != "torso":
+            success, result = solver.get_ik(expected, qpos_seed=qpos)
+            assert bool(success.all())
+            actual = chains[part].forward_kinematics(result).get_matrix()
+            torch.testing.assert_close(actual, expected, atol=1e-5, rtol=0)
+
+
+@pytest.mark.parametrize(
+    ("robot_class", "variant", "part"),
+    [
+        pytest.param(AlohaMiniCfg, {}, "left_arm", id="aloha"),
+        pytest.param(
+            TianjiMarvinCfg, {"with_gripper": True}, "left_arm", id="marvin-gripper"
+        ),
+        pytest.param(
+            TianjiMarvinCfg, {"with_gripper": False}, "left_arm", id="marvin-bare"
+        ),
+        pytest.param(ARX5Cfg, {}, "arm", id="arx5"),
+        pytest.param(FlexivRizon4SCfg, {}, "arm", id="rizon4s"),
+    ],
+)
+@pytest.mark.parametrize("typed", [False, True])
+def test_arm_pytorch_restore_replaces_default_and_roundtrips(
+    robot_class: type[RobotCfg], variant: dict[str, bool], part: str, typed: bool
+) -> None:
+    """Complete replacements restore numerical defaults and retain model frames."""
+    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg, SSIKSolverCfg
+
+    defaults = robot_class.from_dict(variant)
+    previous = defaults.solver_cfg[part]
+    assert isinstance(previous, SSIKSolverCfg)
+    explicit = PytorchSolverCfg(
+        urdf_path=defaults.fpath,
+        joint_names=defaults.control_parts[part],
+        root_link_name=previous.root_link_name,
+        end_link_name=previous.end_link_name,
+        tcp=deepcopy(previous.tcp),
+        ik_nearest_weight=[1.0] * len(defaults.control_parts[part]),
+    )
+    provided = explicit if typed else explicit.to_dict()
+    cfg = robot_class.from_dict({**variant, "solver_cfg": {part: provided}})
+    selected = cfg.solver_cfg[part]
+    assert isinstance(selected, PytorchSolverCfg)
+    assert selected.num_samples == 30 and selected.max_iterations == 500
+    assert selected.pos_eps == 5e-4 and selected.rot_eps == 5e-4
+    assert selected.root_link_name == previous.root_link_name
+    assert selected.end_link_name == previous.end_link_name
+    np.testing.assert_array_equal(selected.tcp, previous.tcp)
+    if part == "left_arm":
+        assert isinstance(cfg.solver_cfg["right_arm"], SSIKSolverCfg)
+        assert cfg.solver_cfg["right_arm"].num_samples == 128
+    if robot_class is AlohaMiniCfg:
+        assert isinstance(cfg.solver_cfg["torso"], PytorchSolverCfg)
+        assert cfg.solver_cfg["torso"].is_only_position_constraint
+    restored = robot_class.from_dict(cfg.to_dict())
+    assert restored.to_dict() == cfg.to_dict()
+    assert isinstance(restored.solver_cfg[part], PytorchSolverCfg)
+    assert selected is not explicit
+    selected.num_samples = 12
+    selected.ik_nearest_weight[0] = 3.0
+    assert explicit.num_samples == 30
+    assert explicit.ik_nearest_weight == [1.0] * len(defaults.control_parts[part])
+    if not typed:
+        assert provided["num_samples"] == 30
+        assert provided["ik_nearest_weight"] == explicit.ik_nearest_weight
 
 
 def test_aloha_mini_pk_chains_follow_overridden_asset(tmp_path):
@@ -908,7 +1053,7 @@ def test_tianji_marvin_overrides_and_roundtrip(with_gripper):
     assert cfg.joint_drive_props.stiffness["left_arm"] == 2e4
     assert cfg.joint_drive_props.stiffness["right_arm"] == 7e4
     assert cfg.solver_cfg["left_arm"].num_samples == 8
-    assert cfg.solver_cfg["right_arm"].num_samples == 30
+    assert cfg.solver_cfg["right_arm"].num_samples == 128
     assert cfg.root_props.fixed_base
     assert TianjiMarvinCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
 
@@ -1021,7 +1166,7 @@ def test_tianji_marvin_camera_overrides_are_isolated_and_roundtrip():
 def test_tianji_marvin_serial_chains_and_solvers_match_source(
     with_gripper, use_link_frame
 ):
-    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
 
     init_dict = {"with_gripper": with_gripper}
     if use_link_frame:
@@ -1041,7 +1186,8 @@ def test_tianji_marvin_serial_chains_and_solvers_match_source(
         assert chain.get_joint_parameter_names() == cfg.control_parts[part]
         side = part.removesuffix("_arm")
         solver_cfg = cfg.solver_cfg[part]
-        assert isinstance(solver_cfg, PytorchSolverCfg)
+        assert isinstance(solver_cfg, SSIKSolverCfg)
+        assert solver_cfg.backend == "warp" and solver_cfg.srs_search == "seed_local"
         assert solver_cfg.root_link_name == f"{side}_arm_base"
         assert solver_cfg.end_link_name == (
             f"{side}_hand_tool_link" if with_gripper else f"{side}_ee"
@@ -1058,9 +1204,10 @@ def test_tianji_marvin_serial_chains_and_solvers_match_source(
         success, solved_qpos = solver.get_ik(expected_pose, qpos_seed=qpos)
         assert bool(success.all())
         torch.testing.assert_close(
-            solver.get_fk(solved_qpos.reshape_as(qpos)),
+            chain.forward_kinematics(solved_qpos.reshape_as(qpos)).get_matrix()
+            @ expected_tcp,
             expected_pose,
-            atol=1e-3,
+            atol=1e-5,
             rtol=0,
         )
 

@@ -18,10 +18,17 @@
 
 from __future__ import annotations
 
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
+
 from .types import LossResult, SupervisedBatch, SupervisedObjective
+from .distributed import distributed_run
 from .learner import SupervisedLearner
 from .sources import SupervisedSource, TensorBatchSource
 from .trainer import SupervisedTrainer, SupervisedTrainerCfg
+
+if TYPE_CHECKING:
+    from .sequence import SequenceBatchSource
 
 __all__ = [
     "LossResult",
@@ -32,4 +39,18 @@ __all__ = [
     "TensorBatchSource",
     "SupervisedTrainer",
     "SupervisedTrainerCfg",
+    "distributed_run",
+    "SequenceBatchSource",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name != "SequenceBatchSource":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"{__name__}.sequence"), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

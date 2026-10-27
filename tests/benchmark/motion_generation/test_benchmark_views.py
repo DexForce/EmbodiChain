@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from types import SimpleNamespace
+from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 import pytest
 import torch
@@ -152,7 +152,7 @@ class _Robot:
 
 
 def test_geometry_and_timing_verdicts_use_distinct_contracts() -> None:
-    result = SimpleNamespace(
+    result = PlanResult(
         positions=torch.tensor([[[0.0], [0.1]]]),
         dt=torch.tensor([[0.0, 0.1]]),
         success=True,
@@ -248,7 +248,7 @@ def test_success_interval_matches_displayed_rate_for_custom_motion_primary(
     records = []
     for case in cases:
         outcome = compute_case_outcomes(
-            SimpleNamespace(
+            PlanResult(
                 positions=torch.tensor([[[0.0], [0.1]]]),
                 dt=torch.tensor([[0.0, 0.1]]),
                 success=True,

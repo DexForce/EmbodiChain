@@ -44,7 +44,10 @@ ActionInvocation                       semantic program
 ```
 
 Planning never steps simulation and never treats command completion as proof of
-a physical effect. Runtime hosts may collect versioned physical evidence after
+a physical effect. A gripper-close hold inserted into a moving arm path does not
+preserve solved timing: retain required stop boundaries and validate the compiled
+control-grid path, not only native planner samples. Runtime hosts may collect
+versioned physical evidence after
 each fresh observation and pass it to an evidence-aware effect verifier, phase
 gate, or held-object guard. Evidence acquisition stays outside planning and
 does not mutate symbolic task state; verification results are the only path
@@ -56,6 +59,19 @@ goals remain exact. Heading alternatives are checked as complete motion paths,
 with accepted rows retained independently and selected offsets in diagnostics.
 Held-object transport and Pour keep the binding's configured grasp command; a
 contact-blocked measured aperture does not retain closing effort.
+
+`PickUpOptions.approach_direction` accepts one world vector or one vector per
+planning row. PickUp and AxisAlign normalize each row independently and use the
+same direction for candidate eligibility and pre-grasp translation. A benchmark
+that freezes per-row grasp realisations must forward their directions to the
+actual action; replacing them with one shared vector changes the request.
+
+`AxisAlignOptions.alignment_twist_rad` selects a scalar or per-row rotation
+about the aligned target axis. Zero keeps shortest-arc behavior; an independent
+benchmark generator can freeze another full-pose realisation without changing
+the directed axis goal. `alignment_offset_m` similarly selects a scalar-vector
+or per-row world translation from the lifted object centre; zero retains the
+fixed-centre target. Neither option establishes path or physical feasibility.
 
 `SlideGoal.joint_target` optionally supplies a public `SlideJointTarget` with an
 absolute prismatic coordinate and a calibrated axis sign. Slide resolves the

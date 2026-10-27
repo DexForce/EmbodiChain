@@ -665,6 +665,10 @@ def test_retiming_samples_on_the_control_period_not_the_rollout_step_count(
     # One sample per nominal dt over the solved duration, not one per step.
     assert retimed.positions.shape[1] > nominal.positions.shape[1]
     assert retimed.positions.shape[1] == pytest.approx(duration / 0.01, rel=0.05)
+    torch.testing.assert_close(retimed.policy_rollout_positions, nominal.positions)
+    torch.testing.assert_close(
+        retimed.policy_rollout_lengths, nominal.policy_rollout_lengths
+    )
 
 
 def test_retimed_success_reflects_the_trajectory_actually_returned(
@@ -955,9 +959,8 @@ def test_neural_planner_fk_preserves_xyzw_for_asymmetric_rotation(
     quaternion = quaternion / torch.linalg.vector_norm(quaternion, dim=-1, keepdim=True)
     pose = torch.eye(4).unsqueeze(0)
     pose[:, :3, :3] = matrix_from_quat(quaternion)
-    planner._fk_matrix = lambda qpos, control_part: pose.expand(qpos.shape[0], -1, -1)
 
-    fk_pose = planner._fk_pose_xyzw(torch.zeros(1, NUM_ARM_JOINTS), "main_arm")
+    fk_pose = planner._policy_pose_xyzw(pose)
 
     torch.testing.assert_close(fk_pose[:, 3:7], quaternion)
 
@@ -1303,6 +1306,8 @@ def test_motion_generator_neural_preserves_failed_rollout_positions(
     assert not result.success.all().item()
     assert result.positions is not None
     assert result.positions[0, 1, 0] > result.positions[0, 0, 0]
+    torch.testing.assert_close(result.policy_rollout_positions, result.positions)
+    assert result.policy_rollout_lengths.tolist() == [3]
 
 
 def test_neural_planner_rejects_pytorch_checkpoint(tmp_path, monkeypatch):
@@ -1365,6 +1370,84 @@ def test_native_and_retimed_rollouts_preserve_requested_first_sample(
     error = (result.positions[:, 0].double() - start).abs().amax(dim=-1)
     assert bool((error < 1e-6).all())
     assert float((result.positions[:, -1] - result.positions[:, 0]).abs().max()) > 1e-6
+    assert result.policy_rollout_positions.shape == (batch_size, 4, NUM_ARM_JOINTS)
+    torch.testing.assert_close(result.policy_rollout_positions[:, 0], start.float())
+    assert result.policy_rollout_lengths.tolist() == [4] * batch_size
+
+
+@pytest.mark.parametrize("batch_size", [1, 3])
+def test_rollout_feedback_and_returned_poses_follow_each_joint_state(
+    tmp_path, monkeypatch, batch_size
+):
+    """Closed-loop observations and returned poses describe the current state."""
+    fake_sim = FakeSimulationManager()
+    fake_sim.robot.num_instances = batch_size
+    offset = torch.tensor([0.2, -0.1, 0.3])
+    observations = []
+
+    def analytic_fk(qpos, **kwargs):
+        poses = torch.eye(4).repeat(qpos.shape[0], 1, 1)
+        poses[:, :3, 3] = qpos[:, :3] + offset
+        return poses
+
+    def feedback_action(self, obs):
+        observations.append(obs.clone())
+        action = torch.zeros(obs.shape[0], NUM_ARM_JOINTS)
+        action[:, :3] = 0.5 * (goal_position - obs[:, 7:10]) / 0.1
+        return action
+
+    monkeypatch.setattr(fake_sim.robot, "compute_fk", analytic_fk)
+    monkeypatch.setattr(FakeOnnxPolicy, "__call__", feedback_action)
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            control_part="main_arm",
+            action_scale=0.1,
+            pos_eps=0.0001,
+            max_steps=20,
+        )
+    )
+    retained = []
+    for direction in (1.0, -1.0):
+        observations.clear()
+        start = torch.zeros(batch_size, NUM_ARM_JOINTS)
+        start[:, :3] = direction * 0.01
+        distance = torch.linspace(0.03, 0.09, batch_size)
+        goal_position = start[:, :3] + offset
+        goal_position[:, 0] += direction * distance
+        targets = torch.eye(4).repeat(batch_size, 1, 1)
+        targets[:, :3, 3] = goal_position
+        result = planner.plan(
+            [PlanState.from_xpos(targets)],
+            NeuralPlanOptions(
+                control_part="main_arm",
+                start_qpos=start,
+                waypoint_modalities=["position"],
+            ),
+        )
+        assert result.success.tolist() == [True] * batch_size
+        observed = torch.stack(observations, dim=1)
+        torch.testing.assert_close(observed[..., :7], result.positions[:, :-1])
+        torch.testing.assert_close(
+            observed[..., 7:10], result.positions[:, :-1, :3] + offset
+        )
+        torch.testing.assert_close(
+            result.xpos_list[..., :3, 3], result.positions[..., :3] + offset
+        )
+        assert (
+            float((result.xpos_list[:, -1, :3, 3] - goal_position).norm(dim=-1).max())
+            <= 0.0001
+        )
+        for old, positions, poses in retained:
+            torch.testing.assert_close(old.positions, positions)
+            torch.testing.assert_close(old.xpos_list, poses)
+        retained.append((result, result.positions.clone(), result.xpos_list.clone()))
 
 
 @pytest.mark.parametrize("intermediate_orientation", [True, False])
@@ -1448,3 +1531,38 @@ def test_joint_reach_uses_inclusive_maximum_error(error, expected):
         torch.zeros(1, dtype=torch.long),
     )
     assert reached.item() is expected
+
+
+@pytest.mark.no_sim
+def test_onnx_runtime_respects_host_thread_budget(monkeypatch, tmp_path):
+    import sys
+    from types import SimpleNamespace
+
+    session = SimpleNamespace(
+        get_inputs=lambda: [SimpleNamespace(name="obs", shape=[None, 32])],
+        get_outputs=lambda: [SimpleNamespace(name="action", shape=[None, 7])],
+        get_modelmeta=lambda: SimpleNamespace(custom_metadata_map={}),
+        get_providers=lambda: ["CPUExecutionProvider"],
+    )
+    received = {}
+
+    def create_session(path, *, sess_options, providers):
+        received["options"] = sess_options
+        return session
+
+    monkeypatch.setitem(
+        sys.modules,
+        "onnxruntime",
+        SimpleNamespace(
+            SessionOptions=SimpleNamespace,
+            GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL="all"),
+            InferenceSession=create_session,
+        ),
+    )
+    messages = []
+    monkeypatch.setattr(neural_planner_module.logger, "log_info", messages.append)
+    monkeypatch.setattr(torch, "get_num_threads", lambda: 3)
+    _REAL_ONNX_POLICY(tmp_path / "policy.onnx")
+    assert messages == ["NMG ONNX execution providers: CPUExecutionProvider"]
+    assert received["options"].intra_op_num_threads == 3
+    assert received["options"].inter_op_num_threads == 1

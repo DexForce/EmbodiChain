@@ -19,13 +19,13 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import Future
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 import torch
 import yaml
-
 from embodichain_benchmarks.motion_generation import (
     BenchmarkCase,
     PlannerAdapter,
@@ -44,6 +44,7 @@ from embodichain_benchmarks.motion_generation.scenarios.base import (
     ScenarioEvaluation,
     ScenarioProvider,
 )
+
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 pytestmark = pytest.mark.no_sim
@@ -453,3 +454,410 @@ def test_frozen_manifest_rejects_changed_embodiment_before_simulation(
     with pytest.raises(ValueError, match="embodiment"):
         run_benchmark(suite, case_manifest=path, **kwargs)
     fake_runtime[0].assert_not_called()
+
+
+def test_prepare_case_manifest_is_planner_independent_and_never_overwrites(
+    fake_runtime, tmp_path, monkeypatch
+):
+    from embodichain_benchmarks.motion_generation import prepare_case_manifest
+
+    suite = load_suite()
+    monkeypatch.setattr(
+        runner_module,
+        "create_planner_adapter",
+        lambda *args, **kwargs: pytest.fail("case preparation constructed a planner"),
+    )
+    output = tmp_path / "frozen.json"
+    assert prepare_case_manifest(suite, output=output, device="cpu") == output
+    payload = json.loads(output.read_text())
+    assert len(payload["cases"]) == 1
+    assert payload["resolved_embodiment"]["embodiment_id"]
+    fake_runtime[0].return_value.destroy.assert_called_once_with(exit_process=False)
+    original = output.read_bytes()
+    with pytest.raises(FileExistsError):
+        prepare_case_manifest(suite, output=output, device="cpu")
+    assert output.read_bytes() == original
+
+
+class _InlineExecutor:
+    """Exercise orchestration independently of process startup and hardware."""
+
+    def __init__(self, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+    def submit(self, function, job):
+        future = Future()
+        try:
+            future.set_result(function(job))
+        except Exception as error:  # noqa: BLE001 - emulate a Future
+            future.set_exception(error)
+        return future
+
+
+def _spawned_fake_shard(job):
+    """Replace native simulation inside a real spawned worker process."""
+    from dataclasses import replace
+    from unittest.mock import patch
+
+    from embodichain_benchmarks.motion_generation.parallel import _run_shard
+
+    robot = Mock(uid="test_robot")
+    provider = Mock(control_part="arm")
+    provider.add_robot.return_value = robot
+    simulation = Mock()
+    factory = Mock(return_value=simulation)
+
+    class Scenario(ScenarioProvider):
+        def batch_sizes(self, suite, track):
+            return [1]
+
+        def generate_cases(self, *args):
+            raise AssertionError("worker regenerated frozen inputs")
+
+        def evaluate_case(self, result, case, *args, **kwargs):
+            outcome = make_failure_outcomes(1, "fixture")[0]
+            if case.case_id == "case_0":
+                outcome = replace(
+                    outcome,
+                    finite=True,
+                    ordered_waypoints_reached=True,
+                    joint_limit_violation=False,
+                    motion_valid=True,
+                    planning_success=True,
+                    completed_waypoint_ratio=1.0,
+                    failure_code=None,
+                )
+            return ScenarioEvaluation(outcomes=(outcome,))
+
+    with (
+        patch.object(runner_module, "SimulationManager", factory),
+        patch.object(runner_module, "create_robot_provider", return_value=provider),
+        patch.object(
+            runner_module, "create_scenario_provider", return_value=Scenario()
+        ),
+        patch.object(
+            runner_module,
+            "create_planner_adapter",
+            side_effect=lambda spec, context: ExternalAdapter(spec, context),
+        ),
+    ):
+        return _run_shard(job)
+
+
+@pytest.mark.parametrize("execution", ["inline", "spawn"])
+def test_parallel_quality_merges_full_population_and_preserves_inputs(
+    fake_runtime, tmp_path, monkeypatch, execution
+):
+    from dataclasses import replace
+
+    from embodichain_benchmarks.motion_generation import parallel, prepare_case_manifest
+    from embodichain_benchmarks.motion_generation.models import TrialPhase
+
+    suite = load_suite()
+    suite.protocol.warmup_trials = 0
+    suite.protocol.measured_trials = 1
+    suite.planners = [
+        PlannerSpecCfg(id="fixture", adapter="ik_interpolate", enabled=True)
+    ]
+    original_generate = fake_runtime[2].generate_cases
+
+    def generate(*args):
+        base = original_generate(*args)[0]
+        return [
+            replace(base, case_id=f"case_{index}", seed=11 + index)
+            for index in range(3)
+        ]
+
+    def evaluate(result, case, *args, **kwargs):
+        outcome = make_failure_outcomes(1, "fixture")[0]
+        if case.case_id == "case_0":
+            outcome = replace(
+                outcome,
+                finite=True,
+                ordered_waypoints_reached=True,
+                joint_limit_violation=False,
+                motion_valid=True,
+                planning_success=True,
+                completed_waypoint_ratio=1.0,
+                failure_code=None,
+            )
+        return ScenarioEvaluation(outcomes=(outcome,))
+
+    monkeypatch.setattr(fake_runtime[2], "generate_cases", generate)
+    monkeypatch.setattr(fake_runtime[2], "evaluate_case", evaluate)
+    corpus = prepare_case_manifest(suite, tmp_path / "frozen.json", device="cpu")
+    original = corpus.read_bytes()
+    monkeypatch.setattr(
+        fake_runtime[2], "generate_cases", lambda *a: pytest.fail("regenerated")
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "create_planner_adapter",
+        lambda spec, context: ExternalAdapter(spec, context),
+    )
+    if execution == "inline":
+        monkeypatch.setattr(parallel, "ProcessPoolExecutor", _InlineExecutor)
+    else:
+        monkeypatch.setattr(parallel, "_run_shard", _spawned_fake_shard)
+    serial = run_benchmark(
+        suite, case_manifest=corpus, output_root=tmp_path / "serial", device="cpu"
+    )
+    result = run_benchmark(
+        suite,
+        case_manifest=corpus,
+        output_root=tmp_path / "parallel",
+        device="cpu",
+        workers=2,
+    )
+    measured = [row for row in result.records if row.phase is TrialPhase.MEASURED]
+    assert [row.case_id for row in measured] == ["case_0", "case_1", "case_2"]
+    assert all(row.cost_time_ms is not None for row in measured)
+    assert all(
+        row.metadata["benchmark_execution"]["timing_comparable"] is False
+        for row in measured
+    )
+    ranking = result.aggregates["motion_planning_leaderboard"][0]
+    assert ranking["overall_success_rate"] == pytest.approx(1 / 3)
+    assert (
+        ranking["overall_success_rate"]
+        == serial.aggregates["motion_planning_leaderboard"][0]["overall_success_rate"]
+    )
+    assert ranking["latency_p95_ms"] is None
+    assert corpus.read_bytes() == original
+    assert (
+        json.loads((result.run_dir / "case_manifest.json").read_text())["cases_sha256"]
+        == json.loads(original)["cases_sha256"]
+    )
+    assert json.loads((result.run_dir / "execution.json").read_text())["workers"] == 2
+    assert result.report_path.is_file()
+
+    frozen_rows = json.loads(original)["cases"]
+    omitted = replace(
+        result,
+        records=tuple(
+            row
+            for row in result.records
+            if not (row.case_id == "case_0" and row.phase is TrialPhase.MEASURED)
+        ),
+    )
+    with pytest.raises(ValueError, match="omitted measured trials"):
+        parallel._merge_records([omitted], frozen_rows, suite.planners, 1)
+    failed = replace(
+        measured[0],
+        phase=TrialPhase.CONSTRUCT,
+        repeat=-1,
+        status="error",
+        failure_code="planner_exception",
+        outcomes=(),
+    )
+    lifecycle_failure = replace(
+        result,
+        records=(failed,)
+        + tuple(row for row in result.records if row.case_id != "case_0"),
+    )
+    preserved, _ = parallel._merge_records(
+        [lifecycle_failure], frozen_rows, suite.planners, 1
+    )
+    assert failed in preserved
+
+    if execution == "spawn":
+        state = json.loads((result.run_dir / "execution.json").read_text())
+        import os
+
+        assert len(state["shards"]) == 2
+        assert all(shard["pid"] != os.getpid() for shard in state["shards"])
+        assert all(shard["torch_threads"] == 1 for shard in state["shards"])
+        return
+    actual_worker = parallel._run_shard
+
+    def failed_worker(job):
+        if job["index"] == 1:
+            raise RuntimeError("worker fixture failure")
+        return actual_worker(job)
+
+    monkeypatch.setattr(parallel, "_run_shard", failed_worker)
+    with pytest.raises(RuntimeError, match="worker fixture failure"):
+        run_benchmark(
+            suite,
+            case_manifest=corpus,
+            output_root=tmp_path / "failed",
+            device="cpu",
+            workers=2,
+        )
+    execution = list((tmp_path / "failed").glob("*/*/execution.json"))
+    assert len(execution) == 1
+    assert json.loads(execution[0].read_text())["status"] == "error"
+
+
+def test_parallel_merges_initialized_and_unsupported_only_nmg_workers(
+    fake_runtime, tmp_path, monkeypatch
+):
+    from copy import deepcopy
+    from dataclasses import replace
+
+    from embodichain_benchmarks.motion_generation import parallel, prepare_case_manifest
+    from embodichain_benchmarks.motion_generation.models import TrialPhase
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
+
+    fake_runtime[1].add_robot.return_value.get_qvel_limits.return_value = torch.ones(
+        1, 2
+    )
+    original_generate = fake_runtime[2].generate_cases
+
+    def generate(*args):
+        base = original_generate(*args)[0]
+        return [
+            replace(
+                base,
+                case_id=f"k{count}",
+                num_waypoints=count,
+                target_waypoints=base.target_waypoints.repeat(1, count, 1, 1),
+                reference_qpos=base.reference_qpos.repeat(1, count, 1),
+            )
+            for count in (1, 6)
+        ]
+
+    monkeypatch.setattr(fake_runtime[2], "generate_cases", generate)
+    monkeypatch.setattr(NmgOnnxAdapter, "availability", lambda self: (True, None))
+    monkeypatch.setattr(
+        NmgOnnxAdapter, "build", lambda self: self.resolve_motion_limits()
+    )
+    monkeypatch.setattr(NmgOnnxAdapter, "plan", ExternalAdapter.plan)
+    monkeypatch.setattr(NmgOnnxAdapter, "events", [], raising=False)
+    monkeypatch.setattr(NmgOnnxAdapter, "close", lambda self: None)
+    monkeypatch.setattr(parallel, "ProcessPoolExecutor", _InlineExecutor)
+    worker_results = []
+    actual_worker = parallel._run_shard
+
+    def capture_worker(job):
+        result, state = actual_worker(job)
+        worker_results.append(result)
+        return result, state
+
+    monkeypatch.setattr(parallel, "_run_shard", capture_worker)
+    suite = load_suite()
+    suite.protocol.warmup_trials = 0
+    suite.protocol.measured_trials = 1
+    suite.planners = [
+        PlannerSpecCfg(
+            id="nmg", adapter="nmg_onnx", enabled=True, config={"num_waypoints": 5}
+        )
+    ]
+    corpus = prepare_case_manifest(suite, tmp_path / "frozen.json", device="cpu")
+    serial = run_benchmark(
+        suite, case_manifest=corpus, output_root=tmp_path / "serial", device="cpu"
+    )
+    result = run_benchmark(
+        suite,
+        case_manifest=corpus,
+        output_root=tmp_path / "parallel",
+        device="cpu",
+        workers=2,
+    )
+    for run in (serial, result):
+        measured = [row for row in run.records if row.phase is TrialPhase.MEASURED]
+        unsupported = [row for row in run.records if row.status == "unsupported"]
+        assert [row.case_id for row in measured] == ["k1"]
+        assert [(row.case_id, row.failure_code) for row in unsupported] == [
+            ("k6", "unsupported_capacity")
+        ]
+    assert result.planner_metadata == serial.planner_metadata
+
+    missing, resolved = sorted(
+        worker_results,
+        key=lambda run: "resolved_motion_limits" in run.planner_metadata[0].parameters,
+    )
+    assert "resolved_motion_limits" not in missing.planner_metadata[0].parameters
+    assert "resolved_motion_limits" in resolved.planner_metadata[0].parameters
+    before = deepcopy([run.planner_metadata for run in worker_results])
+    rows = json.loads(corpus.read_text())["cases"]
+    for shards in ([missing, resolved], [resolved, missing]):
+        _, metadata = parallel._merge_records(shards, rows, suite.planners, 1)
+        assert tuple(metadata) == serial.planner_metadata
+
+    info = resolved.planner_metadata[0]
+    altered_limits = deepcopy(info.parameters)
+    altered_limits["resolved_motion_limits"]["velocity"][0] += 0.1
+    for conflict in (
+        replace(info, model_revision="different_revision"),
+        replace(info, parameters={**info.parameters, "num_waypoints": 6}),
+        replace(info, parameters=altered_limits),
+    ):
+        conflicting = replace(missing, planner_metadata=(conflict,))
+        with pytest.raises(ValueError, match="planner metadata differ"):
+            parallel._merge_records([resolved, conflicting], rows, suite.planners, 1)
+    assert [run.planner_metadata for run in worker_results] == before
+
+
+def test_parallel_partition_preserves_shared_geometry_and_rejects_timing(
+    fake_runtime, tmp_path, monkeypatch
+):
+    from embodichain_benchmarks.motion_generation import parallel, prepare_case_manifest
+    from embodichain_benchmarks.motion_generation.config import stable_hash
+
+    rows = [
+        {
+            "case_id": str(index),
+            "track": "motion",
+            "num_waypoints": index + 1,
+            "batch_size": 1,
+            "case_parameters": {"base_case_id": str(index // 2)},
+        }
+        for index in range(6)
+    ]
+    shards = parallel._partition_rows(rows, 4)
+    assert sorted(index for shard in shards for index in shard) == list(range(6))
+    assert len(shards) == 3
+    for shard in shards:
+        assert (
+            len({rows[index]["case_parameters"]["base_case_id"] for index in shard})
+            == 1
+        )
+    suite = load_suite()
+    corpus = prepare_case_manifest(suite, tmp_path / "timing.json", device="cpu")
+    payload = json.loads(corpus.read_text())
+    payload["cases"][0]["case_parameters"]["measurement_purpose"] = "performance_replay"
+    payload["cases_sha256"] = stable_hash(payload["cases"])
+    corpus.write_text(json.dumps(payload))
+    monkeypatch.setattr(
+        parallel,
+        "ProcessPoolExecutor",
+        lambda **kwargs: pytest.fail("launched timing workers"),
+    )
+    with pytest.raises(ValueError, match="Performance replay must run serially"):
+        run_benchmark(
+            suite, case_manifest=corpus, output_root=tmp_path, device="cpu", workers=2
+        )
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected", "uses_current"),
+    [
+        ("cuda", "cuda:5", True),
+        ("auto", "cuda:5", True),
+        ("cuda:2", "cuda:2", False),
+        ("cpu", "cpu", False),
+    ],
+    ids=["implicit_accelerator", "automatic", "explicit_accelerator", "host"],
+)
+def test_parallel_resolves_device_index_in_parent(
+    monkeypatch, requested, expected, uses_current
+):
+    from embodichain_benchmarks.motion_generation.parallel import _worker_device
+
+    current = Mock(return_value=5)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "current_device", current)
+    resolved = _worker_device(requested)
+    assert resolved == expected
+    assert current.call_count == int(uses_current)
+    if torch.device(resolved).type == "cuda":
+        assert torch.device(resolved).index is not None

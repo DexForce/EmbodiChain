@@ -42,6 +42,10 @@ __all__ = [
 ]
 
 
+class _AntipodalGraspSearchError(RuntimeError):
+    """A bounded grasp pool has no independently solved complete pose chain."""
+
+
 def grasp_sample_count(case: BenchmarkCase) -> int:
     """Return the grasp sampler size a self-sampling case was frozen with."""
     return int(case.case_parameters.get("grasp_sample_count", 10_000))
