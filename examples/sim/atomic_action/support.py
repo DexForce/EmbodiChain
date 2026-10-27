@@ -2056,6 +2056,7 @@ def initialize_pre_pick_robot_pose(
     hand_open: torch.Tensor,
     *,
     height: float = 0.36,
+    clear_dynamics: bool = True,
 ) -> None:
     """Set a tutorial robot at a deterministic open-gripper pose above an object.
 
@@ -2064,6 +2065,8 @@ def initialize_pre_pick_robot_pose(
         obj: Object below the pre-pick TCP pose.
         hand_open: Open gripper joint positions.
         height: World-Z coordinate for the pre-pick TCP pose.
+        clear_dynamics: Clear robot dynamics after initialization. Disable only
+            after the host has cleared the complete Newton articulation world.
 
     Raises:
         RuntimeError: If the pre-pick pose is unreachable.
@@ -2082,7 +2085,8 @@ def initialize_pre_pick_robot_pose(
     for target in (False, True):
         robot.set_qpos(arm_qpos, name="arm", target=target)
         robot.set_qpos(hand_qpos, name="eef", target=target)
-    robot.clear_dynamics()
+    if clear_dynamics:
+        robot.clear_dynamics()
 
 
 def prepare_tutorial_scene(

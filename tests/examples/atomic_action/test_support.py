@@ -52,6 +52,7 @@ from examples.sim.atomic_action.coordinated_pickment import (
     compute_left_to_right_arm_direction,
 )
 from examples.sim.atomic_action.scenario import (
+    add_dual_tutorial_robot,
     create_dual_tutorial_robot_cfg,
 )
 from examples.sim.atomic_action.support import (
@@ -535,6 +536,67 @@ def test_franka_tutorial_config_uses_ur5_gripper_component() -> None:
         assert "fr3_finger_joint[1-2]" not in franka_values
 
 
+def test_place_waypoints_are_rigid_transforms() -> None:
+    from examples.sim.atomic_action.place import make_place_eef_poses
+
+    poses = make_place_eef_poses(torch.device("cpu"))
+    rotation = poses[:, :3, :3]
+    torch.testing.assert_close(
+        rotation.transpose(-1, -2) @ rotation,
+        torch.eye(3).expand(len(poses), 3, 3),
+        rtol=0.0,
+        atol=1e-6,
+    )
+    torch.testing.assert_close(
+        torch.linalg.det(rotation), torch.ones(len(poses)), rtol=0.0, atol=1e-6
+    )
+
+
+def test_coordinated_placement_preserves_baseline_scene_frames() -> None:
+    from examples.sim.atomic_action import coordinated_placement as module
+    from embodichain.utils.math import matrix_from_euler
+
+    for angles in (module.TABLE_INIT_ROT, module.PAN_INIT_ROT):
+        rotation = matrix_from_euler(torch.tensor(angles).deg2rad(), "XYZ")
+        assert float(rotation[2, 2]) > 0.999
+    assert module.TABLE_TOP_Z - module.ROBOT_INIT_POS[2] == pytest.approx(
+        module.BASELINE_TABLE_TOP_Z - module.BASELINE_ROBOT_INIT_POS[2]
+    )
+
+
+@pytest.mark.parametrize("is_newton_backend", [False, True])
+def test_rubiks_cube_initialization_clears_supported_scope_and_keeps_lock(
+    monkeypatch: pytest.MonkeyPatch, is_newton_backend: bool
+) -> None:
+    from examples.sim.atomic_action import pickup_rubiks_cube as module
+
+    cleared = []
+    cube = SimpleNamespace(locked=False, clear_dynamics=lambda: cleared.append("cube"))
+
+    def reset_world():
+        cleared.append("world")
+        cube.locked = False
+
+    def update(*, step):
+        assert cube.locked
+
+    sim = SimpleNamespace(
+        is_newton_backend=is_newton_backend,
+        add_articulation=lambda **kwargs: cube,
+        prepare=lambda: None,
+        update=update,
+        reset_objects_state=reset_world,
+    )
+    monkeypatch.setattr(module.Path, "is_file", lambda _: True)
+    monkeypatch.setattr(
+        module, "lock_turn_joint", lambda obj: setattr(obj, "locked", True)
+    )
+
+    assert module.create_pick_object(sim, "/tmp/cube.usdc") is cube
+    assert cube.locked
+    assert cleared == (["world"] if is_newton_backend else ["cube"])
+
+
 def test_ur5_and_franka_configs_share_place_binding_contract() -> None:
     configs = (
         create_ur5_gripper_robot_cfg(),
@@ -666,6 +728,19 @@ def test_dual_tutorial_configs_share_hand_binding_contract(
     if robot_type == "ur10":
         assert len(dual_cfg.init_qpos) == 24
         assert dual_cfg.init_qpos[-12:] == [0.0] * 12
+
+
+@pytest.mark.parametrize("stabilizer", [None, True])
+def test_dual_scene_mimic_stabilization_is_explicit(stabilizer: bool | None) -> None:
+    sim = SimpleNamespace(is_newton_backend=True, add_robot=lambda *, cfg: cfg)
+    cfg = add_dual_tutorial_robot(
+        sim,
+        robot_type="ur5",
+        uid="test_dual_mimic",
+        urdf_name="test_dual_mimic",
+        newton_mimic_stabilizer=stabilizer,
+    )
+    assert cfg.root_props.newton_mimic_stabilizer is (stabilizer is True)
 
 
 @pytest.mark.parametrize("robot_type", ("ur5", "ur10"))

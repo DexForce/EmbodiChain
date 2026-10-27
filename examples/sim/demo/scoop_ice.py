@@ -357,16 +357,19 @@ def create_ice_cubes(sim: SimulationManager):
 
     # Set visual material for ice cubes.
     # Explicit optical parameters select ice scattering in OfflineRT.
-    ice_mat = sim.create_visual_material(
-        cfg=VisualMaterialCfg(
-            base_color=[1.0, 1.0, 1.0, 1.0],
-            ior=1.31,
-            roughness=0.2,
-            parameters={"transmission": 1.0},
+    ice_mat = None
+    if sim.has_native_renderer:
+        ice_mat = sim.create_visual_material(
+            cfg=VisualMaterialCfg(
+                base_color=[1.0, 1.0, 1.0, 1.0],
+                ior=1.31,
+                roughness=0.2,
+                parameters={"transmission": 1.0},
+            )
         )
-    )
     sim.prepare()
-    ice_cubes.set_visual_material(mat=ice_mat)
+    if ice_mat is not None:
+        ice_cubes.set_visual_material(mat=ice_mat)
 
     return ice_cubes
 

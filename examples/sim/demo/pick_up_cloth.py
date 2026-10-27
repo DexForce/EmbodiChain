@@ -497,11 +497,13 @@ def main(args: argparse.Namespace | None = None) -> None:
         if not args.headless:
             sim.open_window()
         sim.update(step=settle_steps)
-        input("Press Enter to start grabbing the cloth...")
+        if not args.headless:
+            input("Press Enter to start grabbing the cloth...")
 
         # The initial trajectory row is already active after settling.
         sim.update(step=grab_traj.shape[1] - 1)
-        input("Press Enter to exit the simulation...")
+        if not args.headless:
+            input("Press Enter to exit the simulation...")
     finally:
         sim.destroy()
 
