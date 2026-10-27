@@ -24,8 +24,9 @@ establish isolation. The development build
 run this fluid path.
 
 The current native DexUni/DFSPH implementation is a prototype: DFSPH follows
-the rigid step with one-way rigid-to-fluid interaction. It requires the pure
-MuJoCo rigid path and cannot mix fluids with cloth or soft-body particles.
+the rigid step with one-way rigid-to-fluid interaction. When rigid bodies are
+present, it requires the pure MuJoCo rigid path; static collision shapes do not
+require a rigid-body solver. It cannot mix fluids with cloth or soft-body particles.
 Online robot pouring, Gym declarations and replay belong to the dependent task
 layer; two-way fluid feedback is not implied by DexUni's rigid/soft coupling.
 
@@ -71,9 +72,9 @@ follow the renderer requirements of the [material system](materials.md).
 
 `scripts/tutorials/sim/create_fluid.py` demonstrates procedural box sampling,
 five primitive container walls, prepare, step, state reads and reset. Pass
-`--num-envs` to use multiple independent worlds on a capable SPH build. It
-disables MuJoCo rigid-rigid contacts for its fixed container while retaining
-DFSPH boundary collision. It needs no robot, task configuration or downloaded assets:
+`--num-envs` to use multiple independent worlds on a capable SPH build. The
+fixed container uses static SDF collision shapes, so DFSPH can collide with it
+without running a rigid-body solver. It needs no robot, task configuration or downloaded assets:
 
 ```bash
 python scripts/tutorials/sim/create_fluid.py --headless --renderer no-render

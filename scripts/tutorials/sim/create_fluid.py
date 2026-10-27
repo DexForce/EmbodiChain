@@ -86,8 +86,6 @@ def main(args: argparse.Namespace | None = None) -> None:
                 collision_cfg=None,
                 solver_cfg={
                     "solver_type": "dexuni",
-                    # The container is fixed; DFSPH still collides with its SDF.
-                    "mujoco_options": {"disable_contacts": True},
                     "sph_cfg": {
                         "sph_method": "dfsph",
                         "particle_diameter": spacing,
@@ -112,7 +110,7 @@ def main(args: argparse.Namespace | None = None) -> None:
             sim.add_rigid_object(
                 RigidObjectCfg(
                     uid=uid,
-                    body_type="kinematic",
+                    body_type="static",
                     init_pos=position,
                     shape=MeshCfg(
                         vertices=mesh.vertices,
