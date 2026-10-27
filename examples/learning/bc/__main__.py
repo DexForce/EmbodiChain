@@ -26,15 +26,25 @@ import sys
 __all__: list[str] = []
 
 _COMMANDS = {
-    "collect": "_collect",
-    "train": "_train",
-    "evaluate": "_evaluate",
+    "environment": "_state_physics",
+    "qualify": "_state_physics",
+    "replay": "_state_physics",
+    "collect": "_state_physics",
+    "prepare-state": "_state_data",
+    "train": "_state_train",
+    "evaluate": "_state_physics",
+    "pr828-collect": "_collect",
+    "pr828-train": "_train",
+    "pr828-evaluate": "_evaluate",
     "reference-parity": "_reference_parity",
     "runtime-oracle": "_runtime_oracle",
     "window-candidate": "_window_candidate",
     "offline-audit": "_offline_audit",
     "learnability": "_learnability",
 }
+_PHYSICAL_COMMANDS = frozenset(
+    {"environment", "qualify", "replay", "collect", "evaluate"}
+)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -45,7 +55,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument("command", choices=tuple(_COMMANDS))
     args = parser.parse_args(arguments[:1])
-    sys.argv = [f"{parser.prog} {args.command}", *arguments[1:]]
+    if args.command in _PHYSICAL_COMMANDS:
+        sys.argv = [parser.prog, args.command, *arguments[1:]]
+    else:
+        sys.argv = [f"{parser.prog} {args.command}", *arguments[1:]]
     import_module(f"examples.learning.bc._support.{_COMMANDS[args.command]}").main()
 
 
