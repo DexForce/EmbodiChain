@@ -13,8 +13,9 @@ Two state recipes use the same action and task contracts:
 - `legacy_chunk`: two states predict 64 absolute pose/gripper targets with a
   512×512 MLP; the executor applies 16 targets before replanning.
 
-Both use accepted demonstrations, frozen training-only statistics and the
-shared supervised trainer. Policy observations and recorded actions refer to
+Both use accepted demonstrations and the shared supervised trainer. Recipe A
+uses identity normalization; recipe B freezes statistics from training data.
+Policy observations and recorded actions refer to
 the same pre-action step. Per-frame sampling for `maniskill_action` is uniform
 with replacement; the official ManiSkill sampler instead shuffles frames within
 epochs. The `legacy_chunk` recipe uses episode-uniform causal contexts, valid
@@ -34,6 +35,9 @@ embodichain run-example learning/bc qualify \
   --output-dir outputs/bc/qualification --scenes 40 --device cuda:0
 embodichain run-example learning/bc collect \
   --output-dir outputs/bc/demonstrations --episodes 32 --device cuda:0
+embodichain run-example learning/bc replay \
+  --manifest outputs/bc/demonstrations/manifest.json \
+  --output-dir outputs/bc/replay --episodes 32 --device cuda:0
 embodichain run-example learning/bc prepare-state \
   --manifest outputs/bc/demonstrations/manifest.json \
   --output-dir outputs/bc/state-view --episodes 32
@@ -63,6 +67,12 @@ semantics, observation timing and normalization. An immutable resident source
 can be resumed exactly. Caller-owned live ODS data can train through the same
 model and objective and save snapshots; live delivery state is not restored by
 the trainer. The host owns ODS lifecycle and waits.
+
+The [state acceptance record](research/state-acceptance.md) distinguishes the
+completed first-32 results, the ongoing fresh-256 fallback, and the gated
+independent test. It also records source and data identities, the task-success
+predicate, all three seeds, and both checkpoints of both recipes. Neither recipe
+passed the first-round development gate.
 
 ## Historical PR828 visual recipe
 
@@ -97,7 +107,7 @@ This compares actual PR828 forward outputs, its arm/gripper loss, every paramete
 gradient and one clipped AdamW update with the generic SL implementation. The
 declared tolerance is `atol=1e-5`, `rtol=1e-4`; a mismatch exits nonzero.
 
-## Fixed corpus
+## Historical PR828 fixed corpus
 
 `_support/_collect.py` owns expert qualification and bounded collection. Its
 completed manifest records each accepted episode's content hash, geometry51,
@@ -120,7 +130,7 @@ target statistics frozen from the first 32. Qualification, training generation,
 development and final test have separate declared seed populations. Corpus
 preparation remains separate from learner timing and does not use ODS.
 
-## Train and evaluate
+## Historical PR828 training and evaluation
 
 The frozen protocol below documents the historical experiment. All three seeds
 completed 20,000 updates and every development checkpoint scored 0/20 successes.
@@ -194,7 +204,9 @@ normalization tensors. The raw frozen PickPlace corpus stores geometry/actions
 and uses a separate task-owned transform; it is not a stored-target corpus.
 Derive new artifacts in a fresh destination rather than altering frozen data.
 
-`embodichain run-example learning/bc --help` is lazy. Private `_support` modules
+`embodichain run-example learning/bc --help` is lazy. The state commands are
+`collect`, `train` and `evaluate`; the historical visual equivalents are
+`pr828-collect`, `pr828-train` and `pr828-evaluate`. Private `_support` modules
 own collection, geometry targets, controller decode, acceptance and reference
 research. They are ordinary installed example data, outside the model package.
 
