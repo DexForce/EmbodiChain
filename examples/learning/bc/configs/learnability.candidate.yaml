@@ -1,0 +1,24 @@
+# Fixed ordinary offline BC learnability diagnostic; no physical evaluation.
+initialization:
+  checkpoint: /data1/dyc/.codex-artifacts/embodichain-sl-bc-20261025/formal-v1/seed-20261025/training/step_020000.pt
+  checkpoint_sha256: 61d4df2456727d59fb7e910edb1a2c64116351b85daece911fd8445a33db85ef
+data:
+  manifest: /data1/dyc/.codex-artifacts/embodichain-sl-bc-20261025/corpus-v3/manifest.json
+  manifest_sha256: 6b757b0f2d1343ead3d9812abf8652757825981a64fe9a84042dcd8e9c558093
+  normalization: /data1/dyc/.codex-artifacts/embodichain-sl-bc-20261025/formal-v1/seed-20261025/normalization.pt
+optimizer:
+  learning_rate: 3.0e-5
+  weight_decay: 1.0e-6
+  max_grad_norm: 1.0
+trainer:
+  total_updates: 2000
+  batch_size: 64
+  seed: 20302025
+  device: cuda:0
+  checkpoint_interval: 0
+  validation_interval: 0
+gate:
+  tcp_p95_m: 0.005
+  rotation_p95_degrees: 5.0
+  gripper_mae: 0.1
+  strong_gripper_sign_agreement: 0.95
