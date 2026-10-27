@@ -22,8 +22,8 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pytest
 
-from embodichain.gen_sim.assembly import import_mjcf
-from embodichain.gen_sim.assembly.probes import (
+from embodichain.toolkits.assembly import import_mjcf
+from embodichain_benchmarks.assembly.probes import (
     AnalyticPegGeometry,
     ConstrainedProbeCfg,
     prepare_probe,
@@ -129,7 +129,7 @@ def test_constrained_probe_integrates_without_pose_drives_and_retains_joint_expo
     ],
 )
 def test_quasistatic_acceptance_rejects_oscillation_or_drift_with_zero_median(errors):
-    from embodichain.gen_sim.assembly.probes import _settled_error_statistics
+    from embodichain_benchmarks.assembly.probes import _settled_error_statistics
 
     statistics = _settled_error_statistics(errors, 5e-6)
     assert statistics["wall_error_m"] == pytest.approx(0.0)
@@ -142,7 +142,7 @@ def test_quasistatic_acceptance_rejects_oscillation_or_drift_with_zero_median(er
 
 
 def test_initial_overlap_only_counts_penetrating_plate_peg_contacts():
-    from embodichain.gen_sim.assembly.probes import _contact_overlap_worlds
+    from embodichain_benchmarks.assembly.probes import _contact_overlap_worlds
 
     # World0 has a separated plate/peg pair and an unrelated overlap;
     # world1 has one real plate/peg overlap; world2 starts with no contacts.
@@ -161,7 +161,7 @@ def test_initial_overlap_only_counts_penetrating_plate_peg_contacts():
 def test_mjfit_nested_default_contact_profile_is_retained_on_analytic_probe_peg():
     mujoco = pytest.importorskip("mujoco")
     pytest.importorskip("mjfit")
-    from embodichain.gen_sim.assembly import build_assembly
+    from embodichain.toolkits.assembly import build_assembly
 
     asset = build_assembly("circle")
     source_root = ET.fromstring(asset.source_mjcf)

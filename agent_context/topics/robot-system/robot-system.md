@@ -240,4 +240,4 @@ contains no hand selection or assembly-task metadata. The canonical example is
 `configs/components/embodiments/flexiv_rizon4s_robotiq2f85.yaml` under the tasks
 extension. Assembly grasp assumptions and exact-dynamics qualification gates
 belong to the physical task environment. Historical reference conversion is
-owned by [assembly asset preparation](../gen-sim/assembly.md), not a robot type.
+owned by [assembly asset preparation](../assembly-assets/assembly-assets.md), not a robot type.

@@ -33,7 +33,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 from embodichain.utils import configclass
-from .model import AssemblyAsset
+from embodichain.toolkits.assembly.model import AssemblyAsset
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
@@ -373,6 +373,7 @@ class ConstrainedProbeDefinition:
         source_contact: bool | None = None,
     ) -> tuple[RigidObjectCfg, ArticulationCfg]:
         """Build the fixed imported plate and the physically constrained peg."""
+        from embodichain.lab.sim.assembly import to_rigid_config
         from embodichain.lab.sim.cfg import (
             ArticulationCfg,
             ArticulationRootPropertiesCfg,
@@ -385,7 +386,8 @@ class ConstrainedProbeDefinition:
         for geom in plate.geometries:
             geom.friction = [0.0, 0.0, 0.0]
             geom.condim = 1
-        plate_cfg = plate.to_rigid_config(
+        plate_cfg = to_rigid_config(
+            plate,
             source_contact=(
                 self.cfg.source_contact if source_contact is None else source_contact
             ),

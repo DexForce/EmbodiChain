@@ -30,7 +30,7 @@ from typing import Any
 import numpy as np
 
 from embodichain.utils import configclass
-from .model import AssemblyAsset
+from embodichain.toolkits.assembly.model import AssemblyAsset
 
 __all__ = ["PrecisionRunCfg", "compare_usd_geometry", "run_passive_probe"]
 
@@ -332,7 +332,7 @@ def _score(
     metrics: dict[str, Any] = {}
     finite = all(np.isfinite(value).all() for value in final.values())
     if kind == "many_pegs":
-        from .many import _score_many_pegs
+        from ._many_metrics import _score_many_pegs
 
         metrics = _score_many_pegs(asset, initial, final)
     elif kind == "peg":
@@ -643,6 +643,7 @@ def _run_embodichain(
 ) -> dict[str, Any]:
     _validate_solver_overrides(cfg)
     import torch
+    from embodichain.lab.sim.assembly import to_articulation_configs, to_rigid_config
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import (
         DefaultPhysicsCfg,
@@ -720,8 +721,8 @@ def _run_embodichain(
                 }
             else:
                 for body in asset.bodies:
-                    body_cfg = body.to_rigid_config(
-                        source_contact=cfg.source_contact, backend=cfg.backend
+                    body_cfg = to_rigid_config(
+                        body, source_contact=cfg.source_contact, backend=cfg.backend
                     )
                     body_cfg.shape = None
                     body_cfg.source = UsdSourceCfg(
@@ -734,12 +735,16 @@ def _run_embodichain(
         else:
             for body in asset.bodies:
                 if body.joint.kind != "hinge":
-                    body_cfg = body.to_rigid_config(
+                    body_cfg = to_rigid_config(
+                        body,
                         source_contact=cfg.source_contact,
                         backend=cfg.backend,
                     )
                     if native_window:
-                        from ._visual import _VISUAL_FORMAT_VERSION, write_visual_mesh
+                        from embodichain.lab.sim.assembly._visual import (
+                            _VISUAL_FORMAT_VERSION,
+                            write_visual_mesh,
+                        )
                         from embodichain.lab.sim.shapes import MeshCfg, ShapePartCfg
 
                         visual_path = write_visual_mesh(
@@ -757,7 +762,8 @@ def _run_embodichain(
                     body_cfg.attrs.collision_props.contact_offset = cfg.contact_offset
                     body_cfg.attrs.collision_props.rest_offset = cfg.rest_offset
                     objects[body.name] = sim.add_rigid_object(body_cfg)
-            for name, art_cfg in asset.to_articulation_configs(
+            for name, art_cfg in to_articulation_configs(
+                asset,
                 Path(cfg.work_dir) / asset.content_hash,
                 source_contact=cfg.source_contact,
                 backend=cfg.backend,

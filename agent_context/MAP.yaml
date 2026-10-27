@@ -428,8 +428,7 @@ topics:
     grouped scene randomization, GPU场景扩增, 批量场景扩增, 组内扩增, 组内场景扩增, intra-group augmentation, 分组场景随机化, 场景生成, 场景编辑, 生成式仿真]
   keywords: [generate_scene_from_image, edit_scene, SceneExporter, scene-export/v1, SceneRandomizationCfg,
     randomize_scene, prepare_scene_baseline, scene-randomization, load_layouts, preview_layouts, ingest_one_asset,
-    ParserManager, SessionProcessRegistry, Gradio, mjfit, precision assembly, AssemblyAsset,
-    build_assembly, 精密装配资产]
+    ParserManager, SessionProcessRegistry, Gradio]
   paths: [topics/gen-sim/gen-sim.md]
   source_of_truth:
   - embodichain/gen_sim/scene_engine/cli/start.py
@@ -441,9 +440,26 @@ topics:
   - embodichain/gen_sim/simready_pipeline/pipeline/ingest.py
   - embodichain/gen_sim/gradio_ui/app_processes.py
   - embodichain/gen_sim/gradio_ui/app_env.py
-  - embodichain/gen_sim/assembly/
   watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, tests/gen_sim/]
-  related_topics: [simulation-system, data-assets, env-framework]
+  related_topics: [simulation-system, data-assets, env-framework, assembly-assets]
+  status: active
+- id: assembly-assets
+  title: Precision Assembly Assets
+  aliases: [precision assembly, assembly assets, mjfit, 精密装配资产, 精密装配]
+  keywords: [AssemblyAsset, AssemblyBody, build_assembly, build_many_pegs, import_mjcf,
+    to_rigid_config, to_articulation_configs, PrecisionRunCfg, ClearanceProbeCfg]
+  paths: [topics/assembly-assets/assembly-assets.md]
+  source_of_truth:
+  - embodichain/toolkits/assembly/
+  - embodichain/lab/sim/assembly/
+  - extensions/embodichain_benchmarks/assembly/
+  - extensions/embodichain_tasks/embodichain_tasks/manipulation/assembly/assets.py
+  watch_paths: [embodichain/toolkits/assembly/, embodichain/lab/sim/assembly/,
+    extensions/embodichain_benchmarks/assembly/,
+    extensions/embodichain_tasks/embodichain_tasks/manipulation/assembly/assets.py,
+    examples/sim/assembly/, scripts/benchmark/assembly/, tests/toolkits/assembly/,
+    tests/sim/assembly/, tests/benchmark/assembly/]
+  related_topics: [gen-sim, data-assets, simulation-system, env-framework, rl-learning]
   status: active
 - id: data-assets
   title: Data Assets

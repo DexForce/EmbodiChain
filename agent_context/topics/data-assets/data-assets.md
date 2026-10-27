@@ -164,5 +164,5 @@ contracts; separately validate actual network downloads when asset content chang
 `embodichain_robots/flexiv/rizon4s/rizon4s_sources.json` pins individual Git blob identities and
 licenses. The owning asset class verifies each downloaded file before publishing
 the source cache. Historical URDF preparation and model-fidelity metadata are owned by
-`embodichain.gen_sim.assembly.robot_reference`, not the dataset resolver or a
+`embodichain_benchmarks.assembly.robot_reference`, not the dataset resolver or a
 combined arm/gripper catalog preset.

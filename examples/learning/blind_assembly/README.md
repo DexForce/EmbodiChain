@@ -43,7 +43,7 @@ Historical `.nominal` deployments select a prepared parallel-jaw reference
 artifact. Prepare it once before loading those configs:
 
 ```bash
-python -m embodichain.gen_sim.assembly.robot_reference --gripper-model parallel_jaw
+python -m embodichain_benchmarks.assembly.robot_reference --gripper-model parallel_jaw
 ```
 
 This optional preparation is separate from default-asset assembly and training.

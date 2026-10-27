@@ -125,8 +125,9 @@ without sampling. File/model coordinate adaptation remains owned here.
 
 ## Runtime and extension boundaries
 
-Procedural precision assembly has a separate owner under
-`embodichain/gen_sim/assembly/`; see [assembly generation and precision](assembly.md)
+GenSim can consume precision assembly through the reusable
+`embodichain/toolkits/assembly/` API; see
+[assembly assets and precision](../assembly-assets/assembly-assets.md)
 for pinned mjfit adaptation, portable manifests and native/USD construction.
 It does not use Scene Engine inference or the general SimReady decomposition
 pipeline, because approximate recooking can consume an assembly's clearance.

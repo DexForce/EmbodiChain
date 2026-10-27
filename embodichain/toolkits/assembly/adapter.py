@@ -23,18 +23,34 @@ import json
 from pathlib import Path
 import subprocess
 from typing import Any
+from types import ModuleType
 from urllib.parse import unquote, urlparse
 
 import numpy as np
 
 from .model import AssemblyAsset, AssemblyBody, AssemblyGeometry, AssemblyJoint
 
-__all__ = ["MJFIT_REVISION", "build_assembly", "import_mjcf", "sample_assemblies"]
+__all__ = [
+    "MJFIT_REVISION",
+    "build_assembly",
+    "import_mjcf",
+    "sample_assemblies",
+    "load_mjfit",
+]
 
 MJFIT_REVISION = "5833f465896e1e06bc4be4f003be847f5183a4db"
 
 
-def _generator() -> tuple[Any, str]:
+def load_mjfit() -> tuple[ModuleType, str]:
+    """Load the optional mjfit provider and verify its pinned provenance.
+
+    Returns:
+        Public generator module and its verified source revision.
+
+    Raises:
+        ImportError: If the optional generator is unavailable.
+        RuntimeError: If its installed source revision does not match the pin.
+    """
     try:
         import mjfit
     except ImportError as error:
@@ -82,7 +98,7 @@ def build_assembly(
     are deterministic. Use :func:`sample_assemblies` for randomized pegs.
     Existing self-contained manifests can be loaded without this dependency.
     """
-    mjfit, revision = _generator()
+    mjfit, revision = load_mjfit()
     cfg = {
         **mjfit.load(str(config) if isinstance(config, Path) else config),
         **overrides,
@@ -103,7 +119,7 @@ def sample_assemblies(
     """Draw mjfit's stable seeded peg distribution using its public sampler."""
     if count < 0:
         raise ValueError("Assembly sample count must be non-negative.")
-    mjfit, _ = _generator()
+    mjfit, _ = load_mjfit()
     return [
         build_assembly(config, seed=seed)
         for config in mjfit.sample_pegs(count, seed=seed, family=family, **parameters)

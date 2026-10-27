@@ -14,6 +14,12 @@ embodichain run-example sim/assembly/thread_pair --backend mujoco_cpu
 embodichain run-example sim/assembly/gear_pair --backend mujoco_cpu
 ```
 
+The reusable API lives in `embodichain.toolkits.assembly`, independently of
+GenSim. Use `build_assembly` or `build_many_pegs` during asset preparation, then
+load an `AssemblyAsset` at runtime. Native conversion belongs to
+`embodichain.lab.sim.assembly`; precision measurements belong to
+`embodichain_benchmarks.assembly`. GenSim pipelines can consume the same toolkit.
+
 The gallery writes self-contained manifests and USD files. A manifest can be
 loaded and constructed without mjfit or MuJoCo installed. Raw MJCF conversion
 requires MuJoCo. Names, source poses, explicit mass/COM/inertia, motor metadata,
@@ -116,7 +122,7 @@ python -m scripts.benchmark.assembly.precision --configs circle --clearances .00
 The report writes exactly three comparison tables and companion raw JSON.
 Unmeasured memory and unavailable overflow accounting are marked explicitly.
 Passive success is distinct from S0/S2/S3/S4 clearance qualification.
-The constrained reference probes in `embodichain.gen_sim.assembly.probes` use
+The constrained reference probes in `embodichain_benchmarks.assembly.probes` use
 analytic circle/square ground truth and real slide/hinge DOFs; unsupported
 outlines are rejected rather than measured against the wrong oracle.
 Constrained probes disable the global ground. Passive probes author the source

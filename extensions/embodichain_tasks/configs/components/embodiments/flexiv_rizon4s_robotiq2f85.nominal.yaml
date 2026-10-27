@@ -1,5 +1,5 @@
 # Historical parallel-jaw reference only. Prepare with:
-# python -m embodichain.gen_sim.assembly.robot_reference --gripper-model parallel_jaw
+# python -m embodichain_benchmarks.assembly.robot_reference --gripper-model parallel_jaw
 # Explicit nulls retain source-authored fields instead of bare-arm overlays.
 embodiment_id: flexiv_rizon4s_robotiq2f85.nominal
 simulation:

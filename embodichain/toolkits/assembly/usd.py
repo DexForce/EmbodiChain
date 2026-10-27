@@ -84,7 +84,7 @@ def write_assembly_usd(asset: AssemblyAsset, path: str | Path) -> Path:
         for index, geom in enumerate(body.geometries):
             geom_path = f"{body_path}/geom_{index}"
             if geom.kind == "mesh":
-                from ._visual import _surface_arrays
+                from ._surface import _mesh_surface_arrays
 
                 gprim = UsdGeom.Mesh.Define(stage, geom_path)
                 gprim.CreatePointsAttr([Gf.Vec3f(*v) for v in geom.vertices])
@@ -96,7 +96,7 @@ def write_assembly_usd(asset: AssemblyAsset, path: str | Path) -> Path:
                 # Mesh vertices can be shared across sharp convex edges.
                 # Keep their source topology while authoring each corner's
                 # face normal in geometry-local coordinates, as for OBJ.
-                _, _, normals, normal_indices = _surface_arrays(geom)
+                _, _, normals, normal_indices = _mesh_surface_arrays(geom)
                 gprim.CreateNormalsAttr(
                     [
                         Gf.Vec3f(*normal.tolist())

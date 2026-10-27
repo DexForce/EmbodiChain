@@ -22,7 +22,7 @@ import colorsys
 import json
 from pathlib import Path
 
-from embodichain.gen_sim.assembly import build_assembly, sample_assemblies
+from embodichain.toolkits.assembly import build_assembly, sample_assemblies
 
 
 def main() -> None:

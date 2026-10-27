@@ -23,8 +23,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from embodichain.toolkits.assembly._surface import (
+    _checked_surface_arrays,
+    _mesh_surface_arrays,
+)
+
 if TYPE_CHECKING:
-    from .model import AssemblyBody, AssemblyGeometry
+    from embodichain.toolkits.assembly.model import AssemblyBody, AssemblyGeometry
 
 __all__: list[str] = []
 
@@ -118,9 +123,7 @@ def _surface_arrays(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Read exact source meshes or the existing SDK's primitive visual surface."""
     if geometry.kind == "mesh":
-        points = np.asarray(geometry.vertices, dtype=np.float64).reshape(-1, 3)
-        faces = np.asarray(geometry.triangles, dtype=np.int64).reshape(-1, 3)
-        normals = None
+        return _mesh_surface_arrays(geometry)
     else:
         from dexsim.spawn.descs import GeometryDesc
         from dexsim.spawn.adapters.common import generated_mesh
@@ -138,32 +141,4 @@ def _surface_arrays(
         points, faces, normals, _ = generated_mesh(descriptor)
         points = np.asarray(points, dtype=np.float64).reshape(-1, 3)
         faces = np.asarray(faces, dtype=np.int64).reshape(-1, 3)
-    if (
-        not len(points)
-        or not len(faces)
-        or not np.isfinite(points).all()
-        or faces.min() < 0
-        or faces.max() >= len(points)
-    ):
-        raise ValueError(f"Invalid assembly visual surface for {geometry.name!r}.")
-    if normals is None or not np.asarray(normals).size:
-        # Each triangle corner references its face normal, rather than an
-        # average across the sharp edges of the source convex piece.
-        triangles = points[faces]
-        normals = np.cross(
-            triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
-        )
-        normal_indices = np.repeat(np.arange(len(faces))[:, None], 3, axis=1)
-    else:
-        # Native primitive meshes already split cap and side vertices/normals.
-        normals = np.asarray(normals, dtype=np.float64).reshape(-1, 3)
-        if normals.shape != points.shape or not np.isfinite(normals).all():
-            raise ValueError(f"Invalid primitive visual normals for {geometry.name!r}.")
-        normal_indices = faces.copy()
-    lengths = np.linalg.norm(normals, axis=1)
-    valid = lengths > 0.0
-    normals[valid] /= lengths[valid, None]
-    # A zero-area triangle has no defined surface direction; keep its source
-    # topology without exporting an invalid zero normal.
-    normals[~valid] = [0.0, 0.0, 1.0]
-    return points, faces, normals, normal_indices
+    return _checked_surface_arrays(points, faces, normals, name=geometry.name)

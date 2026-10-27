@@ -180,8 +180,8 @@ def _physics_errors(source: mujoco.MjModel, actual: mujoco.MjModel) -> dict[str,
 def _run_cell(spec: dict[str, Any], directory: Path) -> dict[str, Any]:
     """Run one actual native scene with read-only per-step diagnostics."""
     import torch
-    from embodichain.gen_sim.assembly import AssemblyAsset
-    from embodichain.gen_sim.assembly.precision import (
+    from embodichain.toolkits.assembly import AssemblyAsset
+    from embodichain_benchmarks.assembly.precision import (
         PrecisionRunCfg,
         _run_embodichain,
         run_passive_probe,

@@ -25,12 +25,12 @@ import numpy as np
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import ArticulationCfg
-    from .model import AssemblyAsset
+    from embodichain.toolkits.assembly.model import AssemblyAsset
 
-__all__: list[str] = []
+__all__ = ["to_articulation_configs"]
 
 
-def articulation_configs(
+def to_articulation_configs(
     asset: AssemblyAsset,
     directory: str | Path,
     *,
@@ -42,7 +42,21 @@ def articulation_configs(
     URDF supports damping/friction but not rotor armature. The latter is
     supplied through the native joint-drive configuration. Motor transmission
     gain remains in ``AssemblyJoint.motor_gear`` for the execution host.
+
+    Args:
+        asset: Neutral asset retaining source body frames and hinge attachments.
+        directory: Preparation directory for URDF and visual mesh files.
+        source_contact: Preserve supported source contact parameters.
+        backend: Explicit ``newton`` or ``default`` physics configuration.
+
+    Returns:
+        Source hinge-body names mapped to native articulation configurations.
+
+    Raises:
+        ValueError: If a hinge anchor or contact overlay cannot be represented.
+        NotImplementedError: If the backend cannot retain source contacts.
     """
+    from .conversion import to_rigid_config
     from embodichain.lab.sim.cfg import (
         ArticulationCfg,
         ArticulationRootPropertiesCfg,
@@ -151,8 +165,8 @@ def articulation_configs(
         transform[:3, 3] = body.position
         free_copy = body.copy()
         free_copy.joint.kind = "free"
-        properties = free_copy.to_rigid_config(
-            source_contact=source_contact, backend=backend
+        properties = to_rigid_config(
+            free_copy, source_contact=source_contact, backend=backend
         ).attrs
         configs[body.name] = ArticulationCfg(
             uid=body.name,

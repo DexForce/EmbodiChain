@@ -88,8 +88,11 @@ _FIELDS = (
 
 def _capture_cell(spec: dict[str, Any], directory: Path) -> dict[str, Any]:
     """Capture actual live arrays without prescribing any follower motion."""
-    from embodichain.gen_sim.assembly import AssemblyAsset
-    from embodichain.gen_sim.assembly.precision import PrecisionRunCfg, _run_embodichain
+    from embodichain.toolkits.assembly import AssemblyAsset
+    from embodichain_benchmarks.assembly.precision import (
+        PrecisionRunCfg,
+        _run_embodichain,
+    )
 
     asset_dict, digest = _load_manifest(Path(spec["manifest"]))
     asset = AssemblyAsset.load(spec["manifest"])

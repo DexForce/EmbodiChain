@@ -317,7 +317,7 @@ control group, drives and contact overrides. No combined robot type or gripper
 variant is registered in the robot catalog.
 
 Historical nominal comparisons use the optional
-`embodichain.gen_sim.assembly.robot_reference` preparation utility and a separate
+`embodichain_benchmarks.assembly.robot_reference` preparation utility and a separate
 application component selecting that prepared artifact. Its parallel-jaw and
 mimic approximations are not identified closed-loop dynamics. Source revision
 and licenses remain pinned by the `FlexivRizon4SMenagerie` data entry; the

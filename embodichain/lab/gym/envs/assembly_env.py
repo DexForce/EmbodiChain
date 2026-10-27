@@ -20,15 +20,16 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 from typing import Any, ClassVar
+from collections.abc import Callable
 
 import numpy as np
 from scipy.spatial import ConvexHull
 from scipy.spatial.transform import Rotation
 import torch
 
-from embodichain.gen_sim.assembly import AssemblyAsset
-from embodichain.gen_sim.assembly.task_assets import build_task_assembly
+from embodichain.toolkits.assembly import AssemblyAsset
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.sim.assembly import to_articulation_configs, to_rigid_config
 from embodichain.lab.sim.sensors import ContactSensorCfg, ArticulationContactFilterCfg
 from embodichain.utils.math import (
     matrix_from_quat,
@@ -141,6 +142,7 @@ class BlindAssemblyEnv(EmbodiedEnv):
     """
 
     assembly_kind: ClassVar[str]
+    _asset_builder: ClassVar[Callable[..., AssemblyAsset] | None] = None
 
     def _setup_scene(self, **kwargs: Any) -> None:
         if getattr(self, "require_exact_robot_dynamics", False):
@@ -186,13 +188,16 @@ class BlindAssemblyEnv(EmbodiedEnv):
         if selected_seed is None:
             selected_seed = self.cfg.seed
         seed = 0 if selected_seed is None else int(selected_seed)
-        self.assembly_asset = (
-            AssemblyAsset.load(manifest)
-            if manifest
-            else build_task_assembly(
+        if manifest:
+            self.assembly_asset = AssemblyAsset.load(manifest)
+        else:
+            if self._asset_builder is None:
+                raise ValueError(
+                    "Assembly tasks must provide an asset builder or a prepared manifest."
+                )
+            self.assembly_asset = self._asset_builder(
                 self.assembly_kind, getattr(self, "assembly_config", {}), seed=seed
             )
-        )
         if manifest is None:
             from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
@@ -215,13 +220,14 @@ class BlindAssemblyEnv(EmbodiedEnv):
         backend = "newton" if self.sim.is_newton_backend else "default"
         for body in self.assembly_asset.bodies:
             if body.joint.kind != "hinge":
-                config = body.to_rigid_config(
-                    source_contact=source_contact, backend=backend
+                config = to_rigid_config(
+                    body, source_contact=source_contact, backend=backend
                 )
                 if body.name != self._moving_uid:
                     config.body_type = "kinematic"
                 self.sim.add_rigid_object(cfg=config)
-        for config in self.assembly_asset.to_articulation_configs(
+        for config in to_articulation_configs(
+            self.assembly_asset,
             self._assembly_directory.name,
             source_contact=source_contact,
             backend=backend,

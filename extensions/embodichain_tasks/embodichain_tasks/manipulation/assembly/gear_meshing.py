@@ -21,6 +21,8 @@ from __future__ import annotations
 from embodichain.lab.gym.envs.assembly_env import BlindAssemblyEnv
 from embodichain.lab.gym.utils.registration import register_env
 
+from .assets import build_task_assembly
+
 __all__ = ["BlindGearMeshingEnv"]
 
 
@@ -29,3 +31,5 @@ class BlindGearMeshingEnv(BlindAssemblyEnv):
     """Gear meshing through contact and proprioceptive feedback."""
 
     assembly_kind = "gear"
+
+    _asset_builder = staticmethod(build_task_assembly)

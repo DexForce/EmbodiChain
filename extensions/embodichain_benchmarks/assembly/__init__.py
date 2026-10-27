@@ -13,26 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Portable precision-assembly assets and optional mjfit generation.
-
-The manifest stores body-local collision pieces, visual geometry and authored
-mass properties. Loading a manifest does not import MuJoCo or mjfit.
-"""
+"""Precision-assembly probes, reference preparation and backend comparisons."""
 
 from __future__ import annotations
 
-from .model import AssemblyAsset, AssemblyBody, AssemblyGeometry, AssemblyJoint
-from .adapter import MJFIT_REVISION, build_assembly, import_mjcf, sample_assemblies
-from .many import build_many_pegs
-
-__all__ = [
-    "AssemblyAsset",
-    "AssemblyBody",
-    "AssemblyGeometry",
-    "AssemblyJoint",
-    "MJFIT_REVISION",
-    "build_assembly",
-    "build_many_pegs",
-    "import_mjcf",
-    "sample_assemblies",
-]
+__all__: list[str] = []

@@ -32,7 +32,7 @@ class FlexivRizon4SMenagerie(EmbodiChainDataset):
     Source files are verified using Git blob identities from the packaged
     manifest. This dataset contains nominal public dynamics, not the assembly
     paper's identified robot model. Historical URDF preparation is owned by
-    ``embodichain.gen_sim.assembly.robot_reference``; loading prepared URDFs does not require MuJoCo.
+    ``embodichain_benchmarks.assembly.robot_reference``; loading prepared URDFs does not require MuJoCo.
     """
 
     def __init__(self, data_root: str | None = None) -> None:

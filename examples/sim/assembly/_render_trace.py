@@ -180,7 +180,7 @@ def render_trace(
     from matplotlib.ticker import FuncFormatter, MaxNLocator
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-    from embodichain.gen_sim.assembly import AssemblyAsset
+    from embodichain.toolkits.assembly import AssemblyAsset
 
     trace_file = Path(trace_path).resolve()
     output = Path(output_path).resolve()

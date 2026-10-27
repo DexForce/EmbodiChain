@@ -25,8 +25,12 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from scipy.spatial import ConvexHull
 
-from .adapter import _generator, build_assembly, import_mjcf
-from .model import AssemblyAsset
+from embodichain.toolkits.assembly.adapter import (
+    load_mjfit,
+    build_assembly,
+    import_mjcf,
+)
+from embodichain.toolkits.assembly.model import AssemblyAsset
 
 __all__ = ["build_task_assembly"]
 
@@ -52,7 +56,7 @@ def _add_ring(
 
 
 def _gear_asset(config: dict[str, Any], seed: int) -> AssemblyAsset:
-    mjfit, revision = _generator()
+    mjfit, revision = load_mjfit()
     shaft_radius = float(config.pop("shaft_radius", 0.005))
     bore_clearance = float(config.pop("bore_clearance", 0.000875))
     shaft_tip = float(config.pop("shaft_tip", 0.0065))
@@ -185,7 +189,7 @@ def build_task_assembly(
             **parameters,
         }
         asset = build_assembly(cfg, seed=seed)
-        mjfit, _ = _generator()
+        mjfit, _ = load_mjfit()
         hole = cfg["hole"]
         asset.config["mating_outline"] = (
             getattr(mjfit.shapes, hole["type"])(

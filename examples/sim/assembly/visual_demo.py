@@ -33,13 +33,13 @@ import time
 from typing import Any
 import xml.etree.ElementTree as ET
 
-from embodichain.gen_sim.assembly import (
+from embodichain.toolkits.assembly import (
     AssemblyAsset,
     build_assembly,
     build_many_pegs,
     import_mjcf,
 )
-from embodichain.gen_sim.assembly.precision import (
+from embodichain_benchmarks.assembly.precision import (
     PrecisionRunCfg,
     _run_embodichain,
     _run_mujoco,

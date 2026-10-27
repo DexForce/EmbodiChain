@@ -262,123 +262,6 @@ embodichain.data_pipeline.depth_video
    DEPTH_QMAX
 
 
-embodichain.gen_sim.assembly
-----------------------------
-
-Public assembly generation and portable manifests preserve one physical body with multiple convex collision pieces. Generator dependencies are optional at manifest load time.
-
-.. currentmodule:: embodichain.gen_sim.assembly
-
-.. autosummary::
-
-   AssemblyAsset
-   AssemblyBody
-   AssemblyGeometry
-   AssemblyJoint
-   MJFIT_REVISION
-   build_assembly
-   build_many_pegs
-   import_mjcf
-   sample_assemblies
-
-
-
-embodichain.gen_sim.assembly.adapter
-------------------------------------
-
-Pinned public mjfit generation, deterministic sampling and bounded MuJoCo conversion. Source mesh frames and mass tensors are converted at this boundary.
-
-.. currentmodule:: embodichain.gen_sim.assembly.adapter
-
-.. autosummary::
-
-   MJFIT_REVISION
-   build_assembly
-   import_mjcf
-   sample_assemblies
-
-
-
-embodichain.gen_sim.assembly.many
----------------------------------
-
-The official many-pegs grid preserves the public sampler's indexed seed,
-per-cell configuration and prefixed body ownership in one portable scene.
-Optional curved-outline precision settings record both the original sample
-and the actual public generator configuration. The grid does not represent
-independent simulation arenas.
-
-.. currentmodule:: embodichain.gen_sim.assembly.many
-
-.. autosummary::
-
-   build_many_pegs
-
-
-
-embodichain.gen_sim.assembly.model
-----------------------------------
-
-Self-contained body-local geometry, joint attachment and mass-property records with content-addressed, checksummed serialization. Native configs retain authored collision partitions.
-
-.. currentmodule:: embodichain.gen_sim.assembly.model
-
-.. autosummary::
-
-   AssemblyGeometry
-   AssemblyJoint
-   AssemblyBody
-   AssemblyAsset
-
-
-
-embodichain.gen_sim.assembly.precision
---------------------------------------
-
-Independent USD geometry/mass acceptance and passive source/native simulation measurements. Missing overflow accounting remains unverified rather than a precision certification.
-
-.. currentmodule:: embodichain.gen_sim.assembly.precision
-
-.. autosummary::
-
-   PrecisionRunCfg
-   compare_usd_geometry
-   run_passive_probe
-
-
-
-embodichain.gen_sim.assembly.probes
------------------------------------
-
-Circle/square analytic clearance oracles, state-controlled S0 contact scans and
-real slide/hinge S2-S4 equilibrium probes. Native and source runners preserve
-the same force/torque and geometry; unmeasured health limits qualification.
-
-.. currentmodule:: embodichain.gen_sim.assembly.probes
-
-.. autosummary::
-
-   AnalyticPegGeometry
-   ConstrainedProbeCfg
-   ConstrainedProbeDefinition
-   prepare_probe
-   run_reference_probe
-   run_native_probe
-   run_warp_probe
-
-
-embodichain.gen_sim.assembly.task_assets
-----------------------------------------
-
-Public-generator composition of held pegs, perforated gears and nuts with physically mating fixtures. Task topology changes are recorded in asset provenance.
-
-.. currentmodule:: embodichain.gen_sim.assembly.task_assets
-
-.. autosummary::
-
-   build_task_assembly
-
-
 embodichain.gen_sim.env
 -----------------------
 
@@ -829,6 +712,45 @@ Stateful proprioceptive history, privileged labels, reset and milestone rewards 
    assembly_contact_labels
    reset_assembly
    assembly_milestone_reward
+
+
+embodichain.lab.sim.assembly
+----------------------------
+
+Adapt portable assembly data to native simulation without changing authored collision partitions or integrating overlapping-piece inertia. Free and fixed parts become compound rigid objects; hinge parts use actual articulations.
+
+.. currentmodule:: embodichain.lab.sim.assembly
+
+.. autosummary::
+
+   to_rigid_config
+   to_rigid_configs
+   to_articulation_configs
+
+
+embodichain.lab.sim.assembly.conversion
+---------------------------------------
+
+Explicit simulation-boundary conversion of neutral bodies into one rigid object per authored body, preserving supported source contact and mass properties.
+
+.. currentmodule:: embodichain.lab.sim.assembly.conversion
+
+.. autosummary::
+
+   to_rigid_config
+   to_rigid_configs
+
+
+embodichain.lab.sim.assembly.urdf
+---------------------------------
+
+Preparation-only URDF export keeps a moving compound link on its real fixed-anchor hinge. File-backed visual geometry remains separate from collision geometry.
+
+.. currentmodule:: embodichain.lab.sim.assembly.urdf
+
+.. autosummary::
+
+   to_articulation_configs
 
 
 embodichain.lab.sim.scene.expansion.layout
@@ -1842,6 +1764,78 @@ Temporal encoder policy, selective observation-history storage and weighted trai
    ProprioceptiveActorCritic
 
 
+embodichain.toolkits.assembly
+-----------------------------
+
+Public assembly generation and portable manifests preserve one physical body with multiple convex collision pieces. Generator dependencies are optional at manifest load time. GenSim and simulation integrations consume this toolkit; its data model does not import either runtime.
+
+.. currentmodule:: embodichain.toolkits.assembly
+
+.. autosummary::
+
+   AssemblyAsset
+   AssemblyBody
+   AssemblyGeometry
+   AssemblyJoint
+   MJFIT_REVISION
+   build_assembly
+   build_many_pegs
+   import_mjcf
+   sample_assemblies
+   load_mjfit
+
+
+
+embodichain.toolkits.assembly.adapter
+-------------------------------------
+
+Pinned public mjfit generation, deterministic sampling and bounded MuJoCo conversion. Source mesh frames and mass tensors are converted at this boundary.
+
+.. currentmodule:: embodichain.toolkits.assembly.adapter
+
+.. autosummary::
+
+   MJFIT_REVISION
+   build_assembly
+   import_mjcf
+   sample_assemblies
+   load_mjfit
+
+
+
+embodichain.toolkits.assembly.many
+----------------------------------
+
+The official many-pegs grid preserves the public sampler's indexed seed,
+per-cell configuration and prefixed body ownership in one portable scene.
+Optional curved-outline precision settings record both the original sample
+and the actual public generator configuration. The grid does not represent
+independent simulation arenas.
+
+.. currentmodule:: embodichain.toolkits.assembly.many
+
+.. autosummary::
+
+   build_many_pegs
+
+
+
+embodichain.toolkits.assembly.model
+-----------------------------------
+
+Self-contained body-local geometry, joint attachment and mass-property records with content-addressed, checksummed serialization. Native configuration conversion is owned by ``embodichain.lab.sim.assembly``.
+
+.. currentmodule:: embodichain.toolkits.assembly.model
+
+.. autosummary::
+
+   AssemblyGeometry
+   AssemblyJoint
+   AssemblyBody
+   AssemblyAsset
+
+
+
 embodichain.utils.warp.kinematics.trapezoidal_warp
 --------------------------------------------------
 
@@ -2827,6 +2821,41 @@ embodichain.toolkits.urdf_assembly.urdf_assembly_manager
    URDFAssemblyManager
 
 
+embodichain_benchmarks.assembly.precision
+-----------------------------------------
+
+Independent USD geometry/mass acceptance and passive source/native simulation measurements. Missing overflow accounting remains unverified rather than a precision certification.
+
+.. currentmodule:: embodichain_benchmarks.assembly.precision
+
+.. autosummary::
+
+   PrecisionRunCfg
+   compare_usd_geometry
+   run_passive_probe
+
+
+
+embodichain_benchmarks.assembly.probes
+--------------------------------------
+
+Circle/square analytic clearance oracles, state-controlled S0 contact scans and
+real slide/hinge S2-S4 equilibrium probes. Native and source runners preserve
+the same force/torque and geometry; unmeasured health limits qualification.
+
+.. currentmodule:: embodichain_benchmarks.assembly.probes
+
+.. autosummary::
+
+   AnalyticPegGeometry
+   ConstrainedProbeCfg
+   ConstrainedProbeDefinition
+   prepare_probe
+   run_reference_probe
+   run_native_probe
+   run_warp_probe
+
+
 embodichain_robots
 ------------------
 
@@ -2869,6 +2898,18 @@ embodichain_tasks.configs
 .. autosummary::
 
    get_config_path
+
+
+embodichain_tasks.manipulation.assembly.assets
+----------------------------------------------
+
+Public-generator composition of held pegs, perforated gears and nuts with physically mating fixtures. Task topology changes are recorded in asset provenance.
+
+.. currentmodule:: embodichain_tasks.manipulation.assembly.assets
+
+.. autosummary::
+
+   build_task_assembly
 
 
 embodichain_tasks.manipulation.assembly.gear_meshing

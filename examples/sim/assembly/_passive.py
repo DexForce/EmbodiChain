@@ -20,8 +20,8 @@ from __future__ import annotations
 import argparse
 import json
 
-from embodichain.gen_sim.assembly import AssemblyAsset, build_assembly
-from embodichain.gen_sim.assembly.precision import PrecisionRunCfg, run_passive_probe
+from embodichain.toolkits.assembly import AssemblyAsset, build_assembly
+from embodichain_benchmarks.assembly.precision import PrecisionRunCfg, run_passive_probe
 
 
 def run(config: str) -> None:
