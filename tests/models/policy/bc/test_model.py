@@ -62,6 +62,48 @@ def test_single_step_masked_objective_has_independent_loss_and_gradient():
     assert result.weight == 1
 
 
+def test_observation_noise_is_training_only_and_uses_normalization_scale():
+    model = ChunkBCModel(
+        ChunkBCModelCfg(observation_dim=2, target_dim=1, hidden_dims=(2,))
+    )
+    with torch.no_grad():
+        model.head[0].weight.copy_(torch.eye(2))
+        model.head[0].bias.zero_()
+        model.head[2].weight.copy_(torch.tensor([[1.0, 2.0]]))
+        model.head[2].bias.zero_()
+    model.set_normalization(
+        torch.zeros(2), torch.tensor([2.0, 4.0]), torch.zeros(1), torch.ones(1)
+    )
+    history = torch.tensor([[[2.0, 8.0]]])
+    batch = SupervisedBatch(
+        {"history": history},
+        torch.zeros(1, 1, 1),
+        {"target_valid": torch.ones(1, 1, dtype=torch.bool)},
+    )
+    original = history.clone()
+    torch.manual_seed(27)
+    expected_noise = torch.randn_like(history) * 0.01
+    # The model sees the independent normalized input [1,2] + noise.
+    expected = (1 + expected_noise[0, 0, 0] + 2 * (2 + expected_noise[0, 0, 1])) ** 2
+    torch.manual_seed(27)
+    actual = ChunkBCObjective(observation_noise=0.01).compute_loss(model.train(), batch)
+    torch.testing.assert_close(actual.loss, expected, atol=1e-6, rtol=1e-6)
+    torch.testing.assert_close(history, original, atol=0, rtol=0)
+    for objective, train in (
+        (ChunkBCObjective(), True),
+        (ChunkBCObjective(0.01), False),
+    ):
+        model.train(train)
+        before = torch.get_rng_state().clone()
+        torch.testing.assert_close(
+            objective.compute_loss(model, batch).loss, torch.tensor(25.0)
+        )
+        torch.testing.assert_close(torch.get_rng_state(), before, atol=0, rtol=0)
+    for invalid in (-0.01, float("inf"), float("nan")):
+        with pytest.raises(ValueError, match="noise"):
+            ChunkBCObjective(invalid)
+
+
 def test_state_fit_and_checkpoint_preserve_configured_target_semantics():
     torch.manual_seed(6)
     previous = torch.get_num_threads()

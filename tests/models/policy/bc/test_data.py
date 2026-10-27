@@ -131,6 +131,114 @@ def test_sampling_rng_and_transformed_targets_are_reproducible(tmp_path):
         dataset.close()
 
 
+@pytest.mark.parametrize("partial", [False, True])
+def test_frame_uniform_draws_every_eligible_anchor_across_unequal_episodes(
+    tmp_path, partial
+):
+    manifest = _corpus(tmp_path, cameras=False, lengths=(3, 7, 11))
+    with pytest.raises(ValueError, match="sampling mode"):
+        BCWindowDataset(manifest, sampling_mode="unknown")
+    dataset = BCWindowDataset(
+        manifest,
+        history_length=2,
+        prediction_horizon=2,
+        include_partial_targets=partial,
+        sampling_mode="frame_uniform",
+    )
+    legacy = BCWindowDataset(
+        manifest,
+        history_length=2,
+        prediction_horizon=2,
+        include_partial_targets=partial,
+    )
+    # A simple flat list is an independent reference for the specified draw
+    # distribution, including the first/last valid anchor of every episode.
+    eligible = [
+        (episode, anchor)
+        for episode, length in enumerate((3, 7, 11))
+        for anchor in range(1, length if partial else length - 1)
+    ]
+    expected_rng = torch.Generator().manual_seed(41)
+    actual_rng = torch.Generator().manual_seed(41)
+    indices = torch.randint(len(eligible), (500,), generator=expected_rng).tolist()
+    try:
+        result = dataset.sample(len(indices), generator=actual_rng)
+        actual = list(
+            zip(
+                result["metadata"]["episode_ids"].tolist(),
+                result["metadata"]["anchors"].tolist(),
+            )
+        )
+        assert actual == [eligible[index] for index in indices]
+        assert set(actual) == set(eligible)
+        assert dataset.source_id != legacy.source_id
+        torch.testing.assert_close(
+            actual_rng.get_state(), expected_rng.get_state(), atol=0, rtol=0
+        )
+        for row, (episode, anchor) in enumerate(actual):
+            torch.testing.assert_close(
+                result["inputs"]["history"][row, :, 0],
+                torch.tensor([anchor - 1, anchor], dtype=torch.float32) + episode * 100,
+            )
+            valid = min(2, (3, 7, 11)[episode] - anchor)
+            assert result["masks"]["target_valid"][row].tolist() == [True, valid == 2]
+    finally:
+        dataset.close()
+        legacy.close()
+
+
+def test_explicit_episode_uniform_preserves_historical_identity_and_draws(tmp_path):
+    manifest = _corpus(tmp_path, cameras=False, lengths=(8, 11))
+    default = BCWindowDataset(manifest, history_length=2, prediction_horizon=3)
+    explicit = BCWindowDataset(
+        manifest,
+        history_length=2,
+        prediction_horizon=3,
+        sampling_mode="episode_uniform",
+    )
+    metadata = json.loads(manifest.read_text())
+    historical_view = {
+        "history_length": 2,
+        "prediction_horizon": 3,
+        "observation_key": "observations",
+        "observation_slice": None,
+        "target_key": "targets",
+        "target_fields": (),
+        "target_encoder_id": None,
+        "cameras": (),
+        "numeric_cast": "float32",
+        "image_transform": "uint8-thwc-rgb-to-float32-nchw-div255@1",
+        "sampling": "episode-uniform-complete-windows@1",
+    }
+    dataset_hash = hashlib.sha256(
+        json.dumps(metadata, sort_keys=True, allow_nan=False).encode()
+    ).hexdigest()
+    view_hash = hashlib.sha256(
+        json.dumps(historical_view, sort_keys=True, allow_nan=False).encode()
+    ).hexdigest()
+    assert (
+        default.source_id == explicit.source_id == f"bc-hdf5:{dataset_hash}:{view_hash}"
+    )
+    old_rng = torch.Generator().manual_seed(21)
+    actual_rng = torch.Generator().manual_seed(21)
+    old_episodes = torch.randint(2, (25,), generator=old_rng)
+    old_draws = torch.rand(25, generator=old_rng)
+    expected = [
+        1 + int(float(draw) * ((8, 11)[int(episode)] - 3))
+        for episode, draw in zip(old_episodes, old_draws)
+    ]
+    try:
+        result = explicit.sample(25, generator=actual_rng)
+        assert result["metadata"]["episode_ids"].tolist() == old_episodes.tolist()
+        assert result["metadata"]["anchors"].tolist() == expected
+        torch.testing.assert_close(
+            actual_rng.get_state(), old_rng.get_state(), atol=0, rtol=0
+        )
+    finally:
+        default.close()
+        explicit.close()
+
+
 @pytest.mark.parametrize("encoded", [False, True])
 def test_tail_target_keeps_complete_causal_history_and_finite_owned_padding(
     tmp_path, encoded
@@ -392,7 +500,7 @@ def test_prefetched_training_resume_rebuilds_unused_batch_exactly(
         statistics,
     )
 
-    def trainer(name, *, partial=include_partial_targets):
+    def trainer(name, *, partial=include_partial_targets, objective=None):
         return build_supervised_trainer(
             {
                 "model": {
@@ -410,6 +518,7 @@ def test_prefetched_training_resume_rebuilds_unused_batch_exactly(
                         "include_partial_targets": partial,
                     },
                 },
+                **({"objective": objective} if objective is not None else {}),
                 "trainer": {
                     "total_updates": 4,
                     "batch_size": 2,
@@ -464,9 +573,189 @@ def test_prefetched_training_resume_rebuilds_unused_batch_exactly(
                     )
         finally:
             opposite.source.close()
+        zero = trainer(
+            "zero",
+            objective={
+                "type": "masked_normalized_target_mse",
+                "observation_noise": 0.0,
+            },
+        )
+        try:
+            assert zero.signature == full.signature
+            zero.resume(prefix)
+            assert zero.learner.num_updates == 2
+        finally:
+            zero.source.close()
     finally:
         full.source.close()
         resumed.source.close()
+
+
+def test_frame_sampling_noise_and_adam_resume_and_reject_changed_semantics(tmp_path):
+    from embodichain_models.policy.bc import build_supervised_trainer
+
+    manifest = _corpus(tmp_path, cameras=False)
+    statistics = tmp_path / "normalization.pt"
+    torch.save(
+        {
+            "observation_mean": torch.zeros(1),
+            "observation_std": torch.ones(1),
+            "target_mean": torch.zeros(1),
+            "target_std": torch.ones(1),
+        },
+        statistics,
+    )
+
+    def trainer(name, *, sampling="frame_uniform", noise=0.01, optimizer="Adam"):
+        return build_supervised_trainer(
+            {
+                "model": {"observation_dim": 1, "target_dim": 1, "hidden_dims": [4]},
+                "data": {
+                    "manifest": str(manifest),
+                    "normalization": str(statistics),
+                    "reader": {"observation_slice": [0, 1], "sampling_mode": sampling},
+                },
+                "objective": {
+                    "type": "masked_normalized_target_mse",
+                    "observation_noise": noise,
+                },
+                "optimizer": {
+                    "type": optimizer,
+                    "learning_rate": 0.001,
+                    "weight_decay": 0,
+                    "max_grad_norm": 0,
+                },
+                "trainer": {
+                    "total_updates": 4,
+                    "batch_size": 4,
+                    "seed": 83,
+                    "output_dir": str(tmp_path / name),
+                    "checkpoint_interval": 0,
+                },
+            }
+        )
+
+    full, resumed = trainer("full"), trainer("resumed")
+    others = []
+    try:
+        assert type(full.learner.optimizer) is torch.optim.Adam
+        assert full.learner.max_grad_norm == 0
+        full.fit(stop_after=2)
+        prefix = tmp_path / "noisy-adam-prefix.pt"
+        full.save(prefix)
+        full.fit()
+        expected_rng = torch.get_rng_state().clone()
+        resumed.resume(prefix)
+        resumed.fit()
+        torch.testing.assert_close(torch.get_rng_state(), expected_rng, atol=0, rtol=0)
+        torch.testing.assert_close(
+            resumed.sampler.get_state(), full.sampler.get_state(), atol=0, rtol=0
+        )
+        for name, expected in full.learner.model.state_dict().items():
+            if isinstance(expected, torch.Tensor):
+                torch.testing.assert_close(
+                    resumed.learner.model.state_dict()[name], expected, atol=0, rtol=0
+                )
+        actual_optimizer = resumed.learner.optimizer.state_dict()
+        expected_optimizer = full.learner.optimizer.state_dict()
+        assert actual_optimizer["param_groups"] == expected_optimizer["param_groups"]
+        for index, expected_state in expected_optimizer["state"].items():
+            for key, expected in expected_state.items():
+                torch.testing.assert_close(
+                    actual_optimizer["state"][index][key], expected, atol=0, rtol=0
+                )
+
+        for name, changes in (
+            ("other-sampling", {"sampling": "episode_uniform"}),
+            ("other-noise", {"noise": 0.0}),
+            ("other-optimizer", {"optimizer": "AdamW"}),
+        ):
+            candidate = trainer(name, **changes)
+            others.append(candidate)
+            model_before = deepcopy(candidate.learner.model.state_dict())
+            optimizer_before = deepcopy(candidate.learner.optimizer.state_dict())
+            sampler_before = candidate.sampler.get_state().clone()
+            rng_before = torch.get_rng_state().clone()
+            with pytest.raises(ValueError, match="recipe or dataset"):
+                candidate.resume(prefix)
+            assert candidate.learner.num_updates == 0
+            assert candidate.learner.optimizer.state_dict() == optimizer_before
+            torch.testing.assert_close(
+                candidate.sampler.get_state(), sampler_before, atol=0, rtol=0
+            )
+            torch.testing.assert_close(
+                torch.get_rng_state(), rng_before, atol=0, rtol=0
+            )
+            for key, expected in model_before.items():
+                if isinstance(expected, torch.Tensor):
+                    torch.testing.assert_close(
+                        candidate.learner.model.state_dict()[key],
+                        expected,
+                        atol=0,
+                        rtol=0,
+                    )
+    finally:
+        full.source.close()
+        resumed.source.close()
+        for candidate in others:
+            candidate.source.close()
+
+
+def test_factory_adam_one_step_matches_independent_torch_reference(tmp_path):
+    from embodichain_models.policy.bc import build_supervised_trainer
+
+    manifest = _corpus(tmp_path, cameras=False)
+    statistics = tmp_path / "normalization.pt"
+    torch.save(
+        {
+            "observation_mean": torch.zeros(1),
+            "observation_std": torch.ones(1),
+            "target_mean": torch.zeros(1),
+            "target_std": torch.ones(1),
+        },
+        statistics,
+    )
+    trainer = build_supervised_trainer(
+        {
+            "model": {"observation_dim": 1, "target_dim": 1, "hidden_dims": [4]},
+            "data": {
+                "manifest": str(manifest),
+                "normalization": str(statistics),
+                "reader": {
+                    "observation_slice": [0, 1],
+                    "sampling_mode": "frame_uniform",
+                },
+                "prefetch_batches": 0,
+            },
+            "optimizer": {
+                "type": "Adam",
+                "learning_rate": 0.0003,
+                "weight_decay": 0,
+                "max_grad_norm": 0,
+            },
+            "trainer": {"output_dir": str(tmp_path / "run"), "seed": 91},
+        }
+    )
+    try:
+        reference_model = deepcopy(trainer.learner.model)
+        reference_optimizer = torch.optim.Adam(
+            reference_model.parameters(), lr=0.0003, weight_decay=0
+        )
+        batch = trainer.source.sample(6, generator=torch.Generator().manual_seed(123))
+        predicted = reference_model(batch.inputs["history"])
+        loss = torch.nn.functional.mse_loss(predicted, batch.targets)
+        loss.backward()
+        reference_optimizer.step()
+        result = trainer.learner.update(batch)
+        assert result["loss"] == pytest.approx(float(loss), rel=1e-6)
+        for actual, expected in zip(
+            trainer.learner.model.parameters(),
+            reference_model.parameters(),
+            strict=True,
+        ):
+            torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+    finally:
+        trainer.source.close()
 
 
 def test_rgb_storage_remains_fp32_under_different_default_dtype(tmp_path):
