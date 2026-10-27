@@ -13,6 +13,11 @@ resolves source metadata before its first immutable build. Do not implement
 initial configuration as finalize-then-rebuild or duplicate descriptor writes
 inside `Articulation._apply_spawn_config()`.
 
+URDF continuous joints retain unbounded source limits during resolution. Native
+Skeleton metadata may expose zero-filled limits; those must not become a locked
+joint at the Newton boundary. Caller-authored limits and later config overlays
+retain precedence over the source default.
+
 `ArticulationRootPropertiesCfg` separates root intent from link physics.
 Fixed-base/self-collision settings enter common descriptors, independently of
 the source overlay policy; explicit `None` preserves USD intent and selects

@@ -22,13 +22,15 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from dexsim.spawn import ArticulationDesc, LinkDesc
+from dexsim.spawn import ArticulationDesc, JointDesc, LinkDesc
+from dexsim.engine import JointType
 
 from embodichain.lab.sim.spawn.source import (
     _apply_dexsim_source_overlay,
     _capture_dexsim_source_physics,
     _clear_invalid_source_com,
     _retain_dexsim_source_descriptor,
+    resolve_articulation_source,
 )
 
 pytestmark = pytest.mark.no_sim
@@ -36,6 +38,58 @@ pytestmark = pytest.mark.no_sim
 
 def _link(name: str) -> LinkDesc:
     return LinkDesc(name, "", np.eye(4, dtype=np.float32))
+
+
+@pytest.mark.parametrize("authored_limits", [None, (-1.0, 1.0)])
+def test_urdf_continuous_joint_retains_unbounded_source_limits(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, authored_limits
+) -> None:
+    from embodichain.lab.sim.spawn import source
+    from dexsim.spawn.adapters import newton_articulation_adapter
+
+    path = tmp_path / "continuous.urdf"
+    path.write_text('<robot name="continuous"/>', encoding="utf-8")
+    continuous = JointDesc("spinner", "base", "wheel", JointType.CONTINUOUS)
+    if authored_limits is not None:
+        continuous.lower_limit, continuous.upper_limit = authored_limits
+    descriptor = ArticulationDesc(
+        name="source",
+        urdf_path=str(path),
+        joints=[] if authored_limits is None else [continuous],
+    )
+    limited = JointDesc(
+        "locked",
+        "base",
+        "other",
+        JointType.REVOLUTE,
+        lower_limit=0.0,
+        upper_limit=0.0,
+    )
+    skeleton = SimpleNamespace(
+        set_name=lambda _: None,
+        detach_parent=lambda: None,
+        load_urdf=lambda *_: 0,
+        get_link_names=lambda _: (),
+    )
+    arena = SimpleNamespace(
+        create_skeleton=lambda _: skeleton,
+        remove_skeleton=lambda _: None,
+    )
+    monkeypatch.setattr(source, "_source_arena", lambda *_: arena)
+
+    def translate(_skeleton, desc):
+        if not desc.joints:
+            continuous.lower_limit = continuous.upper_limit = 0.0
+        desc.joints = [continuous, limited]
+
+    monkeypatch.setattr(
+        newton_articulation_adapter, "_translate_urdf_articulation", translate
+    )
+    resolve_articulation_source(SimpleNamespace(), descriptor)
+
+    expected = (-np.inf, np.inf) if authored_limits is None else authored_limits
+    assert (continuous.lower_limit, continuous.upper_limit) == expected
+    assert (limited.lower_limit, limited.upper_limit) == (0.0, 0.0)
 
 
 def _physical_attr(

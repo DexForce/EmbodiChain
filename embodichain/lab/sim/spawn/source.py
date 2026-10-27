@@ -31,6 +31,7 @@ from dexsim.spawn import (
     DexsimPhysicsDesc,
     RigidBodyPhysicsDesc,
 )
+from dexsim.engine import JointType
 
 from embodichain.lab.sim._inertia import _principal_inertia_matrix
 from embodichain.utils.math import quat_wxyz_to_xyzw
@@ -91,6 +92,12 @@ def resolve_articulation_source(
         desc.joints = []
         desc.root_link_name = None
 
+    retained_joint_limits = {
+        joint.name
+        for joint in desc.joints
+        if joint.lower_limit is not None or joint.upper_limit is not None
+    }
+
     arena = _source_arena(builder, desc)
     temp_name = f"__embodichain_resolve__{desc.name.replace('/', '__')}__{id(desc)}"
     skeleton = arena.create_skeleton("skeleton")
@@ -121,6 +128,16 @@ def resolve_articulation_source(
             except (KeyError, RuntimeError, TypeError, AttributeError):
                 continue
         _translate_urdf_articulation(skeleton, desc)
+        # Native Skeleton metadata exposes (0, 0) for URDF continuous joints.
+        # Preserve their unbounded source intent before a MuJoCo build, while
+        # retaining caller-authored limits and subsequent config overlays.
+        for joint in desc.joints:
+            if (
+                joint.joint_type == JointType.CONTINUOUS
+                and joint.name not in retained_joint_limits
+            ):
+                joint.lower_limit = -np.inf
+                joint.upper_limit = np.inf
         source_states = _read_urdf_inertial_states(desc.urdf_path)
         _annotate_urdf_source_physics(
             desc,
