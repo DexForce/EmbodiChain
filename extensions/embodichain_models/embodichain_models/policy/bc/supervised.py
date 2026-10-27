@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
+import math
 
 import torch
 
@@ -32,10 +33,19 @@ __all__ = ["ChunkBCObjective", "HDF5BCSource", "PrefetchedBCSource"]
 class ChunkBCObjective:
     """Fit valid current/future targets from causal measured input histories.
 
+    Args:
+        observation_noise: Standard deviation of training-only Gaussian noise
+            in normalized numeric observation units. Zero disables noise.
+
     The data adapter supplies physical target vectors. This objective uses the
     model's frozen normalization and averages over valid target positions and
     features. Target construction and controller decoding remain task-owned.
     """
+
+    def __init__(self, observation_noise: float = 0.0) -> None:
+        self.observation_noise = float(observation_noise)
+        if not math.isfinite(self.observation_noise) or self.observation_noise < 0:
+            raise ValueError("BC observation noise must be finite and nonnegative")
 
     def compute_loss(self, model: ChunkBCModel, batch: SupervisedBatch) -> LossResult:
         """Build the masked normalized target MSE.
@@ -48,7 +58,15 @@ class ChunkBCObjective:
         Returns:
             Mean loss with valid target count as evaluation aggregation weight.
         """
-        predicted = model(batch.inputs["history"], batch.inputs.get("images"))
+        history = batch.inputs["history"]
+        if model.training and self.observation_noise:
+            history = (
+                history
+                + torch.randn_like(history)
+                * model.observation_std
+                * self.observation_noise
+            )
+        predicted = model(history, batch.inputs.get("images"))
         target = batch.targets
         valid = batch.masks["target_valid"]
         if (

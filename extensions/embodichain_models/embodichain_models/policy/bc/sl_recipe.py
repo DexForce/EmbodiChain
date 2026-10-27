@@ -52,7 +52,8 @@ def build_supervised_trainer(config: dict[str, Any]) -> SupervisedTrainer:
             the model package never imports the host's task/controller.
             ``data.prefetch_batches`` is zero or one. ``optimizer`` accepts
             AdamW ``learning_rate``, ``weight_decay`` and ``max_grad_norm``;
-            ``objective`` accepts only masked normalized target MSE.
+            ``objective`` accepts masked normalized target MSE and optional
+            training-only ``observation_noise`` in normalized input units.
             ``trainer`` uses the shared ``SupervisedTrainerCfg``.
 
     Returns:
@@ -66,9 +67,17 @@ def build_supervised_trainer(config: dict[str, Any]) -> SupervisedTrainer:
     prefetch = data.get("prefetch_batches", 1)
     if type(prefetch) is not int or prefetch not in (0, 1):
         raise ValueError("BC recipes support zero or one prefetched batch")
-    objective = config.get("objective", {"type": "masked_normalized_target_mse"})
-    if objective != {"type": "masked_normalized_target_mse"}:
+    objective_cfg = config.get("objective", {"type": "masked_normalized_target_mse"})
+    if (
+        not isinstance(objective_cfg, dict)
+        or set(objective_cfg) - {"type", "observation_noise"}
+        or objective_cfg.get("type") != "masked_normalized_target_mse"
+    ):
         raise ValueError("Unknown BC objective; expected masked normalized target MSE")
+    bc_objective = ChunkBCObjective(objective_cfg.get("observation_noise", 0.0))
+    objective = {"type": "masked_normalized_target_mse"}
+    if bc_objective.observation_noise:
+        objective["observation_noise"] = bc_objective.observation_noise
     optimizer_cfg = config.get("optimizer", {})
     if set(optimizer_cfg) - {"learning_rate", "weight_decay", "max_grad_norm"}:
         raise ValueError("Unknown BC AdamW optimizer setting")
@@ -104,7 +113,7 @@ def build_supervised_trainer(config: dict[str, Any]) -> SupervisedTrainer:
             raise ValueError("BC dataset camera order differs from the model contract")
         optimizer = torch.optim.AdamW(model.parameters(), lr=rate, weight_decay=decay)
         learner = SupervisedLearner(
-            model, ChunkBCObjective(), optimizer, max_grad_norm=maximum
+            model, bc_objective, optimizer, max_grad_norm=maximum
         )
         source = HDF5BCSource(dataset)
         partial_signature = (
