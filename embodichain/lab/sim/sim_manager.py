@@ -624,9 +624,9 @@ class SimulationManager:
         self._requested_renderer = sim_config.render_cfg.renderer
         solver_cfg = getattr(sim_config.physics_cfg, "solver_cfg", None)
         self._requested_solver = str(
-            solver_cfg.get("solver_type", solver_cfg.get("class_type", "auto"))
+            solver_cfg.get("solver_type", solver_cfg.get("class_type", "dexuni"))
             if isinstance(solver_cfg, Mapping)
-            else getattr(solver_cfg, "solver_type", "auto")
+            else getattr(solver_cfg, "solver_type", "dexuni")
         )
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
@@ -4014,8 +4014,8 @@ class SimulationManager:
             sensor_factory, ContactSensor
         ):
             self.prepare()
-            # ``solver_type='auto'`` is resolved while preparing the Spawn
-            # scene, so the early capability check above is not sufficient.
+            # DexUni resolves its contact path while preparing the Spawn scene,
+            # so the early capability check above is not sufficient.
             if not self.physics.supports_contact_sensor:
                 raise NotImplementedError(
                     f"ContactSensor is not supported by the {self.physics.name} "

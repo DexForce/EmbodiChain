@@ -596,6 +596,9 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "is_site",
         # Asset-loading adapter option, not a native ShapeConfig parameter.
         "use_native_mesh_loader",
+        "convert_to_heightfield",
+        "heightfield_resolution",
+        "preserve_mesh_transform",
     }
     assert (
         newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
@@ -792,7 +795,7 @@ def test_robot_preset_accepts_newton_solver_alias() -> None:
     preset = _NewtonSolverAliasRobotPresetCfg()
 
     assert preset.resolve(DefaultPhysicsCfg()).uid == "fallback"
-    assert preset.resolve(NewtonPhysicsCfg()).uid == "fallback"
+    assert preset.resolve(NewtonPhysicsCfg()).uid == "mjwarp"
     assert (
         preset.resolve(NewtonPhysicsCfg(solver_cfg={"solver_type": "mjwarp"})).uid
         == "mjwarp"
@@ -1570,11 +1573,17 @@ class _DexUniRobotPresetCfg(RobotPresetCfg):
         (("newton_dexuni", "newton_mujoco_warp", "newton_mjwarp"), "portable"),
     ],
 )
-def test_dexuni_preset_priority_and_isolation(missing, expected) -> None:
+@pytest.mark.parametrize(
+    "solver_mapping",
+    [None, {}, {"solver_type": "auto"}, {"solver_type": "dexuni"}],
+)
+def test_dexuni_preset_priority_and_isolation(
+    missing, expected, solver_mapping
+) -> None:
     preset = _DexUniRobotPresetCfg()
     for field in missing:
         setattr(preset, field, None)
-    physics = NewtonPhysicsCfg(solver_cfg={"solver_type": "dexuni"})
+    physics = NewtonPhysicsCfg(solver_cfg=solver_mapping)
     resolved = preset.resolve(physics)
     assert resolved.uid == expected
     resolved.control_parts["probe"] = ["joint"]

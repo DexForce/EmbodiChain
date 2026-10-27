@@ -40,11 +40,13 @@ from embodichain_robots import URRobotCfg
 pytestmark = [pytest.mark.requires_sim, pytest.mark.gpu]
 
 
-@pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
-def test_newton_contact_sensor_reports_each_arena(solver_type: str) -> None:
+@pytest.mark.parametrize(
+    "solver_type", ["mujoco_warp", pytest.param(None, id="default_dexuni")]
+)
+def test_newton_contact_sensor_reports_each_arena(solver_type: str | None) -> None:
     from dexsim.scene import ContactBuffer
 
-    if solver_type == "dexuni" and not hasattr(ContactBuffer, "impulse_valid"):
+    if solver_type is None and not hasattr(ContactBuffer, "impulse_valid"):
         pytest.skip("DexUni contacts require DexSim's current dev API.")
     wp.init()
     if not wp.is_cuda_available():
@@ -61,14 +63,11 @@ def test_newton_contact_sensor_reports_each_arena(solver_type: str) -> None:
                 use_cuda_graph=False,
                 # Exercise a multi-point manifold so query-side reductions
                 # cannot satisfy this regression contract accidentally.
-                solver_cfg={
-                    "solver_type": solver_type,
-                    **(
-                        {"enable_multiccd": True}
-                        if solver_type == "mujoco_warp"
-                        else {}
-                    ),
-                },
+                solver_cfg=(
+                    {"solver_type": solver_type, "enable_multiccd": True}
+                    if solver_type is not None
+                    else None
+                ),
             ),
         )
     )
@@ -102,27 +101,18 @@ def test_newton_contact_sensor_reports_each_arena(solver_type: str) -> None:
         sensor.update()
 
         assert sensor.contact_capabilities.geometry
+        # The default DexUni path assigns this all-rigid scene to MuJoCo.
+        assert sensor.contact_capabilities.impulse
+        assert sensor.contact_capabilities.friction
         counts = sensor._num_contacts_per_env.cpu().tolist()
         data = sensor.get_data()
         assert data["is_valid"].sum(dim=1).cpu().tolist() == counts
         if solver_type == "mujoco_warp":
-            assert sensor.contact_capabilities.impulse
             assert counts == [4, 4]
-            assert data["impulse_valid"][data["is_valid"]].all()
-            assert data["friction_valid"][data["is_valid"]].all()
         else:
             assert all(count > 0 for count in counts)
-            # DexUni includes geometry-only VBD rows. Its aggregate capability
-            # does not describe every row in a combined VBD/MuJoCo report.
-            assert not sensor.contact_capabilities.impulse
-            raw = sensor._query.fetch()
-            for env_id in range(sim.num_envs):
-                selected = raw.env_ids[: raw.count] == env_id
-                for name in ("impulse_valid", "friction_valid"):
-                    assert (
-                        data[name][env_id].sum()
-                        == getattr(raw, name)[: raw.count][selected].sum()
-                    )
+        assert data["impulse_valid"][data["is_valid"]].all()
+        assert data["friction_valid"][data["is_valid"]].all()
         measured = data["is_valid"] & data["impulse_valid"]
         assert (data["impulse"][measured] > 1.0e-7).all()
         actor_ids = data["user_ids"][data["is_valid"]]
@@ -282,7 +272,9 @@ def test_dexuni_vbd_contact_sensor_exposes_geometry_only() -> None:
                 device="cuda:0",
                 num_substeps=1,
                 use_cuda_graph=False,
-                solver_cfg={"solver_type": "dexuni"},
+                # Explicit ownership keeps this a VBD geometry-only contract
+                # even though all-rigid scenes now default to pure MuJoCo.
+                solver_cfg={"solver_type": "dexuni", "mujoco_articulations": ()},
             ),
         )
     )

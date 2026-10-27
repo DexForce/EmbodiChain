@@ -12,7 +12,7 @@ binding. Return to the [simulation overview](simulation-system.md).
 uses one registry and backend dispatch for both topologies.
 
 The supported path is Newton on CUDA, without gradient mode. Declarations
-accept unresolved AutoSolver or a supported particle solver (`xpbd`,
+accept a supported particle solver (`xpbd`,
 `semi_implicit`, `vbd`, `dexuni`); they reject unsupported backends/solvers and
 post-finalization additions. Default soft/cloth compatibility is absent.
 Future backend support belongs at dispatch, not inside a monolithic config.

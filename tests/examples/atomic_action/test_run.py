@@ -509,6 +509,41 @@ def test_every_sample_defaults_to_one_reference_environment(skill: str) -> None:
     assert cfg.variants == 1
     assert not cfg.affordance_enabled and not cfg.trajectory_enabled
     assert _scene_args(cfg).num_envs == 1
+    assert cfg.device is None
+    assert _scene_args(cfg).device is None
+
+
+@pytest.mark.parametrize(
+    "physics, expected_device", [("default", "cpu"), ("newton", "cuda:0")]
+)
+def test_sample_omitted_device_preserves_backend_default(
+    monkeypatch: pytest.MonkeyPatch, physics: str, expected_device: str
+) -> None:
+    from examples.sim.atomic_action import support
+
+    captured = {}
+
+    def create_sim(cfg):
+        captured["cfg"] = cfg
+        return SimpleNamespace(add_light=lambda cfg: None)
+
+    monkeypatch.setattr(support, "SimulationManager", create_sim)
+    args = launcher._create_parser().parse_args(
+        ["--skill", "pickup", "--physics", physics]
+    )
+    cfg = launcher._resolve_sample(args)
+    support.create_tutorial_simulation(_scene_args(cfg))
+    assert captured["cfg"].device == expected_device
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda:2"])
+def test_sample_explicit_device_is_preserved(device: str) -> None:
+    args = launcher._create_parser().parse_args(
+        ["--skill", "pickup", "--physics", "newton", "--device", device]
+    )
+    cfg = launcher._resolve_sample(args)
+    assert cfg.device == device
+    assert _scene_args(cfg).device == device
 
 
 @pytest.mark.parametrize("count", (2, 8))
@@ -538,6 +573,7 @@ def test_variant_count_is_the_parallel_environment_count(count: int, mode: str) 
         (["--gpu-id", "-1"], "non-negative"),
         (["--seed", "-1"], "seed must"),
         (["--arena-space", "nan"], "finite"),
+        (["--device", ""], "device must"),
         (["--save-video", "--renderer", "no-render"], "requires a renderer"),
     ),
 )

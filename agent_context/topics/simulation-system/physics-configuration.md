@@ -21,10 +21,11 @@ device, not a separate environment tensor device.
 `None` retains the native default. Gym accepts the former in `physics_config`
 and the latter at the top level through `config_to_cfg()`.
 
-Newton `solver_cfg=None` preserves DexSim's scene-aware `AutoSolverCfg`.
-The concrete solver is resolved from the complete Spawn scene, then exposed
-through `NewtonPhysicsBackend.solver_type`. Do not guess a solver-specific robot
-preset while it is unresolved. Gradient mode requires an explicit
+Newton `solver_cfg=None` preserves DexSim's `DexUniSolverCfg` default.
+DexUni owns scene-based partitioning between MuJoCo, VBD and supported particle
+paths; `NewtonPhysicsBackend.solver_type` remains `dexuni`. Legacy `auto` and
+`AutoSolverCfg` mappings select DexUni. Robot presets select `newton_dexuni`
+before the MuJoCo aliases and portable fallbacks. Gradient mode requires an explicit
 `semi_implicit` solver. Read exact solver options/defaults in
 `cfg/physics.py` and the installed DexSim config types; do not substitute a
 hardcoded fallback when an expected DexSim API is absent.

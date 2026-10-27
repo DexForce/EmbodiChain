@@ -347,8 +347,8 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     A mapping is converted to the matching DexSim Newton solver config. Include
     ``solver_type`` or ``class_type`` to select the solver, then add any
     parameters accepted by that DexSim solver config. If omitted, EmbodiChain
-    preserves DexSim's scene-aware ``AutoSolverCfg`` default. A DexSim build
-    exporting ``AutoSolverCfg`` is required; no concrete-solver fallback is used.
+    preserves DexSim's ``DexUniSolverCfg`` default and its scene-based dispatch.
+    Legacy ``auto``/``AutoSolverCfg`` mappings select DexUni as well.
     For ``solver_type='dexuni'``, the current DexSim contract keeps expert
     options under ``vbd_options``, ``mujoco_options`` and
     ``collision_options``; use ``joint_mode`` and ``contact_mode`` for the
@@ -382,7 +382,6 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     ) -> NewtonCfg:
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
         from dexsim.engine.newton_physics import (
-            AutoSolverCfg,
             DexUniSolverCfg,
             FeatherstoneSolverCfg,
             MJWarpSolverCfg,
@@ -403,7 +402,6 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         )
 
         solver_cfg_map: dict[str, type] = {
-            "auto": AutoSolverCfg,
             "dexuni": DexUniSolverCfg,
             "mujoco_warp": MJWarpSolverCfg,
             "xpbd": XPBDSolverCfg,
@@ -421,7 +419,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         ):
             logger.log_error(
                 "Newton gradient mode requires an explicit "
-                "solver_type='semi_implicit'; AutoSolver does not select a "
+                "solver_type='semi_implicit'; the default does not select a "
                 "differentiable solver."
             )
 
@@ -469,11 +467,11 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
     """Normalize public EmbodiChain and DexSim Newton solver aliases."""
     key = solver_type.replace("-", "_").lower()
     aliases = {
-        "auto": "auto",
-        "autosolver": "auto",
-        "autosolvercfg": "auto",
-        "auto_solver": "auto",
-        "auto_solver_cfg": "auto",
+        "auto": "dexuni",
+        "autosolver": "dexuni",
+        "autosolvercfg": "dexuni",
+        "auto_solver": "dexuni",
+        "auto_solver_cfg": "dexuni",
         "mjwarp": "mujoco_warp",
         "mjwarpsolver": "mujoco_warp",
         "mjwarpsolvercfg": "mujoco_warp",
@@ -531,7 +529,7 @@ def _newton_solver_cfg_to_dexsim(
     configured_solver_type = (
         solver_cfg_data.pop("solver_type", None)
         or solver_cfg_data.pop("class_type", None)
-        or "auto"
+        or "dexuni"
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
     solver_cfg_type = solver_cfg_map[normalized_solver_type]

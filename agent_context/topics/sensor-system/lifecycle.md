@@ -42,7 +42,7 @@ Unavailable values are placeholders, not measured zeros. Older buffers without
 per-row flags use the query capabilities; DexUni queries require the newer
 validity contract. Do not infer force support from sensor construction alone. Inspect
 `supports_contact_sensor` in `embodichain/lab/sim/physics/` for the current
-backend/solver/device matrix: Newton AutoSolver may change the answer during
+backend/solver/device matrix: DexUni's scene-based dispatch may change the answer during
 preparation, so the manager checks again afterwards.
 
 Particle-shape contacts do not enter this rigid ContactQuery.
