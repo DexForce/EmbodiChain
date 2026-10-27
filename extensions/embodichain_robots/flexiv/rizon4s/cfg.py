@@ -29,7 +29,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     RobotCfg,
 )
-from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
 
@@ -51,7 +51,7 @@ class FlexivRizon4SCfg(RobotCfg):
     blurred by the manufacturer; these simulation defaults are not a calibrated
     model of the real robot or its controller.
 
-    ``arm`` contains ``joint1`` through ``joint7``. FK and numerical IK use
+    ``arm`` contains ``joint1`` through ``joint7``. FK and Warp RR IK use
     ``base_link`` to ``flange`` with an identity TCP. An explicit URDF
     ``fpath`` override is shared by simulation and serial-chain construction.
 
@@ -84,7 +84,9 @@ class FlexivRizon4SCfg(RobotCfg):
         )
         self.control_parts = {"arm": [f"joint{i}" for i in range(1, 8)]}
         self.solver_cfg = {
-            "arm": PytorchSolverCfg(
+            "arm": SSIKSolverCfg(
+                geometry_mode="rr",
+                rr_search="seed_local",
                 urdf_path=self._pk_urdf_path,
                 root_link_name="base_link",
                 end_link_name="flange",

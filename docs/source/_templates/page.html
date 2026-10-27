@@ -1,0 +1,17 @@
+{% extends "!page.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  {% if pagename.startswith("resources/robot/") %}
+    <style>
+      table.robot-catalog { min-width: 42rem; }
+    </style>
+  {% endif %}
+{% endblock %}
+
+{% block body %}
+  {% if pagename.startswith("resources/robot/") %}
+    {% include "components/breadcrumbs.html" %}
+  {% endif %}
+  {{ super() }}
+{% endblock %}

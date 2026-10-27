@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
+from inspect import signature
 from pathlib import Path
 from typing import Literal, TYPE_CHECKING
 
@@ -65,6 +66,7 @@ from .atomic_objects import (
 from .base import ScenarioEvaluation, ScenarioProvider
 from .atomic_replay import AtomicReplayRuntime
 from .atomic_grasps import (
+    _AntipodalGraspSearchError,
     ActiveCaseGraspPoseGenerator,
     CaseSampleCountGraspPoseGenerator,
     FrozenArticulationGraspPoseGenerator,
@@ -72,6 +74,7 @@ from .atomic_grasps import (
     parallel_jaw_sampler,
 )
 from ._atomic_pose_sampling import _pose_settings, randomized_scene_pose
+from ._atomic_reference import _recover_reference_ik
 
 from .atomic_case_utils import (
     canonical_case_qpos,
@@ -754,17 +757,23 @@ class AtomicSkillScenario(ScenarioProvider):
             invocations = tuple(
                 with_motion_budget(item, self.suite.protocol) for item in invocations
             )
-        plan_opts = adapter.atomic_plan_options()
-        if plan_opts is not None:
-            invocations = tuple(
-                with_plan_options(item, plan_opts) for item in invocations
-            )
         physics = (
             {} if self.track is None else dict(self.track.config.get("physics", {}))
         )
         control_dt = float(self.simulation.sim_config.physics_dt)
         if physics.get("clock", "fixed_samples") == "compiled":
             control_dt *= int(physics.get("steps_per_waypoint", 4))
+        options_hook = adapter.atomic_plan_options
+        try:
+            signature(options_hook).bind(control_dt=control_dt)
+        except TypeError:
+            plan_opts = options_hook()
+        else:
+            plan_opts = options_hook(control_dt=control_dt)
+        if plan_opts is not None:
+            invocations = tuple(
+                with_plan_options(item, plan_opts) for item in invocations
+            )
         context = engine.initial_context(
             task=task,
             scene=provider.initial_scene(self, case),
@@ -1228,22 +1237,42 @@ class AtomicSkillScenario(ScenarioProvider):
     def solve_reference_qpos(
         self, start_qpos: torch.Tensor, target_waypoints: torch.Tensor
     ) -> torch.Tensor:
-        """Build independent sequential-IK validity evidence for a case."""
+        """Build independent sequential-IK validity evidence for a case.
+
+        Failed exact IK may recover a joint witness inside the suite's arrival
+        tolerances. FK always checks the original request; target poses and
+        accepted exact solutions remain unchanged. This does not certify a path
+        or a physical task outcome.
+        """
         if self.robot is None:
             raise RuntimeError("Atomic Skill runtime is not configured.")
         seed = start_qpos
         references: list[torch.Tensor] = []
         for index in range(target_waypoints.shape[1]):
-            success, seed = self.robot.compute_ik(
-                pose=target_waypoints[:, index],
+            target = target_waypoints[:, index]
+            success, solved = self.robot.compute_ik(
+                pose=target,
                 joint_seed=seed,
                 name=self.control_part,
             )
+            if (
+                not bool(torch.as_tensor(success).all().item())
+                and self.suite is not None
+            ):
+                success, solved = _recover_reference_ik(
+                    self.robot,
+                    target,
+                    seed,
+                    success,
+                    solved,
+                    control_part=self.control_part,
+                    protocol=self.suite.protocol,
+                )
             if not bool(torch.as_tensor(success).all().item()):
                 raise RuntimeError(
                     f"Independent IK rejected atomic target waypoint {index}."
                 )
-            seed = canonical_case_qpos(seed)
+            seed = canonical_case_qpos(solved)
             references.append(seed.clone())
         return torch.stack(references, dim=1)
 
@@ -1301,13 +1330,19 @@ class AtomicSkillScenario(ScenarioProvider):
         alignment_max_angle_deg: float,
         waypoint_poses: Callable[[torch.Tensor], Sequence[torch.Tensor]],
         rank: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
+        row_rank: (
+            Callable[[int, torch.Tensor, torch.Tensor], torch.Tensor] | None
+        ) = None,
+        env_ids: Sequence[int] | None = None,
+        filter_alignment_before_ranking: bool = False,
     ) -> torch.Tensor:
-        """Freeze the first sampled object grasp whose skill poses are reachable.
+        """Freeze each object's first grasp whose skill poses are reachable.
 
-        Candidates are sampled once with ``seed``, ordered by ``rank`` (grasp
-        cost by default), filtered by approach alignment, and tried with their
-        half-turn variant.  The first variant whose ``waypoint_poses`` pass
-        sequential IK from ``start_qpos`` is returned.
+        Candidates are sampled once with ``seed`` for the full object batch.
+        Each row independently orders its own world-frame pool, filters approach
+        alignment, and tries each candidate before its half-turn variant. A row
+        freezes its first variant whose full waypoint chain passes sequential IK
+        from its own start state. Every selected environment must find a grasp.
 
         Args:
             handle: Object whose mesh is sampled.
@@ -1320,24 +1355,89 @@ class AtomicSkillScenario(ScenarioProvider):
             alignment_max_angle_deg: Maximum grasp-axis deviation from the
                 approach axis.
             waypoint_poses: Skill poses that a grasp variant must reach, in
-                order, given that variant with shape ``(1, 4, 4)``.
-            rank: Optional ordering of finite candidates from their poses and
-                costs; returns candidate indices, best first.
+                order, given that variant with shape ``(B, 4, 4)``.
+            rank: Optional ordering of each row's finite candidates from their
+                poses and costs; returns candidate indices, best first.
+            row_rank: Optional row-aware ordering, receiving the input row index,
+                its finite candidates and costs. Mutually exclusive with rank.
+            filter_alignment_before_ranking: Apply the hard TCP-Z angle before
+                grasp NMS and truncation. False preserves the legacy pool.
+            env_ids: Robot environments matching the input rows, or all
+                environments when omitted. A single-row screen in a batched
+                robot must identify that environment explicitly.
 
         Returns:
-            The selected grasp with shape ``(1, 4, 4)``.
+            The selected grasp batch with shape ``(B, 4, 4)``.
 
         Raises:
             RuntimeError: No candidate variant reaches every skill pose.
         """
         if self.robot is None:
             raise RuntimeError("Atomic Skill runtime is not configured.")
+        if object_pose.dim() != 3 or object_pose.shape[1:] != (4, 4):
+            raise ValueError("Object grasp poses must have shape (B, 4, 4).")
+        if start_qpos.shape[0] != object_pose.shape[0]:
+            raise ValueError("Object grasp start states and poses must share a batch.")
+        if env_ids is not None and len(env_ids) != object_pose.shape[0]:
+            raise ValueError("Object grasp rows must match the selected environments.")
+        if rank is not None and row_rank is not None:
+            raise ValueError("Specify either rank or row_rank, not both.")
         if n_sample < 1 or max_candidates < 1:
             raise ValueError(
                 "Antipodal grasp sample/candidate counts must be positive."
             )
         if not 0.0 < alignment_max_angle_deg <= 90.0:
             raise ValueError("grasp_alignment_max_angle_deg must be in (0, 90].")
+        if type(filter_alignment_before_ranking) is not bool:
+            raise TypeError("filter_alignment_before_ranking must be boolean.")
+        ranked_pools = self._ranked_antipodal_grasp_pools(
+            handle,
+            object_pose,
+            approach_direction,
+            seed=seed,
+            n_sample=n_sample,
+            max_candidates=max_candidates,
+            alignment_max_angle_deg=(
+                alignment_max_angle_deg if filter_alignment_before_ranking else None
+            ),
+            rank=rank,
+            row_rank=row_rank,
+        )
+        selected, found = self._screen_antipodal_grasp_rows(
+            ranked_pools,
+            approach_direction,
+            start_qpos,
+            alignment_max_angle_deg=alignment_max_angle_deg,
+            waypoint_poses=waypoint_poses,
+            env_ids=env_ids,
+        )
+        if bool(found.all().item()):
+            return selected
+        failed_rows = torch.nonzero(~found, as_tuple=False).flatten().cpu().tolist()
+        raise _AntipodalGraspSearchError(
+            f"No independently reachable antipodal grasp remained for "
+            f"{handle.object_id!r} in environment rows {failed_rows} after "
+            f"screening up to {[len(pool) for pool in ranked_pools]} candidates per row."
+        )
+
+    def _ranked_antipodal_grasp_pools(
+        self,
+        handle: AtomicObjectHandle,
+        object_pose: torch.Tensor,
+        approach_direction: torch.Tensor,
+        *,
+        seed: int,
+        n_sample: int,
+        max_candidates: int,
+        alignment_max_angle_deg: float | None = None,
+        allow_empty: bool = False,
+        rank: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
+        row_rank: (
+            Callable[[int, torch.Tensor, torch.Tensor], torch.Tensor] | None
+        ) = None,
+    ) -> list[torch.Tensor]:
+        """Sample/rank one frozen pool per row for reuse across goal variants."""
+        assert self.robot is not None
         from .._atomic_fixtures import (
             create_antipodal_semantics,
             create_parallel_jaw_grasp_pose_generator,
@@ -1358,52 +1458,151 @@ class AtomicSkillScenario(ScenarioProvider):
             generator = create_parallel_jaw_grasp_pose_generator(
                 n_sample=n_sample,
                 force_refresh=False,
+                max_candidates=max_candidates,
+                **(
+                    {"approach_alignment_angle": math.radians(alignment_max_angle_deg)}
+                    if alignment_max_angle_deg is not None
+                    else {}
+                ),
             )
-            candidates, costs = generator.get_valid_grasp_poses(
+            candidate_pools = generator.get_valid_grasp_poses(
                 mesh_vertices=affordance.mesh_vertices,
                 mesh_triangles=affordance.mesh_triangles,
                 obj_poses=object_pose,
                 approach_direction=approach_direction,
-            )[0]
-        if candidates.shape[0] == 0:
-            raise RuntimeError(
-                f"No antipodal grasp candidates were found for {handle.object_id!r}."
             )
-        finite_indices = torch.nonzero(torch.isfinite(costs), as_tuple=False).flatten()
-        if finite_indices.numel() == 0:
+        batch_size = object_pose.shape[0]
+        if len(candidate_pools) != batch_size:
             raise RuntimeError(
-                f"No valid antipodal grasp candidates were found for {handle.object_id!r}."
+                "The grasp generator must return one pool per object row."
             )
-        if rank is None:
-            ranked = finite_indices[torch.argsort(costs[finite_indices])]
-        else:
-            order = rank(candidates[finite_indices], costs[finite_indices])
+        ranked_pools = []
+        for row, (candidates, costs) in enumerate(candidate_pools):
+            finite_indices = torch.nonzero(
+                torch.isfinite(costs), as_tuple=False
+            ).flatten()
+            if finite_indices.numel() == 0:
+                if allow_empty:
+                    ranked_pools.append(candidates[:0].to(self.robot.device))
+                    continue
+                raise RuntimeError(
+                    f"No valid antipodal grasp candidates were found for "
+                    f"{handle.object_id!r} in environment row {row}."
+                )
+            if row_rank is not None:
+                order = row_rank(row, candidates[finite_indices], costs[finite_indices])
+            elif rank is not None:
+                order = rank(candidates[finite_indices], costs[finite_indices])
+            else:
+                order = torch.argsort(costs[finite_indices])
             ranked = finite_indices[order.to(device=finite_indices.device)]
-        ranked = ranked[:max_candidates].detach().to("cpu").tolist()
-        minimum_alignment = math.cos(math.radians(alignment_max_angle_deg))
-        for candidate_index in ranked:
-            candidate = candidates[candidate_index].to(
-                device=self.robot.device, dtype=torch.float32
+            ranked_pools.append(
+                candidates[ranked[:max_candidates]].to(
+                    device=self.robot.device, dtype=torch.float32
+                )
             )
-            if (
-                float(torch.dot(candidate[:3, 2], approach_direction).item())
-                < minimum_alignment
-            ):
-                continue
-            mirrored = candidate.clone()
-            mirrored[:3, 0] = -mirrored[:3, 0]
-            mirrored[:3, 1] = -mirrored[:3, 1]
-            for variant in (candidate, mirrored):
-                grasp = variant.unsqueeze(0)
-                if self._ik_chain_feasible(start_qpos, waypoint_poses(grasp)):
-                    return grasp
-        raise RuntimeError(
-            f"No independently reachable antipodal grasp remained for "
-            f"{handle.object_id!r} after screening {len(ranked)} candidates."
+        return ranked_pools
+
+    def _screen_antipodal_grasp_rows(
+        self,
+        ranked_pools: Sequence[torch.Tensor],
+        approach_direction: torch.Tensor,
+        start_qpos: torch.Tensor,
+        *,
+        alignment_max_angle_deg: float,
+        waypoint_poses: Callable[[torch.Tensor], Sequence[torch.Tensor]],
+        env_ids: Sequence[int] | None = None,
+        initial_selection: torch.Tensor | None = None,
+        initial_found: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return independently accepted rows without discarding unresolved ones.
+
+        Existing selections are owned copies and remain frozen. Unresolved rows
+        keep the declared candidate/half-turn order and complete IK-chain gate.
+        The strict public screen raises when any row remains unresolved.
+        """
+        assert self.robot is not None
+        batch_size = len(ranked_pools)
+        selected = (
+            torch.stack([pool[0] for pool in ranked_pools])
+            if initial_selection is None
+            else initial_selection.clone()
         )
+        found = (
+            torch.zeros(batch_size, dtype=torch.bool, device=self.robot.device)
+            if initial_found is None
+            else initial_found.clone()
+        )
+        minimum_alignment = math.cos(math.radians(alignment_max_angle_deg))
+        for candidate_index in range(max(len(pool) for pool in ranked_pools)):
+            grasp = selected.clone()
+            available = torch.tensor(
+                [candidate_index < len(pool) for pool in ranked_pools],
+                dtype=torch.bool,
+                device=self.robot.device,
+            )
+            for row, pool in enumerate(ranked_pools):
+                if candidate_index < len(pool):
+                    grasp[row] = pool[candidate_index]
+            grasp = torch.where(found[:, None, None], selected, grasp)
+            mirrored = grasp.clone()
+            mirrored[:, :3, :2] = -mirrored[:, :3, :2]
+            for variant in (grasp, mirrored):
+                variant = torch.where(found[:, None, None], selected, variant)
+                alignment = torch.sum(variant[:, :3, 2] * approach_direction, dim=-1)
+                eligible = available & ~found & (alignment >= minimum_alignment)
+                if not bool(eligible.any().item()):
+                    continue
+                feasible = self._ik_chain_feasible_rows(
+                    start_qpos,
+                    waypoint_poses(variant),
+                    eligible=eligible,
+                    env_ids=env_ids,
+                )
+                selected[feasible] = variant[feasible]
+                found |= feasible
+                if bool(found.all().item()):
+                    return selected, found
+        return selected, found
+
+    def _ik_chain_feasible_rows(
+        self,
+        start_qpos: torch.Tensor,
+        poses: Sequence[torch.Tensor],
+        *,
+        eligible: torch.Tensor,
+        env_ids: Sequence[int] | None = None,
+    ) -> torch.Tensor:
+        """Keep each eligible row's chain result without truncating other rows.
+
+        Full-batch calls retain Robot's environment/pose contract. Each row uses
+        its own previous solution; already rejected rows cannot become feasible
+        again, and accepted rows are frozen by the caller between candidates.
+        """
+        assert self.robot is not None
+        feasible = eligible.clone()
+        seed = start_qpos
+        for pose in poses:
+            success, solved = self.robot.compute_ik(
+                pose=pose,
+                joint_seed=seed,
+                name=self.control_part,
+                **({"env_ids": env_ids} if env_ids is not None else {}),
+            )
+            feasible &= torch.as_tensor(
+                success, device=feasible.device, dtype=torch.bool
+            ) & torch.isfinite(solved).all(dim=-1)
+            if not bool(feasible.any().item()):
+                break
+            seed = torch.where(feasible[:, None], canonical_case_qpos(solved), seed)
+        return feasible
 
     def _ik_chain_feasible(
-        self, start_qpos: torch.Tensor, poses: Sequence[torch.Tensor]
+        self,
+        start_qpos: torch.Tensor,
+        poses: Sequence[torch.Tensor],
+        *,
+        env_ids: Sequence[int] | None = None,
     ) -> bool:
         """Return whether every pose is reachable by IK seeded from the last."""
         assert self.robot is not None
@@ -1413,6 +1612,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 pose=pose,
                 joint_seed=seed,
                 name=self.control_part,
+                **({"env_ids": env_ids} if env_ids is not None else {}),
             )
             if not bool(torch.as_tensor(success).all().item()):
                 return False
@@ -1537,6 +1737,7 @@ class AtomicSkillScenario(ScenarioProvider):
             generator = create_parallel_jaw_grasp_pose_generator(
                 n_sample=n_sample,
                 force_refresh=False,
+                max_candidates=max_candidates,
             )
             candidates, costs = generator.get_valid_grasp_poses(
                 mesh_vertices=mesh_vertices,

@@ -52,6 +52,75 @@ prefixes are unchanged. Refresh the editable install and restart after changing
 entry-point metadata. Other robot datasets, EEFs and shared resources retain
 their current core ownership.
 
+## Locomotion defaults
+
+| Catalog ID | Canonical module | Morphology | Arms |
+| --- | --- | --- | --- |
+| `UnitreeGo1` | `embodichain_robots.unitree.go1` | `quadruped` | 0 |
+| `UnitreeGo2` | `embodichain_robots.unitree.go2` | `quadruped` | 0 |
+| `UnitreeG1` | `embodichain_robots.unitree.g1` | `bipedal_humanoid` | 2 |
+| `UnitreeH1_2` | `embodichain_robots.unitree.h1_2` | `bipedal_humanoid` | 2 |
+| `ANYmalC` | `embodichain_robots.anybotics.anymal_c` | `quadruped` | 0 |
+| `MicroDuck` | `embodichain_robots.pollen_robotics.microduck` | `biped` | 0 |
+
+Each model owns `cfg.py`, `assets.py` and a wheel-packaged `profile.json`.
+The shared profile reader remains backend-free. Root configuration imports
+and catalog IDs remain stable; use these vendor/model paths for submodule
+imports. For example, `embodichain_robots.unitree_go2` is replaced by
+`embodichain_robots.unitree.go2`.
+
+The catalog includes `UnitreeGo1`, `UnitreeGo2`, `UnitreeG1`, `UnitreeH1_2`,
+`ANYmalC` and `MicroDuck`. G1 selects the bundled 29-joint model; H1_2 selects
+the 27-joint model. Each preset owns its asset, floating base, standing pose,
+`locomotion` control group and default PD drive parameters. Both physics backends
+use the same model definition. These are the existing task simulation defaults,
+not manufacturer-verified hardware parameters or Isaac Lab actuator networks.
+
+| Unitree Go1 | Unitree Go2 | ANYmal-C |
+| --- | --- | --- |
+| ![Unitree Go1](../../docs/source/_static/robots/unitree_go1.png) | ![Unitree Go2](../../docs/source/_static/robots/unitree_go2.png) | ![ANYmal-C](../../docs/source/_static/robots/anymal_c.png) |
+
+| Unitree G1 | Unitree H1_2 | MicroDuck |
+| --- | --- | --- |
+| ![Unitree G1](../../docs/source/_static/robots/unitree_g1.png) | ![Unitree H1_2](../../docs/source/_static/robots/unitree_h1_2.png) | ![MicroDuck](../../docs/source/_static/robots/microduck.png) |
+
+Each model has its own [robot documentation page](../../docs/source/resources/robot/locomotion.md)
+with an individual image, usage example and configuration summary.
+
+DexSim OfflineRT (`rt`), 1 sample per pixel with DLSS denoising, shared preview
+lighting, tone mapping disabled and exposure 1. Models use their default joint
+poses and are framed independently; the preview does not show a common physical
+scale. Captured RGB has no additional gamma or color correction.
+
+```python
+from embodichain.robot_registry import resolve_robot_cfg
+
+cfg = resolve_robot_cfg("UnitreeGo2", {"uid": "robot"})
+robot = sim.add_robot(cfg=cfg)
+```
+
+```bash
+embodichain list-robot
+embodichain preview-robot --robot UnitreeGo2
+```
+
+Task deployments select `robot.class_type` and can explicitly override ordinary
+RobotCfg fields, including `joint_drive_props`. Task initialization preserves
+these overrides, including joint-name regex and control-part rules. Matching
+model defaults are replaced while untouched joints retain their defaults.
+Action scaling, observation layout, rewards and illegal-contact
+rules remain task-owned. Contact sensors remain environment-owned.
+
+The backend-free `locomotion_profiles.load_locomotion_robot_profile()` reader
+provides fresh copies of the packaged model description to both robot configs
+and pure Torch task contracts. `asset.init_qpos` follows source asset order;
+`robot.default_joint_position` follows `robot.joint_names`. Keep these orders
+distinct when modifying assets. Foot reference points and the orientation/IMU
+reference links are model data; their use in observations is task behavior.
+
+The presets retain `build_pk_chain=False` and do not provide limb IK solvers.
+New kinematic consumers need explicit limb control groups and validated chains.
+
 ## Tianji Marvin defaults
 
 Both Marvin variants start in the shared compact ready pose: lowered elbows

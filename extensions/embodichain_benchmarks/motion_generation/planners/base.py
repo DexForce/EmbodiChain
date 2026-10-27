@@ -88,6 +88,8 @@ class PlannerAdapter(ABC):
 
     capabilities: frozenset[str] = frozenset()
     model_revision: str = "N/A"
+    fixed_batch_size: int | None = None
+    """Required execution batch size, if the loaded model fixes it."""
     separate_prepare: bool = False
     """Whether this backend exposes a distinct lazy preparation phase."""
     timing_is_solved: bool = False
@@ -251,12 +253,19 @@ class PlannerAdapter(ABC):
             )
         return motion_generator
 
-    def atomic_plan_options(self) -> "PlanOptions | None":
+    def atomic_plan_options(
+        self, *, control_dt: float | None = None
+    ) -> "PlanOptions | None":
         """Return planner options for Atomic Skill calls that leave them unset.
 
         Atomic Skill providers stay planner-neutral and usually build motion
         policies without backend options.  A backend whose own defaults cannot
         plan such calls returns the options it uses for free-space cases.
+
+        Args:
+            control_dt: Host control period in seconds, when known. Backends may
+                sample a solved trajectory on this clock to avoid interpolation
+                that would invalidate its motion limits.
 
         Returns:
             Options applied to every motion policy without ``plan_opts``, or

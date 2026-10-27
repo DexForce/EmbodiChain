@@ -33,7 +33,7 @@ from embodichain.lab.sim.cfg import (
     RenderCfg,
     LightCfg,
 )
-from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
 
@@ -79,7 +79,8 @@ _READY_ARM_QPOS = (
 class TianjiMarvinCfg(RobotCfg):
     """Configure Tianji Marvin with or without its parallel-jaw grippers.
 
-    Both variants expose seven-joint ``left_arm`` and ``right_arm`` parts.
+    Both variants expose seven-joint ``left_arm`` and ``right_arm`` parts
+    with geometric SSIK and seed-local redundancy search on CPU or CUDA.
     Source mass, inertia and COM values are preserved without automatic unit
     conversion, including for custom assets. Their authored units have not been
     confirmed by the manufacturer. The bundled Task Program embodiment opts
@@ -192,7 +193,9 @@ class TianjiMarvinCfg(RobotCfg):
                 right_eef=["RIGHT_HAND_FINGER_1", "RIGHT_HAND_FINGER_2"],
             )
         self.solver_cfg = {
-            part: PytorchSolverCfg(
+            part: SSIKSolverCfg(
+                backend="warp",
+                srs_search="seed_local",
                 root_link_name=root,
                 end_link_name=end,
                 # End-link-to-TCP transform, shared by both URDF variants.

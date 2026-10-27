@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from .runner import BenchmarkRunResult
     from .video import VideoRecordCfg
 
-__all__ = ["run_benchmark"]
+__all__ = ["prepare_case_manifest", "run_benchmark"]
 
 
 def run_benchmark(
@@ -42,6 +42,9 @@ def run_benchmark(
     output_root: str | Path = "outputs/benchmarks",
     video: VideoRecordCfg | None = None,
     case_manifest: str | Path | None = None,
+    workers: int = 1,
+    worker_threads: int = 1,
+    quality_batch_size: int = 1,
 ) -> BenchmarkRunResult:
     """Evaluate planners against a suite without modifying caller configuration.
 
@@ -66,6 +69,18 @@ def run_benchmark(
             Retain the host-written resolved_embodiment identity; replay rejects
             changed robot/embodiment configurations before creating simulation.
             This supports fixed quality populations and declared timing subsets.
+        workers: Isolated processes for quality cases. More than one uses spawn,
+            freezes all inputs before candidate execution, and merges raw trials.
+            Planner RNG remains backend-owned: input pairing is exact but
+            stochastic solver outputs need not match serial execution.
+            Performance replay requires one worker. Concurrent timing is retained
+            in raw records but excluded from report timing and memory aggregates.
+        worker_threads: Torch and BLAS thread limit in each parallel worker.
+            Serial execution retains the caller's thread settings.
+        quality_batch_size: Execution slots for frozen B=1 Free-space NMG-only
+            quality replay. Original cases and standalone validation grids are
+            retained. Shared batch timings are not per-case planner latency.
+            Atomic, traditional baselines and performance replay require one.
 
     Returns:
         Raw trial records, aggregate metrics and paths to persisted artifacts.
@@ -79,6 +94,28 @@ def run_benchmark(
         within one process. Backend and model dependencies must be installed
         separately. Atomic Skills adapters also expose a MotionGenerator.
     """
+    if type(quality_batch_size) is not int or quality_batch_size < 1:
+        raise ValueError("quality_batch_size must be a positive integer.")
+    if type(workers) is not int or workers < 1:
+        raise ValueError("workers must be a positive integer.")
+    if type(worker_threads) is not int or worker_threads < 1:
+        raise ValueError("worker_threads must be a positive integer.")
+    if workers > 1:
+        from .parallel import run_parallel_benchmark
+
+        return run_parallel_benchmark(
+            suite,
+            planners=planners,
+            adapters=adapters,
+            device=device,
+            headless=headless,
+            output_root=output_root,
+            video=video,
+            case_manifest=case_manifest,
+            workers=workers,
+            worker_threads=worker_threads,
+            quality_batch_size=quality_batch_size,
+        )
     if isinstance(suite, (str, Path)):
         resolved = load_suite(suite)
     elif isinstance(suite, SuiteCfg):
@@ -96,8 +133,8 @@ def run_benchmark(
     if not selected:
         raise ValueError("No algorithms were selected for the benchmark.")
 
-    from .runner import BenchmarkRunner
     from .registry import planner_adapter_names
+    from .runner import BenchmarkRunner
 
     known_adapters = set(planner_adapter_names()) | set(adapters or {})
     for spec in selected:
@@ -116,6 +153,7 @@ def run_benchmark(
         output_root=output_root,
         video=video,
         case_manifest=case_manifest,
+        quality_batch_size=quality_batch_size,
     )
     if planners is not None:
         runner.suite.planners = runner.planner_specs
@@ -123,3 +161,35 @@ def run_benchmark(
             spec.enabled = True
     runner.suite.validate_benchmark()
     return runner.run()
+
+
+def prepare_case_manifest(
+    suite: str | Path | SuiteCfg,
+    output: str | Path,
+    *,
+    device: str = "auto",
+    headless: bool = True,
+) -> Path:
+    """Freeze suite inputs independently of every candidate planner.
+
+    Args:
+        suite: Installed suite name, YAML path or assembled configuration.
+        output: New case manifest path; existing files are never replaced.
+        device: Simulation device used for case generation and reachability.
+        headless: Whether to construct simulation without a viewer.
+
+    Returns:
+        The complete hashed corpus, ready for serial or parallel replay.
+    """
+    if isinstance(suite, (str, Path)):
+        resolved = load_suite(suite)
+    elif isinstance(suite, SuiteCfg):
+        resolved = suite
+    else:
+        raise TypeError("suite must be a suite name, YAML path, or SuiteCfg.")
+    resolved.validate_benchmark()
+    from .runner import BenchmarkRunner
+
+    return BenchmarkRunner(
+        resolved, [], device=device, headless=headless
+    ).prepare_case_manifest(output)

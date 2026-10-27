@@ -27,6 +27,8 @@ Choose a solver
      - Analytical IK for 6-DOF arms matching the OPW parameterization.
    * - :doc:`srs_solver`
      - Analytical IK for 7-DOF spherical-rotational-spherical arms.
+   * - :doc:`ssik_solver`
+     - Model-derived Warp IK for three-parallel 6R and strict SRS 7R chains, with an optional CPU reference.
    * - :doc:`ur_solver`
      - Analytical IK for supported Universal Robots models.
    * - :doc:`neural_ik_solver`
@@ -76,5 +78,6 @@ For full signatures and configuration fields, see the
    pinocchio_solver
    opw_solver
    srs_solver
+   ssik_solver
    ur_solver
    neural_ik_solver

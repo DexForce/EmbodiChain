@@ -108,7 +108,9 @@ def _geometry() -> tuple[torch.Tensor, torch.Tensor]:
     )
 
 
-def _generator(*, force_refresh: bool = False) -> AntipodalGraspPoseGenerator:
+def _generator(
+    *, force_refresh: bool = False, alignment_angle: float | None = None
+) -> AntipodalGraspPoseGenerator:
     return AntipodalGraspPoseGenerator(
         ParallelJawGripperModelCfg(
             model_id="concrete_test_eef",
@@ -122,6 +124,7 @@ def _generator(*, force_refresh: bool = False) -> AntipodalGraspPoseGenerator:
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=321,
             max_candidates=7,
+            approach_alignment_angle=alignment_angle,
         ),
         collision_cfg=ParallelJawGraspCollisionCfg(
             point_sample_density=0.02,
@@ -316,11 +319,13 @@ def test_candidate_metadata_preserves_failed_row_sentinel(
     assert torch.isinf(costs).all()
 
 
+@pytest.mark.parametrize("alignment_angle", [None, 0.1])
 def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     backend: type[_Backend],
+    alignment_angle,
 ) -> None:
     vertices, triangles = _geometry()
-    generator = _generator()
+    generator = _generator(alignment_angle=alignment_angle)
     object_poses = torch.eye(4).repeat(2, 1, 1)
 
     success, grasp_poses, opening_widths = generator.get_best_grasp_poses(
@@ -348,6 +353,7 @@ def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     assert sampler_cfg.max_length == 0.12
     assert sampler_cfg.center_mode == "bounds"
     assert configured.options["max_candidates"] == 7
+    assert configured.options["approach_alignment_angle"] == alignment_angle
     assert configured.options["filter_ground_collision"] is False
     assert collision_cfg.finger_length == 0.09
     assert collision_cfg.open_check_margin == 0.003
@@ -401,6 +407,9 @@ def test_backend_cache_key_includes_sampling_and_annotation_policy() -> None:
     generator._interactive_annotation = False
     generator._use_largest_connected_component = True
     changed_component_policy = generator._get_cache_dir(vertices, triangles)
+    generator._sampler_cfg = generator._sampler_cfg.replace(center_mode="centroid")
+    generator._center_mode = "centroid"
+    changed_center_mode = generator._get_cache_dir(vertices, triangles)
 
     assert (
         len(
@@ -409,7 +418,14 @@ def test_backend_cache_key_includes_sampling_and_annotation_policy() -> None:
                 changed_sampler,
                 changed_selection,
                 changed_component_policy,
+                changed_center_mode,
             }
         )
-        == 4
+        == 5
     )
+
+
+@pytest.mark.parametrize("angle", [True, float("nan"), 4.0])
+def test_hard_approach_angle_rejects_non_angle_values(angle) -> None:
+    with pytest.raises((TypeError, ValueError), match="approach_alignment_angle"):
+        AntipodalGraspPoseGeneratorCfg(approach_alignment_angle=angle)

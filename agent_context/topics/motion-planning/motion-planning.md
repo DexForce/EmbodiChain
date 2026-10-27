@@ -89,6 +89,20 @@ substeps; Gym experts use the environment-owned command period and
 [expert execution contract](../env-framework/env-framework.md). Dataset writers
 encode prepared actions rather than retiming a second time.
 
+For Atomic case preparation, preserve the original batched grasp-pool RNG scope.
+An explicitly configured finite position search reuses that pool; an approach
+search constructs one original batched pool per direction. Both freeze successful
+rows independently, while the public grasp screen still raises for unresolved
+rows. Per-row sampler resets and hard approach filtering before NMS/ranking can
+change the selected full-pose population. Freeze the chosen grasp, direction and
+position before evaluating planners, and review population fingerprints when the
+selection law changes. See the benchmark package README for the case options;
+preparation diagnostics and incomplete corpora are not formal quality results.
+MoveHeldObject/Place may explicitly condition goal-local streams on complete
+reference endpoint evidence with `target_candidate_count`; freeze each accepted
+row and retain rejected goals. This changes the population, requires reviewed
+fingerprints, and supplies no path or physical-success certificate.
+
 ## Trajectory augmentation boundary
 
 Scene layout proposals and their Task Program execution adapter belong to
@@ -124,8 +138,8 @@ state or coverage contracts out of `motion/expansion/`.
 Motion-limit checks are not collision/task-success certification.
 `rotate_grasp_about_object_axis` and `perturb_approach_direction` change TCP
 candidates around a fixed object axis or approach cone; both emit Cartesian
-poses that callers must replan, and neither certifies the contact. Grasp
-grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed by
+poses that callers must replan, and neither certifies the contact.
+Grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed by
 Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
 
 `variants.py` is the common candidate-generation path for joint-space,
@@ -267,14 +281,34 @@ promise path following; sampled polyline deviations and native start-error
 quantiles remain diagnostics.
 Geometry validation includes the requested initial joint state. Atomic providers
 declare gripper requirements; typed pose settings flow through generation rather
-than being expanded into private configuration keys. Built-in Atomic suites
+than being expanded into private configuration keys. Object antipodal screening
+samples the pose batch once, then freezes each row's first aligned, independently
+IK-feasible candidate from its own pool; AxisAlign ranks against each row's
+rotation axis. Failed chains do not truncate other rows or change their choices.
+Built-in Atomic suites
 compile and replay on their declared command clock; compiled replay consumes
 arrival intervals on physics ticks and preserves observation segment indices.
 Legacy fixed-sample replay remains explicit in trial metadata. The benchmark
 README and design contract own population and protocol details.
-Run calls serially within a process. Suite resources ship in the wheel; the
-installed CLI dispatches through `embodichain/cli/benchmark.py`. Source launchers
-under `scripts/benchmark/` only forward motion-generation evaluation.
+Run host calls serially within a process. `run_benchmark(workers>1)` isolates
+quality shards with spawned processes after freezing the full input corpus;
+`prepare_case_manifest()` can prepare that corpus without running planners.
+Frozen B=1 Free-space NMG-only replay optionally uses `quality_batch_size` to
+pack compatible requests into a larger simulator. `_quality_batching.py` owns
+packing, valid-prefix recovery and explicit environment-row FK mapping; the
+runner validates original cases separately and preserves their manifest and
+trial identities. Raw endpoint derivatives are recomputed after trimming, and
+retimed zero-dt holds are excluded. A single batch measurement is metadata,
+not a per-case latency. The option composes with spawn workers; Atomic,
+traditional backends and performance replay retain their declared batches.
+The parent validates complete case/method/repeat evidence and recomputes
+aggregates from raw trials. Parallel raw timing is marked contended and excluded
+from timing reports; performance replay stays serial. Planner RNG is
+backend-owned, so frozen-input pairing does not guarantee identical stochastic
+solver outcomes across schedules. Worker thread limits also bound ONNX Runtime
+through the host Torch intra-op setting. Suite resources ship in the wheel;
+the installed CLI dispatches through `embodichain/cli/benchmark.py`. Source
+launchers under `scripts/benchmark/` forward motion-generation evaluation.
 `tests/benchmark/motion_generation/` covers contracts and lifecycle, while
 `tests/test_benchmark_package.py` builds and installs the wheel outside the checkout.
 

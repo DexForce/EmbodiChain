@@ -135,6 +135,10 @@ _MOTION_METRIC_COLUMNS = (
     "timed_motion_valid_rate",
     "ordered_waypoint_success_rate",
     "waypoint_completion_rate",
+    "policy_trace_coverage_rate",
+    "policy_completion_rate",
+    "policy_completion_steps_mean",
+    "policy_steps_used_mean",
     "final_pos_err_mm",
     "final_rot_err_deg",
     "waypoint_pos_err_mm_p95",
@@ -240,6 +244,9 @@ def write_markdown_report(
         "",
         "Continuous error/path columns use geometry-valid outcomes (`n_valid`) for every method. "
         "Dynamic peaks and violations are diagnostic measurements, including nominal clocks; they are not timed success scores.",
+        "Policy steps use the original pre-retiming control states, with initial satisfaction at step 0. "
+        "Completion-step means condition on completed traces; completion curves in aggregates.json retain failed and missing cases in the denominator. "
+        "Absent policy traces are N/A, and retimed output samples are not policy controls.",
         "Success intervals resample complete seed clusters with 1000 deterministic bootstrap draws; environment rows and repeated calls are not independent samples. "
         "Fewer than two seed clusters produce N/A. Fewer than ten are marked `few_seed_clusters`: percentile intervals are coarse and unstable; with very small populations they can approach the range of seed rates. "
         "These intervals describe the declared workload distribution and do not establish held-out training data.",

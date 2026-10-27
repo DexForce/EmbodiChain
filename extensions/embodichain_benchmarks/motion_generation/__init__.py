@@ -35,6 +35,7 @@ __all__ = [
     "load_suite",
     "run_all_benchmarks",
     "run_benchmark",
+    "prepare_case_manifest",
 ]
 
 _EXPORT_MODULES = {
@@ -47,6 +48,7 @@ _EXPORT_MODULES = {
     "load_suite": ".config",
     "run_all_benchmarks": ".cli",
     "run_benchmark": ".api",
+    "prepare_case_manifest": ".api",
 }
 
 

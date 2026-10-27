@@ -10,8 +10,10 @@ runtime registry. Shared MLPs and feature normalization stay in core
 
 The [model catalog contract](../../../extensions/embodichain_models/README.md)
 owns domain and public-import naming. Policy models predict actions; dynamics
-models predict future state or geometry. RWM and RigidFormer follow-ups use
-`dynamics.rwm` and `dynamics.rigidformer`; only `dynamics.nerd` is implemented here.
+models predict future state or geometry. Canonical RWM and RigidFormer paths are
+`dynamics.rwm` and `dynamics.rigidformer`; the catalog tracks implemented families.
+RWM ownership and graph/data contracts are in
+[robot world model](../robot-world-model/robot-world-model.md).
 World-model naming does not introduce a parallel `world_models` domain.
 
 | Request | Owner |

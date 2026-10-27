@@ -305,6 +305,7 @@ def local_robot_assets(monkeypatch, tmp_path):
 
     for module_name in (
         "embodichain.data",
+        "embodichain.lab.sim.cfg",
         "embodichain_robots.arx.arx5.cfg",
         "embodichain_robots.alohamini.aloha_mini.cfg",
         "embodichain_robots.tianji.marvin.cfg",
@@ -323,6 +324,12 @@ def local_robot_assets(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     "name",
     [
+        "UnitreeGo1",
+        "UnitreeGo2",
+        "UnitreeG1",
+        "UnitreeH1_2",
+        "ANYmalC",
+        "MicroDuck",
         "AlohaMini",
         "ARX5",
         "TianjiMarvin",
@@ -362,6 +369,156 @@ def test_default_control_metadata_matches_robot_configuration(
         for part, joints in cfg.control_parts.items()
         if any(joint in spec["mimic_joints"] for joint in joints)
     }
+
+
+@pytest.mark.parametrize(
+    "name,joint,stiffness,effort,height",
+    [
+        ("UnitreeGo1", "FR_hip_joint", 15.895242654143557, 23.7, 0.278),
+        ("UnitreeGo2", "FL_hip_joint", 20.0, 23.5, 0.32),
+        ("UnitreeG1", "left_knee_joint", 99.09842777666111, 139.0, 0.8),
+        ("UnitreeH1_2", "left_knee_joint", 157.7, 300.0, 1.02),
+        ("ANYmalC", "LF_HAA", 40.0, 80.0, 0.6),
+        ("MicroDuck", "left_hip_yaw", 0.55, 0.96, 0.12),
+    ],
+)
+def test_locomotion_presets_preserve_standalone_drive_defaults(
+    catalogs, local_robot_assets, name, joint, stiffness, effort, height
+) -> None:
+    """Standalone presets retain the previous official task's effective drives."""
+    from embodichain_robots._catalog import ROBOT_CONFIGS
+
+    catalogs.append(_entry("official", ROBOT_CONFIGS))
+    cfg = registry.resolve_robot_cfg(name)
+    drives = cfg.joint_drive_props
+    actual_stiffness = (
+        drives.stiffness[joint]
+        if isinstance(drives.stiffness, dict)
+        else drives.stiffness
+    )
+    actual_effort = (
+        drives.max_effort[joint]
+        if isinstance(drives.max_effort, dict)
+        else drives.max_effort
+    )
+    assert actual_stiffness == pytest.approx(stiffness)
+    assert actual_effort == pytest.approx(effort)
+    assert cfg.init_pos[2] == pytest.approx(height)
+    assert cfg.root_props.fixed_base is False
+    assert cfg.build_pk_chain is False
+
+
+@pytest.mark.parametrize(
+    "name,rules,parts,selected,default",
+    [
+        ("UnitreeGo2", {"FL_hip_joint": 12.5}, {}, {"FL_hip_joint": 12.5}, 20.0),
+        (
+            "UnitreeGo2",
+            {".*hip_joint": 12.5},
+            {},
+            {
+                "FL_hip_joint": 12.5,
+                "FR_hip_joint": 12.5,
+                "RL_hip_joint": 12.5,
+                "RR_hip_joint": 12.5,
+            },
+            20.0,
+        ),
+        ("UnitreeGo2", {"locomotion": 12.5}, {}, None, 20.0),
+        (
+            "UnitreeGo2",
+            {"front_legs": 12.5, "FL_hip_joint": 8.0},
+            {"front_legs": ["F[LR]_.*"]},
+            {
+                "FL_hip_joint": 8.0,
+                "FL_thigh_joint": 12.5,
+                "FL_calf_joint": 12.5,
+                "FR_hip_joint": 12.5,
+                "FR_thigh_joint": 12.5,
+                "FR_calf_joint": 12.5,
+            },
+            20.0,
+        ),
+        (
+            "ANYmalC",
+            {"LF_.*": 12.5},
+            {},
+            {"LF_HAA": 12.5, "LF_HFE": 12.5, "LF_KFE": 12.5},
+            40.0,
+        ),
+    ],
+)
+def test_locomotion_overrides_are_isolated_and_roundtrip(
+    catalogs, local_robot_assets, name, rules, parts, selected, default
+) -> None:
+    """Caller rules lower without default overlaps and survive serialization."""
+    from copy import deepcopy
+    from embodichain.lab.sim.spawn.descriptors import _joint_property_matches
+    from embodichain_robots._catalog import ROBOT_CONFIGS
+
+    catalogs.append(_entry("official", ROBOT_CONFIGS))
+    overrides = {"joint_drive_props": {"stiffness": rules}, "control_parts": parts}
+    original = deepcopy(overrides)
+    cfg = registry.resolve_robot_cfg(name, overrides)
+    snapshot = cfg.to_dict()
+    restored = type(cfg).from_dict(snapshot)
+    assert restored.to_dict() == snapshot
+    names = cfg.control_parts["locomotion"]
+
+    def resolved(candidate):
+        return dict(
+            _joint_property_matches(
+                candidate.joint_drive_props.stiffness,
+                names,
+                property_name="stiffness",
+                control_parts=candidate.control_parts,
+            )
+        )
+
+    baseline = {
+        joint: (
+            40.0
+            if name == "UnitreeGo2"
+            and joint
+            in {"FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint"}
+            else default
+        )
+        for joint in names
+    }
+    expected = (
+        {joint: 12.5 for joint in names}
+        if selected is None
+        else {joint: selected.get(joint, baseline[joint]) for joint in names}
+    )
+    assert resolved(cfg) == expected
+    assert resolved(restored) == expected
+    assert resolved(registry.resolve_robot_cfg(name)) == baseline
+    assert overrides == original
+
+
+@pytest.mark.parametrize(
+    "name,vendor,morphology,arm_count",
+    [
+        ("UnitreeGo1", "unitree", "quadruped", 0),
+        ("UnitreeGo2", "unitree", "quadruped", 0),
+        ("UnitreeG1", "unitree", "bipedal_humanoid", 2),
+        ("UnitreeH1_2", "unitree", "bipedal_humanoid", 2),
+        ("ANYmalC", "anybotics", "quadruped", 0),
+        ("MicroDuck", "pollen_robotics", "biped", 0),
+    ],
+)
+def test_locomotion_catalog_classifies_body_independently_of_arms(
+    catalogs, name, vendor, morphology, arm_count
+) -> None:
+    from embodichain_robots._catalog import ROBOT_CONFIGS
+
+    catalogs.append(_entry("official", ROBOT_CONFIGS))
+    spec = registry._robot_specs()[name]
+    assert (spec["vendor"], spec["morphology"], spec["arm_count"]) == (
+        vendor,
+        morphology,
+        arm_count,
+    )
 
 
 def test_w1_variant_catalog_covers_body_and_independent_hand_registries():

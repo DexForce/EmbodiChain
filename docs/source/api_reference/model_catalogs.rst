@@ -252,3 +252,11 @@ working directory and example-runner bootstrap.
    :members: sample
 
 .. autofunction:: build_supervised_trainer
+
+Other dynamics families
+-----------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   rwm

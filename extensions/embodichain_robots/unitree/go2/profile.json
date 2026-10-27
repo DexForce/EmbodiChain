@@ -1,0 +1,175 @@
+{
+  "asset": {
+    "fpath": "UnitreeGo2Locomotion/go2.usda",
+    "build_pk_chain": false,
+    "init_pos": [
+      0.0,
+      0.0,
+      0.32
+    ],
+    "init_qpos": [
+      -0.1,
+      0.1,
+      -0.1,
+      0.1,
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      -1.8,
+      -1.8,
+      -1.8,
+      -1.8
+    ],
+    "asset_physics_mode": "overlay",
+    "root_props": {
+      "fixed_base": false,
+      "self_collision_enabled": false,
+      "min_position_iters": 4,
+      "min_velocity_iters": 0
+    }
+  },
+  "robot": {
+    "joint_names": [
+      "FL_hip_joint",
+      "FL_thigh_joint",
+      "FL_calf_joint",
+      "FR_hip_joint",
+      "FR_thigh_joint",
+      "FR_calf_joint",
+      "RL_hip_joint",
+      "RL_thigh_joint",
+      "RL_calf_joint",
+      "RR_hip_joint",
+      "RR_thigh_joint",
+      "RR_calf_joint"
+    ],
+    "body_names": [
+      "base_link",
+      "FL_hip",
+      "FL_thigh",
+      "FL_calf",
+      "FR_hip",
+      "FR_thigh",
+      "FR_calf",
+      "RL_hip",
+      "RL_thigh",
+      "RL_calf",
+      "RR_hip",
+      "RR_thigh",
+      "RR_calf"
+    ],
+    "root_position": [
+      0.0,
+      0.0,
+      0.32
+    ],
+    "root_quaternion_wxyz": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "default_joint_position": [
+      -0.1,
+      0.9,
+      -1.8,
+      0.1,
+      0.9,
+      -1.8,
+      -0.1,
+      0.9,
+      -1.8,
+      0.1,
+      0.9,
+      -1.8
+    ],
+    "stiffness": [
+      20.0,
+      20.0,
+      40.0,
+      20.0,
+      20.0,
+      40.0,
+      20.0,
+      20.0,
+      40.0,
+      20.0,
+      20.0,
+      40.0
+    ],
+    "damping": [
+      1.0,
+      1.0,
+      2.0,
+      1.0,
+      1.0,
+      2.0,
+      1.0,
+      1.0,
+      2.0,
+      1.0,
+      1.0,
+      2.0
+    ],
+    "armature": [
+      0.01,
+      0.01,
+      0.02,
+      0.01,
+      0.01,
+      0.02,
+      0.01,
+      0.01,
+      0.02,
+      0.01,
+      0.01,
+      0.02
+    ],
+    "effort_limit": [
+      23.5,
+      23.5,
+      45.0,
+      23.5,
+      23.5,
+      45.0,
+      23.5,
+      23.5,
+      45.0,
+      23.5,
+      23.5,
+      45.0
+    ]
+  },
+  "frames": {
+    "foot_link_names": [
+      "FR_calf",
+      "FL_calf",
+      "RR_calf",
+      "RL_calf"
+    ],
+    "foot_offsets": [
+      [
+        0.0,
+        0.0,
+        -0.213
+      ],
+      [
+        0.0,
+        0.0,
+        -0.213
+      ],
+      [
+        0.0,
+        0.0,
+        -0.213
+      ],
+      [
+        0.0,
+        0.0,
+        -0.213
+      ]
+    ],
+    "orientation_link_name": "base_link"
+  }
+}
