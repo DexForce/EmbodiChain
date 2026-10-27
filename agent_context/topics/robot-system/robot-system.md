@@ -84,15 +84,12 @@ Its default TCPs are the `left_ee` / `right_ee` flanges. Select optional hands
 explicitly and configure their tool TCPs independently. V030 preserves source
 arm link names and omits uncalibrated wrist-camera attachments. Its unified
 asset archive keeps component visuals and inertials aligned with the full body.
-The optional `v030/Pika` variant registers the Pika hand brand, tool TCP and
-three mounted RGB-D cameras (head overview and two wrist views). These are
-simulation-designed mounts; the bare V030 still has no camera suite. Its
-ready pose uses breadth-first source joint order, including interleaved head/
-arm branches. The shared `dexforce_w1_030_pika` task embodiment anchors the
-base and limits task commands to the four arm/EEF groups (16 independent
-joints), keeping torso/head joints at their ready pose. See the
-[W1/Pika configuration](../../../extensions/embodichain_robots/dexforce/w1/README.md)
-for frame, geometry and camera provenance.
+The `dexforce_w1_030_pika` task embodiment composes the W1/Pika URDF assets
+with a generic `RobotCfg`; its component YAML owns tool transforms, source-order
+ready joints, drives and three mounted RGB-D declarations. W1 model defaults
+and catalog variants remain independent of this assembly. See the
+[embodiment configuration](../../../extensions/embodichain_tasks/configs/components/embodiments/dexforce_w1_030_pika.yaml)
+and its [usage notes](../../../extensions/embodichain_tasks/configs/components/embodiments/dexforce_w1_030_pika.md).
 
 `DualArmRobotCfg.build_pk_serial_chain()` resolves each solver's root/end
 frames against that arm's source URDF. It translates assembled names back to

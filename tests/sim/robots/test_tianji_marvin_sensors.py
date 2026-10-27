@@ -24,10 +24,11 @@ import torch
 from pathlib import Path
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import DenoisingCfg, RenderCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import DenoisingCfg, RenderCfg, RigidObjectCfg, RobotCfg
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain_robots import DexforceW1Cfg, TianjiMarvinCfg
+from embodichain_robots import TianjiMarvinCfg
+from embodichain.utils.utility import load_config
 
 
 @pytest.mark.gpu
@@ -143,16 +144,18 @@ class TestTianjiMarvinSensors:
 
 class TestDexforceW1PikaSensors(TestTianjiMarvinSensors):
     def _robot_cfg(self):
-        return DexforceW1Cfg.from_dict(
-            {
-                "version": "v030",
-                "with_default_eef": True,
-                "hand_types": {"left": "PIKA_GRIPPER", "right": "PIKA_GRIPPER"},
-                "enable_sensor": True,
-                "uid": "camera_test_w1_pika",
-                "root_props": {"fixed_base": True},
-            }
+        component = (
+            Path(__file__).parents[3]
+            / "extensions/embodichain_tasks/configs/components/embodiments"
+            / "dexforce_w1_030_pika.yaml"
         )
+        payload = load_config(component)["simulation"]
+        payload.update(
+            enable_sensor=True,
+            uid="camera_test_w1_pika",
+            init_pos=[0.0, 0.0, 0.0],
+        )
+        return RobotCfg.from_dict(payload)
 
     def test_ready_pose_uses_source_joint_order(self) -> None:
         """Native breadth-first joint ordering must preserve the designed TCPs."""

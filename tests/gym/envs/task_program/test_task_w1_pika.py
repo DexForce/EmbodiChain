@@ -19,12 +19,14 @@
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
 
 import pytest
+import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv
-from embodichain.lab.sim.cfg import DefaultPhysicsCfg
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RobotCfg
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 from embodichain.lab.gym.utils._component_composition import (
@@ -59,7 +61,6 @@ def test_w1_pika_deployment_composes_and_preserves_task_route(
     task: str, segments: int | None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain_robots.dexforce.w1 import utils
 
     def asset(value: str) -> str:
         path = tmp_path / value
@@ -67,7 +68,6 @@ def test_w1_pika_deployment_composes_and_preserves_task_route(
         path.write_text("<robot name='fixture'><link name='base_link'/></robot>")
         return str(path)
 
-    monkeypatch.setattr(utils, "get_data_path", asset)
     monkeypatch.setattr(sim_cfg, "get_data_path", asset)
     path = _CONFIGS / task / "task.dexforce_w1_030_pika.yaml"
     payload = load_config(path)
@@ -77,6 +77,34 @@ def test_w1_pika_deployment_composes_and_preserves_task_route(
             "embodichain_tasks.manipulation." + task.replace("/", ".")
         )
     cfg = config_to_cfg(payload, source_path=path)
+    assert type(cfg.robot) is RobotCfg
+    assert set(cfg.robot.urdf_cfg.components) == {
+        "chassis",
+        "torso",
+        "head",
+        "left_arm",
+        "right_arm",
+        "left_hand",
+        "right_hand",
+    }
+    if task == "repeated_pick_place":
+        restored = RobotCfg.from_dict(json.loads(json.dumps(cfg.robot.to_dict())))
+        assert cfg.robot.urdf_cfg.fname == "DexforceW1V030_pika"
+        assert restored.urdf_cfg.fname == cfg.robot.urdf_cfg.fname
+        assert restored.urdf_cfg.fpath_prefix == cfg.robot.urdf_cfg.fpath_prefix
+        assert restored.control_parts == cfg.robot.control_parts
+        assert restored.init_qpos == cfg.robot.init_qpos
+        assert restored.urdf_cfg.component_prefix == cfg.robot.urdf_cfg.component_prefix
+        for side in ("left_arm", "right_arm"):
+            torch.testing.assert_close(
+                torch.tensor(restored.solver_cfg[side].tcp),
+                torch.tensor(cfg.robot.solver_cfg[side].tcp),
+            )
+        for before, after in zip(cfg.robot.sensors, restored.sensors, strict=True):
+            assert after.extrinsics.parent == before.extrinsics.parent
+            torch.testing.assert_close(
+                after.extrinsics.transformation, before.extrinsics.transformation
+            )
     assert payload["id"].endswith("-DexforceW1V030Pika-v1")
     assert cfg.control_parts == ["left_arm", "left_eef", "right_arm", "right_eef"]
     assert isinstance(cfg.sim_cfg.physics_config, DefaultPhysicsCfg)

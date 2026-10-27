@@ -1,22 +1,14 @@
-# W1 V030 with PikaGripper
+# W1 V030 with PikaGripper embodiment
 
-The `DexforceW1` catalog variant `v030/Pika` assembles the standard V030 body
-with two standalone Pika grippers. The V030 bare variant and earlier W1 catalog
-variants keep their existing defaults.
+[`dexforce_w1_030_pika.yaml`](dexforce_w1_030_pika.yaml) composes the standard
+W1 V030 body and two standalone Pika grippers through a generic `RobotCfg`.
+Its `simulation` mapping owns the URDF components, source joint names, FEP
+solver/tool transforms, drives, ready pose and robot-mounted RGB-D cameras.
+It does not introduce a W1 hand-brand enum or robot catalog variant.
 
-```python
-from embodichain.robot_registry import resolve_robot_cfg
-
-cfg = resolve_robot_cfg("DexforceW1", variant="v030/Pika")
-cfg.enable_sensor = True  # Standalone simulation; Gym owns its own switch.
-robot = sim.add_robot(cfg)
-```
-
-The reusable task embodiment is
-[`dexforce_w1_030_pika.yaml`](../../../embodichain_tasks/configs/components/embodiments/dexforce_w1_030_pika.yaml).
-It anchors the base and provides the `dual_arm_parallel_gripper` skill profile.
-The four task control groups are `left_arm`, `left_eef`, `right_arm`, and
-`right_eef`: 14 arm joints and two independent finger joints. The complete
+The component anchors the base and provides the `dual_arm_parallel_gripper`
+skill profile. Task control uses `left_arm`, `left_eef`, `right_arm`, and
+`right_eef`: 14 arm joints and two independent finger joints. The assembled
 robot has 24 joint coordinates, including two mimic followers, and 22
 independent joints. Its six torso/head joints hold their initial positions.
 
@@ -33,11 +25,10 @@ it 20 mm above the object center, leaving the fingertips clear of the table.
 `FINGER1_JOINT` is actuated and `FINGER2_JOINT` mimics it. Each source joint
 spans 0–0.05 m: `[0.05, 0.05]` opens and `[0, 0]` closes the jaws. The
 `pika_gripper` GraspKit geometry is measured from the packaged collision meshes;
-see [geometry provenance](../../../../embodichain/toolkits/graspkit/README.md).
-The standalone gripper drives use 1000 N/m stiffness, 100 N s/m damping,
-40 N effort and 0.25 m/s velocity. The task embodiment limits effort to 8 N
-and sets finger friction to 2.0 to hold objects without the initial overly
-strong squeeze. These are simulation settings, not hardware ratings.
+see [geometry provenance](../../../../../embodichain/toolkits/graspkit/README.md).
+The embodiment sets gripper drives to 1000 N/m stiffness, 100 N s/m damping,
+8 N effort and 0.25 m/s velocity, with finger friction 2.0. These are
+simulation settings, not hardware ratings.
 
 The ready pose uses a shallow `[-0.15, 0.30, -0.15]` rad leg-chain bend,
 keeping the upper body upright. The head physically pitches down 40° through
@@ -85,12 +76,6 @@ head origin clears the head's forward mesh bound. Raising the wrist origins
 keeps the housing out of the central image while retaining the near grasp
 below image centre and preserving context ahead of the fingertips. The
 mount was checked at recorded approach, grasp and transport states.
-
-The native comparison below shows the external head pose beside its full RGB
-image. The upper row is level; the lower row physically pitches NECK2 down
-40°. Both use the same fixed, forward-facing camera mount and DLSS RR.
-
-![Head pose and attached camera observations](head_camera_observations.jpg)
 
 AgileX publishes a [wrist fisheye observation screenshot](https://github.com/agilexrobotics/pika_ros/blob/master/img/image_4.png)
 and [RGB-D recording thumbnails](https://github.com/agilexrobotics/pika_ros/blob/master/img/image_11.png).

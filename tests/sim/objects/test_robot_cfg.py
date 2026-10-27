@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import enum
+import json
 from copy import deepcopy
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -55,6 +56,40 @@ from embodichain_robots.dexforce.w1.utils import (
 from embodichain.lab.sim.motion.solvers import SRSSolverCfg
 from embodichain.utils import configclass
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+
+
+@pytest.mark.no_sim
+def test_generic_robot_assembly_json_roundtrip_preserves_output(
+    tmp_path: Path,
+) -> None:
+    """Declarative assemblies retain output settings and JSON prefix pairs."""
+    source = tmp_path / "component.urdf"
+    source.write_text('<robot name="component"><link name="base_link"/></robot>')
+    output_root = tmp_path / "assemblies"
+    cfg = RobotCfg.from_dict(
+        {
+            "urdf_cfg": {
+                "fname": "composed_robot",
+                "fpath_prefix": str(output_root),
+                "component_prefix": {"left_arm": "left_", "right_arm": "right_"},
+                "components": [
+                    {"component_type": side, "urdf_path": str(source)}
+                    for side in ("left_arm", "right_arm")
+                ],
+            }
+        }
+    )
+    restored = RobotCfg.from_dict(json.loads(json.dumps(cfg.to_dict())))
+    for robot in (cfg, restored):
+        assert robot.urdf_cfg.fname == "composed_robot"
+        assert robot.urdf_cfg.fpath_prefix == str(output_root)
+        assert robot.urdf_cfg.fpath == str(
+            output_root / "composed_robot/composed_robot.urdf"
+        )
+        assert robot.urdf_cfg.component_prefix == [
+            ("left_arm", "left_"),
+            ("right_arm", "right_"),
+        ]
 
 
 @pytest.mark.no_sim
@@ -557,55 +592,6 @@ def test_w1_v030_opt_in_hands_keep_independent_versions(monkeypatch, tmp_path):
     assert "right_hand" in cfg.urdf_cfg.components
     assert all(v == DexforceW1HandVersion.V021 for v in cfg.hand_versions.values())
     assert "left_eef" in cfg.control_parts and "right_eef" in cfg.control_parts
-
-
-def test_w1_pika_defaults_roundtrip_and_explicit_sensor_override(monkeypatch, tmp_path):
-    """Pika keeps its adapter TCP, independent finger and mounted RGB-D suite."""
-    from embodichain.lab.sim.motion.solvers import FEPSolverCfg
-
-    _mock_w1_asset_paths(monkeypatch, tmp_path)
-    selection = {
-        "version": "v030",
-        "with_default_eef": True,
-        "hand_types": {"left": "PIKA_GRIPPER", "right": "PIKA_GRIPPER"},
-    }
-    cfg = DexforceW1Cfg.from_dict(selection)
-    restored = DexforceW1Cfg.from_dict(cfg.to_dict())
-    for instance in (cfg, restored):
-        assert len(instance.init_qpos) == 24
-        assert instance.urdf_cfg.fname == "DexforceW1V030_pika"
-        for side in ("left", "right"):
-            solver = instance.solver_cfg[f"{side}_arm"]
-            assert isinstance(solver, FEPSolverCfg)
-            np.testing.assert_allclose(
-                solver.tcp,
-                [
-                    [0, 1, 0, 0.00064],
-                    [-1, 0, 0, 0],
-                    [0, 0, 1, 0.160],
-                    [0, 0, 0, 1],
-                ],
-            )
-            assert instance.control_parts[f"{side}_eef"] == [
-                f"{side.upper()}_FINGER1_JOINT",
-                f"{side.upper()}_FINGER2_JOINT",
-            ]
-            assert instance.joint_drive_props.max_effort[f"{side}_eef"] == 40
-        assert [(s.uid, s.extrinsics.parent) for s in instance.sensors] == [
-            ("cam_high", "head_pitch_j2_link"),
-            ("cam_left_wrist", "left_gripper_base"),
-            ("cam_right_wrist", "right_gripper_base"),
-        ]
-        assert all(s.enable_color and s.enable_depth for s in instance.sensors)
-        np.testing.assert_allclose(
-            -instance.sensors[0].extrinsics.transformation[:3, 2],
-            [1.0, 0.0, 0.0],
-            atol=1e-7,
-        )
-        assert not any("HAND_" in key for key in instance.joint_drive_props.stiffness)
-    assert DexforceW1Cfg.from_dict({**selection, "sensors": []}).sensors == []
-    restored.sensors[0].extrinsics.parent = "other"
-    assert cfg.sensors[0].extrinsics.parent == "head_pitch_j2_link"
 
 
 def test_w1_v030_custom_tool_tcp_roundtrip_preserves_fep(monkeypatch, tmp_path):

@@ -61,8 +61,6 @@ class W1HandSideSpec:
     end_link_name: str
     root_link_name: str
     attach_xpos: tuple[tuple[float, ...], ...]
-    tcp: tuple[tuple[float, ...], ...] | None = None
-    """Optional asset-root-to-grasp transform; X opens and Z approaches."""
 
 
 @dataclass(frozen=True)
@@ -167,26 +165,6 @@ def _dh_gripper_side(
     )
 
 
-def _pika_side(side: DexforceW1ArmSide) -> W1HandSideSpec:
-    # The asset includes its flange adapter. The distal pads center around
-    # 160 mm along root Z; the 195 mm tip reference misses receiving grasps.
-    return W1HandSideSpec(
-        urdf_path="PikaGripper/PikaGripper.urdf",
-        joint_names=tuple(
-            f"{side.value.upper()}_FINGER{index}_JOINT" for index in (1, 2)
-        ),
-        end_link_name=f"{side.value}_gripper_root_link",
-        root_link_name=f"{side.value}_finger2",
-        attach_xpos=_attach_xpos((0.0, 0.0, 0.0)),
-        tcp=(
-            (0.0, 1.0, 0.0, 0.00064),
-            (-1.0, 0.0, 0.0, 0.0),
-            (0.0, 0.0, 1.0, 0.160),
-            (0.0, 0.0, 0.0, 1.0),
-        ),
-    )
-
-
 _W1_HAND_SPECS = {
     (
         DexforceW1HandBrand.BRAINCO_HAND,
@@ -205,14 +183,6 @@ _W1_HAND_SPECS = {
         sides={side: _dh_gripper_side(side, False) for side in DexforceW1ArmSide},
     ),
     (
-        DexforceW1HandBrand.PIKA_GRIPPER,
-        DexforceW1HandVersion.V021,
-    ): W1HandSpec(
-        brand=DexforceW1HandBrand.PIKA_GRIPPER,
-        version=DexforceW1HandVersion.V021,
-        sides={side: _pika_side(side) for side in DexforceW1ArmSide},
-    ),
-    (
         DexforceW1HandBrand.DH_PGC_GRIPPER_M,
         DexforceW1HandVersion.V021,
     ): W1HandSpec(
@@ -227,7 +197,6 @@ _DEFAULT_W1_HAND_VERSIONS = MappingProxyType(
         DexforceW1HandBrand.BRAINCO_HAND: DexforceW1HandVersion.V021,
         DexforceW1HandBrand.DH_PGC_GRIPPER: DexforceW1HandVersion.V021,
         DexforceW1HandBrand.DH_PGC_GRIPPER_M: DexforceW1HandVersion.V021,
-        DexforceW1HandBrand.PIKA_GRIPPER: DexforceW1HandVersion.V021,
     }
 )
 
