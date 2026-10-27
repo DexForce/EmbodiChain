@@ -24,6 +24,7 @@ import math
 import re
 import xml.etree.ElementTree as ET
 from argparse import Namespace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
@@ -562,6 +563,40 @@ def test_coordinated_placement_preserves_baseline_scene_frames() -> None:
     assert module.TABLE_TOP_Z - module.ROBOT_INIT_POS[2] == pytest.approx(
         module.BASELINE_TABLE_TOP_Z - module.BASELINE_ROBOT_INIT_POS[2]
     )
+
+
+def test_placement_mesh_cache_preserves_authored_axes_and_texture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import trimesh
+    from PIL import Image
+    from examples.sim.atomic_action import coordinated_placement as module
+
+    mesh = trimesh.creation.box(extents=(0.1, 0.2, 0.3))
+    mesh.visual = trimesh.visual.TextureVisuals(
+        uv=torch.zeros((len(mesh.vertices), 2)).numpy(),
+        image=Image.new("RGB", (2, 2), (210, 70, 15)),
+    )
+    source = tmp_path / "asset.glb"
+    mesh.export(source)
+    monkeypatch.setattr(module, "resolve_cached_data_path", lambda _: str(source))
+    monkeypatch.setattr(
+        module, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(tmp_path / "cache")
+    )
+
+    path = Path(module._placement_mesh_path("asset.glb"))
+    loaded = trimesh.load(path, force="mesh", process=False)
+    torch.testing.assert_close(
+        torch.as_tensor(loaded.bounds.copy()),
+        torch.tensor([[-0.05, -0.1, -0.15], [0.05, 0.1, 0.15]], dtype=torch.float64),
+        atol=1e-7,
+        rtol=0,
+    )
+    assert loaded.visual.material.image.getpixel((0, 0))[:3] == (210, 70, 15)
+    loader = MagicMock(side_effect=AssertionError("Cached mesh must not be reloaded"))
+    monkeypatch.setattr(module.trimesh, "load", loader)
+    assert module._placement_mesh_path("asset.glb") == str(path)
+    loader.assert_not_called()
 
 
 @pytest.mark.parametrize("is_newton_backend", [False, True])

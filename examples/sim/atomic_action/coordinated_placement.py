@@ -24,7 +24,9 @@ it while the right hand keeps holding the pan.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -34,8 +36,10 @@ if str(_REPO_ROOT) not in sys.path:
 
 import numpy as np
 import torch
+import trimesh
 from scipy.spatial.transform import Rotation as SciRotation
 
+from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
@@ -88,8 +92,8 @@ from examples.sim.atomic_action.support import (
     run_tutorial,
 )
 
-# Current DexSim retains the authored Z-up GLB geometry. Preserve the gym
-# table/bread orientation; the pan needs a half turn to keep its opening up.
+# Bake the GLB geometry into the authored Z-up frame before native loading.
+# Preserve the gym table/bread orientation; turn the pan's opening upward.
 DEFAULT_MESH_FRAME_CORRECTION_EULER_DEG = (0.0, 0.0, 0.0)
 PAN_MESH_FRAME_CORRECTION_EULER_DEG = (180.0, 0.0, 0.0)
 PAN_WORLD_YAW_CORRECTION_DEG = 270.0
@@ -234,12 +238,38 @@ def create_dual_robot(
     )
 
 
+def _placement_mesh_path(data_path: str) -> str:
+    """Cache a textured OBJ with the same authored Z-up frame in every renderer."""
+    source = Path(resolve_cached_data_path(data_path))
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()[:20]
+    cache_dir = (
+        Path(EMBODICHAIN_DEFAULT_DATA_ROOT)
+        / "derived"
+        / "coordinated_placement_z_up_v1"
+        / digest
+    )
+    target = cache_dir / "mesh.obj"
+    if not target.is_file():
+        cache_dir.parent.mkdir(parents=True, exist_ok=True)
+        # Publish the OBJ, MTL and textures together so concurrent examples
+        # cannot observe a partially exported asset.
+        with tempfile.TemporaryDirectory(dir=cache_dir.parent) as staging:
+            mesh = trimesh.load(str(source), force="mesh", process=False)
+            mesh.export(Path(staging) / target.name)
+            try:
+                Path(staging).rename(cache_dir)
+            except OSError:
+                if not target.is_file():
+                    raise
+    return str(target)
+
+
 def create_table(sim: SimulationManager) -> RigidObject:
     """Create the table mesh from the bread-pan gym project."""
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="table",
-            shape=MeshCfg(fpath=resolve_cached_data_path(TABLE_MESH_PATH)),
+            shape=MeshCfg(fpath=_placement_mesh_path(TABLE_MESH_PATH)),
             attrs=create_tutorial_rigid_body_physics(
                 mass=10.0,
                 dynamic_friction=0.9,
@@ -260,7 +290,7 @@ def create_bread(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="bread",
             shape=MeshCfg(
-                fpath=resolve_cached_data_path(BREAD_MESH_PATH),
+                fpath=_placement_mesh_path(BREAD_MESH_PATH),
                 compute_uv=False,
                 collision=MeshCollisionCfg(
                     approximation="convex_decomposition",
@@ -294,7 +324,7 @@ def create_pan(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="pan",
             shape=MeshCfg(
-                fpath=resolve_cached_data_path(PAN_MESH_PATH),
+                fpath=_placement_mesh_path(PAN_MESH_PATH),
                 compute_uv=False,
                 collision=MeshCollisionCfg(
                     approximation="convex_decomposition",
