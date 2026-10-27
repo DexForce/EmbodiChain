@@ -26,7 +26,9 @@ import pytest
 import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv
-from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RobotCfg
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg
+from embodichain_robots.dexforce.w1 import DexforceW1Cfg
+from embodichain_robots.dexforce.w1.types import DexforceW1Version
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 from embodichain.lab.gym.utils._component_composition import (
@@ -61,6 +63,7 @@ def test_w1_pika_deployment_composes_and_preserves_task_route(
     task: str, segments: int | None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import embodichain.lab.sim.cfg as sim_cfg
+    from embodichain_robots.dexforce.w1 import utils as w1_utils
 
     def asset(value: str) -> str:
         path = tmp_path / value
@@ -69,6 +72,7 @@ def test_w1_pika_deployment_composes_and_preserves_task_route(
         return str(path)
 
     monkeypatch.setattr(sim_cfg, "get_data_path", asset)
+    monkeypatch.setattr(w1_utils, "get_data_path", asset)
     path = _CONFIGS / task / "task.dexforce_w1_030_pika.yaml"
     payload = load_config(path)
     physical = _resolve_gym_components(payload, base_dir=path.parent)
@@ -77,7 +81,9 @@ def test_w1_pika_deployment_composes_and_preserves_task_route(
             "embodichain_tasks.manipulation." + task.replace("/", ".")
         )
     cfg = config_to_cfg(payload, source_path=path)
-    assert type(cfg.robot) is RobotCfg
+    assert isinstance(cfg.robot, DexforceW1Cfg)
+    assert cfg.robot.version is DexforceW1Version.V030
+    assert not cfg.robot.with_default_eef
     assert set(cfg.robot.urdf_cfg.components) == {
         "chassis",
         "torso",
@@ -88,7 +94,7 @@ def test_w1_pika_deployment_composes_and_preserves_task_route(
         "right_hand",
     }
     if task == "repeated_pick_place":
-        restored = RobotCfg.from_dict(json.loads(json.dumps(cfg.robot.to_dict())))
+        restored = DexforceW1Cfg.from_dict(json.loads(json.dumps(cfg.robot.to_dict())))
         assert cfg.robot.urdf_cfg.fname == "DexforceW1V030_pika"
         assert restored.urdf_cfg.fname == cfg.robot.urdf_cfg.fname
         assert restored.urdf_cfg.fpath_prefix == cfg.robot.urdf_cfg.fpath_prefix

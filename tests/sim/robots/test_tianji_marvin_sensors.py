@@ -24,7 +24,8 @@ import torch
 from pathlib import Path
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import DenoisingCfg, RenderCfg, RigidObjectCfg, RobotCfg
+from embodichain.lab.sim.cfg import DenoisingCfg, RenderCfg, RigidObjectCfg
+from embodichain.robot_registry import resolve_robot_cfg
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain_robots import TianjiMarvinCfg
@@ -155,7 +156,7 @@ class TestDexforceW1PikaSensors(TestTianjiMarvinSensors):
             uid="camera_test_w1_pika",
             init_pos=[0.0, 0.0, 0.0],
         )
-        return RobotCfg.from_dict(payload)
+        return resolve_robot_cfg(payload.pop("class_type"), payload)
 
     def test_ready_pose_uses_source_joint_order(self) -> None:
         """Native breadth-first joint ordering must preserve the designed TCPs."""

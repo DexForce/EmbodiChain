@@ -1,26 +1,13 @@
-# W1 and Pika assets, tool frames, ready pose and mounted cameras are composed here.
+# Reuse the V030 bare-body preset; append Pika tools and embodiment calibration.
 embodiment_id: dexforce_w1_030_pika
 simulation:
+  class_type: DexforceW1
+  version: v030
+  with_default_eef: false
   uid: DexforceW1V030Pika
   urdf_cfg:
     fname: DexforceW1V030_pika
-    name_case:
-      joint: upper
-      link: lower
-    component_prefix:
-      left_arm: null
-      right_arm: null
     components:
-    - component_type: chassis
-      urdf_path: DexforceW1V030/w1/chassis.urdf
-    - component_type: torso
-      urdf_path: DexforceW1V030/w1/torso.urdf
-    - component_type: head
-      urdf_path: DexforceW1V030/w1/head.urdf
-    - component_type: left_arm
-      urdf_path: DexforceW1V030/w1/left_arm.urdf
-    - component_type: right_arm
-      urdf_path: DexforceW1V030/w1/right_arm.urdf
     - component_type: left_hand
       urdf_path: PikaGripper/PikaGripper.urdf
       transform:
@@ -60,77 +47,14 @@ simulation:
         - 0.0
         - 1.0
   control_parts:
-    torso:
-    - ANKLE
-    - KNEE
-    - BUTTOCK
-    - WAIST
-    head:
-    - NECK1
-    - NECK2
-    left_arm:
-    - LEFT_J1
-    - LEFT_J2
-    - LEFT_J3
-    - LEFT_J4
-    - LEFT_J5
-    - LEFT_J6
-    - LEFT_J7
-    right_arm:
-    - RIGHT_J1
-    - RIGHT_J2
-    - RIGHT_J3
-    - RIGHT_J4
-    - RIGHT_J5
-    - RIGHT_J6
-    - RIGHT_J7
-    dual_arm:
-    - LEFT_J1
-    - LEFT_J2
-    - LEFT_J3
-    - LEFT_J4
-    - LEFT_J5
-    - LEFT_J6
-    - LEFT_J7
-    - RIGHT_J1
-    - RIGHT_J2
-    - RIGHT_J3
-    - RIGHT_J4
-    - RIGHT_J5
-    - RIGHT_J6
-    - RIGHT_J7
     left_eef:
     - LEFT_FINGER1_JOINT
     - LEFT_FINGER2_JOINT
     right_eef:
     - RIGHT_FINGER1_JOINT
     - RIGHT_FINGER2_JOINT
-    full_body:
-    - ANKLE
-    - KNEE
-    - BUTTOCK
-    - WAIST
-    - NECK1
-    - NECK2
-    - LEFT_J1
-    - LEFT_J2
-    - LEFT_J3
-    - LEFT_J4
-    - LEFT_J5
-    - LEFT_J6
-    - LEFT_J7
-    - RIGHT_J1
-    - RIGHT_J2
-    - RIGHT_J3
-    - RIGHT_J4
-    - RIGHT_J5
-    - RIGHT_J6
-    - RIGHT_J7
   solver_cfg:
     left_arm:
-      class_type: FEPSolver
-      root_link_name: left_arm_base
-      end_link_name: left_ee
       tcp:
       - - 0.0
         - 1.0
@@ -148,23 +72,7 @@ simulation:
         - 0.0
         - 0.0
         - 1.0
-      reference_qpos:
-      - 0.0
-      - 0.0
-      - -1.5707963267948966
-      - 0.0
-      - 0.0
-      - -1.5707963267948966
-      - 0.0
-      axis_alignment_tolerance: 2.0e-05
-      position_tolerance: 1.0e-05
-      rotation_tolerance: 5.0e-05
-      redundancy_search: true
-      arm_angle_weight: 0.0
     right_arm:
-      class_type: FEPSolver
-      root_link_name: right_arm_base
-      end_link_name: right_ee
       tcp:
       - - 0.0
         - 1.0
@@ -182,19 +90,6 @@ simulation:
         - 0.0
         - 0.0
         - 1.0
-      reference_qpos:
-      - 0.0
-      - 0.0
-      - -1.5707963267948966
-      - 0.0
-      - 0.0
-      - 1.5707963267948966
-      - 0.0
-      axis_alignment_tolerance: 1.0e-06
-      position_tolerance: 1.0e-05
-      rotation_tolerance: 1.0e-05
-      redundancy_search: true
-      arm_angle_weight: 0.0
   init_pos:
   - 0.25
   - 0.0
@@ -230,61 +125,29 @@ simulation:
   - 0.05
   root_props:
     fixed_base: true
-    self_collision_enabled: false
-    sleep_threshold: null
-    min_position_iters: 32
-    min_velocity_iters: 8
   joint_drive_props:
-    drive_type: force
-    target_mode: null
     stiffness:
-      (RIGHT|LEFT)_J[0-9]: 10000.0
-      (ANKLE|KNEE|BUTTOCK|WAIST): 10000000.0
-      (NECK1|NECK2): 10000.0
       left_eef: 1000.0
       right_eef: 1000.0
       head: 10000000.0
     damping:
-      (RIGHT|LEFT)_J[0-9]: 1000.0
-      (ANKLE|KNEE|BUTTOCK|WAIST): 10000.0
-      (NECK1|NECK2): 1000.0
       left_eef: 100.0
       right_eef: 100.0
       head: 10000.0
     max_effort:
-      (RIGHT|LEFT)_J[0-9]: 100000.0
-      (ANKLE|KNEE|BUTTOCK|WAIST): 10000000000.0
-      (NECK1|NECK2): 100000.0
       left_eef: 8.0
       right_eef: 8.0
     max_velocity:
       left_eef: 0.25
       right_eef: 0.25
-    friction: null
-    armature: null
-  attrs:
-    mass_props: null
-    rigid_props: null
-    collision_props:
-      collision_enabled: null
-      contact_offset: 0.001
-      rest_offset: 0.0
-    material_props:
-      static_friction: 0.95
-      dynamic_friction: 0.9
-      restitution: null
   link_attrs:
     finger_pads:
       link_names_expr:
       - (left|right)_finger[12]
       attrs:
-        mass_props: null
-        rigid_props: null
-        collision_props: null
         material_props:
           static_friction: 2.0
           dynamic_friction: 2.0
-          restitution: null
   sensors:
   - sensor_type: Camera
     uid: cam_high

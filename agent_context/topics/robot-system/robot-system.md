@@ -84,10 +84,12 @@ Its default TCPs are the `left_ee` / `right_ee` flanges. Select optional hands
 explicitly and configure their tool TCPs independently. V030 preserves source
 arm link names and omits uncalibrated wrist-camera attachments. Its unified
 asset archive keeps component visuals and inertials aligned with the full body.
-The `dexforce_w1_030_pika` task embodiment composes the W1/Pika URDF assets
-with a generic `RobotCfg`; its component YAML owns tool transforms, source-order
-ready joints, drives and three mounted RGB-D declarations. W1 model defaults
-and catalog variants remain independent of this assembly. See the
+The `dexforce_w1_030_pika` task embodiment selects the existing `DexforceW1`
+V030 bare-body preset and appends two Pika tools. Body components, source joint
+groups, FEP solvers and body/arm physics remain preset-owned. The embodiment
+supplies the tool assets, finger groups, TCPs, tool/head drive overrides,
+source-order ready joints and three mounted RGB-D declarations; it uses a
+separate assembly output name. No Pika-specific W1 catalog variant is needed. See the
 [embodiment configuration](../../../extensions/embodichain_tasks/configs/components/embodiments/dexforce_w1_030_pika.yaml)
 and its [usage notes](../../../extensions/embodichain_tasks/configs/components/embodiments/dexforce_w1_030_pika.md).
 

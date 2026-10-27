@@ -1,10 +1,13 @@
 # W1 V030 with PikaGripper embodiment
 
-[`dexforce_w1_030_pika.yaml`](dexforce_w1_030_pika.yaml) composes the standard
-W1 V030 body and two standalone Pika grippers through a generic `RobotCfg`.
-Its `simulation` mapping owns the URDF components, source joint names, FEP
-solver/tool transforms, drives, ready pose and robot-mounted RGB-D cameras.
-It does not introduce a W1 hand-brand enum or robot catalog variant.
+[`dexforce_w1_030_pika.yaml`](dexforce_w1_030_pika.yaml) selects the existing
+`DexforceW1` preset with `version: v030` and `with_default_eef: false`, then
+appends two standalone Pika grippers. The preset supplies the body components,
+source joint groups, FEP solvers and body/arm physics. The embodiment adds only
+the tool components, finger groups, TCPs, gripper/head drive overrides, ready
+pose and robot-mounted RGB-D cameras. A separate assembly output name keeps
+the tool-equipped cache distinct from the bare body. It does not introduce a
+W1 hand-brand enum or robot catalog variant.
 
 The component anchors the base and provides the `dual_arm_parallel_gripper`
 skill profile. Task control uses `left_arm`, `left_eef`, `right_arm`, and

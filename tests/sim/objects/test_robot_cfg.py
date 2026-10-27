@@ -62,15 +62,15 @@ from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 def test_generic_robot_assembly_json_roundtrip_preserves_output(
     tmp_path: Path,
 ) -> None:
-    """Declarative assemblies retain output settings and JSON prefix pairs."""
+    """Appending a tool isolates the cache and preserves the preset assembly."""
     source = tmp_path / "component.urdf"
     source.write_text('<robot name="component"><link name="base_link"/></robot>')
     output_root = tmp_path / "assemblies"
     cfg = RobotCfg.from_dict(
         {
             "urdf_cfg": {
-                "fname": "composed_robot",
-                "fpath_prefix": str(output_root),
+                "fname": "bare_robot",
+                "fpath_prefix": str(tmp_path / "bare_assemblies"),
                 "component_prefix": {"left_arm": "left_", "right_arm": "right_"},
                 "components": [
                     {"component_type": side, "urdf_path": str(source)}
@@ -79,8 +79,21 @@ def test_generic_robot_assembly_json_roundtrip_preserves_output(
             }
         }
     )
+    merge_robot_cfg(
+        cfg,
+        {
+            "urdf_cfg": {
+                "fname": "composed_robot",
+                "fpath_prefix": str(output_root),
+                "components": [
+                    {"component_type": "left_hand", "urdf_path": str(source)}
+                ],
+            }
+        },
+    )
     restored = RobotCfg.from_dict(json.loads(json.dumps(cfg.to_dict())))
     for robot in (cfg, restored):
+        assert set(robot.urdf_cfg.components) == {"left_arm", "right_arm", "left_hand"}
         assert robot.urdf_cfg.fname == "composed_robot"
         assert robot.urdf_cfg.fpath_prefix == str(output_root)
         assert robot.urdf_cfg.fpath == str(
