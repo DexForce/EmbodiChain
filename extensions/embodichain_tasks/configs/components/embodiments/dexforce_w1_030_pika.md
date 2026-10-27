@@ -116,8 +116,9 @@ cup frames. The handover deployment uses a standing 60×60×240 mm bar. The
 source grasps its upper portion and the receiving hand takes the lower
 portion after lift, leaving separate contact regions for the Pika palms.
 Its transfer flow and measured assurance
-remain the same. W1 policies bound joint speed at 0.5 rad/s and retain the
-original projected/verified distinction. Handover disables the approximate
+remain the same. Deployments reuse the shared execution policies with explicit
+overrides bounding joint speed at 0.5 rad/s and retain the original
+projected/verified distinction. Handover disables the approximate
 planning collision world while retaining physical contacts and measured gates.
 
 The work surfaces share a 0.90 m top height; object spawns and fixed program

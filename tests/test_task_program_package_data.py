@@ -158,14 +158,6 @@ _DEPLOYMENTS[Path("tasks/manipulation/hand_over/task.dexforce_w1_030_pika.yaml")
 _DUAL_ARM_RESOURCES = {
     Path("components/embodiments/dexforce_w1_030_pika.yaml"),
     *(
-        Path(f"components/execution_policies/{policy}.yaml")
-        for policy in (
-            "motion_gen_projected_w1_pika",
-            "motion_gen_verified_w1_pika",
-            "trajectory_open_loop_w1_pika",
-        )
-    ),
-    *(
         Path(f"tasks/manipulation/{task}/env.dexforce_w1_030_pika.yaml")
         for task in (
             *_DUAL_ARM_PROGRAMS,
@@ -181,7 +173,6 @@ _DUAL_ARM_RESOURCES = {
         )
         for task in _DUAL_ARM_PROGRAMS
     ),
-    Path("components/execution_policies/motion_gen_verified_tabletop.yaml"),
     Path(
         "tasks/manipulation/tableware/pour_water/task_program/integration.dual_ur5.yaml"
     ),
@@ -220,7 +211,6 @@ _RESOURCE_PATHS = frozenset(
         *_DUAL_ARM_RESOURCES,
         *_PROGRAMS,
         *_DEPLOYMENTS,
-        Path("components/execution_policies/trajectory_open_loop_manipulation.yaml"),
         *(
             Path("tasks/manipulation/tableware") / task_name / relative_path
             for task_name in ("stack_blocks_two", "blocks_ranking_rgb")
@@ -240,9 +230,6 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/tableware/stack_cups/README.md"),
         Path("components/execution_policies/motion_gen_verified.yaml"),
         Path("components/execution_policies/trajectory_open_loop.yaml"),
-        Path("components/execution_policies/trajectory_open_loop_dense.yaml"),
-        Path("components/execution_policies/trajectory_open_loop_slow.yaml"),
-        Path("components/execution_policies/trajectory_open_loop_dual_arm_slow.yaml"),
         Path("components/expansion_policies/task_program_episode.yaml"),
         Path("components/randomization_profiles/cube_initial_pose.yaml"),
         Path("components/randomization_profiles/rgb_visual.yaml"),

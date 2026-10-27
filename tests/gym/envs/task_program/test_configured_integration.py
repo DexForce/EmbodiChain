@@ -299,6 +299,100 @@ def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
     )
 
 
+def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
+    tmp_path: Path,
+) -> None:
+    """A relative selector patches tuning while retaining the policy contract."""
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    physical = _physical_components(path, config)
+    program, task, base_policy = _resolve_task_program_components(
+        config["task_program"], base_dir=path.parent
+    )
+    from embodichain.utils.utility import save_config
+
+    save_config(tmp_path / "policy.yaml", base_policy)
+    save_config(tmp_path / "integration.yaml", task)
+    original = (tmp_path / "policy.yaml").read_bytes()
+    selection = {
+        "program": str(program),
+        "integration": "integration.yaml",
+        "execution_policy": {
+            "component": "policy.yaml",
+            "overrides": {
+                "motion": {
+                    "sample_count": 160,
+                    "velocity_limit": 0.35,
+                    "acceleration_limit": 0.4,
+                    "dynamic_collision_mode": "off",
+                },
+                "recovery": {
+                    "action_timeout": 90.0,
+                    "goal_rotation_threshold": 0.75,
+                },
+            },
+        },
+    }
+    deployment = _load_configured_task_program_deployment(
+        task_program=selection,
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=tmp_path,
+    )
+    preset = deployment.integration.registration.robot_profile_binding.presets[0]
+    assert preset.motion_policy.sample_count == 160
+    assert preset.motion_policy.velocity_limit == 0.35
+    assert preset.motion_policy.acceleration_limit == 0.4
+    assert preset.motion_policy.dynamic_collision_mode.value == "off"
+    assert preset.recovery_policy.action_timeout == 90.0
+    assert preset.recovery_policy.goal_rotation_threshold == 0.75
+    assert preset.recovery_policy.max_replans == 3
+    assert preset.effect_assurance.value == "verified"
+    assert deployment.planner_config == {"type": "toppra", "config": {}}
+    assert (tmp_path / "policy.yaml").read_bytes() == original
+    _, _, unmodified = _resolve_task_program_components(
+        config["task_program"], base_dir=path.parent
+    )
+    assert unmodified == base_policy
+
+
+@pytest.mark.parametrize(
+    "overrides,error,message",
+    (
+        (
+            {"effect_assurance": "projected"},
+            ValueError,
+            "unsupported fields.*effect_assurance",
+        ),
+        (
+            {"motion": {"strategy": "ik_interp"}},
+            ValueError,
+            "unsupported fields.*strategy",
+        ),
+        ({"motion": {"velocity_limit": float("nan")}}, ValueError, "velocity_limit"),
+        ({"motion": {"sample_count": True}}, ValueError, "sample_count"),
+        (
+            {"motion": {"dynamic_collision_mode": "disabled"}},
+            ValueError,
+            "dynamic_collision_mode",
+        ),
+        ({"recovery": {"action_timeout": 0.0}}, ValueError, "action_timeout"),
+        (None, TypeError, "overrides must be a mapping"),
+    ),
+)
+def test_execution_policy_overrides_are_closed_and_use_existing_value_validation(
+    overrides: object, error: type[Exception], message: str
+) -> None:
+    """Deployment tuning cannot replace semantics or bypass typed decoders."""
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    config["task_program"]["execution_policy"] = {
+        "component": "../../../components/execution_policies/motion_gen_verified.yaml",
+        "overrides": overrides,
+    }
+    with pytest.raises(error, match=message):
+        _resolve_task_program_components(config["task_program"], base_dir=path.parent)
+
+
 def test_planner_policy_decoder_validates_backend_and_options() -> None:
     """Planner backends remain closed while typed options stay configurable."""
     assert _decode_planner_config(
