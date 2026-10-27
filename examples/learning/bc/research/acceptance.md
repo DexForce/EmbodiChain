@@ -203,6 +203,7 @@ reports and wrap each serial arm in `timeout 1800s` with
 `CUDA_VISIBLE_DEVICES=4 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1`. Each arm remains
 bounded to exactly 2,000 new updates. Evaluate only its `training/last.pt` with
 `run-example learning/bc evaluate --diagnostic --trace --scenes 4 --seed 20300025`
+(now named `pr828-evaluate` in the state-first showcase)
 and the declared 600-second arm limit. Do not resume or overwrite a formal run.
 
 If the pair misses the exploratory gate, retain both results and stop; do not

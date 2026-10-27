@@ -1,16 +1,82 @@
-# Behavior cloning models and PickPlace research
+# Behavior cloning for PickPlace
 
-This directory uses the physical PickPlace task and visual recipe pinned by
+The default showcase trains state-based policies on a physical Franka
+pick-and-place task through `embodichain.learning.sl`. The input includes
+simulator-provided cube and goal state, so state results do not establish
+camera-based or real-world performance. The task requires lifting, placing,
+opening and withdrawing, followed by 0.3 seconds of stable placement.
+
+Two state recipes use the same action and task contracts:
+
+- `maniskill_action`: one 51-feature state predicts the current seven-component
+  relative-pose/gripper request with a 256×256 MLP and Adam.
+- `legacy_chunk`: two states predict 64 absolute pose/gripper targets with a
+  512×512 MLP; the executor applies 16 targets before replanning.
+
+Both use accepted demonstrations, frozen training-only statistics and the
+shared supervised trainer. Policy observations and recorded actions refer to
+the same pre-action step. Per-frame sampling for `maniskill_action` is uniform
+with replacement; the official ManiSkill sampler instead shuffles frames within
+epochs. The `legacy_chunk` recipe uses episode-uniform causal contexts, valid
+target masks and training-only observation noise.
+
+## Collect and train state BC
+
+Use an installed EmbodiChain distribution with its matching simulation runtime
+and an explicitly selected physical GPU. The commands below run from the
+repository root and write to fresh directories; adapt the paths and seed to the
+planned experiment.
+
+```bash
+embodichain run-example learning/bc environment \
+  --output outputs/bc/environment.json --device cuda:0
+embodichain run-example learning/bc qualify \
+  --output-dir outputs/bc/qualification --scenes 40 --device cuda:0
+embodichain run-example learning/bc collect \
+  --output-dir outputs/bc/demonstrations --episodes 32 --device cuda:0
+embodichain run-example learning/bc prepare-state \
+  --manifest outputs/bc/demonstrations/manifest.json \
+  --output-dir outputs/bc/state-view --episodes 32
+embodichain run-example learning/bc train \
+  --recipe maniskill_action --view outputs/bc/state-view/manifest.json \
+  --environment outputs/bc/environment.json --output-dir outputs/bc/run \
+  --seed 20400011 --device cuda:0 --prepare-only
+embodichain run-example learning/bc train \
+  --recipe maniskill_action --view outputs/bc/state-view/manifest.json \
+  --environment outputs/bc/environment.json --output-dir outputs/bc/run \
+  --seed 20400011 --device cuda:0 --train
+embodichain run-example learning/bc evaluate \
+  --checkpoint outputs/bc/run/training/step_10000.pt \
+  --output outputs/bc/evaluation.json --seed-base 20500000 \
+  --scenes 20 --device cuda:0
+```
+
+Select `--recipe legacy_chunk` for the historical-style state baseline.
+`replay` checks saved policy requests in the current physical environment.
+Evaluation stops at the first termination or timeout, records `success_once`
+and `success_at_end` at that actual episode boundary, and saves per-scene
+state/action traces. The recorded episode-end convention differs from
+ManiSkill's fixed-horizon, ignore-termination evaluation.
+
+The state view binds the source manifest, per-episode content hashes, action
+semantics, observation timing and normalization. An immutable resident source
+can be resumed exactly. Caller-owned live ODS data can train through the same
+model and objective and save snapshots; live delivery state is not restored by
+the trainer. The host owns ODS lifecycle and waits.
+
+## Historical PR828 visual recipe
+
+The historical visual recipe uses the physical PickPlace task pinned by
 PR828 (`51f1f0c`), with an immutable offline corpus and the shared SL learner.
 The production model, objective and HDF5 reader do not import this task or any
 ODS example. The evaluation adapter reuses the original task measurements and
 success predicate; it never constructs an expert during student execution.
 
-Current status: the first-eight-episode learnability check completed exactly
+The historical first-eight-episode learnability check completed exactly
 2,000 updates. Fixed-panel normalized MSE fell 98.38%, but grasp-phase TCP p95
 remained 7.51 mm against the preregistered 5 mm gate; the other four phases
 passed. The planned sampling comparison and formal training therefore did not
-start. Keep the PR draft. A separate four-scene diagnostic with the original
+start. The visual recipe remains unqualified. A separate diagnostic with the original
 20k checkpoint scored 2/4 successes; its new scenes/runtime do not establish a
 training gain. See the [current diagnostics and stopping decision](research/improvement-v2.md)
 and [preserved historical experiments](research/acceptance.md). The original
@@ -70,7 +136,7 @@ separately rather than changing this protocol.
 
 ```bash
 CUDA_VISIBLE_DEVICES=4 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-embodichain run-example learning/bc train \
+embodichain run-example learning/bc pr828-train \
   --manifest outputs/sl/bc-corpus/manifest.json \
   --output outputs/sl/bc-seed20261025 --seed 20261025 \
   --evaluation-visible-devices 4 --sim-device cuda:0 --policy-device cuda:0

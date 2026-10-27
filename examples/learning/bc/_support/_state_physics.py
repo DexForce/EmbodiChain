@@ -160,7 +160,12 @@ def _verify_sources(protocol: dict[str, Any]) -> None:
 
 
 def _scene_panel(seed_base: int, count: int) -> tuple[list[dict[str, Any]], str]:
-    if seed_base < 0 or count < 1:
+    if (
+        type(seed_base) is not int
+        or seed_base < 0
+        or type(count) is not int
+        or count < 1
+    ):
         raise ValueError("Scene seed and count must be nonnegative and positive")
     generator = torch.Generator(device="cpu").manual_seed(seed_base)
     positions = (
@@ -255,6 +260,8 @@ def _freeze(
         "action_contracts": ACTION_CONTRACTS,
         "step_dt": STEP_DT,
         "observation_schema": OBSERVATION_SCHEMA,
+        "observation_timing": "pre_action",
+        "observation_timing_version": "pickplace-preaction-policy-request@1",
         "termination_policy": "stop on first termination/truncation; no automatic reset",
         "runtime": {
             "python": sys.version,
@@ -303,8 +310,8 @@ def qualify(
     *, output: Path, seed_base: int, scenes: int, device: str
 ) -> dict[str, Any]:
     """Execute independent expert scenes with the existing task predicate."""
-    config = _current_config(device)
     panel, panel_hash = _scene_panel(seed_base, scenes)
+    config = _current_config(device)
     protocol = _freeze(
         output,
         "expert-qualification",
@@ -388,6 +395,8 @@ def replay(
     *, manifest: Path, output: Path, episodes: int, device: str
 ) -> dict[str, Any]:
     """Replay original per-frame requests and report visible initial-state parity."""
+    if type(episodes) is not int or episodes < 1:
+        raise ValueError("Replay episode count must be a positive integer")
     import h5py
     import numpy as np
     from examples.ods.simple_bc_demo.observations import policy_observations
@@ -537,10 +546,17 @@ def collect(
     import numpy as np
     from examples.ods.simple_bc_demo.observations import policy_observations
 
-    if max_attempts < episodes:
-        raise ValueError("Maximum attempts cannot be smaller than requested episodes")
-    config = _current_config(device)
+    if (
+        type(episodes) is not int
+        or episodes < 1
+        or type(max_attempts) is not int
+        or max_attempts < episodes
+    ):
+        raise ValueError(
+            "Episode and attempt counts must be positive integers with enough attempts"
+        )
     panel, panel_hash = _scene_panel(seed_base, max_attempts)
+    config = _current_config(device)
     protocol = _freeze(
         output,
         "collect",
@@ -557,8 +573,11 @@ def collect(
     try:
         env = _open_env(config, recording=True)
         raw = env.unwrapped
+        if raw.rollout_action_semantics != "policy_request":
+            raise ValueError("State collection requires raw policy-request recording")
         for scene in panel:
-            _reset(env, scene)
+            initial = _reset(env, scene)
+            initial_geometry = policy_observations(initial)[0].detach().cpu().clone()
             result, planning_error = _expert_episode(env, scene["ordinal"])
             physical, failure, metrics = _result(raw)
             accepted = (
@@ -606,6 +625,12 @@ def collect(
                 ):
                     raise ValueError(
                         "Collected data are not aligned finite state/action records"
+                    )
+                if not torch.allclose(
+                    torch.from_numpy(geometry[0]), initial_geometry, rtol=0, atol=1e-5
+                ):
+                    raise ValueError(
+                        "Recorded first frame is not the initial pre-action state"
                     )
                 path = output / f"episode-{len(records):06d}.h5"
                 if path.exists():
@@ -658,6 +683,8 @@ def collect(
         "step_dt": STEP_DT,
         "action_semantics": "policy_request",
         "action_contracts": ACTION_CONTRACTS,
+        "observation_timing": "pre_action",
+        "observation_timing_version": "pickplace-preaction-policy-request@1",
         "physics": "default",
         "source_id": "state-bc-pickplace-current-v1",
         "protocol_sha256": _sha(output / "protocol.json"),
@@ -713,11 +740,16 @@ def evaluate(
     import numpy as np
     from examples.ods.simple_bc_demo.observations import policy_observations
 
+    panel, panel_hash = _scene_panel(seed_base, scenes)
+    output = output.resolve()
+    if not output.name or output.exists():
+        raise FileExistsError("Evaluation output must be a new file path")
+    artifact = output.with_name(output.name + ".artifacts")
+    if artifact.exists():
+        raise FileExistsError("Evaluation artifact directory already exists")
     checkpoint = checkpoint.resolve()
     executor, state = _policy(checkpoint, device)
     config = _config_on_device(state["signature"]["environment"], device)
-    panel, panel_hash = _scene_panel(seed_base, scenes)
-    artifact = output.with_suffix("")
     protocol = _freeze(
         artifact,
         "student-evaluation",
