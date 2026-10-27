@@ -47,11 +47,18 @@ The native family lives in
 `model.py` owns geometry/configuration; `_native/` preserves licensed author
 code. Checkpoint import validates recorded architecture and named tensors.
 The community `rigidformer` package is not a runtime dependency.
+`data.py` reads verified packed scenes; `supervised.py` separates shifted
+conditioning and anchor targets; `sl_recipe.py` constructs the shared trainer
+with committed sampling, epoch scheduling and EMA participants.
 
-Integration dt=1 differs from physical seconds. Geometry prediction requires
-CUDA and at least two valid objects; construction and weight inspection support
-CPU. Attention backend selection is explicit. The model predicts geometry
-without action inputs and does not qualify state/action gradients.
+Integration dt=1 differs from physical seconds. Stored vertices are unscaled;
+metadata sizes apply about each origin once. Geometry prediction requires CUDA
+and at least two valid objects. Attention backend and source semantics belong
+to recipe/recovery identity. Source-owned epoch sampling does not claim the
+legacy research DataLoader's worker-RNG trajectory.
+
+Numerical agreement, recovery and full benchmark/retraining qualification
+remain separate evidence requirements.
 
 ## Resource and physical identity
 

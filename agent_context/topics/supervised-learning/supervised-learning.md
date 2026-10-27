@@ -80,3 +80,9 @@ qualification belongs to each model's acceptance recipe. The distributed tests
 exercise weighted global updates and fixed-world-size recovery with CPU/Gloo;
 sequence tests reuse real CPU source fixtures for masks, provenance, owned output,
 quota and recovery admission. Examples use launch smoke checks, not tutorial tests.
+
+Factories may register ordered `SupervisedTrainingState` participants for source
+cursors, schedules and model averages. They commit after optimizer success,
+produce owned rank-local snapshots, validate before live restoration and restore
+after validation callbacks. Empty participants retain existing checkpoint
+compatibility. Model-specific participant math stays in its model family.
