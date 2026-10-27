@@ -1,5 +1,5 @@
 Historical assembly robot reference
-==================================
+========================================
 
 This optional preparation utility converts the pinned public Menagerie source
 bundle for historical assembly comparisons. Its gripper approximations are not

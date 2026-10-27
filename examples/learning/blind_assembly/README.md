@@ -49,6 +49,11 @@ Old model bundles that name `FlexivRizon4SRobotiq` require configuration migrati
 to `FlexivRizon4S` and their frozen local `fpath`; use the bundle's recorded code
 revision for an unchanged historical replay. The measured results below predate
 this ownership refactor and do not certify its native dynamics.
+The current default-asset [model descriptor](validation/default_retrain_20261026/model_descriptor.json)
+points to a migrated local bundle. Its checkpoint and physical resources are
+unchanged; the included eight-episode inference smoke completes six successes
+with finite sampled state and no capacity loss. Iteration-budget and SDK teardown
+warnings remain recorded. This smoke does not replace the 8192-episode assessment.
 
 For a training attempt from random initialization, the peg study development
 configuration uses 4,096 environments, 32-step rollouts and at most 2,000 PPO
