@@ -1192,6 +1192,137 @@ def test_usd_articulation_forwards_gravity_compensation(monkeypatch, mode) -> No
     assert descriptor.newton_gravity_compensation == 0.5
 
 
+_NEWTON_CREATION_ROOT_PROPS = {
+    "newton_kinematic": True,
+    "newton_sleep_policy": "never",
+    "newton_shape_collision": False,
+    "newton_shape_collision_links": ["base_link"],
+    "newton_particle_collision_links": ["base_link", "tool"],
+    "newton_mesh_approximation": {"method": "convex_hull", "link_names": ["tool"]},
+}
+
+
+@pytest.mark.parametrize("mode", ["preserve", "overlay"])
+def test_articulation_newton_creation_options_are_forwarded(mode) -> None:
+    from dexsim.spawn import NewtonMeshApproximationDesc, NewtonSleepPolicy
+
+    cfg = ArticulationCfg.from_dict(
+        {
+            "uid": "robot",
+            "fpath": "robot.urdf",
+            "asset_physics_mode": mode,
+            "root_props": _NEWTON_CREATION_ROOT_PROPS,
+        }
+    )
+    descriptor = articulation_desc_from_cfg(cfg, newton_solver_type="dexuni")
+    resolved = _resolved_articulation_desc()
+    configure_articulation_desc(resolved, cfg, newton_solver_type="dexuni")
+
+    for desc in (descriptor, resolved):
+        assert desc.newton_kinematic is True
+        assert desc.newton_sleep_policy is NewtonSleepPolicy.NEVER
+        assert desc.newton_shape_collision is False
+        assert desc.newton_shape_collision_links == ("base_link",)
+        assert desc.newton_particle_collision_links == ("base_link", "tool")
+        assert isinstance(desc.newton_mesh_approximation, NewtonMeshApproximationDesc)
+        assert desc.newton_mesh_approximation.link_names == ("tool",)
+
+
+@pytest.mark.parametrize("mode", ["preserve", "overlay"])
+@pytest.mark.parametrize("native_geometry", [False, True])
+@pytest.mark.parametrize("value", [None, False, True])
+def test_articulation_sdf_request_is_authored_before_source_resolution(
+    value: bool | None,
+    mode: str,
+    native_geometry: bool,
+) -> None:
+    """Preserve concave import intent without introducing contact overrides."""
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode=mode,
+        root_props=ArticulationRootPropertiesCfg(newton_force_sdf=value),
+    )
+    restored = ArticulationCfg.from_dict(cfg.to_dict())
+    descriptor = articulation_desc_from_cfg(restored, newton_solver_type="dexuni")
+    if value is None:
+        assert descriptor.newton_collision is None
+    else:
+        assert descriptor.newton_collision.force_sdf is value
+        assert descriptor.newton_collision.ke is None
+        assert descriptor.newton_collision.margin is None
+    resolved = _resolved_articulation_desc()
+    if native_geometry:
+        resolved.urdf_path = "robot.urdf"
+        for link in resolved.links:
+            link.collisions.clear()
+    configure_articulation_desc(resolved, restored, newton_solver_type="dexuni")
+    if value is not None:
+        for link in resolved.links:
+            for collision in link.collisions:
+                assert collision.newton.force_sdf is value
+
+
+def test_articulation_sdf_request_rejects_default_backend() -> None:
+    """Do not silently apply a Newton source option under Default physics."""
+    cfg = ArticulationCfg(
+        fpath="robot.urdf",
+        root_props=ArticulationRootPropertiesCfg(newton_force_sdf=True),
+    )
+    with pytest.raises(ValueError, match="newton_force_sdf.*Newton"):
+        articulation_desc_from_cfg(cfg)
+
+
+def test_articulation_sdf_request_rejects_truthy_strings() -> None:
+    """Require a boolean rather than treating the text 'false' as enabled."""
+    cfg = ArticulationCfg(
+        fpath="robot.urdf",
+        root_props=ArticulationRootPropertiesCfg(newton_force_sdf="false"),
+    )
+    with pytest.raises(TypeError, match="newton_force_sdf.*boolean"):
+        articulation_desc_from_cfg(cfg, newton_solver_type="dexuni")
+
+
+def test_articulation_unset_newton_creation_options_keep_dexsim_defaults() -> None:
+    descriptor = articulation_desc_from_cfg(
+        ArticulationCfg(), source_path="robot.urdf", newton_solver_type="dexuni"
+    )
+    defaults = ArticulationDesc(name="defaults", path="robot.urdf")
+    for name in (
+        "newton_kinematic",
+        "newton_sleep_policy",
+        "newton_shape_collision",
+        "newton_shape_collision_links",
+        "newton_particle_collision_links",
+        "newton_mesh_approximation",
+    ):
+        assert getattr(descriptor, name) == getattr(defaults, name), name
+
+
+@pytest.mark.parametrize("name", sorted(_NEWTON_CREATION_ROOT_PROPS))
+def test_articulation_newton_creation_options_reject_default_backend(name) -> None:
+    cfg = ArticulationCfg.from_dict(
+        {"root_props": {name: _NEWTON_CREATION_ROOT_PROPS[name]}}
+    )
+    with pytest.raises(ValueError, match="Newton backend"):
+        articulation_desc_from_cfg(cfg, source_path="robot.urdf")
+
+
+@pytest.mark.parametrize(
+    ("root_props", "error"),
+    [
+        ({"newton_sleep_policy": "sometimes"}, ValueError),
+        ({"newton_shape_collision_links": "base_link"}, TypeError),
+        ({"newton_mesh_approximation": "convex_hull"}, TypeError),
+    ],
+)
+def test_articulation_newton_creation_options_reject_invalid_values(
+    root_props, error
+) -> None:
+    with pytest.raises(error):
+        ArticulationCfg.from_dict({"root_props": root_props})
+
+
 @pytest.mark.parametrize("value", [-0.1, 1.1, float("nan"), float("inf")])
 def test_articulation_gravity_compensation_rejects_invalid_values(value) -> None:
     cfg = ArticulationCfg()
@@ -2377,6 +2508,32 @@ def test_spawn_post_config_only_applies_render_uv() -> None:
     articulation._set_default_joint_drive.assert_not_called()
     entity.get_render_body.assert_called_once_with("base")
     render_body.set_projective_uv.assert_called_once_with()
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_newton_mimic_stabilizer_can_be_disabled(monkeypatch, enabled) -> None:
+    configure = Mock(return_value=True)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.objects.articulation._configure_newton_mimic_compliance",
+        configure,
+    )
+    articulation = object.__new__(Articulation)
+    articulation.cfg = SimpleNamespace(
+        compute_uv=False,
+        root_props=ArticulationRootPropertiesCfg(newton_mimic_stabilizer=enabled),
+    )
+    articulation._entities = [Mock(joint_dof_layout=[])]
+    articulation._prepared_default_root_topology_revision = -1
+    articulation._mimic_info = SimpleNamespace(
+        mimic_id=np.array([1], dtype=np.int32),
+        mimic_parent=np.array([0], dtype=np.int32),
+    )
+    articulation._state_joint_names = Mock(return_value=["leader", "follower"])
+
+    articulation._apply_spawn_config()
+
+    assert articulation._newton_mimic_compliance_configured is enabled
+    assert configure.called is enabled
 
 
 def test_rigid_object_spawn_applies_projective_uv() -> None:

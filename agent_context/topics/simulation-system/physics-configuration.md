@@ -47,6 +47,10 @@ cannot respond to contact reactions. Forward solver expert options through
 `NewtonPhysicsCfg.solver_cfg`; DexSim owns their validation and dispatch.
 Articulation gravity compensation and passive damping are separate creation
 settings; see [articulation adapters](articulation-adapters.md).
+`async_sync`, `rigid_transform_sync_mode`, `capture_acquire_timeout` and
+`capture_wait_log_interval` pass straight to DexSim `NewtonCfg`. Solver
+diagnostics (graph status, effective VBD options, contact capacity) are read
+from `sim.spawn_result.get_solver_diagnostics()` after `prepare()`.
 
 Capability checks remain explicit: Default owns native rigid constraints and
 Newton deformables are separate. Contact support is rechecked after Newton

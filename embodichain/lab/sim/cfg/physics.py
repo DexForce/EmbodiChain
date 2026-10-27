@@ -341,6 +341,34 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     Genuine Newton/Warp warnings and errors are not suppressed.
     """
 
+    async_sync: bool = False
+    """Whether Newton-to-render publication returns without waiting for rendering.
+
+    ``True`` removes the render-thread wait from each published step, which
+    mostly matters while a window is open. ``False`` keeps the blocking
+    DexSim default.
+    """
+
+    rigid_transform_sync_mode: Literal["all", "dynamic"] = "all"
+    """Rigid transforms copied from Newton to the renderer after each step.
+
+    ``"all"`` copies every mapped body. ``"dynamic"`` skips static and
+    kinematic bodies, which are already posed by their setters.
+    """
+
+    capture_acquire_timeout: float | None = None
+    """Seconds to wait for CUDA-graph capture rights shared with other users.
+
+    ``None`` waits indefinitely. A finite value lets DexSim fall back to
+    uncaptured stepping when another component holds capture.
+    """
+
+    capture_wait_log_interval: float | None = 10.0
+    """Seconds between progress logs while waiting for capture rights.
+
+    ``None`` or a non-positive value disables the progress log.
+    """
+
     solver_cfg: Mapping[str, Any] | NewtonSolverCfg | None = None
     """Optional Newton solver configuration.
 
@@ -375,6 +403,19 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         """Normalize dictionary collision settings at the config boundary."""
         if isinstance(self.collision_cfg, Mapping):
             self.collision_cfg = NewtonCollisionPipelineCfg(**self.collision_cfg)
+        if self.rigid_transform_sync_mode not in ("all", "dynamic"):
+            raise ValueError(
+                "NewtonPhysicsCfg.rigid_transform_sync_mode must be 'all' or "
+                f"'dynamic'; got {self.rigid_transform_sync_mode!r}."
+            )
+        if self.capture_acquire_timeout is not None and not (
+            math.isfinite(self.capture_acquire_timeout)
+            and self.capture_acquire_timeout >= 0.0
+        ):
+            raise ValueError(
+                "NewtonPhysicsCfg.capture_acquire_timeout must be None or a "
+                "finite non-negative number of seconds."
+            )
 
     def to_dexsim_cfg(
         self,
@@ -452,6 +493,10 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "suppress_warp_kernel_logs": self.suppress_warp_kernel_logs,
             "collision_pipeline_cfg": collision_pipeline_cfg,
             "sync_to_dexsim": self.sync_to_renderer,
+            "async_sync": self.async_sync,
+            "rigid_transform_sync_mode": self.rigid_transform_sync_mode,
+            "capture_acquire_timeout": self.capture_acquire_timeout,
+            "capture_wait_log_interval": self.capture_wait_log_interval,
         }
         if solver_cfg is not None:
             newton_cfg_args["solver_cfg"] = solver_cfg

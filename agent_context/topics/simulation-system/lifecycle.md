@@ -88,6 +88,7 @@ must not reach into `_spawn_scene.builder`.
 | `register_kinematic_nodal_trajectory()` | Declare deformable with selected nodes inactive; offsets `[env, samples, selected_nodes, 3]` are relative to finalized initial world positions |
 | `register_contact_material_schedule()` | Declared rigid object/robot/articulation; piecewise-constant shape friction/stiffness/damping tracks |
 | `register_particle_contact_material_schedule()` | Targeted DexUni deformable material via `uid`; omitted UID retains legacy scene-wide particle properties |
+| `add_runtime_control()` | Any DexSim `RuntimeControl` without a dedicated method (for example `RealtimeJointTargetControl`); pass one scene-wide instance or a `factory(arena_name, env_index)`; targets use `f"{arena_name}/{uid}"`; returns the registered controls |
 
 All registrations reject finalized scenes. Joint, shape-material and targeted DexUni particle-material controls remain
 graph-compatible; nodal trajectories and legacy scene-wide particle-material

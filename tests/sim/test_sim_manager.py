@@ -1846,6 +1846,68 @@ def test_register_kinematic_nodal_trajectory_rejects_finalized_scene() -> None:
     builder.add_runtime_control.assert_not_called()
 
 
+def _runtime_control(**attrs: object):
+    from dexsim.engine.newton_physics.runtime_control import RuntimeControl
+
+    control = type("RecordingControl", (RuntimeControl,), {})()
+    for name, value in attrs.items():
+        setattr(control, name, value)
+    return control
+
+
+def test_add_runtime_control_registers_one_scene_control() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    control = _runtime_control()
+
+    assert sim.add_runtime_control(control) == (control,)
+
+    builder.add_runtime_control.assert_called_once_with(control)
+
+
+def test_add_runtime_control_expands_factory_per_arena() -> None:
+    sim, builder = _make_runtime_control_sim_manager(num_envs=3)
+
+    controls = sim.add_runtime_control(
+        lambda arena_name, env_index: _runtime_control(
+            target=f"{arena_name}/robot", env_index=env_index
+        )
+    )
+
+    assert [control.target for control in controls] == [
+        "arena_0/robot",
+        "arena_1/robot",
+        "arena_2/robot",
+    ]
+    assert [control.env_index for control in controls] == [0, 1, 2]
+    assert [
+        call.args[0] for call in builder.add_runtime_control.call_args_list
+    ] == list(controls)
+
+
+def test_add_runtime_control_rejects_non_control_factory_results() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+
+    with pytest.raises(TypeError, match="RuntimeControl instances"):
+        sim.add_runtime_control(lambda arena_name, env_index: object())
+    with pytest.raises(TypeError, match="RuntimeControl or a factory"):
+        sim.add_runtime_control(object())
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_add_runtime_control_rejects_finalized_scene_and_default_backend() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    builder.is_finalized = True
+    with pytest.raises(RuntimeError, match=r"before SimulationManager\.prepare"):
+        sim.add_runtime_control(_runtime_control())
+
+    sim, builder = _make_runtime_control_sim_manager(backend="default")
+    with pytest.raises(RuntimeError, match="Newton backend"):
+        sim.add_runtime_control(_runtime_control())
+
+    builder.add_runtime_control.assert_not_called()
+
+
 def test_add_robot_resolves_backend_preset_before_declaration() -> None:
     @configclass
     class TestRobotPresetCfg(RobotPresetCfg):

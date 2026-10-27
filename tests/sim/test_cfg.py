@@ -1008,6 +1008,14 @@ def test_backend_joint_and_articulation_configs_round_trip() -> None:
         "min_position_iters": None,
         "min_velocity_iters": None,
         "newton_gravity_compensation": None,
+        "newton_kinematic": None,
+        "newton_sleep_policy": None,
+        "newton_shape_collision": None,
+        "newton_shape_collision_links": None,
+        "newton_particle_collision_links": None,
+        "newton_mimic_stabilizer": False,
+        "newton_mesh_approximation": None,
+        "newton_force_sdf": None,
     }
     assert type(restored_root) is ArticulationRootPropertiesCfg
 
@@ -1134,6 +1142,43 @@ def test_newton_physics_can_disable_the_external_collision_pipeline() -> None:
     assert dexsim_cfg.collision_pipeline_cfg is None
     assert not hasattr(cfg, "enable_collision_pipeline")
     assert not hasattr(cfg, "collision_pipeline_update_interval")
+
+
+def test_newton_physics_forwards_sync_and_capture_options() -> None:
+    defaults = NewtonPhysicsCfg().to_dexsim_cfg(gpu_id=0)
+    assert defaults.async_sync is False
+    assert defaults.rigid_transform_sync_mode == "all"
+    assert defaults.capture_acquire_timeout is None
+    assert defaults.capture_wait_log_interval == 10.0
+
+    dexsim_cfg = NewtonPhysicsCfg(
+        async_sync=True,
+        rigid_transform_sync_mode="dynamic",
+        capture_acquire_timeout=2.5,
+        capture_wait_log_interval=None,
+    ).to_dexsim_cfg(gpu_id=0)
+
+    assert dexsim_cfg.async_sync is True
+    assert dexsim_cfg.rigid_transform_sync_mode == "dynamic"
+    assert dexsim_cfg.capture_acquire_timeout == 2.5
+    assert dexsim_cfg.capture_wait_log_interval is None
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "message"),
+    [
+        ("rigid_transform_sync_mode", "static", "rigid_transform_sync_mode"),
+        ("capture_acquire_timeout", -1.0, "capture_acquire_timeout"),
+        ("capture_acquire_timeout", float("inf"), "capture_acquire_timeout"),
+    ],
+)
+def test_newton_physics_rejects_invalid_sync_and_capture_options(
+    field_name: str,
+    value: str | float,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        NewtonPhysicsCfg(**{field_name: value})
 
 
 @pytest.mark.parametrize(

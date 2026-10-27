@@ -1741,6 +1741,71 @@ class SimulationManager:
         for control in controls:
             scene.builder.add_runtime_control(control)
 
+    def add_runtime_control(
+        self,
+        control: Any | Callable[[str, int], Any],
+    ) -> tuple[Any, ...]:
+        """Register DexSim Newton runtime controls before :meth:`prepare`.
+
+        Use this for controls that have no dedicated ``register_*`` method,
+        such as ``RealtimeJointTargetControl``, ``PinnedParticleControl`` or
+        ``IndexedConveyorControl`` from ``dexsim.engine.newton_physics``.
+
+        Pass either one control instance, which is registered once for the
+        whole scene, or a factory called as ``factory(arena_name, env_index)``
+        for every environment. Controls address entities by Spawn path, which
+        is ``f"{arena_name}/{uid}"`` for an object declared with ``uid``.
+
+        Args:
+            control: A ``RuntimeControl`` instance, or a per-environment
+                factory returning one.
+
+        Returns:
+            The registered controls, in environment order for a factory.
+            Keep them to drive live controls such as joint targets.
+
+        Raises:
+            RuntimeError: If the backend is not Newton, the Spawn scene is
+                already finalized, or its arena count is inconsistent.
+            TypeError: If a control is not a ``RuntimeControl``.
+        """
+        from dexsim.engine.newton_physics.runtime_control import RuntimeControl
+
+        if not self.is_newton_backend:
+            raise RuntimeError("Runtime controls require the Newton backend.")
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError(
+                "Runtime controls must be registered before "
+                "SimulationManager.prepare()."
+            )
+        if isinstance(control, RuntimeControl):
+            controls: tuple[Any, ...] = (control,)
+        elif callable(control):
+            arena_names = scene.arena_names
+            if len(arena_names) != self.num_envs:
+                raise RuntimeError(
+                    "Spawn arena count does not match SimulationManager.num_envs: "
+                    f"{len(arena_names)} != {self.num_envs}."
+                )
+            controls = tuple(
+                control(arena_name, env_index)
+                for env_index, arena_name in enumerate(arena_names)
+            )
+        else:
+            raise TypeError(
+                "control must be a RuntimeControl or a factory returning one."
+            )
+        for item in controls:
+            if not isinstance(item, RuntimeControl):
+                raise TypeError(
+                    "Runtime control factories must return RuntimeControl "
+                    f"instances; got {type(item).__name__}."
+                )
+        for item in controls:
+            scene.builder.add_runtime_control(item)
+        return controls
+
     def prepare(self) -> None:
         """Materialize declarations, bind state, and restore camera parents."""
         self._ready_spawn_topology_revision = -1
