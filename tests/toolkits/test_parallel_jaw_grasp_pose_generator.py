@@ -155,6 +155,7 @@ def test_generic_hierarchy_contains_no_concrete_eef_name() -> None:
         ("franka_panda_hand", (0.001, 0.08, 0.054, 0.022, 0.027, 0.092)),
         ("cobotmagic_v100_gripper", (0.001, 0.1, 0.077, 0.056, 0.025, 0.074)),
         ("tianji_marvin_gripper", (0.001, 0.095, 0.103, 0.043, 0.034, 0.082)),
+        ("pika_gripper", (0.001, 0.094, 0.113, 0.039, 0.057, 0.085)),
     ],
 )
 def test_named_gripper_model_returns_reviewed_geometry(
@@ -180,6 +181,7 @@ def test_named_gripper_model_returns_reviewed_geometry(
         "franka_panda_hand",
         "cobotmagic_v100_gripper",
         "tianji_marvin_gripper",
+        "pika_gripper",
     ],
 )
 def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:

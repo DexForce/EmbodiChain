@@ -158,6 +158,7 @@ _W1_HANDS = {
     "BRAINCO_HAND": ("BrainCo", 6, 6),
     "DH_PGC_GRIPPER": ("DH_PGC", 2, 1),
     "DH_PGC_GRIPPER_M": ("DH_PGC_M", 2, 1),
+    "PIKA_GRIPPER": ("Pika", 2, 1),
 }
 
 
@@ -177,6 +178,7 @@ def _w1_variant_profile(
     if hands is None:
         defaults["with_default_eef"] = False
     else:
+        defaults["with_default_eef"] = True
         defaults["hand_types"] = dict(zip(("left", "right"), hands))
         defaults["hand_versions"] = {"left": "v021", "right": "v021"}
         for side, brand in zip(("left", "right"), hands):
@@ -192,7 +194,7 @@ def _w1_variant_profile(
                     }
                 )
             else:
-                suffix = "_JOINT" if brand == "DH_PGC_GRIPPER" else ""
+                suffix = "_JOINT" if brand in ("DH_PGC_GRIPPER", "PIKA_GRIPPER") else ""
                 follower = f"{prefix}_FINGER2{suffix}"
                 mimics[follower] = f"{prefix}_FINGER1{suffix}"
                 part_mimics[f"{side}_eef"] = (follower,)
@@ -209,8 +211,13 @@ _W1_VARIANTS: dict[str, dict[str, object]] = {}
 for _version in _W1_VERSIONS:
     if _version == "v030":
         _W1_VARIANTS[f"{_version}/bare"] = _w1_variant_profile(_version, None)
+        _W1_VARIANTS[f"{_version}/Pika"] = _w1_variant_profile(
+            _version, ("PIKA_GRIPPER", "PIKA_GRIPPER")
+        )
         continue
     for _left, _right in product(_W1_HANDS, repeat=2):
+        if "PIKA_GRIPPER" in (_left, _right):
+            continue
         if (_left == "BRAINCO_HAND") != (_right == "BRAINCO_HAND"):
             continue
         _left_label = _W1_HANDS[_left][0]

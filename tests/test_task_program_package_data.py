@@ -38,10 +38,13 @@ _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
 _PROGRAMS = (
+    Path("tasks/manipulation/hand_over/task_program/program.bar.yaml"),
     Path("tasks/manipulation/repeated_pick_place/task_program/program.tabletop.yaml"),
+    Path("tasks/manipulation/repeated_pick_place/task_program/program.workbench.yaml"),
     Path("tasks/manipulation/hand_over/task_program/program.tabletop.yaml"),
     Path("tasks/manipulation/tableware/stack_blocks_two/task_program/program.yaml"),
     Path("tasks/manipulation/tableware/blocks_ranking_rgb/task_program/program.yaml"),
+    Path("tasks/manipulation/tableware/pour_water/task_program/program.workbench.yaml"),
     Path("tasks/manipulation/rubiks_cube_pick_place/task_program/program.yaml"),
     Path("tasks/manipulation/repeated_pick_place/task_program/program.yaml"),
     Path("tasks/manipulation/open_drawer/task_program/program.yaml"),
@@ -121,6 +124,7 @@ _DEPLOYMENTS = {
 _DUAL_ARM_VARIANTS = (
     "dual_ur5_dh_pgi_140_80",
     "tianji_marvin",
+    "dexforce_w1_030_pika",
 )
 _DUAL_ARM_PROGRAMS = {
     "hand_over": ("tabletop_hand_over", "tabletop_handover"),
@@ -146,7 +150,37 @@ _DEPLOYMENTS[Path("tasks/manipulation/hand_over/task.dual_ur5.yaml")] = (
     "tabletop_handover",
     "dual_ur5_dh_pgi_140_80",
 )
+_DEPLOYMENTS[Path("tasks/manipulation/hand_over/task.dexforce_w1_030_pika.yaml")] = (
+    "tabletop_hand_over",
+    "tabletop_bar_handover",
+    "dexforce_w1_030_pika",
+)
 _DUAL_ARM_RESOURCES = {
+    Path("components/embodiments/dexforce_w1_030_pika.yaml"),
+    *(
+        Path(f"components/execution_policies/{policy}.yaml")
+        for policy in (
+            "motion_gen_projected_w1_pika",
+            "motion_gen_verified_w1_pika",
+            "trajectory_open_loop_w1_pika",
+        )
+    ),
+    *(
+        Path(f"tasks/manipulation/{task}/env.dexforce_w1_030_pika.yaml")
+        for task in (
+            *_DUAL_ARM_PROGRAMS,
+            "tableware/blocks_ranking_size",
+            "tableware/match_object_container",
+            "tableware/place_object_drawer",
+            "tableware/stack_cups",
+        )
+    ),
+    *(
+        Path(
+            f"tasks/manipulation/{task}/task_program/integration.dexforce_w1_030_pika.yaml"
+        )
+        for task in _DUAL_ARM_PROGRAMS
+    ),
     Path("components/execution_policies/motion_gen_verified_tabletop.yaml"),
     Path(
         "tasks/manipulation/tableware/pour_water/task_program/integration.dual_ur5.yaml"

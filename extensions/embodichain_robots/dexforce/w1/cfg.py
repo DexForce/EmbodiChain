@@ -45,6 +45,7 @@ from embodichain_robots.dexforce.w1.utils import (
 )
 from embodichain_robots.dexforce.w1.hand_specs import (
     get_default_w1_hand_version,
+    get_w1_hand_spec,
     normalize_w1_hand_mappings,
 )
 from embodichain_robots.dexforce.w1.specs import get_w1_version_spec
@@ -61,6 +62,7 @@ from embodichain.utils import configclass
 
 if TYPE_CHECKING:
     import pytorch_kinematics as pk
+    from embodichain.lab.sim.sensors import CameraCfg
 
 
 @configclass
@@ -213,6 +215,15 @@ class DexforceW1Cfg(RobotCfg):
             hand_versions=self.hand_versions,
             hand_attach_xposes=self.hand_attach_xposes,
             include_hand=self.with_default_eef,
+            fname=(
+                f"{spec.assembly_name}_pika"
+                if self.with_default_eef
+                and all(
+                    self.hand_types.get(side) == DexforceW1HandBrand.PIKA_GRIPPER
+                    for side in DexforceW1ArmSide
+                )
+                else None
+            ),
         )
         self.control_parts = build_dexforce_w1_control_parts(
             version=self.version,
@@ -230,6 +241,130 @@ class DexforceW1Cfg(RobotCfg):
 
         # solver (set exactly once -- was previously double-set)
         self.solver_cfg = self._build_default_solver_cfg()
+        self.sensors = self._build_default_sensors()
+        if (
+            self.version == DexforceW1Version.V030
+            and self.with_default_eef
+            and all(
+                self.hand_types.get(side) == DexforceW1HandBrand.PIKA_GRIPPER
+                for side in DexforceW1ArmSide
+            )
+        ):
+            # Source articulation order is breadth-first: torso, head/arm
+            # branches interleaved, then fingers (not XML joint-element order).
+            # A shallow S bend keeps the upper body upright. Relaxed upper
+            # arms put the elbows below the shoulders and forearms forward.
+            # Gripper opening axes are horizontal; approach axes point about
+            # ten degrees down. Head pitch supplies the tabletop view; the
+            # head camera itself faces forward in its parent link frame.
+            # Scene layouts choose their own work height.
+            left = [
+                0.0,
+                -1.25,
+                0.0,
+                -1.70,
+                -0.32,
+                0.30,
+                0.0,
+            ]
+            right = [
+                0.0,
+                1.25,
+                0.0,
+                1.70,
+                -0.32,
+                -0.30,
+                0.0,
+            ]
+            self.init_qpos = (
+                [
+                    -0.15,
+                    0.30,
+                    -0.15,
+                    0.0,
+                    0.0,
+                    left[0],
+                    right[0],
+                    float(np.deg2rad(40.0)),
+                ]
+                + [value for pair in zip(left[1:], right[1:]) for value in pair]
+                + [0.05] * 4
+            )
+
+    def _build_default_sensors(self) -> list[CameraCfg]:
+        """Declare ideal RGB-D cameras for the optional V030 Pika suite."""
+        from embodichain.lab.sim.sensors import CameraCfg
+        from scipy.spatial.transform import Rotation
+
+        pika_sides = [
+            side
+            for side in DexforceW1ArmSide
+            if self.with_default_eef
+            and self.version == DexforceW1Version.V030
+            and self.hand_types.get(side) == DexforceW1HandBrand.PIKA_GRIPPER
+        ]
+        if not pika_sides:
+            return []
+
+        def mount(
+            parent: str,
+            eye: tuple[float, float, float],
+            target: tuple[float, float, float],
+            up: tuple[float, float, float],
+        ) -> CameraCfg.ExtrinsicsCfg:
+            # Native mounted views use OpenGL: -Z forward, +Y up.
+            forward = np.subtract(target, eye, dtype=float)
+            forward /= np.linalg.norm(forward)
+            right = np.cross(forward, up)
+            right /= np.linalg.norm(right)
+            rotation = np.column_stack((right, np.cross(right, forward), -forward))
+            return CameraCfg.ExtrinsicsCfg(
+                parent=parent,
+                pos=eye,
+                quat=tuple(Rotation.from_matrix(rotation).as_quat()),
+            )
+
+        # Simulation-designed mounts, not hardware calibration. The raised
+        # wrist views clear the housing and retain the near grasp below image
+        # centre, with room ahead of the fingertips for approach context.
+        sensors = [
+            CameraCfg(
+                uid="cam_high",
+                width=960,
+                height=540,
+                intrinsics=(505.81446, 487.09289, 480.0, 270.0),
+                near=0.05,
+                far=3.0,
+                enable_color=True,
+                enable_depth=True,
+                extrinsics=mount(
+                    "head_pitch_j2_link",
+                    (0.105, 0.0, 0.06),
+                    (1.105, 0.0, 0.06),
+                    (0.0, 0.0, 1.0),
+                ),
+            )
+        ]
+        for side in pika_sides:
+            sensors.append(
+                CameraCfg(
+                    uid=f"cam_{side.value}_wrist",
+                    width=640,
+                    height=360,
+                    intrinsics=(337.20964, 324.72860, 320.0, 180.0),
+                    near=0.01,
+                    far=2.0,
+                    enable_color=True,
+                    enable_depth=True,
+                    extrinsics=mount(
+                        f"{side.value}_gripper_base",
+                        (0.055, 0.0, 0.135),
+                        (0.195, 0.0, 0.00064),
+                        (0.0, 0.0, 1.0),
+                    ),
+                )
+            )
+        return sensors
 
     def _build_default_solver_cfg(self):
         """Build version-matched solvers with URDF joint coordinates and limits."""
@@ -242,13 +377,24 @@ class DexforceW1Cfg(RobotCfg):
         spec = get_w1_version_spec(self.version)
         for arm_side in DexforceW1ArmSide:
             part_name = f"{arm_side.value}_arm"
+            tcp = spec.tcp(arm_side)
+            if self.with_default_eef:
+                hand = get_w1_hand_spec(
+                    self.hand_types.get(arm_side, DexforceW1HandBrand.BRAINCO_HAND),
+                    self.hand_versions[arm_side],
+                ).for_side(arm_side)
+                if hand.tcp is not None:
+                    attach = self.hand_attach_xposes.get(arm_side, hand.attach_xpos)
+                    tcp = spec.compose_eef_attach_xpos(
+                        arm_side, np.asarray(attach) @ np.asarray(hand.tcp)
+                    )
             if spec.arm_solver_configs is not None:
                 solver_cfg[part_name] = SolverCfg.from_dict(
                     {
                         **spec.arm_solver_configs[arm_side],
                         "root_link_name": f"{arm_side.value}_arm_base",
                         "end_link_name": f"{arm_side.value}_ee",
-                        "tcp": spec.tcp(arm_side),
+                        "tcp": tcp,
                     }
                 )
                 continue
@@ -262,7 +408,7 @@ class DexforceW1Cfg(RobotCfg):
                 T_b_ob=params.T_b_ob,
                 link_lengths=params.link_lengths,
                 rotation_directions=params.rotation_directions,
-                tcp=get_w1_version_spec(self.version).tcp(arm_side),
+                tcp=tcp,
             )
         return solver_cfg
 
@@ -306,15 +452,29 @@ class DexforceW1Cfg(RobotCfg):
 
         if with_default_eef:
             eef_joint_names = DEFAULT_EEF_HAND_JOINT_NAMES
-            joint_drive_props.stiffness.update(
-                {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["stiffness"]}
-            )
-            joint_drive_props.damping.update(
-                {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["damping"]}
-            )
-            joint_drive_props.max_effort.update(
-                {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["max_effort"]}
-            )
+            if any(
+                self.hand_types.get(side, DexforceW1HandBrand.BRAINCO_HAND)
+                == DexforceW1HandBrand.BRAINCO_HAND
+                for side in DexforceW1ArmSide
+            ):
+                joint_drive_props.stiffness.update(
+                    {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["stiffness"]}
+                )
+                joint_drive_props.damping.update(
+                    {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["damping"]}
+                )
+                joint_drive_props.max_effort.update(
+                    {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["max_effort"]}
+                )
+            for side, brand in self.hand_types.items():
+                if brand == DexforceW1HandBrand.PIKA_GRIPPER:
+                    part = f"{side.value}_eef"
+                    joint_drive_props.stiffness[part] = 1000.0
+                    joint_drive_props.damping[part] = 100.0
+                    joint_drive_props.max_effort[part] = 40.0
+                    if joint_drive_props.max_velocity is None:
+                        joint_drive_props.max_velocity = {}
+                    joint_drive_props.max_velocity[part] = 0.25
 
         return {
             "joint_drive_props": joint_drive_props,

@@ -1591,6 +1591,48 @@ def test_pour_dwell_duration_decodes() -> None:
     assert options.dwell_duration == pytest.approx(0.75)
 
 
+def test_configured_pour_target_lowers_live_geometry_and_is_closed() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_registered_lowerer,
+    )
+
+    source = torch.eye(4)
+    source[2, 3] = 0.07
+    receiver = torch.eye(4)
+    receiver[2, 3] = 0.04
+    payload = {
+        "kind": "pour",
+        "object_id": "bottle",
+        "target": {
+            "receiver_id": "cup",
+            "source_mouth_pose": source.flatten().tolist(),
+            "receiver_mouth_pose": receiver.flatten().tolist(),
+            "receiver_radius": 0.03,
+            "mouth_radius": 0.01,
+        },
+    }
+    factory = _decode_registered_lowerer(payload, path="lowerer")
+    result = _PourLowerer("bottle", target=factory.target).lower(
+        RegisteredSemanticCall(
+            call_id="simulation.pour", arguments={"object": "bottle"}
+        ),
+        context=None,
+        bound=None,
+        option_template=PourOptions(),
+    )
+    assert result.goal.target.receiver_pose.entity_id == "cup"
+    torch.testing.assert_close(result.goal.target.receiver_pose.relative_pose, receiver)
+    torch.testing.assert_close(result.goal.target.source_mouth_pose, source)
+    invalid = deepcopy(payload)
+    invalid["target"]["world_bottle_pose"] = source.flatten().tolist()
+    with pytest.raises(ValueError, match="unsupported fields"):
+        _decode_registered_lowerer(invalid, path="lowerer")
+    invalid = deepcopy(payload)
+    invalid["target"]["receiver_id"] = "bottle"
+    with pytest.raises(ValueError, match="distinct"):
+        _decode_registered_lowerer(invalid, path="lowerer")
+
+
 @pytest.mark.parametrize("value", [-0.1, float("inf")])
 def test_pour_dwell_duration_rejects_negative_or_nonfinite_values(
     value: float,

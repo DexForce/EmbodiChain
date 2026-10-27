@@ -1,0 +1,131 @@
+# Simulation-designed camera mounts and Pika calibration; see the W1 README.
+embodiment_id: dexforce_w1_030_pika
+simulation:
+  class_type: DexforceW1
+  uid: DexforceW1V030Pika
+  version: v030
+  with_default_eef: true
+  hand_types:
+    left: PIKA_GRIPPER
+    right: PIKA_GRIPPER
+  init_pos:
+  - 0.25
+  - 0.0
+  - 0.0
+  root_props:
+    fixed_base: true
+    min_position_iters: 32
+    min_velocity_iters: 8
+  joint_drive_props:
+    max_effort:
+      left_eef: 8.0
+      right_eef: 8.0
+    stiffness:
+      head: 10000000.0
+    damping:
+      head: 10000.0
+  link_attrs:
+    finger_pads:
+      link_names_expr:
+      - (left|right)_finger[12]
+      attrs:
+        material_props:
+          static_friction: 2.0
+          dynamic_friction: 2.0
+sensor: []
+skill_profile:
+  contract_id: dual_arm_parallel_gripper
+  profile_id: dexforce_w1_030_pika
+  resources:
+  - resource_id: left
+    endpoints:
+    - endpoint_id: motion
+      control_part: left_arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: left_eef
+      capabilities:
+      - interaction.grasp
+      command_preset: left_parallel_gripper
+  - resource_id: right
+    endpoints:
+    - endpoint_id: motion
+      control_part: right_arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: right_eef
+      capabilities:
+      - interaction.grasp
+      command_preset: right_parallel_gripper
+  - resource_id: primary_manipulator
+    members:
+    - right
+    endpoints:
+    - endpoint_id: motion
+      control_part: right_arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: right_eef
+      capabilities:
+      - interaction.grasp
+      command_preset: right_parallel_gripper
+  - resource_id: secondary_manipulator
+    members:
+    - left
+    endpoints:
+    - endpoint_id: motion
+      control_part: left_arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: left_eef
+      capabilities:
+      - interaction.grasp
+      command_preset: left_parallel_gripper
+  command_presets:
+  - preset_id: left_parallel_gripper
+    control_part: left_eef
+    commands:
+      open:
+      - 0.05
+      - 0.05
+      grasp:
+      - 0.0
+      - 0.0
+  - preset_id: right_parallel_gripper
+    control_part: right_eef
+    commands:
+      open:
+      - 0.05
+      - 0.05
+      grasp:
+      - 0.0
+      - 0.0
+  runtime_services:
+    grasp_pose_generators:
+      left_eef:
+        kind: antipodal_parallel_jaw
+        model: pika_gripper
+      right_eef:
+        kind: antipodal_parallel_jaw
+        model: pika_gripper
+    control_part_evidence:
+      kind: joint_position_constraint
+      control_parts:
+      - left_eef
+      - right_eef
+      open_qpos:
+      - 0.05
+      - 0.05
+      minimum_displacement: 0.004

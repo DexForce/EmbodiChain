@@ -28,6 +28,7 @@ __all__ = ["PlaceObjectDrawerEnv"]
 
 
 @register_env("PlaceObjectDrawer-DualUR5-v1", max_episode_steps=600)
+@register_env("PlaceObjectDrawer-DexforceW1V030Pika-v1", max_episode_steps=600)
 @register_env("PlaceObjectDrawer-TianjiMarvin-v1", max_episode_steps=600)
 @register_env("PlaceObjectDrawer-v1", max_episode_steps=600)
 class PlaceObjectDrawerEnv(EmbodiedEnv):

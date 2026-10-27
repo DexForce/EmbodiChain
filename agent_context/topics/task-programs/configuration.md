@@ -114,6 +114,14 @@ the closed-field decoder. Omitting `velocity_limit` preserves the Robot's
 ordered per-joint speed caps; an explicit scalar request is intersected with
 those caps rather than replacing them.
 
+The configured `pour` lowerer's optional `target` binds a receiving object,
+source/receiver mouth frames and usable opening radii. It lowers to a
+`PourTarget` with a late-bound receiving pose; the Atomic Skill computes the
+preparation and pouring path from the held transform. Keep these geometry
+declarations in the integration and timing in the execution policy, rather
+than placing a precomputed bottle world pose in the program. Omitting `target`
+retains the original internal-axis pouring behavior.
+
 `motion.plan_opts.kind: trapezoidal` selects typed backend options for
 `stop_at_waypoints`, `blend_tolerance`, and `collinearity_tolerance`. It requires
 `strategy: motion_gen` and selects the Trapezoidal planner contract; incompatible
