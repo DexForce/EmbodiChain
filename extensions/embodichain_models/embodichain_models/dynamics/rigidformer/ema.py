@@ -48,7 +48,12 @@ class RigidFormerEMA:
 
     @torch.no_grad()
     def on_update(self, learner: Any) -> None:
-        """Update the average once after a successful parameter update."""
+        """Update the average once after a successful parameter update.
+
+        Args:
+            learner: Successful host update context. Values are read from the
+                model supplied at construction.
+        """
         self.num_updates += 1
         decay = min(self.decay, (1 + self.num_updates) / (10 + self.num_updates))
         floating, values = [], []
@@ -62,7 +67,11 @@ class RigidFormerEMA:
         torch._foreach_add_(floating, values, alpha=1 - decay)
 
     def state_dict(self) -> dict[str, Any]:
-        """Return owned FP32 shadows and the exact EMA update cursor."""
+        """Return owned FP32 shadows and the exact EMA update cursor.
+
+        Returns:
+            CPU shadow tensors, decay and committed update count.
+        """
         return {
             "decay": self.decay,
             "num_updates": self.num_updates,
@@ -70,7 +79,11 @@ class RigidFormerEMA:
         }
 
     def validate_state_dict(self, state: Mapping[str, Any]) -> None:
-        """Validate EMA policy and every shadow tensor before restoration."""
+        """Validate EMA policy and every shadow tensor before restoration.
+
+        Args:
+            state: Candidate snapshot; validation does not change live weights.
+        """
         if (
             state.get("decay") != self.decay
             or type(state.get("num_updates")) is not int
@@ -86,7 +99,11 @@ class RigidFormerEMA:
 
     @torch.no_grad()
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
-        """Restore a prevalidated EMA without changing live model weights."""
+        """Restore a prevalidated EMA without changing live model weights.
+
+        Args:
+            state: Snapshot accepted by validate_state_dict.
+        """
         self.num_updates = state["num_updates"]
         for key, value in self.shadow.items():
             value.copy_(state["shadow"][key])

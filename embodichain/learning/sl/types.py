@@ -119,7 +119,11 @@ class SupervisedTrainingState(Protocol):
         ...
 
     def state_dict(self) -> Mapping[str, Any]:
-        """Return an owned serializable snapshot of the committed state."""
+        """Return an owned serializable snapshot of the committed state.
+
+        Returns:
+            State whose mutable values do not alias the live participant.
+        """
         ...
 
     def validate_state_dict(self, state: Mapping[str, Any]) -> None:

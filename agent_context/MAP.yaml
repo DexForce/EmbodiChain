@@ -283,7 +283,8 @@ topics:
   - examples/learning/nerd/_support/
   - examples/learning/nerd/configs/
   - extensions/embodichain_models/embodichain_models/dynamics/rigidformer/
-  watch_paths: [extensions/embodichain_models/, examples/learning/nerd/,
+  - examples/learning/rigidformer/
+  watch_paths: [extensions/embodichain_models/, examples/learning/nerd/, examples/learning/rigidformer/,
     docs/source/features/neural_dynamics.md,
     docs/source/api_reference/model_catalogs.rst]
   related_topics: [supervised-learning, learning-layers, data-pipeline, data-assets]

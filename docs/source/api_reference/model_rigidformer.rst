@@ -146,5 +146,8 @@ source identity also binds splits, scaling, sampling and seed. EMA shadows remai
 FP32 and retain the author's warmup policy. Official weight import is distinct
 from native optimizer recovery; export selects EMA or raw weights explicitly.
 
-Applications own acquisition and independent reference experiments. Short
-numerical comparisons do not establish published accuracy.
+The showcase owns asset preparation, the author evaluator and independent
+reference comparison. Fixed-checkpoint test evaluation does not select a
+checkpoint. New learning recipes should select using validation data. Reports
+record source/data/checkpoint identities, attention backend and subset/full scope.
+Short numerical comparisons do not establish published accuracy.

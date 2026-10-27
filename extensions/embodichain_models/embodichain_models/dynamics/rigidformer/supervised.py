@@ -57,6 +57,8 @@ class RigidFormerObjective:
     Args:
         weights: Position/acceleration before/after Kabsch weights.
         time_step_scale: Divide errors by step_size squared before smooth-L1.
+        augmentation: Optional author geometry augmentation, applied in FP32
+            before the network's numerical context.
     """
 
     def __init__(

@@ -191,7 +191,14 @@ class MOViSequenceSource:
         return self._order
 
     def updates_per_epoch(self, batch_size: int) -> int:
-        """Return full-batch updates per rank, matching drop-last training."""
+        """Return full-batch updates per rank, matching drop-last training.
+
+        Args:
+            batch_size: Number of windows in each rank's optimizer update.
+
+        Returns:
+            Number of complete rank-local batches in an epoch.
+        """
         if type(batch_size) is not int or batch_size < 1 or self._per_rank < batch_size:
             raise ValueError("Every rank needs at least one complete batch")
         return self._per_rank // batch_size
@@ -255,14 +262,22 @@ class MOViSequenceSource:
         )
 
     def on_update(self, learner: Any) -> None:
-        """Commit the staged window traversal after a successful optimizer step."""
+        """Commit the staged window traversal after a successful optimizer step.
+
+        Args:
+            learner: Host update context; progress comes from the staged batch.
+        """
         if self._pending is None:
             raise RuntimeError("No geometry batch is pending")
         self.epoch, self.cursor = self._pending
         self._pending = None
 
     def state_dict(self) -> dict[str, Any]:
-        """Return the committed rank-local sampling boundary."""
+        """Return the committed rank-local sampling boundary.
+
+        Returns:
+            Owned source identity, epoch, cursor and rank/world-size values.
+        """
         return {
             "source_id": self.source_id,
             "epoch": self.epoch,
@@ -272,7 +287,11 @@ class MOViSequenceSource:
         }
 
     def validate_state_dict(self, state: Mapping[str, Any]) -> None:
-        """Reject incompatible geometry or traversal before training mutation."""
+        """Reject incompatible geometry or traversal before training mutation.
+
+        Args:
+            state: Candidate committed sampling snapshot.
+        """
         if (
             state.get("source_id") != self.source_id
             or state.get("rank") != self.rank
@@ -286,7 +305,11 @@ class MOViSequenceSource:
         self._verify_files()
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
-        """Restore a prevalidated committed traversal and discard staged reads."""
+        """Restore a prevalidated committed traversal and discard staged reads.
+
+        Args:
+            state: Snapshot accepted by validate_state_dict.
+        """
         self.epoch, self.cursor = state["epoch"], state["cursor"]
         self._pending = None
         self._order_epoch = -1
