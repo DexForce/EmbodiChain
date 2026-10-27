@@ -69,10 +69,10 @@ model and objective and save snapshots; live delivery state is not restored by
 the trainer. The host owns ODS lifecycle and waits.
 
 The [state acceptance record](research/state-acceptance.md) distinguishes the
-completed first-32 results, the ongoing fresh-256 fallback, and the gated
-independent test. It also records source and data identities, the task-success
-predicate, all three seeds, and both checkpoints of both recipes. Neither recipe
-passed the first-round development gate.
+completed first-32 and fresh-256 results from the gated independent test. It
+also records source and data identities, the task-success predicate, all three
+seeds, and both checkpoints of both recipes. Neither recipe passed the
+development gate in either round; the independent test was not opened.
 
 ## Historical PR828 visual recipe
 

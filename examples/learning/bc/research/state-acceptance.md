@@ -1,9 +1,9 @@
 # State BC PickPlace: protocol and acceptance record
 
-The first comparison has completed: neither state recipe passed its development
-gate. A fresh 256-demonstration fallback is in progress. The independent
-100-scene test remains sealed. State observations include simulator-provided cube
-and goal information; these results do not establish vision or real-world
+The first comparison and fresh 256-demonstration fallback have completed: neither
+state recipe passed the development gate in either round. The independent
+100-scene test was not opened. State observations include simulator-provided
+cube and goal information; these results do not establish vision or real-world
 performance. PR #861 remains draft until the engineering and task gates pass;
 the maintainer's review determines whether it is merged.
 
@@ -111,19 +111,43 @@ artifacts; do not attribute them to a later source or regenerated dataset.
 
 ## Fresh-256 fallback
 
-The next predeclared comparison keeps both recipes, seeds and checkpoints, with
+The predeclared fallback retained both recipes, seeds and checkpoints, with
 256 demonstrations and a new 20-scene development panel at seed base
-`20500100`. Additional historical demonstrations replayed only 221/224
-successfully, so the historical 256-episode corpus was not admitted. A new
-current-source corpus collected **256/256** physically successful demonstrations
-in 256 attempts; its first 32 define its own normalization. Its parent manifest
-SHA256 is
+`20500100`. The additional 224 historical demonstrations had 224/224 matching
+visible initial states but only 221/224 physical replay successes, so the
+historical 256-episode corpus was not admitted. A new current-source corpus
+collected **256/256** physically successful demonstrations in 256 attempts;
+its first 32 define its own normalization. The corpus contains 124,821 valid
+state/action frames. Its parent manifest SHA256 is
 `e65906ef2936632b513b24fc3aa6f4838d10525b61514d328a36704949670be1`
 and state-view manifest SHA256 is
 `5e4d1538af97ecbdd525f48cfbd9955a63deddc328208f6856cd46fd17c7cf75`.
-These differ from the first-round inputs. The fallback's complete development
-result and gate are **in progress**; no 100-scene result is claimed here.
-Keep original and fallback outcomes separate.
+These differ from the first-round inputs. All six fallback trainings and twelve
+development evaluations used source `1b565b5aea83936df04f1532ce772a85ed022597`.
+The development panel digest was
+`66f9867f62c5379c9167a1e2abe2c95180bcc3ce6e9060f38b948497a09bc2ae`.
+Every cell is complete task successes out of the same 20 scenes; repeated
+checkpoint evaluations are not independent new scenes.
+
+| Training seed | A, 8,000 | A, 10,000 | B, 4,000 | B, 5,000 |
+| --- | ---: | ---: | ---: | ---: |
+| 20400011 | 0/20 | 0/20 | 1/20 | 5/20 |
+| 20400012 | 0/20 | 0/20 | 11/20 | 0/20 |
+| 20400013 | 0/20 | 0/20 | 8/20 | 3/20 |
+
+Neither recipe passes the required 18/20 at both checkpoints for every seed.
+No recipe or checkpoint was selected for the independent test, and the runner
+records `test_opened: false`. Preserve these failed results; do not report the
+historical 99/100 state result as a result of this experiment.
+
+The fallback summary, reports, traces and checkpoints are retained outside Git
+on the execution host under
+`/root/outputs/bc-state-redesign-20261027/execution/fallback-256-v1/`; the fresh
+corpus is under `/root/outputs/bc-state-redesign-20261027/fallback-256/fresh-256/`.
+The completed `summary.json` SHA256 is
+`5295700a87d24c4f0674fc70f065e3ccd2945cdc0d96ec59c62d757018f7a2b7`.
+This is a provenance path, not a portable download location. Keep first-round
+and fallback assets and source identities separate when publishing evidence.
 
 ## Running the state workflow
 
