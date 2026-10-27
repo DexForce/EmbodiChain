@@ -52,6 +52,9 @@ not establish reachable grasps, settled state or measured task success.
 artifacts. It preserves logical entity IDs and derives new Gym/integration
 identities. Explicit `./` or `../` resource paths resolve from the component
 that declares them; bare paths retain dataset registry semantics.
+Execution-policy selections use the same configured resolver as normal task
+loading. Materialization writes the resolved policy to `policy.yaml`, retaining
+deployment overrides when the artifact is relocated.
 
 Physical scene and physics-backend ownership are unchanged. Upright normalized
 mesh replacement supports one visual/collision resource and explicit relative

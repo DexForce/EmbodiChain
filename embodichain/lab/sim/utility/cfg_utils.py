@@ -181,6 +181,8 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
 
     Partial ``root_props`` mappings retain unspecified preset values. Explicit
     ``None`` entries are applied, and iteration pairs validate after merging.
+    Assembly output name/directory overrides apply before appending components,
+    allowing a tool-equipped variant to use a separate assembly cache.
 
     Args:
         base_cfg (RobotCfg): The base robot configuration.

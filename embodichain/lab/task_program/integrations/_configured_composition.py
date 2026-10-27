@@ -30,6 +30,8 @@ from embodichain.utils.utility import load_config
 from .configured import (
     _ConfiguredTaskProgramIntegration,
     _decode_configured_task_program_integration,
+    _decode_motion_policy,
+    _decode_recovery_policy,
     _identifier,
     _mapping,
 )
@@ -58,6 +60,17 @@ _GRASP_GENERATOR_OVERRIDE_FIELDS = frozenset(
     }
 )
 _PLANNER_TYPES = frozenset({"curobo", "neural", "toppra", "trapezoidal"})
+_EXECUTION_POLICY_OVERRIDE_FIELDS = {
+    "motion": frozenset(
+        {
+            "sample_count",
+            "velocity_limit",
+            "acceleration_limit",
+            "dynamic_collision_mode",
+        }
+    ),
+    "recovery": frozenset({"action_timeout", "goal_rotation_threshold"}),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,12 +252,96 @@ def _merge_runtime_services(
     return result
 
 
+def _resolve_execution_policy(
+    value: object,
+    *,
+    base_dir: Path,
+) -> tuple[Path, dict[str, object]]:
+    """Load a policy path or component selector with bounded scalar overrides."""
+    selection_path = "task_program.execution_policy"
+    overrides: Mapping[str, object] = {}
+    component_field = selection_path
+    if isinstance(value, str):
+        component = value
+    else:
+        selection = _mapping(
+            value,
+            path=selection_path,
+            required=frozenset({"component"}),
+            optional=frozenset({"overrides"}),
+        )
+        component = selection["component"]
+        component_field = f"{selection_path}.component"
+        overrides = _mapping(
+            selection.get("overrides", {}),
+            path=f"{selection_path}.overrides",
+            required=frozenset(),
+            optional=frozenset(_EXECUTION_POLICY_OVERRIDE_FIELDS),
+        )
+    policy_path = _component_path(
+        component,
+        base_dir=base_dir,
+        path=component_field,
+        suffixes=frozenset({".yaml", ".yml"}),
+    )
+    policy = dict(
+        _mapping(
+            _load_yaml_component(policy_path, field_name="execution policy"),
+            path="execution policy",
+            required=frozenset(
+                {
+                    "policy_id",
+                    "preset_id",
+                    "requires",
+                    "motion",
+                    "tracking",
+                    "recovery",
+                    "workflow_recovery",
+                    "runner",
+                    "effect_assurance",
+                }
+            ),
+            optional=frozenset({"required_planner", "planner"}),
+        )
+    )
+    _identifier(policy["policy_id"], path="execution policy.policy_id")
+    for group, values in overrides.items():
+        patch = _mapping(
+            values,
+            path=f"{selection_path}.overrides.{group}",
+            required=frozenset(),
+            optional=_EXECUTION_POLICY_OVERRIDE_FIELDS[group],
+        )
+        merged = _owned_mapping(policy[group], path=f"execution policy.{group}")
+        merged.update(deepcopy(dict(patch)))
+        policy[group] = merged
+    # Reuse the production value decoders after patching. Policy identity,
+    # contracts, planner, tracking and effect assurance remain component-owned.
+    _decode_motion_policy(policy["motion"], path="execution policy.motion")
+    _decode_recovery_policy(policy["recovery"], path="execution policy.recovery")
+    if "planner" in policy:
+        policy["planner"] = _decode_planner_config(
+            policy["planner"],
+            path="execution policy.planner",
+        )
+        required_planner = policy.get("required_planner")
+        if (
+            required_planner is not None
+            and required_planner != policy["planner"]["type"]
+        ):
+            raise ValueError(
+                "execution policy.required_planner must match "
+                "execution policy.planner.type when both are declared."
+            )
+    return policy_path, policy
+
+
 def _resolve_task_program_components(
     value: object,
     *,
     base_dir: Path,
 ) -> tuple[Path, Mapping[str, object], Mapping[str, object]]:
-    """Resolve program, task integration, and execution policy files."""
+    """Resolve program, task integration, and execution policy selections."""
     declaration = _mapping(
         value,
         path="task_program",
@@ -260,12 +357,6 @@ def _resolve_task_program_components(
         declaration["integration"],
         base_dir=base_dir,
         path="task_program.integration",
-        suffixes=frozenset({".yaml", ".yml"}),
-    )
-    policy_path = _component_path(
-        declaration["execution_policy"],
-        base_dir=base_dir,
-        path="task_program.execution_policy",
         suffixes=frozenset({".yaml", ".yml"}),
     )
     integration = _mapping(
@@ -288,39 +379,9 @@ def _resolve_task_program_components(
         )
 
         AssetRequirements.from_dict(integration["asset_requirements"])
-    policy = _mapping(
-        _load_yaml_component(policy_path, field_name="execution policy"),
-        path="execution policy",
-        required=frozenset(
-            {
-                "policy_id",
-                "preset_id",
-                "requires",
-                "motion",
-                "tracking",
-                "recovery",
-                "workflow_recovery",
-                "runner",
-                "effect_assurance",
-            }
-        ),
-        optional=frozenset({"required_planner", "planner"}),
+    _, policy = _resolve_execution_policy(
+        declaration["execution_policy"], base_dir=base_dir
     )
-    _identifier(policy["policy_id"], path="execution policy.policy_id")
-    if "planner" in policy:
-        policy["planner"] = _decode_planner_config(
-            policy["planner"],
-            path="execution policy.planner",
-        )
-        required_planner = policy.get("required_planner")
-        if (
-            required_planner is not None
-            and required_planner != policy["planner"]["type"]
-        ):
-            raise ValueError(
-                "execution policy.required_planner must match "
-                "execution policy.planner.type when both are declared."
-            )
     return program_path, integration, policy
 
 

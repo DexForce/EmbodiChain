@@ -1613,6 +1613,14 @@ def init_rollout_buffer_from_gym_space(
 
     Returns:
         TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
+
+    Note:
+        Observation and action payloads are allocated without initialization.
+        Only entries marked by ``valid`` may be consumed; invalid payload
+        contents are unspecified. Avoiding a full image-buffer fill keeps CPU
+        recording startup proportional to written frames rather than the
+        configured episode capacity. Annotation and validity fields remain
+        initialized independently of the payloads.
     """
 
     def _convert_space_dtype_to_torch_dtype(space: spaces.Space) -> torch.dtype:
@@ -1646,7 +1654,7 @@ def init_rollout_buffer_from_gym_space(
                 device=device,
             )
         elif isinstance(space, spaces.Box):
-            return torch.zeros(
+            return torch.empty(
                 (num_envs, max_episode_steps, *space.shape[1:]),
                 dtype=_convert_space_dtype_to_torch_dtype(space),
                 device=device,

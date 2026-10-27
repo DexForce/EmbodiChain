@@ -33,6 +33,7 @@ from ._configured_services import (
     _JointPositionConstraintEvidenceProviderFactory,
     _MoveHeldObjectLowererFactory,
     _PourLowererFactory,
+    _PourTargetBinding,
     _PushObjectLowererFactory,
 )
 from .catalog import (
@@ -942,6 +943,10 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "translation_distance",
                 "rotate_angle",
                 "dwell_duration",
+                "mouth_height",
+                "max_mouth_height",
+                "clearance",
+                "max_rotation_step",
                 "approach_height",
                 "retract_height",
                 "contact_distance",
@@ -1122,7 +1127,17 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             value,
             path=path,
             required=frozenset({"kind"}),
-            optional=frozenset({"rotate_angle", "dwell_duration"}),
+            optional=frozenset(
+                {
+                    "rotate_angle",
+                    "dwell_duration",
+                    "mouth_height",
+                    "max_mouth_height",
+                    "clearance",
+                    "approach_distance",
+                    "max_rotation_step",
+                }
+            ),
         )
         kwargs = {}
         if "rotate_angle" in config:
@@ -1136,6 +1151,17 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 path=f"{path}.dwell_duration",
                 minimum=0.0,
             )
+        for field_name in (
+            "mouth_height",
+            "max_mouth_height",
+            "clearance",
+            "approach_distance",
+            "max_rotation_step",
+        ):
+            if field_name in config:
+                kwargs[field_name] = _real(
+                    config[field_name], path=f"{path}.{field_name}"
+                )
         return PourOptions(**kwargs)
     if kind == "push_object":
         config = _mapping(
@@ -1978,6 +2004,7 @@ def _decode_registered_lowerer(
                 "relative_pose",
                 "object_id",
                 "routes",
+                "target",
             }
         ),
     )
@@ -2058,9 +2085,48 @@ def _decode_registered_lowerer(
             value,
             path=path,
             required=frozenset({"kind", "object_id"}),
+            optional=frozenset({"target"}),
         )
+        target = None
+        if "target" in config:
+            target_config = _mapping(
+                config["target"],
+                path=f"{path}.target",
+                required=frozenset(
+                    {
+                        "receiver_id",
+                        "source_mouth_pose",
+                        "receiver_mouth_pose",
+                        "receiver_radius",
+                        "mouth_radius",
+                    }
+                ),
+            )
+            target = _PourTargetBinding(
+                receiver_id=_identifier(
+                    target_config["receiver_id"], path=f"{path}.target.receiver_id"
+                ),
+                source_mouth_pose=_finite_tuple(
+                    target_config["source_mouth_pose"],
+                    path=f"{path}.target.source_mouth_pose",
+                    expected_length=16,
+                ),
+                receiver_mouth_pose=_finite_tuple(
+                    target_config["receiver_mouth_pose"],
+                    path=f"{path}.target.receiver_mouth_pose",
+                    expected_length=16,
+                ),
+                receiver_radius=_real(
+                    target_config["receiver_radius"],
+                    path=f"{path}.target.receiver_radius",
+                ),
+                mouth_radius=_real(
+                    target_config["mouth_radius"], path=f"{path}.target.mouth_radius"
+                ),
+            )
         return _PourLowererFactory(
-            object_id=_identifier(config["object_id"], path=f"{path}.object_id")
+            object_id=_identifier(config["object_id"], path=f"{path}.object_id"),
+            target=target,
         )
     if kind == "push_object":
         config = _mapping(

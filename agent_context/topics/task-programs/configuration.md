@@ -107,12 +107,30 @@ Ownership is explicit rather than a generic deep merge:
   effect-assurance policy. Planner collision objects are attached from the
   selected live scene and are not serialized in the policy.
 
+`task_program.execution_policy` accepts a string path or a closed
+`{component, overrides}` selector. `_resolve_execution_policy()` in
+`integrations/_configured_composition.py` applies allowlisted motion/recovery
+scalar overrides to an owned copy, then validates the resolved values with the
+normal policy decoders. Contracts, planner selection, tracking and effect
+assurance remain component-owned. Paths in either form resolve from the runnable
+deployment. Reuse the base policy and declare tuning in the selector instead of
+copying a policy for each robot or sampling rate; the supported fields and
+example are in the [task package usage](../../../extensions/embodichain_tasks/README.md).
+
 Configured `motion` policies accept optional finite, strictly positive
 `velocity_limit` and `acceleration_limit` values. Configured Pour action options
 accept a finite, non-negative `dwell_duration`; unknown timing keys still fail
 the closed-field decoder. Omitting `velocity_limit` preserves the Robot's
 ordered per-joint speed caps; an explicit scalar request is intersected with
 those caps rather than replacing them.
+
+The configured `pour` lowerer's optional `target` binds a receiving object,
+source/receiver mouth frames and usable opening radii. It lowers to a
+`PourTarget` with a late-bound receiving pose; the Atomic Skill computes the
+preparation and pouring path from the held transform. Keep these geometry
+declarations in the integration and timing in the execution policy, rather
+than placing a precomputed bottle world pose in the program. Omitting `target`
+retains the original internal-axis pouring behavior.
 
 `motion.plan_opts.kind: trapezoidal` selects typed backend options for
 `stop_at_waypoints`, `blend_tolerance`, and `collinearity_tolerance`. It requires

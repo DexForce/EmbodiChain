@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import enum
+import json
 from copy import deepcopy
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -55,6 +56,53 @@ from embodichain_robots.dexforce.w1.utils import (
 from embodichain.lab.sim.motion.solvers import SRSSolverCfg
 from embodichain.utils import configclass
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+
+
+@pytest.mark.no_sim
+def test_generic_robot_assembly_json_roundtrip_preserves_output(
+    tmp_path: Path,
+) -> None:
+    """Appending a tool isolates the cache and preserves the preset assembly."""
+    source = tmp_path / "component.urdf"
+    source.write_text('<robot name="component"><link name="base_link"/></robot>')
+    output_root = tmp_path / "assemblies"
+    cfg = RobotCfg.from_dict(
+        {
+            "urdf_cfg": {
+                "fname": "bare_robot",
+                "fpath_prefix": str(tmp_path / "bare_assemblies"),
+                "component_prefix": {"left_arm": "left_", "right_arm": "right_"},
+                "components": [
+                    {"component_type": side, "urdf_path": str(source)}
+                    for side in ("left_arm", "right_arm")
+                ],
+            }
+        }
+    )
+    merge_robot_cfg(
+        cfg,
+        {
+            "urdf_cfg": {
+                "fname": "composed_robot",
+                "fpath_prefix": str(output_root),
+                "components": [
+                    {"component_type": "left_hand", "urdf_path": str(source)}
+                ],
+            }
+        },
+    )
+    restored = RobotCfg.from_dict(json.loads(json.dumps(cfg.to_dict())))
+    for robot in (cfg, restored):
+        assert set(robot.urdf_cfg.components) == {"left_arm", "right_arm", "left_hand"}
+        assert robot.urdf_cfg.fname == "composed_robot"
+        assert robot.urdf_cfg.fpath_prefix == str(output_root)
+        assert robot.urdf_cfg.fpath == str(
+            output_root / "composed_robot/composed_robot.urdf"
+        )
+        assert robot.urdf_cfg.component_prefix == [
+            ("left_arm", "left_"),
+            ("right_arm", "right_"),
+        ]
 
 
 @pytest.mark.no_sim

@@ -406,11 +406,20 @@ class URDFCfg:
         use_signature_check = init_dict.get("use_signature_check", True)
         base_link_name = init_dict.get("base_link_name", "base_link")
         component_prefix = init_dict.get("component_prefix", None)
+        if isinstance(component_prefix, list):
+            component_prefix = [
+                tuple(pair) if isinstance(pair, list) else pair
+                for pair in component_prefix
+            ]
         name_case = init_dict.get("name_case", None)
         return cls(
             components=components,
             sensors=sensors,
             fpath=fpath,
+            fname=init_dict.get("fname"),
+            fpath_prefix=init_dict.get(
+                "fpath_prefix", EMBODICHAIN_DEFAULT_DATA_ROOT + "/assembled"
+            ),
             use_signature_check=use_signature_check,
             base_link_name=base_link_name,
             component_prefix=component_prefix,

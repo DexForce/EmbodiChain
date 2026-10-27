@@ -187,10 +187,21 @@ def deployment(tmp_path: Path):
     return template / "task.yaml", requirements, resolved
 
 
+@pytest.mark.parametrize("with_policy_overrides", (False, True))
 def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
-    deployment, tmp_path
+    deployment, tmp_path, with_policy_overrides
 ):
     source, requirements, resolved = deployment
+    if with_policy_overrides:
+        task = yaml.safe_load(source.read_text())
+        task["task_program"]["execution_policy"] = {
+            "component": task["task_program"]["execution_policy"],
+            "overrides": {
+                "motion": {"sample_count": 73, "velocity_limit": 0.15},
+                "recovery": {"action_timeout": 111.0},
+            },
+        }
+        _write(source, task)
     original = source.read_bytes()
     result = materialize_asset_deployment(
         source, requirements, resolved, output_dir=tmp_path / "out"
@@ -199,6 +210,13 @@ def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
     loaded = config_to_cfg(config, source_path=result.deployment_path)
     assert loaded is not None
     assert source.read_bytes() == original
+    policy = yaml.safe_load((result.deployment_path.parent / "policy.yaml").read_text())
+    assert config["task_program"]["execution_policy"] == "policy.yaml"
+    assert policy["motion"]["sample_count"] == (73 if with_policy_overrides else 40)
+    assert policy["motion"]["strategy"] == "ik_interp"
+    if with_policy_overrides:
+        assert policy["motion"]["velocity_limit"] == 0.15
+        assert policy["recovery"]["action_timeout"] == 111.0
     assert config["physics"] == "default"
     assert config["id"] != yaml.safe_load(source.read_text())["id"]
     assert config["rigid_object"][0]["init_pos"][2] == pytest.approx(0.04)

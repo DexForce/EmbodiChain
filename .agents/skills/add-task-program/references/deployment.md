@@ -24,6 +24,22 @@ All component paths resolve from the runnable deployment file. Use YAML
 components. Do not add `task.component`; that compatibility boundary has been
 removed.
 
+For deployment-specific policy tuning, retain the shared base policy and use
+the closed selector instead of duplicating its full configuration:
+
+```yaml
+execution_policy:
+  component: ../../../components/execution_policies/motion_gen_verified.yaml
+  overrides:
+    motion:
+      velocity_limit: 0.5
+```
+
+Only allowlisted motion/recovery scalar fields may be overridden; see the
+task package README and the configured policy resolver. Contracts, planner,
+tracking and effect assurance stay with the base policy. The original string
+reference remains supported. Do not add policy inheritance or arbitrary merges.
+
 ## Composition rules
 
 - Select either `environment.component` or corresponding inline environment
