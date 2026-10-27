@@ -27,6 +27,7 @@ __all__ = ["MatchObjectContainerEnv"]
 
 
 @register_env("MatchObjectContainer-DualUR5-v1", max_episode_steps=600)
+@register_env("MatchObjectContainer-DexforceW1V030Pika-v1", max_episode_steps=600)
 @register_env("MatchObjectContainer-TianjiMarvin-v1", max_episode_steps=600)
 @register_env("MatchObjectContainer-v1", max_episode_steps=600)
 class MatchObjectContainerEnv(EmbodiedEnv):

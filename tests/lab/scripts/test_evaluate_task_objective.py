@@ -27,12 +27,15 @@ def test_component_snapshot_tracks_referenced_content(tmp_path: Path) -> None:
 
     (tmp_path / "task.yaml").write_text(
         "id: Test-v1\nenvironment: {component: env.yaml}\nobjective: {component: objective.yaml}\n"
+        "task_program:\n  execution_policy:\n    component: policy.yaml\n"
+        "    overrides: {motion: {sample_count: 60}}\n"
     )
     (tmp_path / "env.yaml").write_text("physics: default\n")
+    (tmp_path / "policy.yaml").write_text("policy_id: base\n")
     objective = tmp_path / "objective.yaml"
     objective.write_text("object_uid: cube\n")
     snapshot = _component_snapshot(tmp_path / "task.yaml")
-    assert set(snapshot) == {"task.yaml", "env.yaml", "objective.yaml"}
+    assert set(snapshot) == {"task.yaml", "env.yaml", "objective.yaml", "policy.yaml"}
     assert (
         snapshot["objective.yaml"]["sha256"]
         == hashlib.sha256(objective.read_bytes()).hexdigest()

@@ -43,6 +43,7 @@ from embodichain.lab.sim.atomic_actions import (
     Pour,
     PourGoal,
     PourOptions,
+    PourTarget,
     PushObject,
     PushObjectGoal,
     PushObjectOptions,
@@ -512,6 +513,33 @@ class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _PourTargetBinding:
+    """Trusted source/receiver geometry for a targeted pouring call."""
+
+    receiver_id: str
+    source_mouth_pose: tuple[float, ...]
+    receiver_mouth_pose: tuple[float, ...]
+    receiver_radius: float
+    mouth_radius: float
+
+    def __post_init__(self) -> None:
+        _identifier(self.receiver_id, field_name="receiver_id")
+        self.make_target()
+
+    def make_target(self) -> PourTarget:
+        """Own the geometry and resolve the opening anew for each plan."""
+        return PourTarget(
+            receiver_pose=SceneEntityPose(
+                self.receiver_id,
+                relative_pose=torch.tensor(self.receiver_mouth_pose).reshape(4, 4),
+            ),
+            source_mouth_pose=torch.tensor(self.source_mouth_pose).reshape(4, 4),
+            receiver_radius=self.receiver_radius,
+            mouth_radius=self.mouth_radius,
+        )
+
+
 class _PourLowerer(RegisteredSemanticLowerer):
     """Lower one configured held-object pouring request."""
 
@@ -522,6 +550,7 @@ class _PourLowerer(RegisteredSemanticLowerer):
         self,
         object_id: str,
         internal_axis: tuple[float, float, float] = (1.0, 0.0, 0.0),
+        target: _PourTargetBinding | None = None,
     ) -> None:
         self._object_id = _identifier(object_id, field_name="object_id")
         axis = torch.tensor(internal_axis, dtype=torch.float32)
@@ -531,6 +560,7 @@ class _PourLowerer(RegisteredSemanticLowerer):
         if magnitude <= 1.0e-6:
             raise ValueError("internal_axis must be non-zero.")
         self._internal_axis = axis / magnitude
+        self._target = target
 
     def lower(
         self,
@@ -545,7 +575,11 @@ class _PourLowerer(RegisteredSemanticLowerer):
         if type(option_template) is not PourOptions:
             raise TypeError("Configured Pour requires an exact PourOptions template.")
         self._validate_call(call)
-        return SemanticLowering(goal=PourGoal())
+        return SemanticLowering(
+            goal=PourGoal(
+                target=None if self._target is None else self._target.make_target()
+            )
+        )
 
     def pick_lookahead_targets(
         self,
@@ -559,6 +593,10 @@ class _PourLowerer(RegisteredSemanticLowerer):
         self._validate_call(call)
         if picked_object.entity_id != self._object_id:
             return None
+        if self._target is not None:
+            # The mouth-controlled path depends on the actual held transform;
+            # it is checked by Pour after pickup, not replaced by fixed poses.
+            return ()
         if (
             previous_target is None
             or type(previous_target.pose) is not SceneEntityPose
@@ -607,9 +645,14 @@ class _PourLowererFactory(RegisteredSemanticLowererFactory):
     target_descriptor: ClassVar[SkillDescriptor] = Pour.descriptor()
 
     object_id: str
+    target: _PourTargetBinding | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.object_id, field_name="object_id")
+        if self.target is not None and type(self.target) is not _PourTargetBinding:
+            raise TypeError("target must be a configured pouring target.")
+        if self.target is not None and self.target.receiver_id == self.object_id:
+            raise ValueError("Pour source and receiving object must be distinct.")
 
     def create(
         self,
@@ -635,14 +678,25 @@ class _PourLowererFactory(RegisteredSemanticLowererFactory):
             object_ref,
             affordance=grasp_ref,
         )
-        if not isinstance(semantics.affordance, AxisAlignAffordance):
+        if self.target is None and not isinstance(
+            semantics.affordance, AxisAlignAffordance
+        ):
             raise TypeError(
                 "Configured Pour requires an AxisAlignAffordance grasp payload."
             )
-        internal_axis = semantics.affordance.internal_axis.detach().cpu().tolist()
+        internal_axis = (
+            semantics.affordance.internal_axis.detach().cpu().tolist()
+            if isinstance(semantics.affordance, AxisAlignAffordance)
+            else [1.0, 0.0, 0.0]
+        )
+        if self.target is not None:
+            scene_registry.resolve(
+                self.target.receiver_id, expected_type=SceneObjectRef
+            )
         return _PourLowerer(
             self.object_id,
             tuple(float(value) for value in internal_axis),
+            self.target,
         )
 
 

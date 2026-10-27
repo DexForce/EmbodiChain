@@ -27,6 +27,7 @@ __all__ = ["BlocksRankingSizeEnv"]
 
 
 @register_env("BlocksRankingSize-DualUR5-v1", max_episode_steps=600)
+@register_env("BlocksRankingSize-DexforceW1V030Pika-v1", max_episode_steps=600)
 @register_env("BlocksRankingSize-TianjiMarvin-v1", max_episode_steps=600)
 @register_env("BlocksRankingSize-v1", max_episode_steps=600)
 class BlocksRankingSizeEnv(EmbodiedEnv):

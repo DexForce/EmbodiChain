@@ -84,6 +84,7 @@ from embodichain.lab.sim.atomic_actions import (
     Pour,
     PourGoal,
     PourOptions,
+    PourTarget,
     PlanningContext,
     Press,
     PressAffordance,
@@ -1837,16 +1838,162 @@ def test_pour_requires_exclusively_held_axis_align_affordance() -> None:
 
 
 def test_pour_options_validate_rotation_and_dwell_duration() -> None:
-    assert set(PourOptions.__dataclass_fields__) == {
-        "rotate_angle",
-        "dwell_duration",
-    }
     assert PourOptions().rotate_angle == pytest.approx(math.pi / 4.0)
     assert PourOptions().dwell_duration == pytest.approx(0.5)
     with pytest.raises(ValueError, match="rotate_angle must be finite"):
         PourOptions(rotate_angle=float("nan"))
     with pytest.raises(ValueError, match="dwell_duration"):
         PourOptions(dwell_duration=-0.1)
+    with pytest.raises(ValueError, match="max_mouth_height"):
+        PourOptions(mouth_height=0.2, max_mouth_height=0.1)
+    with pytest.raises(ValueError, match="max_rotation_step"):
+        PourOptions(max_rotation_step=math.pi / 2)
+
+
+@pytest.mark.parametrize("inverted_receiver", [False, True])
+def test_targeted_pour_keeps_mouth_over_receiver_and_body_above_rim(
+    inverted_receiver: bool,
+) -> None:
+    """Two opposite approach directions share one compensated mouth path."""
+    generator = _motion_generator()
+    sampled_poses = []
+
+    def plan_geometry(states, options):
+        if options.cartesian_path_sampler is not None:
+            poses = options.cartesian_path_sampler(torch.linspace(0, 1, 101))
+        else:
+            poses = torch.stack([state.xpos for state in states], dim=1)
+        sampled_poses.extend(poses.unbind(1))
+        count = max(2, poses.shape[1] + 1)
+        dt = options.start_qpos.new_full((NUM_ENVS, count), CONTROL_DT)
+        dt[:, 0] = 0
+        return PlanResult(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            positions=options.start_qpos[:, None].expand(-1, count, -1).clone(),
+            dt=dt,
+        )
+
+    generator.generate = Mock(side_effect=plan_geometry)
+    generator.robot.compute_ik.side_effect = lambda pose, name, joint_seed, **kwargs: (
+        torch.ones(NUM_ENVS, dtype=torch.bool),
+        joint_seed + 0.1,
+    )
+    attachment = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    attachment[:, 0, 3] = 0.04
+    source = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    source[:, 0, 3] = torch.tensor([0.4, 0.7])
+    source[:, 1, 3] = torch.tensor([-0.2, 0.2])
+    source[:, 2, 3] = 0.4
+    generator.robot.compute_fk.side_effect = None
+    generator.robot.compute_fk.return_value = source @ attachment
+    vertices = torch.tensor(
+        [[x, y, z] for x in (-0.03, 0.03) for y in (-0.03, 0.03) for z in (-0.1, 0.1)]
+    )
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(
+            internal_axis=torch.tensor([1.0, 0.0, 0.0]),
+            mesh_vertices=vertices,
+            mesh_triangles=torch.tensor([[0, 1, 2]]),
+        ),
+        geometry={},
+        entity_id="bottle",
+        label="bottle",
+    )
+    held = replace(_held(semantics), object_to_eef=attachment)
+    context = _context(
+        TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": held})
+    )
+    receiver = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    receiver[:, 0, 3] = source[:, 0, 3]
+    receiver[:, 2, 3] = 0.2
+    if inverted_receiver:
+        receiver[1, :3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+    context = _context(
+        context.task, scene=_target_scene(receiver, timestamp=0, version=1)
+    )
+    mouth = torch.eye(4)
+    mouth[2, 3] = 0.1
+    action = _bind_action(generator, Pour())
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="pour",
+            goal=PourGoal(PourTarget(SceneEntityPose("target"), mouth, 0.04, 0.01)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=80),
+            skill_options=PourOptions(rotate_angle=math.pi / 3),
+        ),
+        context,
+    )
+    assert plan.plan_success.tolist() == [True, not inverted_receiver]
+    assert plan.scene_dependencies == ("target",)
+    poses = torch.stack(sampled_poses, dim=1) @ torch.linalg.inv(attachment[:, None])
+    mouths = (poses @ mouth)[:, :, :3, 3]
+    pouring = poses[:, :, 2, 2] < math.cos(math.radians(50))
+    for row, sign in ((0, 1), (1, -1)):
+        if row == 1 and inverted_receiver:
+            torch.testing.assert_close(
+                _joint_trajectory(plan).positions[1],
+                context.robot.qpos[1, None].expand(
+                    _joint_trajectory(plan).waypoint_count, -1
+                ),
+            )
+            continue
+        torch.testing.assert_close(
+            mouths[row, pouring[row], :2],
+            receiver[row, None, :2, 3].expand(int(pouring[row].sum()), -1),
+            atol=1e-5,
+            rtol=0,
+        )
+        # A corner 0.20 m below and 0.03 m beside the mouth reaches its
+        # lowest point between angular keyframes. One height must cover the
+        # entire tilt, without bobbing as the active AABB corner changes.
+        safe_height = 0.025 + math.hypot(0.20, 0.03)
+        torch.testing.assert_close(
+            mouths[row, :-1, 2] - receiver[row, 2, 3],
+            torch.full_like(mouths[row, :-1, 2], safe_height),
+            atol=1e-6,
+            rtol=0,
+        )
+        peak = poses[row, :, 2, 2].argmin()
+        torch.testing.assert_close(
+            poses[row, peak, :3, 2],
+            torch.tensor([0.0, sign * 3**0.5 / 2, 0.5]),
+            atol=1e-5,
+            rtol=0,
+        )
+    transformed = (
+        poses[:, :-1, None, :3, :3] @ vertices[None, None, :, :, None]
+    ).squeeze(-1) + poses[:, :-1, None, :3, 3]
+    assert bool((transformed[plan.plan_success, ..., 2] >= 0.2 + 0.025 - 1e-5).all())
+    torch.testing.assert_close(poses[:, -1], source, atol=1e-6, rtol=0)
+    assert [s.name for s in plan.segments] == [
+        "prepare",
+        "pour",
+        "dwell",
+        "return",
+        "retreat",
+    ]
+    assert torch.all(
+        _joint_trajectory(plan).positions[plan.plan_success, :, ARM_DOF:] == 1
+    )
+
+
+def test_pour_target_owns_frames_and_rejects_invalid_openings() -> None:
+    receiver = torch.eye(4)
+    mouth = torch.eye(4)
+    mouth[2, 3] = 0.1
+    target = PourTarget(receiver, mouth, 0.04, 0.01)
+    receiver[0, 3] = 1
+    mouth[2, 3] = 2
+    assert target.receiver_pose[0, 3] == 0
+    assert target.source_mouth_pose[2, 3] == pytest.approx(0.1)
+    with pytest.raises(ValueError, match="radius"):
+        PourTarget(torch.eye(4), torch.eye(4), 0.01, 0.02)
+    invalid = torch.eye(4)
+    invalid[0, 0] = 2
+    with pytest.raises(ValueError, match="proper rotation"):
+        PourTarget(invalid, torch.eye(4), 0.04, 0.01)
 
 
 def test_move_held_object_moves_only_exclusively_held_rows() -> None:
