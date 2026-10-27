@@ -1,0 +1,22 @@
+# State-only, single-step BC: the recorded current action is the target.
+recipe: maniskill_action
+data:
+  view: null
+environment: null
+objective:
+  type: masked_normalized_target_mse
+  observation_noise: 0.0
+optimizer:
+  type: Adam
+  learning_rate: 0.0003
+  weight_decay: 0.0
+  max_grad_norm: 0.0
+trainer:
+  total_updates: 10000
+  batch_size: 1024
+  seed: 20400011
+  device: cuda:0
+  output_dir: outputs/bc-state/maniskill
+  checkpoint_interval: 0
+  validation_interval: 0
+checkpoint_steps: [8000, 10000]

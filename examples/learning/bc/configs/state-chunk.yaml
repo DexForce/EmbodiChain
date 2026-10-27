@@ -1,0 +1,22 @@
+# State-only historical chunk model through shared SL and the ODS bridge.
+recipe: legacy_chunk
+data:
+  view: null
+environment: null
+objective:
+  type: masked_normalized_target_mse
+  observation_noise: 0.01
+optimizer:
+  type: AdamW
+  learning_rate: 0.0003
+  weight_decay: 0.000001
+  max_grad_norm: 1.0
+trainer:
+  total_updates: 5000
+  batch_size: 256
+  seed: 20400011
+  device: cuda:0
+  output_dir: outputs/bc-state/chunk
+  checkpoint_interval: 0
+  validation_interval: 0
+checkpoint_steps: [4000, 5000]
