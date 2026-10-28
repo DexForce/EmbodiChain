@@ -28,6 +28,7 @@ from types import MappingProxyType
 import numpy as np
 
 from embodichain.data_pipeline.real2sim import load_prototype
+from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     InstantiatedSkillMotion,
@@ -65,8 +66,18 @@ class _ConfiguredPrototypeSource:
     authority: str
     gripper_mode: str
     require_collision_validation: bool
+    refinement: MotionRefinementCfg | None = None
 
     def __post_init__(self) -> None:
+        if self.refinement is not None:
+            if (
+                not isinstance(self.refinement, MotionRefinementCfg)
+                or self.authority != "eef_pose"
+            ):
+                raise ValueError(
+                    "configured refinement requires eef_pose authority and a valid profile"
+                )
+            self.refinement.__post_init__()
         if type(self.call_index) is not int or self.call_index < 0:
             raise ValueError("configured call_index must be nonnegative")
         for name in ("program_fingerprint", "prototype_sha256"):
@@ -252,6 +263,13 @@ class _ConfiguredTaskProgramNominalSources:
                 None
                 if self._host_collision_guard is None
                 else self._host_collision_guard.ik_smoothing_trigger_fraction
+            ),
+            refinement=declaration.refinement,
+            grasp_pose_generators=engine.grasp_pose_generators,
+            refinement_release_validator=(
+                None
+                if self._host_collision_guard is None
+                else self._host_collision_guard.validator.validate_refinement_support
             ),
         )
 

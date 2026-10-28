@@ -317,6 +317,36 @@ def test_support_measurement_checks_height_and_rotated_footprint() -> None:
     assert overhang == pytest.approx(0.005)
 
 
+def test_refinement_support_checks_whole_footprint_and_signed_release_gap() -> None:
+    from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
+
+    validator = object.__new__(TabletopPrototypeCollisionValidator)
+    validator._object = BoxCollisionBody("object", (0.02, 0.01, 0.02), np.eye(4))
+    validator._target = BoxCollisionBody("target", (0.1, 0.1, 0.05), np.eye(4), True)
+    validator._target_uid = "target"
+    validator._contact_depth = 0.001
+    context = SimpleNamespace(
+        scene=SimpleNamespace(
+            entities={"target": SimpleNamespace(pose=torch.eye(4)[None])}
+        )
+    )
+    pose = np.eye(4)
+    pose[2, 3] = 0.08
+    cfg = MotionRefinementCfg()
+    evidence = validator.validate_refinement_support(context, pose, cfg)
+    assert evidence["support_verified"] is True
+    assert evidence["release_gap_m"] == pytest.approx(0.01)
+    assert evidence["minimum_support_slack_m"] == pytest.approx(0.08)
+    pose[0, 3] = 0.09  # Centre remains on support; the complete footprint does not.
+    with pytest.raises(ValueError, match="footprint"):
+        validator.validate_refinement_support(context, pose, cfg)
+    pose[0, 3] = 0
+    for height in (0.06, 0.15):
+        pose[2, 3] = height
+        with pytest.raises(ValueError, match="gap"):
+            validator.validate_refinement_support(context, pose, cfg)
+
+
 def test_plan_guard_rejects_nominal_velocity_before_collision_check() -> None:
     @dataclass(frozen=True)
     class Diagnostics:

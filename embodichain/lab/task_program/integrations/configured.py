@@ -2329,11 +2329,34 @@ def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
                     "authority",
                     "gripper_mode",
                     "require_collision_validation",
+                    "refinement",
                 }
             ),
         )
         if item["provider_id"] != "real2sim.prototype" or item["revision"] != "1":
             raise ValueError(f"{item_path} names an unknown provider or revision")
+        refinement = None
+        if item.get("refinement") is not None:
+            from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
+
+            options = _mapping(
+                item["refinement"],
+                path=f"{item_path}.refinement",
+                required=frozenset(),
+                optional=frozenset(
+                    {
+                        "max_translation_m",
+                        "max_rotation_rad",
+                        "smoothing_weight",
+                        "max_candidates",
+                        "seed",
+                        "support_margin_m",
+                        "max_release_gap_m",
+                        "max_iterations",
+                    }
+                ),
+            )
+            refinement = MotionRefinementCfg(**options)
         declaration = _ConfiguredPrototypeSource(
             call_index=_integer(
                 item["call_index"], path=f"{item_path}.call_index", minimum=0
@@ -2372,6 +2395,7 @@ def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
                 item.get("require_collision_validation", True),
                 path=f"{item_path}.require_collision_validation",
             ),
+            refinement=refinement,
         )
         declaration.validate_source()
         nominal.append(declaration)

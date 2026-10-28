@@ -2028,6 +2028,34 @@ def test_configured_nominal_source_preflights_content_and_revision(tmp_path):
     }
     services = _decode_runtime_services({"nominal_motion_sources": [declaration]})
     assert services.nominal_motion_sources[0].call_index == 0
+    refined = _decode_runtime_services(
+        {
+            "nominal_motion_sources": [
+                {
+                    **declaration,
+                    "authority": "eef_pose",
+                    "refinement": {"max_translation_m": 0.015},
+                }
+            ]
+        }
+    )
+    assert refined.nominal_motion_sources[0].refinement.max_translation_m == 0.015
+    with pytest.raises(ValueError, match="eef_pose authority"):
+        _decode_runtime_services(
+            {"nominal_motion_sources": [{**declaration, "refinement": {}}]}
+        )
+    with pytest.raises(ValueError, match="unknown|unexpected|unsupported"):
+        _decode_runtime_services(
+            {
+                "nominal_motion_sources": [
+                    {
+                        **declaration,
+                        "authority": "eef_pose",
+                        "refinement": {"silently_change_time": True},
+                    }
+                ]
+            }
+        )
     with pytest.raises(ValueError, match="unknown provider or revision"):
         _decode_runtime_services(
             {"nominal_motion_sources": [{**declaration, "revision": "2"}]}

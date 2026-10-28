@@ -2366,6 +2366,12 @@ def _real2sim_sink_fixture(tmp_path):
             PhaseAnnotation("lift", 4, 6, "hold", "gravity"),
         ),
         object_pose=np.eye(4),
+        eef_poses=np.tile([0, 0, 0, 0, 0, 0, 1.0], (6, 1)),
+        world_from_pose_frame=np.eye(4),
+        observed_link_to_tcp=np.eye(4),
+        pose_length_unit="m",
+        quaternion_order="xyzw",
+        pose_origin="fk_derived",
     )
     manifest = prepare_prototype(
         source,
@@ -2450,12 +2456,69 @@ def _real2sim_sink_fixture(tmp_path):
     return recorder, sink, episode, manifest, artifacts
 
 
-def test_real2sim_sink_confirms_only_closed_durable_episodes(tmp_path) -> None:
+@pytest.mark.parametrize("with_refinement", [False, True])
+def test_real2sim_sink_confirms_only_closed_durable_episodes(
+    tmp_path, with_refinement
+) -> None:
     from dataclasses import replace
     from embodichain.data_pipeline.real2sim import load_prototype
     from embodichain.data_pipeline.recording.journal import inspect_recording
 
     recorder, sink, episode, manifest, artifacts = _real2sim_sink_fixture(tmp_path)
+    if with_refinement:
+        import hashlib
+        from embodichain.data_pipeline.real2sim import PhaseAnnotation
+        from embodichain.lab.sim.motion.refinement import (
+            InteractionConstraintSet,
+            KinematicMotionRefiner,
+            MotionRefinementCfg,
+        )
+
+        raw = np.repeat(np.eye(4)[None], 6, axis=0)
+        goal = np.eye(4)
+        goal[0, 3] = 0.005
+        phases = (
+            PhaseAnnotation("approach", 0, 2, "free", "object"),
+            PhaseAnnotation("close", 2, 4, "contact", "object"),
+            PhaseAnnotation("lift", 4, 6, "hold", "gravity"),
+        )
+        result = KinematicMotionRefiner(MotionRefinementCfg()).refine(
+            raw, InteractionConstraintSet("pick_up", phases, 4, goal, "b" * 64)
+        )
+        lineage = dict(episode.metadata["real2sim_lineage"])
+        lineage["calls"] = [{**lineage["calls"][0], "refinement": dict(result.report)}]
+        path = Path(lineage["trace"]["path"])
+        with np.load(path, allow_pickle=False) as payload:
+            arrays = {name: np.array(payload[name]) for name in payload.files}
+        arrays.update(
+            call_0_refinement_original_tcp=raw,
+            call_0_refinement_target_tcp=result.fit.poses,
+        )
+        np.savez_compressed(path, **arrays)
+        lineage["trace"] = {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        episode = replace(
+            episode, metadata={**episode.metadata, "real2sim_lineage": lineage}
+        )
+        tampered = {
+            **lineage,
+            "calls": [
+                {
+                    **lineage["calls"][0],
+                    "refinement": {**result.report, "baseline_id": "c" * 64},
+                }
+            ],
+        }
+        rejected = sink.submit(
+            replace(
+                episode, metadata={**episode.metadata, "real2sim_lineage": tampered}
+            ),
+            submission_id=0,
+        )
+        assert not rejected.confirmed and "baseline digest" in rejected.error
+        assert recorder.dataset.meta.total_episodes == 0
     first = sink.submit(episode, submission_id=0)
     assert first.confirmed, first.error
     archived = (

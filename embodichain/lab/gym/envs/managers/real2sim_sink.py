@@ -190,6 +190,13 @@ def build_real2sim_execution_trace(
         ):
             raise ValueError("consumed actions do not cover every plan sample in order")
         prefix = f"call_{index}_"
+        if motion.refinement_report:
+            arrays[prefix + "refinement_original_tcp"] = (
+                motion.refinement_original_tcp.detach().cpu().numpy().copy()
+            )
+            arrays[prefix + "refinement_target_tcp"] = (
+                motion.refinement_target_tcp.detach().cpu().numpy().copy()
+            )
         for name, values in (
             ("left", mapping.left),
             ("right", mapping.right),
@@ -701,6 +708,7 @@ class Real2SimLeRobotEpisodeSink:
         indices: set[int] = set()
         normalized_calls = []
         required_arrays = {"step_call_index", "step_plan_index"}
+        refinements: dict[int, Mapping[str, object]] = {}
         for call in calls:
             if not isinstance(call, Mapping):
                 raise ValueError("lineage calls must be mappings")
@@ -736,6 +744,23 @@ class Real2SimLeRobotEpisodeSink:
             prototype = load_prototype(root / manifest["path"])
             indices.add(index)
             normalized_calls.append((index, offset, prototype))
+            refinement = call.get("refinement")
+            if refinement:
+                if (
+                    prototype.unit.world_tcp is None
+                    or not isinstance(refinement, Mapping)
+                    or refinement.get("schema") != "kinematic-refinement/v1"
+                    or refinement.get("samples") != len(prototype.unit.timestamps)
+                    or refinement.get("time_grid_changed") is not False
+                ):
+                    raise ValueError(
+                        "lineage contains an invalid refinement declaration"
+                    )
+                refinements[index] = refinement
+                required_arrays.update(
+                    f"call_{index}_refinement_{name}_tcp"
+                    for name in ("original", "target")
+                )
             required_arrays.update(
                 f"call_{index}_{name}"
                 for name in ("left", "right", "weight", "source_events", "plan_events")
@@ -772,6 +797,66 @@ class Real2SimLeRobotEpisodeSink:
                 raise ValueError("lineage calls must remain in execution order")
             for index, offset, prototype in normalized_calls:
                 prefix = f"call_{index}_"
+                if index in refinements:
+                    from embodichain.compute.trajectory.refinement import _poses
+                    from scipy.spatial.transform import Rotation
+
+                    declaration = refinements[index]
+                    original = _poses(
+                        payload[prefix + "refinement_original_tcp"],
+                        "refinement original",
+                    )
+                    target = _poses(
+                        payload[prefix + "refinement_target_tcp"], "refinement target"
+                    )
+                    if (
+                        original.shape != (len(prototype.unit.timestamps), 4, 4)
+                        or target.shape != original.shape
+                    ):
+                        raise ValueError(
+                            "lineage refinement arrays do not match the source grid"
+                        )
+                    refinement_digest = hashlib.sha256()
+                    refinement_digest.update(
+                        np.asarray(original, dtype="<f8").tobytes()
+                    )
+                    refinement_digest.update(np.asarray(target, dtype="<f8").tobytes())
+                    for name in ("profile_sha256", "geometry_id"):
+                        value = declaration.get(name)
+                        if not isinstance(value, str) or len(value) != 64:
+                            raise ValueError("lineage refinement identity is missing")
+                        refinement_digest.update(value.encode())
+                    if refinement_digest.hexdigest() != declaration.get("baseline_id"):
+                        raise ValueError(
+                            "lineage refinement baseline digest does not match"
+                        )
+                    distance = float(
+                        np.linalg.norm(
+                            target[:, :3, 3] - original[:, :3, 3], axis=1
+                        ).max()
+                    )
+                    angle = float(
+                        Rotation.from_matrix(
+                            target[:, :3, :3] @ original[:, :3, :3].transpose(0, 2, 1)
+                        )
+                        .magnitude()
+                        .max()
+                    )
+                    for measured, name, budget in (
+                        (distance, "max_translation_m", "translation_budget_m"),
+                        (angle, "max_rotation_rad", "rotation_budget_rad"),
+                    ):
+                        reported, limit = declaration.get(name), declaration.get(budget)
+                        if (
+                            not isinstance(reported, (int, float))
+                            or not isinstance(limit, (int, float))
+                            or not np.isfinite([reported, limit]).all()
+                            or abs(measured - reported) > 1e-7
+                            or measured > limit + 1e-7
+                        ):
+                            raise ValueError(
+                                "lineage refinement correction exceeds its declared budget"
+                            )
                 mapping = TrajectoryTimeMap(
                     payload[prefix + "left"],
                     payload[prefix + "right"],

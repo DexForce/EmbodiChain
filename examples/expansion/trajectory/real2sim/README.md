@@ -1,5 +1,8 @@
 # Synthetic Real2Sim reference
 
+For bounded affordance/geometry-based trajectory repair, deterministic error
+injection, ablations and the verification ladder, see [REFINEMENT.md](REFINEMENT.md).
+
 This example uses the existing UR5 and DH-PGI primitive cube/platform scene.
 `sample_geometry_v3/` contains a simulator-generated, verified nominal
 reference with pinned robot, object and support geometry. The three portable

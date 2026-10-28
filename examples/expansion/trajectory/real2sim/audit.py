@@ -26,6 +26,7 @@ from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 import yaml
 
 from embodichain.data_pipeline.real2sim import load_prototype
@@ -389,6 +390,49 @@ def _check_case(
         for call in calls:
             index = call["call_index"]
             prototype = prototypes[index]
+            repair = call.get("refinement")
+            if repair:
+                original = trace[f"call_{index}_refinement_original_tcp"]
+                corrected = trace[f"call_{index}_refinement_target_tcp"]
+                if (
+                    original.shape != (len(prototype.unit.timestamps), 4, 4)
+                    or corrected.shape != original.shape
+                    or not np.isfinite([original, corrected]).all()
+                ):
+                    raise ValueError(
+                        "refinement arrays are not aligned with source time"
+                    )
+                digest = hashlib.sha256(
+                    np.asarray(original, dtype="<f8").tobytes()
+                    + np.asarray(corrected, dtype="<f8").tobytes()
+                    + repair["profile_sha256"].encode()
+                    + repair["geometry_id"].encode()
+                ).hexdigest()
+                distance = float(
+                    np.linalg.norm(
+                        corrected[:, :3, 3] - original[:, :3, 3], axis=1
+                    ).max()
+                )
+                angular = float(
+                    (
+                        Rotation.from_matrix(corrected[:, :3, :3])
+                        * Rotation.from_matrix(original[:, :3, :3]).inv()
+                    )
+                    .magnitude()
+                    .max()
+                )
+                if (
+                    digest != repair["baseline_id"]
+                    or repair["time_grid_changed"] is not False
+                    or repair["calibration_estimated"] is not False
+                    or distance > repair["translation_budget_m"] + 1e-7
+                    or angular > repair["rotation_budget_rad"] + 1e-7
+                    or abs(distance - repair["max_translation_m"]) > 1e-6
+                    or abs(angular - repair["max_rotation_rad"]) > 1e-6
+                ):
+                    raise ValueError(
+                        "refinement identity, correction budget or clock changed"
+                    )
             if prototype.unit.source.origin != "synthetic_reference":
                 raise ValueError("unexpected source origin")
             source = prototype.unit.source

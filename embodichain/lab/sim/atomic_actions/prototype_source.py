@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+import hashlib
 from typing import Literal
 
 import numpy as np
@@ -31,6 +32,12 @@ from embodichain.data_pipeline.real2sim import (
     retarget_motion_prototype,
 )
 from embodichain.compute.trajectory import retime_to_control_grid
+from embodichain.lab.sim.motion.refinement import (
+    InteractionConstraintSet,
+    KinematicMotionRefiner,
+    MotionRefinementCfg,
+)
+from embodichain.toolkits.graspkit.pose_generator import GraspPoseGenerator
 
 from .invocation import ResolvedActionRequest
 from .bindings import JointPositionTarget
@@ -157,6 +164,12 @@ class PrototypeMotionProvider:
         ik_smoothing_trigger_fraction: Optional fraction of the motion policy's
             acceleration limit at which to seek a lower-acceleration nominal
             path without changing protected samples or the TCP error tube.
+        refinement: Optional bounded Cartesian interaction repair before the
+            expansion baseline. Only explicit ``eef_pose`` authority supports it.
+        grasp_pose_generators: Existing runtime gripper services keyed by the
+            configured grasp control part; required for Pick refinement.
+        refinement_release_validator: Host-owned physical support check for
+            refined Place targets. It must verify footprint and release gap.
 
     A required acceleration-feasibility pass can adjust Cartesian-authoritative
     hold interiors before the nominal geometry baseline is frozen. Its FK error
@@ -176,8 +189,35 @@ class PrototypeMotionProvider:
     prototype_sha256: str | None = None
     object_support_validator: Callable[[PlanningContext], bool] | None = None
     ik_smoothing_trigger_fraction: float | None = None
+    refinement: MotionRefinementCfg | None = None
+    grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None
+    refinement_release_validator: (
+        Callable[
+            [PlanningContext, np.ndarray, MotionRefinementCfg], Mapping[str, object]
+        ]
+        | None
+    ) = None
 
     def __post_init__(self) -> None:
+        if self.refinement is not None:
+            if not isinstance(self.refinement, MotionRefinementCfg):
+                raise TypeError("refinement must be MotionRefinementCfg or None")
+            if self.authority != "eef_pose":
+                raise ValueError("refinement requires explicit eef_pose authority")
+            self.refinement.__post_init__()
+            object.__setattr__(self, "refinement", self.refinement.copy())
+        if self.grasp_pose_generators is not None:
+            from types import MappingProxyType
+
+            object.__setattr__(
+                self,
+                "grasp_pose_generators",
+                MappingProxyType(dict(self.grasp_pose_generators)),
+            )
+        if self.refinement_release_validator is not None and not callable(
+            self.refinement_release_validator
+        ):
+            raise TypeError("refinement release validator must be callable")
         if not isinstance(self.prototype, SkillMotionPrototype):
             raise TypeError("prototype must be a SkillMotionPrototype")
         if (
@@ -384,6 +424,9 @@ class PrototypeMotionProvider:
         anchor_rotation_correction = 0.0
         fk_position_error_m = None
         fk_rotation_error_rad = None
+        refinement_result = None
+        refinement_report: dict[str, object] = {}
+        refined_grasp_pose = None
         if self.authority in {"eef_pose", "hybrid"}:
             generator = self.motion_generator
             if generator is None:
@@ -438,7 +481,71 @@ class PrototypeMotionProvider:
                 held_object_to_tcp=held,
                 object_supported_regrasp=supported_regrasp,
             )
-            if request.skill_id == "place":
+            if self.refinement is not None:
+                from ._prototype_refinement import _pick_refinement_anchor, _world_goal
+
+                cfg = self.refinement
+                evidence: dict[str, object] = {}
+                if request.skill_id == "pick_up":
+                    if request.goal.semantics.entity_id != self.object_entity_id:
+                        raise ValueError(
+                            "refinement object and skill goal do not match"
+                        )
+                    index = unit.phases[2].start
+                    anchor, geometry_id, evidence = _pick_refinement_anchor(
+                        request,
+                        context,
+                        object_pose[0].detach().cpu().numpy(),
+                        target_tcp[index],
+                        cfg,
+                        self.grasp_pose_generators or {},
+                        generator,
+                    )
+                    refined_grasp_pose = anchor
+                else:
+                    assert held is not None
+                    if request.skill_id == "move_held_object":
+                        index = len(target_tcp) - 1
+                        anchor = (
+                            _world_goal(
+                                request.goal.object_target_pose,
+                                context,
+                                "object_target_pose",
+                            )
+                            @ held
+                        )
+                    else:
+                        index = unit.phases[1].start
+                        anchor = _world_goal(request.goal.xpos, context, "xpos")
+                        if self.refinement_release_validator is None:
+                            raise ValueError(
+                                "Place refinement requires support geometry validation"
+                            )
+                        evidence = dict(
+                            self.refinement_release_validator(
+                                context, anchor @ np.linalg.inv(held), cfg
+                            )
+                        )
+                        if evidence.get("support_verified") is not True:
+                            raise ValueError(
+                                "Place refinement has no verified support geometry"
+                            )
+                    identity = hashlib.sha256()
+                    identity.update(
+                        (self.prototype_sha256 or unit.source.unit_id).encode()
+                    )
+                    identity.update(np.asarray(held, dtype="<f8").tobytes())
+                    identity.update(np.asarray(anchor, dtype="<f8").tobytes())
+                    geometry_id = identity.hexdigest()
+                refinement_result = KinematicMotionRefiner(cfg).refine(
+                    target_tcp,
+                    InteractionConstraintSet(
+                        request.skill_id, unit.phases, index, anchor, geometry_id
+                    ),
+                )
+                refinement_report = {**refinement_result.report, **evidence}
+                target_tcp = refinement_result.fit.poses
+            elif request.skill_id == "place":
                 from .goals import resolve_pose_goal
                 from .primitives.place import PlaceGoal
                 from .trajectory_ops import resolve_pose_target
@@ -731,6 +838,44 @@ class PrototypeMotionProvider:
                 ).any()
             ):
                 raise ValueError("prototype connection exceeds a joint velocity limit")
+            if refinement_result is not None:
+                from scipy.spatial.transform import Rotation
+
+                realized = (
+                    robot.compute_batch_fk(
+                        qpos=positions[:, offset:, arm_ids],
+                        name=arm.control_part,
+                        to_matrix=True,
+                    )[0]
+                    .detach()
+                    .cpu()
+                    .numpy()
+                )
+                original = refinement_result.original_poses
+                actual_translation = float(
+                    np.linalg.norm(
+                        realized[:, :3, 3] - original[:, :3, 3], axis=1
+                    ).max()
+                )
+                actual_rotation = float(
+                    Rotation.from_matrix(
+                        realized[:, :3, :3] @ original[:, :3, :3].transpose(0, 2, 1)
+                    )
+                    .magnitude()
+                    .max()
+                )
+                if (
+                    not np.isfinite([actual_translation, actual_rotation]).all()
+                    or actual_translation > self.refinement.max_translation_m + 1e-6
+                    or actual_rotation > self.refinement.max_rotation_rad + 1e-6
+                ):
+                    raise ValueError(
+                        "final IK path exceeds the total refinement budget"
+                    )
+                refinement_report.update(
+                    final_fk_correction_m=actual_translation,
+                    final_fk_correction_rad=actual_rotation,
+                )
         if self.motion_generator is not None:
             _project_mimics(positions, self.motion_generator.robot)
         if self.require_collision_validation:
@@ -762,7 +907,13 @@ class PrototypeMotionProvider:
             positions, env_ids=context.env_ids, dt=dt
         )
         grasp_pose = None
-        if request.skill_id == "pick_up" and self.prototype.object_to_tcp is not None:
+        if refined_grasp_pose is not None:
+            grasp_pose = torch.as_tensor(
+                np.array(refined_grasp_pose, copy=True),
+                dtype=positions.dtype,
+                device=positions.device,
+            ).unsqueeze(0)
+        elif request.skill_id == "pick_up" and self.prototype.object_to_tcp is not None:
             grasp_pose = object_pose @ torch.as_tensor(
                 np.array(self.prototype.object_to_tcp, copy=True),
                 dtype=positions.dtype,
@@ -803,6 +954,25 @@ class PrototypeMotionProvider:
             object_supported_regrasp=supported_regrasp,
             semantic_anchor_position_correction_m=anchor_position_correction,
             semantic_anchor_rotation_correction_rad=anchor_rotation_correction,
+            refinement_report=refinement_report,
+            refinement_original_tcp=(
+                None
+                if refinement_result is None
+                else torch.as_tensor(
+                    np.array(refinement_result.original_poses, copy=True),
+                    dtype=torch.float64,
+                    device=positions.device,
+                )
+            ),
+            refinement_target_tcp=(
+                None
+                if refinement_result is None
+                else torch.as_tensor(
+                    np.array(refinement_result.fit.poses, copy=True),
+                    dtype=torch.float64,
+                    device=positions.device,
+                )
+            ),
             collision_evidence=(
                 "sampled_passed" if self.require_collision_validation else "unverified"
             ),

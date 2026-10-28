@@ -187,7 +187,7 @@ topics:
   aliases: [motion planning, motion generation benchmark, motion benchmark, 运动生成评测, trajectory planning, trajectory playback, fixed-cadence trajectory playback, motion expansion,
     trajectory expansion, trajectory augmentation, expansion profile, configured trajectory expansion,
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
-    轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体]
+    轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体, kinematic trajectory refinement, 轨迹修正]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
     expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
     load_expansion_profile, SourceAdapter, CandidateCoordinator, CandidateTrajectoryBatch,
@@ -201,6 +201,7 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
   - embodichain/lab/sim/motion/motion_generator.py
+  - embodichain/lab/sim/motion/refinement.py
   - extensions/embodichain_benchmarks/motion_generation/
   - embodichain/cli/benchmark.py
   - embodichain/lab/sim/motion/execution.py

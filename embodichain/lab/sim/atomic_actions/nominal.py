@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 import math
 from types import MappingProxyType
@@ -77,8 +78,33 @@ class InstantiatedSkillMotion:
     phase_permissions: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     grasp_pose: torch.Tensor | None = None
     joint_names: tuple[str, ...] = ()
+    refinement_report: Mapping[str, object] = field(default_factory=dict)
+    refinement_original_tcp: torch.Tensor | None = None
+    refinement_target_tcp: torch.Tensor | None = None
 
     def __post_init__(self) -> None:
+        report = deepcopy(dict(self.refinement_report))
+        arrays = (self.refinement_original_tcp, self.refinement_target_tcp)
+        if bool(report) != all(value is not None for value in arrays) or (
+            not report and any(value is not None for value in arrays)
+        ):
+            raise ValueError(
+                "refinement report and both pose evidence arrays are required together"
+            )
+        if report:
+            for name, value in zip(
+                ("refinement_original_tcp", "refinement_target_tcp"), arrays
+            ):
+                if (
+                    not isinstance(value, torch.Tensor)
+                    or value.shape != (report.get("samples"), 4, 4)
+                    or not bool(torch.isfinite(value).all())
+                ):
+                    raise ValueError(
+                        "refinement evidence must contain aligned finite TCP arrays"
+                    )
+                object.__setattr__(self, name, value.detach().clone())
+        object.__setattr__(self, "refinement_report", MappingProxyType(report))
         if not isinstance(self.trajectory, TimedTrajectory):
             raise TypeError("trajectory must be a TimedTrajectory")
         if type(self.object_supported_regrasp) is not bool:
@@ -321,6 +347,7 @@ class InstantiatedSkillMotion:
                 None if self.source_time_map is None else len(self.source_time_map.left)
             ),
             "prototype_phase_permissions": dict(self.phase_permissions),
+            "refinement": deepcopy(dict(self.refinement_report)),
         }
 
 

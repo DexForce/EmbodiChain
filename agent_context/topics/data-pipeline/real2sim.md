@@ -30,6 +30,25 @@ error tube before the geometric baseline is frozen; it records those passes.
 Input source permissions can only narrow a skill's free-phase permissions.
 Pick lift must be declared contact/hold and cannot authorize deformation.
 
+Configured source bindings may opt into `MotionRefinementCfg` with explicit
+`eef_pose` authority. `motion.refinement.KinematicMotionRefiner` repairs a
+scene-retargeted nominal path before expansion freezes its protected samples.
+The source provider grounds the anchor from the skill goal, the current held
+relation, or existing antipodal mesh candidates with calibrated gripper-envelope
+and endpoint-IK checks. Pick commits the corrected grasp through ordinary skill
+effects; later transport and Place reuse that relation. Place refinement needs
+the tabletop host's physical footprint and signed release-gap validator. A
+geometry/authority/budget failure rejects the bound source without fallback.
+The numeric fitter uses sparse fixed-grid pose QPs, bounded local rotation
+coordinates, exact stationary close/release constraints and gravity-preserving
+hold references; it is not a joint-space collision optimizer. Independent IK,
+motion, collision and measured-effect checks remain mandatory. Source data,
+timestamps and events are unchanged; neither calibration nor source uncertainty
+is inferred. Original/refined TCP arrays and hashed baseline reports belong to
+typed trace attachments, whose digests and correction budgets are checked before
+receipt confirmation. See `examples/expansion/trajectory/real2sim/REFINEMENT.md` for reproducible
+error-injection fixtures and the analytic/ablation/simulation verification ladder.
+
 `AtomicActionEngine` accepts a call-scoped nominal source before native planning;
 only PickUp, MoveHeldObject and Place opt in. Their skill-owned assembly retains
 effects, tracking, segments and scene dependencies. Source plans reject retries

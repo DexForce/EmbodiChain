@@ -940,6 +940,11 @@ def install_real2sim_tabletop_owner(
             "seed": profile.seed,
             "prototypes": [item.prototype_sha256 for item in declarations],
         }
+        if any(item.refinement is not None for item in declarations):
+            payload["refinement"] = [
+                tracer.motions[item.call_index].refinement_report.get("baseline_id")
+                for item in declarations
+            ]
         candidate = (
             "candidate:"
             + hashlib.sha256(
@@ -1015,6 +1020,8 @@ def install_real2sim_tabletop_owner(
                 "fk_position_error_m": motion.fk_position_error_m,
                 "fk_rotation_error_rad": motion.fk_rotation_error_rad,
             }
+            if motion.refinement_report:
+                call["refinement"] = dict(motion.refinement_report)
             if isinstance(delegate, TaskProgramSameGridExpansionFactory):
                 record = variants[index]
                 call.update(

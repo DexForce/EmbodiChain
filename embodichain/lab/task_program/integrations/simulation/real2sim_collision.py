@@ -37,6 +37,7 @@ from embodichain.lab.sim.motion.expansion.real2sim_collision import (
 from embodichain.lab.sim.motion.expansion.operators import validate_motion_samples
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
     from embodichain.lab.sim.atomic_actions import (
         ActionPlan,
         AtomicActionEngine,
@@ -334,6 +335,54 @@ class TabletopPrototypeCollisionValidator:
             self._target,
         )
         return height <= self._contact_depth and overhang <= self._contact_depth
+
+    def validate_refinement_support(
+        self,
+        context: PlanningContext,
+        object_pose: np.ndarray,
+        cfg: MotionRefinementCfg,
+    ) -> Mapping[str, object]:
+        """Check the semantic release target against the actual physical boxes.
+
+        Args:
+            context: Current immutable B=1 scene observation.
+            object_pose: Desired world object pose at release, before falling.
+            cfg: Explicit footprint margin and maximum allowed release gap.
+
+        Returns:
+            Geometry identities and signed gap/footprint evidence.
+
+        Raises:
+            ValueError: Support is tilted, the object overhangs, penetrates, or
+                the requested release gap exceeds the explicit budget.
+        """
+        target = self._scene_pose(context, self._target_uid) @ self._target.local_pose
+        if not np.allclose(target[:3, 2], (0, 0, 1), atol=1e-5, rtol=0):
+            raise ValueError("refinement support must be horizontal")
+        relative = (
+            np.linalg.inv(target) @ np.asarray(object_pose) @ self._object.local_pose
+        )
+        extent = np.abs(relative[:3, :3]) @ np.asarray(self._object.half_extents)
+        slack = (
+            np.asarray(self._target.half_extents[:2])
+            - np.abs(relative[:2, 3])
+            - extent[:2]
+        )
+        gap = float(relative[2, 3] - extent[2] - self._target.half_extents[2])
+        if (
+            not np.isfinite(relative).all()
+            or np.min(slack) < cfg.support_margin_m - 1e-7
+        ):
+            raise ValueError("refinement release target violates the support footprint")
+        if gap < -self._contact_depth or gap > cfg.max_release_gap_m:
+            raise ValueError("refinement release target violates the support gap")
+        return {
+            "support_verified": True,
+            "object_geometry_sha256": self._object.geometry_sha256,
+            "support_geometry_sha256": self._target.geometry_sha256,
+            "release_gap_m": gap,
+            "minimum_support_slack_m": float(np.min(slack)),
+        }
 
     def validate(
         self,

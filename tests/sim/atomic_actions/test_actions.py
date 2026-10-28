@@ -1520,6 +1520,87 @@ def test_pick_uses_normalized_prototype_and_rejects_moved_fixed_scene() -> None:
             shifted_invocation, changed, nominal_source=hybrid
         )
 
+    from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
+
+    noisy_poses = np.array(source.eef_poses, copy=True)
+    noisy_poses[:, 0] = 0.008
+    noisy_prototype = build_motion_prototype(
+        normalize_trajectory(
+            replace(source, eef_poses=noisy_poses),
+            joints=tuple(JointSpec(name, "revolute") for name in names),
+            control_dt=CONTROL_DT,
+        )
+    )
+    vertices = torch.tensor(
+        [[x, y, z] for x in (-0.01, 0.01) for y in (-0.01, 0.01) for z in (-0.01, 0.01)]
+    )
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(
+            mesh_vertices=vertices, mesh_triangles=torch.tensor([[0, 1, 2], [5, 6, 7]])
+        ),
+        geometry={},
+        entity_id="target",
+    )
+    refined_invocation = replace(
+        shifted_invocation, goal=replace(shifted_invocation.goal, semantics=semantics)
+    )
+    refined_provider = replace(
+        spatial,
+        prototype=noisy_prototype,
+        refinement=MotionRefinementCfg(smoothing_weight=0),
+        grasp_pose_generators=_ACTION_ENGINES[id(action)].grasp_pose_generators,
+    )
+    repaired = _ACTION_ENGINES[id(action)].plan(
+        refined_invocation, changed, nominal_source=refined_provider
+    )
+    assert repaired.diagnostics.metadata["refinement"][
+        "max_translation_m"
+    ] == pytest.approx(0.008, abs=1e-6)
+    np.testing.assert_allclose(noisy_prototype.unit.world_tcp[:, 0, 3], 0.008)
+    confirmed = repaired.expected_effects.apply(
+        changed.task, repaired.plan_success
+    ).get_held_object("arm")
+    torch.testing.assert_close(
+        confirmed.object_to_eef, torch.eye(4)[None], atol=1e-5, rtol=0
+    )
+    sampled_generator = _StubGraspPoseGenerator()
+
+    def geometry_candidates(*, obj_poses, **kwargs):
+        del kwargs
+        torch.rand(3)  # Legacy candidate generators may consume their torch RNG.
+        return [(obj_poses.clone(), torch.zeros(1))]
+
+    sampled_generator.get_valid_grasp_poses = geometry_candidates
+    sampling_provider = replace(
+        refined_provider,
+        grasp_pose_generators={
+            key: sampled_generator for key in refined_provider.grasp_pose_generators
+        },
+    )
+    rng = torch.get_rng_state().clone()
+    sampled = _ACTION_ENGINES[id(action)].plan(
+        replace(
+            refined_invocation, goal=replace(refined_invocation.goal, grasp_xpos=None)
+        ),
+        changed,
+        nominal_source=sampling_provider,
+    )
+    assert (
+        sampled.diagnostics.metadata["refinement"]["anchor_origin"] == "affordance_mesh"
+    )
+    assert torch.equal(torch.get_rng_state(), rng)
+    generator.generate.reset_mock()
+    with pytest.raises(ValueError, match="correction budgets"):
+        _ACTION_ENGINES[id(action)].plan(
+            refined_invocation,
+            changed,
+            nominal_source=replace(
+                refined_provider,
+                refinement=MotionRefinementCfg(max_translation_m=0.001),
+            ),
+        )
+    generator.generate.assert_not_called()
+
 
 def test_place_release_alignment_preserves_world_vertical_motion() -> None:
     import numpy as np
