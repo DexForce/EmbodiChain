@@ -260,3 +260,14 @@ Other dynamics families
    :maxdepth: 2
 
    rwm
+
+
+LeWM visual dynamics
+--------------------
+
+The :doc:`lewm` reference covers visual dynamics, training and planning.
+
+.. toctree::
+   :hidden:
+
+   lewm

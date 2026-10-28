@@ -185,6 +185,7 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain_models.dynamics.nerd": ["THIRD_PARTY_LICENSES"],
+            "embodichain_models.dynamics.lewm": ["THIRD_PARTY_LICENSES"],
             "embodichain.data": ["default_materials.json"],
             "embodichain.compute.kinematics._warp": [
                 "ssik_LICENSE.txt",
