@@ -113,6 +113,12 @@ archives the measured T+1 object poses, fixed support pose and timestamps.
 Configured tabletop collection supplies explicit layouts, recipes, collision
 policy and per-joint motion limits. Its runtime owner coordinates scene setup,
 source-bound planning, measured verification and one durable episode receipt.
+Sequential Pick, MoveHeldObject and Place occurrences, including bounded
+repeats, each require a pinned source. The host separately checks each Pick,
+held interval and Place. A Pick from an observed support permits a change in
+height and at most two degrees of tilt only after checking the support
+footprint; lift remains gravity-aligned. Cartesian Place aligns its release
+anchor to the semantic target and reports the applied correction.
 
 .. automodule:: embodichain.lab.task_program.integrations.simulation.real2sim_collection
    :members:

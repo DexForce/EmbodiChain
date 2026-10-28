@@ -42,6 +42,7 @@ from embodichain.lab.sim.motion.expansion.real2sim_collision import (
 from embodichain.lab.task_program.integrations.simulation.real2sim_collision import (
     TabletopCollisionGuardFactory,
     TabletopPrototypeCollisionValidator,
+    _support_errors,
 )
 
 _URDF = """\
@@ -252,6 +253,14 @@ def test_tabletop_guard_projects_command_to_geometric_contact(tmp_path: Path) ->
         contact_depth_m=0.001,
         base_ground_depth_m=0.001,
     )
+    pair = ("body:object", "body:support")
+    assert (
+        pair not in validator.phase_policy("pick_up", "approach", 0, 1).allowed_contacts
+    )
+    supported = validator.phase_policy(
+        "pick_up", "approach", 0, 1, object_supported_by_target=True
+    )
+    assert supported.allowed_contacts[pair] == pytest.approx(0.001)
     request = SimpleNamespace(
         skill_id="pick_up",
         binding=SimpleNamespace(
@@ -288,6 +297,24 @@ def test_tabletop_guard_projects_command_to_geometric_contact(tmp_path: Path) ->
         ),
     )
     assert validator.validate(request, context, plan).accepted
+
+
+def test_support_measurement_checks_height_and_rotated_footprint() -> None:
+    obj = BoxCollisionBody("object", (0.02, 0.01, 0.02), np.eye(4))
+    target = BoxCollisionBody("target", (0.1, 0.1, 0.05), np.eye(4), True)
+    object_pose = np.eye(4)
+    object_pose[:3, 3] = (0.0, 0.0, 0.07)
+    target_pose = np.eye(4)
+    height, overhang = _support_errors(object_pose, target_pose, obj, target)
+    assert height == pytest.approx(0.0, abs=1e-12)
+    assert overhang == pytest.approx(0.0, abs=1e-12)
+    # A quarter turn swaps the 2 cm/1 cm footprint half-extents.
+    object_pose[:3, :3] = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+    object_pose[0, 3] = 0.095
+    object_pose[2, 3] += 0.01
+    height, overhang = _support_errors(object_pose, target_pose, obj, target)
+    assert height == pytest.approx(0.01)
+    assert overhang == pytest.approx(0.005)
 
 
 def test_plan_guard_rejects_nominal_velocity_before_collision_check() -> None:

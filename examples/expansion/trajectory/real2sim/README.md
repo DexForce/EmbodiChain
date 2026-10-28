@@ -63,13 +63,20 @@ geometrically projected at first sampled contact for plan validation and the
 executed robot/object states are checked independently. The current tabletop
 owner accepts a fixed-base, scalar-joint robot, a dynamic box, a static box and
 the default ground plane; unsupported physical topology is rejected.
-The initial tabletop collection host requires one Pick → MoveHeldObject → Place
-sequence. The underlying source bindings use call occurrences and can be used
-by other hosts with different supported sequential programs.
+The tabletop owner accepts sequential Pick, MoveHeldObject and Place calls,
+including single calls and bounded repeats, when every occurrence has a pinned
+prototype binding. Each Pick checks its measured lift, each held interval checks
+grasp drift, and each Place checks its own release target, support and stability.
+Move and Place require a confirmed held relation. A repeated Pick from the target
+support may adapt to its measured height and up to 2° tilt only after the host
+verifies the object's support footprint; lift remains gravity-aligned.
 The current profile also locks joints whose nominal speed or acceleration is
 at least 95% of its effective limit before sampling joint residuals. Other
 authorized joints retain the configured residual scale, and each call records
-its locked joint indices and names.
+its locked joint indices and names. For task-space variants, the same threshold
+also triggers a bounded search for lower-acceleration IK references in authorized
+free phases. Contact, hold and protected boundary samples stay fixed; FK error,
+motion limits and sampled collision checks still gate every candidate.
 Use the dataset path printed by `run-task`; the example suffix `000` applies
 when the destination is initially empty. The independent audit checks schedule completeness, receipts, asset and source
 hashes, actual T+1 arrays, hard-event mappings, per-phase duration, measured
@@ -88,6 +95,28 @@ python examples/expansion/trajectory/real2sim/matrix_run_task.py \
 
 The resulting report links nine separately persisted datasets. The earlier
 single-dataset run remains available as its own evidence.
+
+The following deployments exercise one Pick and two bounded Pick → Move →
+Place cycles, using an explicit single-episode profile:
+
+```bash
+embodichain run-task \
+  --gym-config examples/expansion/trajectory/real2sim/task.ur5.pick_only.yaml \
+  --real2sim-profile examples/expansion/trajectory/real2sim/collection.tabletop.single.yaml \
+  --dataset-dir /tmp/real2sim-pick --device cpu --headless \
+  --renderer no-render --disable-sensor --max_episodes 1
+
+embodichain run-task \
+  --gym-config examples/expansion/trajectory/real2sim/task.ur5.repeated.yaml \
+  --real2sim-profile examples/expansion/trajectory/real2sim/collection.tabletop.single.yaml \
+  --dataset-dir /tmp/real2sim-repeat --device cpu --headless \
+  --renderer no-render --disable-sensor --max_episodes 1
+
+python examples/expansion/trajectory/real2sim/audit.py \
+  --dataset /tmp/real2sim-repeat/ur5_tabletop_real2sim_000 \
+  --profile examples/expansion/trajectory/real2sim/collection.tabletop.single.yaml \
+  --output /tmp/real2sim-repeat-audit.json
+```
 
 The source binding belongs under the existing `runtime_services` mapping of an
 integration file. For example, the first compiled call in this checked-in

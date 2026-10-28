@@ -130,16 +130,22 @@ def build_motion_prototype(unit: NormalizedReal2SimUnit) -> SkillMotionPrototype
 
 
 def _tabletop_delta(
-    current: np.ndarray, reference: np.ndarray, name: str
+    current: np.ndarray,
+    reference: np.ndarray,
+    name: str,
+    *,
+    supported_regrasp: bool = False,
 ) -> np.ndarray:
     transform = _rigid(current, name) @ np.linalg.inv(
         _rigid(reference, f"source {name}")
     )
-    if not np.allclose(transform[:3, 2], [0, 0, 1], atol=1e-6, rtol=0):
+    tilt = float(np.arccos(np.clip(transform[2, 2], -1.0, 1.0)))
+    max_tilt = np.deg2rad(2.0) if supported_regrasp else 1e-6
+    if tilt > max_tilt:
         raise ValueError(
             f"{name} changes roll or pitch; tabletop transfer supports yaw only"
         )
-    if abs(transform[2, 3]) > 1e-6:
+    if not supported_regrasp and abs(transform[2, 3]) > 1e-6:
         raise ValueError(f"{name} changes height; tabletop transfer supports XY only")
     return transform
 
@@ -150,6 +156,7 @@ def retarget_motion_prototype(
     object_pose: FloatArray | None = None,
     target_pose: FloatArray | None = None,
     held_object_to_tcp: FloatArray | None = None,
+    object_supported_regrasp: bool = False,
 ) -> FloatArray:
     """Transfer prototype TCP poses to tabletop object and target references.
 
@@ -163,6 +170,9 @@ def retarget_motion_prototype(
         object_pose: Current world object pose for Pick.
         target_pose: Current world target pose for transport or Place.
         held_object_to_tcp: Current verified held relation for transport/place.
+        object_supported_regrasp: Permit an explicitly verified Pick from the
+            target support at a different height, with up to two degrees of
+            observed tilt. The host must establish the support relation first.
 
     Returns:
         Owned world-frame TCP poses with shape ``(N, 4, 4)``.
@@ -172,7 +182,11 @@ def retarget_motion_prototype(
     """
     if not isinstance(prototype, SkillMotionPrototype):
         raise TypeError("prototype must be a SkillMotionPrototype")
+    if type(object_supported_regrasp) is not bool:
+        raise TypeError("object_supported_regrasp must be a boolean")
     unit = prototype.unit
+    if object_supported_regrasp and unit.source.skill_id != "pick_up":
+        raise ValueError("supported regrasp applies only to Pick")
     poses = unit.world_tcp
     if poses is None or prototype.object_to_tcp is None:
         raise ValueError("Cartesian transfer requires normalized TCP poses")
@@ -180,10 +194,23 @@ def retarget_motion_prototype(
         if object_pose is None:
             raise ValueError("Pick requires a current object pose")
         assert unit.source.object_pose is not None
-        delta = _tabletop_delta(object_pose, unit.source.object_pose, "object_pose")
-        # A tabletop yaw preserves gravity, so applying the same rigid change
-        # to the lift preserves world-up motion as well as the grasp relation.
+        delta = _tabletop_delta(
+            object_pose,
+            unit.source.object_pose,
+            "object_pose",
+            supported_regrasp=object_supported_regrasp,
+        )
         result = delta @ poses
+        # Small observed support tilt changes the grasp orientation. Rotate
+        # lift displacements only by yaw so gravity remains world-up.
+        start = unit.phases[2].start
+        yaw = np.arctan2(delta[1, 0], delta[0, 0])
+        cosine, sine = np.cos(yaw), np.sin(yaw)
+        yaw_rotation = np.array([[cosine, -sine, 0], [sine, cosine, 0], [0, 0, 1]])
+        result[start:, :3, 3] = (
+            result[start, :3, 3]
+            + (poses[start:, :3, 3] - poses[start, :3, 3]) @ yaw_rotation.T
+        )
     else:
         if target_pose is None or held_object_to_tcp is None:
             raise ValueError("transport and place require target and held relation")

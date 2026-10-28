@@ -650,10 +650,13 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         )
         relative = actual[:, :3, :3].transpose(-1, -2) @ target[:, :3, :3]
         cosine = ((relative.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2).clamp(-1, 1)
-        if bool(
-            ((position_error > 0.002) | (torch.acos(cosine) > math.radians(2))).any()
-        ):
-            raise ValueError("external motion does not reach its required TCP anchor")
+        rotation_error = torch.acos(cosine)
+        if bool(((position_error > 0.002) | (rotation_error > math.radians(2))).any()):
+            raise ValueError(
+                "external motion does not reach its required TCP anchor: "
+                f"position_error_m={float(position_error.max()):.6g}, "
+                f"rotation_error_deg={math.degrees(float(rotation_error.max())):.6g}"
+            )
 
     def _prepare_request(
         self,

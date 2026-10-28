@@ -180,6 +180,31 @@ def test_pick_transfer_preserves_grasp_and_world_up_lift() -> None:
     raised[2, 3] = 0.01
     with pytest.raises(ValueError, match="height"):
         retarget_motion_prototype(prototype, object_pose=raised)
+    tilt = np.deg2rad(1.0)
+    raised[:3, :3] = moved[:3, :3] @ np.array(
+        [[1, 0, 0], [0, np.cos(tilt), -np.sin(tilt)], [0, np.sin(tilt), np.cos(tilt)]]
+    )
+    supported = retarget_motion_prototype(
+        prototype, object_pose=raised, object_supported_regrasp=True
+    )
+    np.testing.assert_allclose(
+        np.linalg.inv(raised) @ supported[grasp_index],
+        prototype.object_to_tcp,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        supported[-1, :3, 3] - supported[grasp_index, :3, 3],
+        [0, 0, 0.03],
+        atol=1e-10,
+    )
+    tilt = np.deg2rad(3.0)
+    raised[:3, :3] = moved[:3, :3] @ np.array(
+        [[1, 0, 0], [0, np.cos(tilt), -np.sin(tilt)], [0, np.sin(tilt), np.cos(tilt)]]
+    )
+    with pytest.raises(ValueError, match="roll or pitch"):
+        retarget_motion_prototype(
+            prototype, object_pose=raised, object_supported_regrasp=True
+        )
 
 
 def test_trajectory_bundle_round_trip_and_digest(tmp_path: Path) -> None:

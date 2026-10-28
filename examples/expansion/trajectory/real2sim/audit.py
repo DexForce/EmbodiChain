@@ -34,6 +34,7 @@ from embodichain.lab.task_program.integrations.simulation.real2sim_collection im
     load_real2sim_tabletop_profile,
 )
 from embodichain.lab.sim.atomic_actions import MotionPolicy
+from embodichain.lab.sim.atomic_actions._expansion_phases import FREE_PHASES
 
 __all__: list[str] = []
 
@@ -117,33 +118,131 @@ def _check_case(
             np.linalg.norm(objects[:, 3:], axis=1), 1, atol=1e-4, rtol=0
         ):
             raise ValueError("measured object quaternion is invalid")
+    lineage = row["real2sim_lineage"]
+    calls = lineage["calls"]
+    if not calls or sorted(call["call_index"] for call in calls) != list(
+        range(len(calls))
+    ):
+        raise ValueError("source lineage must cover every sequential call occurrence")
+    prototypes = {}
+    for call in calls:
+        index = call["call_index"]
+        bundle = row["real2sim_artifacts"][call["source_bundle"]]
+        for item in bundle.values():
+            _artifact(root, item)
+        if bundle["prototype_manifest"]["sha256"] != call["prototype_sha256"]:
+            raise ValueError("prototype identity differs from its archived bundle")
+        prototypes[index] = load_prototype(root / bundle["prototype_manifest"]["path"])
     metrics = next(item["metrics"] for item in checks if item["id"] == "task")
-    xy_error = float(np.linalg.norm(objects[-1, :2] - target[:2, 3]))
-    if abs(xy_error - metrics["placement_xy_error_m"]) > 1e-6:
-        raise ValueError("placement metric differs from recorded object observations")
-    drift = float(
-        np.linalg.norm(objects[-1, :3] - objects[max(0, len(actions) - 19), :3])
-    )
-    if abs(drift - metrics["drift_m"]) > 1e-6:
-        raise ValueError("stability metric differs from recorded object observations")
+    outcomes = row.get("task_call_validation")
+    if outcomes is None:
+        xy_error = float(np.linalg.norm(objects[-1, :2] - target[:2, 3]))
+        drift = float(
+            np.linalg.norm(objects[-1, :3] - objects[max(0, len(actions) - 19), :3])
+        )
+        if (
+            abs(xy_error - metrics["placement_xy_error_m"]) > 1e-6
+            or abs(drift - metrics["drift_m"]) > 1e-6
+        ):
+            raise ValueError("legacy placement metrics differ from observed states")
+        lifts = []  # Legacy Pick lift is checked against the trace below.
+        placements = [xy_error]
+    else:
+        if len(outcomes) != len(calls) or {
+            item["call_index"] for item in outcomes
+        } != set(prototypes):
+            raise ValueError("task outcomes do not cover every call occurrence")
+        lifts, placements = [], []
+        for item in outcomes:
+            index, skill = item["call_index"], item["skill_id"]
+            start, stop = item["start_step"], item["end_step"]
+            if (
+                skill != prototypes[index].unit.source.skill_id
+                or item.get("passed") is not True
+                or type(start) is not int
+                or type(stop) is not int
+                or not 0 <= start < stop <= len(actions)
+            ):
+                raise ValueError(
+                    "task outcome has an invalid call or observation range"
+                )
+            if skill == "pick_up":
+                lift = float(objects[stop, 2] - objects[start, 2])
+                if abs(lift - item["lift_m"]) > 1e-6 or lift < profile.minimum_lift_m:
+                    raise ValueError(
+                        "Pick lift differs from the measured object states"
+                    )
+                lifts.append(lift)
+            elif skill == "place":
+                expected_xy = np.asarray(item["expected_object_xy"], dtype=np.float64)
+                stable_start = item["stability_start_step"]
+                if expected_xy.shape != (2,) or not start <= stable_start <= stop:
+                    raise ValueError(
+                        "placement target or stability interval is invalid"
+                    )
+                error = float(np.linalg.norm(objects[stop, :2] - expected_xy))
+                drift = float(
+                    np.linalg.norm(objects[stop, :3] - objects[stable_start, :3])
+                )
+                if (
+                    abs(error - item["placement_xy_error_m"]) > 1e-6
+                    or abs(drift - item["drift_m"]) > 1e-6
+                    or error > profile.placement_xy_tolerance_m
+                    or item["height_error_m"] > profile.placement_height_tolerance_m
+                    or item["support_overhang_m"] > profile.contact_depth_m
+                    or drift > profile.maximum_drift_m
+                ):
+                    raise ValueError(
+                        "Place target, support or stability evidence failed"
+                    )
+                placements.append(error)
+        held_checks = row.get("held_interval_validation")
+        if not held_checks:
+            raise ValueError("measured held intervals are missing")
+        for held in held_checks:
+            if (
+                held.get("passed") is not True
+                or not 0
+                <= held["first_call_index"]
+                <= held["last_call_index"]
+                < len(calls)
+                or not 0 <= held["start_step"] < held["end_step"] <= len(actions)
+                or held["held_translation_drift_m"]
+                > profile.held_translation_tolerance_m
+                or held["held_rotation_drift_deg"] > profile.held_rotation_tolerance_deg
+            ):
+                raise ValueError("held interval exceeds the measured grasp tolerance")
+        if any(
+            not any(
+                h["first_call_index"] <= i <= h["last_call_index"] for h in held_checks
+            )
+            for i in prototypes
+        ):
+            raise ValueError("a call is not covered by a held interval")
+        if lifts and abs(min(lifts) - metrics["lift_m"]) > 1e-6:
+            raise ValueError("aggregate Pick lift differs from call evidence")
+        if placements and abs(max(placements) - metrics["placement_xy_error_m"]) > 1e-6:
+            raise ValueError("aggregate Place error differs from call evidence")
+        for name in ("held_translation_drift_m", "held_rotation_drift_deg"):
+            if abs(max(h[name] for h in held_checks) - metrics[name]) > 1e-6:
+                raise ValueError("aggregate held drift differs from call evidence")
     if (
-        xy_error > profile.placement_xy_tolerance_m
-        or metrics["height_error_m"] > profile.placement_height_tolerance_m
-        or drift > profile.maximum_drift_m
-        or metrics["lift_m"] < profile.minimum_lift_m
+        (placements and max(placements) > profile.placement_xy_tolerance_m)
+        or (
+            "height_error_m" in metrics
+            and metrics["height_error_m"] > profile.placement_height_tolerance_m
+        )
+        or ("drift_m" in metrics and metrics["drift_m"] > profile.maximum_drift_m)
+        or ("lift_m" in metrics and metrics["lift_m"] < profile.minimum_lift_m)
         or metrics["held_translation_drift_m"] > profile.held_translation_tolerance_m
         or metrics["held_rotation_drift_deg"] > profile.held_rotation_tolerance_deg
     ):
         raise ValueError("measured task metrics exceed the explicit profile tolerances")
     phases = row["phase_duration_validation"]
     expected_phases = {
-        (0, "approach"),
-        (0, "close"),
-        (0, "lift"),
-        (1, "transport"),
-        (2, "approach"),
-        (2, "release"),
-        (2, "retract"),
+        (index, phase.name)
+        for index, prototype in prototypes.items()
+        for phase in prototype.unit.phases
     }
     if (
         len(phases) != len(expected_phases)
@@ -152,9 +251,16 @@ def _check_case(
         raise ValueError("phase validation is missing a semantic phase")
     recipe = row["recipe"]
     scale = 1.15 if recipe == "time_115" else 1.30 if recipe == "time_130" else None
-    free = {0: {"approach"}, 1: {"transport"}, 2: {"approach", "retract"}}
     for phase in phases:
-        retimed = scale is not None and phase["phase"] in free[phase["call_index"]]
+        prototype = prototypes[phase["call_index"]]
+        source_phase = next(
+            item for item in prototype.unit.phases if item.name == phase["phase"]
+        )
+        retimed = (
+            scale is not None
+            and phase["phase"] in FREE_PHASES[prototype.unit.source.skill_id]
+            and "retime" in source_phase.allowed_operators
+        )
         expected = (
             math.ceil((phase["source_samples"] - 1) * scale - 1e-9) + 1
             if retimed
@@ -169,7 +275,7 @@ def _check_case(
                 "semantic phase duration does not match the selected recipe"
             )
     collisions = row["sampled_plan_collisions"]
-    expected_checks = 3 if recipe == "nominal" else 6
+    expected_checks = len(calls) * (1 if recipe == "nominal" else 2)
     if len(collisions) != expected_checks or any(
         not item["accepted"] for item in collisions
     ):
@@ -180,42 +286,122 @@ def _check_case(
     ):
         raise ValueError("observed collision evidence is incomplete")
     ratios = row["sampled_motion_limits"]
-    if len(ratios) != 3 or any(
+    if set(ratios) != {str(index) for index in prototypes} or any(
         max(value.values()) > 1 + 1e-6 for value in ratios.values()
     ):
         raise ValueError("motion-limit ratios are incomplete or exceed the profile")
-    lineage = row["real2sim_lineage"]
-    calls = lineage["calls"]
-    if len(calls) != 3 or {call["call_index"] for call in calls} != {0, 1, 2}:
-        raise ValueError("source lineage must cover three distinct call occurrences")
-    max_position, max_angle = 0.0, 0.0
+    max_position, max_angle = None, None
     with np.load(_artifact(root, lineage["trace"]), allow_pickle=False) as trace:
         step_call, step_plan = trace["step_call_index"], trace["step_plan_index"]
         if step_call.shape != (len(actions),) or step_plan.shape != step_call.shape:
             raise ValueError("action-to-plan trace length is invalid")
-        transport_steps = np.flatnonzero(step_call == 1)
-        if not len(transport_steps):
-            raise ValueError("trace has no measured transport boundary")
-        lift = float(objects[int(transport_steps[0]), 2] - objects[0, 2])
-        if abs(lift - metrics["lift_m"]) > 1e-6:
-            raise ValueError("lift metric differs from recorded object observations")
+        if outcomes is None:
+            transport_steps = np.flatnonzero(step_call == 1)
+            if not len(transport_steps):
+                raise ValueError("trace has no measured transport boundary")
+            lift = float(objects[int(transport_steps[0]), 2] - objects[0, 2])
+            if abs(lift - metrics["lift_m"]) > 1e-6:
+                raise ValueError(
+                    "lift metric differs from recorded object observations"
+                )
+            lifts.append(lift)
+        else:
+            selected_calls = step_call[step_call >= 0]
+            if set(selected_calls.tolist()) != set(prototypes) or np.any(
+                np.diff(selected_calls) < 0
+            ):
+                raise ValueError("action trace omits or reorders a source call")
+            starts = {
+                index: int(np.flatnonzero(step_call == index)[0])
+                for index in prototypes
+            }
+            ordered = sorted(prototypes)
+            for pos, index in enumerate(ordered):
+                outcome = next(item for item in outcomes if item["call_index"] == index)
+                stop = (
+                    starts[ordered[pos + 1]] if pos + 1 < len(ordered) else len(actions)
+                )
+                if (outcome["start_step"], outcome["end_step"]) != (
+                    starts[index],
+                    stop,
+                ):
+                    raise ValueError(
+                        "call outcome boundaries differ from the action trace"
+                    )
+            phase_starts = {}
+            for index in ordered:
+                offset = 0
+                for source_phase in prototypes[index].unit.phases:
+                    phase = next(
+                        item
+                        for item in phases
+                        if item["call_index"] == index
+                        and item["phase"] == source_phase.name
+                    )
+                    selected = np.flatnonzero(
+                        (step_call == index)
+                        & (step_plan >= offset)
+                        & (step_plan < offset + phase["final_samples"])
+                    )
+                    if not len(selected):
+                        raise ValueError("action trace is missing a semantic phase")
+                    phase_starts[index, source_phase.name] = int(selected[0])
+                    offset += phase["final_samples"]
+            expected_held, active_start, active_call = [], None, None
+            for pos, index in enumerate(ordered):
+                skill = prototypes[index].unit.source.skill_id
+                if skill == "pick_up":
+                    if active_start is not None:
+                        raise ValueError("a new Pick begins before the prior release")
+                    active_start, active_call = phase_starts[index, "lift"], index
+                else:
+                    if active_start is None:
+                        if pos:
+                            raise ValueError("a call has no held-object interval")
+                        active_start, active_call = starts[index], index
+                    if skill == "place":
+                        expected_held.append(
+                            (
+                                active_call,
+                                index,
+                                active_start,
+                                phase_starts[index, "release"],
+                            )
+                        )
+                        active_start = active_call = None
+            if active_start is not None:
+                expected_held.append(
+                    (active_call, ordered[-1], active_start, len(actions))
+                )
+            observed_held = [
+                (
+                    h["first_call_index"],
+                    h["last_call_index"],
+                    h["start_step"],
+                    h["end_step"],
+                )
+                for h in held_checks
+            ]
+            if expected_held != observed_held:
+                raise ValueError(
+                    "held interval boundaries differ from the action trace"
+                )
         for call in calls:
             index = call["call_index"]
-            bundle = row["real2sim_artifacts"][call["source_bundle"]]
-            for item in bundle.values():
-                _artifact(root, item)
-            if bundle["prototype_manifest"]["sha256"] != call["prototype_sha256"]:
-                raise ValueError("prototype identity differs from its archived bundle")
-            prototype = load_prototype(root / bundle["prototype_manifest"]["path"])
+            prototype = prototypes[index]
             if prototype.unit.source.origin != "synthetic_reference":
                 raise ValueError("unexpected source origin")
             source = prototype.unit.source
             if (
-                source.source_id != row["source_id"]
-                or source.source_revision != row["source_revision"]
+                source.source_id != call.get("source_id", row["source_id"])
+                or source.source_revision
+                != call.get("source_revision", row["source_revision"])
                 or source.robot_geometry_sha256 != collisions[0]["geometry_sha256"]
                 or source.object_geometry_sha256 is None
-                or (index != 0 and source.target_geometry_sha256 is None)
+                or (
+                    source.target_pose is not None
+                    and source.target_geometry_sha256 is None
+                )
             ):
                 raise ValueError("source revision or geometry identity is incomplete")
             if call["geometry_family_id"] != row["geometry_family_id"]:
@@ -265,22 +451,26 @@ def _check_case(
             ):
                 raise ValueError("same-grid variant changed the plan time mapping")
             position, angle = call["fk_position_error_m"], call["fk_rotation_error_rad"]
-            if (
-                position is None
-                or angle is None
-                or position > 0.002
-                or angle > math.radians(2)
-            ):
-                raise ValueError("IK residual is absent or exceeds its threshold")
-            max_position, max_angle = max(max_position, position), max(max_angle, angle)
+            if call.get("authority", "eef_pose") != "qpos":
+                if (
+                    position is None
+                    or angle is None
+                    or position > 0.002
+                    or angle > math.radians(2)
+                ):
+                    raise ValueError("IK residual is absent or exceeds its threshold")
+                max_position = (
+                    position if max_position is None else max(max_position, position)
+                )
+                max_angle = angle if max_angle is None else max(max_angle, angle)
     return {
         "layout": row["layout"],
         "recipe": recipe,
         "steps": len(actions),
         "candidate_id": row["candidate_id"],
         "receipt_confirmed": True,
-        "xy_error_m": xy_error,
-        "lift_m": metrics["lift_m"],
+        "xy_error_m": max(placements) if placements else None,
+        "lift_m": min(lifts) if lifts else None,
         "held_translation_drift_m": metrics["held_translation_drift_m"],
         "held_rotation_drift_deg": metrics["held_rotation_drift_deg"],
         "fk_position_error_m": max_position,
@@ -391,20 +581,38 @@ def main() -> None:
         "continuous_collision_qualified": False,
         "metrics": {
             "maximum_fk_position_error_m": max(
-                (item["fk_position_error_m"] for item in cases), default=None
+                (
+                    item["fk_position_error_m"]
+                    for item in cases
+                    if item["fk_position_error_m"] is not None
+                ),
+                default=None,
             ),
             "maximum_fk_rotation_error_deg": (
                 math.degrees(
-                    max((item["fk_rotation_error_rad"] for item in cases), default=0.0)
+                    max(
+                        (
+                            item["fk_rotation_error_rad"]
+                            for item in cases
+                            if item["fk_rotation_error_rad"] is not None
+                        ),
+                        default=0.0,
+                    )
                 )
-                if cases
+                if any(item["fk_rotation_error_rad"] is not None for item in cases)
                 else None
             ),
             "minimum_pick_lift_m": min(
-                (item["lift_m"] for item in cases), default=None
+                (item["lift_m"] for item in cases if item["lift_m"] is not None),
+                default=None,
             ),
             "maximum_placement_xy_error_m": max(
-                (item["xy_error_m"] for item in cases), default=None
+                (
+                    item["xy_error_m"]
+                    for item in cases
+                    if item["xy_error_m"] is not None
+                ),
+                default=None,
             ),
             "maximum_held_translation_drift_m": max(
                 (item["held_translation_drift_m"] for item in cases), default=None

@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
+from collections.abc import Mapping
 from dataclasses import asdict, replace
 import hashlib
 import json
@@ -60,6 +62,7 @@ from embodichain.lab.task_program.integrations.expansion import (
 from embodichain.lab.task_program.integrations.simulation.real2sim_collision import (
     TabletopCollisionGuardFactory,
     TabletopPrototypeCollisionValidator,
+    _support_errors,
 )
 from embodichain.lab.task_program.integrations.simulation.scene_expansion import (
     SimulationSceneExpansionHost,
@@ -256,6 +259,86 @@ def _offset(pose: torch.Tensor, delta: tuple[float, float, float]) -> torch.Tens
     return result
 
 
+def _observed_program_phases(
+    skills: Mapping[int, str],
+    segments: Mapping[int, tuple[tuple[str, int, int], ...]],
+    calls: np.ndarray,
+    samples: np.ndarray,
+) -> tuple[tuple[int, int, str, str], ...]:
+    """Map each validated call phase to its first consumed action in O(T)."""
+    if (
+        not skills
+        or set(skills) != set(segments)
+        or calls.ndim != 1
+        or samples.shape != calls.shape
+        or calls.dtype.kind != "i"
+        or samples.dtype.kind != "i"
+    ):
+        raise ValueError("observed trace and declared call occurrences do not match")
+    starts: dict[int, tuple[int, ...]] = {}
+    for index, phases in segments.items():
+        if (
+            not phases
+            or phases[0][1] != 0
+            or any(
+                start >= stop or (pos and phases[pos - 1][2] != start)
+                for pos, (_, start, stop) in enumerate(phases)
+            )
+        ):
+            raise ValueError("validated phases must cover each plan contiguously")
+        starts[index] = tuple(start for _, start, _ in phases)
+    first: dict[tuple[int, int], int] = {}
+    previous = -1
+    for step, (call, sample) in enumerate(zip(calls.tolist(), samples.tolist())):
+        if call == -1 and sample == -1:
+            continue
+        if call not in starts or call < previous or sample < -1:
+            raise ValueError("observed trace has an unknown or out-of-order call")
+        previous = call
+        if sample == -1:
+            continue
+        phase = bisect_right(starts[call], sample) - 1
+        if phase < 0 or sample >= segments[call][phase][2]:
+            raise ValueError("observed trace refers outside a validated plan")
+        first.setdefault((call, phase), step)
+    events = []
+    for index in sorted(skills):
+        for phase, (name, _, _) in enumerate(segments[index]):
+            if (index, phase) not in first:
+                raise ValueError("observed trace is missing a declared phase")
+            events.append((first[index, phase], index, skills[index], name))
+    if any(events[pos][0] >= events[pos + 1][0] for pos in range(len(events) - 1)):
+        raise ValueError("observed phases are not strictly sequential")
+    return tuple(events)
+
+
+def _held_pose_errors(objects: np.ndarray, tcp: np.ndarray) -> tuple[float, float]:
+    """Measure maximum drift of the observed object-to-TCP relation."""
+    if (
+        objects.ndim != 2
+        or objects.shape[1] != 7
+        or tcp.shape != (len(objects), 4, 4)
+        or not len(objects)
+        or not np.isfinite(objects).all()
+        or not np.isfinite(tcp).all()
+    ):
+        raise ValueError("held-state evidence must contain aligned finite poses")
+    rotation = Rotation.from_quat(objects[:, 3:7]).as_matrix()
+    relative_translation = np.einsum(
+        "nij,nj->ni", rotation.transpose(0, 2, 1), tcp[:, :3, 3] - objects[:, :3]
+    )
+    relative_rotation = rotation.transpose(0, 2, 1) @ tcp[:, :3, :3]
+    translation = float(
+        np.linalg.norm(relative_translation - relative_translation[0], axis=1).max()
+    )
+    angle = float(
+        np.degrees(
+            Rotation.from_matrix(relative_rotation[0].T @ relative_rotation).magnitude()
+        ).max()
+    )
+    return translation, angle
+
+
 def install_real2sim_tabletop_owner(
     env: object, profile: Real2SimTabletopCollectionCfg, *, dataset_dir: str | Path
 ) -> Real2SimRunTaskOwner:
@@ -288,9 +371,10 @@ def install_real2sim_tabletop_owner(
             key=lambda item: item.call_index,
         )
     )
-    if {item.call_index for item in declarations} != {0, 1, 2}:
+    call_indices = tuple(item.call_index for item in declarations)
+    if not call_indices or len(set(call_indices)) != len(call_indices):
         raise ValueError(
-            "the initial tabletop owner requires three configured source occurrences"
+            "tabletop collection requires unique configured call occurrences"
         )
     registration = getattr(adapter, "_registration", None)
     if registration is None:
@@ -311,7 +395,7 @@ def install_real2sim_tabletop_owner(
     ) or any(
         item.target_entity_id != profile.target_entity_id
         for item in declarations
-        if item.call_index != 0
+        if item.target_entity_id is not None
     ):
         raise ValueError("source and scene entity IDs must match this tabletop profile")
     if (
@@ -354,6 +438,16 @@ def install_real2sim_tabletop_owner(
         item.call_index: load_prototype(item.prototype_manifest)
         for item in declarations
     }
+    unique_prototypes = {}
+    identities = {}
+    for item in declarations:
+        prototype = prototypes[item.call_index]
+        source = prototype.unit.source
+        key = (source.source_id, source.source_revision, source.unit_id)
+        if key in identities and identities[key] != item.prototype_sha256:
+            raise ValueError("a source unit revision cannot name different prototypes")
+        identities[key] = item.prototype_sha256
+        unique_prototypes[key] = prototype
     recorder = LeRobotRecorder(
         DatasetFunctorCfg(
             func=LeRobotRecorder,
@@ -393,6 +487,17 @@ def install_real2sim_tabletop_owner(
             )
         layout_index, recipe_index = divmod(episode_index, len(profile.recipes))
         layout, recipe = profile.layouts[layout_index], profile.recipes[recipe_index]
+        program = environment.compile_task_program(environment.cfg.task_program)
+        compiled_calls = tuple(
+            call.call_index
+            for segment in program.iter_segments()
+            for call in segment.calls
+        )
+        if call_indices != compiled_calls:
+            raise ValueError(
+                "tabletop collection requires one configured source for every "
+                "sequential program call"
+            )
         cube = environment.sim.get_rigid_object(profile.object_uid)
         platform = environment.sim.get_rigid_object(profile.target_uid)
         current = {
@@ -442,7 +547,7 @@ def install_real2sim_tabletop_owner(
         validator = TabletopPrototypeCollisionValidator(
             robot=environment.robot,
             checker=checker,
-            prototypes=tuple(prototypes.values()),
+            prototypes=tuple(unique_prototypes.values()),
             object_uid=profile.object_entity_id,
             target_uid=profile.target_entity_id,
             ground_uid="ground",
@@ -457,7 +562,7 @@ def install_real2sim_tabletop_owner(
         common = {
             "velocity_limits": profile.velocity_limits,
             "acceleration_limits": profile.acceleration_limits,
-            "call_indices": (0, 1, 2),
+            "call_indices": call_indices,
             "diagnostic_unchecked": True,
         }
         if recipe.startswith("time_"):
@@ -512,12 +617,14 @@ def install_real2sim_tabletop_owner(
                 ),
                 **common,
             )
-        program = environment.compile_task_program(environment.cfg.task_program)
         guard = TabletopCollisionGuardFactory(
             validator,
             delegate,
             velocity_limits=common["velocity_limits"],
             acceleration_limits=common["acceleration_limits"],
+            ik_smoothing_trigger_fraction=(
+                profile.motion_headroom_fraction if recipe == "task_space" else None
+            ),
         )
         tracer = adapter.create_traced_configured_sources(program, guard)
         segments = environment.create_demo_segments(
@@ -560,116 +667,195 @@ def install_real2sim_tabletop_owner(
             .cpu()
             .numpy()
         )
-        final = objects[-1, :3]
-        xy_error = float(np.linalg.norm(final[:2] - target_pose[:2, 3]))
-        expected_height = float(
-            target_pose[2, 3]
-            + target_body.half_extents[2]
-            + object_body.half_extents[2]
+        tracer = state["tracer"]
+        delegate = state["delegate"]
+        guard = state["guard"]
+        if set(tracer.motions) != set(call_indices):
+            raise ValueError("not every configured source occurrence was executed")
+        retime_maps = (
+            {}
+            if not isinstance(delegate, TaskProgramMappedRetimeFactory)
+            else {item.call_index: item.result.time_map for item in delegate.records}
         )
-        height_error = abs(float(final[2]) - expected_height)
-        drift = float(
-            np.linalg.norm(objects[-1, :3] - objects[max(0, length - 19), :3])
+        arrays = build_real2sim_execution_trace(
+            environment._active_task_program_bridge.execution_trace,
+            tracer.motions,
+            retime_maps=retime_maps,
         )
-        events = []
-        for segment in result.to_metadata()["segments"]:
-            for event in segment["metadata"]["runtime"]["events"]:
-                if event["kind"] == "trajectory_segment_entered":
-                    events.append(
-                        (
-                            round(float(event["timestamp"]) / environment.step_dt),
-                            event["skill_id"],
-                            event["segment_name"],
+        if len(arrays["step_call_index"]) != length:
+            raise ValueError("observed action trace does not cover the rollout")
+        skills = {
+            index: prototypes[index].unit.source.skill_id for index in call_indices
+        }
+        events = _observed_program_phases(
+            skills,
+            guard.segments,
+            arrays["step_call_index"],
+            arrays["step_plan_index"],
+        )
+        phase_starts = {(index, name): start for start, index, _, name in events}
+        call_starts = {
+            index: next(start for start, call, _, _ in events if call == index)
+            for index in call_indices
+        }
+        matrices = np.repeat(np.eye(4)[None], length + 1, axis=0)
+        matrices[:, :3, :3] = Rotation.from_quat(objects[:, 3:7]).as_matrix()
+        matrices[:, :3, 3] = objects[:, :3]
+        outcomes = []
+        held_intervals = []
+        held_start = None
+        held_endpoint = None
+        held_call = None
+        for position, index in enumerate(call_indices):
+            skill = skills[index]
+            start = call_starts[index]
+            stop = (
+                call_starts[call_indices[position + 1]]
+                if position + 1 < len(call_indices)
+                else length
+            )
+            endpoint = guard.motion_targets[index]
+            outcome = {
+                "call_index": index,
+                "skill_id": skill,
+                "start_step": start,
+                "end_step": stop,
+                "passed": True,
+            }
+            if skill == "pick_up":
+                if held_start is not None:
+                    raise ValueError("a Pick cannot begin while the object is held")
+                lift = float(objects[stop, 2] - objects[start, 2])
+                outcome.update(lift_m=lift, passed=lift >= profile.minimum_lift_m)
+                held_start = phase_starts[index, "lift"]
+                held_endpoint, held_call = endpoint, index
+            else:
+                if held_start is None:
+                    if position:
+                        raise ValueError(
+                            "the call has no preceding held-object relation"
                         )
+                    # Initial held state must still be verified by the live plan guard.
+                    held_start, held_endpoint, held_call = start, endpoint, index
+                if endpoint != held_endpoint:
+                    raise ValueError("a held interval cannot switch motion endpoints")
+                if skill == "place":
+                    release = phase_starts[index, "release"]
+                    held_intervals.append(
+                        (held_start, release, held_endpoint, held_call, index)
                     )
-        events.sort()
-        if (
-            not events
-            or events[0][0] != 0
-            or any(events[i][0] >= events[i + 1][0] for i in range(len(events) - 1))
-            or events[-1][0] > length
+                    release_target = guard.release_targets.get(index)
+                    if release_target is None:
+                        raise ValueError("Place is missing its verified release target")
+                    xy_error = float(
+                        np.linalg.norm(objects[stop, :2] - release_target[:2, 3])
+                    )
+                    height_error, overhang = _support_errors(
+                        matrices[stop], target_pose, object_body, target_body
+                    )
+                    stable_start = max(phase_starts[index, "retract"], stop - 19)
+                    drift = float(
+                        np.linalg.norm(objects[stop, :3] - objects[stable_start, :3])
+                    )
+                    outcome.update(
+                        expected_object_xy=release_target[:2, 3].tolist(),
+                        placement_xy_error_m=xy_error,
+                        height_error_m=height_error,
+                        support_overhang_m=overhang,
+                        stability_start_step=stable_start,
+                        drift_m=drift,
+                        passed=(
+                            xy_error <= profile.placement_xy_tolerance_m
+                            and height_error <= profile.placement_height_tolerance_m
+                            and overhang <= profile.contact_depth_m
+                            and drift <= profile.maximum_drift_m
+                        ),
+                    )
+                    held_start = held_endpoint = held_call = None
+                elif skill != "move_held_object":
+                    raise ValueError("unsupported source-backed tabletop skill")
+            outcomes.append(outcome)
+        if held_start is not None:
+            held_intervals.append(
+                (held_start, length, held_endpoint, held_call, call_indices[-1])
+            )
+        held_checks = []
+        for start, stop, endpoint, first_call, last_call in held_intervals:
+            if not 0 <= start < stop <= length:
+                raise ValueError("observed held-object interval is invalid")
+            control_part, joint_ids = endpoint
+            tcp = (
+                environment.robot.compute_batch_fk(
+                    qpos=qpos[None, start : stop + 1, list(joint_ids)],
+                    name=control_part,
+                    to_matrix=True,
+                )[0]
+                .detach()
+                .cpu()
+                .numpy()
+            )
+            translation, rotation = _held_pose_errors(objects[start : stop + 1], tcp)
+            held_checks.append(
+                {
+                    "first_call_index": first_call,
+                    "last_call_index": last_call,
+                    "start_step": start,
+                    "end_step": stop,
+                    "held_translation_drift_m": translation,
+                    "held_rotation_drift_deg": rotation,
+                    "passed": (
+                        translation <= profile.held_translation_tolerance_m
+                        and rotation <= profile.held_rotation_tolerance_deg
+                    ),
+                }
+            )
+        metrics = {}
+        for name, aggregate in (
+            ("lift_m", min),
+            ("placement_xy_error_m", max),
+            ("height_error_m", max),
+            ("support_overhang_m", max),
+            ("drift_m", max),
         ):
-            raise ValueError(
-                "observed phase events cannot be mapped to the control grid"
-            )
-        transport_events = [
-            start
-            for start, skill, phase in events
-            if skill == "move_held_object" and phase == "transport"
-        ]
-        place_events = [
-            start
-            for start, skill, phase in events
-            if skill == "place" and phase == "approach"
-        ]
-        if len(transport_events) != 1 or len(place_events) != 1:
-            raise ValueError(
-                "measured validation requires one transport and place phase"
-            )
-        transport_start, transport_stop = transport_events[0], place_events[0]
-        if not 0 < transport_start < transport_stop <= length:
-            raise ValueError("measured transport boundaries are invalid")
-        lift = float(objects[transport_start, 2] - objects[0, 2])
-        control_part, joint_ids = state["guard"].motion_targets[1]
-        tcp = (
-            environment.robot.compute_batch_fk(
-                qpos=qpos[None, transport_start : transport_stop + 1, list(joint_ids)],
-                name=control_part,
-                to_matrix=True,
-            )[0]
-            .detach()
-            .cpu()
-            .numpy()
-        )
-        observed_objects = objects[transport_start : transport_stop + 1]
-        object_rotation = Rotation.from_quat(observed_objects[:, 3:7]).as_matrix()
-        relative_translation = np.einsum(
-            "nij,nj->ni",
-            object_rotation.transpose(0, 2, 1),
-            tcp[:, :3, 3] - observed_objects[:, :3],
-        )
-        relative_rotation = object_rotation.transpose(0, 2, 1) @ tcp[:, :3, :3]
-        held_translation = float(
-            np.linalg.norm(relative_translation - relative_translation[0], axis=1).max()
-        )
-        held_rotation = float(
-            np.degrees(
-                Rotation.from_matrix(
-                    relative_rotation[0].T @ relative_rotation
-                ).magnitude()
-            ).max()
-        )
-        task_ok = (
-            xy_error <= profile.placement_xy_tolerance_m
-            and height_error <= profile.placement_height_tolerance_m
-            and drift <= profile.maximum_drift_m
-            and lift >= profile.minimum_lift_m
-            and held_translation <= profile.held_translation_tolerance_m
-            and held_rotation <= profile.held_rotation_tolerance_deg
-        )
+            values = [item[name] for item in outcomes if name in item]
+            if values:
+                metrics[name] = aggregate(values)
+        for name in ("held_translation_drift_m", "held_rotation_drift_deg"):
+            if held_checks:
+                metrics[name] = max(item[name] for item in held_checks)
+        task_ok = all(item["passed"] for item in (*outcomes, *held_checks))
         validator = state["validator"]
         phases = tuple(
             validator.phase_policy(
                 skill,
                 phase,
-                start,
+                0 if i == 0 else start,
                 events[i + 1][0] if i + 1 < len(events) else length + 1,
+                object_supported_by_target=(
+                    skill == "pick_up"
+                    and all(
+                        value <= profile.contact_depth_m
+                        for value in _support_errors(
+                            matrices[call_starts[index]],
+                            target_pose,
+                            object_body,
+                            target_body,
+                        )
+                    )
+                ),
             )
-            for i, (start, skill, phase) in enumerate(events)
+            for i, (start, index, skill, phase) in enumerate(events)
         )
-        matrices = np.repeat(np.eye(4)[None], length + 1, axis=0)
-        matrices[:, :3, :3] = Rotation.from_quat(objects[:, 3:7]).as_matrix()
-        matrices[:, :3, 3] = objects[:, :3]
         observed = validator.validate_observed(
             qpos, object_poses=matrices, target_pose=target_pose, phases=phases
         )
-        expected_reports = 3 if state["delegate"] is None else 6
+        expected_reports = len(call_indices) * (1 if delegate is None else 2)
         reports = validator.reports
         collision_ok = len(reports) == expected_reports and all(
             report.accepted for _, report in reports
         )
         motion_metrics = state["guard"].motion_metrics
-        motion_ok = len(motion_metrics) == 3 and all(
+        motion_ok = set(motion_metrics) == set(call_indices) and all(
             max(item.values(), default=float("inf")) <= 1.0 + 1e-6
             for item in motion_metrics.values()
         )
@@ -699,7 +885,7 @@ def install_real2sim_tabletop_owner(
                         "passed": final_count == expected_count,
                     }
                 )
-        phases_ok = bool(phase_validation) and all(
+        phases_ok = set(state["guard"].phase_samples) == set(call_indices) and all(
             item["passed"] for item in phase_validation
         )
         validation = ValidationResult(
@@ -732,14 +918,7 @@ def install_real2sim_tabletop_owner(
                 ValidationCheck(
                     "task",
                     "passed" if task_ok else "failed",
-                    metrics={
-                        "placement_xy_error_m": xy_error,
-                        "height_error_m": height_error,
-                        "drift_m": drift,
-                        "lift_m": lift,
-                        "held_translation_drift_m": held_translation,
-                        "held_rotation_drift_deg": held_rotation,
-                    },
+                    metrics=metrics,
                 ),
             )
         )
@@ -753,18 +932,6 @@ def install_real2sim_tabletop_owner(
                     ]
                 )
             )
-        tracer = state["tracer"]
-        delegate = state["delegate"]
-        retime_maps = (
-            {}
-            if not isinstance(delegate, TaskProgramMappedRetimeFactory)
-            else {item.call_index: item.result.time_map for item in delegate.records}
-        )
-        arrays = build_real2sim_execution_trace(
-            environment._active_task_program_bridge.execution_trace,
-            tracer.motions,
-            retime_maps=retime_maps,
-        )
         variant = state["variant"]
         payload = {
             "program": tracer.program_fingerprint,
@@ -833,6 +1000,18 @@ def install_real2sim_tabletop_owner(
                 "source_sample_offset": motion.source_sample_offset,
                 "operator": "nominal",
                 "prototype_sha256": item.prototype_sha256,
+                "source_id": motion.source_id,
+                "source_revision": motion.source_revision,
+                "source_unit_id": motion.unit_id,
+                "source_origin": motion.origin,
+                "authority": motion.authority,
+                "pose_origin": motion.pose_origin,
+                "object_supported_regrasp": motion.object_supported_regrasp,
+                "semantic_anchor_position_correction_m": motion.semantic_anchor_position_correction_m,
+                "semantic_anchor_rotation_correction_rad": motion.semantic_anchor_rotation_correction_rad,
+                "ik_smoothing_iterations": motion.ik_smoothing_iterations,
+                "ik_hold_smoothing_iterations": motion.ik_hold_smoothing_iterations,
+                "ik_smoothing_trigger_fraction": guard.ik_smoothing_trigger_fraction,
                 "fk_position_error_m": motion.fk_position_error_m,
                 "fk_rotation_error_rad": motion.fk_rotation_error_rad,
             }
@@ -856,7 +1035,8 @@ def install_real2sim_tabletop_owner(
                 record = variants[index]
                 call.update(operator="retime", duration_scale=record.duration_scale)
             calls.append(call)
-        first = prototypes[0].unit.source
+        first = prototypes[call_indices[0]].unit.source
+        origins = {prototype.unit.source.origin for prototype in prototypes.values()}
         identity = CandidateIdentity(
             variant.variant_id,
             state["preparation"].initial_state_id,
@@ -864,7 +1044,7 @@ def install_real2sim_tabletop_owner(
             variant.variant_id,
             first.source_id,
             first.source_revision,
-            "pick_move_place_episode",
+            "real2sim_program_episode",
             attempt_id=state["attempt_id"],
         )
         return Real2SimCaptureRequest(
@@ -875,7 +1055,7 @@ def install_real2sim_tabletop_owner(
             observations,
             "joint_position",
             {
-                "origin": first.origin,
+                "origin": first.origin if len(origins) == 1 else "mixed",
                 "acceleration_limit_origin": profile.acceleration_limit_origin,
                 "acceleration_limits": profile.acceleration_limits,
                 "velocity_limit_origin": profile.velocity_limit_origin,
@@ -884,6 +1064,8 @@ def install_real2sim_tabletop_owner(
                     str(index): dict(value) for index, value in motion_metrics.items()
                 },
                 "phase_duration_validation": phase_validation,
+                "task_call_validation": outcomes,
+                "held_interval_validation": held_checks,
                 "layout": state["layout"],
                 "layout_parameters": state["layout_parameters"],
                 "scene_variant": {

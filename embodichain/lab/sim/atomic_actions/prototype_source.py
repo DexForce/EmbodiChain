@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -72,15 +73,23 @@ def _project_mimics(positions: torch.Tensor, robot: object) -> None:
 
 
 def _smooth_ik_phase_interiors(
-    path: torch.Tensor, phases: tuple[PhaseAnnotation, ...]
+    path: torch.Tensor,
+    phases: tuple[PhaseAnnotation, ...],
+    *,
+    allowed_phases: frozenset[str] | None = None,
+    allow_hold_for_feasibility: bool = False,
 ) -> torch.Tensor:
     """Reduce numerical IK jitter while retaining event derivative stencils."""
     result = path.clone()
     for phase in phases:
         if (
-            phase.kind == "contact"
+            (
+                phase.kind != "free"
+                and not (allow_hold_for_feasibility and phase.kind == "hold")
+            )
             or phase.authority == "qpos"
             or phase.stop - phase.start < 5
+            or (allowed_phases is not None and phase.name not in allowed_phases)
         ):
             continue
         start, stop = phase.start + 2, phase.stop - 2
@@ -90,6 +99,33 @@ def _smooth_ik_phase_interiors(
             + path[:, start + 1 : stop + 1]
         ) * 0.25
     return result
+
+
+def _align_release_anchor(
+    poses: np.ndarray, index: int, goal: np.ndarray
+) -> tuple[np.ndarray, float, float]:
+    """Align a Place path to its semantic release pose while preserving world-up."""
+    if poses.ndim != 3 or poses.shape[1:] != (4, 4) or not 0 <= index < len(poses):
+        raise ValueError("release alignment requires a valid TCP path and anchor")
+    goal = np.asarray(goal, dtype=np.float64)
+    if (
+        goal.shape != (4, 4)
+        or not np.isfinite(goal).all()
+        or not np.allclose(goal[3], [0, 0, 0, 1], atol=1e-6, rtol=0)
+        or not np.allclose(goal[:3, :3].T @ goal[:3, :3], np.eye(3), atol=1e-5, rtol=0)
+        or not np.isclose(np.linalg.det(goal[:3, :3]), 1.0, atol=1e-5, rtol=0)
+    ):
+        raise ValueError("release alignment requires a proper rigid goal pose")
+    anchor = poses[index]
+    delta = goal @ np.linalg.inv(anchor)
+    yaw = np.arctan2(delta[1, 0], delta[0, 0])
+    cosine, sine = np.cos(yaw), np.sin(yaw)
+    yaw_rotation = np.array([[cosine, -sine, 0], [sine, cosine, 0], [0, 0, 1]])
+    result = delta @ poses
+    result[:, :3, 3] = goal[:3, 3] + (poses[:, :3, 3] - anchor[:3, 3]) @ yaw_rotation.T
+    position = float(np.linalg.norm(goal[:3, 3] - anchor[:3, 3]))
+    cosine_angle = np.clip((np.trace(delta[:3, :3]) - 1.0) / 2.0, -1.0, 1.0)
+    return result, position, float(np.arccos(cosine_angle))
 
 
 @dataclass(frozen=True)
@@ -108,12 +144,24 @@ class PrototypeMotionProvider:
         object_entity_id: Scene entity carrying the source object pose.
         target_entity_id: Scene entity carrying the source target pose when
             one is declared by the prototype.
+        target_entity_to_reference: Optional rigid transform from that entity
+            to the prototype's target reference frame.
         pose_tolerance: Absolute matrix tolerance for fixed scene references.
         gripper_mode: Use recorded values or reconstruct semantic commands.
         authority: Authoritative joint or TCP path, globally or by phase.
         motion_generator: Robot motion services for IK and collision checking.
         require_collision_validation: Require the backend's sampled checker.
         prototype_sha256: Optional content-addressed source identity.
+        object_support_validator: Optional trusted host check for regrasping
+            an object currently resting on the target support.
+        ik_smoothing_trigger_fraction: Optional fraction of the motion policy's
+            acceleration limit at which to seek a lower-acceleration nominal
+            path without changing protected samples or the TCP error tube.
+
+    A required acceleration-feasibility pass can adjust Cartesian-authoritative
+    hold interiors before the nominal geometry baseline is frozen. Its FK error
+    is checked and its iterations are recorded. Optional headroom smoothing
+    never changes contact or hold samples.
     """
 
     prototype: SkillMotionPrototype
@@ -126,6 +174,8 @@ class PrototypeMotionProvider:
     motion_generator: object | None = None
     require_collision_validation: bool = True
     prototype_sha256: str | None = None
+    object_support_validator: Callable[[PlanningContext], bool] | None = None
+    ik_smoothing_trigger_fraction: float | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.prototype, SkillMotionPrototype):
@@ -196,6 +246,19 @@ class PrototypeMotionProvider:
             )
         if type(self.require_collision_validation) is not bool:
             raise TypeError("require_collision_validation must be a boolean")
+        if self.object_support_validator is not None and not callable(
+            self.object_support_validator
+        ):
+            raise TypeError("object_support_validator must be callable or None")
+        if self.ik_smoothing_trigger_fraction is not None and (
+            isinstance(self.ik_smoothing_trigger_fraction, bool)
+            or not isinstance(self.ik_smoothing_trigger_fraction, (int, float))
+            or not np.isfinite(self.ik_smoothing_trigger_fraction)
+            or not 0 < self.ik_smoothing_trigger_fraction < 1
+        ):
+            raise ValueError(
+                "ik_smoothing_trigger_fraction must be between zero and one"
+            )
         if self.prototype_sha256 is not None and (
             not isinstance(self.prototype_sha256, str)
             or len(self.prototype_sha256) != 64
@@ -315,6 +378,10 @@ class PrototypeMotionProvider:
             phase.name: phase.stop - phase.start for phase in unit.phases
         }
         smoothing_iterations = 0
+        hold_smoothing_iterations = 0
+        supported_regrasp = False
+        anchor_position_correction = 0.0
+        anchor_rotation_correction = 0.0
         fk_position_error_m = None
         fk_rotation_error_rad = None
         if self.authority in {"eef_pose", "hybrid"}:
@@ -339,6 +406,13 @@ class PrototypeMotionProvider:
             if unowned:
                 positions[:, :, unowned] = context.robot.qpos[:, None, unowned]
             held = None
+            if (
+                request.skill_id == "pick_up"
+                and self.object_support_validator is not None
+            ):
+                supported_regrasp = self.object_support_validator(context)
+                if type(supported_regrasp) is not bool:
+                    raise TypeError("object support validation must return a boolean")
             if request.skill_id != "pick_up":
                 endpoint = request.binding.endpoint("primary", "motion")
                 held_state = context.get_held_object(endpoint.task_state_key)
@@ -362,7 +436,29 @@ class PrototypeMotionProvider:
                     else target_pose[0].detach().cpu().numpy()
                 ),
                 held_object_to_tcp=held,
+                object_supported_regrasp=supported_regrasp,
             )
+            if request.skill_id == "place":
+                from .goals import resolve_pose_goal
+                from .primitives.place import PlaceGoal
+                from .trajectory_ops import resolve_pose_target
+
+                if not isinstance(request.goal, PlaceGoal):
+                    raise ValueError("prototype Place requires a direct PlaceGoal")
+                goal = resolve_pose_target(
+                    resolve_pose_goal(request.goal.xpos, context, name="xpos"),
+                    num_envs=1,
+                    device=positions.device,
+                )
+                if goal.ndim == 4:
+                    goal = goal[:, -1]
+                target_tcp, anchor_position_correction, anchor_rotation_correction = (
+                    _align_release_anchor(
+                        target_tcp,
+                        unit.phases[1].start,
+                        goal[0].detach().cpu().numpy(),
+                    )
+                )
             target_tcp = torch.as_tensor(
                 np.array(target_tcp, copy=True),
                 dtype=positions.dtype,
@@ -505,8 +601,9 @@ class PrototypeMotionProvider:
             # Discrete independent IK solves can add small joint-acceleration
             # spikes. Only accept a filtered interior if the complete path now
             # satisfies the explicit acceleration budget AND its FK remains in
-            # the source TCP error tube. Contact stages, qpos-authority phases,
-            # endpoints and their derivative neighbors are never filtered.
+            # the source TCP error tube. Contact and qpos-authority samples
+            # stay fixed. Hold interiors may be adjusted only when necessary
+            # for nominal IK feasibility, never for voluntary headroom.
             acceleration_limit = request.motion_policy.acceleration_limit
             if acceleration_limit is not None and positions.shape[1] > 2:
                 dt = context.require_control_dt()
@@ -518,16 +615,51 @@ class PrototypeMotionProvider:
                     )
 
                 original_arm = positions[:, :, arm_ids]
-                if peak_acceleration(original_arm) > acceleration_limit + 1e-5:
+                original_peak = peak_acceleration(original_arm)
+                requires_feasibility = original_peak > acceleration_limit + 1e-5
+                trigger = (
+                    acceleration_limit + 1e-5
+                    if self.ik_smoothing_trigger_fraction is None
+                    else acceleration_limit * self.ik_smoothing_trigger_fraction
+                )
+                if original_peak > trigger:
                     candidate_path = path
+                    best = None
+                    best_peak = original_peak
+                    smoothing_phases = None
+                    if (
+                        self.ik_smoothing_trigger_fraction is not None
+                        and not requires_feasibility
+                    ):
+                        from ._expansion_phases import FREE_PHASES
+
+                        smoothing_phases = frozenset(
+                            phase.name
+                            for phase in unit.phases
+                            if phase.name in FREE_PHASES.get(request.skill_id, ())
+                            and "task_space_residual" in phase.allowed_operators
+                        )
                     for iteration in range(1, 9):
                         candidate_path = _smooth_ik_phase_interiors(
-                            candidate_path, unit.phases
+                            candidate_path,
+                            unit.phases,
+                            allowed_phases=smoothing_phases,
+                            allow_hold_for_feasibility=requires_feasibility,
                         )
                         candidate_arm = torch.cat(
                             (original_arm[:, :offset], candidate_path), dim=1
                         )
-                        if peak_acceleration(candidate_arm) > acceleration_limit + 1e-5:
+                        candidate_peak = peak_acceleration(candidate_arm)
+                        if (
+                            candidate_peak > acceleration_limit + 1e-5
+                            or candidate_peak >= best_peak - 1e-7
+                            or bool(
+                                (
+                                    (candidate_arm[:, 1:] - candidate_arm[:, :-1]).abs()
+                                    > velocity_limits[:, None] * dt + 1e-5
+                                ).any()
+                            )
+                        ):
                             continue
                         filtered_fk = robot.compute_batch_fk(
                             qpos=candidate_path, name=arm.control_part, to_matrix=True
@@ -563,11 +695,35 @@ class PrototypeMotionProvider:
                             ).any()
                         ):
                             continue
+                        best = (
+                            candidate_path,
+                            iteration,
+                            float(filtered_position_error.max()),
+                            float(torch.acos(filtered_cosine).max()),
+                        )
+                        best_peak = candidate_peak
+                        if (
+                            self.ik_smoothing_trigger_fraction is None
+                            or requires_feasibility
+                        ):
+                            break
+                    if best is not None:
+                        (
+                            candidate_path,
+                            smoothing_iterations,
+                            fk_position_error_m,
+                            fk_rotation_error_rad,
+                        ) = best
                         positions[:, offset:, arm_ids] = candidate_path
-                        smoothing_iterations = iteration
-                        fk_position_error_m = float(filtered_position_error.max())
-                        fk_rotation_error_rad = float(torch.acos(filtered_cosine).max())
-                        break
+                        if requires_feasibility and any(
+                            phase.kind == "hold"
+                            and not torch.equal(
+                                candidate_path[:, phase.start : phase.stop],
+                                path[:, phase.start : phase.stop],
+                            )
+                            for phase in unit.phases
+                        ):
+                            hold_smoothing_iterations = smoothing_iterations
             if bool(
                 (
                     (positions[:, 1:, arm_ids] - positions[:, :-1, arm_ids]).abs()
@@ -643,6 +799,10 @@ class PrototypeMotionProvider:
             source_time_map=unit.report.time_map,
             source_sample_offset=positions.shape[1] - len(unit.timestamps),
             ik_smoothing_iterations=smoothing_iterations,
+            ik_hold_smoothing_iterations=hold_smoothing_iterations,
+            object_supported_regrasp=supported_regrasp,
+            semantic_anchor_position_correction_m=anchor_position_correction,
+            semantic_anchor_rotation_correction_rad=anchor_rotation_correction,
             collision_evidence=(
                 "sampled_passed" if self.require_collision_validation else "unverified"
             ),

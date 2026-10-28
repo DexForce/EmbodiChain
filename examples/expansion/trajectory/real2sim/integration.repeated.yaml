@@ -1,0 +1,168 @@
+integration_id: real2sim_synthetic_repeated_v1
+program_id: real2sim_synthetic_repeated
+requires:
+  scene_contract: real2sim_synthetic_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: real2sim_synthetic_scene_v1
+  registry_id: real2sim_synthetic_scene
+  rigid_objects:
+  - entity_id: cube
+    simulation_uid: cube
+    dynamics: dynamic
+    semantic_type: cube
+    affordances:
+    - entity_id: cube_grasp
+      kind: antipodal_grasp
+  - entity_id: platform
+    simulation_uid: platform
+    dynamics: static
+    semantic_type: platform
+    affordances:
+    - kind: support_surface
+      entity_id: platform_top
+      native_name: top
+      object_target_frame: parent
+      object_target_pose:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.067
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    move_held_object:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+      hand_interp_steps: 20
+    simulation.move_held_object:
+      kind: move_held_object
+    place:
+      kind: place
+      hand_interp_steps: 20
+      release_settle_steps: 60
+      preserve_current_object_orientation: true
+  effect_monitors:
+    pick:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 5
+    place:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 5
+        attached_translation_threshold: 0.01
+        detached_translation_threshold: 0.015
+runtime_services:
+  registered_semantic_lowerers:
+  - kind: move_held_object
+    target_id: above_platform
+    reference_entity_id: platform
+    relative_pose:
+    - 1.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    - 0.18
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+  control_part_evidence:
+    kind: joint_position_constraint
+    control_parts:
+    - eef
+    open_qpos:
+    - 0.0
+    minimum_displacement: 0.004
+  nominal_motion_sources:
+  - call_index: 0
+    program_fingerprint: ce01573184b5c808f2439f440094cb4d817605e231fa6e52e18010aac1d72e86
+    provider_id: real2sim.prototype
+    revision: '1'
+    prototype_manifest: sample_geometry_v3/prototypes/0/prototype.json
+    prototype_sha256: 0c967257993dd06a44e03c2ffc52fd7c06991178f00b298e75da4358e2db7d9b
+    object_entity_id: cube
+    authority: eef_pose
+    gripper_mode: semantic
+    require_collision_validation: true
+  - call_index: 1
+    program_fingerprint: ce01573184b5c808f2439f440094cb4d817605e231fa6e52e18010aac1d72e86
+    provider_id: real2sim.prototype
+    revision: '1'
+    prototype_manifest: sample_geometry_v3/prototypes/1/prototype.json
+    prototype_sha256: 3138fb0f71f3007eba0567de55453652450a17dea2361aa6035c78fc06f61c09
+    object_entity_id: cube
+    target_entity_id: platform
+    authority: eef_pose
+    gripper_mode: semantic
+    require_collision_validation: true
+  - call_index: 2
+    program_fingerprint: ce01573184b5c808f2439f440094cb4d817605e231fa6e52e18010aac1d72e86
+    provider_id: real2sim.prototype
+    revision: '1'
+    prototype_manifest: sample_geometry_v3/prototypes/2/prototype.json
+    prototype_sha256: 2da8137bdbe37f571fdf3ba3b83e54d2f11583fe2cdc37d6462f5282130a47fc
+    object_entity_id: cube
+    target_entity_id: platform
+    authority: eef_pose
+    gripper_mode: semantic
+    require_collision_validation: true
+  - call_index: 3
+    program_fingerprint: ce01573184b5c808f2439f440094cb4d817605e231fa6e52e18010aac1d72e86
+    provider_id: real2sim.prototype
+    revision: '1'
+    prototype_manifest: sample_geometry_v3/prototypes/0/prototype.json
+    prototype_sha256: 0c967257993dd06a44e03c2ffc52fd7c06991178f00b298e75da4358e2db7d9b
+    object_entity_id: cube
+    authority: eef_pose
+    gripper_mode: semantic
+    require_collision_validation: true
+  - call_index: 4
+    program_fingerprint: ce01573184b5c808f2439f440094cb4d817605e231fa6e52e18010aac1d72e86
+    provider_id: real2sim.prototype
+    revision: '1'
+    prototype_manifest: sample_geometry_v3/prototypes/1/prototype.json
+    prototype_sha256: 3138fb0f71f3007eba0567de55453652450a17dea2361aa6035c78fc06f61c09
+    object_entity_id: cube
+    target_entity_id: platform
+    authority: eef_pose
+    gripper_mode: semantic
+    require_collision_validation: true
+  - call_index: 5
+    program_fingerprint: ce01573184b5c808f2439f440094cb4d817605e231fa6e52e18010aac1d72e86
+    provider_id: real2sim.prototype
+    revision: '1'
+    prototype_manifest: sample_geometry_v3/prototypes/2/prototype.json
+    prototype_sha256: 2da8137bdbe37f571fdf3ba3b83e54d2f11583fe2cdc37d6462f5282130a47fc
+    object_entity_id: cube
+    target_entity_id: platform
+    authority: eef_pose
+    gripper_mode: semantic
+    require_collision_validation: true

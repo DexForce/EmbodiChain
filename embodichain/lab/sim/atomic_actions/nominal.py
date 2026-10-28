@@ -42,6 +42,9 @@ class InstantiatedSkillMotion:
     The skill owns semantic effects and command assembly. A source cannot
     commit held state or step the environment. ``grasp_pose`` is an optional
     world-frame candidate used by skills with an acquisition boundary.
+    IK smoothing records both its total iterations and any hold-phase
+    feasibility iterations. Those adjustments precede the frozen plan used
+    by trajectory expansion.
     """
 
     trajectory: TimedTrajectory
@@ -67,6 +70,10 @@ class InstantiatedSkillMotion:
     source_time_map: TrajectoryTimeMap | None = None
     source_sample_offset: int = 0
     ik_smoothing_iterations: int = 0
+    ik_hold_smoothing_iterations: int = 0
+    object_supported_regrasp: bool = False
+    semantic_anchor_position_correction_m: float = 0.0
+    semantic_anchor_rotation_correction_rad: float = 0.0
     phase_permissions: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     grasp_pose: torch.Tensor | None = None
     joint_names: tuple[str, ...] = ()
@@ -74,6 +81,16 @@ class InstantiatedSkillMotion:
     def __post_init__(self) -> None:
         if not isinstance(self.trajectory, TimedTrajectory):
             raise TypeError("trajectory must be a TimedTrajectory")
+        if type(self.object_supported_regrasp) is not bool:
+            raise TypeError("object_supported_regrasp must be a boolean")
+        for value in (
+            self.semantic_anchor_position_correction_m,
+            self.semantic_anchor_rotation_correction_rad,
+        ):
+            if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                raise ValueError(
+                    "semantic anchor corrections must be finite and nonnegative"
+                )
         for name in ("source_id", "source_revision", "unit_id", "origin"):
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
@@ -141,6 +158,13 @@ class InstantiatedSkillMotion:
             or self.ik_smoothing_iterations < 0
         ):
             raise ValueError("ik_smoothing_iterations must be nonnegative")
+        if (
+            type(self.ik_hold_smoothing_iterations) is not int
+            or not 0
+            <= self.ik_hold_smoothing_iterations
+            <= self.ik_smoothing_iterations
+        ):
+            raise ValueError("ik_hold_smoothing_iterations must be within the total")
         if self.source_time_map is not None:
             if (
                 not isinstance(self.source_time_map, TrajectoryTimeMap)
@@ -289,6 +313,10 @@ class InstantiatedSkillMotion:
             "prototype_sha256": self.prototype_sha256,
             "source_sample_offset": self.source_sample_offset,
             "ik_smoothing_iterations": self.ik_smoothing_iterations,
+            "ik_hold_smoothing_iterations": self.ik_hold_smoothing_iterations,
+            "object_supported_regrasp": self.object_supported_regrasp,
+            "semantic_anchor_position_correction_m": self.semantic_anchor_position_correction_m,
+            "semantic_anchor_rotation_correction_rad": self.semantic_anchor_rotation_correction_rad,
             "source_samples_mapped": (
                 None if self.source_time_map is None else len(self.source_time_map.left)
             ),

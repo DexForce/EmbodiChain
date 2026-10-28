@@ -1521,6 +1521,32 @@ def test_pick_uses_normalized_prototype_and_rejects_moved_fixed_scene() -> None:
         )
 
 
+def test_place_release_alignment_preserves_world_vertical_motion() -> None:
+    import numpy as np
+    from embodichain.lab.sim.atomic_actions.prototype_source import (
+        _align_release_anchor,
+    )
+
+    poses = np.repeat(np.eye(4)[None], 3, axis=0)
+    poses[:, 2, 3] = [0.1, 0.0, 0.2]
+    angle = np.deg2rad(10.0)
+    goal = np.eye(4)
+    goal[:3, :3] = [
+        [1, 0, 0],
+        [0, np.cos(angle), -np.sin(angle)],
+        [0, np.sin(angle), np.cos(angle)],
+    ]
+    goal[:3, 3] = [0.03, 0.02, 0.07]
+    aligned, position, rotation = _align_release_anchor(poses, 1, goal)
+    np.testing.assert_allclose(aligned[1], goal, atol=1e-12)
+    np.testing.assert_allclose(aligned[2, :3, 3] - aligned[1, :3, 3], [0, 0, 0.2])
+    assert position == pytest.approx(np.linalg.norm(goal[:3, 3]))
+    assert rotation == pytest.approx(angle)
+    goal[0, 0] = -1
+    with pytest.raises(ValueError, match="proper rigid"):
+        _align_release_anchor(poses, 1, goal)
+
+
 def test_ik_smoothing_preserves_contact_and_phase_event_derivatives() -> None:
     from embodichain.data_pipeline.real2sim import PhaseAnnotation
     from embodichain.lab.sim.atomic_actions.prototype_source import (
@@ -1546,8 +1572,17 @@ def test_ik_smoothing_preserves_contact_and_phase_event_derivatives() -> None:
             path[:, phase.stop - 2 : phase.stop],
         )
     assert torch.equal(smoothed[:, 12:18], path[:, 12:18])
-    before = (path[:, 2:] - 2 * path[:, 1:-1] + path[:, :-2]).abs().max()
-    after = (smoothed[:, 2:] - 2 * smoothed[:, 1:-1] + smoothed[:, :-2]).abs().max()
+    assert torch.equal(smoothed[:, 18:30], path[:, 18:30])
+    assert torch.equal(
+        _smooth_ik_phase_interiors(path, phases, allowed_phases=frozenset()), path
+    )
+    feasible = _smooth_ik_phase_interiors(path, phases, allow_hold_for_feasibility=True)
+    assert not torch.equal(feasible[:, 18:30], path[:, 18:30])
+    assert torch.equal(feasible[:, 12:18], path[:, 12:18])
+    assert torch.equal(feasible[:, 18:20], path[:, 18:20])
+    assert torch.equal(feasible[:, 28:30], path[:, 28:30])
+    before = (path[:, 2:12] - 2 * path[:, 1:11] + path[:, :10]).abs().max()
+    after = (smoothed[:, 2:12] - 2 * smoothed[:, 1:11] + smoothed[:, :10]).abs().max()
     assert after < before
 
 

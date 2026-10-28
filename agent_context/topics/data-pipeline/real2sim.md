@@ -12,6 +12,11 @@ substituted for qpos.
 `atomic_actions.PrototypeMotionProvider` supplies qpos, EEF or explicitly
 phase-bound hybrid nominal motion. Cartesian transfer is limited to B=1,
 tabletop XY/yaw and compatible geometry; it checks IK/FK and sampled joint limits.
+For a subsequent Pick, a qualified tabletop host can additionally verify that
+the observed object rests on the target support and permit its changed height
+and at most two degrees of measured tilt. Grasp orientation follows that
+observation while lift displacement stays gravity-aligned. Place aligns the
+source release anchor to the current semantic target and records the correction.
 An optional planner collision check is reported separately from task acceptance.
 The tabletop host requires source robot, object and target geometry hashes to
 match live physical assets. Older source bundles without hashes remain valid
@@ -19,6 +24,9 @@ for explicit diagnostics but cannot use the qualified tabletop owner. In EEF
 phases, numerical IK jitter can be smoothed only if the TCP error tube and
 motion limits remain satisfied. Contact
 phases, qpos-authority samples and phase boundary derivative stencils stay fixed.
+When a Cartesian IK result itself exceeds its motion budget, a bounded
+feasibility pass can adjust hold-phase IK samples inside the declared TCP
+error tube before the geometric baseline is frozen; it records those passes.
 Input source permissions can only narrow a skill's free-phase permissions.
 Pick lift must be declared contact/hold and cannot authorize deformation.
 
@@ -42,7 +50,11 @@ reject out-of-limit proposals and require host collision evidence outside
 explicit diagnostics. The optional motion-headroom policy removes nearly
 saturated joints from joint-residual edits without changing the configured
 amplitude for the remaining joints; the locked indices are recorded and checked
-against the nominal plan. The tabletop guard uses physical URDF meshes and scene
+against the nominal plan. For task-space variants the same threshold requests
+at most eight free-phase IK smoothing passes and keeps the best path only if
+it stays within the TCP error tube and motion limits. Unauthorized, contact,
+hold and boundary samples remain fixed by this optional headroom pass. The
+tabletop guard uses physical URDF meshes and scene
 boxes with per-phase contact and penetration limits, predicts a contact-limited
 gripper for planned trajectories, and separately checks actual recorded robot
 and object poses. These are sampled geometric checks, not continuous collision
@@ -67,8 +79,12 @@ opt into `trace_actions` to retain acknowledged action-to-plan references;
 hosts must still assemble the typed trace and qualified validation before sink
 submission. Ordinary `run-task` recording still rejects source-bound collection
 without an installed Real2Sim owner. The tabletop profile requires exactly one
-dynamic box, one static box, a fixed plane and three configured call occurrences;
-other scene topologies fail closed. Gym still owns reset and stepping.
+dynamic box, one static box and a fixed plane. All sequential Pick,
+MoveHeldObject and Place call occurrences require pinned sources; repeats use
+distinct call indices even when they share a prototype. Per-Pick lift,
+continuous held intervals and each Place's target, support footprint and
+stability are measured separately. Other scene topologies and unbound calls
+fail closed. Gym still owns reset and stepping.
 
 Focused coverage: `tests/data_pipeline/test_real2sim_normalize.py`,
 `tests/sim/motion/expansion/test_mapped_timing.py`, and matching Atomic Action

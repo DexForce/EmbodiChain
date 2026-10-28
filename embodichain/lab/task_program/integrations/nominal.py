@@ -219,8 +219,9 @@ class _ConfiguredTaskProgramNominalSources:
         if declaration is None:
             return None
         declaration.validate_source()
+        prototype = load_prototype(declaration.prototype_manifest)
         return PrototypeMotionProvider(
-            load_prototype(declaration.prototype_manifest),
+            prototype,
             object_entity_id=declaration.object_entity_id,
             target_entity_id=declaration.target_entity_id,
             target_entity_to_reference=(
@@ -241,6 +242,17 @@ class _ConfiguredTaskProgramNominalSources:
                 and self._host_collision_guard is None
             ),
             prototype_sha256=declaration.prototype_sha256,
+            object_support_validator=(
+                self._host_collision_guard.validator.object_supported_by_target
+                if self._host_collision_guard is not None
+                and prototype.unit.source.skill_id == "pick_up"
+                else None
+            ),
+            ik_smoothing_trigger_fraction=(
+                None
+                if self._host_collision_guard is None
+                else self._host_collision_guard.ik_smoothing_trigger_fraction
+            ),
         )
 
 

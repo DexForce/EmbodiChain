@@ -1,0 +1,17 @@
+program_id: real2sim_synthetic_pick_only
+instruction: Pick and lift the cube.
+targets: {}
+program:
+  kind: sequence
+  items:
+  - kind: segment
+    name: pick
+    steps:
+      kind: invoke
+      call:
+        kind: pick
+        object: cube
+    validators:
+    - kind: object_lifted
+      object: cube
+      minimum_lift: 0.03
