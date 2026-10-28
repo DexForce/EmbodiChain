@@ -1,7 +1,7 @@
 :orphan:
 
 Real2Sim kinematic trajectory refinement
-======================================
+========================================
 
 Refinement repairs a scene-instantiated nominal Cartesian path before Atomic
 Skills freeze their expansion baseline. The source evidence, control period,

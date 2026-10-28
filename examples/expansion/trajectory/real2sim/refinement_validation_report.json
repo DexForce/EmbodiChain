@@ -5,7 +5,7 @@
   "source_base_commit": "b107bc0d8c7337812bad1bbad65b9693c7073c23",
   "production_files_sha256": {
     "embodichain/compute/trajectory/__init__.py": "16b0694fa7c3fb2f7509050062694c83980d4044ebc24948af4cf84764de688f",
-    "embodichain/compute/trajectory/refinement.py": "3412583d9d3869980c5ae6b63997dead04f5017d64f853d6c396fa1ae502dd7b",
+    "embodichain/compute/trajectory/refinement.py": "32eeda55dbb4599ea19572b43d91f7734e6d37cf1e37330b871ec61034f90151",
     "embodichain/lab/gym/envs/managers/real2sim_sink.py": "909e511e36411bff49100219a2440ff48a8b1c5543f7f65c0d73cf44485f8ff3",
     "embodichain/lab/sim/atomic_actions/_prototype_refinement.py": "5edc7bfc289ae6ee3343126c11715a8a06d4e47a6956817897e0e74730350af6",
     "embodichain/lab/sim/atomic_actions/nominal.py": "16a6b0e46c5979b8f82289f294d273cda7af839bcee7a059a2edb2cd72e8e6f7",
@@ -14,15 +14,14 @@
     "embodichain/lab/sim/motion/refinement.py": "f9b595908a9ab0009e49660f950c5ab7fee2fba2a78ae0a41bfebe73d8a07e8f",
     "embodichain/lab/task_program/integrations/configured.py": "b8e85664abcfa1a035048b3d1c46fa412d7c75fb8531b17749b30d7af8cb8927",
     "embodichain/lab/task_program/integrations/nominal.py": "918f7b4fa812be524024a4f69a535734d2212886b4cd849ad9670fea1bde0d9e",
-    "embodichain/lab/task_program/integrations/simulation/real2sim_collection.py": "e7b6c5f88c88b37e8335ec0ae018a36810f2484a57c7dd5e9aad6d37572a3599",
+    "embodichain/lab/task_program/integrations/simulation/real2sim_collection.py": "8da3028d6af6a0fbf37d3e39b484dffe573ef63f6028aa74e6a9b47c4e0dfdda",
     "embodichain/lab/task_program/integrations/simulation/real2sim_collision.py": "6d87159b606533f1b830dcac2b906249a17d728760185f766908db35e0f4017d"
   },
   "scope": "B=1; same robot and assets; Cartesian pose repair followed by existing IK and sampled geometry validation",
   "software_tests": {
-    "passed": 637,
+    "passed": 638,
     "failed": 0,
-    "scope": "numerical refinement, atomic skills, collision/support, configured bindings, recorder/receipts, CLI, import boundaries, API tooling and context",
-    "additional_final_focus_passed": 1
+    "scope": "numerical refinement, atomic skills, collision/support, configured bindings, recorder/receipts, CLI, import boundaries, API tooling and context"
   },
   "numerical_benchmark": {
     "origin": "synthetic_reference",
@@ -42,6 +41,16 @@
     },
     "warmup": 2,
     "repeats": 7,
+    "refinement_profile": {
+      "max_translation_m": 0.02,
+      "max_rotation_rad": 0.17453292519943295,
+      "smoothing_weight": 8,
+      "max_candidates": 8,
+      "seed": 0,
+      "support_margin_m": 0.002,
+      "max_release_gap_m": 0.04,
+      "max_iterations": 4000
+    },
     "acceptance_thresholds": {
       "position_rmse_m": 0.0008,
       "anchor_error_m": 1e-06,
@@ -54,7 +63,7 @@
     {
       "sample_size": 128,
       "algorithm": "replay",
-      "cost_time_ms": 0.0003809982445091009,
+      "cost_time_ms": 0.0003210006980225444,
       "cpu_delta_mb": 0.0,
       "gpu_delta_mb": null,
       "peak_gpu_mb": null,
@@ -66,7 +75,7 @@
     {
       "sample_size": 128,
       "algorithm": "rigid_anchor",
-      "cost_time_ms": 0.002554996171966195,
+      "cost_time_ms": 0.00244499824475497,
       "cpu_delta_mb": 0.0,
       "gpu_delta_mb": null,
       "peak_gpu_mb": null,
@@ -78,8 +87,8 @@
     {
       "sample_size": 128,
       "algorithm": "sparse_refinement",
-      "cost_time_ms": 2.1428360050776973,
-      "cpu_delta_mb": 0.00390625,
+      "cost_time_ms": 2.0868609863100573,
+      "cpu_delta_mb": 0.01171875,
       "gpu_delta_mb": null,
       "peak_gpu_mb": null,
       "position_rmse_mm": 0.014807069942416139,
@@ -102,7 +111,7 @@
     {
       "sample_size": 512,
       "algorithm": "rigid_anchor",
-      "cost_time_ms": 0.007996000931598246,
+      "cost_time_ms": 0.007914990419521928,
       "cpu_delta_mb": 0.0,
       "gpu_delta_mb": null,
       "peak_gpu_mb": null,
@@ -114,7 +123,7 @@
     {
       "sample_size": 512,
       "algorithm": "sparse_refinement",
-      "cost_time_ms": 4.983995997463353,
+      "cost_time_ms": 4.864937989623286,
       "cpu_delta_mb": 0.00390625,
       "gpu_delta_mb": null,
       "peak_gpu_mb": null,
@@ -126,7 +135,7 @@
     {
       "sample_size": 2048,
       "algorithm": "replay",
-      "cost_time_ms": 0.0028560025384649634,
+      "cost_time_ms": 0.0023750035325065255,
       "cpu_delta_mb": 0.0,
       "gpu_delta_mb": null,
       "peak_gpu_mb": null,
@@ -138,7 +147,7 @@
     {
       "sample_size": 2048,
       "algorithm": "rigid_anchor",
-      "cost_time_ms": 0.029955990612506866,
+      "cost_time_ms": 0.030436989618465304,
       "cpu_delta_mb": 0.0,
       "gpu_delta_mb": null,
       "peak_gpu_mb": null,
@@ -150,7 +159,7 @@
     {
       "sample_size": 2048,
       "algorithm": "sparse_refinement",
-      "cost_time_ms": 16.430162999313325,
+      "cost_time_ms": 15.712729000370018,
       "cpu_delta_mb": 0.00390625,
       "gpu_delta_mb": null,
       "peak_gpu_mb": null,
@@ -178,8 +187,8 @@
     "execution": "independent B=1 processes; six sequential episodes per layout"
   },
   "ablation_and_sequence": {
-    "expected_cases": 6,
-    "passed_cases": 6,
+    "expected_cases": 7,
+    "passed_cases": 7,
     "cases": [
       {
         "case": "clean",
@@ -214,6 +223,16 @@
         "passed": true
       },
       {
+        "case": "same_seed_repeat",
+        "expected_accepted": true,
+        "run_task_exit_code": 0,
+        "confirmed_receipts": 1,
+        "failed_attempts": 0,
+        "passed": true,
+        "same_seed_identity_matches": true,
+        "final_position_difference_m": 6.839149136794731e-05
+      },
+      {
         "case": "raw_replay",
         "expected_accepted": false,
         "run_task_exit_code": 1,
@@ -232,19 +251,19 @@
     ]
   },
   "persistence": {
-    "independently_audited_episodes": 59,
-    "audited_datasets": 14,
+    "independently_audited_episodes": 60,
+    "audited_datasets": 15,
     "matrix_confirmed_receipts": 54,
-    "additional_successful_suite_episodes": 4,
+    "additional_successful_suite_episodes": 5,
     "write_only_repaired_episode": 1,
     "repair_reexecuted_episode": false
   },
-  "validation_revision_note": "The 54-case matrix preceded additional endpoint-IK and post-IK total-budget gates. The later sequence/ablation suite and focused tests exercise those gates; all 59 persisted episodes were independently re-audited with refinement digest and correction checks.",
+  "validation_revision_note": "The 54-case matrix preceded additional endpoint-IK/post-IK total-budget gates and deterministic recipe identity finalization. The final seven-case sequence/ablation/repeat suite and focused tests exercise those paths; all 60 persisted episodes were independently re-audited with refinement digests and correction checks.",
   "artifact_references": {
     "matrix": "/tmp/embodichain-refinement-matrix-bias-v1/acceptance-report.json",
-    "refinement_audit": "/tmp/embodichain-refinement-matrix-bias-v1/refinement-audit-summary.json",
-    "ablation_and_sequence": "/tmp/embodichain-refinement-acceptance-v1/report.json",
-    "numerical": "/tmp/embodichain-refinement-benchmark-final/report.json",
+    "refinement_audit": "/tmp/embodichain-refinement-matrix-bias-v1/refinement-audit-summary-final.json",
+    "ablation_and_sequence": "/tmp/embodichain-refinement-acceptance-final/report.json",
+    "numerical": "/tmp/embodichain-refinement-benchmark-final-v2/report.json",
     "write_only_repair": "/tmp/embodichain-refinement-bias-v1/repair-result.json"
   },
   "real_data_qualified": false,

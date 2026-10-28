@@ -161,6 +161,7 @@ def run_all_benchmarks(output: Path, sizes: tuple[int, ...], repeats: int) -> No
         },
         "warmup": 2,
         "repeats": repeats,
+        "refinement_profile": refiner.cfg.to_dict(),
         "acceptance_thresholds": {
             "position_rmse_m": 0.0008,
             "anchor_error_m": 1e-6,

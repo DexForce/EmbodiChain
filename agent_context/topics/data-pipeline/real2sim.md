@@ -46,7 +46,10 @@ motion, collision and measured-effect checks remain mandatory. Source data,
 timestamps and events are unchanged; neither calibration nor source uncertainty
 is inferred. Original/refined TCP arrays and hashed baseline reports belong to
 typed trace attachments, whose digests and correction budgets are checked before
-receipt confirmation. See `examples/expansion/trajectory/real2sim/REFINEMENT.md` for reproducible
+receipt confirmation. Episode recipe identity includes the refinement profile;
+realized floating-point pose hashes remain call-level evidence rather than
+renaming the recipe after a small physical variation.
+See `examples/expansion/trajectory/real2sim/REFINEMENT.md` for reproducible
 error-injection fixtures and the analytic/ablation/simulation verification ladder.
 
 `AtomicActionEngine` accepts a call-scoped nominal source before native planning;

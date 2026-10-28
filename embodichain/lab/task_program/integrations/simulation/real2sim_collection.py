@@ -942,7 +942,7 @@ def install_real2sim_tabletop_owner(
         }
         if any(item.refinement is not None for item in declarations):
             payload["refinement"] = [
-                tracer.motions[item.call_index].refinement_report.get("baseline_id")
+                None if item.refinement is None else item.refinement.fingerprint
                 for item in declarations
             ]
         candidate = (

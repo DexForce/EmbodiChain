@@ -32,6 +32,8 @@ import subprocess
 import sys
 import time
 
+import numpy as np
+
 __all__: list[str] = []
 
 
@@ -52,6 +54,7 @@ def main() -> None:
         ("biased", "bias", True, False, True, None),
         ("drifting", "drift", True, False, True, None),
         ("repeated", "bias", True, True, True, None),
+        ("same_seed_repeat", "bias", True, False, True, None),
         ("raw_replay", "bias", False, False, False, "external grasp conflicts"),
         ("over_budget", "over_budget", True, False, False, "correction budgets"),
     )
@@ -149,6 +152,48 @@ def main() -> None:
                 and len(messages) == 1
                 and reason.lower() in json.dumps(messages).lower()
             )
+        if name == "same_seed_repeat" and row["passed"]:
+            original = next(item for item in rows if item["case"] == "biased")
+            dataset_paths = [
+                next(
+                    (output / case / "dataset").glob(
+                        "*/meta/embodichain_episodes.jsonl"
+                    )
+                )
+                for case in ("biased", name)
+            ]
+            metadata = [
+                json.loads(path.read_text().splitlines()[0]) for path in dataset_paths
+            ]
+
+            def identities(item: dict[str, object]) -> tuple[object, ...]:
+                return (
+                    item["candidate_id"],
+                    tuple(
+                        (
+                            call["call_index"],
+                            call["prototype_sha256"],
+                            call["operator"],
+                            call["refinement"]["profile_sha256"],
+                        )
+                        for call in item["real2sim_lineage"]["calls"]
+                    ),
+                )
+
+            matched = identities(metadata[0]) == identities(metadata[1])
+            positions = []
+            for path, item in zip(dataset_paths, metadata):
+                with np.load(
+                    path.parents[1] / item["real2sim_observed_geometry"]["path"],
+                    allow_pickle=False,
+                ) as values:
+                    positions.append(values["object_pose"][-1, :3].copy())
+            difference = float(np.linalg.norm(positions[0] - positions[1]))
+            row.update(
+                same_seed_identity_matches=matched,
+                final_position_difference_m=difference,
+            )
+            row["passed"] = original["passed"] and matched and difference <= 0.003
         rows.append(row)
         print(f"{name}: {'passed' if row['passed'] else 'FAILED'}", flush=True)
         report = {

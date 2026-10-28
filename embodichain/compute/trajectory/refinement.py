@@ -31,6 +31,9 @@ __all__ = ["PoseRefinementResult", "refine_pose_trajectory"]
 
 def _poses(value: object, name: str) -> np.ndarray:
     """Return owned, proper rigid transforms without accepting object arrays."""
+    raw = np.asarray(value)
+    if raw.dtype.kind not in "fiu":
+        raise ValueError(f"{name} must contain real numeric rigid transforms")
     result = np.array(value, dtype=np.float64, copy=True)
     if (
         result.ndim != 3

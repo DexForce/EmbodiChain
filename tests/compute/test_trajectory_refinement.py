@@ -111,3 +111,10 @@ def test_iteration_budget_cannot_return_an_unconverged_path() -> None:
         refine_pose_trajectory(
             source, anchors={0: source[0], 80: source[-1]}, max_iterations=1
         )
+
+
+def test_pose_fit_does_not_discard_complex_measurement_components() -> None:
+    source = _line().astype(np.complex128)
+    source[:, 0, 3] += 1j
+    with pytest.raises(ValueError, match="real numeric"):
+        refine_pose_trajectory(source, anchors={0: np.eye(4)})

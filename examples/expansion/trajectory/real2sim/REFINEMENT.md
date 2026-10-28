@@ -31,6 +31,7 @@ optimizer. General meshes still need a correspondingly qualified collection host
 | Ablation benchmark | Replay vs rigid anchor vs sparse fit on identical data | Report oracle RMSE, anchor/rotation error, success, latency and retained RSS |
 | Simulation | Fixed 9 layouts x 6 recipes with injected TCP bias | Measured lift, held relation, place/support/stability, collision, attachments and receipts |
 | Negative simulation | Raw biased replay and 5 cm over-budget source | Explicit rejection, no confirmed episode and retained failure reason |
+| Same-seed repeat | Reprepare identical source bundles in a new directory | Same recipe, prototype and profile identities; final position within 3 mm |
 
 The analytic benchmark uses a separately constructed straight line, a 3 degree
 yaw transform, a millimetre translation and 1.5 mm high-frequency sensor jitter.
@@ -75,6 +76,10 @@ The source profile also owns the maximum correction, reference smoothness,
 candidate/iteration budgets, support margin and allowed release gap. Authority
 is explicit; qpos and hybrid bindings cannot silently become refinable. Example
 sources are ``synthetic_reference`` and injected TCP poses are ``transformed``.
+Recipe identity includes the configured refinement fingerprint. Realized pose
+hashes remain call-level evidence so small physical differences do not rename
+the same deterministic recipe. The analytic benchmark uses smoothness weight 8;
+the recorded example uses 0.2, with independent IK and physical validation.
 
 Hardware qualification, per-sample source uncertainty estimation, general joint
 trajectory optimization and continuous collision certificates remain separate
