@@ -100,6 +100,10 @@
       {
         "label": "旧 Hybrid 诊断（历史）",
         "path": "outputs/benchmarks/L-02/reports/loading-profile-20261026.md"
+      },
+      {
+        "label": "素材保留与清理记录",
+        "path": "reports/media-cleanup.md"
       }
     ]
   },
@@ -220,6 +224,10 @@
       {
         "label": "2026-10-28 独立 parser 修复复验及客户端／资产限制",
         "path": "outputs/benchmarks/usd-import-fix/20261028-v1/README.md"
+      },
+      {
+        "label": "素材保留与清理记录",
+        "path": "reports/media-cleanup.md"
       }
     ],
     "report_note": "以下为本轮正式实验初稿。早期共享 GPU 试跑单独保留，不参与本稿性能统计；G1 排除本轮。"
@@ -378,6 +386,10 @@
       {
         "label": "历史 Isaac Lab HTML（旧口径）",
         "path": "reports/P-01-isaaclab.html"
+      },
+      {
+        "label": "素材保留与清理记录",
+        "path": "reports/media-cleanup.md"
       }
     ]
   },
@@ -466,6 +478,10 @@
       {
         "label": "全部主测录像",
         "path": "outputs/benchmarks/P-02/videos/index.md"
+      },
+      {
+        "label": "素材保留与清理记录",
+        "path": "reports/media-cleanup.md"
       }
     ]
   },
@@ -549,6 +565,10 @@
       {
         "label": "资产预检",
         "path": "outputs/benchmarks/P-03/reports/asset-preflight.md"
+      },
+      {
+        "label": "素材保留与清理记录",
+        "path": "reports/media-cleanup.md"
       }
     ]
   },

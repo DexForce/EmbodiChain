@@ -37,6 +37,7 @@ def test_failed_run_is_retained_but_runtime_and_generic_assets_are_excluded(
     runtime.mkdir()
     (runtime / "engine.bin").write_bytes(b"private runtime")
     (raw / "robot.usd").write_bytes(b"generic upstream asset")
+    (raw / "scene.usda.gz").write_bytes(b"compressed upstream geometry")
     output = tmp_path / "stage"
     summary = prepare(workspace, output)
     report = output / "reports" / summary["report_id"]
@@ -52,7 +53,7 @@ def test_failed_run_is_retained_but_runtime_and_generic_assets_are_excluded(
     )
     assert record["size_bytes"] == 3
     assert record["license"] == "NOASSERTION"
-    assert len(inventory["excluded"]) == 2
+    assert len(inventory["excluded"]) == 3
     index = json.loads((output / "index.fragment.json").read_text())
     assert index["bundles"]
     for bundle in index["bundles"].values():

@@ -52,7 +52,7 @@
     }
   },
   "validation": {
-    "unit_tests": "8 passed (reference ODE/energy, contact geometry/events, evidence preservation and input-only indexing)",
+    "unit_tests": "9 passed (numerical references/contact events, evidence/input indexing, compressed asset exclusion, historical media links)",
     "p01": {
       "trajectories": 240,
       "configurations": 24,
@@ -64,12 +64,13 @@
       "all_fields_equal_except_source_location": true
     },
     "html": {
-      "pages_checked": 802,
-      "links_checked": 31873,
-      "source_files_verified": 10089,
+      "pages_checked": 803,
+      "links_checked": 31641,
+      "source_files_verified": 9810,
       "video_range_checks": 19,
       "broken_links": [],
       "broken_fragments": [],
+      "read_only_routes": true,
       "source_hashes_match": true
     },
     "formatting": [
@@ -80,12 +81,54 @@
     "api_docs": "3274/3274 exports documented",
     "skill": "quick_validate.py passed",
     "context": "no affected topics; no production routes changed",
-    "original_evidence": {
+    "diff_whitespace": "Four frozen P-03 USD inputs retain original trailing blank lines to preserve recorded hashes; no other whitespace errors.",
+    "initial_import_evidence": {
       "files_checked_before_after": 29542,
       "unchanged": true,
-      "added_files": "P-01/submission-20261028/benchmark-summary.md and .json only"
+      "added_files": "P-01/submission-20261028/benchmark-summary.md and .json only",
+      "scope": "Before the user-requested media cleanup; retained as import audit history."
     },
-    "diff_whitespace": "Four frozen P-03 USD inputs retain original trailing blank lines to preserve recorded hashes; no other whitespace errors."
+    "media_cleanup": {
+      "date": "2026-10-28",
+      "videos_before": 95,
+      "videos_after": 42,
+      "deleted_video_gif_files": 53,
+      "deleted_png_files": 5998,
+      "deleted_media_bytes": 3329367210,
+      "scene_bytes_before": 5048703120,
+      "scene_bytes_after": 887533494,
+      "scene_lossless_sha256_verified": true,
+      "allocated_bytes_before": 23016878080,
+      "allocated_bytes_after": 11472998400,
+      "allocated_bytes_freed": 11543879680,
+      "disk_scope": "simulation-report workspace + prior release validation copies + publication staging directories",
+      "disk_after": [
+        {
+          "path": "/home/oem/code/simulation-report",
+          "allocated_bytes": 11385257984
+        },
+        {
+          "path": "/home/oem/.codex/worktrees/technical-report-draft/EmbodiChain/outputs/benchmarks/release-validation",
+          "allocated_bytes": 65404928
+        },
+        {
+          "path": "/home/oem/code/simulation-report-publication-20261028-curated",
+          "allocated_bytes": 22335488
+        }
+      ],
+      "evidence": {
+        "unchanged_original_files_checked": 23490,
+        "numerical_and_metadata_files_checked": 12821,
+        "unexpected_changes": [],
+        "edited_media_indices": [
+          "outputs/benchmarks/P-02/videos/index.md",
+          "outputs/benchmarks/P-03/videos/index.md",
+          "reports/P-01/common-view/index.md"
+        ],
+        "intentionally_removed_files": 6051,
+        "formal_reports_unchanged": true
+      }
+    }
   },
   "not_validated": [
     "No simulator initialized; imported drivers are not certified against current main.",
@@ -95,14 +138,15 @@
   ],
   "publication_inventory": {
     "input_files": 28,
-    "artifact_files": 29544,
-    "artifact_bytes": 10572238084,
+    "artifact_files": 23496,
+    "artifact_bytes": 7243173735,
     "excluded_files": 20987,
     "artifact_groups": {
-      "results": 17015,
-      "figures": 12434,
-      "videos": 95
+      "results": 17018,
+      "figures": 6436,
+      "videos": 42
     },
-    "inventory_sha256": "9feede45ab472d304bfb92de0485a40b702a917dd92f5ac019240503977ed2eb"
+    "inventory_sha256": "02a40105a35f366d36478b02f827d0ab161390f70de6064cf4ffa278e07d80cf",
+    "selection": "Representative media retained; obsolete, invalid and redundant recordings removed. All numerical/failed-run evidence retained."
   }
 }

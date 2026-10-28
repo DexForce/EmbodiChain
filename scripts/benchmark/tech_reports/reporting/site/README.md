@@ -16,3 +16,7 @@ python -m scripts.benchmark.tech_reports.reporting.site.check --directory output
 publication-manifest.json 记录导出来源、字节数与哈希；check.py 检查链接、状态、哈希、HTTP 和视频 Range 响应。
 新建输出目录避免污染已有发布副本。只服务构建目录，不将数据工作区或仓库根目录设为 HTTP 根。
 原机器的局域网站和 systemd 配置不由本 PR 安装或替换。
+
+## 素材精简
+
+数据工作区的 `reports/media-retention.json` 声明已清理媒体、相同文件替代路径和无损压缩场景。构建时将旧媒体引用明确标为“已清理”并指向 `reports/media-cleanup.md`，不改写历史报告；未声明的缺失文件仍报错。不能将已删除的旧配置链接悄悄改为其他配置的视频。精简后构建到全新目录，检查通过再替换并删除旧发布副本，避免增量目录残留已删素材。

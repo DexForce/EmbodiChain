@@ -57,6 +57,11 @@ class SiteBuilder:
         self.directories: set[Path] = set()
         self.queue: deque[Path] = deque()
         self.unpublished: list[dict] = []
+        retention_path = ROOT / "reports/media-retention.json"
+        self.retention = (
+            json.loads(retention_path.read_text()) if retention_path.exists() else {}
+        )
+        self.media_notices: dict[tuple[Path, str], str] = {}
         self.main_sources = {
             (ROOT / item["source"]).resolve(): item
             for item in self.catalog
@@ -101,6 +106,29 @@ class SiteBuilder:
                 {"source": str(source.relative_to(ROOT)), "reference": reference}
             )
             return None
+        relative_name = path.relative_to(ROOT).as_posix()
+        for rule in self.retention.get("retired_rules", []):
+            if relative_name == rule.get("path") or (
+                rule.get("directory")
+                and path.is_relative_to(ROOT / rule["directory"])
+                and path.suffix.lower() in rule["suffixes"]
+            ):
+                self.media_notices[source, reference] = "已清理：" + rule["reason"]
+                return self.register_document(ROOT / "reports/media-cleanup.md", owner)
+        for record in self.retention.get("redirects", []):
+            if relative_name == record["path"]:
+                path = (ROOT / record["replacement"]).resolve()
+                self.media_notices[source, reference] = record["note"]
+                break
+        for record in self.retention.get("compressed_files", []):
+            if relative_name == record["path"]:
+                path = (ROOT / record["archive"]).resolve()
+                self.media_notices[source, reference] = (
+                    "gzip 无损压缩；解压后与原文件 SHA-256 一致"
+                )
+                break
+        if not path.is_relative_to(ROOT):
+            raise ValueError(f"Media replacement leaves project: {path}")
         if not path.exists():
             raise FileNotFoundError(
                 f"Broken source link: {source.relative_to(ROOT)} -> {reference}"
@@ -173,6 +201,27 @@ class SiteBuilder:
             attribute = "href" if node.name == "a" else "src"
             original = node[attribute]
             rewritten = self.local_url(original, source, doc["owner"])
+            notice = self.media_notices.get((source, original))
+            if notice and notice.startswith("已清理"):
+                if node.name != "a":
+                    replacement = soup.new_tag("a", href=rewritten)
+                    replacement.string = node.get("alt", "历史媒体") + "（已清理）"
+                    target = (
+                        node.parent
+                        if node.name == "source" and node.parent.name == "video"
+                        else node
+                    )
+                    target.replace_with(replacement)
+                    node = replacement
+                else:
+                    node.append("（已清理）")
+                node["title"] = notice
+                node["href"] = rewritten
+                continue
+            if notice:
+                node["title"] = notice
+                if node.name == "a" and "gzip" in notice:
+                    node.append("（gzip 无损压缩）")
             if rewritten is None:
                 if node.name != "a":
                     raise ValueError(f"Image/media outside export scope: {original}")
@@ -212,6 +261,17 @@ class SiteBuilder:
                     )
                 )
         doc["body"] = str(soup)
+        if any(
+            path == source and note.startswith("已清理")
+            for (path, _), note in self.media_notices.items()
+        ):
+            note_url = self.register_document(
+                ROOT / "reports/media-cleanup.md", doc["owner"]
+            )
+            doc["body"] = (
+                f'<aside class="issue-callout"><strong>历史素材已精简</strong><p>本页部分旧录像／帧图已清理，相应链接已标注。数值、日志和失败记录仍保留。见<a href="{note_url}">保留范围与清理记录</a>。</p></aside>'
+                + doc["body"]
+            )
         doc["toc"] = md.toc
         doc["historical"] = source.name in {
             "P-01-isaaclab.md",

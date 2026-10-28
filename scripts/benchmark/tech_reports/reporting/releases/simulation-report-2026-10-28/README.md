@@ -1,7 +1,7 @@
 # 仿真技术报告：2026-10-28 本地进度快照
 
 本次为 **draft 源码提交**，整理已有实验、方案和离线报告工具；没有新增测量。
-原始数据、报告、图片、原始帧和视频仍保留在原工作区。
+原始数值、报告和保留的代表性媒体位于原工作区；旧／无效／重复视频和帧图已按用户要求清理，见下文。
 Hugging Face 上传按用户要求暂缓，`dataset_revision` 为 `null`；本页不代表数据集已发布或最新引擎已经通过完整复测。
 
 目标数据集：[DexForceAI/embodichain_reports](https://huggingface.co/datasets/DexForceAI/embodichain_reports)。
@@ -115,3 +115,9 @@ reports/simulation-report-2026-10-28/
 `0573053fa2c9174ca2a4678a462ec4dfd3035d59`，约 17.7 MB，包装元数据声明 CC-BY-4.0。
 来源是 [ForgeCAD/simready-assets](https://huggingface.co/datasets/ForgeCAD/simready-assets/tree/0573053fa2c9174ca2a4678a462ec4dfd3035d59/kitchen_base_cabinet)，由 NVIDIA SimReady Central 索引；不将它误写为 NVIDIA 制作。
 它尚未进入共同加载预检或正式实验。下载仅选该子目录，核对依赖、许可、哈希与两端模型后再使用，避免整库下载及默认本地 URDF→USD 转换。
+
+## 素材精简（2026-10-28）
+
+95 个视频／GIF 精简为 42 个 MP4，保留 33 段两平台原片及 9 段并排预览。P-01 保留落体／单摆与 PGS／TGS；P-02 保留滑移、摩擦差异、不同堆叠现象及边界复跑；P-03 保留四段有效抓取原片；L-02 只保留 N=16、L-03 只保留 N=4 的配对原片。所有数值、配置、日志、失败记录与六份正式报告不变。旧片的逐帧图可清理，保留片段的原始帧仍在。
+
+[media-retention.json](media-retention.json) 记录被清理的路径规则、相同副本的替代路径，以及四份大型 P-03 场景的无损 gzip 哈希。原工作区 `reports/media-cleanup.md` 与 `media-cleanup-audit.json.gz` 提供说明和逐文件删除清单；历史运行 JSON 中的旧媒体路径仅用于追溯。待上传清单已重新生成，不能继续使用精简前的 inventory。压缩后的通用 USD 仍排除于公开素材清单，上传继续暂缓。

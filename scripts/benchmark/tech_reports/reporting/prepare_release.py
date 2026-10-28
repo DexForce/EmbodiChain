@@ -147,23 +147,23 @@ def prepare(workspace: Path, output: Path) -> dict:
             elif any(p in parts for p in ("runtime", "__pycache__", ".cache")):
                 reason = "installed runtime/cache; reproduce from separately licensed dependencies"
             elif (
-                source.suffix.lower()
-                in {
-                    ".usd",
-                    ".usda",
-                    ".usdc",
-                    ".urdf",
-                    ".obj",
-                    ".dae",
-                    ".stl",
-                    ".mtl",
-                    ".so",
-                    ".pyc",
-                    ".patch",
-                    ".diff",
-                }
-                or source.name == "parser.py"
-            ):
+                source.suffixes[-2].lower()
+                if source.suffix == ".gz" and len(source.suffixes) > 1
+                else source.suffix.lower()
+            ) in {
+                ".usd",
+                ".usda",
+                ".usdc",
+                ".urdf",
+                ".obj",
+                ".dae",
+                ".stl",
+                ".mtl",
+                ".so",
+                ".pyc",
+                ".patch",
+                ".diff",
+            } or source.name == "parser.py":
                 reason = "generic asset or engine-source evidence; retain source reference and review redistribution separately"
             elif "prepared" in parts and source.suffix.lower() not in {
                 ".json",
