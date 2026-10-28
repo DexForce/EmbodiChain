@@ -62,6 +62,7 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
+from embodichain.lab.sim.atomic_actions.nominal import NominalMotionSource
 from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
     PlannerDiagnostics,
@@ -605,7 +606,124 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             device=self.device,
             name="Pick-up trajectory success",
         )
+        return self._assemble_pick_plan(
+            request,
+            context,
+            success=success_mask,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
+            grasp_xpos=grasp_xpos,
+            object_pose=object_pose,
+            segment_lengths=segment_lengths,
+            affordance_sample=affordance_sample,
+            replannable=True,
+            provenance=None,
+        )
 
+    def _plan_from_nominal(
+        self,
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+        context: PlanningContext,
+        nominal_source: NominalMotionSource,
+    ) -> ActionPlan:
+        """Assemble a Pick from an explicitly supplied external motion."""
+        target = self.require_goal(request)
+        motion = self._validate_nominal_motion(
+            request, context, nominal_source, segments=("approach", "close", "lift")
+        )
+        if not motion.success.any():
+            return self.failed_plan(
+                request, context, message="External Pick motion failed."
+            )
+        endpoint = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        grasp_index = (
+            motion.segment_lengths["approach"] + motion.segment_lengths["close"]
+        )
+        if motion.grasp_pose is None:
+            # A qpos-only source supplies no independent pose observation. Its
+            # candidate is derived from the robot's FK at the declared anchor.
+            qpos = motion.trajectory.positions[:, grasp_index, list(endpoint.joint_ids)]
+            grasp_xpos = self.robot.compute_fk(
+                qpos=qpos, name=endpoint.control_part, to_matrix=True
+            )
+            if (
+                not isinstance(grasp_xpos, torch.Tensor)
+                or grasp_xpos.shape != (context.batch_size, 4, 4)
+                or not bool(torch.isfinite(grasp_xpos).all())
+            ):
+                raise ValueError("external Pick grasp FK is unavailable")
+        else:
+            grasp_xpos = motion.grasp_pose.to(context.robot.qpos)
+        if target.object_pose is None:
+            object_pose = _resolve_object_pose(
+                target.semantics, context, name="pickup_object_pose"
+            )
+        else:
+            object_pose = resolve_pose_target(
+                resolve_pose_goal(target.object_pose, context, name="object_pose"),
+                num_envs=context.batch_size,
+                device=self.device,
+            )
+        expected_grasp = None
+        if target.grasp_xpos is not None:
+            expected_grasp = resolve_pose_target(
+                resolve_pose_goal(target.grasp_xpos, context, name="grasp_xpos"),
+                num_envs=context.batch_size,
+                device=self.device,
+            )
+        elif request.skill_options.fixed_object_to_eef is not None:
+            expected_grasp = object_pose @ request.skill_options.fixed_object_to_eef.to(
+                object_pose
+            )
+        if expected_grasp is not None and not torch.allclose(
+            grasp_xpos, expected_grasp, atol=2e-3, rtol=0
+        ):
+            raise ValueError("external grasp conflicts with the requested grasp")
+        self._validate_nominal_anchor(
+            motion.trajectory, index=grasp_index, endpoint=endpoint, target=grasp_xpos
+        )
+        return self._assemble_pick_plan(
+            request,
+            context,
+            success=motion.success,
+            trajectory=motion.trajectory,
+            grasp_xpos=grasp_xpos,
+            object_pose=object_pose,
+            segment_lengths=dict(motion.segment_lengths),
+            affordance_sample=None,
+            replannable=False,
+            provenance=motion.provenance(),
+        )
+
+    def _assemble_pick_plan(
+        self,
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+        context: PlanningContext,
+        *,
+        success: torch.Tensor,
+        trajectory: TimedTrajectory,
+        grasp_xpos: torch.Tensor,
+        object_pose: torch.Tensor,
+        segment_lengths: dict[str, int],
+        affordance_sample: AffordanceSample | None,
+        replannable: bool,
+        provenance: dict[str, object] | None,
+    ) -> ActionPlan:
+        """Assemble Pick semantics shared by native and external motion."""
+        target = request.goal
+        options = request.skill_options
+        motion = request.binding.endpoint("primary", "motion")
+        grasp = request.binding.endpoint("primary", "grasp")
+        task_state_key = require_shared_task_state_key(
+            motion, grasp, participant="PickUp primary participant"
+        )
+        sem = target.semantics
+        state = context
         object_to_eef = torch.bmm(pose_inv(object_pose), grasp_xpos)
         held = HeldObjectState(
             semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
@@ -622,22 +740,29 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         return self.build_plan(
             request,
             context,
-            success=success_mask,
-            trajectory=TimedTrajectory.from_uniform_step(
-                full,
-                env_ids=context.env_ids,
-                step_dt=context.require_control_dt(),
-            ),
+            success=success,
+            trajectory=trajectory,
+            replannable=replannable,
             expected_effects=StateDelta(
                 held_object_updates={task_state_key: held},
                 coordinated_held_object_updates=coordinated_updates,
             ),
             diagnostics=PlannerDiagnostics(
-                backend=self.planning_services.planner_name,
+                backend=(
+                    self.planning_services.planner_name
+                    if provenance is None
+                    else "external_nominal"
+                ),
                 metadata=(
-                    {}
-                    if affordance_sample is None
-                    else {"affordance_sample": {"grasp": affordance_sample.metadata}}
+                    provenance
+                    if provenance is not None
+                    else (
+                        {}
+                        if affordance_sample is None
+                        else {
+                            "affordance_sample": {"grasp": affordance_sample.metadata}
+                        }
+                    )
                 ),
             ),
             segment_lengths=segment_lengths,

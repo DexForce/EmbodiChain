@@ -143,6 +143,14 @@ class ThreeFrameStubAction(StubAction):
     binding_contract: ClassVar[SkillBindingContract] = StubAction.binding_contract
 
 
+class RetimedStubAction(StubAction):
+    """Long deterministic motion using the built-in move-joints phase name."""
+
+    skill_id: ClassVar[str] = "move_joints"
+    sample_count: ClassVar[int] = 20
+    binding_contract: ClassVar[SkillBindingContract] = StubAction.binding_contract
+
+
 class StubSceneProvider:
     """Record scene captures and return one configured snapshot."""
 
@@ -645,6 +653,24 @@ def test_plan_transform_runs_after_normal_plan_validation() -> None:
     assert calls[0][2].skill_id == "stub"
 
 
+def test_unsupported_nominal_source_never_falls_back_to_native_planning() -> None:
+    engine = _engine()
+    action = StubAction()
+    native = Mock(wraps=action._plan)
+    action._plan = native  # type: ignore[method-assign]
+    engine.register(action)
+
+    class Source:
+        def instantiate(self, request, context):
+            raise AssertionError(
+                "unsupported skill must reject before invoking the source"
+            )
+
+    with pytest.raises(ValueError, match="does not support external nominal"):
+        engine.plan(_invocation(engine, torch.zeros(2, 3)), nominal_source=Source())
+    native.assert_not_called()
+
+
 def test_plan_transform_must_return_a_validated_action_plan() -> None:
     engine = _engine()
     engine.register(StubAction())
@@ -888,6 +914,99 @@ def test_action_plan_template_adapter_rejects_batch_and_failed_plan() -> None:
         adapter.export_template(batched, context=context)
     with pytest.raises(ValueError, match="one successful row"):
         adapter.export_template(failed, context=context)
+
+
+def test_mapped_retime_rebuilds_commands_and_preserves_terminal_velocity() -> None:
+    from embodichain.lab.sim.motion.expansion import retime_with_time_map
+
+    engine = _engine(batch_size=1)
+    engine.robot.joint_names = ["j0", "j1", "j2"]
+    action = RetimedStubAction()
+    action._scene_dependencies = lambda request: ("object",)  # type: ignore[method-assign]
+    engine.register(action)
+    invocation = ActionInvocation(
+        skill_id="move_joints",
+        goal=JointPositionGoal(torch.ones(1, 3)),
+        binding=engine.bind_control_parts(
+            "move_joints", {"primary": {"motion": "all"}}
+        ),
+    )
+    context = replace(engine.initial_context(), control_dt=ACTION_DT)
+    plan = engine.plan(invocation, context)
+    request = action.resolve_request(invocation)
+    adapter = ActionPlanTemplateAdapter(
+        joint_names=("j0", "j1", "j2"),
+        phase_permissions={"move_joints": ("retime",)},
+        phase_kinds={"move_joints": "free"},
+    )
+    template = adapter.export_template(
+        plan,
+        context=SourceContext(
+            "stub",
+            "1",
+            "unit",
+            SceneCase("case", "initial", "scene", "task", "robot"),
+            ACTION_DT,
+        ),
+    )
+    result = retime_with_time_map(template, duration_scale=1.5, control_dt=ACTION_DT)
+    rebuilt = engine.rebuild_plan_from_mapped_trajectory(
+        request,
+        context,
+        plan,
+        template,
+        result,
+        joint_limits=torch.tensor([[-2.0, 2.0]] * 3),
+        velocity_limits=torch.full((3,), 100.0),
+        acceleration_limits=torch.full((3,), 1000.0),
+    )
+    assert rebuilt.commands.frame_count > plan.commands.frame_count
+    assert rebuilt.segments[0].stop == rebuilt.commands.frame_count
+    assert torch.equal(
+        rebuilt.joint_trajectory.positions[:, -1],
+        plan.joint_trajectory.positions[:, -1],
+    )
+    assert torch.equal(
+        rebuilt.joint_trajectory.velocities[:, -1],
+        plan.joint_trajectory.velocities[:, -1],
+    )
+
+    dependency_plan = replace(
+        plan,
+        scene_dependencies=("object",),
+        scene_dependency_monitor_until={"object": 8},
+    )
+    with pytest.raises(ValueError, match="protected events"):
+        engine.rebuild_plan_from_mapped_trajectory(
+            request,
+            context,
+            dependency_plan,
+            template,
+            result,
+            joint_limits=torch.tensor([[-2.0, 2.0]] * 3),
+            velocity_limits=torch.full((3,), 100.0),
+            acceleration_limits=torch.full((3,), 1000.0),
+        )
+    protected = retime_with_time_map(
+        template, duration_scale=1.5, control_dt=ACTION_DT, protected_indices=(8,)
+    )
+    remapped = engine.rebuild_plan_from_mapped_trajectory(
+        request,
+        context,
+        dependency_plan,
+        template,
+        protected,
+        joint_limits=torch.tensor([[-2.0, 2.0]] * 3),
+        velocity_limits=torch.full((3,), 100.0),
+        acceleration_limits=torch.full((3,), 1000.0),
+    )
+    mapping = dict(
+        zip(
+            protected.time_map.source_event_indices,
+            protected.time_map.execution_event_indices,
+        )
+    )
+    assert remapped.scene_dependency_monitor_until["object"] == mapping[8]
 
 
 def test_rebuild_plan_rejects_changed_same_grid_dt() -> None:

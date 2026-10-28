@@ -418,6 +418,156 @@ def test_generate_function_discards_retry_then_commits_once(monkeypatch) -> None
     assert env.reset_options == [{"save_data": False}, None]
 
 
+def test_source_bound_recording_cannot_bypass_real2sim_receipt() -> None:
+    env = _ResetTrackingEnv()
+    env._task_program_adapter = SimpleNamespace(_configured_nominal_sources=(object(),))
+    with pytest.raises(ValueError, match="Real2Sim receipt"):
+        generate_function(env, reset_before=False)
+    assert env.reset_options == []
+
+    env._task_program_adapter = None
+    with pytest.raises(ValueError, match="Real2Sim receipt"):
+        generate_function(env, reset_before=False, nominal_source_factory=object())
+    assert env.reset_options == []
+
+
+def test_real2sim_dataset_path_is_owned_by_profile_not_dataset_manager() -> None:
+    args = _create_parser().parse_args(
+        [
+            "--gym-config",
+            "task.yaml",
+            "--real2sim-profile",
+            "profile.yaml",
+            "--dataset-dir",
+            "/tmp/real2sim-dataset",
+        ]
+    )
+    merged = merge_args_with_gym_config(
+        args, {"id": "Dummy-v0", "physics": "default", "env": {"dataset": {}}}
+    )
+    assert merged["env"]["dataset"] == {}
+
+
+def test_real2sim_run_task_preserves_failed_write_without_rerunning(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from dataclasses import replace
+
+    from embodichain.lab.gym.envs.managers import real2sim_collection
+    from embodichain.lab.gym.envs.managers.real2sim_collection import (
+        Real2SimCaptureRequest,
+        Real2SimRunTaskOwner,
+        load_staged_real2sim_episode,
+    )
+    from embodichain.lab.gym.envs.managers.real2sim_sink import (
+        Real2SimLeRobotEpisodeSink,
+    )
+    from embodichain.lab.sim.motion.expansion import (
+        CandidateIdentity,
+        CommitReceipt,
+        ExpertEpisode,
+        ValidationCheck,
+        ValidationResult,
+    )
+
+    env = _ResetTrackingEnv()
+    sink = object.__new__(Real2SimLeRobotEpisodeSink)
+    sink._recorder = SimpleNamespace(_env=env, dataset_full_path=tmp_path)
+    identity = CandidateIdentity(
+        "scene", "initial", "candidate", "geometry", "source", "1", "unit"
+    )
+    validation = ValidationResult((ValidationCheck("task", "passed"),))
+    request = Real2SimCaptureRequest(
+        identity,
+        validation,
+        "episode",
+        "commit",
+        {"qpos": ("robot", "qpos")},
+        "joint_position",
+        {},
+    )
+    episode = ExpertEpisode(
+        identity=identity,
+        observations={"qpos": torch.tensor([[0.0], [1.0]])},
+        actions=torch.tensor([[1.0]]),
+        timestamps=torch.tensor([0.0, 0.1]),
+        action_representation="joint_position",
+        validation=validation,
+        episode_id="episode",
+        commit_id="commit",
+    )
+    failed = CommitReceipt(
+        episode_id="episode",
+        candidate_id="candidate",
+        attempt_id=0,
+        storage_id="store",
+        commit_id="commit",
+        scene_case_id="scene",
+        confirmed=False,
+        error="injected attachment failure",
+        submission_id=0,
+    )
+    confirmed = replace(failed, confirmed=True, error="", submission_id=1)
+    submissions = iter((failed, confirmed))
+    monkeypatch.setattr(
+        real2sim_collection, "capture_real2sim_episode", lambda *a, **k: episode
+    )
+    submit = MagicMock(side_effect=lambda *a, **k: next(submissions))
+    monkeypatch.setattr(
+        real2sim_collection, "submit_and_discard_real2sim_episode", submit
+    )
+    execute = MagicMock(
+        return_value=_episode_result(success=True, reason="success", length=1)
+    )
+    monkeypatch.setattr(run_task, "execute_demo_episode", execute)
+    prepare = MagicMock(return_value=())
+    owner = Real2SimRunTaskOwner(
+        sink, prepare_attempt=prepare, capture_request=lambda *_: request
+    )
+
+    with pytest.raises(RuntimeError, match="unconfirmed"):
+        generate_function(
+            env, reset_before=False, max_attempts=2, _real2sim_owner=owner
+        )
+    assert env.reset_options == []
+    assert owner.pending_episode is not None
+    assert owner.staged_path is not None and owner.staged_path.is_file()
+    recovered = load_staged_real2sim_episode(owner.staged_path)
+    assert recovered.identity == episode.identity
+    assert torch.equal(recovered.actions, episode.actions)
+    assert torch.equal(recovered.observations["qpos"], episode.observations["qpos"])
+    assert prepare.call_count == execute.call_count == 1
+    with pytest.raises(RuntimeError, match="before reset"):
+        generate_function(env, max_attempts=1, _real2sim_owner=owner)
+    assert env.reset_options == []
+    publish = owner._publish_receipt
+    monkeypatch.setattr(
+        owner, "_publish_receipt", MagicMock(side_effect=OSError("disk failure"))
+    )
+    with pytest.raises(OSError, match="disk failure"):
+        owner.retry_write(env)
+    assert owner.pending_episode is not None and owner.staged_path.is_file()
+    assert owner.last_receipt.confirmed
+    monkeypatch.setattr(owner, "_publish_receipt", publish)
+    assert owner.retry_write(env).confirmed
+    assert owner.pending_episode is None
+    assert owner.staged_path is None
+    assert execute.call_count == 1
+    assert submit.call_count == 2
+    assert submit.call_args_list[1].args[2].commit_id == episode.commit_id
+
+
+def test_close_preserves_staged_real2sim_submission_without_reset() -> None:
+    env = _LifecycleTrackingEnv()
+    owner = SimpleNamespace(pending_episode=object(), finalize=MagicMock())
+    env._real2sim_collection_owner = owner
+    run_task._abort_and_close_env(env, exit_process=False)
+    assert env.reset_options == []
+    assert env.events == [("close", False)]
+    owner.finalize.assert_called_once()
+
+
 def test_generate_function_updates_collection_attempt_and_reset_stats(
     monkeypatch,
 ) -> None:

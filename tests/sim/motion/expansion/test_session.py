@@ -227,6 +227,15 @@ def test_planning_failure_and_assigned_cancellation_do_not_count_rollouts() -> N
     assert session.snapshot()["counts"]["rollout_attempted"] == 0
 
 
+def test_gym_joint_position_commands_share_the_expansion_episode_contract() -> None:
+    session = _session()
+    identity = _start(session)
+    episode = replace(
+        _episode(session, identity), action_representation="joint_position"
+    )
+    assert session.accept_episode(episode)
+
+
 def test_failed_validation_statuses_and_release_reason_survive_payload_discard() -> (
     None
 ):

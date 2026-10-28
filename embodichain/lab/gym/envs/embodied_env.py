@@ -100,6 +100,10 @@ from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 if TYPE_CHECKING:
+    from embodichain.lab.task_program.runtime.expansion import (
+        TaskProgramNominalSourceFactory,
+        TaskProgramPlanTransformFactory,
+    )
     from embodichain.lab.sim.motion.expansion import (
         CombinedExpansionProfile,
     )
@@ -2928,6 +2932,8 @@ class EmbodiedEnv(BaseEnv):
         expansion_profile: CombinedExpansionProfile | None = None,
         expansion_candidate_index: int = 0,
         expansion_recipe_indices: tuple[int, ...] | None = None,
+        nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
+        plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
     ) -> TaskProgramDemoBridge:
         """Create the Gym demo bridge through the explicit adapter.
 
@@ -2941,11 +2947,17 @@ class EmbodiedEnv(BaseEnv):
             Atomic demo bridge whose segments are consumed lazily.
 
         """
+        kwargs = {}
+        if nominal_source_factory is not None:
+            kwargs["nominal_source_factory"] = nominal_source_factory
+        if plan_transform_factory is not None:
+            kwargs["plan_transform_factory"] = plan_transform_factory
         return self._checked_task_program_adapter().create_bridge(
             program,
             expansion_profile=expansion_profile,
             candidate_index=expansion_candidate_index,
             recipe_indices=expansion_recipe_indices,
+            **kwargs,
         )
 
     @property
@@ -2999,6 +3011,8 @@ class EmbodiedEnv(BaseEnv):
         expansion_profile: CombinedExpansionProfile | None = None,
         expansion_candidate_index: int = 0,
         expansion_recipe_indices: tuple[int, ...] | None = None,
+        nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
+        plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
         **kwargs,
     ) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
@@ -3041,14 +3055,22 @@ class EmbodiedEnv(BaseEnv):
                 expansion_profile is None
                 and expansion_candidate_index == 0
                 and expansion_recipe_indices is None
+                and nominal_source_factory is None
+                and plan_transform_factory is None
             ):
                 bridge = self.create_task_program_bridge(compiled_program)
             else:
+                bridge_kwargs = {}
+                if nominal_source_factory is not None:
+                    bridge_kwargs["nominal_source_factory"] = nominal_source_factory
+                if plan_transform_factory is not None:
+                    bridge_kwargs["plan_transform_factory"] = plan_transform_factory
                 bridge = self.create_task_program_bridge(
                     compiled_program,
                     expansion_profile=expansion_profile,
                     expansion_candidate_index=expansion_candidate_index,
                     expansion_recipe_indices=expansion_recipe_indices,
+                    **bridge_kwargs,
                 )
             self._active_task_program_bridge = bridge
             if getattr(self, "_demo_instruction_snapshot", None) is None:
@@ -3064,6 +3086,10 @@ class EmbodiedEnv(BaseEnv):
 
         if expansion_profile is not None:
             raise ValueError("expansion_profile requires a selected Task Program")
+        if nominal_source_factory is not None:
+            raise ValueError("nominal_source_factory requires a selected Task Program")
+        if plan_transform_factory is not None:
+            raise ValueError("plan_transform_factory requires a selected Task Program")
         if expansion_candidate_index != 0:
             raise ValueError(
                 "expansion_candidate_index requires a selected Task Program"

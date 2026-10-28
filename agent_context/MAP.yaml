@@ -464,7 +464,7 @@ topics:
   status: active
 - id: data-pipeline
   title: Data Pipeline
-  aliases: [online data, online dataset, async recorder, dataset persistence, simple BC demo, ODS documentation, ODS 文档, 数据管线, 在线数据, 数据集持久化, 数据保存,
+  aliases: [real2sim motion, real2sim trajectory, real2sim, 真实轨迹原型, online data, online dataset, async recorder, dataset persistence, simple BC demo, ODS documentation, ODS 文档, 数据管线, 在线数据, 数据集持久化, 数据保存,
     深度视频, 数据集校验, 数据集转换, 数据集划分]
   keywords: [OnlineDataEngine, OnlineDataset, sample_batch, sample_batch_with_context, lock_index, LeRobotRecorder, AsyncLeRobotRecorder,
     DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice,
@@ -473,12 +473,13 @@ topics:
     ODSFlowController, ODSFlowControllerCfg, get_flow_status, ODS 供数控制,
     episode_sample_budget, OnlineDataBudgetExhaustedError, ODS 自动配置, BatchSource, SequenceSpecCfg,
     OnlineDataSource, TensorDataSource, LeRobotDataSource, OfflineDataset, SequenceDataset,
-    DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, 数据集加载, 离线加载]
+    DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, Real2SimTrajectory, NormalizedReal2SimUnit, SkillMotionPrototype, TrajectoryTimeMap, 数据集加载, 离线加载]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
   - embodichain/data_pipeline/engine/data.py
   - embodichain/data_pipeline/engine/language.py
   - embodichain/data_pipeline/configuration.py
+  - embodichain/data_pipeline/real2sim/
   - embodichain/data_pipeline/runtime.py
   - embodichain/data_pipeline/datasets/online_data.py
   - embodichain/data_pipeline/datasets/sequence.py

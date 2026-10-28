@@ -584,6 +584,194 @@ def test_bridge_without_expansion_profile_preserves_default_path() -> None:
     assert explicit_bridge.expansion_records == ()
 
 
+def test_nominal_sources_are_bound_to_compiled_program_identity() -> None:
+    from embodichain.lab.task_program.integrations.nominal import (
+        BoundTaskProgramNominalSources,
+    )
+
+    class Source:
+        def instantiate(self, request, context):
+            raise AssertionError("bridge construction must not instantiate a source")
+
+    adapter = TaskProgramEnvironmentAdapter(_FakeEnvironmentFactory(), step_dt=_STEP_DT)
+    config = _program()
+    compiled = adapter.compile(config)
+    bindings = BoundTaskProgramNominalSources(compiled, {0: Source()})
+    bridge = adapter.create_bridge(compiled, nominal_source_factory=bindings)
+    assert isinstance(bridge, TaskProgramDemoBridge)
+    config.instruction = "A different instruction for the same program."
+    changed = adapter.compile(config)
+    with pytest.raises(ValueError, match="do not match"):
+        adapter.create_bridge(changed, nominal_source_factory=bindings)
+
+
+def test_execution_trace_rejects_vectorized_bridge() -> None:
+    adapter = TaskProgramEnvironmentAdapter(_FakeEnvironmentFactory(), step_dt=_STEP_DT)
+    bridge = adapter.create_bridge(adapter.compile(_program()))
+    with pytest.raises(ValueError, match="B=1"):
+        bridge.enable_execution_trace()
+
+
+def test_repeated_skill_occurrences_select_distinct_nominal_sources() -> None:
+    from dataclasses import replace
+    from embodichain.lab.sim.atomic_actions import ActionInvocation
+    from embodichain.lab.task_program.integrations.nominal import (
+        BoundTaskProgramNominalSources,
+    )
+    from embodichain.lab.task_program.runtime import TaskProgramPlanRequest
+
+    class Source:
+        def instantiate(self, request, context):
+            raise AssertionError("binding lookup must not execute the source")
+
+    config = _program_with_later_segment_hooks()
+    config.program.items = (
+        *config.program.items,
+        InvokeCfg(call=PickCfg(object="cube")),
+    )
+    adapter = TaskProgramEnvironmentAdapter(_FakeEnvironmentFactory(), step_dt=_STEP_DT)
+    compiled = adapter.compile(config)
+    first, second = Source(), Source()
+    bindings = BoundTaskProgramNominalSources(compiled, {0: first, 2: second})
+    calls = [
+        item.call for segment in compiled.iter_segments() for item in segment.calls
+    ]
+    request = TaskProgramPlanRequest(
+        "fake_pick/segment", 0, 0, calls[0], Mock(spec=ActionInvocation)
+    )
+    engine = _engine(_robot_profile())
+    assert bindings.create_nominal_source(request, engine=engine) is first
+    assert (
+        bindings.create_nominal_source(
+            replace(request, analysis_call_index=2, call=calls[2]), engine=engine
+        )
+        is second
+    )
+
+
+def test_tracing_source_factory_owns_one_instantiation_per_call() -> None:
+    from embodichain.lab.sim.atomic_actions import (
+        ActionInvocation,
+        InstantiatedSkillMotion,
+        TimedTrajectory,
+    )
+    from embodichain.lab.task_program.integrations.nominal import (
+        BoundTaskProgramNominalSources,
+        TracingTaskProgramNominalSources,
+    )
+    from embodichain.lab.task_program.runtime import TaskProgramPlanRequest
+
+    motion = InstantiatedSkillMotion(
+        trajectory=TimedTrajectory.from_uniform_step(
+            torch.zeros(1, 3, 1), env_ids=torch.tensor([0]), step_dt=0.1
+        ),
+        success=torch.tensor([True]),
+        segment_lengths={"approach": 1, "close": 1, "lift": 1},
+        initial_qpos=torch.zeros(1, 1),
+        source_id="source",
+        source_revision="1",
+        unit_id="pick",
+        origin="synthetic_reference",
+        joint_names=("arm",),
+    )
+
+    class Source:
+        def instantiate(self, request, context):
+            return motion
+
+    adapter = TaskProgramEnvironmentAdapter(_FakeEnvironmentFactory(), step_dt=_STEP_DT)
+    program = adapter.compile(_program())
+    binding = TracingTaskProgramNominalSources(
+        program, BoundTaskProgramNominalSources(program, {0: Source()})
+    )
+    call = next(iter(program.iter_segments())).calls[0].call
+    request = TaskProgramPlanRequest(
+        "fake_pick/segment", 0, 0, call, Mock(spec=ActionInvocation)
+    )
+    selected = binding.create_nominal_source(request, engine=_engine(_robot_profile()))
+    selected.instantiate(Mock(), Mock())
+    assert binding.motions[0].unit_id == "pick"
+    binding.motions[0].trajectory.positions[0, 0, 0] = 1
+    assert binding.motions[0].trajectory.positions[0, 0, 0] == 0
+    with pytest.raises(ValueError, match="cannot be instantiated twice"):
+        selected.instantiate(Mock(), Mock())
+
+
+def test_configured_nominal_source_is_preflighted_before_bridge(tmp_path) -> None:
+    import hashlib
+    import numpy as np
+
+    from embodichain.data_pipeline.real2sim import (
+        JointSpec,
+        PhaseAnnotation,
+        Real2SimTrajectory,
+        prepare_prototype,
+    )
+    from embodichain.lab.task_program.integrations.nominal import (
+        BoundTaskProgramNominalSources,
+        _ConfiguredPrototypeSource,
+    )
+
+    adapter = TaskProgramEnvironmentAdapter(_FakeEnvironmentFactory(), step_dt=_STEP_DT)
+    compiled = adapter.compile(_program())
+    fingerprint = BoundTaskProgramNominalSources(compiled, {}).program_fingerprint
+    source = Real2SimTrajectory(
+        source_id="synthetic",
+        source_revision="1",
+        unit_id="pick",
+        skill_id="pick_up",
+        origin="synthetic_reference",
+        joint_names=("arm",),
+        joint_units=("rad",),
+        qpos=np.zeros((6, 1)),
+        timestamps=np.arange(6) * _STEP_DT,
+        time_unit="s",
+        phases=(
+            PhaseAnnotation("approach", 0, 2, "free", "object"),
+            PhaseAnnotation("close", 2, 4, "contact", "object"),
+            PhaseAnnotation("lift", 4, 6, "hold", "gravity"),
+        ),
+        object_pose=np.eye(4),
+    )
+    manifest = prepare_prototype(
+        source,
+        joints=(JointSpec("arm", "revolute"),),
+        control_dt=_STEP_DT,
+        directory=tmp_path / "prototype",
+    )
+    declaration = _ConfiguredPrototypeSource(
+        call_index=0,
+        program_fingerprint=fingerprint,
+        prototype_manifest=str(manifest),
+        prototype_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        object_entity_id="cube",
+        target_entity_id=None,
+        target_entity_to_reference=None,
+        authority="qpos",
+        gripper_mode="semantic",
+        require_collision_validation=True,
+    )
+    adapter._set_configured_nominal_sources((declaration,))
+    assert isinstance(adapter.create_bridge(compiled), TaskProgramDemoBridge)
+    from embodichain.lab.task_program.integrations.simulation.real2sim_collision import (
+        TabletopCollisionGuardFactory,
+    )
+
+    guard = object.__new__(TabletopCollisionGuardFactory)
+    tracer = adapter.create_traced_configured_sources(compiled, guard)
+    assert isinstance(
+        adapter.create_bridge(
+            compiled, nominal_source_factory=tracer, plan_transform_factory=guard
+        ),
+        TaskProgramDemoBridge,
+    )
+    with pytest.raises(ValueError, match="configured and explicit"):
+        adapter.create_bridge(compiled, nominal_source_factory=tracer)
+    manifest.write_text("tampered")
+    with pytest.raises(ValueError, match="changed"):
+        adapter.create_bridge(compiled)
+
+
 def test_embodied_env_threads_episode_expansion_profile_to_bridge() -> None:
     adapter = TaskProgramEnvironmentAdapter(
         _FakeEnvironmentFactory(),

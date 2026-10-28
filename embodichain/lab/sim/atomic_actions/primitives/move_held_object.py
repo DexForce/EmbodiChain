@@ -43,6 +43,7 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
+from embodichain.lab.sim.atomic_actions.nominal import NominalMotionSource
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan, PlannerDiagnostics
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.lab.sim.atomic_actions.requirements import (
@@ -121,6 +122,81 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             ),
         ),
     )
+
+    def _plan_from_nominal(
+        self,
+        request: ResolvedActionRequest[HeldObjectPoseGoal, MoveHeldObjectOptions],
+        context: PlanningContext,
+        nominal_source: NominalMotionSource,
+    ) -> ActionPlan:
+        """Assemble externally supplied held-object transport."""
+        target = self.require_goal(request)
+        motion = self._validate_nominal_motion(
+            request, context, nominal_source, segments=("transport",)
+        )
+        if not motion.success.any():
+            return self.failed_plan(
+                request, context, message="External transport motion failed."
+            )
+        arm = request.binding.endpoint("primary", "motion")
+        hand = request.binding.endpoint("primary", "grasp")
+        endpoint = arm.require_target(JointPositionTarget)
+        hand_target = hand.require_target(JointPositionTarget)
+        key = require_shared_task_state_key(
+            arm, hand, participant="MoveHeldObject primary participant"
+        )
+        held = context.get_held_object(key)
+        if held is None:
+            raise ValueError("external transport requires a held object")
+        eligible = context.task.exclusive_held_object_mask(key)
+        if not eligible.all():
+            return self.failed_plan(
+                request,
+                context,
+                message="Held object is not exclusive to the control part.",
+            )
+        goal = resolve_pose_target(
+            resolve_pose_goal(
+                target.object_target_pose, context, name="object_target_pose"
+            ),
+            num_envs=context.batch_size,
+            device=self.device,
+        )
+        if goal.ndim == 4:
+            goal = goal[:, -1]
+        relation = held.object_to_eef.to(goal)
+        if relation.ndim == 2:
+            relation = relation.unsqueeze(0)
+        self._validate_nominal_anchor(
+            motion.trajectory,
+            index=motion.trajectory.waypoint_count - 1,
+            endpoint=endpoint,
+            target=goal @ relation,
+        )
+        grasp_command = hand.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        hand_path = motion.trajectory.positions[:, :, list(hand_target.joint_ids)]
+        if not torch.allclose(
+            hand_path, grasp_command[:, None, :].expand_as(hand_path), atol=1e-5, rtol=0
+        ):
+            raise ValueError(
+                "external transport must preserve the configured grasp command"
+            )
+        return self.build_plan(
+            request,
+            context,
+            success=motion.success & eligible,
+            trajectory=motion.trajectory,
+            segment_lengths=dict(motion.segment_lengths),
+            replannable=False,
+            diagnostics=PlannerDiagnostics(
+                backend="external_nominal", metadata=motion.provenance()
+            ),
+        )
 
     def _plan(
         self,

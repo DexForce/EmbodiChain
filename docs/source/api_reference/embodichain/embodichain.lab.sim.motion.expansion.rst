@@ -48,6 +48,9 @@ and persistence confirmations; this package does not instantiate them.
    SPATIAL_METHODS
    TrajectoryPhase
    TrajectoryTemplate
+   Real2SimSourceAdapter
+   MappedRetimeResult
+   retime_with_time_map
    TASK_SPACE_RESIDUAL_OPERATOR
    TaskSpaceDeformationConstraint
    TaskSpaceTrajectory
@@ -159,6 +162,14 @@ the package itself does not write or verify storage.
 
 .. autoclass:: TrajectoryTemplate
    :members:
+
+.. autoclass:: Real2SimSourceAdapter
+   :members:
+
+.. autoclass:: MappedRetimeResult
+   :members:
+
+.. autofunction:: retime_with_time_map
 
 .. autoclass:: CandidateIdentity
    :members:

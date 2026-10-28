@@ -1,0 +1,142 @@
+# Synthetic Real2Sim reference
+
+This example uses the existing UR5 and DH-PGI primitive cube/platform scene.
+`sample/` contains a simulator-generated, verified nominal reference: the
+original source JSON/NPZ, three portable prepared prototype bundles, the actual
+T+1 state and T submitted commands, a report and a TCP comparison plot. Its
+origin is `synthetic_reference`; TCP poses in the source are `fk_derived`.
+It is not a real-robot qualification dataset.
+
+`acceptance_report.json` records the fixed 54-case diagnostic run, action-trace
+coverage, two additional target-yaw checks and a seed-reproducibility check.
+Its explicit collision and persistence qualification flags remain false.
+
+`sample_geometry_v3/` is a separate synthetic reference with pinned robot,
+object and support geometry. Its Pick close phase is longer than the original
+sample, so its commanded finger velocity fits the explicit simulation budget.
+The profile uses the URDF arm speed bounds and a conservative synthetic
+finger-speed budget; acceleration values are simulation assumptions. The
+[manufacturer's PGI-140-80 product data](https://www.dh-robotics.com/wp-content/uploads/2022/01/PGI-Series.pdf)
+states full-stroke opening/closing time, but does not specify the joint
+acceleration limits used here. These budgets do not establish real-device
+qualification.
+
+`acceptance_report_v3.json` is the independent audit of the earlier 54-episode
+source-qualified synthetic run, using `collection.tabletop.legacy-v3.yaml`.
+One target-X-plus joint-residual attempt was
+rejected near the acceleration limit and succeeded after a reset; the report
+retains that failed attempt. `reproducibility_report_v3.json` and
+`negative_report_v3.json` record a same-seed repeat and an unreachable-object
+failure respectively. These results describe the recorded runs, not every
+pose in the surrounding workspace.
+
+`reproducibility_headroom_report.json` records two further runs of the earlier
+high-acceleration target-X-plus joint-residual case with the headroom policy
+enabled. It compares episode and call candidate identities, prototype hashes,
+locked joint indices, receipts and measured final object positions.
+`acceptance_report_headroom.json` records the resulting 54/54 independently
+audited matrix with no failed attempts; its nine dataset and per-shard report
+paths refer to the local recorded artifacts. No untested workspace region or
+continuous-time motion is implied by that result.
+
+The B=1 source-qualified `run-task` path selects one layout and recipe per
+episode, validates sampled plan and actual-state collision geometry, and writes
+the actual T+1 observations, submitted actions, source bundles and trace to a
+synchronous LeRobot dataset. A matching receipt is published before reset.
+The profile declares all 9 layouts and 6 recipes in their fixed order:
+
+```bash
+embodichain run-task \
+  --gym-config examples/expansion/trajectory/real2sim/task.ur5.recorded.yaml \
+  --real2sim-profile examples/expansion/trajectory/real2sim/collection.tabletop.yaml \
+  --dataset-dir /tmp/real2sim-dataset --device cpu --headless \
+  --renderer no-render --disable-sensor --max_episodes 54
+
+python examples/expansion/trajectory/real2sim/audit.py \
+  --dataset /tmp/real2sim-dataset/ur5_tabletop_real2sim_000 \
+  --profile examples/expansion/trajectory/real2sim/collection.tabletop.yaml \
+  --output /tmp/real2sim-acceptance-report.json
+```
+
+The collision result is sampled, not continuous-time. Grasp closure is
+geometrically projected at first sampled contact for plan validation and the
+executed robot/object states are checked independently. The current tabletop
+owner accepts a fixed-base, scalar-joint robot, a dynamic box, a static box and
+the default ground plane; unsupported physical topology is rejected.
+The initial tabletop collection host requires one Pick → MoveHeldObject → Place
+sequence. The underlying source bindings use call occurrences and can be used
+by other hosts with different supported sequential programs.
+The current profile also locks joints whose nominal speed or acceleration is
+at least 95% of its effective limit before sampling joint residuals. Other
+authorized joints retain the configured residual scale, and each call records
+its locked joint indices and names.
+Use the dataset path printed by `run-task`; the example suffix `000` applies
+when the destination is initially empty. The independent audit checks schedule completeness, receipts, asset and source
+hashes, actual T+1 arrays, hard-event mappings, per-phase duration, measured
+placement and stored IK and motion-limit metrics. Protected same-grid samples
+are enforced by the plan adapter and covered by focused software tests.
+
+For independent B=1 shards, with the six recipes still collected sequentially
+within each layout, run:
+
+```bash
+python examples/expansion/trajectory/real2sim/matrix_run_task.py \
+  --task examples/expansion/trajectory/real2sim/task.ur5.recorded.yaml \
+  --profile examples/expansion/trajectory/real2sim/collection.tabletop.yaml \
+  --output /tmp/real2sim-sharded-acceptance --device cpu --jobs 3
+```
+
+The resulting report links nine separately persisted datasets. The earlier
+single-dataset run remains available as its own evidence.
+
+The source binding belongs under the existing `runtime_services` mapping of an
+integration file. For example, the first compiled call in this checked-in
+reference can be declared as follows (paths are relative to that integration
+file):
+
+```yaml
+nominal_motion_sources:
+  - call_index: 0
+    program_fingerprint: 091319bf0fd5ab5f838e075f2a6bc52b86e571c4eb890ed424b7433f1edacc70
+    provider_id: real2sim.prototype
+    revision: '1'
+    prototype_manifest: sample/prototypes/0/prototype.json
+    prototype_sha256: ae83c4abe300958f97b0fc82312cb9792bee967d20e9d0702d2170d8391455fc
+    object_entity_id: cube
+    authority: qpos
+    gripper_mode: semantic
+    require_collision_validation: true
+```
+
+Add separate entries for the transport and place occurrences when deploying a
+complete program. Each entry is pinned by the compiled program and prototype
+hash; Cartesian transfer also declares the target entity and `eef_pose`
+authority. Ordinary configured sources require a backend collision checker;
+the tabletop collection path pairs its configured sources with a host-owned
+phase-aware guard. The older diagnostic runners use programmatic bindings and
+keep their collision opt-out explicit.
+
+From an installed checkout with DexSim and the bundled task/robot extensions:
+
+```bash
+embodichain real2sim validate examples/expansion/trajectory/real2sim/sample/prototypes/0/prototype.json
+embodichain real2sim prepare examples/expansion/trajectory/real2sim/sample/sources/0/trajectory.json --joints examples/expansion/trajectory/real2sim/joints.ur5.json --control-dt 0.04 --output /tmp/real2sim-prepared-pick
+python examples/expansion/trajectory/real2sim/capture.py --output-dir /tmp/real2sim-reference --device cpu
+python examples/expansion/trajectory/real2sim/replay.py --reference-dir /tmp/real2sim-reference --output-dir /tmp/real2sim-replay --diagnostic-no-collision-check
+python examples/expansion/trajectory/real2sim/layout_replay.py --reference-dir /tmp/real2sim-reference --output-dir /tmp/real2sim-one --layout object_x_plus --recipe joint_7 --diagnostic-no-collision-check
+python examples/expansion/trajectory/real2sim/matrix.py --reference-dir /tmp/real2sim-reference --output-dir /tmp/real2sim-matrix --diagnostic-no-collision-check
+```
+
+The matrix runner executes all nine requested layouts and all six recipes in
+separate B=1 simulator processes. Each case retains a report, failure reason,
+actual actions and states when available, call-level plan-variant arrays and a
+typed action-to-plan trace. Effect-gate repetitions retain their plan index;
+other runtime holds are explicitly marked as unassociated with a plan sample.
+The reported retiming acceleration values for the example gripper are explicit
+diagnostic assumptions, while arm values are constrained by the motion policy.
+
+The legacy diagnostic flags do not submit a dataset or certify collisions.
+`matrix.py --validate-sampled-collision --save-lerobot` can separately report
+sampled geometry and receipt results, but those cases still use its diagnostic
+motion-budget assumptions. The source-qualified `run-task` path above uses the
+explicit profile budgets and independently validates each resulting episode.

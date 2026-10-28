@@ -22,9 +22,18 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Depth sidecars | `embodichain/data_pipeline/depth_video/writer.py`, `reader.py` |
 | Offline collection retries and final partial batch | `embodichain/lab/scripts/run_task.py` |
 | File-only validation and grouped quality splits | `embodichain/data_pipeline/datasets/inspection.py`; `embodichain dataset validate\|split` |
+| Annotated real2sim source/prototype preparation and verification | `embodichain/data_pipeline/real2sim/`; `embodichain real2sim prepare\|validate` |
 | Durable commit diagnostics and metadata repair | `embodichain/data_pipeline/recording/journal.py`; `embodichain dataset recover` |
 | NeRD-specific HDF5 windows and teacher collection | `extensions/embodichain_models/embodichain_models/dynamics/nerd/data.py` and `examples/learning/nerd/_support/_generation.py`; contracts in [neural dynamics](../neural-dynamics/neural-dynamics.md) |
 | Isolated LeRobot 0.6.1 language/depth conversion | `tools/lerobot_export/` (Python >=3.12, independent dependencies) |
+
+Real2Sim normalization keeps source qpos, raw velocity, optional command and
+pose evidence separate. Phases and source-frame declarations are explicit;
+hard events must survive the control grid. JSON/NPZ bundles disable pickle and
+verify content digests. A qpos-only prototype supports fixed-scene replay;
+tabletop Cartesian transfer needs source TCP poses. Prototype preparation and
+planning do not establish collision freedom or physical task success. See
+[Real2Sim motion](real2sim.md) for ownership and source binding.
 
 Read [online sampling](online-sampling.md) for worker states, refill, shared
 errors, action schemas, sample provenance, causal histories and example-runner

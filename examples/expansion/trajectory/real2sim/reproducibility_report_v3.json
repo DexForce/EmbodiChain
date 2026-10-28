@@ -1,0 +1,29 @@
+{
+  "origin": "synthetic_reference",
+  "layout": "object_x_plus",
+  "recipe": "joint_7",
+  "seed": 7,
+  "runs": 2,
+  "episode_candidate_ids_match": true,
+  "call_candidate_ids_match": [
+    true,
+    true,
+    true
+  ],
+  "call_variant_ordinals_match": [
+    true,
+    true,
+    true
+  ],
+  "prototype_hashes_match": [
+    true,
+    true,
+    true
+  ],
+  "final_object_position_difference_m": 0.0004471157444640994,
+  "position_tolerance_m": 0.025,
+  "confirmed_receipts": [
+    true,
+    true
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "origin": "synthetic_reference",
+  "layout": "target_x_plus",
+  "recipe": "joint_7",
+  "seed": 7,
+  "motion_headroom_fraction": 0.95,
+  "runs": 2,
+  "dataset_copies": [
+    "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-repro/1/ur5_tabletop_real2sim_000",
+    "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-repro/2/ur5_tabletop_real2sim_000"
+  ],
+  "original_receipt_storage_ids": [
+    "/tmp/real2sim-target-headroom-1/ur5_tabletop_real2sim_000#5adf9280-9e8a-520a-aa16-95ef2df75b9a",
+    "/tmp/real2sim-target-headroom-2/ur5_tabletop_real2sim_000#5adf9280-9e8a-520a-aa16-95ef2df75b9a"
+  ],
+  "episode_candidate_ids_match": true,
+  "call_candidate_ids_match": [
+    true,
+    true,
+    true
+  ],
+  "call_variant_ordinals_match": [
+    true,
+    true,
+    true
+  ],
+  "prototype_hashes_match": [
+    true,
+    true,
+    true
+  ],
+  "locked_joint_indices_match": [
+    true,
+    true,
+    true
+  ],
+  "locked_joint_indices": [
+    [
+      2,
+      3
+    ],
+    [],
+    [
+      3
+    ]
+  ],
+  "failed_episode_attempts": [
+    0,
+    0
+  ],
+  "final_object_position_difference_m": 0.00027759719523601234,
+  "position_tolerance_m": 0.025,
+  "confirmed_receipts": [
+    true,
+    true
+  ],
+  "note": "Receipt storage IDs reflect their original run paths; dataset copies retain the original evidence unchanged."
+}

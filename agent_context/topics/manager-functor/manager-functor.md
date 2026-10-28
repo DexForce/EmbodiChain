@@ -129,6 +129,9 @@ focused environment integration case when invocation order changes.
 - Incorrect interval rows: distinguish global and per-row interval counters.
 - Corrupted asynchronous recordings: snapshot owned CPU payloads before rollout
   buffers are cleared; follow the recorder's persistence contract.
+- Source-bound Real2Sim recordings need the synchronous receipt and typed
+  action-trace contract in [Real2Sim motion](../data-pipeline/real2sim.md),
+  not the ordinary reset-time recorder alone.
 
 ### Flat action ownership
 

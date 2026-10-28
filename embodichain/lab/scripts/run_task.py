@@ -511,10 +511,53 @@ def generate_function(
     max_attempts = int(kwargs.pop("max_attempts", 3))
     reset_before = bool(kwargs.pop("reset_before", True))
     expansion_record_sink = kwargs.pop("_expansion_record_sink", None)
+    real2sim_owner = kwargs.pop("_real2sim_owner", None)
     if expansion_record_sink is not None and not callable(expansion_record_sink):
         raise TypeError("_expansion_record_sink must be callable or None")
     if max_attempts < 1:
         raise ValueError(f"max_attempts must be at least 1, got {max_attempts}.")
+    target = _env_target(env)
+    adapter = getattr(target, "_task_program_adapter", None)
+    external_source = kwargs.get("nominal_source_factory") is not None or bool(
+        getattr(adapter, "_configured_nominal_sources", ())
+    )
+    cfg = getattr(target, "cfg", None)
+    ordinary_recording = getattr(target, "dataset_manager", None) is not None or (
+        bool(getattr(cfg, "record_trajectory", False))
+        and bool(getattr(cfg, "trajectory_auto_save", False))
+    )
+    if real2sim_owner is not None:
+        from embodichain.lab.gym.envs.managers.real2sim_collection import (
+            Real2SimRunTaskOwner,
+        )
+
+        if not isinstance(real2sim_owner, Real2SimRunTaskOwner):
+            raise TypeError("_real2sim_owner must be a Real2SimRunTaskOwner")
+        if expansion_record_sink is not None or kwargs:
+            raise ValueError("Real2Sim owner exclusively selects sources and expansion")
+        if save_env_ids is not None and tuple(save_env_ids) != (0,):
+            raise ValueError("Real2Sim collection requires the single B=1 row")
+        if execution_cfg is not None and not isinstance(
+            execution_cfg, DemoExecutionCfg
+        ):
+            raise TypeError("execution_cfg must be a DemoExecutionCfg or None.")
+        if execution_cfg is not None and execution_cfg.mode != "continuous":
+            raise ValueError("Real2Sim collection requires continuous episodes")
+        if save_video:
+            raise ValueError("Real2Sim synchronous collection does not record video")
+        return _generate_real2sim_episode(
+            env,
+            owner=real2sim_owner,
+            episode_index=time_id,
+            max_attempts=max_attempts,
+            reset_before=reset_before,
+            execution_cfg=execution_cfg,
+        )
+    if external_source and ordinary_recording:
+        raise ValueError(
+            "source-bound collection requires the Real2Sim receipt and execution-trace "
+            "path; ordinary run-task recording cannot yet commit this episode"
+        )
     normalized_save_env_ids = _normalize_save_env_ids(env, save_env_ids)
     save_failed_episodes = _save_failed_episodes_enabled(env)
     if execution_cfg is None:
@@ -611,6 +654,75 @@ def generate_function(
                 )
             )
 
+    return False
+
+
+def _generate_real2sim_episode(
+    env: Any,
+    *,
+    owner: Any,
+    episode_index: int,
+    max_attempts: int,
+    reset_before: bool,
+    execution_cfg: DemoExecutionCfg | None,
+) -> bool:
+    """Collect one source-backed episode without resetting an uncertain write."""
+    if int(getattr(_env_target(env), "num_envs", 0)) != 1:
+        raise ValueError("Real2Sim run-task collection currently requires B=1")
+    if owner.pending_episode is not None:
+        raise RuntimeError(
+            "unconfirmed Real2Sim submission must be repaired before reset"
+        )
+    if reset_before:
+        _abort_pending_episode(env)
+    for attempt in range(max_attempts):
+        stats = getattr(_env_target(env), "_collection_stats", None)
+        if isinstance(stats, dict):
+            stats["attempts"] = stats.get("attempts", 0) + 1
+        result = None
+        failure_recorded = False
+        try:
+            segments = owner.prepare(
+                env, episode_index=episode_index, attempt_id=attempt
+            )
+            result = execute_demo_episode(
+                env,
+                episode_index=episode_index,
+                execution_cfg=execution_cfg,
+                attempt_id=attempt,
+                progress=_progress_wrapper,
+                segments=segments,
+            )
+            if not result.completed or not result.all_success:
+                failure_recorded = True
+                owner.record_failure(env, result)
+                log_warning(
+                    f"Real2Sim episode {episode_index} attempt {attempt + 1}/{max_attempts} "
+                    f"failed: {result.terminal_reason}."
+                )
+                _abort_pending_episode(env)
+                continue
+            receipt = owner.commit(env, result)
+            if not receipt.confirmed:
+                raise RuntimeError(
+                    f"Real2Sim submission {receipt.submission_id} is unconfirmed: "
+                    f"{receipt.error}. Pending evidence: {owner.staged_path}. "
+                    "Repair this episode before retrying."
+                )
+            return True
+        except BaseException as error:
+            if owner.pending_episode is None:
+                if result is not None and not failure_recorded:
+                    try:
+                        owner.record_failure(
+                            env, result, error=f"{type(error).__name__}: {error}"
+                        )
+                    except Exception as reporting_error:
+                        error.add_note(
+                            f"Failed to retain attempt evidence: {reporting_error}"
+                        )
+                _abort_pending_episode(env)
+            raise
     return False
 
 
@@ -1351,15 +1463,26 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         preview(env)
         return
 
+    real2sim_owner = getattr(_env_target(env), "_real2sim_collection_owner", None)
+    if real2sim_owner is not None and getattr(args, "regenerate", False):
+        raise ValueError("Real2Sim collection does not regenerate source prototypes")
     if (
         getattr(args, "expansion_profile", None) is not None
         or "expansion" in gym_config
     ):
+        if real2sim_owner is not None:
+            raise ValueError(
+                "Real2Sim collection and combined expansion cannot both own an episode"
+            )
         log_info("Expansion mode enabled.", color="green")
         _run_expansion(env, args, gym_config)
         return
 
     plan = resolve_collection_plan(args, gym_config)
+    if real2sim_owner is not None and real2sim_owner.pending_episode is not None:
+        raise RuntimeError(
+            "unconfirmed Real2Sim submission must be repaired before reset"
+        )
     _abort_pending_episode(env, count_discard=False)
     num_envs = int(getattr(_env_target(env), "num_envs", 1))
     if num_envs < 1:
@@ -1409,7 +1532,15 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         while committed < plan.target_episodes:
             batch_size = min(num_envs, plan.target_episodes - committed)
             stats["prepare_reset_count"] += 1
-            env.reset()
+            if real2sim_owner is None:
+                env.reset()
+            else:
+                env.reset(options={"save_data": False})
+            collection_kwargs = (
+                {"regenerate": getattr(args, "regenerate", False)}
+                if real2sim_owner is None
+                else {"_real2sim_owner": real2sim_owner}
+            )
             generated = generate_function(
                 env,
                 time_id=cursor,
@@ -1417,9 +1548,9 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
                 save_video=getattr(args, "save_video", False),
                 debug_mode=getattr(args, "debug_mode", False),
                 save_env_ids=tuple(range(batch_size)),
-                regenerate=getattr(args, "regenerate", False),
                 max_attempts=plan.max_attempts,
                 reset_before=False,
+                **collection_kwargs,
             )
             stats["batch_count"] += 1
             if not generated:
@@ -1432,6 +1563,12 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
             cursor += batch_size
             stats["committed_episodes"] = committed
             episode_progress.update(batch_size)
+
+    if real2sim_owner is not None:
+        report_path = real2sim_owner.write_collection_report(
+            expected_episodes=committed
+        )
+        log_info(f"Verified Real2Sim collection report: {report_path}")
 
     episode_label = "episode" if committed == 1 else "episodes"
     batch_label = "batch" if stats["batch_count"] == 1 else "batches"
@@ -1524,6 +1661,12 @@ def _create_parser() -> argparse.ArgumentParser:
         help="Path to a declarative Task Program (.json, .yaml, or .yml).",
     )
     parser.add_argument(
+        "--real2sim-profile",
+        type=str,
+        default=None,
+        help="Inert B=1 tabletop Real2Sim collection profile; source bindings remain in the integration.",
+    )
+    parser.add_argument(
         "--debug-mode",
         action="store_true",
         help="Log the structured trace for each failed demo attempt.",
@@ -1606,8 +1749,12 @@ def _abort_and_close_env(env: Any, *, exit_process: bool | None = None) -> None:
     """
     abort_error: BaseException | None = None
     close_error: BaseException | None = None
+    owner = getattr(_env_target(env), "_real2sim_collection_owner", None)
     try:
-        _abort_pending_episode(env, count_discard=False)
+        if owner is None or owner.pending_episode is None:
+            _abort_pending_episode(env, count_discard=False)
+        if owner is not None:
+            owner.finalize()
     except BaseException as error:
         abort_error = error
     try:
@@ -1666,6 +1813,40 @@ def cli(argv: Sequence[str] | None = None) -> None:
     execute_init_hooks()
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
+
+    real2sim_profile = None
+    if getattr(args, "real2sim_profile", None) is not None:
+        from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
+            load_real2sim_tabletop_profile,
+        )
+
+        if (
+            args.replay
+            or args.preview
+            or args.expansion_profile is not None
+            or "expansion" in gym_config
+        ):
+            raise ValueError(
+                "Real2Sim collection cannot be combined with replay, preview or another expansion owner"
+            )
+        if (
+            not isinstance(args.expansion_dataset_dir, str)
+            or not args.expansion_dataset_dir.strip()
+        ):
+            raise ValueError("--real2sim-profile requires a nonempty --dataset-dir")
+        real2sim_profile = load_real2sim_tabletop_profile(args.real2sim_profile)
+        if env_cfg.num_envs != 1:
+            raise ValueError("Real2Sim collection requires B=1")
+        schedule_size = len(real2sim_profile.layouts) * len(real2sim_profile.recipes)
+        if resolve_collection_plan(args, gym_config).target_episodes > schedule_size:
+            raise ValueError("collection target exceeds the Real2Sim profile schedule")
+        env_cfg.init_rollout_buffer = True
+        env_cfg.record_trajectory = True
+        env_cfg.trajectory_auto_save = False
+        env_cfg.filter_dataset_saving = True
+        log_info(
+            "Real2Sim profile owns the synchronous recorder; ordinary dataset saving is disabled."
+        )
 
     expansion_request = None
     if (
@@ -1729,6 +1910,15 @@ def cli(argv: Sequence[str] | None = None) -> None:
     # destruction + GC + scene-barrier so we still exit cleanly.
     body_error: BaseException | None = None
     try:
+        if real2sim_profile is not None:
+            from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
+                install_real2sim_tabletop_owner,
+            )
+
+            env.reset(options={"save_data": False})
+            install_real2sim_tabletop_owner(
+                env, real2sim_profile, dataset_dir=args.expansion_dataset_dir
+            )
         main(args, env, gym_config)
     except BaseException as error:
         body_error = error

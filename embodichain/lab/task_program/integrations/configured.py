@@ -39,6 +39,7 @@ from ._configured_services import (
 from .catalog import (
     SimulationTaskProgramRegistration,
 )
+from .nominal import _ConfiguredPrototypeSource
 from .simulation import (
     AntipodalGraspAffordanceBinding,
     ContainerAffordanceBinding,
@@ -2227,6 +2228,7 @@ class _DecodedRuntimeServices:
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
+    nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
 
 
 def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
@@ -2242,6 +2244,7 @@ def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
                 "handover_pose_providers",
                 "registered_semantic_lowerers",
                 "control_part_evidence",
+                "nominal_motion_sources",
             }
         ),
     )
@@ -2297,11 +2300,89 @@ def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
             path=f"{path}.control_part_evidence",
         )
     )
+    nominal = []
+    for index, value in enumerate(
+        _sequence(
+            config.get("nominal_motion_sources", ()),
+            path=f"{path}.nominal_motion_sources",
+        )
+    ):
+        item_path = f"{path}.nominal_motion_sources[{index}]"
+        item = _mapping(
+            value,
+            path=item_path,
+            required=frozenset(
+                {
+                    "call_index",
+                    "program_fingerprint",
+                    "provider_id",
+                    "revision",
+                    "prototype_manifest",
+                    "prototype_sha256",
+                    "object_entity_id",
+                }
+            ),
+            optional=frozenset(
+                {
+                    "target_entity_id",
+                    "target_entity_to_reference",
+                    "authority",
+                    "gripper_mode",
+                    "require_collision_validation",
+                }
+            ),
+        )
+        if item["provider_id"] != "real2sim.prototype" or item["revision"] != "1":
+            raise ValueError(f"{item_path} names an unknown provider or revision")
+        declaration = _ConfiguredPrototypeSource(
+            call_index=_integer(
+                item["call_index"], path=f"{item_path}.call_index", minimum=0
+            ),
+            program_fingerprint=_identifier(
+                item["program_fingerprint"], path=f"{item_path}.program_fingerprint"
+            ),
+            prototype_manifest=_identifier(
+                item["prototype_manifest"], path=f"{item_path}.prototype_manifest"
+            ),
+            prototype_sha256=_identifier(
+                item["prototype_sha256"], path=f"{item_path}.prototype_sha256"
+            ),
+            object_entity_id=_identifier(
+                item["object_entity_id"], path=f"{item_path}.object_entity_id"
+            ),
+            target_entity_id=_optional_identifier(
+                item.get("target_entity_id"), path=f"{item_path}.target_entity_id"
+            ),
+            target_entity_to_reference=(
+                None
+                if item.get("target_entity_to_reference") is None
+                else _finite_tuple(
+                    item["target_entity_to_reference"],
+                    path=f"{item_path}.target_entity_to_reference",
+                    expected_length=16,
+                )
+            ),
+            authority=_identifier(
+                item.get("authority", "qpos"), path=f"{item_path}.authority"
+            ),
+            gripper_mode=_identifier(
+                item.get("gripper_mode", "recorded"), path=f"{item_path}.gripper_mode"
+            ),
+            require_collision_validation=_boolean(
+                item.get("require_collision_validation", True),
+                path=f"{item_path}.require_collision_validation",
+            ),
+        )
+        declaration.validate_source()
+        nominal.append(declaration)
+    if len({item.call_index for item in nominal}) != len(nominal):
+        raise ValueError(f"{path}.nominal_motion_sources has duplicate call indices")
     return _DecodedRuntimeServices(
         grasp_pose_generators=generators,
         handover_pose_providers=handover,
         registered_semantic_lowerers=lowerers,
         control_part_evidence=evidence,
+        nominal_motion_sources=tuple(nominal),
     )
 
 
@@ -2311,6 +2392,7 @@ class _ConfiguredTaskProgramAdapterFactory:
 
     delegate: SimulationTaskProgramAdapterFactory
     integration_fingerprint: str
+    nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
 
     @property
     def registration(self) -> SimulationTaskProgramRegistration:
@@ -2322,7 +2404,9 @@ class _ConfiguredTaskProgramAdapterFactory:
         environment: object,
     ) -> TaskProgramEnvironmentAdapter:
         """Create a live adapter for an initialized environment."""
-        return self.delegate.create_adapter(environment)
+        adapter = self.delegate.create_adapter(environment)
+        adapter._set_configured_nominal_sources(self.nominal_motion_sources)
+        return adapter
 
 
 @dataclass(frozen=True, slots=True)
@@ -2387,6 +2471,15 @@ def _decode_configured_task_program_integration(
         "grasp_pose_generators": grasp_fingerprint,
         "planner_config": deepcopy(planner_config),
     }
+    if services.nominal_motion_sources:
+        fingerprint_payload["nominal_motion_sources"] = [
+            {
+                key: value
+                for key, value in asdict(item).items()
+                if key != "prototype_manifest"
+            }
+            for item in services.nominal_motion_sources
+        ]
     integration_fingerprint = hashlib.sha256(
         json.dumps(
             fingerprint_payload,
@@ -2404,6 +2497,7 @@ def _decode_configured_task_program_integration(
     adapter_factory = _ConfiguredTaskProgramAdapterFactory(
         delegate=delegate,
         integration_fingerprint=integration_fingerprint,
+        nominal_motion_sources=services.nominal_motion_sources,
     )
     return _ConfiguredTaskProgramIntegration(
         registration=registration,

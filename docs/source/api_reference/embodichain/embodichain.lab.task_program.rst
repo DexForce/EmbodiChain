@@ -324,11 +324,23 @@ template contract.
 
    TaskProgramPlanRequest
    TaskProgramPlanTransformFactory
+   TaskProgramNominalSourceFactory
 
 .. autoclass:: TaskProgramPlanRequest
    :members:
 
 .. autoclass:: TaskProgramPlanTransformFactory
+   :members:
+
+.. autoclass:: TaskProgramNominalSourceFactory
+   :members:
+
+.. currentmodule:: embodichain.lab.task_program.integrations.nominal
+
+.. autoclass:: BoundTaskProgramNominalSources
+   :members:
+
+.. autoclass:: TracingTaskProgramNominalSources
    :members:
 
 .. currentmodule:: embodichain.lab.task_program.integrations.expansion
@@ -339,6 +351,10 @@ template contract.
    TaskProgramSourceAdapter
    TaskProgramExpansionRecord
    CombinedTaskProgramExpansionFactory
+   TaskProgramMappedRetimeFactory
+   TaskProgramMappedRetimeRecord
+   TaskProgramSameGridExpansionFactory
+   TaskProgramSameGridExpansionRecord
 
 .. autoclass:: TaskProgramSourceAdapter
    :members:
@@ -347,6 +363,18 @@ template contract.
    :members:
 
 .. autoclass:: CombinedTaskProgramExpansionFactory
+   :members:
+
+.. autoclass:: TaskProgramMappedRetimeFactory
+   :members:
+
+.. autoclass:: TaskProgramMappedRetimeRecord
+   :members:
+
+.. autoclass:: TaskProgramSameGridExpansionFactory
+   :members:
+
+.. autoclass:: TaskProgramSameGridExpansionRecord
    :members:
 
 .. currentmodule:: embodichain.lab.task_program

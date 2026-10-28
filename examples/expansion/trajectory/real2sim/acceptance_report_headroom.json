@@ -1,0 +1,4422 @@
+{
+  "origin": "synthetic_reference",
+  "execution": "independent B=1 processes; six sequential episodes per layout",
+  "jobs": 3,
+  "expected_cases": 54,
+  "validated_cases": 54,
+  "failure_count": 0,
+  "failures": [],
+  "failed_attempts": [],
+  "synthetic_matrix_complete": true,
+  "real_data_qualified": false,
+  "continuous_collision_qualified": false,
+  "velocity_limit_origin": "urdf_arm_and_synthetic_gripper_budget",
+  "acceleration_limit_origin": "synthetic_simulation_assumption",
+  "motion_headroom_fraction": 0.95,
+  "metrics": {
+    "maximum_fk_position_error_m": 0.00027450668858364224,
+    "maximum_fk_rotation_error_rad": 0.0009765625,
+    "minimum_pick_lift_m": 0.09989090263843536,
+    "maximum_placement_xy_error_m": 0.002983525861054659,
+    "maximum_held_translation_drift_m": 0.00017327696303173832,
+    "maximum_held_rotation_drift_deg": 0.5694517639450731,
+    "maximum_speed_ratio": 0.5540176696339486,
+    "maximum_acceleration_ratio": 0.9998679608047577
+  },
+  "shards": [
+    {
+      "layout": "baseline",
+      "run_task_exit_code": 0,
+      "log": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/baseline/run-task.log",
+      "dataset": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/baseline/dataset/ur5_tabletop_real2sim_000",
+      "audit": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/baseline/audit.json",
+      "error": null
+    },
+    {
+      "layout": "object_x_plus",
+      "run_task_exit_code": 0,
+      "log": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_x_plus/run-task.log",
+      "dataset": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_x_plus/dataset/ur5_tabletop_real2sim_000",
+      "audit": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_x_plus/audit.json",
+      "error": null
+    },
+    {
+      "layout": "object_x_minus",
+      "run_task_exit_code": 0,
+      "log": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_x_minus/run-task.log",
+      "dataset": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_x_minus/dataset/ur5_tabletop_real2sim_000",
+      "audit": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_x_minus/audit.json",
+      "error": null
+    },
+    {
+      "layout": "object_y_plus",
+      "run_task_exit_code": 0,
+      "log": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_y_plus/run-task.log",
+      "dataset": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_y_plus/dataset/ur5_tabletop_real2sim_000",
+      "audit": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_y_plus/audit.json",
+      "error": null
+    },
+    {
+      "layout": "object_y_minus",
+      "run_task_exit_code": 0,
+      "log": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_y_minus/run-task.log",
+      "dataset": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_y_minus/dataset/ur5_tabletop_real2sim_000",
+      "audit": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_y_minus/audit.json",
+      "error": null
+    },
+    {
+      "layout": "object_yaw_plus",
+      "run_task_exit_code": 0,
+      "log": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_yaw_plus/run-task.log",
+      "dataset": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_yaw_plus/dataset/ur5_tabletop_real2sim_000",
+      "audit": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_yaw_plus/audit.json",
+      "error": null
+    },
+    {
+      "layout": "object_yaw_minus",
+      "run_task_exit_code": 0,
+      "log": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_yaw_minus/run-task.log",
+      "dataset": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_yaw_minus/dataset/ur5_tabletop_real2sim_000",
+      "audit": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/object_yaw_minus/audit.json",
+      "error": null
+    },
+    {
+      "layout": "target_x_plus",
+      "run_task_exit_code": 0,
+      "log": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/target_x_plus/run-task.log",
+      "dataset": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/target_x_plus/dataset/ur5_tabletop_real2sim_000",
+      "audit": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/target_x_plus/audit.json",
+      "error": null
+    },
+    {
+      "layout": "target_x_minus",
+      "run_task_exit_code": 0,
+      "log": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/target_x_minus/run-task.log",
+      "dataset": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/target_x_minus/dataset/ur5_tabletop_real2sim_000",
+      "audit": "/home/dex/.codex/visualizations/2026/10/26/01a1796c-b27c-7092-bc5c-353120e49e1f/real2sim-headroom-acceptance/target_x_minus/audit.json",
+      "error": null
+    }
+  ],
+  "cases": [
+    {
+      "layout": "baseline",
+      "recipe": "nominal",
+      "steps": 628,
+      "candidate_id": "candidate:3659b0c90e336384d194862a47cbb30fcd10ded21a81258f5039a019cb6eabb6",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002983525861054659,
+      "lift_m": 0.10055890679359436,
+      "held_translation_drift_m": 8.209244746974347e-05,
+      "held_rotation_drift_deg": 0.2873986265627336,
+      "fk_position_error_m": 3.0863753863741294e-07,
+      "fk_rotation_error_rad": 0.000845727976411581,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.981092496861181,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 115,
+          "expected_samples": 115,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "baseline",
+      "recipe": "joint_7",
+      "steps": 628,
+      "candidate_id": "candidate:1f3f1eb75878131b797ceba8a207adc2ede2a9e8e59dd50177da3cd11b5d4868",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0028499835170805454,
+      "lift_m": 0.10038797557353973,
+      "held_translation_drift_m": 9.432384797032793e-05,
+      "held_rotation_drift_deg": 0.2782020301228103,
+      "fk_position_error_m": 3.677297399917734e-07,
+      "fk_rotation_error_rad": 0.0009765625,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9799004039123825,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 115,
+          "expected_samples": 115,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "baseline",
+      "recipe": "joint_11",
+      "steps": 628,
+      "candidate_id": "candidate:4c866795eb6da2ddb8959d52625e181cec89d5bfd5d1ab1812d5d45aaf44a274",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0028047936502844095,
+      "lift_m": 0.10056370496749878,
+      "held_translation_drift_m": 5.980365945969854e-05,
+      "held_rotation_drift_deg": 0.22840010307236155,
+      "fk_position_error_m": 3.408589748232771e-07,
+      "fk_rotation_error_rad": 0.000845727976411581,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9799004039123825,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 115,
+          "expected_samples": 115,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "baseline",
+      "recipe": "task_space",
+      "steps": 628,
+      "candidate_id": "candidate:c026e89b879eb8eb52d2b1b0270c0c9ae9daece93d8d30c5b6db3adf4f8fadfa",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002831668360158801,
+      "lift_m": 0.10039448738098145,
+      "held_translation_drift_m": 9.32668748167542e-05,
+      "held_rotation_drift_deg": 0.28638059917394654,
+      "fk_position_error_m": 4.132218407448818e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9939074960607651,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 115,
+          "expected_samples": 115,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "baseline",
+      "recipe": "time_115",
+      "steps": 698,
+      "candidate_id": "candidate:29da471185dcdf7397fba633d702ddc995d7ce4b9f41c870176ab6257162b1a1",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002866694936528802,
+      "lift_m": 0.10058441758155823,
+      "held_translation_drift_m": 7.150093609319081e-05,
+      "held_rotation_drift_deg": 0.261623928843073,
+      "fk_position_error_m": 3.295145063475502e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9655952885268017,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 133,
+          "expected_samples": 133,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 183,
+          "expected_samples": 183,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 160,
+          "expected_samples": 160,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 51,
+          "expected_samples": 51,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "baseline",
+      "recipe": "time_130",
+      "steps": 766,
+      "candidate_id": "candidate:9fb2bfa4708ee9b7f4cfa273d09c5b4f9b8b9916d869098949ce9b16cb3ee73f",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0028149676509201527,
+      "lift_m": 0.10051696002483368,
+      "held_translation_drift_m": 8.612226086453874e-05,
+      "held_rotation_drift_deg": 0.36235455578138687,
+      "fk_position_error_m": 3.440200089244172e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9655952885268017,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 150,
+          "expected_samples": 150,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 207,
+          "expected_samples": 207,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 181,
+          "expected_samples": 181,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 57,
+          "expected_samples": 57,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_x_plus",
+      "recipe": "nominal",
+      "steps": 707,
+      "candidate_id": "candidate:438fc6e9bea76991e6fcab31bb7c562e070dde65e6b55cb67ba07774d9b9e113",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0028403708711266518,
+      "lift_m": 0.10060785710811615,
+      "held_translation_drift_m": 0.00017327696303173832,
+      "held_rotation_drift_deg": 0.5548390299919119,
+      "fk_position_error_m": 0.00027450668858364224,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9989738910931601,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_x_plus",
+      "recipe": "joint_7",
+      "steps": 707,
+      "candidate_id": "candidate:aee29b1c3442ea12a63d5cdb4bf166816915ca48d0559bc5896d2e8e4450294b",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0029360970947891474,
+      "lift_m": 0.10060237348079681,
+      "held_translation_drift_m": 4.746445466278833e-05,
+      "held_rotation_drift_deg": 0.18003548131369482,
+      "fk_position_error_m": 0.00027450668858364224,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9989738910931601,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_x_plus",
+      "recipe": "joint_11",
+      "steps": 707,
+      "candidate_id": "candidate:796c1484dcc95a8d7e6c176984f466c727c4fd4d790c43362533b86e26516269",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002710185945034027,
+      "lift_m": 0.10052376985549927,
+      "held_translation_drift_m": 7.869458231030026e-05,
+      "held_rotation_drift_deg": 0.24841136284710455,
+      "fk_position_error_m": 0.00027450668858364224,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9989738910931601,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_x_plus",
+      "recipe": "task_space",
+      "steps": 707,
+      "candidate_id": "candidate:4b210e66b627a245dd019d77c90c100083d35ac05c0dabd7841ccd3435e040b8",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002881857566535473,
+      "lift_m": 0.10061508417129517,
+      "held_translation_drift_m": 0.00017163766525743015,
+      "held_rotation_drift_deg": 0.5694517639450731,
+      "fk_position_error_m": 0.00027450668858364224,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9989738910931601,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_x_plus",
+      "recipe": "time_115",
+      "steps": 788,
+      "candidate_id": "candidate:064d189a99fc6bab6ecd2085e3c4b8d5a3c634d354a5e03842146a5f41474d65",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002860515145584941,
+      "lift_m": 0.10052765905857086,
+      "held_translation_drift_m": 7.84202253326838e-05,
+      "held_rotation_drift_deg": 0.26153985412686137,
+      "fk_position_error_m": 0.00027450668858364224,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9989738910931601,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 223,
+          "expected_samples": 223,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 183,
+          "expected_samples": 183,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 160,
+          "expected_samples": 160,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 51,
+          "expected_samples": 51,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_x_plus",
+      "recipe": "time_130",
+      "steps": 868,
+      "candidate_id": "candidate:bf30c31773577f91889c1dc127ac14d030d868ac175ca7b7ae24b57dbc98529a",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002849532989785075,
+      "lift_m": 0.10064387321472168,
+      "held_translation_drift_m": 6.706461477549903e-05,
+      "held_rotation_drift_deg": 0.19762167748474532,
+      "fk_position_error_m": 0.00027450668858364224,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9989738910931601,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 252,
+          "expected_samples": 252,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 207,
+          "expected_samples": 207,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 181,
+          "expected_samples": 181,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 57,
+          "expected_samples": 57,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_x_minus",
+      "recipe": "nominal",
+      "steps": 707,
+      "candidate_id": "candidate:8726e53a5feb0bcc0da709c61364b43d2d636cf4316764fb34c463b04073b7ea",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002714170143008232,
+      "lift_m": 0.10006110370159149,
+      "held_translation_drift_m": 0.00016233430347865785,
+      "held_rotation_drift_deg": 0.5394924438306887,
+      "fk_position_error_m": 6.882572779431939e-05,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9864569151307757,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_x_minus",
+      "recipe": "joint_7",
+      "steps": 707,
+      "candidate_id": "candidate:b78582876b938b2b682775b3eb0ad421191dcc606951781bc53684f13cbf976f",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002654092852026224,
+      "lift_m": 0.09989586472511292,
+      "held_translation_drift_m": 6.984853622781936e-05,
+      "held_rotation_drift_deg": 0.22653171647812434,
+      "fk_position_error_m": 6.882572779431939e-05,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9864569151307757,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_x_minus",
+      "recipe": "joint_11",
+      "steps": 707,
+      "candidate_id": "candidate:b33b3fed193bfb569279e39b38d5e88fd0511ba6c834a05a574e342201cef8b1",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0026369004044681787,
+      "lift_m": 0.0998992919921875,
+      "held_translation_drift_m": 8.50436633559123e-05,
+      "held_rotation_drift_deg": 0.26272551448510695,
+      "fk_position_error_m": 6.882572779431939e-05,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9864569151307757,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_x_minus",
+      "recipe": "task_space",
+      "steps": 707,
+      "candidate_id": "candidate:128f8928e03c6e159ab19bd59f621146212ac9eef6a4f18a63cb325c7818cdfd",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0024966823402792215,
+      "lift_m": 0.09989090263843536,
+      "held_translation_drift_m": 7.05022554680851e-05,
+      "held_rotation_drift_deg": 0.23404142412539486,
+      "fk_position_error_m": 6.882572779431939e-05,
+      "fk_rotation_error_rad": 0.0009765625,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9933114495863672,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_x_minus",
+      "recipe": "time_115",
+      "steps": 788,
+      "candidate_id": "candidate:b97a5a21d8f15fd0d626ed2c5f522d7edacee15737fbe7d7ac9ec15e70c56383",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002592420903965831,
+      "lift_m": 0.09990942478179932,
+      "held_translation_drift_m": 8.351233834907178e-05,
+      "held_rotation_drift_deg": 0.261945870890835,
+      "fk_position_error_m": 6.882572779431939e-05,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9194016867608577,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 223,
+          "expected_samples": 223,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 183,
+          "expected_samples": 183,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 160,
+          "expected_samples": 160,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 51,
+          "expected_samples": 51,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_x_minus",
+      "recipe": "time_130",
+      "steps": 868,
+      "candidate_id": "candidate:5e5657449cf985a691ead626bc09eaa8d3b0632b6292208c9b5323d7a93ac441",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0027685428503900766,
+      "lift_m": 0.10005052387714386,
+      "held_translation_drift_m": 5.654689687163434e-05,
+      "held_rotation_drift_deg": 0.21007651895220422,
+      "fk_position_error_m": 6.882572779431939e-05,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9194016867608577,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 252,
+          "expected_samples": 252,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 207,
+          "expected_samples": 207,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 181,
+          "expected_samples": 181,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 57,
+          "expected_samples": 57,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_y_plus",
+      "recipe": "nominal",
+      "steps": 707,
+      "candidate_id": "candidate:1bc5a78e2ba0651ff8d2e9c4e72258efc838a240df87eed004e89e8495073a1b",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0026147994212806225,
+      "lift_m": 0.10051636397838593,
+      "held_translation_drift_m": 9.653696970613102e-05,
+      "held_rotation_drift_deg": 0.31691991199349556,
+      "fk_position_error_m": 3.5388296737437486e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9799004039123825,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_y_plus",
+      "recipe": "joint_7",
+      "steps": 707,
+      "candidate_id": "candidate:7a78dad560d637f6c6173257bff88e0b9d19aa4c3f80a7517b161cd2c2e6f7a9",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002788974205031991,
+      "lift_m": 0.10050944983959198,
+      "held_translation_drift_m": 9.915196473301011e-05,
+      "held_rotation_drift_deg": 0.3373571302750519,
+      "fk_position_error_m": 3.302086781786784e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9799004039123825,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_y_plus",
+      "recipe": "joint_11",
+      "steps": 707,
+      "candidate_id": "candidate:1c094eb9656f2fe85fc063c82f6bf18588fc76b7d92e35aa4499aef74e5a3c4f",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0027972697280347347,
+      "lift_m": 0.1004592627286911,
+      "held_translation_drift_m": 9.519747694375449e-05,
+      "held_rotation_drift_deg": 0.3415497164368216,
+      "fk_position_error_m": 3.3453022751928074e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9799004039123825,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_y_plus",
+      "recipe": "task_space",
+      "steps": 707,
+      "candidate_id": "candidate:fc173dbb80360c5cb2b81ebb7c05569111b39b6385252b54f15c67f7e938235f",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0024763213004916906,
+      "lift_m": 0.10033327341079712,
+      "held_translation_drift_m": 9.123204915390829e-05,
+      "held_rotation_drift_deg": 0.3042891690582776,
+      "fk_position_error_m": 3.302086781786784e-07,
+      "fk_rotation_error_rad": 0.0009765625,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.992417379874767,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_y_plus",
+      "recipe": "time_115",
+      "steps": 788,
+      "candidate_id": "candidate:d974cfc2e3099f0fa0f6da1f7dd4440e5a7ee61e27be473a75fa53474b5e63bb",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0027852829080075026,
+      "lift_m": 0.1005098968744278,
+      "held_translation_drift_m": 9.889741194497546e-05,
+      "held_rotation_drift_deg": 0.32718002387363365,
+      "fk_position_error_m": 3.3922648867701355e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9739399391683913,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 223,
+          "expected_samples": 223,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 183,
+          "expected_samples": 183,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 160,
+          "expected_samples": 160,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 51,
+          "expected_samples": 51,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_y_plus",
+      "recipe": "time_130",
+      "steps": 868,
+      "candidate_id": "candidate:b580bc9d4bc15ff40c54b7618f4bb1ad9d93966f2c60255533ac67d03014b89e",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.00273018516600132,
+      "lift_m": 0.10038033127784729,
+      "held_translation_drift_m": 9.465724803942813e-05,
+      "held_rotation_drift_deg": 0.31139016063809904,
+      "fk_position_error_m": 3.990062396042049e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9739399391683913,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 252,
+          "expected_samples": 252,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 207,
+          "expected_samples": 207,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 181,
+          "expected_samples": 181,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 57,
+          "expected_samples": 57,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_y_minus",
+      "recipe": "nominal",
+      "steps": 707,
+      "candidate_id": "candidate:b9808d0be69126ea3e43fd56999cec503ad51b8b346298ae48692d1cb554b024",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0024685319513082504,
+      "lift_m": 0.10020110011100769,
+      "held_translation_drift_m": 9.522961754619565e-05,
+      "held_rotation_drift_deg": 0.29227757748470706,
+      "fk_position_error_m": 6.980127363931388e-05,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.978708310963584,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_y_minus",
+      "recipe": "joint_7",
+      "steps": 707,
+      "candidate_id": "candidate:8d63bdb7fa9a3a4b6c4aabcebd392ea7d0105eb3972dbc52eae827a11e8091f9",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0028770379722118378,
+      "lift_m": 0.10038110613822937,
+      "held_translation_drift_m": 6.699885464084672e-05,
+      "held_rotation_drift_deg": 0.24444111685297745,
+      "fk_position_error_m": 6.980127363931388e-05,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.978708310963584,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_y_minus",
+      "recipe": "joint_11",
+      "steps": 707,
+      "candidate_id": "candidate:c9bbef2afab049230c3a695e27e131984a0e21cc27a56848c3722a6d27199897",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0028095655143260956,
+      "lift_m": 0.10023267567157745,
+      "held_translation_drift_m": 9.309624951100487e-05,
+      "held_rotation_drift_deg": 0.28769296355565654,
+      "fk_position_error_m": 6.980127363931388e-05,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.978708310963584,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_y_minus",
+      "recipe": "task_space",
+      "steps": 707,
+      "candidate_id": "candidate:11e728d269d76a0c9c5da854825ebfbe1e8f7eab6d6209b6e7cf9bf0c857225e",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002623155480250716,
+      "lift_m": 0.09993846714496613,
+      "held_translation_drift_m": 3.0441125762927706e-05,
+      "held_rotation_drift_deg": 0.08054421356071155,
+      "fk_position_error_m": 6.980127363931388e-05,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9873509848423733,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_y_minus",
+      "recipe": "time_115",
+      "steps": 788,
+      "candidate_id": "candidate:681644eb68d428fe4fec3de320f3647f2be520e353bb01f2972359ed2ef96da9",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002776484936475754,
+      "lift_m": 0.10019733011722565,
+      "held_translation_drift_m": 9.351510508868235e-05,
+      "held_rotation_drift_deg": 0.28270383772389107,
+      "fk_position_error_m": 6.980127363931388e-05,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9641051723408022,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 223,
+          "expected_samples": 223,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 183,
+          "expected_samples": 183,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 160,
+          "expected_samples": 160,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 51,
+          "expected_samples": 51,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_y_minus",
+      "recipe": "time_130",
+      "steps": 868,
+      "candidate_id": "candidate:19db77e0cf6b51ace24c01e585779106294bd38889316fcbd05b4fc7a740fadd",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0024657361209392548,
+      "lift_m": 0.10027128458023071,
+      "held_translation_drift_m": 8.760483341696013e-05,
+      "held_rotation_drift_deg": 0.2683980761349959,
+      "fk_position_error_m": 6.980127363931388e-05,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9641051723408022,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 252,
+          "expected_samples": 252,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 207,
+          "expected_samples": 207,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 181,
+          "expected_samples": 181,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 57,
+          "expected_samples": 57,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_yaw_plus",
+      "recipe": "nominal",
+      "steps": 707,
+      "candidate_id": "candidate:0747987ddf227ab6d46e2735f9f2ac639df47e786f5eefa6ce8684f0fad5d34e",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002753832843154669,
+      "lift_m": 0.10044480860233307,
+      "held_translation_drift_m": 9.717293372362579e-05,
+      "held_rotation_drift_deg": 0.3392293298104088,
+      "fk_position_error_m": 3.533335188876663e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9799004039123825,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_yaw_plus",
+      "recipe": "joint_7",
+      "steps": 707,
+      "candidate_id": "candidate:5f4170e00f9f6deb1d096a295ab0de59d8368e69a15b043471add60b993dfae1",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0027775682974606752,
+      "lift_m": 0.10055743157863617,
+      "held_translation_drift_m": 9.229368055965716e-05,
+      "held_rotation_drift_deg": 0.35140759443063485,
+      "fk_position_error_m": 3.533335188876663e-07,
+      "fk_rotation_error_rad": 0.000845727976411581,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9799004039123825,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_yaw_plus",
+      "recipe": "joint_11",
+      "steps": 707,
+      "candidate_id": "candidate:95d71c676d046c845d44e37a365d351a8a0a827b067a50ff4df58f5345653d66",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002600272186100483,
+      "lift_m": 0.1000581830739975,
+      "held_translation_drift_m": 6.062193687569154e-05,
+      "held_rotation_drift_deg": 0.06845159891949601,
+      "fk_position_error_m": 3.7409037645375065e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9775162180147855,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_yaw_plus",
+      "recipe": "task_space",
+      "steps": 707,
+      "candidate_id": "candidate:c163807f59c475c90814dc06250c13ca6ac884f50fbbf6a67902f2c307339a5d",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0026378401089459658,
+      "lift_m": 0.10053345561027527,
+      "held_translation_drift_m": 9.82359206820174e-05,
+      "held_rotation_drift_deg": 0.33404078183767844,
+      "fk_position_error_m": 3.533335188876663e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.980347438768182,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_yaw_plus",
+      "recipe": "time_115",
+      "steps": 788,
+      "candidate_id": "candidate:8ef8cd62ef81284e281e34e6e9baf2e81a4204c0a97da253d80cd2d77aa27bb6",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0028886976651847363,
+      "lift_m": 0.10051295161247253,
+      "held_translation_drift_m": 0.00010078162695369797,
+      "held_rotation_drift_deg": 0.33701686765071315,
+      "fk_position_error_m": 3.545098650192813e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9644031955780031,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 223,
+          "expected_samples": 223,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 183,
+          "expected_samples": 183,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 160,
+          "expected_samples": 160,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 51,
+          "expected_samples": 51,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_yaw_plus",
+      "recipe": "time_130",
+      "steps": 868,
+      "candidate_id": "candidate:d3da5ee9d8b70ada5dfa1b6333ba036994c0a83daa172718ed25fcffa21b4175",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002688806736841798,
+      "lift_m": 0.10051022469997406,
+      "held_translation_drift_m": 9.660513186976449e-05,
+      "held_rotation_drift_deg": 0.3317081182688018,
+      "fk_position_error_m": 3.533335188876663e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9644031955780031,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 252,
+          "expected_samples": 252,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 207,
+          "expected_samples": 207,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 181,
+          "expected_samples": 181,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 57,
+          "expected_samples": 57,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_yaw_minus",
+      "recipe": "nominal",
+      "steps": 707,
+      "candidate_id": "candidate:7709278a9dd099461b60338b58afcb765508db01bcfe2e9e7e42f75c55b424fa",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0026789456605911255,
+      "lift_m": 0.10010485351085663,
+      "held_translation_drift_m": 0.0001345536590925039,
+      "held_rotation_drift_deg": 0.4254512505111163,
+      "fk_position_error_m": 3.37257091587162e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9831786595215785,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_yaw_minus",
+      "recipe": "joint_7",
+      "steps": 707,
+      "candidate_id": "candidate:3d2a7e053b8cf7ed02dadfadc371983318bc257b3370a2bea89b0d761ca92e0d",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.00253947451710701,
+      "lift_m": 0.10061536729335785,
+      "held_translation_drift_m": 6.81861113357336e-05,
+      "held_rotation_drift_deg": 0.22497590208201262,
+      "fk_position_error_m": 3.37257091587162e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9831786595215785,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_yaw_minus",
+      "recipe": "joint_11",
+      "steps": 707,
+      "candidate_id": "candidate:51e69098ced1f979930198ea6ea84e64018a75d79ccde6e39a79aa6a951373cb",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0027534400578588247,
+      "lift_m": 0.10038016736507416,
+      "held_translation_drift_m": 9.832960654891201e-05,
+      "held_rotation_drift_deg": 0.20632099232774767,
+      "fk_position_error_m": 4.054238615935901e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9831786595215785,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_yaw_minus",
+      "recipe": "task_space",
+      "steps": 707,
+      "candidate_id": "candidate:89700b8a5ab36a49f5c3867ba4e890233beee051e1b088ee240ff39a78b3824c",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0029002490919083357,
+      "lift_m": 0.10036541521549225,
+      "held_translation_drift_m": 0.00010099461182860247,
+      "held_rotation_drift_deg": 0.2610285138162787,
+      "fk_position_error_m": 3.37257091587162e-07,
+      "fk_rotation_error_rad": 0.000845727976411581,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9864569151307744,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 194,
+          "expected_samples": 194,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_yaw_minus",
+      "recipe": "time_115",
+      "steps": 788,
+      "candidate_id": "candidate:0c3f1572f9d02f8b4519ec7ae78025eeaf61bbab8e76fae3de7e1faaf393db2c",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002766528632491827,
+      "lift_m": 0.10044603049755096,
+      "held_translation_drift_m": 9.496066036670296e-05,
+      "held_rotation_drift_deg": 0.377935086545679,
+      "fk_position_error_m": 3.37257091587162e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9667873814756002,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 223,
+          "expected_samples": 223,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 183,
+          "expected_samples": 183,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 160,
+          "expected_samples": 160,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 51,
+          "expected_samples": 51,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "object_yaw_minus",
+      "recipe": "time_130",
+      "steps": 868,
+      "candidate_id": "candidate:8559da2f30ca342d5c8092a25e27ce98a7638cd305e795b7245d21ae20b33ff6",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0028037438169121742,
+      "lift_m": 0.10042592883110046,
+      "held_translation_drift_m": 0.00010248059070524865,
+      "held_rotation_drift_deg": 0.20131631054429777,
+      "fk_position_error_m": 4.4864623305329587e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9667873814756002,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 194,
+          "final_samples": 252,
+          "expected_samples": 252,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 207,
+          "expected_samples": 207,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 181,
+          "expected_samples": 181,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 57,
+          "expected_samples": 57,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "target_x_plus",
+      "recipe": "nominal",
+      "steps": 628,
+      "candidate_id": "candidate:df23689a03201d548ce47f8c6f476f4d24305f78fae57a674048b41ea965bd30",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002858329564332962,
+      "lift_m": 0.1004503071308136,
+      "held_translation_drift_m": 8.569173762165148e-05,
+      "held_rotation_drift_deg": 0.34295032418759325,
+      "fk_position_error_m": 7.66386729083024e-05,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9998679608047577,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 115,
+          "expected_samples": 115,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "target_x_plus",
+      "recipe": "joint_7",
+      "steps": 628,
+      "candidate_id": "candidate:cf3fa2d7b05ee877c7b60eafbfec90d40790f72c89553bb5c99d05c2464cb52c",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0028347084298729897,
+      "lift_m": 0.10045178234577179,
+      "held_translation_drift_m": 8.765626287923851e-05,
+      "held_rotation_drift_deg": 0.25007887150942554,
+      "fk_position_error_m": 7.674372318433598e-05,
+      "fk_rotation_error_rad": 0.000845727976411581,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9995699375675581,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 115,
+          "expected_samples": 115,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "target_x_plus",
+      "recipe": "joint_11",
+      "steps": 628,
+      "candidate_id": "candidate:313d67dcbfdf28b95fbcf9f3f7062123753256d40359211aa00ea60e829475e6",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0026692822575569153,
+      "lift_m": 0.10051678121089935,
+      "held_translation_drift_m": 8.603542269761363e-05,
+      "held_rotation_drift_deg": 0.3636994856406753,
+      "fk_position_error_m": 0.0001531628950033337,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9965897051955618,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 115,
+          "expected_samples": 115,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "target_x_plus",
+      "recipe": "task_space",
+      "steps": 628,
+      "candidate_id": "candidate:0c71f55cd870ca4190d67f326205937f2e7ea6cb1f7a50634fca2d64eeb8ae84",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0027386066503822803,
+      "lift_m": 0.10057562589645386,
+      "held_translation_drift_m": 7.078958591640684e-05,
+      "held_rotation_drift_deg": 0.24856863148009584,
+      "fk_position_error_m": 0.00015316686767619103,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9982288330001597,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 115,
+          "expected_samples": 115,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "target_x_plus",
+      "recipe": "time_115",
+      "steps": 698,
+      "candidate_id": "candidate:f10bc875719dc1247b0a8cefaaeb3959405b474e8e10e0f2a4a2b787a26f1d5b",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0025153132155537605,
+      "lift_m": 0.10055842995643616,
+      "held_translation_drift_m": 7.206099305274884e-05,
+      "held_rotation_drift_deg": 0.26471123819004877,
+      "fk_position_error_m": 0.00015310889284592122,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9655952885268017,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 133,
+          "expected_samples": 133,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 183,
+          "expected_samples": 183,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 160,
+          "expected_samples": 160,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 51,
+          "expected_samples": 51,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "target_x_plus",
+      "recipe": "time_130",
+      "steps": 766,
+      "candidate_id": "candidate:bf9a41c189412c698ec3371dbbf680f8a6277cbac7712395435a98a062e81846",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002872696379199624,
+      "lift_m": 0.10059522092342377,
+      "held_translation_drift_m": 7.375388898665414e-05,
+      "held_rotation_drift_deg": 0.24412281521143803,
+      "fk_position_error_m": 0.00015314537449739873,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9655952885268017,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 150,
+          "expected_samples": 150,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 207,
+          "expected_samples": 207,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 181,
+          "expected_samples": 181,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 57,
+          "expected_samples": 57,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "target_x_minus",
+      "recipe": "nominal",
+      "steps": 628,
+      "candidate_id": "candidate:914cf8c4fded96a2497879f2655bacd569760553170f6aebfbeae27d9fac7767",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.0028516515158116817,
+      "lift_m": 0.1004323661327362,
+      "held_translation_drift_m": 8.481675138429976e-05,
+      "held_rotation_drift_deg": 0.3355022932502392,
+      "fk_position_error_m": 3.129243850708008e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9678304628057975,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 115,
+          "expected_samples": 115,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "target_x_minus",
+      "recipe": "joint_7",
+      "steps": 628,
+      "candidate_id": "candidate:2f97cfb61b5e346e2ad6deb3da7accca031393cd4f9a214982d0749e4d317f74",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002743522170931101,
+      "lift_m": 0.10043811798095703,
+      "held_translation_drift_m": 7.930126923725068e-05,
+      "held_rotation_drift_deg": 0.2547535259925009,
+      "fk_position_error_m": 3.418347205297323e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9678304628057975,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 115,
+          "expected_samples": 115,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "target_x_minus",
+      "recipe": "joint_11",
+      "steps": 628,
+      "candidate_id": "candidate:e1708a2beb41805061ad8e139b9af500b3713276470939c999ba97eb22c9cbd5",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002857823856174946,
+      "lift_m": 0.10052204132080078,
+      "held_translation_drift_m": 8.904756700035832e-05,
+      "held_rotation_drift_deg": 0.37269978525775255,
+      "fk_position_error_m": 3.6998716268499265e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9678304628057975,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 115,
+          "expected_samples": 115,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "target_x_minus",
+      "recipe": "task_space",
+      "steps": 628,
+      "candidate_id": "candidate:45887f9ce5500b3dafd24c0fb2ddf05600882d1a912f7e2c900ed033e7c33b51",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002839515218511224,
+      "lift_m": 0.10059601068496704,
+      "held_translation_drift_m": 6.402931772325598e-05,
+      "held_rotation_drift_deg": 0.22768547048990165,
+      "fk_position_error_m": 3.529405319113721e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9718537765079925,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 115,
+          "expected_samples": 115,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 159,
+          "expected_samples": 159,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 139,
+          "expected_samples": 139,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 44,
+          "expected_samples": 44,
+          "retimed": false,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "target_x_minus",
+      "recipe": "time_115",
+      "steps": 698,
+      "candidate_id": "candidate:507faf9dd5c0040bdc9d1de4705941d397ad883c10b77485daa888b3681c0779",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002477882197126746,
+      "lift_m": 0.10042141377925873,
+      "held_translation_drift_m": 9.252360420048353e-05,
+      "held_rotation_drift_deg": 0.2789543876546817,
+      "fk_position_error_m": 3.026440253961482e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9655952885268017,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 133,
+          "expected_samples": 133,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 183,
+          "expected_samples": 183,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 160,
+          "expected_samples": 160,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 51,
+          "expected_samples": 51,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "target_x_minus",
+      "recipe": "time_130",
+      "steps": 766,
+      "candidate_id": "candidate:02b6273b8ff87612812ea489753e44191d242e57868619fdc0f7ef15097a01d3",
+      "receipt_confirmed": true,
+      "xy_error_m": 0.002770691178739071,
+      "lift_m": 0.10040026903152466,
+      "held_translation_drift_m": 8.802239946718099e-05,
+      "held_rotation_drift_deg": 0.2757838820569314,
+      "fk_position_error_m": 3.488272284357663e-07,
+      "fk_rotation_error_rad": 0.0006905339541845024,
+      "maximum_speed_ratio": 0.5540176696339486,
+      "maximum_acceleration_ratio": 0.9655952885268017,
+      "phase_duration_validation": [
+        {
+          "call_index": 0,
+          "phase": "approach",
+          "source_samples": 115,
+          "final_samples": 150,
+          "expected_samples": 150,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "close",
+          "source_samples": 20,
+          "final_samples": 20,
+          "expected_samples": 20,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 0,
+          "phase": "lift",
+          "source_samples": 49,
+          "final_samples": 49,
+          "expected_samples": 49,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 1,
+          "phase": "transport",
+          "source_samples": 159,
+          "final_samples": 207,
+          "expected_samples": 207,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "approach",
+          "source_samples": 139,
+          "final_samples": 181,
+          "expected_samples": 181,
+          "retimed": true,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "release",
+          "source_samples": 80,
+          "final_samples": 80,
+          "expected_samples": 80,
+          "retimed": false,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "phase": "retract",
+          "source_samples": 44,
+          "final_samples": 57,
+          "expected_samples": 57,
+          "retimed": true,
+          "passed": true
+        }
+      ]
+    }
+  ]
+}

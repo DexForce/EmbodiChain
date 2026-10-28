@@ -1,0 +1,81 @@
+{
+  "control_dt": 0.04,
+  "corrections": [
+    "joint gripper_finger2_joint_1: derived from mimic driver gripper_finger1_joint_1",
+    "initial state source: observed"
+  ],
+  "event_tolerance_s": 1e-06,
+  "joints": [
+    {
+      "initial_hold": null,
+      "kind": "revolute",
+      "mimic_driver": null,
+      "mimic_multiplier": 1.0,
+      "mimic_offset": 0.0,
+      "name": "joint1"
+    },
+    {
+      "initial_hold": null,
+      "kind": "revolute",
+      "mimic_driver": null,
+      "mimic_multiplier": 1.0,
+      "mimic_offset": 0.0,
+      "name": "joint2"
+    },
+    {
+      "initial_hold": null,
+      "kind": "revolute",
+      "mimic_driver": null,
+      "mimic_multiplier": 1.0,
+      "mimic_offset": 0.0,
+      "name": "joint3"
+    },
+    {
+      "initial_hold": null,
+      "kind": "revolute",
+      "mimic_driver": null,
+      "mimic_multiplier": 1.0,
+      "mimic_offset": 0.0,
+      "name": "joint4"
+    },
+    {
+      "initial_hold": null,
+      "kind": "revolute",
+      "mimic_driver": null,
+      "mimic_multiplier": 1.0,
+      "mimic_offset": 0.0,
+      "name": "joint5"
+    },
+    {
+      "initial_hold": null,
+      "kind": "revolute",
+      "mimic_driver": null,
+      "mimic_multiplier": 1.0,
+      "mimic_offset": 0.0,
+      "name": "joint6"
+    },
+    {
+      "initial_hold": null,
+      "kind": "prismatic",
+      "mimic_driver": null,
+      "mimic_multiplier": 1.0,
+      "mimic_offset": 0.0,
+      "name": "gripper_finger1_joint_1"
+    },
+    {
+      "initial_hold": null,
+      "kind": "prismatic",
+      "mimic_driver": "gripper_finger1_joint_1",
+      "mimic_multiplier": 1.0,
+      "mimic_offset": 0.0,
+      "name": "gripper_finger2_joint_1"
+    }
+  ],
+  "max_event_error_s": 1.6361475019266436e-07,
+  "mimic_tolerance": 1e-06,
+  "normalized_file": "normalized.npz",
+  "normalized_sha256": "0322d55709328310e80aef954f769096354f082ce2a01d404836974859babea8",
+  "schema_version": 1,
+  "source_manifest": "source/trajectory.json",
+  "source_manifest_sha256": "bd736565093e8e4ac97639e0f9d4bd680fec03e7bc4999d0f3eec8ee327db8d3"
+}

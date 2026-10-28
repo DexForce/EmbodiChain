@@ -1,0 +1,78 @@
+{
+  "array_file": "trajectory.npz",
+  "metadata": {
+    "annotation_revision": "synthetic_skill_phases_v1",
+    "calibration_revision": "synthetic_ur5_dh_pgi_140_80_v1",
+    "command_alignment": "sample_aligned_reference",
+    "command_representation": "joint_position_reference",
+    "joint_names": [
+      "joint1",
+      "joint2",
+      "joint3",
+      "joint4",
+      "joint5",
+      "joint6",
+      "gripper_finger1_joint_1"
+    ],
+    "joint_units": [
+      "rad",
+      "rad",
+      "rad",
+      "rad",
+      "rad",
+      "rad",
+      "m"
+    ],
+    "object_geometry_sha256": "30b94d688f69655e03630e263e2caa8e082f6381d4cde61eb17f509fe2e5d681",
+    "origin": "synthetic_reference",
+    "phases": [
+      {
+        "allowed_operators": [
+          "joint_residual",
+          "task_space_residual",
+          "retime"
+        ],
+        "authority": null,
+        "kind": "free",
+        "name": "approach",
+        "reference": "target",
+        "start": 0,
+        "stop": 59
+      },
+      {
+        "allowed_operators": [],
+        "authority": null,
+        "kind": "contact",
+        "name": "release",
+        "reference": "target",
+        "start": 59,
+        "stop": 139
+      },
+      {
+        "allowed_operators": [
+          "joint_residual",
+          "task_space_residual",
+          "retime"
+        ],
+        "authority": null,
+        "kind": "free",
+        "name": "retract",
+        "reference": "target",
+        "start": 139,
+        "stop": 184
+      }
+    ],
+    "pose_length_unit": "m",
+    "pose_origin": "fk_derived",
+    "quaternion_order": "xyzw",
+    "robot_geometry_sha256": "96f565178318541e2ce507a07bec7d5e2349275900b714532b9c135152cc0115",
+    "skill_id": "place",
+    "source_id": "synthetic_ur5_pick_move_place",
+    "source_revision": "2",
+    "target_geometry_sha256": "2a41cbd7301116bbabe244f70c9ac7930a553f6c65fee79cb64d0f37218efa92",
+    "time_unit": "s",
+    "unit_id": "call_2_place"
+  },
+  "schema_version": 1,
+  "sha256": "7fd4445d8422767a4274ef92820c201c9f9c6d09833e300217713cd5f6899d3d"
+}

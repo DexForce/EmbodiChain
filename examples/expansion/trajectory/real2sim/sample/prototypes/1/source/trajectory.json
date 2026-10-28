@@ -1,0 +1,53 @@
+{
+  "array_file": "trajectory.npz",
+  "metadata": {
+    "annotation_revision": "synthetic_skill_phases_v1",
+    "calibration_revision": "synthetic_ur5_dh_pgi_140_80_v1",
+    "command_alignment": "sample_aligned_reference",
+    "command_representation": "joint_position_reference",
+    "joint_names": [
+      "joint1",
+      "joint2",
+      "joint3",
+      "joint4",
+      "joint5",
+      "joint6",
+      "gripper_finger1_joint_1"
+    ],
+    "joint_units": [
+      "rad",
+      "rad",
+      "rad",
+      "rad",
+      "rad",
+      "rad",
+      "m"
+    ],
+    "origin": "synthetic_reference",
+    "phases": [
+      {
+        "allowed_operators": [
+          "joint_residual",
+          "task_space_residual",
+          "retime"
+        ],
+        "authority": null,
+        "kind": "free",
+        "name": "transport",
+        "reference": "target",
+        "start": 0,
+        "stop": 80
+      }
+    ],
+    "pose_length_unit": "m",
+    "pose_origin": "fk_derived",
+    "quaternion_order": "xyzw",
+    "skill_id": "move_held_object",
+    "source_id": "synthetic_ur5_pick_move_place",
+    "source_revision": "1",
+    "time_unit": "s",
+    "unit_id": "call_1_move_held_object"
+  },
+  "schema_version": 1,
+  "sha256": "6b0cd8f46819e48d11db7289e004a13b031a855e402f6c093e60220952e24c59"
+}

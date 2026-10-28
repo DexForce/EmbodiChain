@@ -1,0 +1,24 @@
+{
+  "origin": "synthetic_reference",
+  "case": "unreachable_object_x_plus_2m",
+  "expected": "planning_rejected_no_submission",
+  "attempts": [
+    {
+      "attempt_id": 0,
+      "segment": "pick",
+      "reason": "Could not prepare semantic call 0 ('pick'): ValueError: prototype entry connection could not be planned"
+    },
+    {
+      "attempt_id": 1,
+      "segment": "pick",
+      "reason": "Could not prepare semantic call 0 ('pick'): ValueError: prototype entry connection could not be planned"
+    },
+    {
+      "attempt_id": 2,
+      "segment": "pick",
+      "reason": "Could not prepare semantic call 0 ('pick'): ValueError: prototype entry connection could not be planned"
+    }
+  ],
+  "confirmed_receipts": 0,
+  "result": "passed"
+}

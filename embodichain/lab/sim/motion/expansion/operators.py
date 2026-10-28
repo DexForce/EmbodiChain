@@ -45,6 +45,7 @@ __all__ = [
     "nullspace_residual",
     "retime",
     "validate_motion_limits",
+    "validate_motion_samples",
 ]
 
 TIMING_PROFILES = ("uniform", "ease_in", "ease_out")
@@ -653,10 +654,48 @@ def validate_motion_limits(
     Returns:
         A single ``motion_limits`` check with maximum normalized ratios.
     """
+    return validate_motion_samples(
+        template.positions,
+        template.dt,
+        velocity_limits=velocity_limits,
+        acceleration_limits=acceleration_limits,
+    )
+
+
+def validate_motion_samples(
+    positions: torch.Tensor,
+    dt: torch.Tensor,
+    *,
+    velocity_limits: torch.Tensor,
+    acceleration_limits: torch.Tensor,
+) -> ValidationResult:
+    """Check full-joint sampled positions and intervals against motion limits.
+
+    The first interval must be zero; later intervals are strictly positive.
+    This finite-difference check does not establish continuous-time dynamics.
+    """
+    if not isinstance(positions, torch.Tensor) or not isinstance(dt, torch.Tensor):
+        raise TypeError("positions and dt must be tensors")
+    if (
+        positions.ndim != 2
+        or positions.shape[0] == 0
+        or positions.shape[1] == 0
+        or dt.shape != (positions.shape[0],)
+    ):
+        raise ValueError("positions and dt must have shapes (T, D) and (T,)")
+    if (
+        not bool(torch.isfinite(positions).all())
+        or not bool(torch.isfinite(dt).all())
+        or dt[0] != 0
+        or bool((dt[1:] <= 0).any())
+    ):
+        raise ValueError(
+            "positions and intervals must be finite with positive later intervals"
+        )
     # Accumulate derivatives outside the source's storage dtype. Half-precision
     # ratios can overflow even for ordinary joint motion and finite profiles.
-    q = template.positions.to(dtype=torch.float64)
-    dt = template.dt.to(dtype=torch.float64)
+    q = positions.to(dtype=torch.float64)
+    dt = dt.to(device=q.device, dtype=torch.float64)
     limits = [
         x.to(device=q.device, dtype=q.dtype)
         for x in (velocity_limits, acceleration_limits)

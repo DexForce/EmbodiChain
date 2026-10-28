@@ -1,0 +1,66 @@
+[
+  {
+    "initial_hold": null,
+    "kind": "revolute",
+    "mimic_driver": null,
+    "mimic_multiplier": 1.0,
+    "mimic_offset": 0.0,
+    "name": "joint1"
+  },
+  {
+    "initial_hold": null,
+    "kind": "revolute",
+    "mimic_driver": null,
+    "mimic_multiplier": 1.0,
+    "mimic_offset": 0.0,
+    "name": "joint2"
+  },
+  {
+    "initial_hold": null,
+    "kind": "revolute",
+    "mimic_driver": null,
+    "mimic_multiplier": 1.0,
+    "mimic_offset": 0.0,
+    "name": "joint3"
+  },
+  {
+    "initial_hold": null,
+    "kind": "revolute",
+    "mimic_driver": null,
+    "mimic_multiplier": 1.0,
+    "mimic_offset": 0.0,
+    "name": "joint4"
+  },
+  {
+    "initial_hold": null,
+    "kind": "revolute",
+    "mimic_driver": null,
+    "mimic_multiplier": 1.0,
+    "mimic_offset": 0.0,
+    "name": "joint5"
+  },
+  {
+    "initial_hold": null,
+    "kind": "revolute",
+    "mimic_driver": null,
+    "mimic_multiplier": 1.0,
+    "mimic_offset": 0.0,
+    "name": "joint6"
+  },
+  {
+    "initial_hold": null,
+    "kind": "prismatic",
+    "mimic_driver": null,
+    "mimic_multiplier": 1.0,
+    "mimic_offset": 0.0,
+    "name": "gripper_finger1_joint_1"
+  },
+  {
+    "initial_hold": null,
+    "kind": "prismatic",
+    "mimic_driver": "gripper_finger1_joint_1",
+    "mimic_multiplier": 1.0,
+    "mimic_offset": 0.0,
+    "name": "gripper_finger2_joint_1"
+  }
+]

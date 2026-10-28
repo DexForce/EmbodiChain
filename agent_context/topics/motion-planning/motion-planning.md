@@ -105,6 +105,10 @@ fingerprints, and supplies no path or physical-success certificate.
 
 ## Trajectory augmentation boundary
 
+Real2Sim source templates and protected mapped retiming integrate with this
+boundary; their control-grid, source-permission and host limits are documented
+in [Real2Sim motion](../data-pipeline/real2sim.md).
+
 Scene layout proposals and their Task Program execution adapter belong to
 [scene expansion](../scene-expansion/scene-expansion.md). The trajectory
 contracts below operate within a specified scene and initial state.

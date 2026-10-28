@@ -80,6 +80,10 @@ Atomic plan transform; the bridge exposes immutable
 `TaskProgramExpansionRecord` provenance. Nonmatching calls and episodes
 without a profile keep the ordinary path.
 
+An optional nominal source is selected separately before Atomic planning and
+is bound to a compiled sequential call occurrence. Its configured declaration
+and verification boundary are described in [Real2Sim motion](../data-pipeline/real2sim.md).
+
 The configured combined transform supplies each selected call's Affordance
 context before planning and delegates trajectory adaptation and rebuilding to
 the shared Atomic plan expansion service. Built-in phase permissions can only
