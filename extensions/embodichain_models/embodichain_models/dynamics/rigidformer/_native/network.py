@@ -133,7 +133,7 @@ class CUT3RDynamicsModel(nn.Module):
             PhysFormerRoPE as _RopeCls,
         )
 
-        _RopeCls.INTERLEAVED_PAIRING = bool(
+        rope_interleaved_pairing = bool(
             config["model"].get("rope_interleaved_pairing", False)
         )
 
@@ -429,6 +429,8 @@ class CUT3RDynamicsModel(nn.Module):
             else False
         )
 
+        # The pinned author implementation uses the decoder's 16-token default,
+        # even if the source config contains another num_register_tokens value.
         self.decoder = BidirectionalDecoder(
             state_dim=config["model"]["state"].get("token_dim", 768),
             num_layers=config["model"]["decoder"].get(
@@ -789,6 +791,12 @@ class CUT3RDynamicsModel(nn.Module):
             )
             print(_rope_msg)
             logger.info(_rope_msg)
+
+        # Pairing belongs to this model, not to the RoPE class shared by all
+        # model instances. This preserves each checkpoint's saved policy.
+        for module in self.modules():
+            if isinstance(module, _RopeCls):
+                module.interleaved_pairing = rope_interleaved_pairing
 
     def forward(self, batch, return_all=False, teacher_forcing_ratio=1.0):
         """

@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 import subprocess
 import sys
 import pytest
@@ -32,6 +34,67 @@ assert not any(n.startswith('embodichain.lab.sim') for n in sys.modules)
 assert RigidFormerCfg().reference_config()['model']['kabsch_reference'] == 'fixed'
 """
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_cpu_only_model_construction_and_checkpoint_import(tmp_path):
+    pytest.importorskip("roma")
+    code = """import importlib.util
+import sys
+import torch
+from embodichain_models.dynamics.rigidformer import RigidFormerModel, load_rigidformer_checkpoint
+
+assert not torch.cuda.is_available()
+spec = importlib.util.spec_from_file_location('fixtures', sys.argv[2])
+fixtures = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fixtures)
+model = RigidFormerModel(fixtures.tiny_cfg())
+torch.save({'config': model.reference_config, 'model_state_dict': model.network.state_dict()}, sys.argv[1])
+restored = load_rigidformer_checkpoint(sys.argv[1])
+assert all(v.device.type == 'cpu' for v in restored.state_dict().values())
+batch = fixtures.geometry_batch()
+batch['valid_obj_mask'][:] = True
+try:
+    restored(batch)
+except ValueError as exc:
+    assert 'requires CUDA' in str(exc)
+else:
+    raise AssertionError('CPU geometry execution must be rejected')
+"""
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = ""
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            code,
+            str(tmp_path / "weights.pt"),
+            str(Path(__file__).with_name("_rigidformer_fixtures.py")),
+        ],
+        check=True,
+        env=env,
+    )
+
+
+def test_rope_pairing_is_owned_by_each_model():
+    pytest.importorskip("roma")
+    from embodichain_models.dynamics.rigidformer import RigidFormerCfg, RigidFormerModel
+    from embodichain_models.dynamics.rigidformer._native.models.physformer_rope import (
+        PhysFormerRoPE,
+    )
+
+    first = RigidFormerModel(tiny_cfg())
+    first_rope = next(m for m in first.modules() if isinstance(m, PhysFormerRoPE))
+    positions = torch.tensor([[0.1, 0.2, 0.4]])
+    expected = first_rope.forward_3d(positions).clone()
+    config = tiny_cfg().reference_config()
+    config["model"]["rope_interleaved_pairing"] = False
+    second = RigidFormerModel(RigidFormerCfg(architecture=config))
+    second_rope = next(m for m in second.modules() if isinstance(m, PhysFormerRoPE))
+
+    torch.testing.assert_close(
+        first_rope.forward_3d(positions), expected, rtol=0, atol=0
+    )
+    assert not torch.equal(second_rope.forward_3d(positions), expected)
 
 
 @pytest.mark.gpu
@@ -77,6 +140,13 @@ def test_native_forward_checkpoint_and_rollout_with_variable_objects(tmp_path):
     rollout = restored.rollout(values, num_frames=8, warmup_frames=4)
     assert rollout["obj_positions"].shape == (2, 8, 3, 8, 3)
     assert torch.isfinite(rollout["obj_positions"]).all()
+    with torch.inference_mode():
+        inference = restored.rollout(values, num_frames=8, warmup_frames=4)
+    torch.testing.assert_close(
+        inference["obj_positions"], rollout["obj_positions"], rtol=0, atol=0
+    )
+    # Inference-mode results must not leave inference tensors in the RoPE memo.
+    restored(values)["obj_positions_denorm"].sum().backward()
 
 
 @pytest.mark.gpu

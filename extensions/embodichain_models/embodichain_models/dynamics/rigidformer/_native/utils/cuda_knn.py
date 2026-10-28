@@ -9,8 +9,8 @@ import torch
 import torch.nn.functional as F
 from typing import List, Tuple, Optional
 
-# CUDA is mandatory for this module; there is intentionally no CPU fallback.
-assert torch.cuda.is_available(), "cuda_knn requires a CUDA-capable device."
+# The public model checks for CUDA when geometry is executed. Keep this module
+# importable without CUDA so model construction and checkpoint inspection work.
 
 
 def compute_nearest_distance_to_list_cuda(

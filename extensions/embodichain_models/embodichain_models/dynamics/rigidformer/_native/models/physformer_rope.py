@@ -68,10 +68,13 @@ def _memo_key(tag, x, extra=()):
 
 def _memo_usable(*tensors):
     # Under torch.compile the graph de-duplicates identical subexpressions itself; the memo (which reads storage
-    # pointers) is skipped there.
-    if torch.compiler.is_compiling():
+    # pointers) is skipped there. Inference tensors have no version counter,
+    # and caching an inference-mode result could contaminate a later autograd run.
+    if torch.compiler.is_compiling() or torch.is_inference_mode_enabled():
         return False
-    return ROPE_MEMO_ENABLED and not any(t.requires_grad for t in tensors)
+    return ROPE_MEMO_ENABLED and not any(
+        t.requires_grad or t.is_inference() for t in tensors
+    )
 
 
 def _cos_sin(freqs):
@@ -126,12 +129,11 @@ class PhysFormerRoPE(nn.Module):
     # Pair sin/cos channels the way rotate_half pairs them (interleaved), which
     # keeps the relative-position property; the half-split layout does not. A
     # model is evaluated with the layout it was trained with.
-    INTERLEAVED_PAIRING = False
     _PAIRING_LOGGED = False
 
     def _paired_angles(self, angles: torch.Tensor) -> torch.Tensor:
         cls = type(self)
-        if cls.INTERLEAVED_PAIRING:
+        if self.interleaved_pairing:
             if not cls._PAIRING_LOGGED:
                 cls._PAIRING_LOGGED = True
                 print(
@@ -171,6 +173,7 @@ class PhysFormerRoPE(nn.Module):
         """
         super().__init__()
 
+        self.interleaved_pairing = False
         self.dim = dim
         self.use_3d = use_3d
         self.include_time = include_time
@@ -263,7 +266,7 @@ class PhysFormerRoPE(nn.Module):
     def _memo_extra(self):
         return (
             self._freqs_signature(),
-            type(self).INTERLEAVED_PAIRING,
+            self.interleaved_pairing,
             self.n_coords,
             self.include_time,
             self.dim_per_coord_3d,

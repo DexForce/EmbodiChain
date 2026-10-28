@@ -32,7 +32,6 @@ def tiny_cfg() -> RigidFormerCfg:
         num_heads=1,
         num_layers=1,
         dropout=0.0,
-        num_register_tokens=2,
         block_attn_res={"enable": False},
     )
     m["predictor"].update(hidden_dims=[96, 32], dropout=0.0)
