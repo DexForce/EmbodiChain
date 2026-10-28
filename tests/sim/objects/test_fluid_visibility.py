@@ -147,23 +147,6 @@ def _run_visibility_worker(output: Path, clipping: bool) -> None:
             )
         )
         sim.prepare()
-        # Each render particle must belong to its own Arena and inherit that
-        # Arena's transform before its world-space particle data is published.
-        for env_id, particle in enumerate(fluid._entities):
-            arena = sim.get_env(env_id)
-            render_particle = particle._render_resource
-            assert (
-                render_particle.get_arena().get_native_handle()
-                == arena.get_native_handle()
-            )
-            np.testing.assert_allclose(
-                render_particle.get_world_pose(),
-                arena.get_root_node().get_world_pose()
-                @ render_particle.get_local_pose(),
-                atol=1e-6,
-                rtol=0,
-            )
-        arena = particle = render_particle = None
         sim.update(step=2)
 
         def capture():

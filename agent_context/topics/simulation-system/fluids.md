@@ -70,14 +70,6 @@ Display clipping changes only a render copy. Viser consumes detached particle
 point clouds. NoRender needs no optical material. Advanced optical parameters
 follow the renderer requirements of the [material system](materials.md).
 
-Each fluid render particle belongs to its Arena and is published in world
-coordinates. Native cameras view the shared render scene: Arena ownership and
-physics-world isolation do not filter other Arenas from a camera. Camera framing
-and spacing can keep a known task workspace out of view, but do not provide
-general camera-level isolation. In the qualified DexSim build above, the
-reconstructed fluid surface is a separate native render instance and does not
-inherit the particle node's visibility toggle.
-
 `scripts/tutorials/sim/create_fluid.py` demonstrates procedural box sampling,
 five primitive container walls, prepare, step, state reads and reset. Pass
 `--num-envs` to use multiple independent worlds on a capable SPH build. The

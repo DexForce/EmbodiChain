@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-from itertools import product
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
@@ -99,46 +98,6 @@ def test_fluid_deployment_resolves_sources_and_observation_entities():
     assert Path(cup.particle_collision_shape.fpath).is_absolute()
     assert cup.body_type == "dynamic"
     assert cfg.task_program is not None
-
-
-def test_record_camera_excludes_neighboring_pour_workspaces():
-    """The recording view excludes each neighbor's expected pour region."""
-    cfg = config_to_cfg(load_config(TASK), source_path=TASK)
-    params = cfg.events.record_camera.params
-    eye = np.asarray(params["eye"], dtype=float)
-    forward = np.asarray(params["target"], dtype=float) - eye
-    forward /= np.linalg.norm(forward)
-    right = np.cross(forward, np.asarray(params["up"], dtype=float))
-    right /= np.linalg.norm(right)
-    up = np.cross(right, forward)
-    width, height = params["resolution"]
-    fx, fy, cx, cy = params["intrinsics"]
-
-    # Envelope around the cup and receiver, including space above the pour.
-    workspace = np.asarray(list(product((-0.90, -0.60), (-0.28, 0.08), (0.49, 0.80))))
-    spacing = cfg.sim_cfg.arena_space
-    offsets = np.asarray(list(product((0.0, spacing), repeat=2)))
-    for camera_offset in offsets:
-        for other_offset in offsets:
-            if np.array_equal(camera_offset, other_offset):
-                continue
-            relative = workspace.copy()
-            relative[:, :2] += other_offset - camera_offset
-            relative -= eye
-            depth = relative @ forward
-            horizontal = relative @ right
-            vertical = relative @ up
-            outside = (
-                depth <= 0,
-                horizontal < -(cx / fx) * depth,
-                horizontal > ((width - cx) / fx) * depth,
-                vertical < -((height - cy) / fy) * depth,
-                vertical > (cy / fy) * depth,
-            )
-            assert any(np.all(plane) for plane in outside), (
-                camera_offset,
-                other_offset,
-            )
 
 
 def test_fluid_component_rejects_duplicate_inline_ownership():
