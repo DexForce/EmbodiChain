@@ -38,6 +38,10 @@ locked joint indices, receipts and measured final object positions.
 audited matrix with no failed attempts; its nine dataset and per-shard report
 paths refer to the local recorded artifacts. No untested workspace region or
 continuous-time motion is implied by that result.
+`acceptance_report_pr.json` summarizes the later 54-case run against the
+recorded source commit. `sequence_acceptance_report_pr.json` records three
+additional repeated-program variants and their per-call validation. Their full
+datasets and audit outputs are generated locally rather than bundled here.
 
 The B=1 source-qualified `run-task` path selects one layout and recipe per
 episode, validates sampled plan and actual-state collision geometry, and writes
