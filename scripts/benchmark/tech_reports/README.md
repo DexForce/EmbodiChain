@@ -1,22 +1,24 @@
+> Publication in progress: data upload has not completed. Download remains disabled until the verified dataset commit is pinned.
+
 # EmbodiChain technical report benchmarks
 
 This directory groups technical-report assets, comparison experiment scaffolds,
 and shared execution/reporting designs. For existing runnable benchmarks and
-CLI usage, start with the [benchmark guide](../README.md).
+CLI usage, start with the [upstream benchmark guide](https://github.com/DexForce/EmbodiChain/blob/f179b5558fa17df06f172f0b1e4e4f81df63be74/scripts/benchmark/README.md).
 
 ## Technical report comparison layout
 
 The L/R/P/G/D families follow
 [issue #679](https://github.com/DexForce/EmbodiChain/issues/679). This change
-creates their directory scaffold and ownership notes. The common framework,
-new experiments, and cross-platform adapters are not implemented yet.
+creates their directory scaffold and ownership notes. The shared framework remains planned. The local DexUni physics suite adds
+experiment orchestration, platform adapters and offline reporting within these owners.
 
 ```text
 scripts/benchmark/tech_reports/
   assets/
     README.md                 # asset ownership and publication guide
     DOWNLOAD_DESIGN.md         # proposed input download protocol
-    index.json                # empty Hugging Face bootstrap index
+    index.json                # published input-bundle index snapshot
     shared/                   # small shared inputs and asset references
     loading/                  # L-series input definitions
     rendering/                # R-series input definitions
@@ -59,7 +61,7 @@ and explicit comparison conditions.
 
 The planned [core](core/README.md) owns shared run/measurement contracts; the
 planned [reporting](reporting/README.md) owns simulator-free result rebuilding.
-Start with the R-04 and G-03 end-to-end slices. Other experiment folders are
+R-04 and G-03 remain planned end-to-end slices. Other experiment folders are
 reserved for incremental implementation. Empty directories are tracked with
 `.gitkeep`; they contain no runnable placeholder scripts or invented results.
 
@@ -79,10 +81,50 @@ under `outputs/benchmarks/`, not into the source asset directories.
 
 The [report asset guide](assets/README.md) describes the public
 [DexForceAI/embodichain_reports dataset](https://huggingface.co/datasets/DexForceAI/embodichain_reports),
-its directory conventions, publishing process, and empty bootstrap index.
+its directory conventions, publishing process, and published input-bundle index.
 The [download design](assets/DOWNLOAD_DESIGN.md) defines future shared
 benchmark input preparation, revision pinning, cache behavior, and provenance.
 
 These conventions and the proposed download helper are owned by the benchmark
-scripts. The helper and asset CLI are design only; existing benchmark commands
-keep their current behavior until actual report inputs are integrated.
+scripts. The general helper and unified asset CLI remain design only. DexUni provides
+an explicit [published-artifact download command](physics/experiments/dexuni/SETUP.md)
+using the same official endpoint, pinned revisions and external Hub cache.
+
+## Local DexUni results and entry points
+
+Layout follows [PR #832](https://github.com/DexForce/EmbodiChain/pull/832).
+The 13 existing task items, including unsupported cases and
+C02 preliminary measurements, are indexed in the
+[task comparison](reporting/dexuni/RESULTS.md).
+
+| Content | Owner |
+| --- | --- |
+| Small authored inputs and references | `assets/physics/dexuni/` |
+| Experiment definitions and measurement orchestration | `physics/experiments/dexuni/` |
+| Platform workers and recording | `physics/platforms/dexuni/` |
+| Offline reporting and video assembly | `reporting/dexuni/` |
+| Raw measurements, videos, reports and frozen execution inputs/source | `outputs/benchmarks/tech_reports/dexuni/` (repository relative) |
+| Cleanup and layout-migration evidence | `outputs/benchmarks/tech_reports/maintenance/` |
+
+See the [experiment plan](physics/experiments/dexuni/PLAN.md),
+[reporting commands](reporting/README.md#dexuni-maintained-tools), and
+[migration record](physics/experiments/dexuni/MIGRATION.md).
+The local ignored `runs` and `maintenance` symlinks only preserve historical
+absolute paths in frozen records. They are not source/resource publication
+directories; all maintained output defaults use `outputs/benchmarks/`.
+Frozen source copies in results are execution evidence, not maintained entry points.
+Existing `outputs/benchmarks/dexuni/pilot_v1` remains unchanged. The obsolete
+`dexuni_benchmark` workspace has been removed; see the [retirement record](physics/experiments/dexuni/MIGRATION.md).
+
+The [published report](https://huggingface.co/datasets/DexForceAI/embodichain_reports/tree/main/reports/dexuni-physics-2026-10-27)
+contains retained inputs, raw measurements, reports and videos. The reviewed
+[release index](assets/physics/dexuni/publication.json) pins the dataset commit,
+file sizes and SHA256 hashes. Inputs, results and videos are separate download
+selections. General assets retain their existing EmbodiChain resolvers.
+
+Current plans and task descriptions live under `physics/experiments/dexuni/`.
+[Initial design snapshots](physics/experiments/dexuni/history/initial_design/INDEX.md)
+are retained there as history; the old root workspace has been removed.
+
+See [environment and data setup](physics/experiments/dexuni/SETUP.md) for the
+required adaptation PR, independent platform environments and portability limits.

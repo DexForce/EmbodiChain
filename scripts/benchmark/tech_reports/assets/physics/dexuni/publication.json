@@ -1,0 +1,951 @@
+{
+  "schema_version": 1,
+  "report_id": "dexuni-physics-2026-10-27",
+  "repo_id": "DexForceAI/embodichain_reports",
+  "repo_type": "dataset",
+  "status": "upload_in_progress",
+  "source_dependency": "https://github.com/DexForce/EmbodiChain/pull/829",
+  "task_count": 13,
+  "task_ids": [
+    "S01-C",
+    "S01-T",
+    "S02",
+    "S03",
+    "S04",
+    "M01",
+    "M02",
+    "M03",
+    "M04",
+    "M05",
+    "M06",
+    "C01",
+    "C02"
+  ],
+  "artifacts": [
+    {
+      "id": "c01_supermarket_packing-inputs",
+      "task_folder": "c01_supermarket_packing",
+      "kind": "inputs",
+      "path": "reports/dexuni-physics-2026-10-27/inputs/c01_supermarket_packing/c01_supermarket_packing.zip",
+      "bytes": 316548158,
+      "sha256": "18c8fa8be31350b63e66bc69097df89a58ebbd92e7290c93bd1f4c53a54798e6",
+      "members_path": "reports/dexuni-physics-2026-10-27/inputs/c01_supermarket_packing/c01_supermarket_packing.members.json",
+      "members_sha256": "fa002fee39e7d704a24b6f146944d72b229681f160dbae1df173f08ff24351f7",
+      "files": 804,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "c01_supermarket_packing-results",
+      "task_folder": "c01_supermarket_packing",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/results/c01_supermarket_packing.zip",
+      "bytes": 451861958,
+      "sha256": "865414674346f8c81598bed7d6d85e2edfa5f2a4edb9ec043830551c3a49a8f5",
+      "members_path": "reports/dexuni-physics-2026-10-27/results/c01_supermarket_packing.members.json",
+      "members_sha256": "022c48f78a39f68947275d737e7def6d1dbf3e1ad92f70063ddc809bc66389bc",
+      "files": 504,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "c01_supermarket_packing/platforms/embodichain/preview/video.mp4",
+      "task_folder": "c01_supermarket_packing",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/c01_supermarket_packing/platforms/embodichain/preview/video.mp4",
+      "bytes": 13746456,
+      "sha256": "fa25cb851c7770b50d2c5aefb7047e4c638bbb20bb12dfb5509cb899fd521124",
+      "output_path": "c01_supermarket_packing/platforms/embodichain/preview/video.mp4"
+    },
+    {
+      "id": "c01_supermarket_packing/platforms/isaaclab/preview/video.mp4",
+      "task_folder": "c01_supermarket_packing",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/c01_supermarket_packing/platforms/isaaclab/preview/video.mp4",
+      "bytes": 3920677,
+      "sha256": "bc024f4a5a0e0068e6599ba9048a27fc26baa348e8a9f13dce7f69f5a135a08a",
+      "output_path": "c01_supermarket_packing/platforms/isaaclab/preview/video.mp4"
+    },
+    {
+      "id": "c01_supermarket_packing/preview/comparison.mp4",
+      "task_folder": "c01_supermarket_packing",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/c01_supermarket_packing/preview/comparison.mp4",
+      "bytes": 5552108,
+      "sha256": "0f750898ba380f1d1d40310f2daebe7bb06d2418e0f652b11a9b75cd46333390",
+      "output_path": "c01_supermarket_packing/preview/comparison.mp4"
+    },
+    {
+      "id": "c01_supermarket_packing/preview/dexsim.mp4",
+      "task_folder": "c01_supermarket_packing",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/c01_supermarket_packing/preview/dexsim.mp4",
+      "bytes": 12196327,
+      "sha256": "488c6f23e88d033018abd4f4b9236078d39d8fdf11a46dfa49d3a0766f2f423f",
+      "output_path": "c01_supermarket_packing/preview/dexsim.mp4"
+    },
+    {
+      "id": "c02_bag_frame_packing-inputs",
+      "task_folder": "c02_bag_frame_packing",
+      "kind": "inputs",
+      "path": "reports/dexuni-physics-2026-10-27/inputs/c02_bag_frame_packing/c02_bag_frame_packing.zip",
+      "bytes": 258976297,
+      "sha256": "cd087c5c18eceec3238e114af7e813113e3bd083ccf409e892cf7d84aca49d9c",
+      "members_path": "reports/dexuni-physics-2026-10-27/inputs/c02_bag_frame_packing/c02_bag_frame_packing.members.json",
+      "members_sha256": "2bf516739ff5c3f1b78ec63648d9c66716019f072a92ba13fa935ad2690ecbf6",
+      "files": 609,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "c02_bag_frame_packing-results",
+      "task_folder": "c02_bag_frame_packing",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/results/c02_bag_frame_packing.zip",
+      "bytes": 743683018,
+      "sha256": "7e476b209b20b4814d7b0442d3bb97c2888d91bdd6e741eff37b406715a0aae5",
+      "members_path": "reports/dexuni-physics-2026-10-27/results/c02_bag_frame_packing.members.json",
+      "members_sha256": "25d578765ce0104ab61e24fbe462779c5992238662f4f4ca8f5f2ea5bac3dddd",
+      "files": 406,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "c02_bag_frame_packing/budget_reduction/i24_s12_video/preview/video.mp4",
+      "task_folder": "c02_bag_frame_packing",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/c02_bag_frame_packing/budget_reduction/i24_s12_video/preview/video.mp4",
+      "bytes": 33126938,
+      "sha256": "795fcebd5970ae69542490499835c6999fc0bdd8872a9301754ca1cef4737d7e",
+      "output_path": "c02_bag_frame_packing/budget_reduction/i24_s12_video/preview/video.mp4"
+    },
+    {
+      "id": "c02_bag_frame_packing/budget_reduction/iteration_comparison.mp4",
+      "task_folder": "c02_bag_frame_packing",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/c02_bag_frame_packing/budget_reduction/iteration_comparison.mp4",
+      "bytes": 7029206,
+      "sha256": "bc7b276f2f88e76e8283c22c42e9dd1a79d3d188904b8994eab8808c14979a57",
+      "output_path": "c02_bag_frame_packing/budget_reduction/iteration_comparison.mp4"
+    },
+    {
+      "id": "c02_bag_frame_packing/platforms/comparison.mp4",
+      "task_folder": "c02_bag_frame_packing",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/c02_bag_frame_packing/platforms/comparison.mp4",
+      "bytes": 3998557,
+      "sha256": "f043b41016c1697786d1703871fb0d76dea39b4da8c8f289c1c63b7f96d06b1c",
+      "output_path": "c02_bag_frame_packing/platforms/comparison.mp4"
+    },
+    {
+      "id": "c02_bag_frame_packing/platforms/embodichain/preview/video.mp4",
+      "task_folder": "c02_bag_frame_packing",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/c02_bag_frame_packing/platforms/embodichain/preview/video.mp4",
+      "bytes": 28664354,
+      "sha256": "51bdd882eef7a4b9ef7e1bcbf9f1b78656682ff10e1de064ca342c2dd96b1bbf",
+      "output_path": "c02_bag_frame_packing/platforms/embodichain/preview/video.mp4"
+    },
+    {
+      "id": "c02_bag_frame_packing/platforms/isaaclab/preview/video.mp4",
+      "task_folder": "c02_bag_frame_packing",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/c02_bag_frame_packing/platforms/isaaclab/preview/video.mp4",
+      "bytes": 26834597,
+      "sha256": "94c5dc38e799e3fd84838dd9fea55a25fc7ea3541a34a8e484945edbeb3101e0",
+      "output_path": "c02_bag_frame_packing/platforms/isaaclab/preview/video.mp4"
+    },
+    {
+      "id": "c02_bag_frame_packing/preview/dexsim.mp4",
+      "task_folder": "c02_bag_frame_packing",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/c02_bag_frame_packing/preview/dexsim.mp4",
+      "bytes": 18627945,
+      "sha256": "a6efa67c9ede465f16f0fbdef5ec06a60a021d7ddf537baeeb6d6315c42a3f4c",
+      "output_path": "c02_bag_frame_packing/preview/dexsim.mp4"
+    },
+    {
+      "id": "m01_soft_beam_bend-inputs",
+      "task_folder": "m01_soft_beam_bend",
+      "kind": "inputs",
+      "path": "reports/dexuni-physics-2026-10-27/inputs/m01_soft_beam_bend/m01_soft_beam_bend.zip",
+      "bytes": 41841164,
+      "sha256": "5f27fe88d4204d7bf5eaa51a3177bd332638da1da5fba7b7e2ff90ac3b3499ac",
+      "members_path": "reports/dexuni-physics-2026-10-27/inputs/m01_soft_beam_bend/m01_soft_beam_bend.members.json",
+      "members_sha256": "9e6a284230263e7642db4ad2f07c4a43e4a14aae2729fcfd6cc513afe05917a8",
+      "files": 85,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "m01_soft_beam_bend-results",
+      "task_folder": "m01_soft_beam_bend",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/results/m01_soft_beam_bend.zip",
+      "bytes": 152352745,
+      "sha256": "7949657f5097c8182eeb4508212350d01f70eaf2b54331ba081a1f5bb0e84120",
+      "members_path": "reports/dexuni-physics-2026-10-27/results/m01_soft_beam_bend.members.json",
+      "members_sha256": "5f8100d7cabe09ca04c19486fbd1b9d29efd90ae03ef64cb2c040ce7baca76ed",
+      "files": 96,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "m01_soft_beam_bend/preview/dexsim.mp4",
+      "task_folder": "m01_soft_beam_bend",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m01_soft_beam_bend/preview/dexsim.mp4",
+      "bytes": 8628504,
+      "sha256": "5f7564cd33b27f6c5f15c0e72292888ce051274795e550257bcb5cb041e81a3f",
+      "output_path": "m01_soft_beam_bend/preview/dexsim.mp4"
+    },
+    {
+      "id": "m01_soft_beam_bend/preview/embodichain/video.mp4",
+      "task_folder": "m01_soft_beam_bend",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m01_soft_beam_bend/preview/embodichain/video.mp4",
+      "bytes": 7768953,
+      "sha256": "70a80cd1165ff25ddb06644c93511787f3da0cdce79e9b69d44c8c0866e0e5db",
+      "output_path": "m01_soft_beam_bend/preview/embodichain/video.mp4"
+    },
+    {
+      "id": "m01_soft_beam_bend/preview/isaaclab/video.mp4",
+      "task_folder": "m01_soft_beam_bend",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m01_soft_beam_bend/preview/isaaclab/video.mp4",
+      "bytes": 4295533,
+      "sha256": "259238e9526404e9eeeef8a071a9e91b13a62f4e28d985890bf34f80272237ba",
+      "output_path": "m01_soft_beam_bend/preview/isaaclab/video.mp4"
+    },
+    {
+      "id": "m01_soft_beam_bend/videos/m01_comparison.mp4",
+      "task_folder": "m01_soft_beam_bend",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m01_soft_beam_bend/videos/m01_comparison.mp4",
+      "bytes": 12794588,
+      "sha256": "297c51a368ec60d90b66f4feeaa2f30b7cbcf0841aaab5717889603874d232c1",
+      "output_path": "m01_soft_beam_bend/videos/m01_comparison.mp4"
+    },
+    {
+      "id": "m02_cloth_single_fold-inputs",
+      "task_folder": "m02_cloth_single_fold",
+      "kind": "inputs",
+      "path": "reports/dexuni-physics-2026-10-27/inputs/m02_cloth_single_fold/m02_cloth_single_fold.zip",
+      "bytes": 41854282,
+      "sha256": "d6059987b9d5bc6bc820e884655b5cb6657477699f8580f249168f64795ba157",
+      "members_path": "reports/dexuni-physics-2026-10-27/inputs/m02_cloth_single_fold/m02_cloth_single_fold.members.json",
+      "members_sha256": "9f58967eafdbf0d13c80bbba003d593460c52514d9fed394767a96443b9d8684",
+      "files": 85,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "m02_cloth_single_fold-results",
+      "task_folder": "m02_cloth_single_fold",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/results/m02_cloth_single_fold.zip",
+      "bytes": 199343790,
+      "sha256": "814a3eadf31f6580d89a2d4f7bcc298f2da3e3b29aa4f6238c9b78abf9047dea",
+      "members_path": "reports/dexuni-physics-2026-10-27/results/m02_cloth_single_fold.members.json",
+      "members_sha256": "c4c76ea710735d334026ce9ccef40d4c99eb2c5c05705a10172177f36af14253",
+      "files": 85,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "m02_cloth_single_fold/preview/dexsim.mp4",
+      "task_folder": "m02_cloth_single_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m02_cloth_single_fold/preview/dexsim.mp4",
+      "bytes": 8326065,
+      "sha256": "8a759699789c034302ada98f17499990d1da65d82ffa50cfa7aecc57ddc5b2db",
+      "output_path": "m02_cloth_single_fold/preview/dexsim.mp4"
+    },
+    {
+      "id": "m02_cloth_single_fold/preview/embodichain/video.mp4",
+      "task_folder": "m02_cloth_single_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m02_cloth_single_fold/preview/embodichain/video.mp4",
+      "bytes": 8705428,
+      "sha256": "3f1a185b655b1cf23ed8efd7f7eff7bf321a6ac2e2671efc59e452ec34722575",
+      "output_path": "m02_cloth_single_fold/preview/embodichain/video.mp4"
+    },
+    {
+      "id": "m02_cloth_single_fold/preview/isaaclab/video.mp4",
+      "task_folder": "m02_cloth_single_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m02_cloth_single_fold/preview/isaaclab/video.mp4",
+      "bytes": 4920567,
+      "sha256": "c8f7ead32f33a8465f2f598a73e03b5e5f4bdc2cf8983bfd3e5a5a2948265977",
+      "output_path": "m02_cloth_single_fold/preview/isaaclab/video.mp4"
+    },
+    {
+      "id": "m02_cloth_single_fold/videos/m02_comparison.mp4",
+      "task_folder": "m02_cloth_single_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m02_cloth_single_fold/videos/m02_comparison.mp4",
+      "bytes": 14505231,
+      "sha256": "ca10b03634a0fb19fee8a38dd015e5300dfc75e793cfab051232efb01865bbed",
+      "output_path": "m02_cloth_single_fold/videos/m02_comparison.mp4"
+    },
+    {
+      "id": "m03_four_layer_cloth_pick_place-inputs",
+      "task_folder": "m03_four_layer_cloth_pick_place",
+      "kind": "inputs",
+      "path": "reports/dexuni-physics-2026-10-27/inputs/m03_four_layer_cloth_pick_place/m03_four_layer_cloth_pick_place.zip",
+      "bytes": 41936621,
+      "sha256": "7b19f92167a62652cd7c9547cb24abef64deb69315b63962cded57b38314829c",
+      "members_path": "reports/dexuni-physics-2026-10-27/inputs/m03_four_layer_cloth_pick_place/m03_four_layer_cloth_pick_place.members.json",
+      "members_sha256": "4855c01df5e858c75f1dfabd3f43211456f0904509406ac2ba54916ba03b2baf",
+      "files": 90,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "m03_four_layer_cloth_pick_place-results",
+      "task_folder": "m03_four_layer_cloth_pick_place",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/results/m03_four_layer_cloth_pick_place.zip",
+      "bytes": 1176372157,
+      "sha256": "ccc59548e4097f5888339cb808160829123316742ccfcc2e2914787a8c22652b",
+      "members_path": "reports/dexuni-physics-2026-10-27/results/m03_four_layer_cloth_pick_place.members.json",
+      "members_sha256": "ddbea6c3e61da2004f4a9a181716d1b68f1c198ae0711ca0a9ab05bc8623b6cd",
+      "files": 100,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "m03_four_layer_cloth_pick_place/preview/comparison.mp4",
+      "task_folder": "m03_four_layer_cloth_pick_place",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m03_four_layer_cloth_pick_place/preview/comparison.mp4",
+      "bytes": 23425355,
+      "sha256": "f67019c92b32acbf78f00269c891af3dc2311da6a4f282b5d7f156530c076039",
+      "output_path": "m03_four_layer_cloth_pick_place/preview/comparison.mp4"
+    },
+    {
+      "id": "m03_four_layer_cloth_pick_place/preview/dexsim.mp4",
+      "task_folder": "m03_four_layer_cloth_pick_place",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m03_four_layer_cloth_pick_place/preview/dexsim.mp4",
+      "bytes": 17795261,
+      "sha256": "c809a6865439d04da1d069982cb19507fd902035eb09dfbb8685b4e51d1509be",
+      "output_path": "m03_four_layer_cloth_pick_place/preview/dexsim.mp4"
+    },
+    {
+      "id": "m03_four_layer_cloth_pick_place/preview/embodichain/video.mp4",
+      "task_folder": "m03_four_layer_cloth_pick_place",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m03_four_layer_cloth_pick_place/preview/embodichain/video.mp4",
+      "bytes": 20375885,
+      "sha256": "aa40e55e1e533f93226ebdf62d648578ebe7765f09ba78fe0d5228813c49b52b",
+      "output_path": "m03_four_layer_cloth_pick_place/preview/embodichain/video.mp4"
+    },
+    {
+      "id": "m03_four_layer_cloth_pick_place/preview/isaaclab/video.mp4",
+      "task_folder": "m03_four_layer_cloth_pick_place",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m03_four_layer_cloth_pick_place/preview/isaaclab/video.mp4",
+      "bytes": 13997759,
+      "sha256": "020544b230806676532bc2f596cfbc4642b9c285a82da2c1964def48d05dc331",
+      "output_path": "m03_four_layer_cloth_pick_place/preview/isaaclab/video.mp4"
+    },
+    {
+      "id": "m04_bimanual_tshirt_single_fold-inputs",
+      "task_folder": "m04_bimanual_tshirt_single_fold",
+      "kind": "inputs",
+      "path": "reports/dexuni-physics-2026-10-27/inputs/m04_bimanual_tshirt_single_fold/m04_bimanual_tshirt_single_fold.zip",
+      "bytes": 45826693,
+      "sha256": "00f91dc6b6564cb1963439eadde8a168a834a9ec7b1497ca2ae069986ccbbc5e",
+      "members_path": "reports/dexuni-physics-2026-10-27/inputs/m04_bimanual_tshirt_single_fold/m04_bimanual_tshirt_single_fold.members.json",
+      "members_sha256": "309aa7b94f1b29cadf7ff1d33f7ee59e8098df66a1e95821c17ea5d95426889c",
+      "files": 92,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "m04_bimanual_tshirt_single_fold-results",
+      "task_folder": "m04_bimanual_tshirt_single_fold",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/results/m04_bimanual_tshirt_single_fold.zip",
+      "bytes": 2639206964,
+      "sha256": "8c3a2fc74e96e3ef84a389f200fb43500f55a7c9e566ee826b7ce58c7ec196d3",
+      "members_path": "reports/dexuni-physics-2026-10-27/results/m04_bimanual_tshirt_single_fold.members.json",
+      "members_sha256": "b059a723d7b2e16ea795f35bb56153033a0a3d32d1ef7cfb8c8a4a27e1279e98",
+      "files": 339,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "m04_bimanual_tshirt_single_fold/preview/comparison.mp4",
+      "task_folder": "m04_bimanual_tshirt_single_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m04_bimanual_tshirt_single_fold/preview/comparison.mp4",
+      "bytes": 17856539,
+      "sha256": "16b586fe959304b4381ac319859bbf2519c9e1fbecfa86199e5e1ca5db38964a",
+      "output_path": "m04_bimanual_tshirt_single_fold/preview/comparison.mp4"
+    },
+    {
+      "id": "m04_bimanual_tshirt_single_fold/preview/dexsim.mp4",
+      "task_folder": "m04_bimanual_tshirt_single_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m04_bimanual_tshirt_single_fold/preview/dexsim.mp4",
+      "bytes": 13164171,
+      "sha256": "13bb1380cc593949e4d8cea226c1c119949a00efe6fbcd2e50fb355dcd0841d1",
+      "output_path": "m04_bimanual_tshirt_single_fold/preview/dexsim.mp4"
+    },
+    {
+      "id": "m04_bimanual_tshirt_single_fold/preview/embodichain/video.mp4",
+      "task_folder": "m04_bimanual_tshirt_single_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m04_bimanual_tshirt_single_fold/preview/embodichain/video.mp4",
+      "bytes": 15943363,
+      "sha256": "e0001eca37784aa773fc1e5938c519cbcde4f9517d8d0e803422889f712177f1",
+      "output_path": "m04_bimanual_tshirt_single_fold/preview/embodichain/video.mp4"
+    },
+    {
+      "id": "m04_bimanual_tshirt_single_fold/preview/isaaclab/video.mp4",
+      "task_folder": "m04_bimanual_tshirt_single_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m04_bimanual_tshirt_single_fold/preview/isaaclab/video.mp4",
+      "bytes": 10629854,
+      "sha256": "3c01970bb40efaf77592d38713cce205f88675f5260ef2ed063f467fbf4741bd",
+      "output_path": "m04_bimanual_tshirt_single_fold/preview/isaaclab/video.mp4"
+    },
+    {
+      "id": "m05_inflatable_pouch_load-inputs",
+      "task_folder": "m05_inflatable_pouch_load",
+      "kind": "inputs",
+      "path": "reports/dexuni-physics-2026-10-27/inputs/m05_inflatable_pouch_load/m05_inflatable_pouch_load.zip",
+      "bytes": 28105453,
+      "sha256": "02efb2bd9a2b78a2d4e7ccd6eefa54dea3c1753b488e8ad7719b7d5f5a5d2dfa",
+      "members_path": "reports/dexuni-physics-2026-10-27/inputs/m05_inflatable_pouch_load/m05_inflatable_pouch_load.members.json",
+      "members_sha256": "396e2f3f32b2aabdcf3114b22993da619af194a1d6d055a7d6b63894a43f8fcf",
+      "files": 72,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "m05_inflatable_pouch_load-results",
+      "task_folder": "m05_inflatable_pouch_load",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/results/m05_inflatable_pouch_load.zip",
+      "bytes": 11229379,
+      "sha256": "e4af549eeb00450a2f3a8c4daa8997e4f4f1c9ff442ea48928f1fd42de7ba2e7",
+      "members_path": "reports/dexuni-physics-2026-10-27/results/m05_inflatable_pouch_load.members.json",
+      "members_sha256": "2729cd3674179f737343579ed4e5bbe31765b15cc4270b58a30f68d941b3226a",
+      "files": 79,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "m05_inflatable_pouch_load/preview/comparison.mp4",
+      "task_folder": "m05_inflatable_pouch_load",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m05_inflatable_pouch_load/preview/comparison.mp4",
+      "bytes": 30713468,
+      "sha256": "288e139220daeb5e635f74ca7cf6856561a8e115d6bb242021ce86da165fdebd",
+      "output_path": "m05_inflatable_pouch_load/preview/comparison.mp4"
+    },
+    {
+      "id": "m05_inflatable_pouch_load/preview/dexsim.mp4",
+      "task_folder": "m05_inflatable_pouch_load",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m05_inflatable_pouch_load/preview/dexsim.mp4",
+      "bytes": 12966861,
+      "sha256": "a6a6afa743f79b71986d7f62346aa7e88ba05ec528b38bff2f60aa9c8f195858",
+      "output_path": "m05_inflatable_pouch_load/preview/dexsim.mp4"
+    },
+    {
+      "id": "m05_inflatable_pouch_load/preview/embodichain/video.mp4",
+      "task_folder": "m05_inflatable_pouch_load",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m05_inflatable_pouch_load/preview/embodichain/video.mp4",
+      "bytes": 14335610,
+      "sha256": "efc07730c0fbc2e29f30cd496120d917fa4025780099d1e324d846664f8fddcb",
+      "output_path": "m05_inflatable_pouch_load/preview/embodichain/video.mp4"
+    },
+    {
+      "id": "m06_franka_tshirt_fold-inputs",
+      "task_folder": "m06_franka_tshirt_fold",
+      "kind": "inputs",
+      "path": "reports/dexuni-physics-2026-10-27/inputs/m06_franka_tshirt_fold/m06_franka_tshirt_fold.zip",
+      "bytes": 60284357,
+      "sha256": "a985f62e41f4d93b3cca98d6db089c94b59a9098b80d9dfefb3d8709711bbfd6",
+      "members_path": "reports/dexuni-physics-2026-10-27/inputs/m06_franka_tshirt_fold/m06_franka_tshirt_fold.members.json",
+      "members_sha256": "b6b763de29081cfe5139a84c3cdfdf9a9be1fb38fdd59edcaaeccd72535a3c67",
+      "files": 82,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "m06_franka_tshirt_fold-results",
+      "task_folder": "m06_franka_tshirt_fold",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/results/m06_franka_tshirt_fold.zip",
+      "bytes": 732246740,
+      "sha256": "8150a4d9e66341f83f33d4bd074be7c0e5d7ea72e473ce97c179d0054636dce0",
+      "members_path": "reports/dexuni-physics-2026-10-27/results/m06_franka_tshirt_fold.members.json",
+      "members_sha256": "293d2df439041b441e16267aedf5c2083a0284e1a69ffd220a87235eb9edea66",
+      "files": 276,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "m06_franka_tshirt_fold/history/preview_before_stiffness_change/preview/dexsim.mp4",
+      "task_folder": "m06_franka_tshirt_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m06_franka_tshirt_fold/history/preview_before_stiffness_change/preview/dexsim.mp4",
+      "bytes": 10050088,
+      "sha256": "e3391e214b2c135ca152b08bc11e803c176b272d8feb93ee68ba9256960335bf",
+      "output_path": "m06_franka_tshirt_fold/history/preview_before_stiffness_change/preview/dexsim.mp4"
+    },
+    {
+      "id": "m06_franka_tshirt_fold/history/preview_before_surface_fast/preview/comparison.mp4",
+      "task_folder": "m06_franka_tshirt_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m06_franka_tshirt_fold/history/preview_before_surface_fast/preview/comparison.mp4",
+      "bytes": 10813745,
+      "sha256": "31020b3c26ce0aa57897e1f4e7853f29f31841268cf8fa855f338bbb08c1d479",
+      "output_path": "m06_franka_tshirt_fold/history/preview_before_surface_fast/preview/comparison.mp4"
+    },
+    {
+      "id": "m06_franka_tshirt_fold/history/preview_before_surface_fast/preview/embodichain/embodichain.mp4",
+      "task_folder": "m06_franka_tshirt_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m06_franka_tshirt_fold/history/preview_before_surface_fast/preview/embodichain/embodichain.mp4",
+      "bytes": 10160169,
+      "sha256": "9f0829a926d4774b72a22bf180159cbe1adfcc2ed9c10e402481d512a1ea9d37",
+      "output_path": "m06_franka_tshirt_fold/history/preview_before_surface_fast/preview/embodichain/embodichain.mp4"
+    },
+    {
+      "id": "m06_franka_tshirt_fold/preview/comparison.mp4",
+      "task_folder": "m06_franka_tshirt_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m06_franka_tshirt_fold/preview/comparison.mp4",
+      "bytes": 10769021,
+      "sha256": "b8ad85e4058ad718eae4a38027e48b4f7e41a208b6b549e2a7cfb08889cea7f1",
+      "output_path": "m06_franka_tshirt_fold/preview/comparison.mp4"
+    },
+    {
+      "id": "m06_franka_tshirt_fold/preview/dexsim.mp4",
+      "task_folder": "m06_franka_tshirt_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m06_franka_tshirt_fold/preview/dexsim.mp4",
+      "bytes": 10146339,
+      "sha256": "0012c10b3d8973d2d596cf411e700140aa0aaf62d241a6247c725fc49eb887bb",
+      "output_path": "m06_franka_tshirt_fold/preview/dexsim.mp4"
+    },
+    {
+      "id": "m06_franka_tshirt_fold/preview/embodichain/embodichain.mp4",
+      "task_folder": "m06_franka_tshirt_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m06_franka_tshirt_fold/preview/embodichain/embodichain.mp4",
+      "bytes": 10121772,
+      "sha256": "03e169ffd495b54334d272bc45fcd7c516aa80a970e9fe321ac7c9bb399e5c11",
+      "output_path": "m06_franka_tshirt_fold/preview/embodichain/embodichain.mp4"
+    },
+    {
+      "id": "m06_franka_tshirt_fold/preview/isaaclab/isaaclab.mp4",
+      "task_folder": "m06_franka_tshirt_fold",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/m06_franka_tshirt_fold/preview/isaaclab/isaaclab.mp4",
+      "bytes": 7124474,
+      "sha256": "0972642c60bf99455f8a5d85f9bcd592e93873e1a4148414debf3cb88f8bdd45",
+      "output_path": "m06_franka_tshirt_fold/preview/isaaclab/isaaclab.mp4"
+    },
+    {
+      "id": "s01_fixed_five-inputs",
+      "task_folder": "s01_fixed_five",
+      "kind": "inputs",
+      "path": "reports/dexuni-physics-2026-10-27/inputs/s01_fixed_five/s01_fixed_five.zip",
+      "bytes": 6339239,
+      "sha256": "93c817cbe5de868e2f08a5f9acdf8651a9f4ded70fca29b3a776e3e0faae4435",
+      "members_path": "reports/dexuni-physics-2026-10-27/inputs/s01_fixed_five/s01_fixed_five.members.json",
+      "members_sha256": "5073218b7da5df6f9705a41507ec727949983127cd5dc27922b9dbbd25ad65ab",
+      "files": 24,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "s01_fixed_five-results",
+      "task_folder": "s01_fixed_five",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/results/s01_fixed_five.zip",
+      "bytes": 894907601,
+      "sha256": "2a50db8ec6cc93eac1a32fb969b1d12ab4a89782b92daaecbffd9b279e0a5da4",
+      "members_path": "reports/dexuni-physics-2026-10-27/results/s01_fixed_five.members.json",
+      "members_sha256": "07855b987c8a16a9ed4b3041fdb1086922d5af08f8ec995ca3bf6036a6f86a41",
+      "files": 281,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "s01_fixed_five/media/s01c/raw_data/embodichain/s01c_embodichain_s00_nominal_r00_full_20261022T035752Z_d34b/rgb_front45.mp4",
+      "task_folder": "s01_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s01_fixed_five/media/s01c/raw_data/embodichain/s01c_embodichain_s00_nominal_r00_full_20261022T035752Z_d34b/rgb_front45.mp4",
+      "bytes": 16433917,
+      "sha256": "740b465d3639040ef12ce0c86b49036d4c6b23fe54d3351cb02f2633fd9de72d",
+      "output_path": "s01_fixed_five/media/s01c/raw_data/embodichain/s01c_embodichain_s00_nominal_r00_full_20261022T035752Z_d34b/rgb_front45.mp4"
+    },
+    {
+      "id": "s01_fixed_five/media/s01c/raw_data/embodichain/s01c_embodichain_s00_nominal_r00_full_20261022T035752Z_d34b/rgb_oblique.mp4",
+      "task_folder": "s01_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s01_fixed_five/media/s01c/raw_data/embodichain/s01c_embodichain_s00_nominal_r00_full_20261022T035752Z_d34b/rgb_oblique.mp4",
+      "bytes": 15264057,
+      "sha256": "42cb51fe1122446b32ebd473678a1b6b54eccf0d14e8e48cb5fceed498450570",
+      "output_path": "s01_fixed_five/media/s01c/raw_data/embodichain/s01c_embodichain_s00_nominal_r00_full_20261022T035752Z_d34b/rgb_oblique.mp4"
+    },
+    {
+      "id": "s01_fixed_five/media/s01c/raw_data/isaaclab/s01c_isaaclab_s00_nominal_r00_full_20261022T035854Z_8b17/rgb_front45.mp4",
+      "task_folder": "s01_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s01_fixed_five/media/s01c/raw_data/isaaclab/s01c_isaaclab_s00_nominal_r00_full_20261022T035854Z_8b17/rgb_front45.mp4",
+      "bytes": 9924950,
+      "sha256": "381fd8448dbb6fdefbb3546cab91e546c43432a9809392fac747263753af54cc",
+      "output_path": "s01_fixed_five/media/s01c/raw_data/isaaclab/s01c_isaaclab_s00_nominal_r00_full_20261022T035854Z_8b17/rgb_front45.mp4"
+    },
+    {
+      "id": "s01_fixed_five/media/s01c/raw_data/isaaclab/s01c_isaaclab_s00_nominal_r00_full_20261022T035854Z_8b17/rgb_oblique.mp4",
+      "task_folder": "s01_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s01_fixed_five/media/s01c/raw_data/isaaclab/s01c_isaaclab_s00_nominal_r00_full_20261022T035854Z_8b17/rgb_oblique.mp4",
+      "bytes": 9469215,
+      "sha256": "4a05350efa495dbe95f429805a5890efe9e8a7cf83384c2a2c2a639fa3ef3f95",
+      "output_path": "s01_fixed_five/media/s01c/raw_data/isaaclab/s01c_isaaclab_s00_nominal_r00_full_20261022T035854Z_8b17/rgb_oblique.mp4"
+    },
+    {
+      "id": "s01_fixed_five/media/s01t/raw_data/embodichain/s01t_embodichain_s00_nominal_r00_full_20261022T040002Z_e8f5/rgb_oblique.mp4",
+      "task_folder": "s01_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s01_fixed_five/media/s01t/raw_data/embodichain/s01t_embodichain_s00_nominal_r00_full_20261022T040002Z_e8f5/rgb_oblique.mp4",
+      "bytes": 16999986,
+      "sha256": "9ad5cb14b1e3a2a56aa737cfd9ac1609db06f685a9242454b18bcdf4aee133dd",
+      "output_path": "s01_fixed_five/media/s01t/raw_data/embodichain/s01t_embodichain_s00_nominal_r00_full_20261022T040002Z_e8f5/rgb_oblique.mp4"
+    },
+    {
+      "id": "s01_fixed_five/media/s01t/raw_data/embodichain/s01t_embodichain_s00_nominal_r00_full_20261022T040002Z_e8f5/rgb_side45.mp4",
+      "task_folder": "s01_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s01_fixed_five/media/s01t/raw_data/embodichain/s01t_embodichain_s00_nominal_r00_full_20261022T040002Z_e8f5/rgb_side45.mp4",
+      "bytes": 20853262,
+      "sha256": "ea37cbc5b1e26bf3cd92c2e6b0e62880d0f48f7c620fdec56377976cc07c56e3",
+      "output_path": "s01_fixed_five/media/s01t/raw_data/embodichain/s01t_embodichain_s00_nominal_r00_full_20261022T040002Z_e8f5/rgb_side45.mp4"
+    },
+    {
+      "id": "s01_fixed_five/media/s01t/raw_data/isaaclab/s01t_isaaclab_s00_nominal_r00_full_20261022T040111Z_f51b/rgb_oblique.mp4",
+      "task_folder": "s01_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s01_fixed_five/media/s01t/raw_data/isaaclab/s01t_isaaclab_s00_nominal_r00_full_20261022T040111Z_f51b/rgb_oblique.mp4",
+      "bytes": 11219618,
+      "sha256": "21498d1ff4767b4eff55e8ef8348ce9c32abcc1cd08cfae79cf32f4faa2d27e0",
+      "output_path": "s01_fixed_five/media/s01t/raw_data/isaaclab/s01t_isaaclab_s00_nominal_r00_full_20261022T040111Z_f51b/rgb_oblique.mp4"
+    },
+    {
+      "id": "s01_fixed_five/media/s01t/raw_data/isaaclab/s01t_isaaclab_s00_nominal_r00_full_20261022T040111Z_f51b/rgb_side45.mp4",
+      "task_folder": "s01_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s01_fixed_five/media/s01t/raw_data/isaaclab/s01t_isaaclab_s00_nominal_r00_full_20261022T040111Z_f51b/rgb_side45.mp4",
+      "bytes": 11728485,
+      "sha256": "e2d966d0afdf6065533e4a3785e18e441659f6d47ae466c1634a794f3e073e82",
+      "output_path": "s01_fixed_five/media/s01t/raw_data/isaaclab/s01t_isaaclab_s00_nominal_r00_full_20261022T040111Z_f51b/rgb_side45.mp4"
+    },
+    {
+      "id": "s01_fixed_five/videos/s01c_comparison.mp4",
+      "task_folder": "s01_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s01_fixed_five/videos/s01c_comparison.mp4",
+      "bytes": 4545580,
+      "sha256": "7d13b069baa82074acf8dfe2e3666277fad5687d613777e7f8600953e565c5c1",
+      "output_path": "s01_fixed_five/videos/s01c_comparison.mp4"
+    },
+    {
+      "id": "s01_fixed_five/videos/s01t_comparison.mp4",
+      "task_folder": "s01_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s01_fixed_five/videos/s01t_comparison.mp4",
+      "bytes": 5382392,
+      "sha256": "1bdfb11ac9ce70754b24dd68803ba9fcd128861f5638a65b7f405c4234252d7b",
+      "output_path": "s01_fixed_five/videos/s01t_comparison.mp4"
+    },
+    {
+      "id": "s02_fixed_five-inputs",
+      "task_folder": "s02_fixed_five",
+      "kind": "inputs",
+      "path": "reports/dexuni-physics-2026-10-27/inputs/s02_fixed_five/s02_fixed_five.zip",
+      "bytes": 6048962,
+      "sha256": "a9b480d063a793c92d6a69a89f905bb1164a36aa20731bff085f33367702226f",
+      "members_path": "reports/dexuni-physics-2026-10-27/inputs/s02_fixed_five/s02_fixed_five.members.json",
+      "members_sha256": "d9a369a828519f7b40f57b56e33575e0b226e14512593ec3ded05ea58ab8001b",
+      "files": 17,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "s02_fixed_five-results",
+      "task_folder": "s02_fixed_five",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/results/s02_fixed_five.zip",
+      "bytes": 847825711,
+      "sha256": "b2930f522c88abd0b372a648ff9579caf9bbfbc7614ae7415110dbc3e59d0d5c",
+      "members_path": "reports/dexuni-physics-2026-10-27/results/s02_fixed_five.members.json",
+      "members_sha256": "ec8b5caa54ccb3f94fd4d6ee3be84cc32656ab662d15ab8321656e44fe481d8a",
+      "files": 190,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "s02_fixed_five/media/s02/raw_data/embodichain/s02_embodichain_s00_nominal_r00_full_20261022T043059Z_b0a4/rgb_front.mp4",
+      "task_folder": "s02_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s02_fixed_five/media/s02/raw_data/embodichain/s02_embodichain_s00_nominal_r00_full_20261022T043059Z_b0a4/rgb_front.mp4",
+      "bytes": 23801359,
+      "sha256": "8022ade27b86fb58fd93328562dcadb57c1a63b9a34e43a962f8c1f428a5e6bb",
+      "output_path": "s02_fixed_five/media/s02/raw_data/embodichain/s02_embodichain_s00_nominal_r00_full_20261022T043059Z_b0a4/rgb_front.mp4"
+    },
+    {
+      "id": "s02_fixed_five/media/s02/raw_data/embodichain/s02_embodichain_s00_nominal_r00_full_20261022T043059Z_b0a4/rgb_oblique.mp4",
+      "task_folder": "s02_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s02_fixed_five/media/s02/raw_data/embodichain/s02_embodichain_s00_nominal_r00_full_20261022T043059Z_b0a4/rgb_oblique.mp4",
+      "bytes": 29865710,
+      "sha256": "5f75bccf4ed1f57a377ce9b67e7877886b1fc6d6a3e4310419be3c7771f6d9c5",
+      "output_path": "s02_fixed_five/media/s02/raw_data/embodichain/s02_embodichain_s00_nominal_r00_full_20261022T043059Z_b0a4/rgb_oblique.mp4"
+    },
+    {
+      "id": "s02_fixed_five/media/s02/raw_data/isaaclab/s02_isaaclab_s00_nominal_r00_full_20261022T043246Z_fb33/rgb_front.mp4",
+      "task_folder": "s02_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s02_fixed_five/media/s02/raw_data/isaaclab/s02_isaaclab_s00_nominal_r00_full_20261022T043246Z_fb33/rgb_front.mp4",
+      "bytes": 14768107,
+      "sha256": "4aad6c333324b244477c67aa7a7626ff31add8e4db79cd9bdc11abfcde851002",
+      "output_path": "s02_fixed_five/media/s02/raw_data/isaaclab/s02_isaaclab_s00_nominal_r00_full_20261022T043246Z_fb33/rgb_front.mp4"
+    },
+    {
+      "id": "s02_fixed_five/media/s02/raw_data/isaaclab/s02_isaaclab_s00_nominal_r00_full_20261022T043246Z_fb33/rgb_oblique.mp4",
+      "task_folder": "s02_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s02_fixed_five/media/s02/raw_data/isaaclab/s02_isaaclab_s00_nominal_r00_full_20261022T043246Z_fb33/rgb_oblique.mp4",
+      "bytes": 19141263,
+      "sha256": "10bc9fb27743f12e8a6fc6f385e39eebabe8a112cc21e9fc793bdc37ce687755",
+      "output_path": "s02_fixed_five/media/s02/raw_data/isaaclab/s02_isaaclab_s00_nominal_r00_full_20261022T043246Z_fb33/rgb_oblique.mp4"
+    },
+    {
+      "id": "s02_fixed_five/videos/s02_comparison.mp4",
+      "task_folder": "s02_fixed_five",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s02_fixed_five/videos/s02_comparison.mp4",
+      "bytes": 8219963,
+      "sha256": "c55f15cadae50ec83c9feed481b8d84add8be4cef26e8bf9a1835ac0434f4bca",
+      "output_path": "s02_fixed_five/videos/s02_comparison.mp4"
+    },
+    {
+      "id": "s03_cloth_corner_lift-inputs",
+      "task_folder": "s03_cloth_corner_lift",
+      "kind": "inputs",
+      "path": "reports/dexuni-physics-2026-10-27/inputs/s03_cloth_corner_lift/s03_cloth_corner_lift.zip",
+      "bytes": 32544276,
+      "sha256": "0be1e835eb6c1b21154df5509f4064abf8b027ad53ef46306c543f1dbeeb5757",
+      "members_path": "reports/dexuni-physics-2026-10-27/inputs/s03_cloth_corner_lift/s03_cloth_corner_lift.members.json",
+      "members_sha256": "02027dd819cef2e69e24361946e52d3c07f79da883be54f96fd11034fa221515",
+      "files": 78,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "s03_cloth_corner_lift-results",
+      "task_folder": "s03_cloth_corner_lift",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/results/s03_cloth_corner_lift.zip",
+      "bytes": 276610053,
+      "sha256": "91a843ecfd8e5071a4e49063c0840233f938f5d319624848dcbce6a69c3d4f47",
+      "members_path": "reports/dexuni-physics-2026-10-27/results/s03_cloth_corner_lift.members.json",
+      "members_sha256": "2637f9fbb35cb2108c60c8521e1c758dbea23206c13703e2944dfe0239816b39",
+      "files": 551,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "s03_cloth_corner_lift/history/formal_before_sdk/preview/raw_data/embodichain/s03_embodichain_s00_nominal_r00_full_20261022T082925Z_c200/rgb_oblique.mp4",
+      "task_folder": "s03_cloth_corner_lift",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s03_cloth_corner_lift/history/formal_before_sdk/preview/raw_data/embodichain/s03_embodichain_s00_nominal_r00_full_20261022T082925Z_c200/rgb_oblique.mp4",
+      "bytes": 4698500,
+      "sha256": "4c962bd6d2c9519202d975d4aefb552e27d0229e096354ad5fdb1335aef940c1",
+      "output_path": "s03_cloth_corner_lift/history/formal_before_sdk/preview/raw_data/embodichain/s03_embodichain_s00_nominal_r00_full_20261022T082925Z_c200/rgb_oblique.mp4"
+    },
+    {
+      "id": "s03_cloth_corner_lift/history/formal_before_sdk/preview/raw_data/isaaclab/s03_isaaclab_s00_nominal_r00_full_20261022T082804Z_0718/rgb_oblique.mp4",
+      "task_folder": "s03_cloth_corner_lift",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s03_cloth_corner_lift/history/formal_before_sdk/preview/raw_data/isaaclab/s03_isaaclab_s00_nominal_r00_full_20261022T082804Z_0718/rgb_oblique.mp4",
+      "bytes": 10428213,
+      "sha256": "b2b4fb8c5a1597b29a368555d73af9a2b092cf72bcedba731365a1d9592c1c0c",
+      "output_path": "s03_cloth_corner_lift/history/formal_before_sdk/preview/raw_data/isaaclab/s03_isaaclab_s00_nominal_r00_full_20261022T082804Z_0718/rgb_oblique.mp4"
+    },
+    {
+      "id": "s03_cloth_corner_lift/history/formal_before_sdk/videos/s03_comparison.mp4",
+      "task_folder": "s03_cloth_corner_lift",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s03_cloth_corner_lift/history/formal_before_sdk/videos/s03_comparison.mp4",
+      "bytes": 4097429,
+      "sha256": "15f45fd2fb590dec918793815092ecddc5c84eb7973b68bd07584bdd00f98d75",
+      "output_path": "s03_cloth_corner_lift/history/formal_before_sdk/videos/s03_comparison.mp4"
+    },
+    {
+      "id": "s03_cloth_corner_lift/preview/raw_data/embodichain/s03_embodichain_s00_nominal_r00_full_20261023T013919Z_343b/rgb_oblique.mp4",
+      "task_folder": "s03_cloth_corner_lift",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s03_cloth_corner_lift/preview/raw_data/embodichain/s03_embodichain_s00_nominal_r00_full_20261023T013919Z_343b/rgb_oblique.mp4",
+      "bytes": 4664726,
+      "sha256": "b1390161b5fa4277408909828bf7d40a5e9588ffb6f53fac24f032587cd9f859",
+      "output_path": "s03_cloth_corner_lift/preview/raw_data/embodichain/s03_embodichain_s00_nominal_r00_full_20261023T013919Z_343b/rgb_oblique.mp4"
+    },
+    {
+      "id": "s03_cloth_corner_lift/preview/raw_data/isaaclab/s03_isaaclab_s00_nominal_r00_full_20261023T014031Z_6c89/rgb_oblique.mp4",
+      "task_folder": "s03_cloth_corner_lift",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s03_cloth_corner_lift/preview/raw_data/isaaclab/s03_isaaclab_s00_nominal_r00_full_20261023T014031Z_6c89/rgb_oblique.mp4",
+      "bytes": 10444888,
+      "sha256": "9b6a21b4f5916d4c28eae43d958072fc1ca964fcc49d6505cc2f148247b89afc",
+      "output_path": "s03_cloth_corner_lift/preview/raw_data/isaaclab/s03_isaaclab_s00_nominal_r00_full_20261023T014031Z_6c89/rgb_oblique.mp4"
+    },
+    {
+      "id": "s03_cloth_corner_lift/videos/s03_comparison.mp4",
+      "task_folder": "s03_cloth_corner_lift",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s03_cloth_corner_lift/videos/s03_comparison.mp4",
+      "bytes": 4116872,
+      "sha256": "81a74615576ec8c643398077df5d24f3863ceb832c337e861d162f5bbc95cabe",
+      "output_path": "s03_cloth_corner_lift/videos/s03_comparison.mp4"
+    },
+    {
+      "id": "s04_rigid_soft_squeeze_grasp-inputs",
+      "task_folder": "s04_rigid_soft_squeeze_grasp",
+      "kind": "inputs",
+      "path": "reports/dexuni-physics-2026-10-27/inputs/s04_rigid_soft_squeeze_grasp/s04_rigid_soft_squeeze_grasp.zip",
+      "bytes": 41793198,
+      "sha256": "ec7d9515936c9a2de8ebaa4969be28fd6a490c7a21088054e32f7b6d8ca8ff76",
+      "members_path": "reports/dexuni-physics-2026-10-27/inputs/s04_rigid_soft_squeeze_grasp/s04_rigid_soft_squeeze_grasp.members.json",
+      "members_sha256": "83044d351b5a7b4e5b25c38212eee66c717585531b3ce38e0b8b04eaaed44c31",
+      "files": 85,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "s04_rigid_soft_squeeze_grasp-results",
+      "task_folder": "s04_rigid_soft_squeeze_grasp",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/results/s04_rigid_soft_squeeze_grasp.zip",
+      "bytes": 154052426,
+      "sha256": "48f6e7daec353331baa670369abff4034f8834c4a90969d49f66bb5296a23448",
+      "members_path": "reports/dexuni-physics-2026-10-27/results/s04_rigid_soft_squeeze_grasp.members.json",
+      "members_sha256": "6d74afc8aaeecfcf9e9360000e1dcc44653fbc8e9a23ec36a5afa3958a05f42c",
+      "files": 710,
+      "extract_to": "outputs/benchmarks/tech_reports/dexuni"
+    },
+    {
+      "id": "s04_rigid_soft_squeeze_grasp/history/before_ec_initial_pose_fix/preview/embodichain/video.mp4",
+      "task_folder": "s04_rigid_soft_squeeze_grasp",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s04_rigid_soft_squeeze_grasp/history/before_ec_initial_pose_fix/preview/embodichain/video.mp4",
+      "bytes": 6218026,
+      "sha256": "4a846f47dd5b0a729703f3a7c43bf329d38a187d0db3b3c087950a266b95b9e1",
+      "output_path": "s04_rigid_soft_squeeze_grasp/history/before_ec_initial_pose_fix/preview/embodichain/video.mp4"
+    },
+    {
+      "id": "s04_rigid_soft_squeeze_grasp/history/before_ec_initial_pose_fix/videos/s04_comparison.mp4",
+      "task_folder": "s04_rigid_soft_squeeze_grasp",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s04_rigid_soft_squeeze_grasp/history/before_ec_initial_pose_fix/videos/s04_comparison.mp4",
+      "bytes": 6690875,
+      "sha256": "7ac72b7a666b29467390bf3ad4358f892c45c41d2c7c013e265110bcbb9f1117",
+      "output_path": "s04_rigid_soft_squeeze_grasp/history/before_ec_initial_pose_fix/videos/s04_comparison.mp4"
+    },
+    {
+      "id": "s04_rigid_soft_squeeze_grasp/history/formal_before_sdk/preview/comparison.mp4",
+      "task_folder": "s04_rigid_soft_squeeze_grasp",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s04_rigid_soft_squeeze_grasp/history/formal_before_sdk/preview/comparison.mp4",
+      "bytes": 6636858,
+      "sha256": "05bbb300b83b4cb1e1c2a64177ecb7864daf6c3c1db85490cd230ea48b2e65a0",
+      "output_path": "s04_rigid_soft_squeeze_grasp/history/formal_before_sdk/preview/comparison.mp4"
+    },
+    {
+      "id": "s04_rigid_soft_squeeze_grasp/history/formal_before_sdk/preview/embodichain/video.mp4",
+      "task_folder": "s04_rigid_soft_squeeze_grasp",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s04_rigid_soft_squeeze_grasp/history/formal_before_sdk/preview/embodichain/video.mp4",
+      "bytes": 6131634,
+      "sha256": "5b0255fa052baff868c79cc50590584a73759d7255742a1ff0da406cb6f59733",
+      "output_path": "s04_rigid_soft_squeeze_grasp/history/formal_before_sdk/preview/embodichain/video.mp4"
+    },
+    {
+      "id": "s04_rigid_soft_squeeze_grasp/history/formal_before_sdk/preview/isaaclab/video.mp4",
+      "task_folder": "s04_rigid_soft_squeeze_grasp",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s04_rigid_soft_squeeze_grasp/history/formal_before_sdk/preview/isaaclab/video.mp4",
+      "bytes": 3183336,
+      "sha256": "d6f6d8922f043e5a65727a62abdbc948f3fe9133c360b81154d824dfa0b66de0",
+      "output_path": "s04_rigid_soft_squeeze_grasp/history/formal_before_sdk/preview/isaaclab/video.mp4"
+    },
+    {
+      "id": "s04_rigid_soft_squeeze_grasp/preview/dexsim.mp4",
+      "task_folder": "s04_rigid_soft_squeeze_grasp",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s04_rigid_soft_squeeze_grasp/preview/dexsim.mp4",
+      "bytes": 6651544,
+      "sha256": "6c06e4ca8231ccad7dde6970170c33742d37558338664e10fab02d0328f740db",
+      "output_path": "s04_rigid_soft_squeeze_grasp/preview/dexsim.mp4"
+    },
+    {
+      "id": "s04_rigid_soft_squeeze_grasp/preview/embodichain/video.mp4",
+      "task_folder": "s04_rigid_soft_squeeze_grasp",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s04_rigid_soft_squeeze_grasp/preview/embodichain/video.mp4",
+      "bytes": 5963566,
+      "sha256": "df333f305e75ed4f840f83b895a84940f12d2f4bebbf3f253430db97364317b2",
+      "output_path": "s04_rigid_soft_squeeze_grasp/preview/embodichain/video.mp4"
+    },
+    {
+      "id": "s04_rigid_soft_squeeze_grasp/preview/isaaclab/video.mp4",
+      "task_folder": "s04_rigid_soft_squeeze_grasp",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s04_rigid_soft_squeeze_grasp/preview/isaaclab/video.mp4",
+      "bytes": 3202964,
+      "sha256": "4d3682bc6a2bfcf84d61c7c16d17cad4ee98eb469c7bbe769dec4e3c9b1cd30a",
+      "output_path": "s04_rigid_soft_squeeze_grasp/preview/isaaclab/video.mp4"
+    },
+    {
+      "id": "s04_rigid_soft_squeeze_grasp/videos/s04_comparison.mp4",
+      "task_folder": "s04_rigid_soft_squeeze_grasp",
+      "kind": "videos",
+      "path": "reports/dexuni-physics-2026-10-27/videos/s04_rigid_soft_squeeze_grasp/videos/s04_comparison.mp4",
+      "bytes": 6502075,
+      "sha256": "ded0d6b1e715592b44f07886cdc8d4686a7115a702bb0a6257b3b3a54d98e490",
+      "output_path": "s04_rigid_soft_squeeze_grasp/videos/s04_comparison.mp4"
+    },
+    {
+      "id": "comparison.json",
+      "task_folder": "__overview__",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/comparison.json",
+      "bytes": 12151,
+      "sha256": "b41b86d014aad5964084db8d39dca5ed313136d625778166aa849b44674b0166",
+      "output_path": "comparison.json"
+    },
+    {
+      "id": "comparison.csv",
+      "task_folder": "__overview__",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/comparison.csv",
+      "bytes": 4414,
+      "sha256": "bcaa4941c1f19b57fa93ec3e929f509b9c1ca5fd975ccb7cca6958d19a52edf7",
+      "output_path": "comparison.csv"
+    },
+    {
+      "id": "COMPARISON.md",
+      "task_folder": "__overview__",
+      "kind": "results",
+      "path": "reports/dexuni-physics-2026-10-27/COMPARISON.md",
+      "bytes": 8097,
+      "sha256": "fd131cc8f259fa7035b9ee5887a4a5b08c5999be729631eaab28996ec9ff4b84",
+      "output_path": "COMPARISON.md"
+    }
+  ],
+  "revision": null,
+  "tasks": {
+    "S01-C": "s01_fixed_five",
+    "S01-T": "s01_fixed_five",
+    "S02": "s02_fixed_five",
+    "S03": "s03_cloth_corner_lift",
+    "S04": "s04_rigid_soft_squeeze_grasp",
+    "M01": "m01_soft_beam_bend",
+    "M02": "m02_cloth_single_fold",
+    "M03": "m03_four_layer_cloth_pick_place",
+    "M04": "m04_bimanual_tshirt_single_fold",
+    "M05": "m05_inflatable_pouch_load",
+    "M06": "m06_franka_tshirt_fold",
+    "C01": "c01_supermarket_packing",
+    "C02": "c02_bag_frame_packing"
+  }
+}
