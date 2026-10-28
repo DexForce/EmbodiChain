@@ -639,7 +639,7 @@ def test_parallel_quality_merges_full_population_and_preserves_inputs(
         if execution == "multi_device":
             quality_devices = ["cuda:2", "cuda:5"]
             workers = 3
-            monkeypatch.setattr(parallel, "_resolve_quality_devices", list)
+            monkeypatch.setattr(parallel, "resolve_quality_devices", list)
             actual_worker = parallel._run_shard
 
             def cpu_shard(job):
@@ -889,7 +889,7 @@ def test_parallel_partition_preserves_shared_geometry_and_rejects_timing(
         run_benchmark(
             suite, case_manifest=corpus, output_root=tmp_path, device="cpu", workers=2
         )
-    monkeypatch.setattr(parallel, "_resolve_quality_devices", list)
+    monkeypatch.setattr(parallel, "resolve_quality_devices", list)
     for workers in (1, 2):
         with pytest.raises(ValueError, match="Performance replay does not accept"):
             run_benchmark(
@@ -904,15 +904,13 @@ def test_parallel_partition_preserves_shared_geometry_and_rejects_timing(
 
 @pytest.mark.parametrize("devices", [[], ["cuda"], ["cuda:0", "cuda:0"], ["cuda:2"]])
 def test_quality_device_list_is_explicit_unique_and_available(monkeypatch, devices):
-    from embodichain_benchmarks.motion_generation.parallel import (
-        _resolve_quality_devices,
-    )
+    from embodichain_benchmarks.motion_generation import resolve_quality_devices
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
     with pytest.raises(ValueError, match="quality.device"):
-        _resolve_quality_devices(devices)
-    assert _resolve_quality_devices(["cuda:1", "cuda:0"]) == ["cuda:1", "cuda:0"]
+        resolve_quality_devices(devices)
+    assert resolve_quality_devices(["cuda:1", "cuda:0"]) == ["cuda:1", "cuda:0"]
 
 
 @pytest.mark.parametrize("fails", [False, True])
@@ -946,7 +944,7 @@ def test_serial_quality_device_scope_restores_host_on_return_or_failure(
                 raise RuntimeError("fixture failure")
             return "complete"
 
-    monkeypatch.setattr(parallel, "_resolve_quality_devices", list)
+    monkeypatch.setattr(parallel, "resolve_quality_devices", list)
     monkeypatch.setattr(torch.cuda, "device", device_scope)
     monkeypatch.setattr(runner_module, "BenchmarkRunner", Runner)
     if fails:

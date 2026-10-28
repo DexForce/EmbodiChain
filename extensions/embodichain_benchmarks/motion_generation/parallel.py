@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from .runner import BenchmarkRunResult
     from .video import VideoRecordCfg
 
-__all__ = []
+__all__ = ["resolve_quality_devices"]
 
 
 def _worker_device(requested: str) -> str:
@@ -56,8 +56,20 @@ def _worker_device(requested: str) -> str:
     return str(device)
 
 
-def _resolve_quality_devices(requested: Sequence[str]) -> list[str]:
-    """Validate explicit visible CUDA ordinals before any worker or simulator starts."""
+def resolve_quality_devices(requested: Sequence[str]) -> list[str]:
+    """Validate explicit visible CUDA ordinals before starting quality evaluation.
+
+    Args:
+        requested: Nonempty sequence of unique explicit ``cuda:N`` device names.
+            Indices refer to devices visible through ``CUDA_VISIBLE_DEVICES``.
+
+    Returns:
+        Canonical device names in the caller's order. This validation does not
+        create workers or simulators or change the current CUDA device.
+
+    Raises:
+        ValueError: If a device is implicit, unavailable, repeated, or malformed.
+    """
     import torch
 
     if isinstance(requested, (str, bytes)) or not requested:
@@ -387,7 +399,7 @@ def run_parallel_benchmark(
         raise ValueError("Parallel evaluation requires installed planner adapters.")
     device = _worker_device(device)
     devices = (
-        _resolve_quality_devices(quality_devices)
+        resolve_quality_devices(quality_devices)
         if quality_devices is not None
         else [device]
     )

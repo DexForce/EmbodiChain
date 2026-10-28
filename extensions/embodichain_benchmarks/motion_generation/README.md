@@ -151,11 +151,12 @@ hand's geometry, including its 0.08 m maximum opening. Single-arm declarations
 use `gripper.control_part: eef`; dual declarations use the `grippers` list.
 Omitting these new selectors retains the existing PGI fixture behavior.
 
-GraspKit defines closing along grasp-frame X, while the native hand closes
-along TCP Y. The benchmark rotates sampled and explicit Placement grasp poses
-by -90 degrees about local Z before freezing them, keeping their contact center
-and approach direction. Frozen replay uses those native-TCP poses directly.
-This grasp convention conversion is separate from the policy/runtime TCP map.
+GraspKit returns sampled poses already converted once to the declared runtime
+TCP; see its [frame contract](../../../embodichain/toolkits/graspkit/README.md#frames-and-collision-scope).
+The Placement provider converts its explicitly authored canonical top/handle
+poses to that TCP before freezing them. Frozen replay consumes these runtime-TCP
+poses directly, without another hand-specific conversion. This boundary is
+separate from the policy/runtime TCP map.
 
 Changing hands changes case generation and requires fresh frozen Atomic inputs.
 Explicit Placement top/handle grasps still need native-hand input and physical

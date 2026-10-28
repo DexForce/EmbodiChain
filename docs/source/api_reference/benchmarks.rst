@@ -74,12 +74,15 @@ Public entry points
    run_all_benchmarks
    run_benchmark
    prepare_case_manifest
+   resolve_quality_devices
 
 .. autofunction:: embodichain_benchmarks.motion_generation.run_benchmark
 
 .. autofunction:: embodichain_benchmarks.motion_generation.prepare_case_manifest
 
 .. autofunction:: embodichain_benchmarks.motion_generation.load_suite
+
+.. autofunction:: embodichain_benchmarks.motion_generation.resolve_quality_devices
 
 .. autoclass:: embodichain_benchmarks.motion_generation.BenchmarkRunResult
 
@@ -258,6 +261,18 @@ embodichain_benchmarks.motion_generation.models
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: embodichain_benchmarks.motion_generation.models
+   :members:
+   :undoc-members:
+
+
+embodichain_benchmarks.motion_generation.parallel
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Validate explicit visible CUDA devices before creating quality workers or a
+simulator. The package-level ``resolve_quality_devices`` export is the public
+entry point for external benchmark hosts.
+
+.. automodule:: embodichain_benchmarks.motion_generation.parallel
    :members:
    :undoc-members:
 

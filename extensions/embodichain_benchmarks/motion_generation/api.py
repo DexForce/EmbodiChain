@@ -111,9 +111,9 @@ def run_benchmark(
     if quality_devices is not None:
         import torch
 
-        from .parallel import _resolve_quality_devices
+        from .parallel import resolve_quality_devices
 
-        quality_devices = _resolve_quality_devices(quality_devices)
+        quality_devices = resolve_quality_devices(quality_devices)
         if case_manifest is not None and any(
             row.get("case_parameters", {}).get("measurement_purpose")
             == "performance_replay"

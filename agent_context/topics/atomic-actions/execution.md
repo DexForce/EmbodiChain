@@ -202,17 +202,10 @@ multiples of `physics_dt`; the adapter never rounds a motion-command request
 upward. Passive runner polling, including physical-effect waits, rounds the
 configured minimum cycle up to an advertised clock quantum before sleeping.
 
-
 ## Benchmark physical replay evidence
 
-The motion-generation benchmark's Atomic replay can collect opt-in bounded
-`physics.replay_diagnostics` independently of stage scoring. It samples all
-compiled action segments, including prefix pickups, and persists scene-row
-object/TCP poses, commanded/measured gripper state, elapsed simulation time and
-available ContactSensor evidence in trial metadata. Contact identities retain
-Spawn paths/link names and overflow counts; missing channels and sparse absence
-must not be interpreted as a successful grasp or absence of intermediate contact.
-Collection contributes to execution time, so the resolved diagnostic switch is
-recorded before planning and must match for execution-performance comparisons.
-See `scenarios/_replay_diagnostics.py` and `atomic_replay.py` in the benchmark
-extension. This evidence does not attach objects or change controller commands.
+The benchmark extension's `scenarios/_replay_diagnostics.py` and
+`atomic_replay.py` collect optional Atomic replay evidence without changing
+stage scoring or controller commands. The
+[benchmark README](../../../extensions/embodichain_benchmarks/motion_generation/README.md#physical-replay-diagnostics)
+owns the configuration, recorded fields and timing interpretation.

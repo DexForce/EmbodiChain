@@ -38,6 +38,20 @@ import trimesh
 __all__ = ["FixedGripperCollisionGeometry"]
 
 
+def _rigid_transform(value: object, *, error_message: str) -> np.ndarray:
+    """Validate one transform while retaining the caller's error context."""
+    transform = np.asarray(value, dtype=np.float64)
+    if (
+        transform.shape != (4, 4)
+        or not np.isfinite(transform).all()
+        or not np.allclose(transform[3], [0, 0, 0, 1])
+        or not np.allclose(transform[:3, :3].T @ transform[:3, :3], np.eye(3))
+        or not np.isclose(np.linalg.det(transform[:3, :3]), 1)
+    ):
+        raise ValueError(error_message)
+    return transform
+
+
 def _origin(element: ET.Element | None) -> np.ndarray:
     result = np.eye(4)
     if element is not None:
@@ -87,17 +101,10 @@ class FixedGripperCollisionGeometry:
             raise ValueError(
                 "Fixed gripper geometry requires finite CPU points (N, 3)."
             )
-        transform = np.asarray(self.provenance.get("grasp_from_tcp"), dtype=np.float64)
-        if (
-            transform.shape != (4, 4)
-            or not np.isfinite(transform).all()
-            or not np.allclose(transform[3], [0, 0, 0, 1])
-            or not np.allclose(transform[:3, :3].T @ transform[:3, :3], np.eye(3))
-            or not np.isclose(np.linalg.det(transform[:3, :3]), 1)
-        ):
-            raise ValueError(
-                "Explicit rigid grasp_from_tcp is required for collision geometry."
-            )
+        _rigid_transform(
+            self.provenance.get("grasp_from_tcp"),
+            error_message="Explicit rigid grasp_from_tcp is required for collision geometry.",
+        )
         object.__setattr__(self, "points", points.detach().clone().contiguous())
         object.__setattr__(self, "provenance", deepcopy(self.provenance))
 
@@ -149,17 +156,10 @@ class FixedGripperCollisionGeometry:
         """
         if not np.isfinite(point_spacing) or point_spacing <= 0:
             raise ValueError("point_spacing must be finite and positive.")
-        grasp_from_tcp = np.asarray(grasp_from_tcp, dtype=np.float64)
-        if (
-            grasp_from_tcp.shape != (4, 4)
-            or not np.isfinite(grasp_from_tcp).all()
-            or not np.allclose(grasp_from_tcp[3], [0, 0, 0, 1])
-            or not np.allclose(
-                grasp_from_tcp[:3, :3].T @ grasp_from_tcp[:3, :3], np.eye(3)
-            )
-            or not np.isclose(np.linalg.det(grasp_from_tcp[:3, :3]), 1)
-        ):
-            raise ValueError("grasp_from_tcp must be a finite rigid transform.")
+        grasp_from_tcp = _rigid_transform(
+            grasp_from_tcp,
+            error_message="grasp_from_tcp must be a finite rigid transform.",
+        )
         path = Path(urdf_path).resolve(strict=True)
         source = path.read_bytes()
         document = ET.fromstring(source)
@@ -259,17 +259,10 @@ class FixedGripperCollisionGeometry:
             joint_position(named_joints[name])
         if link_from_tcp is None:
             link_from_tcp = np.eye(4)
-        link_from_tcp = np.asarray(link_from_tcp, dtype=np.float64)
-        if (
-            link_from_tcp.shape != (4, 4)
-            or not np.isfinite(link_from_tcp).all()
-            or not np.allclose(link_from_tcp[3], [0, 0, 0, 1])
-            or not np.allclose(
-                link_from_tcp[:3, :3].T @ link_from_tcp[:3, :3], np.eye(3)
-            )
-            or not np.isclose(np.linalg.det(link_from_tcp[:3, :3]), 1)
-        ):
-            raise ValueError("link_from_tcp must be a finite rigid transform.")
+        link_from_tcp = _rigid_transform(
+            link_from_tcp,
+            error_message="link_from_tcp must be a finite rigid transform.",
+        )
         tcp_from_root = np.linalg.inv(root_from_link(tcp_link) @ link_from_tcp)
         files = {str(path): hashlib.sha256(source).hexdigest()}
         pieces = []
