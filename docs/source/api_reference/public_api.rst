@@ -3098,3 +3098,25 @@ Historical assembly reference preparation
    :maxdepth: 1
 
    assembly_robot_reference
+
+Blind assembly observation functors
+-----------------------------------
+
+These task-specific observations maintain proprioceptive history and provide
+privileged mating state and contact labels for training. Only the proprioceptive
+observation belongs to the actor input.
+
+.. currentmodule:: embodichain_tasks.manipulation.assembly.obs
+
+.. autosummary::
+
+   AssemblyProprioception
+   assembly_privileged_state
+   assembly_contact_labels
+
+.. autoclass:: AssemblyProprioception
+   :members: reset
+
+.. autofunction:: assembly_privileged_state
+
+.. autofunction:: assembly_contact_labels

@@ -249,7 +249,9 @@ it. `scripts/benchmark/assembly/train_peg.py` uses this hook for read-only nativ
 capacity checks before auto-reset, while preserving the native PPO path.
 
 Blind assembly uses the registered `proprioceptive_actor_critic` policy with
-explicit actor/critic groups. Its `architecture_version` preserves checkpoint
+explicit actor/critic groups. Task-owned observations and training labels live
+under `embodichain_tasks.manipulation.assembly.obs`, registered for config
+resolution by the task package. Its `architecture_version` preserves checkpoint
 semantics: omitted versions retain `legacy_v1` with previous history followed by
 current; `official_v1` matches the author's public actor export with current
 followed by history including current. Deployments must pair the policy version
