@@ -1,72 +1,77 @@
-# GraspKit parallel-jaw geometry presets
+# GraspKit parallel-jaw geometry
 
-`get_parallel_jaw_gripper_model(model_id)` returns a fresh
-`ParallelJawGripperModelCfg`. The static catalog contains planning dimensions;
-robot assembly, asset loading, TCP transforms and generator policy have their
-own owners. Inline configurations remain available for calibrated hardware.
+`AntipodalGraspPoseGenerator` requires an explicit `collision_geometry`.
+`ParallelJawGripperModelCfg` supplies the model identity and minimum/maximum
+contact opening; it does not approximate fingers or the palm with boxes.
+`get_parallel_jaw_collision_geometry` resolves the registered hand's actual
+URDF collision meshes, open joint state and calibrated TCP. Custom hardware
+must provide its own geometry; missing geometry is an error.
 
-## Default use
-
-The reusable Franka Panda embodiment selects `franka_panda_hand` for `hand`.
-The CobotMagic embodiment selects `cobotmagic_v100_gripper` for its declared
-`right_eef` grasp endpoint. The Tianji Marvin embodiment selects
-`tianji_marvin_gripper` for both `left_eef` and `right_eef`, reusing the
-registered `TianjiMarvinCfg` with `with_gripper: true`. Its task embodiment
-aligns the TCP opening/approach axes with the physical finger span; the
-standalone catalog keeps its source-tool convention. For example:
-
-```yaml
-runtime_services:
-  grasp_pose_generators:
-    right_eef:
-      kind: antipodal_parallel_jaw
-      model: cobotmagic_v100_gripper
-```
-
-These declarations use the library defaults in
-`AntipodalGraspPoseGeneratorCfg`, `ParallelJawGraspCollisionCfg` and
-`GraspAnnotationCfg`. Task integrations can tune the supported fields through
-`grasp_pose_generator_overrides`; the shared embodiment retains its defaults.
-An inline `model: {model_id: ...}` is a custom configuration and does not look
-up the named preset.
-
-Direct callers use the same defaults:
+## Construct a generator
 
 ```python
 from embodichain.toolkits.graspkit import get_parallel_jaw_gripper_model
-from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
+from embodichain.toolkits.graspkit.pg_grasp import (
+    AntipodalGraspPoseGenerator,
+    get_parallel_jaw_collision_geometry,
+)
 
 generator = AntipodalGraspPoseGenerator(
-    get_parallel_jaw_gripper_model("franka_panda_hand")
+    get_parallel_jaw_gripper_model("franka_panda_hand"),
+    collision_geometry=get_parallel_jaw_collision_geometry("franka_panda_hand"),
 )
 ```
 
-## Geometry semantics
+Task Program, benchmark and example integrations use the same service and
+geometry contract. The algorithm, collision policy and annotation/cache policy
+retain their separate configuration objects. Marvin requires an explicit
+`side="left"` or `side="right"` because its two hands have different meshes.
+A runtime TCP calibration can be supplied explicitly with `root_from_tcp`;
+this changes the returned TCP poses without moving the physical geometry.
 
-All dimensions are in metres. Grasp-frame X is the opening axis, Z is the
-approach axis, and Y is the finger-width axis. Opening width is the full
-distance between the opposing contact surfaces, not one finger's travel.
-The three presets below use a 1 mm minimum usable opening, matching the generic
-model's planning cutoff. Franka and CobotMagic close at joint position zero;
-Marvin opens at zero and closes by decreasing joint position to -0.05 m.
+For a custom hand, construct `FixedGripperCollisionGeometry.from_urdf` with
+its root/TCP, collision links, actual open joint positions, canonical-to-TCP
+transform and point spacing. Use `link_from_tcp` for a virtual TCP and explicit
+mesh-path mappings when a registered archive requires them. The loader records
+URDF/mesh hashes, resolved joint transforms and the sampled geometry. It does
+not construct a robot or simulator.
 
-Finger dimensions and palm depth are axis-aligned collision-mesh extents,
-rounded upward to the next millimetre. They are scalar size approximations:
-the current model does not retain mesh offsets, curved surfaces or independent
-palm width/thickness. Full robot collision checking and TCP alignment remain
-the host integration's responsibility.
+## Frames and collision scope
 
-| Model ID | Min opening | Max opening | Finger length | Finger width | Finger thickness | Palm depth |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `franka_panda_hand` | 0.001 | 0.080 | 0.054 | 0.022 | 0.027 | 0.092 |
-| `cobotmagic_v100_gripper` | 0.001 | 0.100 | 0.077 | 0.056 | 0.025 | 0.074 |
-| `tianji_marvin_gripper` | 0.001 | 0.095 | 0.103 | 0.043 | 0.034 | 0.082 |
-| `pika_gripper` | 0.001 | 0.094 | 0.113 | 0.039 | 0.057 | 0.085 |
+Sampling, candidate ranking and collision checks use a canonical contact frame:
+X opens the jaws, Z approaches the object, and the origin is the antipodal-pair
+midpoint. Opening width is the full distance between contact surfaces. Public
+pose outputs are converted once to the geometry's declared runtime TCP; callers
+must not add another hand-specific rotation. Explicit canonical poses can use
+`geometry.canonical_to_tcp_poses` at the same boundary.
+
+For Panda, native `fr3_hand_tcp` closes along Y. The conversion is `Rz(-pi/2)`
+with no translation; the contact pads lie near TCP Z=0. The benchmark's policy
+and runtime still use the same TCP. Other hand calibrations come from their
+actual asset and embodiment definitions.
+
+Collision geometry uses the complete declared hand/finger mesh surfaces at a
+fixed open state. Candidate contact widths do not move the fingers beyond that
+physical command. All mesh vertices and deterministic triangle-surface samples
+are checked in bounded candidate/point blocks. This finite surface check does
+not certify continuous mesh intersection, closing contact, arm/environment
+collision, swept paths or physical grasp success.
+
+| Model ID | Minimum contact opening (m) | Maximum contact opening (m) |
+| --- | ---: | ---: |
+| `dh_pgi_140_80` | 0.005 | 0.100 |
+| `franka_panda_hand` | 0.001 | 0.080 |
+| `cobotmagic_v100_gripper` | 0.001 | 0.100 |
+| `tianji_marvin_gripper` | 0.001 | 0.095 |
+| `pika_gripper` | 0.001 | 0.094 |
+
+These are contact-pair eligibility bounds. The actual URDF/open-state geometry
+owns collision checking.
 
 ## Versioned geometry sources
 
 The source archives are the official assets selected by
-`embodichain/data/assets/robot_assets.py`, pinned here to dataset revision
+the asset registry and `extensions/embodichain_robots/`, pinned here to dataset revision
 `48317bd8733182f36d306cc2a7a60ae5e47ed2c9`. Their MD5 checksums were verified
 against the download registry. These presets
 describe those simulation assets; the CobotMagic V70 variant needs its own ID.
@@ -81,8 +86,8 @@ URDF: `Panda/PandaWithHand.urdf`, SHA-256
 The packaged Panda model names its hand links `fr3_*` and selects the white
 Franka Hand meshes. Both finger joints declare 0–0.04 m travel, giving the
 nominal 0.08 m full opening. The finger joints open along hand-frame Y and
-approach along hand-frame Z, so mesh X maps to `finger_width`, Y to
-`finger_thickness` and Z to `finger_length`.
+approach along hand-frame Z. Their mesh origins and offsets are retained in
+the collision template.
 
 Collision meshes under `Panda/meshes/robot_ee/franka_hand_white/collision/`:
 
@@ -101,8 +106,9 @@ URDF: `CobotMagicWithGripperV100.urdf`, SHA-256
 Both finger joints declare 0–0.05 m travel, giving the 0.10 m full opening.
 Their joint origins rotate the finger meshes by a quarter turn about X;
 mesh Z becomes the opening axis and mesh Y becomes the approach axis.
-Consequently mesh X maps to `finger_width`, Y to `finger_length` and Z to
-`finger_thickness`. The gripper-base mesh's Z extent supplies `palm_depth`.
+The collision template preserves those joint transforms and the full palm
+geometry. The archive's `../Collision` references require an explicit mapping
+to its packaged `Collision/` directory.
 
 Collision meshes under `Collision/`:
 
@@ -128,15 +134,15 @@ Transform each collision mesh by its URDF joint-origin rotation and translation
 into the corresponding `*_hand_base_link` frame. Base-frame X is the opening
 axis, Z is the approach axis, and Y is the finger-width axis. The maximum
 extent across all four fingers gives length 0.102398208 m, width 0.042925822 m
-and thickness 0.033736937 m. The larger palm depth is 0.081209033 m. These
-dimensions round upward to the shared preset's millimetre values.
+and thickness 0.033736937 m. The larger palm depth is 0.081209033 m. These are
+descriptive asset measurements; the checker uses the transformed mesh surfaces.
 
 The 0.10 m total joint travel is not the open gap: at zero position, the
 opposing finger meshes' inner X bounds are 0.095514838 m apart on the left
 hand and 0.095523180 m on the right. The preset takes the smaller gap and
-rounds downward to 0.095 m rather than using the nominal travel. Source mesh
-offsets and joint-axis tilts still belong to the full robot collision model;
-the scalar planning preset retains their measured extents only.
+rounds downward to 0.095 m rather than using the nominal travel. The gripper
+collision template retains the source mesh offsets and joint-axis tilts for the
+selected side.
 
 Collision meshes under `Collision/`:
 
@@ -158,9 +164,9 @@ Archive MD5: `8a9d0779e7dbfa7bf5d4713175df014e`; URDF SHA-256:
 The asset includes its adapter. Native gripper-base X approaches, Y opens,
 and Z is the finger-width axis. The Pika TCP aligns these with grasp Z, X,
 and Y respectively. Source finger bounds give approach extent 0.11214 m,
-width 0.03811 m and thickness 0.05700 m; scalar collision sizes round upward
-to millimetres. Palm approach extent is 0.08480 m. The full open gap measured
-from opposing inner mesh bounds at q=0.05 m is about 0.09404 m; the preset
+width 0.03811 m and thickness 0.05700 m. Palm approach extent is 0.08480 m.
+The full open gap measured from opposing inner mesh bounds at q=0.05 m is about
+0.09404 m; the preset
 rounds down to 0.094 m. Joint zero closes the jaws, and finger 2 mimics finger 1.
 These are simulation mesh dimensions, not hardware specifications.
 

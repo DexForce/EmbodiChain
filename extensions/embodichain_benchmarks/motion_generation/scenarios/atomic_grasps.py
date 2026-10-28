@@ -48,67 +48,6 @@ class _AntipodalGraspSearchError(RuntimeError):
     """A bounded grasp pool has no independently solved complete pose chain."""
 
 
-def _native_panda_tcp_pose(grasp_pose: torch.Tensor) -> torch.Tensor:
-    """Map canonical grasp +X closing to native Panda TCP +Y closing once."""
-    grasp_from_tcp = grasp_pose.new_tensor(
-        [[0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
-    )
-    return grasp_pose @ grasp_from_tcp
-
-
-class _NativePandaGraspPoseGenerator(ParallelJawGraspPoseGenerator):
-    """Adapt canonical sampler output to the native hand, before freezing.
-
-    Collision checks and candidate ranking remain in GraspKit's canonical
-    X-closing frame. Only returned poses change; centers, widths, costs and
-    sampling order are preserved. Frozen native-TCP poses bypass this adapter.
-    """
-
-    def __init__(self, sampler: ParallelJawGraspPoseGenerator) -> None:
-        super().__init__(sampler.gripper_model)
-        self._sampler = sampler
-
-    def get_valid_grasp_poses(
-        self, **kwargs: Any
-    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        return [
-            (_native_panda_tcp_pose(poses), costs)
-            for poses, costs in self._sampler.get_valid_grasp_poses(**kwargs)
-        ]
-
-    def get_grasp_candidates(
-        self, **kwargs: Any
-    ) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        return [
-            (_native_panda_tcp_pose(poses), widths, costs)
-            for poses, widths, costs in self._sampler.get_grasp_candidates(**kwargs)
-        ]
-
-    def get_best_grasp_poses(
-        self, **kwargs: Any
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        success, poses, widths = self._sampler.get_best_grasp_poses(**kwargs)
-        return success, _native_panda_tcp_pose(poses), widths
-
-    def get_dual_arm_valid_grasp_poses(
-        self, **kwargs: Any
-    ) -> list[dict[str, dict[str, object]] | None]:
-        return [
-            (
-                None
-                if row is None
-                else {
-                    part: {
-                        **values,
-                        "grasp_poses": _native_panda_tcp_pose(values["grasp_poses"]),
-                    }
-                    for part, values in row.items()
-                }
-            )
-            for row in self._sampler.get_dual_arm_valid_grasp_poses(**kwargs)
-        ]
-
-
 def grasp_sample_count(case: BenchmarkCase) -> int:
     """Return the grasp sampler size a self-sampling case was frozen with."""
     return int(case.case_parameters.get("grasp_sample_count", 10_000))
@@ -456,13 +395,17 @@ class ActiveCaseGraspPoseGenerator(GraspPoseGenerator):
 
 
 def parallel_jaw_sampler(
-    n_sample: int, *, gripper_model: ParallelJawGripperModelCfg | None = None
+    n_sample: int,
+    *,
+    gripper_model: ParallelJawGripperModelCfg | None = None,
+    root_from_tcp: Sequence[Sequence[float]] | None = None,
 ) -> ParallelJawGraspPoseGenerator:
-    """Build a case sampler with explicit hand geometry, or the legacy PGI default.
+    """Build a case sampler with the selected physical hand and runtime TCP.
 
     Args:
         n_sample: Number of antipodal contact-pair samples.
         gripper_model: Mounted hand geometry shared by preparation and replay.
+        root_from_tcp: The bound fixture's calibrated hand-root-to-TCP transform.
 
     Returns:
         A sampler configured for the selected hand.
@@ -472,7 +415,10 @@ def parallel_jaw_sampler(
     )
 
     return create_parallel_jaw_grasp_pose_generator(
-        n_sample=n_sample, force_refresh=False, gripper_model=gripper_model
+        n_sample=n_sample,
+        force_refresh=False,
+        gripper_model=gripper_model,
+        root_from_tcp=root_from_tcp,
     )
 
 

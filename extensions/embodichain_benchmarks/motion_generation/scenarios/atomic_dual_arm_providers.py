@@ -86,7 +86,7 @@ from .atomic_evaluation import (
     stage_evidence_batch,
     trace_validity,
 )
-from .atomic_grasps import _native_panda_tcp_pose, parallel_jaw_sampler
+from .atomic_grasps import parallel_jaw_sampler
 from .atomic_policy import with_plan_options
 from ..atomic_skill import register_atomic_skill_provider
 
@@ -636,6 +636,78 @@ def _compile_reference(
     return plan
 
 
+def _require_hand_over_samples(reference: _ReferencePlan, *, batch_size: int) -> None:
+    """Reject placeholder grasps before qualifying the recorded arm endpoints.
+
+    New HandOver input generation requires explicit legal-sample evidence from
+    its reference compile. Generic planner diagnostics remain optional, and
+    replay of already frozen cases does not enter this preparation-only check.
+    Reference planning success is deliberately not an eligibility condition.
+    """
+    plans = [
+        plan for plan in reference.compiled.action_plans if plan.skill_id == "hand_over"
+    ]
+    if len(plans) != 1:
+        raise RuntimeError(
+            "Reference HandOver input sampling requires one action plan."
+        )
+    samples = plans[0].diagnostics.metadata.get("affordance_sample")
+    if not isinstance(samples, Mapping):
+        raise RuntimeError("Reference HandOver input sampling metadata is missing.")
+    expected_env_ids = reference.compiled.trajectory.env_ids.detach().cpu().tolist()
+    failures = []
+    for name in ("pickup_grasp", "receive_grasp"):
+        sample = samples.get(name)
+        if not isinstance(sample, Mapping):
+            raise RuntimeError(
+                f"Reference HandOver input sampling {name!r} is missing."
+            )
+        success = sample.get("success")
+        parts = sample.get("control_parts")
+        if (
+            not isinstance(success, list)
+            or len(success) != batch_size
+            or any(type(value) is not bool for value in success)
+            or len(expected_env_ids) != batch_size
+            or sample.get("env_ids") != expected_env_ids
+            or not isinstance(parts, list)
+            or len(parts) != batch_size
+            or any(not isinstance(part, str) or not part for part in parts)
+        ):
+            raise RuntimeError(
+                f"Reference HandOver input sampling {name!r} has invalid row metadata."
+            )
+        diagnostic_rows = {}
+        for key in ("valid_candidate_counts", "candidate_ids"):
+            values = sample.get(key)
+            if values is not None and (
+                not isinstance(values, list) or len(values) != batch_size
+            ):
+                raise RuntimeError(
+                    f"Reference HandOver input sampling {name!r} has invalid {key}."
+                )
+            diagnostic_rows[key] = values
+        failed = [index for index, valid in enumerate(success) if not valid]
+        if failed:
+            failures.append(
+                {
+                    "sample": name,
+                    "rows": failed,
+                    "env_ids": [expected_env_ids[index] for index in failed],
+                    "control_parts": [parts[index] for index in failed],
+                    **{
+                        key: None if values is None else [values[i] for i in failed]
+                        for key, values in diagnostic_rows.items()
+                    },
+                }
+            )
+    if failures:
+        raise RuntimeError(
+            "Reference HandOver input sampling failed; invalid grasp placeholders "
+            f"cannot enter independent endpoint qualification: {failures}."
+        )
+
+
 def _antipodal_semantics(handle: AtomicObjectHandle) -> ObjectSemantics:
     """Return whole-object antipodal semantics for one configured object."""
     from .._atomic_fixtures import (
@@ -1008,6 +1080,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
         sampler = parallel_jaw_sampler(
             int(config.get("grasp_sample_count", 10_000)),
             gripper_model=scenario.grasp_model(),
+            root_from_tcp=scenario.grasp_root_from_tcp(),
         )
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(
@@ -1028,6 +1101,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
             grasp_generators={part: sampler for part in grasp_parts},
             record_grasp_parts=grasp_parts,
         )
+        _require_hand_over_samples(reference, batch_size=batch_size)
         # HandOver samples one grasp per gripper: the pickup grasp on the
         # settled object, then the receiving grasp on the predicted handover
         # pose.  Each arm's first request ends at its grasp.
@@ -1242,6 +1316,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
         sampler = parallel_jaw_sampler(
             int(parameters["grasp_sample_count"]),
             gripper_model=scenario.grasp_model(),
+            root_from_tcp=scenario.grasp_root_from_tcp(),
         )
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(
@@ -1610,12 +1685,21 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
         poses = _placement_poses(
             placing, support, placing_pose, support_pose, config, seed=seed
         )
-        grasp_model = scenario.grasp_model()
-        if grasp_model is not None and grasp_model.model_id == "franka_panda_hand":
-            # These calibrated top/handle frames close along X, like GraspKit.
-            # Freeze the actual native TCP pose; replay must not rotate it again.
-            for name in ("placing_grasp_pose", "support_grasp_pose"):
-                poses[name] = _native_panda_tcp_pose(poses[name])
+        from .._atomic_fixtures import TUTORIAL_PARALLEL_JAW_MODEL
+        from embodichain.toolkits.graspkit.pg_grasp import (
+            get_parallel_jaw_collision_geometry,
+        )
+
+        grasp_model = scenario.grasp_model() or TUTORIAL_PARALLEL_JAW_MODEL
+        hand_geometry = get_parallel_jaw_collision_geometry(
+            grasp_model.model_id,
+            point_spacing=0.012,
+            root_from_tcp=scenario.grasp_root_from_tcp(),
+        )
+        # Calibrated top/handle poses are canonical contact frames. Freeze each
+        # actual runtime TCP once; frozen replay never transforms them again.
+        for name in ("placing_grasp_pose", "support_grasp_pose"):
+            poses[name] = hand_geometry.canonical_to_tcp_poses(poses[name])
         from .._atomic_fixtures import get_local_vertices
         from ._placement_qualification import _placement_input_geometry
 

@@ -621,30 +621,23 @@ def _make_benchmark_grasp_pose_generator_class():
 
 def create_benchmark_grasp_pose_generator(
     args: argparse.Namespace,
+    robot,
 ):
     """Create the endpoint-owned parallel-jaw service used by benchmarks."""
-    from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+    from examples.sim.atomic_action.gripper_geometry import mounted_gripper_geometry
     from embodichain.toolkits.graspkit.pg_grasp import (
         AntipodalGraspPoseGeneratorCfg,
         GraspAnnotationCfg,
         ParallelJawGraspCollisionCfg,
     )
 
+    model, geometry = mounted_gripper_geometry(robot.cfg)
     generator_type = _make_benchmark_grasp_pose_generator_class()
     return generator_type(
-        ParallelJawGripperModelCfg(
-            model_id="dh_pgi_140_80",
-            min_opening_width=0.003,
-            max_opening_width=0.1,
-            finger_length=0.1,
-            finger_width=0.04,
-            finger_thickness=0.01,
-            palm_depth=0.096,
-        ),
+        model,
+        collision_geometry=geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=args.n_sample),
         collision_cfg=ParallelJawGraspCollisionCfg(
-            opening_margin=0.03,
-            point_sample_density=0.012,
             filter_ground_collision=False,
         ),
         annotation_cfg=GraspAnnotationCfg(

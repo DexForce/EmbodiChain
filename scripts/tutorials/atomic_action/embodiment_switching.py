@@ -161,9 +161,11 @@ def main() -> None:
         control_profiles=cfg.command_profiles(robot.device),
         grasp_pose_generators={
             part: create_parallel_jaw_grasp_pose_generator(
+                robot=robot,
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,
                 gripper_model=model,
+                collision_geometry=cfg.collision_geometries[part],
                 approach_direction_samples=1,
             )
             for part, model in cfg.models.items()

@@ -53,6 +53,7 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
     GraspAnnotationCfg,
+    get_parallel_jaw_collision_geometry,
     ParallelJawGraspCollisionCfg,
 )
 from embodichain_robots import FrankaPandaCfg, URRobotCfg
@@ -98,10 +99,6 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     model_id="dh_pgi_140_80",
     min_opening_width=0.003,
     max_opening_width=0.100,
-    finger_length=0.10,
-    finger_width=0.040,
-    finger_thickness=0.01,
-    palm_depth=0.096,
 )
 
 
@@ -150,8 +147,8 @@ def create_parallel_jaw_grasp_pose_generator(
     force_refresh: bool,
     max_candidates: int = 50,
     approach_alignment_angle: float | None = None,
-    opening_margin: float = 0.03,
     gripper_model: ParallelJawGripperModelCfg | None = None,
+    root_from_tcp: Sequence[Sequence[float]] | None = None,
 ) -> ParallelJawGraspPoseGenerator:
     """Create a standalone generator for the sample's mounted gripper.
 
@@ -159,38 +156,37 @@ def create_parallel_jaw_grasp_pose_generator(
         n_sample: Number of antipodal contact-pair samples.
         force_refresh: Whether to regenerate cached object annotations.
         max_candidates: Maximum ranked grasp candidates returned per object.
-        approach_alignment_angle: Optional hard TCP-Z angle in radians before
+        approach_alignment_angle: Optional hard contact-Z angle before
             candidate deduplication and ranking; proposal cones are unchanged.
-        opening_margin: Additional clearance used for grasp collision checks.
         gripper_model: Explicit fixture geometry; omission uses the PGI sample.
+        root_from_tcp: Actual fixture TCP relative to the hand root, when it
+            differs from the model's default calibration.
 
     Returns:
-        A generator with independently owned geometry. Native Panda output
-        uses its Y-closing TCP frame; legacy PGI output remains unchanged.
+        A generator with actual open hand collision surfaces and runtime TCP
+        poses. Finite surface checks do not establish continuous mesh or path
+        collision freedom.
     """
-    sampler = AntipodalGraspPoseGenerator(
-        TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model,
+    model = TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model
+    return AntipodalGraspPoseGenerator(
+        model,
+        collision_geometry=get_parallel_jaw_collision_geometry(
+            model.model_id,
+            point_spacing=0.012,
+            root_from_tcp=None if root_from_tcp is None else np.asarray(root_from_tcp),
+        ),
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=n_sample,
             max_candidates=max_candidates,
             approach_alignment_angle=approach_alignment_angle,
         ),
-        collision_cfg=ParallelJawGraspCollisionCfg(
-            opening_margin=opening_margin,
-            point_sample_density=0.012,
-            filter_ground_collision=False,
-        ),
+        collision_cfg=ParallelJawGraspCollisionCfg(filter_ground_collision=False),
         annotation_cfg=GraspAnnotationCfg(
             selection_mode="whole_mesh",
             viser_port=11801,
             force_refresh=force_refresh,
         ),
     )
-    if gripper_model is not None and gripper_model.model_id == "franka_panda_hand":
-        from .scenarios.atomic_grasps import _NativePandaGraspPoseGenerator
-
-        return _NativePandaGraspPoseGenerator(sampler)
-    return sampler
 
 
 def create_ur5_gripper_robot_cfg(

@@ -37,6 +37,7 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGeneratorCfg,
     AntipodalSamplerCfg,
     GraspAnnotationCfg,
+    FixedGripperCollisionGeometry,
     ParallelJawGraspCollisionCfg,
 )
 from embodichain.toolkits.graspkit.pg_grasp._antipodal_backend import (
@@ -116,10 +117,9 @@ def _generator(
             model_id="concrete_test_eef",
             min_opening_width=0.004,
             max_opening_width=0.12,
-            finger_length=0.09,
-            finger_width=0.025,
-            finger_thickness=0.008,
-            palm_depth=0.07,
+        ),
+        collision_geometry=FixedGripperCollisionGeometry(
+            torch.zeros((1, 3)), {"grasp_from_tcp": torch.eye(4).tolist()}
         ),
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=321,
@@ -127,9 +127,7 @@ def _generator(
             approach_alignment_angle=alignment_angle,
         ),
         collision_cfg=ParallelJawGraspCollisionCfg(
-            point_sample_density=0.02,
             max_decomposition_hulls=5,
-            opening_margin=0.003,
             filter_ground_collision=False,
         ),
         annotation_cfg=GraspAnnotationCfg(force_refresh=force_refresh),
@@ -149,13 +147,13 @@ def test_generic_hierarchy_contains_no_concrete_eef_name() -> None:
 @pytest.mark.parametrize(
     ("model_id", "expected"),
     [
-        ("dh_pgi_140_80", (0.005, 0.1, 0.12, 0.04, 0.01, 0.096)),
-        # Versioned URDF limits and collision-mesh extents;
+        ("dh_pgi_140_80", (0.005, 0.1)),
+        # Versioned usable aperture limits; collision geometry is separate.
         # see graspkit/README.md for the source hashes and axis mapping.
-        ("franka_panda_hand", (0.001, 0.08, 0.054, 0.022, 0.027, 0.092)),
-        ("cobotmagic_v100_gripper", (0.001, 0.1, 0.077, 0.056, 0.025, 0.074)),
-        ("tianji_marvin_gripper", (0.001, 0.095, 0.103, 0.043, 0.034, 0.082)),
-        ("pika_gripper", (0.001, 0.094, 0.113, 0.039, 0.057, 0.085)),
+        ("franka_panda_hand", (0.001, 0.08)),
+        ("cobotmagic_v100_gripper", (0.001, 0.1)),
+        ("tianji_marvin_gripper", (0.001, 0.095)),
+        ("pika_gripper", (0.001, 0.094)),
     ],
 )
 def test_named_gripper_model_returns_reviewed_geometry(
@@ -167,10 +165,6 @@ def test_named_gripper_model_returns_reviewed_geometry(
     assert (
         model.min_opening_width,
         model.max_opening_width,
-        model.finger_length,
-        model.finger_width,
-        model.finger_thickness,
-        model.palm_depth,
     ) == pytest.approx(expected)
 
 
@@ -189,7 +183,6 @@ def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
     second = get_parallel_jaw_gripper_model(model_id)
     expected = second.to_dict()
 
-    first.palm_depth = 1.0
     first.max_opening_width = 2.0
 
     assert first is not second
@@ -203,10 +196,6 @@ def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
         ("min_opening_width", -0.001, ValueError),
         ("min_opening_width", 0.08, ValueError),
         ("max_opening_width", float("nan"), ValueError),
-        ("finger_length", float("inf"), ValueError),
-        ("finger_width", 0.0, ValueError),
-        ("finger_thickness", True, TypeError),
-        ("palm_depth", -0.01, ValueError),
     ],
 )
 def test_named_geometry_rejects_invalid_calibration(
@@ -357,8 +346,10 @@ def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     assert configured.options["max_candidates"] == 7
     assert configured.options["approach_alignment_angle"] == alignment_angle
     assert configured.options["filter_ground_collision"] is False
-    assert collision_cfg.finger_length == 0.09
-    assert collision_cfg.open_check_margin == 0.003
+    assert collision_cfg.max_decomposition_hulls == 5
+    assert isinstance(
+        configured.options["collision_geometry"], FixedGripperCollisionGeometry
+    )
     assert torch.allclose(
         torch.stack(configured.best_directions[:2]),
         torch.tensor([[0.0, 0.0, -1.0], [0.0, -1.0, 0.0]]),
@@ -385,12 +376,13 @@ def test_failed_candidates_receive_infinite_cost_and_refresh_is_service_owned(
     assert backend.instances[0].annotate_calls == 1
 
 
-def test_rejects_collision_margin_outside_gripper_opening() -> None:
-    with pytest.raises(ValueError, match="opening_margin"):
+def test_rejects_missing_collision_geometry_instead_of_using_a_box() -> None:
+    with pytest.raises(TypeError, match="collision_geometry"):
         AntipodalGraspPoseGenerator(
-            ParallelJawGripperModelCfg(max_opening_width=0.05),
-            collision_cfg=ParallelJawGraspCollisionCfg(opening_margin=0.05),
+            ParallelJawGripperModelCfg(), collision_geometry=None
         )
+    with pytest.raises(TypeError, match="finger_length"):
+        ParallelJawGripperModelCfg(finger_length=0.05)
 
 
 def test_backend_cache_key_includes_sampling_and_annotation_policy() -> None:

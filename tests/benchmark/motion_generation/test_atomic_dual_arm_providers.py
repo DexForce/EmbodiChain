@@ -903,6 +903,152 @@ def test_dual_case_does_not_freeze_when_only_the_primary_arm_is_qualified(failur
         assert "does not establish unreachability" in str(error.value)
 
 
+def _hand_over_generation(monkeypatch, *, endpoint_failure=None):
+    """Prepare real case/endpoint qualification around a CPU reference result."""
+    batch = 8
+    suite = load_suite("atomic_dual_franka_pgi_hand_over")
+    scenario = AtomicSkillScenario()
+    scenario.robot = robot = _EndpointRobot(batch, endpoint_failure)
+    scenario.control_part = "left_arm"
+    scenario.suite = suite
+    object_pose = _pose(0.0, 0.0, 0.6).repeat(batch, 1, 1)
+    full_start = torch.zeros(batch, 6)
+    samples = {}
+    poses = {}
+    for name, arm in (("pickup_grasp", "left_arm"), ("receive_grasp", "right_arm")):
+        samples[name] = {
+            "success": [True] * batch,
+            "env_ids": list(range(batch)),
+            "control_parts": [arm] * batch,
+            "valid_candidate_counts": [3] * batch,
+            "candidate_ids": [0] * batch,
+        }
+        poses[arm] = [
+            robot.forward(torch.full((batch, 3), offset), arm) for offset in (0.1, 0.2)
+        ]
+    reference = dual._ReferencePlan(
+        compiled=SimpleNamespace(
+            plan_success=torch.zeros(batch, dtype=torch.bool),
+            trajectory=SimpleNamespace(env_ids=torch.arange(batch)),
+            action_plans=(
+                SimpleNamespace(
+                    skill_id="hand_over",
+                    diagnostics=SimpleNamespace(
+                        metadata={"affordance_sample": samples}
+                    ),
+                ),
+            ),
+        ),
+        planned_poses=poses,
+        grasp_requests=[("left_eef", object_pose), ("right_eef", object_pose)],
+    )
+    scenario.activate_object = Mock(
+        return_value=SimpleNamespace(object_id="object", entity=object())
+    )
+    scenario.restore_base_robot = Mock()
+    scenario.open_grippers = Mock()
+    scenario.grasp_model = Mock()
+    monkeypatch.setattr(dual, "_settled_pose", Mock(return_value=(object_pose, 0)))
+    monkeypatch.setattr(
+        dual, "snapshot_case_qpos", Mock(return_value=(full_start[:, :3], full_start))
+    )
+    monkeypatch.setattr(dual, "_randomized_target_pose", Mock(return_value=object_pose))
+    monkeypatch.setattr(dual, "parallel_jaw_sampler", Mock())
+    monkeypatch.setattr(dual, "_antipodal_semantics", Mock())
+    monkeypatch.setattr(dual, "_compile_reference", Mock(return_value=reference))
+
+    def generate():
+        return create_atomic_skill_provider("hand_over").generate_case(
+            scenario,
+            suite,
+            suite.tracks[0],
+            {"name": "sampling_contract", "object": "object"},
+            seed=65001,
+            batch_size=batch,
+        )
+
+    return generate, reference, robot
+
+
+@pytest.mark.parametrize("sample_name", ["pickup_grasp", "receive_grasp"])
+def test_hand_over_rejects_invalid_grasp_rows_before_endpoint_ik(
+    monkeypatch, sample_name
+):
+    """Finite placeholder transforms must not be misreported as unreachable IK."""
+    generate, reference, robot = _hand_over_generation(monkeypatch)
+    sample = reference.compiled.action_plans[0].diagnostics.metadata[
+        "affordance_sample"
+    ][sample_name]
+    failed = [1, 2, 6, 7]
+    arm = sample["control_parts"][0]
+    for index in failed:
+        sample["success"][index] = False
+        sample["valid_candidate_counts"][index] = 0
+        sample["candidate_ids"][index] = -1
+        for pose in reference.planned_poses[arm]:
+            pose[index] = torch.eye(4)
+    with pytest.raises(RuntimeError, match="input sampling failed") as error:
+        generate()
+    message = str(error.value)
+    assert sample_name in message and arm in message
+    assert "'rows': [1, 2, 6, 7]" in message
+    assert "'env_ids': [1, 2, 6, 7]" in message
+    assert "'valid_candidate_counts': [0, 0, 0, 0]" in message
+    assert "'candidate_ids': [-1, -1, -1, -1]" in message
+    assert robot.seeds == {"left_arm": [], "right_arm": []}
+
+
+@pytest.mark.parametrize("candidate_diagnostics", [True, False])
+def test_hand_over_valid_samples_allow_failed_reference_plan(
+    monkeypatch, candidate_diagnostics
+):
+    """Independent witnesses, not reference-plan success, qualify valid grasps."""
+    generate, reference, robot = _hand_over_generation(monkeypatch)
+    if not candidate_diagnostics:
+        for sample in (
+            reference.compiled.action_plans[0]
+            .diagnostics.metadata["affordance_sample"]
+            .values()
+        ):
+            sample.pop("valid_candidate_counts")
+            sample.pop("candidate_ids")
+    case = generate()
+    assert case.case_parameters["reference_plan_success"] == [False] * 8
+    assert set(case.case_parameters["frozen_grasps"]) == {"left_eef", "right_eef"}
+    evidence = case.case_parameters["endpoint_qualification"]["arms"]
+    for arm in ("left_arm", "right_arm"):
+        assert robot.seeds[arm]
+        assert torch.tensor(evidence[arm]["qualified"]).all()
+        torch.testing.assert_close(
+            torch.tensor(evidence[arm]["reference_qpos"]),
+            torch.tensor([0.1, 0.2]).reshape(1, 2, 1).expand(8, 2, 3),
+        )
+
+
+@pytest.mark.parametrize("missing", ["affordance_sample", "receive_grasp", "success"])
+def test_hand_over_missing_sampling_evidence_is_not_accepted(monkeypatch, missing):
+    """Optional generic planner diagnostics cannot certify new grasp inputs."""
+    generate, reference, robot = _hand_over_generation(monkeypatch)
+    metadata = reference.compiled.action_plans[0].diagnostics.metadata
+    if missing == "affordance_sample":
+        metadata.clear()
+    elif missing == "receive_grasp":
+        metadata["affordance_sample"].pop(missing)
+    else:
+        metadata["affordance_sample"]["receive_grasp"].pop(missing)
+    with pytest.raises(RuntimeError, match="input sampling"):
+        generate()
+    assert robot.seeds == {"left_arm": [], "right_arm": []}
+
+
+def test_hand_over_valid_samples_retain_independent_ik_failure(monkeypatch):
+    generate, _, robot = _hand_over_generation(monkeypatch, endpoint_failure="ik")
+    with pytest.raises(RuntimeError, match="right_arm") as error:
+        generate()
+    assert "does not establish unreachability" in str(error.value)
+    assert robot.seeds["right_arm"]
+
+
 def test_control_parts_default_to_left_then_right_and_validate():
     assert dual._control_parts({}, ("source", "destination")) == {
         "source": {"motion": "left_arm", "grasp": "left_eef"},
@@ -1113,6 +1259,15 @@ def test_coordinated_placement_transforms_fixed_targets_with_task_frame(monkeypa
 
 def test_scenario_configures_every_gripper_and_freezes_each_hand_over_grasp():
     robot = Mock(device=CPU, dof=16)
+    pgi_tcp = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.15],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    robot.cfg.solver_cfg = {
+        part: SimpleNamespace(tcp=pgi_tcp) for part in ("left_arm", "right_arm")
+    }
     robot.control_parts = {
         "left_arm": object(),
         "right_arm": object(),
@@ -1179,10 +1334,15 @@ class _CountingSampler(ParallelJawGraspPoseGenerator):
     """Report the sample count it was built with instead of sampling."""
 
     def __init__(
-        self, n_sample: int, *, gripper_model: ParallelJawGripperModelCfg | None = None
+        self,
+        n_sample: int,
+        *,
+        gripper_model: ParallelJawGripperModelCfg | None = None,
+        root_from_tcp: list[list[float]] | None = None,
     ) -> None:
         super().__init__(gripper_model or ParallelJawGripperModelCfg())
         self.n_sample = n_sample
+        self.root_from_tcp = root_from_tcp
 
     def get_valid_grasp_poses(self, **kwargs: object) -> list:
         return []
@@ -1200,6 +1360,13 @@ def test_each_self_sampling_case_compiles_with_its_own_sample_count(
 ):
     monkeypatch.setattr(atomic_skill, "parallel_jaw_sampler", _CountingSampler)
     robot = Mock(device=CPU)
+    pgi_tcp = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.15],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    robot.cfg.solver_cfg = {"left_arm": SimpleNamespace(tcp=pgi_tcp)}
     robot.control_parts = {"left_eef": object(), "right_eef": object()}
     robot.get_joint_ids.side_effect = lambda name: {
         "left_eef": [12],
@@ -1209,6 +1376,7 @@ def test_each_self_sampling_case_compiles_with_its_own_sample_count(
     scenario = AtomicSkillScenario()
     scenario.track = SimpleNamespace(config={"grasp_model": model_id})
     scenario.robot = robot
+    scenario.control_part = "left_arm"
     scenario.simulation = Mock(sim_config=Mock(physics_dt=0.01))
     scenario._gripper_states = {
         part: (torch.tensor([0.0]), torch.tensor([0.026]))
@@ -1499,27 +1667,39 @@ def test_native_grasp_sampling_maps_closing_axis_once_before_frozen_replay(monke
         torch.tensor([True]),
     )
     model = get_parallel_jaw_gripper_model("franka_panda_hand")
-    source = Mock(gripper_model=model)
-    source.get_valid_grasp_poses.return_value = [(canonical, costs)]
-    source.get_grasp_candidates.return_value = [(canonical, widths, costs)]
-    source.get_best_grasp_poses.return_value = (success, canonical, widths)
-    source.get_dual_arm_valid_grasp_poses.return_value = [
+    source = Mock(device=torch.device("cpu"))
+    source.get_valid_grasp_poses.return_value = (True, canonical, widths, costs)
+    source.get_grasp_poses.return_value = (True, canonical[0], float(widths[0]))
+    source.get_dual_arm_valid_grasp_poses.side_effect = [
         {
             part: {"grasp_poses": canonical, "open_lengths": widths, "costs": costs}
             for part in ("left", "right")
         },
         None,
     ]
-    monkeypatch.setattr(
-        _atomic_fixtures, "AntipodalGraspPoseGenerator", Mock(return_value=source)
-    )
     sampler = _atomic_fixtures.create_parallel_jaw_grasp_pose_generator(
         n_sample=32, force_refresh=False, gripper_model=model
     )
-    valid, actual_costs = sampler.get_valid_grasp_poses()[0]
-    candidates, actual_widths, candidate_costs = sampler.get_grasp_candidates()[0]
-    actual_success, best, best_widths = sampler.get_best_grasp_poses()
-    paired = sampler.get_dual_arm_valid_grasp_poses()
+    monkeypatch.setattr(sampler, "_backend", lambda *_: source)
+    arguments = dict(
+        mesh_vertices=torch.zeros((3, 3)),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        obj_poses=torch.eye(4).unsqueeze(0),
+        approach_direction=canonical[:, :3, 2],
+    )
+    valid, actual_costs = sampler.get_valid_grasp_poses(**arguments)[0]
+    candidates, actual_widths, candidate_costs = sampler.get_grasp_candidates(
+        **arguments
+    )[0]
+    actual_success, best, best_widths = sampler.get_best_grasp_poses(**arguments)
+    paired_arguments = {
+        **arguments,
+        "obj_poses": torch.eye(4).repeat(2, 1, 1),
+        "approach_direction": canonical[0, :3, 2],
+    }
+    paired = sampler.get_dual_arm_valid_grasp_poses(
+        **paired_arguments, left_to_right_arm_direction=torch.tensor([1.0, 0.0, 0.0])
+    )
     assert paired[1] is None
     for actual in (
         valid,
@@ -1538,7 +1718,7 @@ def test_native_grasp_sampling_maps_closing_axis_once_before_frozen_replay(monke
     torch.testing.assert_close(actual_success, success)
     torch.testing.assert_close(canonical, before, rtol=0, atol=0)
 
-    frozen = ActiveCaseGraspPoseGenerator(sampler)
+    frozen = ActiveCaseGraspPoseGenerator()
     object_pose = torch.eye(4).unsqueeze(0)
     frozen.activate(object_pose, best)
     _, replayed, _ = frozen.get_best_grasp_poses(

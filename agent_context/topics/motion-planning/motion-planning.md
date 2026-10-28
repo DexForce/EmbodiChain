@@ -139,8 +139,14 @@ Motion-limit checks are not collision/task-success certification.
 `rotate_grasp_about_object_axis` and `perturb_approach_direction` change TCP
 candidates around a fixed object axis or approach cone; both emit Cartesian
 poses that callers must replan, and neither certifies the contact.
-Grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed by
-Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
+Grasp generation belongs to `embodichain.toolkits.graspkit`, composed by Atomic
+Skills/Task Program rather than embedded in `MotionGenerator`. Its antipodal
+service requires explicit URDF collision geometry at the caller's open joint
+state. Builtin asset/TCP mappings live in `pg_grasp/model_geometry.py`; custom
+hands provide their own geometry. Sampling/collision stays in the canonical
+contact frame, and public poses map once to the declared runtime TCP. Do not
+add a second hand-specific conversion. See the [GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
+for geometry ownership and the finite collision-check scope.
 
 `variants.py` is the common candidate-generation path for joint-space,
 task-space and manipulability-guided expansion; `CandidateCoordinator` supplies

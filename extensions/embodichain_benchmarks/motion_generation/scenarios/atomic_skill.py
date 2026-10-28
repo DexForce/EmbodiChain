@@ -159,6 +159,25 @@ class AtomicSkillScenario(ScenarioProvider):
             raise ValueError("track.config.grasp_model must be a non-empty model id.")
         return get_parallel_jaw_gripper_model(model_id)
 
+    def grasp_root_from_tcp(self) -> list[list[float]] | None:
+        """Bind mounted PGI geometry to this fixture's actual solver TCP.
+
+        PGI fixture roots attach at the arm flange, the solver end link. Their
+        configured tool points differ (.15/.17 m and explicit overrides).
+        Native Panda instead uses its actual named hand TCP from the asset;
+        no PGI offset is applied to it.
+        """
+        model = self.grasp_model()
+        if model is not None and model.model_id != "dh_pgi_140_80":
+            return None
+        if self.robot is None:
+            raise RuntimeError("A bound robot is required for the mounted PGI TCP.")
+        solver = self.robot.cfg.solver_cfg[self.control_part]
+        tcp = solver.get("tcp") if isinstance(solver, Mapping) else solver.tcp
+        if tcp is None:
+            raise ValueError("The mounted PGI fixture requires an explicit solver TCP.")
+        return [[float(value) for value in row] for row in tcp]
+
     def trial_metadata(self, case: BenchmarkCase) -> dict[str, object]:
         """Expose planner attribution before planning or evaluation can fail."""
         attribution = benchmark_motion_attribution(case.skill_id)
@@ -505,7 +524,11 @@ class AtomicSkillScenario(ScenarioProvider):
         if sampling_counts:
             self._case_grasp_sampler = CaseSampleCountGraspPoseGenerator(
                 {
-                    count: parallel_jaw_sampler(count, gripper_model=self.grasp_model())
+                    count: parallel_jaw_sampler(
+                        count,
+                        gripper_model=self.grasp_model(),
+                        root_from_tcp=self.grasp_root_from_tcp(),
+                    )
                     for count in sorted(sampling_counts)
                 },
                 default_count=max(sampling_counts),
@@ -1521,6 +1544,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 force_refresh=False,
                 max_candidates=max_candidates,
                 gripper_model=self.grasp_model(),
+                root_from_tcp=self.grasp_root_from_tcp(),
                 **(
                     {"approach_alignment_angle": math.radians(alignment_max_angle_deg)}
                     if alignment_max_angle_deg is not None
@@ -1801,6 +1825,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 force_refresh=False,
                 max_candidates=max_candidates,
                 gripper_model=self.grasp_model(),
+                root_from_tcp=self.grasp_root_from_tcp(),
             )
             candidates, costs = generator.get_valid_grasp_poses(
                 mesh_vertices=mesh_vertices,

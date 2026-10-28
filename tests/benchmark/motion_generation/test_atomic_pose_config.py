@@ -1310,6 +1310,16 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
         factory,
     )
     robot = Mock(device=torch.device("cpu"))
+    robot.cfg.solver_cfg = {
+        "arm": {
+            "tcp": [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.17],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        }
+    }
     robot.compute_ik.side_effect = lambda pose, joint_seed, name: (
         torch.ones(batch_size, dtype=torch.bool),
         joint_seed.clone(),

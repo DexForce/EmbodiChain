@@ -44,6 +44,7 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
     GripperCollisionCfg,
 )
 from embodichain.utils.math import get_pc_center_box
+from .fixed_geometry import FixedGripperCollisionGeometry
 
 GRASP_ANNOTATOR_CACHE_DIR = (
     Path.home() / ".cache" / "embodichain" / "grasp_annotator_cache"
@@ -70,6 +71,7 @@ class _AntipodalMeshBackend:
         *,
         sampler_cfg: AntipodalSamplerCfg,
         collision_cfg: GripperCollisionCfg,
+        collision_geometry: FixedGripperCollisionGeometry,
         max_deviation_angle: float,
         approach_direction_samples: int,
         max_candidates: int,
@@ -85,7 +87,8 @@ class _AntipodalMeshBackend:
             vertices: Vertex positions with shape ``(V, 3)``.
             triangles: Triangle indices with shape ``(F, 3)``.
             sampler_cfg: Configuration for antipodal contact sampling.
-            collision_cfg: Physical collision-checker configuration.
+            collision_cfg: Target-object decomposition configuration.
+            collision_geometry: Actual surfaces in the canonical contact frame.
             max_deviation_angle: Maximum approach-axis deviation in radians.
             approach_direction_samples: Number of approach variants per pair.
             max_candidates: Maximum number of ranked candidates to retain.
@@ -110,6 +113,7 @@ class _AntipodalMeshBackend:
             object_mesh_verts=vertices,
             object_mesh_faces=triangles,
             cfg=collision_cfg,
+            collision_geometry=collision_geometry,
         )
         self._sampler_cfg = sampler_cfg
         self._center_mode = sampler_cfg.center_mode
@@ -776,7 +780,6 @@ class _AntipodalMeshBackend:
         is_colliding, max_penetration = self._collision_checker.query(
             object_pose,
             valid_grasp_poses,
-            valid_open_lengths,
             is_filter_ground_collision=self._filter_ground_collision,
             is_visual=visualize_collision,
             collision_threshold=0.0,

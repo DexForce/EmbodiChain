@@ -34,9 +34,6 @@ profile:
   effect_monitors: {}
 
 runtime_services:
-  grasp_pose_generator_overrides:
-    eef:
-      opening_margin: 0.03
   registered_semantic_lowerers:
     - kind: articulation_link_slide
       articulation_id: drawer
