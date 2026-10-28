@@ -1,11 +1,13 @@
 # Recorded visual ACT qualification
 
-These reports capture one local qualification run with the task identity,
-dataset identities, checkpoints, seed panels and software listed in
-[summary.json](summary.json). The detailed JSON files retain every scene and
-checkpoint selection result; their absolute `/tmp` paths describe the machine
-where the run was performed and are not portable dataset locations. Datasets,
-checkpoints and videos are not bundled with the repository.
+The retained [summary](summary.json) records the task identity, dataset
+identities, checkpoints, seed panels and software for one local qualification
+run. [benchmark.json](benchmark.json) retains the sampling, update and inference
+measurements. Detailed per-scene results and raw memory samples are preserved in
+[the original report commit](https://github.com/DexForce/EmbodiChain/tree/69f0ab53564ae7d8aa2d2a6f08cbaa8b8aef0646/examples/learning/act/results);
+`archived_reports` in the summary records that revision and the original hashes.
+Their absolute `/tmp` paths describe the original machine and are not portable
+dataset locations. Datasets, checkpoints and videos are not bundled.
 The run preceded the move to the repository's canonical `policy.act` import
 path; existing checkpoints and training recovery were subsequently checked with
 that path. The default action aggregation and model computations are unchanged.
