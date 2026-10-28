@@ -13,4 +13,3 @@ trainer:
   batch_size: 32
   seed: 42
   checkpoint_interval: 5000
-

@@ -226,4 +226,3 @@ This is a numerical-integration check. Full published-accuracy reproduction
 additionally requires frozen official weights/data/evaluation, or complete
 retraining with the declared compute and selection protocol. No short-run
 comparison is labelled a full training reproduction.
-
