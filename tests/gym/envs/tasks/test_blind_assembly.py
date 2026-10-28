@@ -78,15 +78,10 @@ def test_nominal_task_uses_production_component_loader(
 
     module = importlib.import_module("embodichain_robots.flexiv.rizon4s.cfg")
     monkeypatch.setattr(module, "get_data_path", lambda path: str(urdf))
-    register_manager_modules(
-        [
-            "embodichain_tasks.manipulation.assembly.obs",
-            "embodichain.lab.gym.envs.managers.assembly",
-        ]
-    )
+    register_manager_modules(["embodichain.lab.gym.envs.managers.assembly"])
     path = _CONFIG_ROOT / task / f"task.{profile}.nominal.yaml"
     cfg = config_to_cfg(load_config(str(path)), source_path=path)
-    from embodichain_tasks.manipulation.assembly.obs import (
+    from embodichain.lab.gym.envs.managers.observations import (
         AssemblyProprioception,
         assembly_contact_labels,
         assembly_privileged_state,
@@ -610,7 +605,7 @@ def test_encoder_gravity_feedforward_matches_mujoco_bias(
 
 
 def test_manager_history_selective_reset_does_not_repeat_other_rows() -> None:
-    from embodichain_tasks.manipulation.assembly.obs import AssemblyProprioception
+    from embodichain.lab.gym.envs.managers.observations import AssemblyProprioception
     from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
 
     frame = torch.zeros((2, 33))
@@ -639,6 +634,7 @@ def test_manager_history_selective_reset_does_not_repeat_other_rows() -> None:
 
 def test_legacy_assembly_observation_imports_remain_available() -> None:
     from embodichain.lab.gym.envs.managers import assembly as legacy
+    from embodichain.lab.gym.envs.managers import observations
     from embodichain_tasks.manipulation.assembly import obs
 
     for name in (
@@ -646,7 +642,8 @@ def test_legacy_assembly_observation_imports_remain_available() -> None:
         "assembly_privileged_state",
         "assembly_contact_labels",
     ):
-        assert getattr(legacy, name) is getattr(obs, name)
+        assert getattr(legacy, name) is getattr(observations, name)
+        assert getattr(obs, name) is getattr(observations, name)
 
 
 def test_checkpoint_task_resources_relocate_without_generator(
@@ -773,12 +770,7 @@ def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
     monkeypatch.setattr(
         arm_module, "get_data_path", lambda path: assets.get(path, path)
     )
-    register_manager_modules(
-        [
-            "embodichain_tasks.manipulation.assembly.obs",
-            "embodichain.lab.gym.envs.managers.assembly",
-        ]
-    )
+    register_manager_modules(["embodichain.lab.gym.envs.managers.assembly"])
     path = _CONFIG_ROOT / "peg_insertion/task.study.default_assets.yaml"
     config = load_config(str(path))
     import yaml

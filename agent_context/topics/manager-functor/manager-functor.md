@@ -6,7 +6,7 @@
 |------|------|
 | Base classes (`ManagerBase`, `Functor`) | `embodichain/lab/gym/envs/managers/manager_base.py` |
 | All config classes (`FunctorCfg`, `EventCfg`, `ObservationCfg`, `RewardCfg`, `ActionTermCfg`, `DatasetFunctorCfg`, `SceneEntityCfg`) | `embodichain/lab/gym/envs/managers/cfg.py` |
-| Observation manager + built-in functors | `managers/observation_manager.py`, `managers/observations.py` |
+| Observation manager + built-in functors | `managers/observation_manager.py`, `managers/observations/` |
 | Reward manager + built-in functors | `managers/reward_manager.py`, `managers/rewards.py` |
 | Event manager + built-in functors | `managers/event_manager.py`, `managers/events.py` |
 | Action manager + built-in terms | `managers/action_manager.py`, `managers/actions.py` |
@@ -14,6 +14,9 @@
 | Randomization functors (event sub-type) | `managers/randomization/` (spatial, visual, physics, geometry) |
 
 All paths relative to `embodichain/lab/gym/envs/`.
+Observation implementations are grouped in `managers/observations/` and
+re-exported by that package for configuration lookup and existing imports.
+The historical assembly and locomotion modules only forward their old names.
 
 ---
 

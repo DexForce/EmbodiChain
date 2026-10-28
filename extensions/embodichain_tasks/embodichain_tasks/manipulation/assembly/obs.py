@@ -13,11 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Observation functors for the precision assembly tasks."""
+"""Compatibility imports for assembly observation functors."""
 
 from __future__ import annotations
 
-from ._blind import (
+from embodichain.lab.gym.envs.managers.observations import (
     AssemblyProprioception,
     assembly_contact_labels,
     assembly_privileged_state,

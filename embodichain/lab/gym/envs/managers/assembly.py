@@ -21,6 +21,12 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
+from .observations import (
+    AssemblyProprioception,
+    assembly_contact_labels,
+    assembly_privileged_state,
+)
+
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.assembly_env import BlindAssemblyEnv
 
@@ -31,19 +37,6 @@ __all__ = [
     "reset_assembly",
     "assembly_milestone_reward",
 ]
-
-_LEGACY_OBSERVATIONS = frozenset(
-    {"AssemblyProprioception", "assembly_privileged_state", "assembly_contact_labels"}
-)
-
-
-def __getattr__(name: str) -> Any:
-    """Resolve historical observation imports only when explicitly requested."""
-    if name not in _LEGACY_OBSERVATIONS:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    from importlib import import_module
-
-    return getattr(import_module("embodichain_tasks.manipulation.assembly.obs"), name)
 
 
 def reset_assembly(env: BlindAssemblyEnv, env_ids: torch.Tensor) -> None:

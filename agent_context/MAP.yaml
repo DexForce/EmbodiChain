@@ -83,8 +83,8 @@ topics:
   status: active
 - id: manager-functor
   title: Manager & Functor Pattern
-  aliases: [manager functor, functor pattern, observation manager, reward manager, event manager, action
-      manager, dataset manager, 管理器]
+  aliases: [manager functor, functor pattern, observation manager, observation functor, obs functor,
+    reward manager, event manager, action manager, dataset manager, 观测 functor, 观测管理器, 管理器]
   keywords: [FunctorCfg, ObservationCfg, RewardCfg, ActionTermCfg, ObservationManager, RewardManager,
     EventManager, ActionManager, ActionDescriptor, ActionTermDescriptor, ParallelGripperAction,
     DatasetManager, SceneEntityCfg]
@@ -96,6 +96,7 @@ topics:
   - embodichain/lab/gym/envs/managers/manager_base.py
   - embodichain/lab/gym/envs/managers/cfg.py
   - embodichain/lab/gym/envs/managers/observation_manager.py
+  - embodichain/lab/gym/envs/managers/observations/
   - embodichain/lab/gym/envs/managers/reward_manager.py
   - embodichain/lab/gym/envs/managers/event_manager.py
   - embodichain/lab/gym/envs/managers/dataset_manager.py

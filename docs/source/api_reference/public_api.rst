@@ -3120,3 +3120,28 @@ observation belongs to the actor input.
 .. autofunction:: assembly_privileged_state
 
 .. autofunction:: assembly_contact_labels
+
+Shared observation functors
+---------------------------
+
+The observation manager resolves general, assembly and locomotion functors
+through one package. Assembly contact labels and privileged state are intended
+for training; policy configuration controls which observations reach the actor.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observations
+
+.. autosummary::
+
+   AssemblyProprioception
+   assembly_privileged_state
+   assembly_contact_labels
+   velocity_locomotion_observation
+
+.. autoclass:: AssemblyProprioception
+   :members: reset
+
+.. autofunction:: assembly_privileged_state
+
+.. autofunction:: assembly_contact_labels
+
+.. autofunction:: velocity_locomotion_observation
