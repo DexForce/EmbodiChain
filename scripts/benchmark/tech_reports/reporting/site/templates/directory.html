@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="breadcrumb"><a href="/">总览</a><span>/</span>原始文件</div>
+<header class="page-header"><div class="eyebrow">SOURCE FILES</div><h1>原始文件目录</h1><p class="source-path"><code>{{ directory }}</code></p><p>该目录由报告链接明确引用，保留原文件名与字节内容。</p></header>
+<div class="table-scroll"><table class="file-table"><thead><tr><th>文件</th><th>大小</th></tr></thead><tbody>{% for entry in entries %}<tr><td><a href="{{ entry.url }}">{{ entry.name }}</a></td><td>{{ entry.size }}</td></tr>{% endfor %}</tbody></table></div>
+{% endblock %}

@@ -1,0 +1,108 @@
+{
+  "report_id": "simulation-report-2026-10-28",
+  "dataset": "DexForceAI/embodichain_reports",
+  "publication_status": "not_uploaded_user_deferred",
+  "dataset_revision": null,
+  "source_import_base": "950a16c6d93ba6bbbef384fcf8350c7ca2a0aa4d",
+  "experiment_status": {
+    "L-02": "partial",
+    "L-03": "complete",
+    "L-04": "partial",
+    "L-05": "pending",
+    "R-01": "pending",
+    "P-01": "complete",
+    "P-02": "complete",
+    "P-03": "partial",
+    "P-04": "pending",
+    "P-05": "pending",
+    "P-06": "pending",
+    "P-07": "pending",
+    "D-01": "pending"
+  },
+  "frozen_report_sources": {
+    "L-02": {
+      "path": "outputs/benchmarks/L-02/sleep-off-main-v1/reports/L-02.md",
+      "size_bytes": 9923,
+      "sha256": "d513b611f75394106aae88fa424782c1e8421d79cc2e6ef888a83682353ffa46"
+    },
+    "L-03": {
+      "path": "outputs/benchmarks/L-03/three-robots-v1/reports/L-03.md",
+      "size_bytes": 15159,
+      "sha256": "779b7580871136c16b056ffba1ab0dc30be3318cf1fce261ade2caf6ccbcec93"
+    },
+    "L-04": {
+      "path": "outputs/benchmarks/L-04/reports/L-04.md",
+      "size_bytes": 5921,
+      "sha256": "35084f97aeb560a2ed0afce439d3330e0a6a3c047af8ca6479fa25ac16ebb5ba"
+    },
+    "P-01": {
+      "path": "reports/P-01.md",
+      "size_bytes": 39923,
+      "sha256": "235a4c00d06d4981406d6b55316b33e5aa270bbbfa9a697bb5c2008062b48b10"
+    },
+    "P-02": {
+      "path": "outputs/benchmarks/P-02/reports/P-02.md",
+      "size_bytes": 25125,
+      "sha256": "6927d8dc266573fcabce04c934e3226a0f52478215b6d531891c33900dea5bab"
+    },
+    "P-03": {
+      "path": "outputs/benchmarks/P-03/reports/P-03.md",
+      "size_bytes": 13776,
+      "sha256": "79bddbfd464e5672a25e291dcf037faaa365d72b9212072a0d88c8c62e5cc0ad"
+    }
+  },
+  "validation": {
+    "unit_tests": "8 passed (reference ODE/energy, contact geometry/events, evidence preservation and input-only indexing)",
+    "p01": {
+      "trajectories": 240,
+      "configurations": 24,
+      "continuous_metrics_unchanged": true,
+      "three_table_summary_groups": 24
+    },
+    "p02": {
+      "trajectories": 300,
+      "all_fields_equal_except_source_location": true
+    },
+    "html": {
+      "pages_checked": 802,
+      "links_checked": 31873,
+      "source_files_verified": 10089,
+      "video_range_checks": 19,
+      "broken_links": [],
+      "broken_fragments": [],
+      "source_hashes_match": true
+    },
+    "formatting": [
+      "black 26.3.1: black .",
+      "black 26.10.1: full-tree CI check"
+    ],
+    "syntax": "all imported Python compiled; JSON parsed",
+    "api_docs": "3274/3274 exports documented",
+    "skill": "quick_validate.py passed",
+    "context": "no affected topics; no production routes changed",
+    "original_evidence": {
+      "files_checked_before_after": 29542,
+      "unchanged": true,
+      "added_files": "P-01/submission-20261028/benchmark-summary.md and .json only"
+    },
+    "diff_whitespace": "Four frozen P-03 USD inputs retain original trailing blank lines to preserve recorded hashes; no other whitespace errors."
+  },
+  "not_validated": [
+    "No simulator initialized; imported drivers are not certified against current main.",
+    "Historical launchers retain machine-specific paths and frozen-runtime dependencies; runtime portability remains draft work.",
+    "No Hugging Face bytes uploaded or remote commit pinned.",
+    "Per-file input/media redistribution licenses remain to be reviewed."
+  ],
+  "publication_inventory": {
+    "input_files": 28,
+    "artifact_files": 29544,
+    "artifact_bytes": 10572238084,
+    "excluded_files": 20987,
+    "artifact_groups": {
+      "results": 17015,
+      "figures": 12434,
+      "videos": 95
+    },
+    "inventory_sha256": "9feede45ab472d304bfb92de0485a40b702a917dd92f5ac019240503977ed2eb"
+  }
+}

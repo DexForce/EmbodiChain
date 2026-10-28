@@ -1,0 +1,37 @@
+{
+  "experiment": "P-01",
+  "platform": "Isaac Lab",
+  "device": "cuda:0",
+  "solver": "PhysX TGS",
+  "dt_s": [
+    0.01,
+    0.005,
+    0.0025
+  ],
+  "duration_s": 10.0,
+  "mass_kg": 0.1,
+  "cube_edge_m": 0.05,
+  "bob_radius_m": 0.025,
+  "pendulum_length_m": 0.5,
+  "gravity_m_s2": 9.81,
+  "position_iterations": 4,
+  "velocity_iterations": 1,
+  "linear_damping": 0.0,
+  "angular_damping": 0.0,
+  "joint_friction": 0.0,
+  "joint_armature": 0.0,
+  "sleep_threshold": 0.0,
+  "stabilization_threshold": 0.0,
+  "collision": false,
+  "num_envs": 1,
+  "initial_states": "assets/P-01/initial-states.json",
+  "reference_dt_s": 0.0001,
+  "reference_refined_dt_s": 5e-05,
+  "candidate_thresholds": {
+    "fall_position_0_1s_m": 0.005,
+    "fall_velocity_0_1s_m_s": 0.01,
+    "pendulum_period_relative": 0.01,
+    "pendulum_energy_relative": 0.02
+  },
+  "performance_benchmark": false
+}

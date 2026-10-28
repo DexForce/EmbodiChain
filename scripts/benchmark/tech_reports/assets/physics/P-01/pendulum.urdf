@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!-- P-01: fixed base; 0.1 kg spherical bob at 0.5 m; no collision shapes. -->
+<robot name="p01_pendulum">
+  <link name="base">
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="0.001" iyy="0.001" izz="0.001" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+  <link name="bob">
+    <inertial>
+      <origin xyz="0 0 -0.5"/>
+      <mass value="0.1"/>
+      <inertia ixx="0.000025" iyy="0.000025" izz="0.000025" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.5"/>
+      <geometry><sphere radius="0.025"/></geometry>
+      <material name="blue"><color rgba="0.1 0.4 0.9 1"/></material>
+    </visual>
+  </link>
+  <joint name="pivot" type="continuous">
+    <parent link="base"/><child link="bob"/>
+    <axis xyz="0 1 0"/>
+    <dynamics damping="0" friction="0"/>
+  </joint>
+</robot>

@@ -1,0 +1,585 @@
+[
+  {
+    "id": "L-02",
+    "category": "加载",
+    "title": "基础场景多 arena 加载",
+    "status": "partial",
+    "date": "2026-10-27",
+    "source": "outputs/benchmarks/L-02/sleep-off-main-v1/reports/L-02.md",
+    "description": "原生多 arena 复制；比较全部环境物理就绪时间、内存和容量。",
+    "scope": "主配置 sleep=False · 8000 arena 加载验证完成 · 公平性能待补测",
+    "takeaway": "EmbodiChain 关闭睡眠后，8000 个独立 arena 的加载、首步和全量读回已完成 3 次；Isaac Lab 原对照已完成 16000 个。当前共享 GPU 数据不用于速度排名，尚未确定两者的容量上限。",
+    "metrics": [
+      {
+        "label": "EmbodiChain · 关闭睡眠",
+        "value": "8000 arena",
+        "detail": "每 arena 一个立方体，3/3 加载完成；最高已测完成点"
+      },
+      {
+        "label": "Isaac Lab · 原配置",
+        "value": "16000 arena",
+        "detail": "PhysX TGS 4/1，3/3 完成；沿用原睡眠设置"
+      },
+      {
+        "label": "当前性能对比",
+        "value": "待独占复测",
+        "detail": "不沿用 sleep 开启的 6.403 s 或 1.31 倍"
+      },
+      {
+        "label": "当前原生素材",
+        "value": "4 段配对原片",
+        "detail": "16 arena；EmbodiChain 已补录 sleep=False 配置"
+      }
+    ],
+    "issue": {
+      "title": "尚待确认：大规模加载耗时与 16000 arena",
+      "text": "关闭睡眠的 8000 arena 在共享 GPU 下原始就绪时间为 75–80 s，16000 预载在 180 s 内未就绪。需独占资源复测，不能据此确定速度差或新数量上限，也不能把增长全部归因于 GPU 争用。开启睡眠时的邻接表预算限制仍未修复，历史证据另列。",
+      "source": "outputs/benchmarks/L-02/sleep-off-main-v1/reports/L-02.md",
+      "summary": "关闭睡眠已完成 8000 arena；公平耗时／内存比较及 16000 复测待补。"
+    },
+    "media_note": "真实 16 arena 全景，640×480、20 fps、3 s、1×，零重力静态初态。EmbodiChain 使用 rigid_enable_sleep=False，Isaac 沿用原配置。两端阵列中心对齐、同物理时刻；均创建 16 台相机，仅导出第一台。Isaac 仅录像关闭渲染分区，物理隔离保持。录像不参与无渲染主测，也不代表球体规模性能已完成。",
+    "videos": [
+      {
+        "title": "立方体 · EmbodiChain / DexUni · sleep=False",
+        "src": "outputs/benchmarks/L-02/sleep-off-main-v1/runs/20261027_121232_sleep_off_main_media_v1_embodichain_cube_S_00016_H_media_00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/L-02/sleep-off-main-v1/runs/20261027_121232_sleep_off_main_media_v1_embodichain_cube_S_00016_H_media_00/native_camera/frame_0029.png",
+        "caption": "每 arena 一个物体；实际仿真原片，同视角、同物理时刻，零重力静态初态。"
+      },
+      {
+        "title": "立方体 · Isaac Lab / PhysX · 原配置",
+        "src": "outputs/benchmarks/L-02/multi-arena-v1/runs/20261027_111849_multi_media_v5_isaaclab_cube_S_00016_H_media_00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/L-02/multi-arena-v1/runs/20261027_111849_multi_media_v5_isaaclab_cube_S_00016_H_media_00/native_camera/frame_0029.png",
+        "caption": "每 arena 一个物体；实际仿真原片，同视角、同物理时刻，零重力静态初态。"
+      },
+      {
+        "title": "球体 · EmbodiChain / DexUni · sleep=False",
+        "src": "outputs/benchmarks/L-02/sleep-off-main-v1/runs/20261027_121245_sleep_off_main_media_v1_embodichain_sphere_S_00016_H_media_00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/L-02/sleep-off-main-v1/runs/20261027_121245_sleep_off_main_media_v1_embodichain_sphere_S_00016_H_media_00/native_camera/frame_0029.png",
+        "caption": "每 arena 一个物体；实际仿真原片，同视角、同物理时刻，零重力静态初态。"
+      },
+      {
+        "title": "球体 · Isaac Lab / PhysX · 原配置",
+        "src": "outputs/benchmarks/L-02/multi-arena-v1/runs/20261027_111900_multi_media_v5_isaaclab_sphere_S_00016_H_media_00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/L-02/multi-arena-v1/runs/20261027_111900_multi_media_v5_isaaclab_sphere_S_00016_H_media_00/native_camera/frame_0029.png",
+        "caption": "每 arena 一个物体；实际仿真原片，同视角、同物理时刻，零重力静态初态。"
+      }
+    ],
+    "resources": [
+      {
+        "label": "当前主配置：原始数据与复现入口",
+        "path": "outputs/benchmarks/L-02/sleep-off-main-v1/reports/data-index.md"
+      },
+      {
+        "label": "当前三表 benchmark 摘要",
+        "path": "outputs/benchmarks/L-02/sleep-off-main-v1/reports/benchmark-summary.md"
+      },
+      {
+        "label": "当前视频来源与相机核验",
+        "path": "outputs/benchmarks/L-02/sleep-off-main-v1/videos/index.md"
+      },
+      {
+        "label": "多 arena 加载 Spec · L-02 sleep=False",
+        "path": "specs/loading-experiments-spec.md"
+      },
+      {
+        "label": "首次关闭睡眠诊断（历史原记录）",
+        "path": "outputs/benchmarks/L-02/sleep-off-v1/reports/sleep-off.md"
+      },
+      {
+        "label": "睡眠开启报告（历史配置）",
+        "path": "outputs/benchmarks/L-02/multi-arena-v1/reports/L-02.md"
+      },
+      {
+        "label": "睡眠开启限制：原问题与复测清单",
+        "path": "outputs/benchmarks/L-02/multi-arena-v1/reports/release-review.md"
+      },
+      {
+        "label": "旧单场景报告（历史，不适用本业务）",
+        "path": "outputs/benchmarks/L-02/reports/L-02.md"
+      },
+      {
+        "label": "旧 Hybrid 诊断（历史）",
+        "path": "outputs/benchmarks/L-02/reports/loading-profile-20261026.md"
+      }
+    ]
+  },
+  {
+    "id": "L-03",
+    "category": "加载",
+    "title": "机器人场景多 arena 加载",
+    "status": "complete",
+    "date": "2026-10-27",
+    "source": "outputs/benchmarks/L-03/three-robots-v1/reports/L-03.md",
+    "description": "Cartpole、Franka、Go2：每 arena 一台机器人，两端共用 USD。",
+    "scope": "三种机器人 · 108 次正式样本 · 1000 arena · 六段原片",
+    "takeaway": "1000 arena、H 条件的就绪时间（EmbodiChain/Isaac Lab）：Cartpole 6.989/6.153 s；Franka 8.451/7.919 s；Go2 9.852/8.634 s，对应 1.07–1.14 倍。三种机器人的全部计划规模均完成；G1 排除本轮，问题仍保留。本配置下进程显存峰值为对照的 24%–26%，RAM 为 68%–69%；这是整个进程的占用。",
+    "metrics": [
+      {
+        "label": "正式样本完成",
+        "value": "108 / 108",
+        "detail": "另有 18 次 H 预载；两端串行，无其他 GPU 计算进程"
+      },
+      {
+        "label": "1000 arena · 时间比",
+        "value": "1.07–1.14×",
+        "detail": "EmbodiChain / Isaac Lab；H，各三次中位数"
+      },
+      {
+        "label": "1000 arena · 进程显存比",
+        "value": "24%–26%",
+        "detail": "EmbodiChain / Isaac Lab；H，各三次峰值的中位数；RAM 比为 68%–69%"
+      },
+      {
+        "label": "原生素材",
+        "value": "6 段原片",
+        "detail": "4 arena、960×540、3 s、20 fps、1×；360 帧 PNG 保留"
+      }
+    ],
+    "issue": {
+      "title": "发布前重点：加载耗时差距；G1 导入问题仍未修复",
+      "text": "1000 arena、H 条件的就绪时间（EmbodiChain/Isaac Lab）：Cartpole 6.989/6.153 s；Franka 8.451/7.919 s；Go2 9.852/8.634 s，对应 1.07–1.14 倍。已保存启动、声明复制、物理准备和首步读回的分阶段数据，尚未做逐函数归因。G1 的 19 个网格碰撞体遗漏独立记录。退出时 entity lost balance 提示仍需定位，未证实为泄漏。 以上为冻结版本结果。2026-10-28 独立 parser 修复已恢复 G1／抽屉 31／2 个碰撞，但标准客户端兼容及抽屉凸分块问题另行保留，尚未进入正式矩阵复测。",
+      "source": "outputs/benchmarks/L-03/three-robots-v1/reports/L-03.md",
+      "summary": "1000 arena 时 EmbodiChain 就绪耗时为对照的 1.07–1.14 倍；G1 另列未修复问题。"
+    },
+    "media_note": "真实四 arena 全景。两端相机相对阵列中心位姿、内参、物理采样时刻一致；每场景创建 4 台相机，仅保存第 1 台。零重力、无驱动，画面为加载就绪后的实际静态运行；光照与材质呈现不同，未作画质比较。录像不计入主测耗时。",
+    "videos": [
+      {
+        "title": "Cartpole · EmbodiChain / DexUni",
+        "src": "outputs/benchmarks/L-03/three-robots-v1/runs/20261027_181050_three_robots_media_v1_embodichain_cartpole_00004_H_media_00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/L-03/three-robots-v1/runs/20261027_181050_three_robots_media_v1_embodichain_cartpole_00004_H_media_00/native_camera/frame_0029.png",
+        "caption": "4 arena；3 s、20 fps、1×；实际相机采集，静态零重力加载初态。"
+      },
+      {
+        "title": "Cartpole · Isaac Lab / PhysX",
+        "src": "outputs/benchmarks/L-03/three-robots-v1/runs/20261027_181107_three_robots_media_v1_isaaclab_cartpole_00004_H_media_00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/L-03/three-robots-v1/runs/20261027_181107_three_robots_media_v1_isaaclab_cartpole_00004_H_media_00/native_camera/frame_0029.png",
+        "caption": "4 arena；3 s、20 fps、1×；实际相机采集，静态零重力加载初态。"
+      },
+      {
+        "title": "Franka · EmbodiChain / DexUni",
+        "src": "outputs/benchmarks/L-03/three-robots-v1/runs/20261027_181121_three_robots_media_v1_embodichain_franka_00004_H_media_00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/L-03/three-robots-v1/runs/20261027_181121_three_robots_media_v1_embodichain_franka_00004_H_media_00/native_camera/frame_0029.png",
+        "caption": "4 arena；3 s、20 fps、1×；实际相机采集，静态零重力加载初态。"
+      },
+      {
+        "title": "Franka · Isaac Lab / PhysX",
+        "src": "outputs/benchmarks/L-03/three-robots-v1/runs/20261027_181140_three_robots_media_v1_isaaclab_franka_00004_H_media_00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/L-03/three-robots-v1/runs/20261027_181140_three_robots_media_v1_isaaclab_franka_00004_H_media_00/native_camera/frame_0029.png",
+        "caption": "4 arena；3 s、20 fps、1×；实际相机采集，静态零重力加载初态。"
+      },
+      {
+        "title": "Go2 · EmbodiChain / DexUni",
+        "src": "outputs/benchmarks/L-03/three-robots-v1/runs/20261027_181152_three_robots_media_v1_embodichain_go2_00004_H_media_00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/L-03/three-robots-v1/runs/20261027_181152_three_robots_media_v1_embodichain_go2_00004_H_media_00/native_camera/frame_0029.png",
+        "caption": "4 arena；3 s、20 fps、1×；实际相机采集，静态零重力加载初态。"
+      },
+      {
+        "title": "Go2 · Isaac Lab / PhysX",
+        "src": "outputs/benchmarks/L-03/three-robots-v1/runs/20261027_181212_three_robots_media_v1_isaaclab_go2_00004_H_media_00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/L-03/three-robots-v1/runs/20261027_181212_three_robots_media_v1_isaaclab_go2_00004_H_media_00/native_camera/frame_0029.png",
+        "caption": "4 arena；3 s、20 fps、1×；实际相机采集，静态零重力加载初态。"
+      }
+    ],
+    "resources": [
+      {
+        "label": "原始数据与复现命令",
+        "path": "outputs/benchmarks/L-03/three-robots-v1/reports/data-index.md"
+      },
+      {
+        "label": "三表运行摘要",
+        "path": "outputs/benchmarks/L-03/three-robots-v1/reports/benchmark-summary.md"
+      },
+      {
+        "label": "相机、时间与原片核验",
+        "path": "outputs/benchmarks/L-03/three-robots-v1/videos/index.md"
+      },
+      {
+        "label": "全量状态／模型与哈希核验",
+        "path": "outputs/benchmarks/L-03/three-robots-v1/analysis/validation.json"
+      },
+      {
+        "label": "三种机器人碰撞与隔离核验",
+        "path": "outputs/benchmarks/L-03/analysis/three-robots-preflight-v1/model-comparison.json"
+      },
+      {
+        "label": "G1 独立问题记录",
+        "path": "outputs/benchmarks/L-03/reports/issues/g1-usd-parent-collider.md"
+      },
+      {
+        "label": "Go2 初始化修正记录",
+        "path": "outputs/benchmarks/L-03/reports/go2-initialization-diagnosis.md"
+      },
+      {
+        "label": "退出警告明细",
+        "path": "outputs/benchmarks/L-03/three-robots-v1/analysis/runtime-warnings.json"
+      },
+      {
+        "label": "分析图 PNG / SVG / PDF 与绘图数据",
+        "path": "outputs/benchmarks/L-03/three-robots-v1/figures"
+      },
+      {
+        "label": "2026-10-28 独立 parser 修复复验及客户端／资产限制",
+        "path": "outputs/benchmarks/usd-import-fix/20261028-v1/README.md"
+      }
+    ],
+    "report_note": "以下为本轮正式实验初稿。早期共享 GPU 试跑单独保留，不参与本稿性能统计；G1 排除本轮。"
+  },
+  {
+    "id": "L-04",
+    "category": "加载",
+    "title": "工作站多 arena 加载",
+    "status": "partial",
+    "date": "2026-10-27",
+    "source": "outputs/benchmarks/L-04/reports/L-04.md",
+    "description": "工作站资产准备；抽屉共同 USD 的碰撞导入检查。",
+    "scope": "资产预检阻塞 · N=1／4 · 正式加载实验未开始",
+    "takeaway": "同一份 SlidingBoxDrawer USD，Isaac Lab 每个抽屉加载 2 个碰撞形状，当前 EmbodiChain／DexUni 为 0。N=1、4 都复现，虽然四次预检均正常退出，仍不能进行同模型加载性能比较。",
+    "metrics": [
+      {
+        "label": "EmbodiChain · 抽屉碰撞",
+        "value": "0 个 / arena",
+        "detail": "N=1、4 均复现；全局默认地面已排除"
+      },
+      {
+        "label": "Isaac Lab · 抽屉碰撞",
+        "value": "2 个 / arena",
+        "detail": "两端共同 USD；分别对应外壳与内盒"
+      },
+      {
+        "label": "原生预检",
+        "value": "4 次",
+        "detail": "两平台 × N=1／4，每次 20 步；不是完整工作站"
+      },
+      {
+        "label": "性能矩阵",
+        "value": "尚未开始",
+        "detail": "未测 C/H/B/R 耗时、内存与工作站容量"
+      }
+    ],
+    "issue": {
+      "title": "阻塞：抽屉碰撞未导入；转换也未保留原凸分块",
+      "text": "父 Xform 上的碰撞属性未进入当前 DexSim 使用的 OpenUSD 形状索引，与 G1 问题一致。源 OBJ 的 28 个凸分块还被转换为两个整体凸包。需处理共同资产／导入适配并重新预检；本轮未改求解器或原始 USD。 以上为冻结版本结果。2026-10-28 独立 parser 修复已恢复 G1／抽屉 31／2 个碰撞，但标准客户端兼容及抽屉凸分块问题另行保留，尚未进入正式矩阵复测。",
+      "source": "outputs/benchmarks/L-04/reports/L-04.md",
+      "summary": "WD 抽屉碰撞数量 0 对 2，正式性能测试暂停。"
+    },
+    "media_note": "本轮仅做无渲染的资产预检，尚无完整工作站视频。",
+    "videos": [],
+    "resources": [
+      {
+        "label": "原始数据、资产来源与复现命令",
+        "path": "outputs/benchmarks/L-04/reports/data-index.md"
+      },
+      {
+        "label": "预检三表摘要（性能未测）",
+        "path": "outputs/benchmarks/L-04/reports/benchmark-summary.md"
+      },
+      {
+        "label": "索引对照与 67 个文件哈希",
+        "path": "outputs/benchmarks/L-04/analysis/drawer-v2/collision-audit.json"
+      },
+      {
+        "label": "双方共同 USD 与依赖",
+        "path": "outputs/benchmarks/L-04/prepared/drawer-common-v1"
+      },
+      {
+        "label": "四次原生运行记录",
+        "path": "outputs/benchmarks/L-04/drawer-preflight-v1"
+      },
+      {
+        "label": "2026-10-28 独立 parser 修复复验及客户端／资产限制",
+        "path": "outputs/benchmarks/usd-import-fix/20261028-v1/README.md"
+      }
+    ],
+    "report_note": "以下是资产预检记录，尚不是完整工作站的性能报告。原始输入、定位过程与不利结果均保留。"
+  },
+  {
+    "id": "L-05",
+    "category": "加载",
+    "title": "工作间多 arena 加载",
+    "status": "pending"
+  },
+  {
+    "id": "R-01",
+    "category": "渲染质量",
+    "title": "渲染质量与一致性",
+    "status": "pending"
+  },
+  {
+    "id": "P-01",
+    "category": "物理",
+    "title": "自由落体与无驱动单摆",
+    "status": "complete",
+    "date": "2026-10-22",
+    "source": "reports/P-01.md",
+    "description": "以解析解和独立积分为参照，比较步长、求解器及迭代次数对误差的影响。",
+    "scope": "240 条主对照轨迹 · 24 组配置 · PGS / TGS",
+    "takeaway": "短窗口落体与单摆必须分开评价。增加位置迭代不必然改善本单摆场景的能量表现；长程落体还暴露出 DexUni 的舍入累积误差。",
+    "metrics": [
+      {
+        "label": "落体前 1 s · 1 ms 步长",
+        "value": "7.802 / 4.900 mm",
+        "detail": "最大位置误差均值 · DexUni / PhysX PGS 4/1（TGS 1/1 同为 4.900）"
+      },
+      {
+        "label": "单摆 10 s · 1 ms 步长",
+        "value": "约 0.222%",
+        "detail": "最大能量漂移均值 · DexUni、PGS 4/1、TGS 1/1"
+      },
+      {
+        "label": "长程落体 · 1 ms 步长",
+        "value": "11.619 / 约 0.078 m",
+        "detail": "10 s 最大位置误差均值 · DexUni / PGS、TGS 1/1"
+      }
+    ],
+    "issue": {
+      "title": "需关注：长距离自由落体的数值误差",
+      "text": "理论下落距离 490.5 m 的 10 s 应力测试中，DexUni 的误差未随步长减小而下降。Float32 位置差分更新速度的离线重放复现了全部 40 条落体轨迹。该结果不能直接等同于普通机器人工作空间误差；求解器未修改。",
+      "source": "reports/P-01/comparison-descriptive/README.md",
+      "summary": "490.5 m 理论行程的应力测试暴露数值误差，与日常工作空间结论分开解释。"
+    },
+    "media_note": "三路从左到右为 EmbodiChain DexUni、Isaac Lab PGS 4/1、Isaac Lab TGS 4/1。共同步长 5 ms、初态 0、40 fps、1×；单独原片与相机核验可从素材索引下载。",
+    "videos": [
+      {
+        "title": "自由落体 · 三组配置同步对照",
+        "src": "reports/P-01/common-view/freefall_comparison.mp4",
+        "poster": "reports/P-01/common-view/freefall_comparison.png",
+        "caption": "前 1 s · 镜头沿共同解析轨迹移动，不跟随各自被测物体",
+        "wide": true
+      },
+      {
+        "title": "无驱动单摆 · 三组配置同步对照",
+        "src": "reports/P-01/common-view/pendulum_comparison.mp4",
+        "poster": "reports/P-01/common-view/pendulum_comparison.png",
+        "caption": "完整 10 s · 固定共同相机 · 显示杆不参与质量和碰撞",
+        "wide": true
+      }
+    ],
+    "resources": [
+      {
+        "label": "连续指标与复算出处",
+        "path": "reports/P-01/comparison-descriptive/README.md"
+      },
+      {
+        "label": "全部原片与同视角核验",
+        "path": "reports/P-01/common-view/index.md"
+      },
+      {
+        "label": "迭代次数机制研究",
+        "path": "reports/P-01/iteration-study.md"
+      },
+      {
+        "label": "PGS 补充基线",
+        "path": "reports/P-01/pgs-baseline.md"
+      },
+      {
+        "label": "复现说明",
+        "path": "reports/P-01/reproduction.md"
+      },
+      {
+        "label": "历史 Isaac Lab HTML（旧口径）",
+        "path": "reports/P-01-isaaclab.html"
+      }
+    ]
+  },
+  {
+    "id": "P-02",
+    "category": "物理",
+    "title": "摩擦、接触与静态稳定",
+    "status": "complete",
+    "date": "2026-10-22",
+    "source": "outputs/benchmarks/P-02/reports/P-02.md",
+    "description": "斜面摩擦、静态接触与 10 s 堆叠边界；保留睡眠，检查参数敏感性与重复性。",
+    "scope": "300 条原分析轨迹 · 203 条堆叠扫描轨迹",
+    "takeaway": "提高 VBD 迭代预算改善了斜面摩擦误差。高层堆叠出现跨进程结果变化，原批次 51 层边界不能视为可重复的稳定上限。",
+    "metrics": [
+      {
+        "label": "斜面加速度相对误差",
+        "value": "33.22% → 0.79%",
+        "detail": "DexUni VBD 10 → 100 · 30°、μ=0.4"
+      },
+      {
+        "label": "原批次 10/10 完整最高层数",
+        "value": "51 / 78 层",
+        "detail": "VBD 100＋接触分组 / TGS 100/1 · 非可重复上限"
+      },
+      {
+        "label": "边界复录出现倒塌",
+        "value": "1.985 s",
+        "detail": "DexUni 51 层、初态 0 · 原测量和两次无录像复跑完整"
+      }
+    ],
+    "issue": {
+      "title": "发布前重点：高层堆叠的重复性尚未解释",
+      "text": "51 层原测量完整，录像倒塌；52 层初态 4 原测量失稳，录像及无录像复跑完整。初态和物理配置一致，变化不只发生在录制中，根因待定位。下方保留异常片段；边界视频层数不同，不能作为同层数质量排名。",
+      "source": "outputs/benchmarks/P-02/stack-limit-10s/reports/repeatability.md",
+      "summary": "51 层复录倒塌，且无录像复跑也有结果变化；不能称为可重复上限。"
+    },
+    "media_note": "堆叠视频覆盖释放后完整 10 s、睡眠开启、20 fps、1×。各自观测边界的层数不同；相邻层录像的初态也不同，标签逐项注明。原主测的无睡眠 12 s 结果与本扩展分开报告。",
+    "videos": [
+      {
+        "title": "观测边界复录 · DexUni 51 层 / PhysX 78 层",
+        "src": "outputs/benchmarks/P-02/stack-limit-10s/videos/stable_boundary_paired_1x.mp4",
+        "poster": "outputs/benchmarks/P-02/stack-limit-10s/figures/stable_boundary_native.png",
+        "caption": "两端初态 0 · DexUni 复录倒塌与原测量不一致，原片完整保留",
+        "wide": true
+      },
+      {
+        "title": "相邻层复录 · DexUni 52 层 / PhysX 79 层",
+        "src": "outputs/benchmarks/P-02/stack-limit-10s/videos/next_layer_paired_1x.mp4",
+        "poster": "outputs/benchmarks/P-02/stack-limit-10s/figures/next_layer_native.png",
+        "caption": "DexUni 初态 4 / PhysX 初态 0 · 只表示各次录制的实际表现",
+        "wide": true
+      },
+      {
+        "title": "斜面摩擦 · 30°、μ=0.54",
+        "src": "outputs/benchmarks/P-02/videos/slope_30_mu54_paired_1x.mp4",
+        "poster": "outputs/benchmarks/P-02/figures/slope_30_mu54_native.png",
+        "caption": "原生相机同视角对照 · 本片 μ=0.54，与上方 μ=0.4 指标不是同一配置",
+        "wide": true
+      }
+    ],
+    "resources": [
+      {
+        "label": "10 s 堆叠边界详细报告",
+        "path": "outputs/benchmarks/P-02/stack-limit-10s/reports/stack-limit.md"
+      },
+      {
+        "label": "重复性核查",
+        "path": "outputs/benchmarks/P-02/stack-limit-10s/reports/repeatability.md"
+      },
+      {
+        "label": "摩擦实现与精度分析",
+        "path": "outputs/benchmarks/P-02/reports/friction-review.md"
+      },
+      {
+        "label": "三表运行摘要",
+        "path": "outputs/benchmarks/P-02/reports/benchmark-summary.md"
+      },
+      {
+        "label": "原始数据索引",
+        "path": "outputs/benchmarks/P-02/reports/data-index.md"
+      },
+      {
+        "label": "堆叠原片与核验",
+        "path": "outputs/benchmarks/P-02/stack-limit-10s/videos/index.md"
+      },
+      {
+        "label": "全部主测录像",
+        "path": "outputs/benchmarks/P-02/videos/index.md"
+      }
+    ]
+  },
+  {
+    "id": "P-03",
+    "category": "物理",
+    "title": "抓取、保持、扰动与放回",
+    "status": "partial",
+    "date": "2026-10-23",
+    "source": "outputs/benchmarks/P-03/reports/P-03.md",
+    "description": "Franka 接触抓取立方体与圆柱；质量结果已完成，正式性能矩阵待补。",
+    "scope": "40 条质量轨迹 · 两形状 · 每端每形状 10 初态",
+    "takeaway": "两端每种形状均 10/10 完成循环。DexUni 在当前配置下仍有较大的手指穿透与受力 mimic 误差；正式吞吐与同步延迟尚未测完，不作速度排名。",
+    "metrics": [
+      {
+        "label": "完整抓取循环",
+        "value": "各 10/10",
+        "detail": "两端、每种形状 · 100 g、50 mm 物体 · 100 mm 抬升命令"
+      },
+      {
+        "label": "手指最大几何穿透范围",
+        "value": "1.174–1.962 mm",
+        "detail": "DexUni · PhysX TGS 对应 0.041–0.063 mm"
+      },
+      {
+        "label": "受力 mimic 最大差范围",
+        "value": "4.620–4.825 mm",
+        "detail": "DexUni · PhysX TGS 对应约 0.067 mm"
+      }
+    ],
+    "issue": {
+      "title": "部分完成：受力约束误差需复测，性能待补",
+      "text": "mimic 解析修复已解决从指不跟随，但毫米级受力偏差和接触穿透仍存在，原因尚未唯一定位。当前结论只覆盖这组资产、控制器和小幅扰动；124 组正式性能矩阵与同步延迟尚未完成。",
+      "source": "outputs/benchmarks/P-03/reports/P-03.md",
+      "summary": "抓取循环已完成，但毫米级约束误差仍需分析，正式性能尚未测完。"
+    },
+    "media_note": "固定共同相机，960×720、20 fps、10 s、1×。DexUni 录像与主测物体位置最大差分别为 0.738 / 0.646 mm，Isaac 为 0；任务事件一致，录像不计为新增独立初态。",
+    "videos": [
+      {
+        "title": "立方体 · EmbodiChain / DexUni",
+        "src": "outputs/benchmarks/P-03/runs/20261023_122426_native_v4_embodichain_cube_physics_n0001_r00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/P-03/runs/20261023_122426_native_v4_embodichain_cube_physics_n0001_r00/native_camera/frame_0059.png",
+        "caption": "动态关节、双向耦合 · VBD 100 次 · 初态 0"
+      },
+      {
+        "title": "立方体 · Isaac Lab / PhysX TGS",
+        "src": "outputs/benchmarks/P-03/runs/20261023_123448_native_v4_partition_fix_isaaclab_cube_physics_n0001_r00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/P-03/runs/20261023_123448_native_v4_partition_fix_isaaclab_cube_physics_n0001_r00/native_camera/frame_0059.png",
+        "caption": "TGS 16/1 · 同一关节目标、外力和初态"
+      },
+      {
+        "title": "圆柱 · EmbodiChain / DexUni",
+        "src": "outputs/benchmarks/P-03/runs/20261023_122605_native_v4_embodichain_cylinder_physics_n0001_r00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/P-03/runs/20261023_122605_native_v4_embodichain_cylinder_physics_n0001_r00/native_camera/frame_0059.png",
+        "caption": "抓取 → 保持 → 扰动 → 放回释放 · 不附加抓持约束"
+      },
+      {
+        "title": "圆柱 · Isaac Lab / PhysX TGS",
+        "src": "outputs/benchmarks/P-03/runs/20261023_123534_native_v4_partition_fix_isaaclab_cylinder_physics_n0001_r00/native_camera/native_1x.mp4",
+        "poster": "outputs/benchmarks/P-03/runs/20261023_123534_native_v4_partition_fix_isaaclab_cylinder_physics_n0001_r00/native_camera/frame_0059.png",
+        "caption": "同视角、同时间窗口 · 渲染材质与光照存在平台差异"
+      }
+    ],
+    "resources": [
+      {
+        "label": "全部原片与状态核验",
+        "path": "outputs/benchmarks/P-03/videos/index.md"
+      },
+      {
+        "label": "三表运行摘要",
+        "path": "outputs/benchmarks/P-03/reports/benchmark-summary.md"
+      },
+      {
+        "label": "原始数据索引",
+        "path": "outputs/benchmarks/P-03/reports/data-index.md"
+      },
+      {
+        "label": "mimic 修复复验",
+        "path": "outputs/benchmarks/P-03/reports/mimic-mr1501-readiness.md"
+      },
+      {
+        "label": "资产预检",
+        "path": "outputs/benchmarks/P-03/reports/asset-preflight.md"
+      }
+    ]
+  },
+  {
+    "id": "P-04",
+    "category": "物理",
+    "title": "20 物体杂乱抓放",
+    "status": "pending"
+  },
+  {
+    "id": "P-05",
+    "category": "物理",
+    "title": "三块堆叠与完整释放",
+    "status": "pending"
+  },
+  {
+    "id": "P-06",
+    "category": "物理",
+    "title": "夹持把手与抽屉拉动",
+    "status": "pending"
+  },
+  {
+    "id": "P-07",
+    "category": "物理",
+    "title": "间隙与姿态偏差插接",
+    "status": "pending"
+  },
+  {
+    "id": "D-01",
+    "category": "Demo",
+    "title": "接触操作演示",
+    "status": "pending"
+  }
+]

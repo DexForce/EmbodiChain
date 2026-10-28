@@ -1,0 +1,18 @@
+{
+  "runs": [
+    {
+      "id": "pilot_freefall_dt005",
+      "case": "freefall",
+      "dt": 0.005,
+      "phase": "pilot",
+      "count": 1
+    },
+    {
+      "id": "pilot_pendulum_dt005",
+      "case": "pendulum",
+      "dt": 0.005,
+      "phase": "pilot",
+      "count": 1
+    }
+  ]
+}

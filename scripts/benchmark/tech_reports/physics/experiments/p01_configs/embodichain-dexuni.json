@@ -1,0 +1,62 @@
+{
+  "experiment": "P-01",
+  "platform": "EmbodiChain",
+  "device": "cuda:0",
+  "solver": "DexUni",
+  "dt_s": [
+    0.01,
+    0.005,
+    0.0025
+  ],
+  "duration_s": 10.0,
+  "mass_kg": 0.1,
+  "cube_edge_m": 0.05,
+  "bob_radius_m": 0.025,
+  "pendulum_length_m": 0.5,
+  "gravity_m_s2": 9.81,
+  "joint_friction": 0.0,
+  "joint_armature": 0.0,
+  "collision": false,
+  "num_envs": 1,
+  "initial_states": "assets/P-01/initial-states.json",
+  "reference_dt_s": 0.0001,
+  "reference_refined_dt_s": 5e-05,
+  "candidate_thresholds": {
+    "fall_position_0_1s_m": 0.005,
+    "fall_velocity_0_1s_m_s": 0.01,
+    "pendulum_period_relative": 0.01,
+    "pendulum_energy_relative": 0.02
+  },
+  "performance_benchmark": false,
+  "repository": "/home/oem/code/EmbodiChain",
+  "branch": "codex/adapt-latest-dexsim",
+  "source_commit": "e8a641999cb42d66c4b84bceb5040a62a91a2999",
+  "num_substeps": 1,
+  "supplement_dt_s": [
+    0.001
+  ],
+  "solver_cfg": {
+    "solver_type": "dexuni",
+    "joint_mode": "dynamic",
+    "contact_mode": "auto",
+    "coupling": "one_way",
+    "vbd_options": {
+      "iterations": 10
+    },
+    "mujoco_options": {
+      "integrator": "implicitfast",
+      "solver": "newton",
+      "iterations": 100,
+      "ls_iterations": 50,
+      "use_mujoco_cpu": false,
+      "enable_sleeping": false,
+      "density": 0.0,
+      "viscosity": 0.0,
+      "wind": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  }
+}
