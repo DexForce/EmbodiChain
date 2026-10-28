@@ -194,6 +194,7 @@ def main():
                 "REFERENCE_SOURCES.json",
                 "configs/*.yaml",
             ],
+            "embodichain_models.dynamics.lewm": ["THIRD_PARTY_LICENSES"],
             "embodichain.data": ["default_materials.json"],
             "embodichain.compute.kinematics._warp": [
                 "ssik_LICENSE.txt",

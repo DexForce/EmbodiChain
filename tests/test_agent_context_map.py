@@ -65,6 +65,7 @@ def test_map_registers_the_supported_context_domains() -> None:
         "supervised-learning",
         "neural-dynamics",
         "robot-world-model",
+        "visual-world-model",
         "configclass-pattern",
         "randomization",
         "atomic-actions",
