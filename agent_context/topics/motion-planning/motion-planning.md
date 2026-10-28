@@ -193,7 +193,8 @@ embeds their candidates in a self-contained HTML page. The page uses the
 official Atomic Action example's seven-DoF Franka Panda serial-chain geometry
 for orbitable 3D robot and EEF-path playback. A fixed task object and placement
 target clarify pick-and-place phases without participating in augmentation;
-JavaScript owns only playback and drawing. The checked-in generated page lives
+JavaScript owns playback, drawing, and light/dark/system theme selection using
+the documentation's stored preference. The checked-in generated page lives
 under
 `docs/source/labs/trajectory-augmentation/`; Sphinx copies that directory into
 each versioned documentation build through `html_extra_path`, so the same page

@@ -25,7 +25,9 @@ python examples/expansion/trajectory/trajectory_augmentation_visualizer.py \
 The interactive 3D view uses the official Panda serial-chain geometry and can
 be orbited or zoomed without loading a simulator. A fixed orange object and
 green placement target show the pick-and-place objective; they provide task
-context but never enter candidate generation. The tabs cover
+context but never enter candidate generation. The page follows the documentation
+theme preference and offers light, dark, and system modes, including when opened
+as a standalone file. The tabs cover
 endpoint-preserving joint residuals, interior via points,
 Jacobian null-space residuals, manipulability-guided selection, task-space
 deformation with trajectory IK, temporal retiming, fixed-contact approach

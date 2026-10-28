@@ -8,144 +8,212 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Trajectory Augmentation Lab · EmbodiChain</title>
+  <script>
+    // Use the same stored mode as the documentation, including when opened directly.
+    (() => {
+      let mode = "auto";
+      try { mode = localStorage.getItem("mode") || "auto"; } catch (_) {}
+      if (!["auto", "light", "dark"].includes(mode)) mode = "auto";
+      document.documentElement.dataset.mode = mode;
+      document.documentElement.dataset.theme = mode === "auto"
+        ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : mode;
+    })();
+  </script>
   <style>
     :root {
+      color-scheme: light;
+      --bg: #fff;
+      --panel: #fff;
+      --surface: #f3f4f5;
+      --canvas: #f8fafc;
+      --border: #d1d5da;
+      --border-strong: #aab6c5;
+      --muted: #52647a;
+      --text: #222832;
+      --heading: #222832;
+      --blue: #176de8;
+      --blue-emphasis: #0b58c1;
+      --blue-soft: #edf4ff;
+      --blue-border: #b8d4fa;
+      --button-text: #fff;
+      --gold: #a35e0a;
+      --red: #b63c4d;
+      --green: #18764c;
+      --code: #005f77;
+      --metric-bg: rgba(255, 255, 255, .94);
+    }
+    :root[data-theme="dark"] {
       color-scheme: dark;
-      --bg: #090b0f;
-      --panel: #11151b;
-      --panel-2: #151a22;
-      --border: #252c36;
-      --muted: #8e98a7;
-      --text: #edf1f7;
-      --blue: #4f8cff;
-      --blue-soft: rgba(79, 140, 255, 0.14);
-      --cyan: #5bd6de;
-      --gold: #f0b35a;
-      --red: #ff6b6b;
-      --green: #58d68d;
+      --bg: #121212;
+      --panel: #171a1f;
+      --surface: #29313d;
+      --canvas: #1b2028;
+      --border: #48566b;
+      --border-strong: #687a91;
+      --muted: #a6b1c0;
+      --text: #ced6dd;
+      --heading: #f0f2f4;
+      --blue: #528fe4;
+      --blue-emphasis: #a4c9ff;
+      --blue-soft: #263c58;
+      --blue-border: #41658d;
+      --button-text: #101c2d;
+      --gold: #e6ad5a;
+      --red: #ff8794;
+      --green: #70c995;
+      --code: #76c9db;
+      --metric-bg: rgba(23, 26, 31, .94);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      min-width: 980px;
-      background:
-        radial-gradient(circle at 15% 0%, rgba(43, 88, 160, 0.13), transparent 32rem),
-        linear-gradient(180deg, #0b0e13 0%, var(--bg) 100%);
+      background: var(--bg);
       color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-        "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      font-size: 14px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+        Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+      font-size: 15px;
+      line-height: 1.55;
     }
-    button, input { font: inherit; }
+    button, input, select { font: inherit; }
     button { color: inherit; }
-    .app { max-width: 1480px; margin: 0 auto; padding: 28px 32px 40px; }
-    .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
-    .eyebrow {
-      color: var(--blue); font-size: 11px; font-weight: 750; letter-spacing: .15em;
-      text-transform: uppercase; margin-bottom: 8px;
+    button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .app { max-width: 1480px; margin: 0 auto; padding: 0 32px 40px; }
+    .topbar {
+      min-height: 62px; display: flex; align-items: center; justify-content: space-between;
+      gap: 20px; border-bottom: 1px solid var(--border);
     }
-    h1 { margin: 0; font-size: 28px; letter-spacing: -.02em; }
-    .subtitle { margin: 7px 0 0; color: var(--muted); }
+    .breadcrumbs { color: var(--muted); font-size: 14px; }
+    .breadcrumbs strong { color: var(--heading); font-weight: 600; }
+    .breadcrumbs span { margin: 0 6px; color: var(--border-strong); }
+    .theme-control { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .theme-control select {
+      color: var(--text); background: var(--panel); border: 1px solid var(--border);
+      border-radius: 4px; padding: 5px 8px;
+    }
+    .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-top: 28px; }
+    h1 { margin: 0; color: var(--heading); font-size: 36px; font-weight: 400; line-height: 1.2; }
+    .subtitle { margin: 9px 0 0; color: var(--muted); }
     .scope {
-      border: 1px solid var(--border); border-radius: 12px; background: rgba(17,21,27,.82);
-      padding: 10px 13px; max-width: 470px; color: #b9c2cf; line-height: 1.55;
+      border: 1px solid var(--border); border-left: 3px solid var(--blue); border-radius: 4px;
+      background: var(--surface); padding: 10px 13px; max-width: 470px; color: var(--text);
+      font-size: 13px; line-height: 1.55;
     }
-    .scope strong { color: var(--green); }
+    .scope strong { color: var(--heading); }
     .scope span { margin-left: 4px; }
-    .scope .excluded { color: #9da6b4; }
     .tabs {
-      display: flex; gap: 8px; overflow-x: auto; padding: 22px 0 14px;
-      scrollbar-width: thin;
+      display: flex; gap: 7px; overflow-x: auto; padding: 24px 0 16px; scrollbar-width: thin;
     }
     .tab, .view-button, .seed-button, .phase-button, .play-button {
-      border: 1px solid var(--border); background: #151a21; border-radius: 8px;
-      cursor: pointer; transition: border-color .15s, background .15s, transform .15s;
+      border: 1px solid var(--border); background: var(--panel); border-radius: 4px;
+      cursor: pointer; transition: border-color .15s, background .15s, color .15s;
     }
-    .tab { white-space: nowrap; padding: 9px 13px; color: #aeb8c7; }
-    .tab:hover, .view-button:hover, .seed-button:hover, .phase-button:hover { border-color: #465267; }
-    .tab.active { color: white; background: #255aa8; border-color: #3979d6; }
-    .tab .mini { opacity: .65; margin-left: 5px; font-size: 10px; text-transform: uppercase; }
-    .main-grid { display: grid; grid-template-columns: minmax(270px, 340px) minmax(620px, 1fr); gap: 16px; }
-    .panel { border: 1px solid var(--border); background: rgba(17, 21, 27, .94); border-radius: 14px; }
-    .sidebar { padding: 18px; display: flex; flex-direction: column; gap: 18px; }
-    .method-title { display: flex; align-items: center; gap: 9px; margin: 0 0 8px; font-size: 20px; }
+    .tab { white-space: nowrap; padding: 8px 12px; color: var(--muted); }
+    .tab:hover, .view-button:hover, .seed-button:hover, .phase-button:hover { border-color: var(--blue); color: var(--blue); }
+    .tab.active { color: var(--blue-emphasis); background: var(--blue-soft); border-color: var(--blue-border); font-weight: 600; }
+    .main-grid { display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); gap: 18px; }
+    .panel { border: 1px solid var(--border); background: var(--panel); border-radius: 6px; }
+    .sidebar { padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+    .method-title { display: flex; align-items: center; gap: 9px; margin: 0 0 8px; color: var(--heading); font-size: 21px; font-weight: 600; }
     .badge {
-      display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 999px;
-      background: var(--blue-soft); border: 1px solid rgba(79,140,255,.35);
-      color: #8db5ff; font-size: 10px; font-weight: 700; letter-spacing: .05em;
+      display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 4px;
+      background: var(--blue-soft); border: 1px solid var(--blue-border);
+      color: var(--blue-emphasis); font-size: 11px; font-weight: 600;
     }
-    .equation { color: #c5ccd7; line-height: 1.65; }
-    .section-label { margin-bottom: 8px; color: #7f8a9a; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-    .control-block { border-top: 1px solid var(--border); padding-top: 16px; }
+    .equation { color: var(--muted); line-height: 1.6; }
+    .section-label { margin-bottom: 8px; color: var(--heading); font-size: 13px; font-weight: 600; }
+    .control-block { border-top: 1px solid var(--border); padding-top: 18px; }
     .slider-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
-    .strength-value { color: #dbe6f8; font-variant-numeric: tabular-nums; }
+    .strength-value { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
     input[type="range"] { width: 100%; accent-color: var(--blue); cursor: pointer; }
     .seed-row { display: flex; align-items: center; gap: 9px; margin-top: 13px; }
     .seed-box {
-      flex: 1; background: #0d1015; border: 1px solid var(--border); border-radius: 8px;
-      padding: 9px 10px; color: #b8c0cc;
+      flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      padding: 7px 10px; color: var(--muted);
     }
-    .seed-box span { float: right; color: white; font-variant-numeric: tabular-nums; }
-    .seed-button { padding: 9px 11px; background: #1b222c; }
-    .explain { color: #a9b2bf; line-height: 1.65; margin: 0; }
+    .seed-box span { float: right; color: var(--heading); font-variant-numeric: tabular-nums; }
+    .seed-button { padding: 7px 10px; }
+    .explain { color: var(--text); line-height: 1.6; margin: 0; }
     .implementation {
-      display: block; margin-top: 9px; padding: 9px 10px; border-radius: 8px;
-      color: #9dc0ff; background: #0c1118; border: 1px solid #202b39;
-      font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      overflow-wrap: anywhere;
+      display: block; margin-top: 10px; padding: 9px 10px; border-radius: 4px;
+      color: var(--code); background: var(--surface); border: 1px solid var(--border);
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere;
     }
-    .guarantee { border-left: 2px solid var(--gold); padding-left: 10px; color: #b8bec8; line-height: 1.55; }
+    .guarantee { border-left: 3px solid var(--gold); padding-left: 10px; color: var(--text); line-height: 1.55; }
     .visual { overflow: hidden; }
     .visual-head {
-      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
       padding: 13px 16px; border-bottom: 1px solid var(--border);
     }
-    .legend { display: flex; gap: 18px; align-items: center; color: #9aa4b2; font-size: 12px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; color: var(--muted); font-size: 12px; }
     .legend-item { display: flex; align-items: center; gap: 7px; }
     .line { width: 22px; height: 0; border-top: 2px solid var(--blue); }
-    .line.reference { border-color: #8f98a5; border-top-style: dashed; }
-    .diamond { width: 8px; height: 8px; border: 1.5px solid #dde4ed; transform: rotate(45deg); }
-    .object-swatch { width: 9px; height: 9px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 2px rgba(240,179,90,.18); }
+    .line.reference { border-color: var(--muted); border-top-style: dashed; }
+    .diamond { width: 8px; height: 8px; border: 1.5px solid var(--muted); transform: rotate(45deg); }
+    .object-swatch { width: 9px; height: 9px; border-radius: 50%; background: var(--gold); }
     .target-swatch { width: 11px; height: 8px; border: 1.5px solid var(--green); border-radius: 50%; }
     .view-toggle { display: flex; gap: 5px; }
-    .view-button { padding: 7px 10px; color: #95a0af; }
-    .view-button.active { color: white; background: #263347; border-color: #3a4d69; }
-    .canvas-wrap { position: relative; height: 540px; background: #0d1015; }
+    .view-button { padding: 6px 10px; color: var(--muted); font-size: 13px; }
+    .view-button.active { color: var(--blue-emphasis); background: var(--blue-soft); border-color: var(--blue-border); }
+    .canvas-wrap { position: relative; height: 540px; background: var(--canvas); }
     canvas { display: block; width: 100%; height: 100%; }
     canvas.orbitable { cursor: grab; touch-action: none; }
     canvas.orbitable.dragging { cursor: grabbing; }
     .chart-caption {
-      position: absolute; top: 13px; left: 16px; color: #8a95a5; font-size: 11px;
+      position: absolute; top: 13px; left: 16px; color: var(--muted); font-size: 11px;
       pointer-events: none;
     }
     .metrics {
       position: absolute; right: 13px; top: 13px; display: grid; grid-template-columns: repeat(2, minmax(115px, 1fr));
       gap: 7px; max-width: 360px; pointer-events: none;
     }
-    .metric { background: rgba(12,15,20,.88); border: 1px solid #252d38; border-radius: 8px; padding: 7px 9px; }
-    .metric-label { color: #778292; font-size: 10px; }
-    .metric-value { margin-top: 2px; color: #e5ebf3; font-size: 12px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .metric { background: var(--metric-bg); border: 1px solid var(--border); border-radius: 4px; padding: 7px 9px; }
+    .metric-label { color: var(--muted); font-size: 10px; }
+    .metric-value { margin-top: 2px; color: var(--heading); font-size: 12px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .timeline-area { padding: 14px 16px 16px; border-top: 1px solid var(--border); }
     .phases { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 13px; }
-    .phase-button { padding: 6px 9px; color: #8792a2; font-size: 12px; }
-    .phase-button.active { background: var(--blue-soft); color: #86adf5; border-color: rgba(79,140,255,.42); }
-    .phase-button.contact { color: #d9ad69; }
-    .phase-button.bridge { color: #ff8f8f; border-style: dashed; }
+    .phase-button { padding: 5px 9px; color: var(--muted); font-size: 12px; }
+    .phase-button.active { background: var(--blue-soft); color: var(--blue-emphasis); border-color: var(--blue-border); }
+    .phase-button.contact { color: var(--gold); }
+    .phase-button.bridge { color: var(--red); border-style: dashed; }
     .transport { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; }
-    .play-button { min-width: 58px; padding: 8px 12px; background: #f4f6f8; color: #11151a; border-color: white; font-weight: 700; }
-    .time-readout { min-width: 86px; text-align: right; color: #c8d0da; font-variant-numeric: tabular-nums; }
-    .footnote { margin-top: 14px; color: #687383; font-size: 11px; line-height: 1.55; }
-    @media (max-width: 1120px) {
-      .main-grid { grid-template-columns: 290px minmax(620px, 1fr); }
-      .metrics { grid-template-columns: 1fr; max-width: 180px; }
+    .play-button { min-width: 58px; padding: 7px 12px; background: var(--blue); color: var(--button-text); border-color: var(--blue); font-weight: 600; }
+    .time-readout { min-width: 86px; text-align: right; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+    .footnote { margin-top: 14px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    @media (max-width: 900px) {
+      .header { flex-wrap: wrap; }
+      .scope { max-width: none; }
+      .main-grid { grid-template-columns: 1fr; }
+      .visual { grid-row: 1; }
+    }
+    @media (max-width: 600px) {
+      .app { padding: 0 16px 24px; }
+      .breadcrumbs { font-size: 12px; }
+      h1 { font-size: 29px; }
+      .canvas-wrap { height: auto; }
+      canvas { height: 390px; }
+      .chart-caption { max-width: calc(100% - 32px); }
+      .metrics {
+        position: static; grid-template-columns: repeat(2, minmax(0, 1fr));
+        max-width: none; padding: 10px; border-top: 1px solid var(--border);
+      }
     }
   </style>
 </head>
 <body>
   <div class="app">
+    <div class="topbar">
+      <div class="breadcrumbs"><strong>EmbodiChain</strong><span aria-hidden="true">/</span>Trajectory augmentation</div>
+      <label class="theme-control" for="theme-select">Theme
+        <select id="theme-select" aria-label="Color theme">
+          <option value="auto">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+    </div>
     <header class="header">
       <div>
-        <div class="eyebrow">EmbodiChain · Trajectory augmentation</div>
         <h1 id="title"></h1>
         <p class="subtitle" id="subtitle"></p>
       </div>
@@ -237,10 +305,50 @@
       requires_replanning: "Replan required", bank_size: "Segment bank", bridge_count: "Bridges",
       selected_sources: "Source order"
     };
-    const colors = { blue: "#4f8cff", reference: "#8993a1", grid: "#242a33", text: "#7f8997", boundary: "#e4eaf2", contact: "#f0b35a", bridge: "#ff6b6b" };
+    const palettes = {
+      light: {
+        blue: "#176de8", reference: "#788493", grid: "#dce3ea", groundAxis: "#b3c0ce", text: "#52647a",
+        boundary: "#485b70", contact: "#a35e0a", bridge: "#b63c4d", green: "#18764c", background: "#f8fafc",
+        labelBackground: "rgba(255,255,255,.92)", referenceRobot: "rgba(92,108,128,.55)",
+        pickFaces: ["rgba(222,229,236,.96)", "rgba(207,217,227,.96)", "rgba(192,204,216,.96)"], pickStroke: "#95a5b7",
+        placeFaces: ["rgba(221,238,228,.96)", "rgba(202,228,213,.96)", "rgba(185,216,200,.96)"], placeStroke: "#7bae91",
+        robotOutline: "#708297", robotBody: ["#f1f4f7", "#dce3eb"], jointRim: "#53677e", joint: "#3471bd",
+        jointStroke: "#dcecff", gripperOutline: "#687c91", gripper: "#f3f5f7", tcp: "#fff",
+        cursor: "rgba(48,64,84,.7)", contactFill: "rgba(196,126,28,.10)", bridgeFill: "rgba(190,60,75,.10)",
+        axes: ["#c54349", "#25845d", "#176de8"],
+        joints: ["#176de8", "#0d8090", "#9145af", "#a56200", "#198250", "#c14258", "#6053ba"]
+      },
+      dark: {
+        blue: "#528fe4", reference: "#a0aab8", grid: "#343e4b", groundAxis: "#59677a", text: "#a6b1c0",
+        boundary: "#e4eaf2", contact: "#e6ad5a", bridge: "#ff8794", green: "#70c995", background: "#1b2028",
+        labelBackground: "rgba(18,18,18,.9)", referenceRobot: "rgba(170,182,198,.52)",
+        pickFaces: ["rgba(67,78,93,.92)", "rgba(53,63,76,.92)", "rgba(43,52,64,.92)"], pickStroke: "#718096",
+        placeFaces: ["rgba(49,82,67,.9)", "rgba(40,68,56,.9)", "rgba(33,57,47,.9)"], placeStroke: "#58876e",
+        robotOutline: "#354251", robotBody: ["#e4e9ee", "#cfd7df"], jointRim: "#222b35", joint: "#3869ad",
+        jointStroke: "#91bdff", gripperOutline: "#293544", gripper: "#dce3e9", tcp: "#d9e8ff",
+        cursor: "rgba(255,255,255,.7)", contactFill: "rgba(230,173,90,.10)", bridgeFill: "rgba(255,135,148,.12)",
+        axes: ["#ff7a83", "#70c995", "#79aaff"],
+        joints: ["#528fe4", "#5bd6de", "#d88cf0", "#f0b35a", "#70c995", "#ff8794", "#a3b8ff"]
+      }
+    };
+    let colors = palettes[document.documentElement.dataset.theme];
+    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
     const canvas = document.getElementById("plot");
     const context = canvas.getContext("2d");
     let lastFrame = performance.now();
+
+    function setTheme(mode, persist = true) {
+      if (!["auto", "light", "dark"].includes(mode)) mode = "auto";
+      const theme = mode === "auto" ? (systemTheme.matches ? "dark" : "light") : mode;
+      document.documentElement.dataset.mode = mode;
+      document.documentElement.dataset.theme = theme;
+      document.getElementById("theme-select").value = mode;
+      colors = palettes[theme];
+      if (persist) {
+        try { localStorage.setItem("mode", mode); localStorage.setItem("theme", theme); } catch (_) {}
+      }
+      draw();
+    }
 
     function method() { return DATA.methods[state.method]; }
     function candidate() { return method().variants[state.strength][state.seed]; }
@@ -337,7 +445,7 @@
     }
     function clear(width, height) {
       context.clearRect(0, 0, width, height);
-      context.fillStyle = "#0d1015";
+      context.fillStyle = colors.background;
       context.fillRect(0, 0, width, height);
     }
     function polyline(points, project, color, width, dash = []) {
@@ -353,7 +461,7 @@
       const [x, y] = project(point), radius = 5;
       context.beginPath(); context.moveTo(x, y - radius); context.lineTo(x + radius, y);
       context.lineTo(x, y + radius); context.lineTo(x - radius, y); context.closePath();
-      context.fillStyle = "#0d1015"; context.fill(); context.strokeStyle = color; context.lineWidth = 1.5; context.stroke();
+      context.fillStyle = colors.background; context.fill(); context.strokeStyle = color; context.lineWidth = 1.5; context.stroke();
     }
     function extent(values) {
       let minimum = Infinity, maximum = -Infinity;
@@ -372,7 +480,7 @@
         context.strokeStyle = colors.grid; context.beginPath(); context.moveTo(bounds.left, y); context.lineTo(bounds.right, y); context.stroke();
         context.fillStyle = colors.text; context.textAlign = "right"; context.fillText(value.toFixed(1), bounds.left - 8, y + 4);
       });
-      context.fillStyle = "#98a2b1"; context.textAlign = "right"; context.fillText(xLabel, bounds.right, bounds.bottom + 35);
+      context.fillStyle = colors.text; context.textAlign = "right"; context.fillText(xLabel, bounds.right, bounds.bottom + 35);
       context.save(); context.translate(16, bounds.top); context.rotate(-Math.PI / 2); context.textAlign = "right"; context.fillText(yLabel, 0, 0); context.restore();
     }
     function niceTicks(minimum, maximum, count = 5) {
@@ -394,7 +502,7 @@
       const forward = normalize3([target[0] - position[0], target[1] - position[1], target[2] - position[2]]);
       const right = normalize3(cross3(forward, [0, 0, 1]));
       const up = normalize3(cross3(right, forward));
-      const focalLength = Math.min(width, height) * 1.28;
+      const focalLength = Math.min(width, height) * (width < 500 ? 1 : 1.28);
       return point => {
         const relative = [point[0] - position[0], point[1] - position[1], point[2] - position[2]];
         const depth = Math.max(.1, dot3(relative, forward));
@@ -405,13 +513,13 @@
       const extent = .65, step = .13;
       for (let index = -5; index <= 5; index += 1) {
         const value = index * step;
-        polyline([[-extent, value, 0], [extent, value, 0]], project, index === 0 ? "#343c48" : "#202730", index === 0 ? 1.2 : 1);
-        polyline([[value, -extent, 0], [value, extent, 0]], project, index === 0 ? "#343c48" : "#202730", index === 0 ? 1.2 : 1);
+        polyline([[-extent, value, 0], [extent, value, 0]], project, index === 0 ? colors.groundAxis : colors.grid, index === 0 ? 1.2 : 1);
+        polyline([[value, -extent, 0], [value, extent, 0]], project, index === 0 ? colors.groundAxis : colors.grid, index === 0 ? 1.2 : 1);
       }
       const axes = [
-        { point: [.19, 0, 0], color: "#ff6b6b", label: "X" },
-        { point: [0, .19, 0], color: "#58d68d", label: "Y" },
-        { point: [0, 0, .19], color: "#5b9dff", label: "Z" }
+        { point: [.19, 0, 0], color: colors.axes[0], label: "X" },
+        { point: [0, .19, 0], color: colors.axes[1], label: "Y" },
+        { point: [0, 0, .19], color: colors.axes[2], label: "Z" }
       ];
       axes.forEach(axis => {
         polyline([[0, 0, 0], axis.point], project, axis.color, 2);
@@ -457,7 +565,7 @@
     function drawTaskLabel(label, point, project, color) {
       const [x, y] = project(point);
       context.font = "700 10px ui-sans-serif, system-ui"; context.textAlign = "center";
-      context.fillStyle = "rgba(9,12,16,.86)"; context.fillRect(x - 25, y + 22, 50, 17);
+      context.fillStyle = colors.labelBackground; context.fillRect(x - 25, y + 22, 50, 17);
       context.fillStyle = color; context.fillText(label, x, y + 34);
     }
     function drawTaskContext(project) {
@@ -467,11 +575,11 @@
       const pickTop = Math.max(.08, pickCenter[2] - object.radius_m);
       const placeTop = Math.max(.08, placeCenter[2] - object.radius_m);
       drawBox(translationTransform([pickCenter[0], pickCenter[1], pickTop / 2]), [.21, .21, pickTop], project,
-        ["rgba(55,64,76,.82)", "rgba(43,51,62,.82)", "rgba(34,41,51,.82)"], "#596575");
+        colors.pickFaces, colors.pickStroke);
       drawBox(translationTransform([placeCenter[0], placeCenter[1], placeTop / 2]), [.21, .21, placeTop], project,
-        ["rgba(42,66,57,.78)", "rgba(34,56,48,.78)", "rgba(29,47,41,.78)"], "#47735d");
-      drawRing([pickCenter[0], pickCenter[1], pickTop + .003], .071, project, "rgba(240,179,90,.8)", [4, 4]);
-      drawRing([placeCenter[0], placeCenter[1], placeTop + .003], .075, project, "#58d68d");
+        colors.placeFaces, colors.placeStroke);
+      drawRing([pickCenter[0], pickCenter[1], pickTop + .003], .071, project, colors.contact, [4, 4]);
+      drawRing([placeCenter[0], placeCenter[1], placeTop + .003], .075, project, colors.green);
       return {
         pickCenter, placeCenter,
         pickLabel: [pickCenter[0], pickCenter[1], pickTop + .003],
@@ -503,31 +611,31 @@
         return { start, point, depth: (startProjected[2] + stopProjected[2]) / 2 };
       }).sort((a, b) => b.depth - a.depth);
       if (reference) {
-        projectedLinks.forEach(link => polyline([link.start, link.point], project, "rgba(124,135,149,.46)", 4, [5, 5]));
+        projectedLinks.forEach(link => polyline([link.start, link.point], project, colors.referenceRobot, 4, [5, 5]));
         return;
       }
       const [baseX, baseY] = project([0, 0, 0]);
       context.beginPath(); context.ellipse(baseX, baseY + 4, 22, 10, 0, 0, Math.PI * 2);
-      context.fillStyle = "#202a36"; context.fill(); context.strokeStyle = "#647184"; context.lineWidth = 1.5; context.stroke();
-      projectedLinks.forEach(link => polyline([link.start, link.point], project, "#28313c", 17));
-      projectedLinks.forEach((link, index) => polyline([link.start, link.point], project, index % 2 ? "#cfd7df" : "#e4e9ee", 10));
+      context.fillStyle = colors.robotOutline; context.fill(); context.strokeStyle = colors.jointStroke; context.lineWidth = 1.5; context.stroke();
+      projectedLinks.forEach(link => polyline([link.start, link.point], project, colors.robotOutline, 17));
+      projectedLinks.forEach((link, index) => polyline([link.start, link.point], project, colors.robotBody[index % 2], 10));
       pose.joints.forEach((point, index) => {
         const [x, y] = project(point), radius = index === 6 ? 6 : 7;
-        context.beginPath(); context.arc(x, y, radius + 2, 0, Math.PI * 2); context.fillStyle = "#222b35"; context.fill();
-        context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2); context.fillStyle = "#3869ad"; context.strokeStyle = "#7fb0ff"; context.lineWidth = 1.5; context.fill(); context.stroke();
+        context.beginPath(); context.arc(x, y, radius + 2, 0, Math.PI * 2); context.fillStyle = colors.jointRim; context.fill();
+        context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2); context.fillStyle = colors.joint; context.strokeStyle = colors.jointStroke; context.lineWidth = 1.5; context.fill(); context.stroke();
       });
       const toolX = normalize3(transformVector(pose.transform, [1, 0, 0]));
       const toolZ = normalize3(transformVector(pose.transform, [0, 0, 1]));
       const palm = add3(pose.tcp, scale3(toolZ, -.07));
       const left = add3(palm, scale3(toolX, .045)), right = add3(palm, scale3(toolX, -.045));
       const leftTip = add3(left, scale3(toolZ, .105)), rightTip = add3(right, scale3(toolZ, .105));
-      polyline([left, right], project, "#1d2630", 10);
-      polyline([left, right], project, "#dce3e9", 6);
+      polyline([left, right], project, colors.gripperOutline, 10);
+      polyline([left, right], project, colors.gripper, 6);
       [[left, leftTip], [right, rightTip]].forEach(finger => {
-        polyline(finger, project, "#1d2630", 9); polyline(finger, project, "#dce3e9", 5);
+        polyline(finger, project, colors.gripperOutline, 9); polyline(finger, project, colors.gripper, 5);
       });
       const [tcpX, tcpY] = project(pose.tcp);
-      context.beginPath(); context.arc(tcpX, tcpY, 4, 0, Math.PI * 2); context.fillStyle = "#d9e8ff"; context.fill(); context.strokeStyle = colors.blue; context.lineWidth = 2; context.stroke();
+      context.beginPath(); context.arc(tcpX, tcpY, 4, 0, Math.PI * 2); context.fillStyle = colors.tcp; context.fill(); context.strokeStyle = colors.blue; context.lineWidth = 2; context.stroke();
     }
     function drawPath(width, height) {
       const reference = DATA.reference, variant = candidate(), project = cameraProjection(width, height);
@@ -541,8 +649,8 @@
       drawRobot(frankaPose(reference.q[referenceIndex]), project, true);
       drawTaskObject(currentObjectCenter(variant, variantIndex, variantPose, taskContext), project);
       drawRobot(variantPose, project);
-      drawTaskLabel("PICK", taskContext.pickLabel, project, "#f0b35a");
-      drawTaskLabel("PLACE", taskContext.placeLabel, project, "#58d68d");
+      drawTaskLabel("PICK", taskContext.pickLabel, project, colors.contact);
+      drawTaskLabel("PLACE", taskContext.placeLabel, project, colors.green);
     }
     function drawJoints(width, height) {
       const reference = DATA.reference, variant = candidate();
@@ -557,16 +665,16 @@
         if (phase.kind !== "contact" && phase.kind !== "bridge") return;
         const start = variant.time[phase.start], stop = variant.time[phase.stop - 1];
         const [x0] = project([start, qMin]), [x1] = project([stop, qMin]);
-        context.fillStyle = phase.kind === "bridge" ? "rgba(255,107,107,.12)" : "rgba(240,179,90,.09)";
+        context.fillStyle = phase.kind === "bridge" ? colors.bridgeFill : colors.contactFill;
         context.fillRect(x0, top, Math.max(1, x1 - x0), bottom - top);
       });
-      const jointColors = ["#4f8cff", "#5bd6de", "#d88cf0", "#f0b35a", "#58d68d", "#ff7a90", "#a3b8ff"];
+      const jointColors = colors.joints;
       for (let joint = 0; joint < DATA.robot.dof; joint += 1) {
         polyline(reference.q.map((q, index) => [reference.time[index], q[joint]]), project, jointColors[joint] + "88", 1.4, [5, 4]);
         polyline(variant.q.map((q, index) => [variant.time[index], q[joint]]), project, jointColors[joint], 2.2);
       }
       const cursorTime = state.progress * duration(variant), [cursorX] = project([cursorTime, qMin]);
-      context.strokeStyle = "rgba(255,255,255,.65)"; context.lineWidth = 1; context.beginPath(); context.moveTo(cursorX, top); context.lineTo(cursorX, bottom); context.stroke();
+      context.strokeStyle = colors.cursor; context.lineWidth = 1; context.beginPath(); context.moveTo(cursorX, top); context.lineTo(cursorX, bottom); context.stroke();
       context.font = "11px ui-sans-serif, system-ui";
       DATA.robot.joint_names.forEach((name, index) => {
         context.fillStyle = jointColors[index]; context.textAlign = "left"; context.fillText(`J${index + 1}`, left + index * 38, top + 12);
@@ -631,6 +739,15 @@
       updateMetrics(); syncProgress();
     }
     function initialize() {
+      const themeSelect = document.getElementById("theme-select");
+      themeSelect.value = document.documentElement.dataset.mode;
+      themeSelect.onchange = event => setTheme(event.target.value);
+      systemTheme.addEventListener("change", () => {
+        if (document.documentElement.dataset.mode === "auto") setTheme("auto");
+      });
+      window.addEventListener("storage", event => {
+        if (event.key === "mode" || event.key === null) setTheme(event.newValue || "auto", false);
+      });
       document.getElementById("title").textContent = DATA.title;
       document.getElementById("subtitle").textContent = DATA.subtitle;
       document.getElementById("scope-included").textContent = DATA.scope.included;
