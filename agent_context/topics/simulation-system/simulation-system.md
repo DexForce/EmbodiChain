@@ -82,6 +82,9 @@ state, or physics use. `BaseEnv` supplies it between scene setup and dependent
 initialization; standalone callers supply it explicitly. `update()` also
 prepares defensively. See [lifecycle](lifecycle.md) for retries, replacement,
 reset ordering, runtime controls and teardown.
+`physics_step_index` exposes the manager's completed-substep count independently
+of rendering and backend clock resets. Sensors use it to identify new samples;
+observation reads and selected-environment resets do not advance it.
 
 ## Quaternion and pose convention
 

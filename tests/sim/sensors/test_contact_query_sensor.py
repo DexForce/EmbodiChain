@@ -16,12 +16,15 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
+import pytest
 import torch
 import warp as wp
 
 from dexsim.scene import ContactActorInfo, ContactBuffer, ContactQueryCapabilities
+from embodichain.lab.gym.envs import BaseEnv
 from embodichain.lab.sim.sensors import ContactSensor, ContactSensorCfg
 
 
@@ -35,6 +38,8 @@ class _FakeQuery:
         }
         self.actors = tuple(self._actors.values())
         self.actor_info_calls = 0
+        self.fetch_calls = 0
+        self.available = True
         self.buffer = ContactBuffer.allocate(4, "cpu")
         self.buffer.count = 2
         self.buffer.data[0] = torch.tensor(
@@ -51,6 +56,8 @@ class _FakeQuery:
         return self._actors[actor_id]
 
     def fetch(self) -> ContactBuffer:
+        assert self.available, "SDK contact snapshot is unavailable after reset"
+        self.fetch_calls += 1
         return self.buffer
 
 
@@ -72,6 +79,7 @@ def test_contact_sensor_consumes_scene_query_and_explicit_env_ids() -> None:
     )
     owner = SimpleNamespace(
         num_envs=2,
+        physics_step_index=0,
         spawn_result=result,
         _spawn_scene=SimpleNamespace(handles=lambda uid: handles),
         arena_offsets=torch.zeros((2, 3)),
@@ -85,10 +93,14 @@ def test_contact_sensor_consumes_scene_query_and_explicit_env_ids() -> None:
 
     sensor = ContactSensor(cfg, torch.device("cpu"), owner=owner)
     sensor.update()
+    assert query.fetch_calls == 0
+    owner.physics_step_index += 1
+    sensor.update()
     original_ids = sensor.item_user_ids
     original_env_ids = sensor.item_env_ids
     assert query.actor_info_calls == len(query.selected_actor_ids)
     sensor.update()
+    assert query.fetch_calls == 1
     assert sensor.item_user_ids is original_ids
     assert sensor.item_env_ids is original_env_ids
     assert query.actor_info_calls == len(query.selected_actor_ids)
@@ -138,6 +150,7 @@ def _sensor_for_query(query, capacity=2):
     )
     owner = SimpleNamespace(
         num_envs=2,
+        physics_step_index=0,
         arena_offsets=torch.zeros((2, 3)),
         _spawn_scene=SimpleNamespace(handles=lambda uid: handles),
         spawn_result=SimpleNamespace(
@@ -159,15 +172,20 @@ def test_default_history_enables_substep_sampling_and_preserves_interval_drops()
     assert sensor.requires_substep_update
     sensor.begin_control_step()
     query.buffer.dropped_count = 3
+    sensor._sim.physics_step_index += 1
     sensor.update_physics_step(0.01)
     assert history.found.all()
+    sensor.update_physics_step(0.01)
+    assert query.fetch_calls == 1
     query.buffer.count = 0
     query.buffer.dropped_count = 0
+    sensor._sim.physics_step_index += 1
     sensor.update_physics_step(0.01)
     assert not history.contact.any()
     assert history.found.all()
     assert sensor.dropped_contacts == 3
     sensor.update()  # Observation refresh must not replace interval diagnostics.
+    assert query.fetch_calls == 2
     assert sensor.dropped_contacts == 3
     sensor.begin_control_step()
     assert sensor.dropped_contacts == 0
@@ -183,15 +201,116 @@ def test_scatter_overflow_is_counted_separately_and_reset_by_selected_row():
     sensor.create_history("feet", torch.tensor([[4], [7]]))
     sensor.begin_control_step()
     query.buffer.dropped_count = 2
+    sensor._sim.physics_step_index += 1
     sensor.update_physics_step(0.01)
     assert sensor.total_current_contacts == 2
     assert sensor._scatter_dropped_count.tolist() == [1, 0]
     assert sensor.dropped_contacts == 3
     query.buffer.count = 0
     query.buffer.dropped_count = 0
+    sensor._sim.physics_step_index += 1
     sensor.update_physics_step(0.01)
     assert sensor.dropped_contacts == 3
     sensor.reset([1])
     assert sensor.dropped_contacts == 3
     sensor.reset()
     assert sensor.dropped_contacts == 0
+
+
+@pytest.mark.parametrize("with_history_peer", [False, True])
+def test_contact_sensor_owns_step_cache_and_reset_observation(with_history_peer):
+    """Gym and standalone reads use one sample per step without reset queries."""
+    query = _FakeQuery()
+    query.available = False
+    sensor = _sensor_for_query(query)
+    owner = sensor._sim
+    history_calls = []
+    sensors = {"contact": sensor}
+    if with_history_peer:
+        sensors["history"] = SimpleNamespace(
+            requires_substep_update=True,
+            begin_control_step=lambda: None,
+            update_physics_step=lambda dt: history_calls.append(dt),
+            get_data=lambda: {"touch": torch.zeros(2)},
+        )
+
+    def advance(dt, count, after_substep=None, **kwargs):
+        for _ in range(count):
+            owner.physics_step_index += 1
+            query.available = True
+            if after_substep is not None:
+                after_substep(dt)
+
+    owner.update = advance
+    owner.render_camera_group = lambda ids: None
+    env = SimpleNamespace(
+        sensors=sensors,
+        sim=owner,
+        physics_dt=0.001,
+        cfg=SimpleNamespace(sim_steps_per_control=20),
+        num_envs=2,
+        device=torch.device("cpu"),
+        _camera_group_ids=[],
+        _profiler=SimpleNamespace(section=lambda *args: nullcontext()),
+    )
+    BaseEnv._get_sensor_obs(env)
+    assert query.fetch_calls == 0
+    BaseEnv._advance_physics(env)
+    assert owner.physics_step_index == 20 and query.fetch_calls == 0
+    assert len(history_calls) == (20 if with_history_peer else 0)
+    BaseEnv._get_sensor_obs(env)
+    sensor.update()
+    assert query.fetch_calls == 1
+    untouched = sensor.get_data()[1].clone()
+
+    query.available = False
+    sensor.reset([0])
+    BaseEnv._get_sensor_obs(env)
+    sensor.update()
+    assert query.fetch_calls == 1 and owner.physics_step_index == 20
+    assert not sensor.get_data()["is_valid"][0].any()
+    for name, value in untouched.items():
+        torch.testing.assert_close(sensor.get_data()[name][1], value)
+
+    # Replay advances the manager directly rather than through env.step().
+    owner.update(0.001, 1)
+    BaseEnv._get_sensor_obs(env)
+    assert query.fetch_calls == 2
+    assert sensor.get_data()["is_valid"][:, 0].all()
+
+    query.available = False
+    sensor.reset()
+    sensor.update()
+    assert query.fetch_calls == 2
+    assert not sensor.get_data()["is_valid"].any()
+    owner.update(0.001, 1)
+    sensor.reset([])
+    sensor.update()
+    assert query.fetch_calls == 3
+    assert sensor.get_data()["is_valid"][:, 0].all()
+
+
+def test_history_reuses_raw_sample_and_advances_only_once_per_physics_step():
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    history = sensor.create_history("feet", torch.tensor([[4], [7]]))
+    sensor.begin_control_step()
+    sensor._sim.physics_step_index += 1
+    sensor.update()
+    sensor.update_physics_step(0.01)
+    sensor.update_physics_step(0.01)
+    assert query.fetch_calls == 1
+    assert history.contact_count.tolist() == [1, 1]
+
+
+def test_failed_contact_query_does_not_poison_step_cache():
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    sensor._sim.physics_step_index += 1
+    query.available = False
+    with pytest.raises(AssertionError, match="snapshot is unavailable"):
+        sensor.update()
+    query.available = True
+    sensor.update()
+    assert query.fetch_calls == 1
+    assert sensor.get_data()["is_valid"][:, 0].all()

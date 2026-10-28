@@ -19,89 +19,13 @@
 from __future__ import annotations
 
 import math
-from contextlib import nullcontext
-from types import SimpleNamespace
 
 import pytest
-import torch
 
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.sim import SimulationManagerCfg
 
 pytestmark = pytest.mark.no_sim
-
-
-@pytest.mark.parametrize("with_history", [False, True])
-def test_contact_sampling_precedes_reset_without_extra_physics(
-    with_history: bool,
-) -> None:
-    """Ordinary contacts sample once per control; reset observations use buffers."""
-    world = SimpleNamespace(ready=False, steps=0)
-
-    class Contact:
-        requires_substep_update = False
-        requires_control_update = True
-
-        def __init__(self) -> None:
-            self.samples = 0
-            self.values = torch.zeros(2)
-
-        def update(self, **kwargs) -> None:
-            assert world.ready, "SDK contact snapshot is unavailable after reset"
-            self.samples += 1
-            self.values.fill_(1)
-
-        def get_data(self):
-            return {"touch": self.values}
-
-    contact = Contact()
-    history_calls = []
-    sensors = {"contact": contact}
-    if with_history:
-        sensors["history"] = SimpleNamespace(
-            requires_substep_update=True,
-            requires_control_update=False,
-            begin_control_step=lambda: None,
-            update_physics_step=lambda dt: history_calls.append(dt),
-            get_data=lambda: {"touch": torch.zeros(2)},
-        )
-
-    def step(dt, count, after_substep=None, **kwargs):
-        for _ in range(count):
-            world.steps += 1
-            env.sim._visualization_sim_step += 1
-            world.ready = True
-            if after_substep is not None:
-                after_substep(dt)
-
-    env = SimpleNamespace(
-        sensors=sensors,
-        sim=SimpleNamespace(
-            update=step, render_camera_group=lambda ids: None, _visualization_sim_step=0
-        ),
-        physics_dt=0.001,
-        cfg=SimpleNamespace(sim_steps_per_control=20),
-        num_envs=2,
-        device=torch.device("cpu"),
-        _camera_group_ids=[],
-        _profiler=SimpleNamespace(section=lambda *args: nullcontext()),
-        _control_sensor_step=0,
-    )
-    BaseEnv._get_sensor_obs(env)
-    assert contact.samples == 0
-    BaseEnv._advance_physics(env)
-    assert world.steps == 20 and contact.samples == 1
-    assert len(history_calls) == (20 if with_history else 0)
-    world.ready = False
-    contact.values[0] = 0  # selective reset invalidates the SDK snapshot
-    obs = BaseEnv._get_sensor_obs(env)
-    torch.testing.assert_close(obs["contact"]["touch"], torch.tensor([0.0, 1.0]))
-    assert contact.samples == 1 and world.steps == 20
-    # Replay and event functors may advance the manager outside env.step().
-    env.sim.update(0.001, 1)
-    obs = BaseEnv._get_sensor_obs(env)
-    torch.testing.assert_close(obs["contact"]["touch"], torch.ones(2))
-    assert contact.samples == 2 and world.steps == 21
 
 
 def _configure_timing(

@@ -11,14 +11,19 @@ once with an `after_substep` observer. The manager invokes the observer after
 each world update, preserving its preparation, profiling and camera-capture
 boundary. Observation reads reuse the sampled sensor buffer.
 
-Sensors without histories opt into `requires_control_update` and are sampled
-once after the control interval's physics, before auto-reset. Gym observation
-reads reuse that buffer. Reset clears selected rows without querying the SDK's
-invalidated contact snapshot or advancing physics; untouched rows retain their
-last sample. A Gym observation after an external simulation step, such as replay,
-refreshes control sensors once for the new step. Explicit standalone `ContactSensor.update()` still requires a
-completed physics step after a reset. Histories retain per-substep sampling,
-so ordinary contact acquisition does not acquire a decimation-factor overhead.
+`ContactSensor` owns sample caching using the manager's public
+`physics_step_index`. Ordinary Gym observation reads call `sensor.update()`;
+the sensor queries at most once for each newly observed physics step. Repeated
+reads reuse its buffer. Creation and reset suppress SDK queries until the next
+physics step, since solver reset invalidates the current contact snapshot.
+Selected reset rows are invalidated while untouched rows retain their last
+sample; an empty reset leaves cache eligibility unchanged. Standalone and replay
+updates use the same sensor logic without Gym-specific sampling state.
+
+Histories retain per-substep sampling. Raw contact refresh and history reduction
+track their completed steps separately so reading a raw sample cannot suppress
+its history update, and duplicate callbacks do not advance history twice.
+Ordinary sensors do not acquire a decimation-factor query overhead.
 
 CUDA queries use `fetch_async()` and device-resident counts. Sparse Warp kernels
 process valid contact rows, using precomputed sorted environment/actor indices;

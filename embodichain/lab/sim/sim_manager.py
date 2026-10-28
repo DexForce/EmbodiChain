@@ -942,6 +942,19 @@ class SimulationManager:
         return spawn_scene.builder.result
 
     @property
+    def physics_step_index(self) -> int:
+        """Number of physics substeps completed through :meth:`update`.
+
+        The counter advances without rendering and is unchanged by observation
+        reads or selected-environment resets. It belongs to this manager's
+        lifetime, independently of the backend's resettable simulation clock.
+
+        Returns:
+            Monotonic completed-substep count for this manager.
+        """
+        return self._visualization_sim_step
+
+    @property
     def is_use_gpu_physics(self) -> bool:
         """Whether the active physics backend is running on GPU."""
         return self.device.type == "cuda"

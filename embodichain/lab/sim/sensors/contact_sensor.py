@@ -111,7 +111,9 @@ class ContactSensor(BaseSensor):
 
     The sensor preserves every backend-emitted contact row that passes the
     backend's positive-impulse filter. Geometry-only Newton solvers retain all
-    candidate contact rows.
+    candidate contact rows. Updates reuse the last completed physics step's
+    sample. Creation and reset leave affected rows invalid until another
+    physics step completes; reading observations never advances physics.
     """
 
     SUPPORTED_DATA_TYPES = [
@@ -166,6 +168,9 @@ class ContactSensor(BaseSensor):
         self._sample_graph_key = None
         self._sample_stream = None
         self._sample_torch_stream = None
+        self._last_update_step = owner.physics_step_index
+        self._last_history_step = owner.physics_step_index
+        self._last_contact_buffer: ContactBuffer | None = None
         self._num_contacts_per_env: torch.Tensor | None = None
         """Number of contacts per environment."""
 
@@ -325,18 +330,26 @@ class ContactSensor(BaseSensor):
         self._metadata_selected_ids = actor_ids
 
     def update(self, **kwargs) -> None:
-        """Update the sensor state based on the current simulation state.
+        """Sample a new completed physics step, otherwise reuse cached data.
 
-        This method is called periodically to ensure the sensor data is up-to-date.
+        Same-step calls, including reads after reset, do not query the SDK.
+        Selected reset rows remain invalid while untouched rows retain their
+        most recent sample. A caller using a registered history should use the
+        physics-substep callback to advance its timing reductions.
 
         Args:
             **kwargs: Additional keyword arguments for sensor update.
         """
 
+        step = self._sim.physics_step_index
+        if step == self._last_update_step:
+            return
         buffer = self._fetch_contacts()
         if not self._histories:
             self._query_dropped_count.copy_(buffer.dropped_count_device)
             self._scatter_dropped_count.copy_(self._sample_scatter_dropped_count)
+        self._last_update_step = step
+        self._last_contact_buffer = buffer
 
     def _fetch_contacts(self) -> ContactBuffer:
         buffer = self._read_contacts()
@@ -525,15 +538,6 @@ class ContactSensor(BaseSensor):
         """Whether this sensor participates in the physics-substep lifecycle."""
         return bool(self._histories)
 
-    @property
-    def requires_control_update(self) -> bool:
-        """Sample ordinary contacts once before reset invalidates SDK snapshots.
-
-        Returns:
-            True for sensors without registered substep histories.
-        """
-        return not self._histories
-
     def begin_control_step(self) -> None:
         """Start a new interval without discarding persistent contact timing."""
         self._query_dropped_count.zero_()
@@ -549,7 +553,22 @@ class ContactSensor(BaseSensor):
         """
         if dt <= 0:
             raise ValueError("Contact sampling dt must be positive.")
-        buffer = self._read_contacts()
+        step = self._sim.physics_step_index
+        if step == self._last_history_step:
+            return
+        buffer = (
+            self._last_contact_buffer
+            if step == self._last_update_step
+            else self._read_contacts()
+        )
+        assert buffer is not None
+        self._sample_physics_contacts(buffer, dt)
+        self._last_update_step = step
+        self._last_history_step = step
+        self._last_contact_buffer = buffer
+
+    def _sample_physics_contacts(self, buffer: ContactBuffer, dt: float) -> None:
+        """Schedule the existing reduction without changing sample ownership."""
         if self.device.type != "cuda" or torch.cuda.is_current_stream_capturing():
             self._sample_contacts(buffer, dt)
             return
@@ -613,6 +632,8 @@ class ContactSensor(BaseSensor):
                 self.device, non_blocking=True
             )
         )
+        if ids is not None and ids.numel() == 0:
+            return
         for value in (
             self._data_buffer["is_valid"],
             self._num_contacts_per_env,
@@ -627,6 +648,12 @@ class ContactSensor(BaseSensor):
             self._query_dropped_count.zero_()
         for history in self._histories.values():
             history.reset(ids)
+        # SDK solver reset invalidates the complete same-step contact snapshot.
+        # Preserve other rows in our own buffers until a new step can be queried.
+        step = self._sim.physics_step_index
+        self._last_update_step = step
+        self._last_history_step = step
+        self._last_contact_buffer = None
 
     def filter_by_user_ids(
         self, item_user_ids: torch.Tensor, env_ids: Sequence[int] | None = None
