@@ -472,7 +472,7 @@ topics:
     SharedLanguageRegistry, resolve_language, configure_ods, ODSReuseProfileCfg,
     ODSFlowController, ODSFlowControllerCfg, get_flow_status, ODS 供数控制,
     episode_sample_budget, OnlineDataBudgetExhaustedError, ODS 自动配置, BatchSource, SequenceSpecCfg,
-    OnlineDataSource, TensorDataSource, LeRobotDataSource, OfflineDataset, SequenceDataset,
+    OnlineDataSource, TensorDataSource, LeRobotDataSource, LeRobotImageReader, OfflineDataset, SequenceDataset,
     DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, 数据集加载, 离线加载]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
@@ -484,6 +484,7 @@ topics:
   - embodichain/data_pipeline/datasets/sequence.py
   - embodichain/data_pipeline/datasets/sources.py
   - embodichain/data_pipeline/datasets/lerobot.py
+  - embodichain/data_pipeline/datasets/lerobot_images.py
   - embodichain/data_pipeline/datasets/offline_data.py
   - embodichain/data_pipeline/datasets/sequence_data.py
   - embodichain/data_pipeline/datasets/schema.py
@@ -548,13 +549,15 @@ topics:
 
 - id: supervised-learning
   title: Supervised Learning
-  aliases: [supervised learning, SL learning, 监督学习, 统一监督学习]
-  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, SequenceBatchSource, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
+  aliases: [supervised learning, SL learning, visual ACT, 视觉模仿学习, 监督学习, 统一监督学习]
+  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, SequenceBatchSource, ACTPolicy, ACTSequenceSource, ACTTemporalEnsembler, build_act_trainer, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
   paths: [topics/supervised-learning/supervised-learning.md]
   source_of_truth:
   - embodichain/learning/sl/
   - embodichain/cli/main.py
-  watch_paths: [embodichain/learning/sl/, tests/learning/sl/]
+  - extensions/embodichain_models/embodichain_models/policy/act/
+  - examples/learning/act/
+  watch_paths: [embodichain/learning/sl/, tests/learning/sl/, extensions/embodichain_models/embodichain_models/policy/act/, examples/learning/act/, tests/models/policy/]
   related_topics: [learning-layers, data-pipeline, rl-learning, neural-dynamics, robot-world-model]
   status: active
 - id: robot-world-model

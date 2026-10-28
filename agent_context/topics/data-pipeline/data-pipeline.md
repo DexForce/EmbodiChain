@@ -15,6 +15,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | PyTorch iteration | `embodichain/data_pipeline/datasets/`: `sequence_data.py` owns `SequenceDataset`; `online_data.py` preserves `OnlineDataset`; `OfflineDataset` is an alias |
 | Shared sequence contract and sources | `embodichain/data_pipeline/datasets/sequence.py`, `sources.py`, `_sampling.py` |
 | Bounded numeric LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping |
+| Bounded LeRobot RGB frame loading | `embodichain/data_pipeline/datasets/lerobot_images.py`: `LeRobotImageReader`, episode/frame IDs |
 | Local Franka ChunkBC demo and offline comparisons | `examples/ods/simple_bc_demo/train.py`; local task/config/model/trainer/evaluator and evidence in the same directory |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
@@ -48,6 +49,10 @@ helpers while retaining distinct lifecycle/lock ownership. `LeRobotDataSource`
 requires explicit action semantics, step duration, field mapping and a resident
 memory limit; imports do not initialize simulation or import the SDK until load.
 The first backend samples resident numeric tensors after bounded SDK reads.
+`LeRobotImageReader` decodes individual image features by SDK episode/frame ID,
+owns a bounded uint8 CPU cache and hashes persisted content for recovery;
+it does not decode video features. Visual ACT joins the anchor image to a
+numeric window after verifying the full frame order.
 
 `learning/sl/sequence.py` bridges these sources through an explicit encoder;
 the [SL context](../supervised-learning/supervised-learning.md) owns its identity

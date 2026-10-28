@@ -1,0 +1,41 @@
+{
+  "command": [
+    "python",
+    "/tmp/act-budget-evaluate-runner.py",
+    "--checkpoint",
+    "/tmp/act-pushcube-dev-seed19001/best.pt",
+    "--panel",
+    "test",
+    "--episodes",
+    "100",
+    "--seed-base",
+    "400000",
+    "--video",
+    "--output",
+    "/tmp/act-pushcube-current-budget-test"
+  ],
+  "returncode": 0,
+  "pid": 644924,
+  "elapsed_seconds": 345.0650549060665,
+  "sample_interval_seconds": 0.25,
+  "samples": 1292,
+  "devices": [
+    {
+      "index": 5,
+      "uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+      "baseline_used_bytes": 1462501376,
+      "peak_used_bytes": 8337752064,
+      "compute_process_peak_bytes": 6158000128,
+      "graphics_process_peak_bytes": 6158000128
+    },
+    {
+      "index": 7,
+      "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+      "baseline_used_bytes": 12594708480,
+      "peak_used_bytes": 12627607552,
+      "compute_process_peak_bytes": 0,
+      "graphics_process_peak_bytes": 6897664
+    }
+  ],
+  "measurement_note": "Device usage peaks can include other processes; compute and graphics per-process counters may overlap and must not be summed."
+}

@@ -48,6 +48,10 @@ state-transition fitting and state/action gradients. Its generated recipes use
 the installable `embodichain_models.dynamics.rwm` model family and shared SL
 trainer; its corpus generation and acceptance helpers remain private to the example.
 
+The [visual ACT example](learning/act/README.md) collects Franka PushCube
+demonstrations, trains an RGB and proprioception action-chunking policy, and
+evaluates checkpoints on independently seeded simulator scenes.
+
 The [Atomic Skill example catalog](sim/atomic_action/README.md) owns all per-skill,
 coordinated-manipulation and recovery demonstrations. The two source-checkout
 walkthroughs under `scripts/tutorials/atomic_action/` teach single-arm and dual-arm

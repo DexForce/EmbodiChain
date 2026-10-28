@@ -1,0 +1,112 @@
+{
+  "panel": "development",
+  "task_identity": {
+    "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml": "b03cdef23e1cc4cddf1902ce670c505ee877a8ef49772850be5399c7f4137b2f",
+    "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.visual.yaml": "9237ae3784ef23ae3959d365147a8d0b7fcc4257b1cc7ed83ecacb5f58544a23",
+    "extensions/embodichain_tasks/configs/components/embodiments/franka_panda_rgb_224.yaml": "1ce9d0e62d26ec2ec252bce1e9559851af260b2d8fc72721b3a1858563e1b832",
+    "extensions/embodichain_tasks/embodichain_tasks/manipulation/push_cube.py": "bc125a817723c5310cff2cef64666f755f62a66e822b45fa644956ed049d1212"
+  },
+  "seeds": [
+    300000,
+    300001,
+    300002,
+    300003,
+    300004,
+    300005,
+    300006,
+    300007,
+    300008,
+    300009
+  ],
+  "shuffled_images": "/tmp/act-pushcube-validation-v1/report.json",
+  "selected_update": 4000,
+  "evaluations": [
+    {
+      "episodes": 10,
+      "successes": 1,
+      "success_rate": 0.1,
+      "success_rate_wilson_95": [
+        0.017876213095072896,
+        0.4041500267952385
+      ],
+      "strict_success_rate": 0.0,
+      "mean_goal_distance": 0.2125654175877571,
+      "mean_policy_seconds": 0.0031754696324733382,
+      "episodes_detail": [
+        {
+          "seed": 300000,
+          "success": false,
+          "strict_success": false,
+          "goal_distance": 0.2005889117717743,
+          "steps": 300
+        },
+        {
+          "seed": 300001,
+          "success": false,
+          "strict_success": false,
+          "goal_distance": 0.20000052452087402,
+          "steps": 300
+        },
+        {
+          "seed": 300002,
+          "success": false,
+          "strict_success": false,
+          "goal_distance": 0.42507481575012207,
+          "steps": 300
+        },
+        {
+          "seed": 300003,
+          "success": false,
+          "strict_success": false,
+          "goal_distance": 0.20005035400390625,
+          "steps": 300
+        },
+        {
+          "seed": 300004,
+          "success": false,
+          "strict_success": false,
+          "goal_distance": 0.20000052452087402,
+          "steps": 300
+        },
+        {
+          "seed": 300005,
+          "success": false,
+          "strict_success": false,
+          "goal_distance": 0.19969452917575836,
+          "steps": 300
+        },
+        {
+          "seed": 300006,
+          "success": false,
+          "strict_success": false,
+          "goal_distance": 0.1998535841703415,
+          "steps": 300
+        },
+        {
+          "seed": 300007,
+          "success": false,
+          "strict_success": false,
+          "goal_distance": 0.200307235121727,
+          "steps": 300
+        },
+        {
+          "seed": 300008,
+          "success": false,
+          "strict_success": false,
+          "goal_distance": 0.2008782923221588,
+          "steps": 300
+        },
+        {
+          "seed": 300009,
+          "success": true,
+          "strict_success": false,
+          "goal_distance": 0.09920540452003479,
+          "steps": 188
+        }
+      ],
+      "checkpoint": "/tmp/act-pushcube-full-seed19001/step_4000.pt",
+      "update": 4000,
+      "checkpoint_sha256": "79b59ab075786fbc31e8cb8b569e73d87350e592efea3c53a926dafe5ec2f04d"
+    }
+  ]
+}
