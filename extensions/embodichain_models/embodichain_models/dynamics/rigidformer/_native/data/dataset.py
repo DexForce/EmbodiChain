@@ -345,7 +345,9 @@ class MultiObjectDynamics(Dataset):
                     f"Empty reference frame in {frame0}: no per-object vertex files found."
                 )
             anchors_dir = ds / "anchors"
-            anchors_dir.mkdir(parents=True, exist_ok=True)
+            require_cache = kwargs.get("require_prepared_cache", False)
+            if not require_cache:
+                anchors_dir.mkdir(parents=True, exist_ok=True)
             ds_anchor_list = []
             ds_faces_list = []
             ds_order_list = []
@@ -404,6 +406,10 @@ class MultiObjectDynamics(Dataset):
                         )
                     ds_anchor_list.append(idx.astype(np.int32, copy=False))
                 else:
+                    if require_cache:
+                        raise ValueError(
+                            f"Prepared anchor cache is missing: {anchor_path}"
+                        )
                     # Compute deterministic FPS anchors on the STORED (unscaled) frame-0 vertices, as
                     # pregen_cf_anchors.py does: FPS is invariant to the size scaling only in exact arithmetic (float32
                     # rounding of the scaled coordinates breaks the exact ties of symmetric meshes differently)
@@ -435,6 +441,10 @@ class MultiObjectDynamics(Dataset):
                                 f"FPS-order cache {order_path} is not a permutation of the {nv} vertices"
                             )
                     else:
+                        if require_cache:
+                            raise ValueError(
+                                f"Prepared FPS-order cache is missing: {order_path}"
+                            )
                         # stored (unscaled) frame-0 vertices, as pregen_fps_order.py does (see the anchors above)
                         order = self._farthest_point_sample_np(
                             load_frame(ds, 0)[i].astype(np.float32, copy=False),

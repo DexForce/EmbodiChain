@@ -98,8 +98,13 @@ def export_rigidformer_checkpoint(
     output = Path(destination)
     if output.exists():
         raise FileExistsError(output)
+    try:
+        reconstruct = np._core.multiarray._reconstruct
+    except AttributeError:  # NumPy 1.x
+        reconstruct = np.core.multiarray._reconstruct
     safe = [
-        np._core.multiarray._reconstruct,
+        (reconstruct, "numpy.core.multiarray._reconstruct"),
+        (reconstruct, "numpy._core.multiarray._reconstruct"),
         np.ndarray,
         np.dtype,
         type(np.dtype(np.uint32)),

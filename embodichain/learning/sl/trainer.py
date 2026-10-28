@@ -379,7 +379,11 @@ class SupervisedTrainer:
             "signature": self.signature,
             "source_id": self.source.source_id,
             "ddp_broadcast_buffers": self.learner.ddp_broadcast_buffers,
-            "training_states": self._training_state_dict(),
+            "training_states": (
+                self._training_state_dict()
+                if rank_states is None
+                else rank_states[0]["training_states"]
+            ),
             "config": self.cfg.to_dict(),
             "scheduler_type": (
                 None
@@ -399,7 +403,6 @@ class SupervisedTrainer:
         if rank_states is not None:
             state["sampler"] = rank_states[0]["sampler"]
             state["rng"] = rank_states[0]["rng"]
-            state["training_states"] = rank_states[0]["training_states"]
             # An eval forward may maintain caches/counters. A callback save is
             # still the pre-validation training boundary, including buffers.
             for name, value in rank_states[0]["buffers"].items():

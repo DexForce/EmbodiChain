@@ -44,6 +44,58 @@ from ._rigidformer_training import assert_exact, make_packed, recovery_config
 pytestmark = [pytest.mark.gpu, pytest.mark.slow]
 
 
+def _chunked_checkpoint_worker(rank: int, path: str) -> None:
+    from embodichain.learning.sl.distributed import _DistributedContext
+
+    torch.cuda.set_device(rank)
+    dist.init_process_group(
+        "nccl",
+        init_method=(Path(path) / "chunked-rendezvous").as_uri(),
+        rank=rank,
+        world_size=2,
+        timeout=timedelta(seconds=90),
+    )
+    try:
+        context = _DistributedContext(f"cuda:{rank}")
+        context.gather({"warmup": rank})
+        values = {"rank": rank, "tensor": torch.arange(4_194_307, dtype=torch.float32)}
+        torch.cuda.synchronize()
+        baseline = torch.cuda.memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
+        gathered = context.gather(values)
+        torch.cuda.synchronize()
+        peak_delta = torch.cuda.max_memory_allocated() - baseline
+        # The rank state exceeds one 16 MiB transfer chunk.
+        assert peak_delta < 20 * 1024 * 1024
+        if rank == 0:
+            assert [state["rank"] for state in gathered] == [0, 1]
+            torch.testing.assert_close(gathered[1]["tensor"], values["tensor"])
+        else:
+            assert gathered is None
+    finally:
+        dist.destroy_process_group()
+
+
+@pytest.mark.skipif(
+    torch.cuda.device_count() < 2 or not dist.is_nccl_available(),
+    reason="Requires two CUDA devices and NCCL",
+)
+def test_nccl_chunked_checkpoint_limits_device_memory(tmp_path):
+    context = mp.spawn(
+        _chunked_checkpoint_worker, args=(str(tmp_path),), nprocs=2, join=False
+    )
+    deadline = time.monotonic() + 120
+    try:
+        while not context.join(timeout=1):
+            if time.monotonic() > deadline:
+                raise TimeoutError("NCCL checkpoint transfer exceeded 120 seconds")
+    finally:
+        for process in context.processes:
+            if process.is_alive():
+                process.kill()
+            process.join()
+
+
 def _disable_dropout(model: torch.nn.Module) -> None:
     # Encoder regularization is hard-coded in author code. Disable stochastic
     # masks for the concatenated-batch oracle; the recovery case keeps them.
