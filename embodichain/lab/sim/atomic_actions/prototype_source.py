@@ -544,6 +544,17 @@ class PrototypeMotionProvider:
                     ),
                 )
                 refinement_report = {**refinement_result.report, **evidence}
+                if request.skill_id == "place":
+                    from scipy.spatial.transform import Rotation
+
+                    anchor_position_correction = float(
+                        np.linalg.norm(anchor[:3, 3] - target_tcp[index, :3, 3])
+                    )
+                    anchor_rotation_correction = float(
+                        Rotation.from_matrix(
+                            anchor[:3, :3] @ target_tcp[index, :3, :3].T
+                        ).magnitude()
+                    )
                 target_tcp = refinement_result.fit.poses
             elif request.skill_id == "place":
                 from .goals import resolve_pose_goal

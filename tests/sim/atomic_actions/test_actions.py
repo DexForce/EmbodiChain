@@ -1568,7 +1568,9 @@ def test_pick_uses_normalized_prototype_and_rejects_moved_fixed_scene() -> None:
     def geometry_candidates(*, obj_poses, **kwargs):
         del kwargs
         torch.rand(3)  # Legacy candidate generators may consume their torch RNG.
-        return [(obj_poses.clone(), torch.zeros(1))]
+        invalid = obj_poses.clone()
+        invalid[:, 0, 3] += 0.008
+        return [(torch.cat((invalid, obj_poses)), torch.tensor([float("inf"), 0.0]))]
 
     sampled_generator.get_valid_grasp_poses = geometry_candidates
     sampling_provider = replace(
@@ -1588,6 +1590,9 @@ def test_pick_uses_normalized_prototype_and_rejects_moved_fixed_scene() -> None:
     assert (
         sampled.diagnostics.metadata["refinement"]["anchor_origin"] == "affordance_mesh"
     )
+    assert sampled.diagnostics.metadata["refinement"][
+        "source_grasp_translation_error_m"
+    ] == pytest.approx(0.008, abs=1e-6)
     assert torch.equal(torch.get_rng_state(), rng)
     generator.generate.reset_mock()
     with pytest.raises(ValueError, match="correction budgets"):

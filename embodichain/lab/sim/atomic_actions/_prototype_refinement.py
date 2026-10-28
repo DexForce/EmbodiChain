@@ -122,7 +122,8 @@ def _pick_refinement_anchor(
                 ),
                 is_positive_part=request.skill_options.pick_object_part != "bottom",
             )
-        candidates = pool.poses[0, pool.valid[0]].detach().cpu().numpy()
+        eligible = pool.valid[0] & torch.isfinite(pool.costs[0])
+        candidates = pool.poses[0, eligible].detach().cpu().numpy()
         origin = "affordance_mesh"
     if not len(candidates):
         raise ValueError("refinement found no legal grasp candidates")

@@ -7,9 +7,9 @@
     "embodichain/compute/trajectory/__init__.py": "16b0694fa7c3fb2f7509050062694c83980d4044ebc24948af4cf84764de688f",
     "embodichain/compute/trajectory/refinement.py": "3412583d9d3869980c5ae6b63997dead04f5017d64f853d6c396fa1ae502dd7b",
     "embodichain/lab/gym/envs/managers/real2sim_sink.py": "909e511e36411bff49100219a2440ff48a8b1c5543f7f65c0d73cf44485f8ff3",
-    "embodichain/lab/sim/atomic_actions/_prototype_refinement.py": "cbe1f576cb6c6d31d5cad1081873ea8f4afb8482d3f283b2e86b019cfb93e9a4",
+    "embodichain/lab/sim/atomic_actions/_prototype_refinement.py": "5edc7bfc289ae6ee3343126c11715a8a06d4e47a6956817897e0e74730350af6",
     "embodichain/lab/sim/atomic_actions/nominal.py": "16a6b0e46c5979b8f82289f294d273cda7af839bcee7a059a2edb2cd72e8e6f7",
-    "embodichain/lab/sim/atomic_actions/prototype_source.py": "cbeb1abea43021bd451200d6ad0a92961d7e0499ef2865e23cccf8c0e4aa98ad",
+    "embodichain/lab/sim/atomic_actions/prototype_source.py": "e923f04db0511f5be6eed28a1e211c275351ff2b78a830e5bc637b4269c301a9",
     "embodichain/lab/sim/motion/__init__.py": "ae537ceb18d92eebf2ac8f1e19f49a723cce6ebc420087dbdef265e5278c6a8b",
     "embodichain/lab/sim/motion/refinement.py": "f9b595908a9ab0009e49660f950c5ab7fee2fba2a78ae0a41bfebe73d8a07e8f",
     "embodichain/lab/task_program/integrations/configured.py": "b8e85664abcfa1a035048b3d1c46fa412d7c75fb8531b17749b30d7af8cb8927",
@@ -21,7 +21,8 @@
   "software_tests": {
     "passed": 637,
     "failed": 0,
-    "scope": "numerical refinement, atomic skills, collision/support, configured bindings, recorder/receipts, CLI, import boundaries, API tooling and context"
+    "scope": "numerical refinement, atomic skills, collision/support, configured bindings, recorder/receipts, CLI, import boundaries, API tooling and context",
+    "additional_final_focus_passed": 1
   },
   "numerical_benchmark": {
     "origin": "synthetic_reference",
