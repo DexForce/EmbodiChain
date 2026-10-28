@@ -45,7 +45,21 @@ Write a description that includes:
 - **Motivation and context**: Why this change is needed
 - **Dependencies**: List any dependencies required for this change
 
-### 4. Select Proportional Validation
+### 4. Review Test Necessity and Select Proportional Validation
+
+Before validation and publication, apply the shared
+[test necessity review](../add-test/SKILL.md#test-necessity-review). Inspect the
+full proposed PR delta from the merge base with its intended target branch,
+plus staged, unstaged, and untracked changes to be included. `git diff HEAD`
+alone misses committed additions. Include new or extended cases and supporting
+fixtures in existing files, not only newly added test files.
+
+Within the task's authorized scope, remove or merge confirmed redundant
+additions and simplify unjustified implementation coupling. Limit cleanup to
+this change and preserve explicitly requested scenarios. Run the affected tests
+after any edits. Briefly state the coverage basis and any meaningful cleanup in
+the PR's validation summary, including existing coverage when no new tests are
+needed; do not create a per-test justification ledger.
 
 Inspect the changed files and validate only the affected behavior. Do not run the
 full test suite automatically.
@@ -193,9 +207,9 @@ gh stack add feat/ui
 gh stack view
 ```
 
-Run the proportional validation selected in step 4 for every affected layer.
-Keep the commits and working tree for each layer complete before adding the next
-branch.
+Apply the test necessity review and proportional validation in step 4 to every
+affected layer, using that layer's own target branch as its base. Keep the
+commits and working tree for each layer complete before adding the next branch.
 
 #### 4. Publish or Update the Stack
 
@@ -276,21 +290,51 @@ After creating the PR, select proper labels from the repository label list and a
 First, list available labels:
 
 ```bash
-gh label list
+gh label list --limit 100
 ```
 
 Then choose labels based on change type and scope. Typical mapping:
 
 - Bug fix: `bug`
-- Enhancement: `enhancement`
+- Improvement to an existing capability: `enhancement`
 - New feature: `feature`
 - Documentation update: `docs`
-- Affected area labels when available (for example): `physics`, `robot`, `agent`, `dataset`, `dexsim`
+- Structural change: `refactor`; performance work: `performance`
+- Add `breaking` for user-visible incompatible changes, independently of change type.
+- Select the affected areas from the current repository labels. Preserve the
+  exact label `motion gen` for motion planning, generation, retiming and expansion.
+
+Keep these ownership boundaries explicit:
+
+- `task`: concrete tasks, deployments and objectives; `task-program`: language,
+  semantics, compiler, runtime and integrations; `gym`: environment framework.
+- `atomic-skill`: Atomic Skill contracts and execution; `kinematics`: FK/IK,
+  Jacobians and reachability; `physics`: dynamics and physics solvers.
+- `gen-sim`: scene generation/editing and SimReady; `scene`: shared scene
+  composition/layout/state services; `assets`: resource files and catalogs;
+  `sim-object`: runtime simulation entities and their lifecycle.
+- `data-pipeline`: collection, ODS, sampling, recording, persistence, conversion
+  and analysis. The former `data` and `dataset` labels are consolidated here.
+- `model`: model architectures, inference and weights; `sl` and `rl`: the
+  corresponding training systems; `compute`: shared numerical algorithms.
+- `agent`: runtime agents, MLLM and MCP integration; `devtools`: repository
+  development skills, agent context and contribution tooling.
+- `rendering`: image generation and renderer behavior; `visualization`: viewers,
+  markers, previews and interactive debugging. Use these instead of `interaction`.
+- `benchmark`: evaluation protocols, suites, metrics and reports; `performance`:
+  optimization work. Use both when both scopes change.
+- `dexsim`: SDK interfaces and version integration, rather than every simulation
+  change; `robot`, `sensor` and `toolkit`: their corresponding runtime/tool owners.
+
+Use `ci` for build/release automation and `dependencies` for dependency changes.
+Apply `skip-release-notes` only when explicitly excluding the change from release
+notes. Draft state and dependency links describe PR progress; area labels do not
+claim that a planned capability has shipped.
 
 Apply labels to the PR:
 
 ```bash
-gh pr edit <pr-number> --add-label "bug" --add-label "env"
+gh pr edit <pr-number> --add-label "bug" --add-label "gym"
 ```
 
 If needed, remove incorrect labels:
@@ -337,7 +381,7 @@ Fixes #<issue-number>
 - [x] I have run the `black .` command to format the code base.
 - [ ] I reviewed affected documentation and agent context, updated it where needed, or explained why no update was needed.
 - [ ] Public API changes are reflected in the API docs (`python docs/scripts/check_api_docs.py`), if applicable
-- [ ] I have added tests that prove my fix is effective or that my feature works
+- [ ] I verified appropriate behavioral coverage, reviewed the necessity of added or extended tests, and explained when no new tests were needed.
 - [ ] Dependencies have been updated, if applicable.
 ```
 
@@ -368,7 +412,7 @@ Fixes #<issue-number>
 | `gh stack sync` | Fetch, cascade rebase, push, and synchronize the stack |
 | `gh stack rebase --no-trunk` | Cascade a lower-layer update through the stack |
 | `gh stack merge` | Merge a selected portion or the entire stack |
-| `gh label list` | List repository labels |
+| `gh label list --limit 100` | List repository labels |
 | `gh pr edit <pr-number> --add-label ...` | Apply labels to PR |
 
 ## Notes

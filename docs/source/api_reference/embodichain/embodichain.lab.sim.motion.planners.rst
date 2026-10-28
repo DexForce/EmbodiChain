@@ -144,3 +144,22 @@ Utilities
     :members:
     :undoc-members:
     :show-inheritance:
+
+Joint path retiming
+------------------
+
+TOPPRA uses a single Warp calculation chain on CPU and CUDA. Its configuration
+accepts ``grid_size`` and the shared robot/manager fields; the removed
+``backend``, ``max_workers`` and ``mp_context`` fields are no longer accepted.
+CPU inference uses shared threads without creating planner-owned processes.
+
+Re-parameterize existing joint paths with the same differentiable timing
+solve. The helper preserves float32/float64 input precision, supports valid
+per-row waypoint prefixes, and returns explicit timing with isolated failures.
+
+.. autosummary::
+   :nosignatures:
+
+   embodichain.lab.sim.motion.planners.toppra_planner.retime_joint_paths
+
+.. autofunction:: embodichain.lab.sim.motion.planners.toppra_planner.retime_joint_paths

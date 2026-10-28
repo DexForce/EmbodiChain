@@ -34,6 +34,14 @@ not establish semantic boundaries for an unannotated recorded demonstration.
 Language instructions express intent; physical acceptance still depends on the
 selected effect authority and validators, not on the presence of a label.
 
+Measured segment validators can check lift from the segment's incoming pose,
+world-axis position relative to another live object, and object uprightness.
+They belong to the program's acceptance contract; a projected call completing
+does not replace these measurements. The Gym tutorial at
+`scripts/tutorials/gym/simple_task_program.py` shows Cartesian end-effector
+motion with a tutorial-local registered call, the existing `MoveEndEffector`
+Atomic Skill, and the common Gym environment and demonstration executor.
+
 Unknown fields, duplicate keys, non-finite values, invalid exact types,
 excessive depth/nodes/repeats, cyclic or executable registered payloads, and
 unresolved references fail before live providers are touched.
@@ -71,7 +79,7 @@ three typed selections: `environment.component`,
 `embodiment.component`. The reusable `env.yaml` owns only
 embodiment-independent Gym values and physical simulation entities. All
 ordinary deployment component paths resolve from `task.<embodiment>.yaml`.
-Official `embodichain_tasks/configs/` references for program, integration and
+Official `extensions/embodichain_tasks/configs/` references for program, integration and
 execution policy use the imported SDK's packaged configs. The shared
 [Gym component path contract](../env-framework/configuration.md#reusable-gym-deployment-components)
 defines the owner-directory and CWD-shadow behavior.
@@ -98,6 +106,21 @@ Ownership is explicit rather than a generic deep merge:
   selection/configuration, motion, tracking, recovery, runner, and
   effect-assurance policy. Planner collision objects are attached from the
   selected live scene and are not serialized in the policy.
+
+Configured `motion` policies accept optional finite, strictly positive
+`velocity_limit` and `acceleration_limit` values. Configured Pour action options
+accept a finite, non-negative `dwell_duration`; unknown timing keys still fail
+the closed-field decoder. Omitting `velocity_limit` preserves the Robot's
+ordered per-joint speed caps; an explicit scalar request is intersected with
+those caps rather than replacing them.
+
+`motion.plan_opts.kind: trapezoidal` selects typed backend options for
+`stop_at_waypoints`, `blend_tolerance`, and `collinearity_tolerance`. It requires
+`strategy: motion_gen` and selects the Trapezoidal planner contract; incompatible
+planner requirements fail during decoding. Policy scalar velocity/acceleration
+limits are carried into these explicit options, while omitted limits retain
+Robot speed caps and the planner's acceleration default. Sampling count remains
+owned by `motion.sample_count`.
 
 Grasp generators select toolkit-owned geometry with a string `model` ID;
 an inline mapping is a custom calibration and its `model_id` does not trigger
@@ -162,3 +185,24 @@ fixed internal epsilon rather than an author-controlled tolerance. The
 configured decoder derives those relations and normalizes the authoring
 hierarchy into the flat `SimulationSceneBinding` / `SceneRegistry` index.
 Scene-level affordance collections are not accepted.
+
+Placement affordances default to composing `object_target_pose` in their parent's
+frame. Select `object_target_frame: world_axes` when a target should follow the
+parent's measured position while its offset and orientation stay in world axes.
+This distinction matters for left/right sorting after reference-object rotation.
+World-axis targets fingerprint both their frame and declared pose; static
+manifests and live registries retain the same identity.
+
+`object_relative_position` validators default to `reference_frame: world_axes`,
+so reference rotation does not rotate their offset or per-axis tolerances.
+Select `reference_frame: parent` to measure both in the live reference frame,
+matching a target whose relative pose composes the complete parent transform.
+
+
+## Asset role requirements
+
+An integration may declare optional `asset_requirements`; decoding validates its
+closed role/relation contract without contacting providers. Offline asset
+materialization owns selection and emits a new bound deployment before ordinary
+compilation. See [asset generalization](../asset-generalization/asset-generalization.md)
+for supported adaptations, provenance and integrity boundaries.

@@ -34,6 +34,7 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlanOptions,
     ToppraPlannerCfg,
 )
+from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 
 
 def draw_axis(env, pose):
@@ -219,6 +220,7 @@ def plan_trajectory(
         options=MotionGenOptions(
             control_part=select_arm,
             plan_opts=ToppraPlanOptions(
+                sample_method=TrajectorySampleMethod.QUANTITY,
                 sample_interval=sample_num,
             ),
         ),

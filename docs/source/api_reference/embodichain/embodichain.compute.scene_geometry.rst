@@ -91,6 +91,8 @@ Public kernel namespace
    group_height_offset
    transform_aabbs
    triangle_geometry
+   nearest_half_turn_pose
+   rotate_rigid_grasp
 
 AABB arithmetic and group reductions
 ------------------------------------
@@ -131,4 +133,23 @@ Triangle measurements
    triangle_geometry
 
 .. automodule:: embodichain.compute.geometry.mesh
+   :members:
+
+Rigid grasp transforms
+----------------------
+
+These pure tensor operations select a half-turn grasp orientation and rotate
+a link with its rigidly attached TCP about a link-local axis. Atomic motion
+primitives and benchmark case generation share this algebra; physical
+validation and execution remain in their consuming layers.
+
+.. currentmodule:: embodichain.compute.geometry.rigid
+
+.. autosummary::
+   :nosignatures:
+
+   nearest_half_turn_pose
+   rotate_rigid_grasp
+
+.. automodule:: embodichain.compute.geometry.rigid
    :members:

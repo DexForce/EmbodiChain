@@ -1,0 +1,37 @@
+program_id: cube_platform_pick_place
+instruction: Pick up the cube and place it on the platform.
+targets: {}
+program:
+  kind: sequence
+  items:
+  - kind: segment
+    name: pick
+    steps:
+      kind: invoke
+      call:
+        kind: pick
+        object: cube
+    validators:
+    - kind: object_lifted
+      object: cube
+      minimum_lift: 0.03
+  - kind: segment
+    name: place
+    steps:
+      kind: invoke
+      call:
+        kind: place
+        object: cube
+        'on': platform_top
+    post:
+    - kind: wait_stable
+      entity: cube
+    validators:
+    - kind: object_upright
+      object: cube
+    - kind: object_relative_position
+      object: cube
+      reference: platform
+      reference_frame: parent
+      position_offset: [0.0, 0.0, 0.047]
+      position_tolerance: [0.05, 0.05, 0.015]

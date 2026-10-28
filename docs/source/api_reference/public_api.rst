@@ -23,15 +23,38 @@ decoding and compiling the constrained Task Program schema surface.
    decode_mllm_task_program
 
 embodichain.compute.geometry.particles
------------------------------------------
+--------------------------------------
 
-Deterministic initial-fill volume sampling without simulation dependencies.
-
-.. currentmodule:: embodichain.compute.geometry.particles
+Deterministic lattice sampling for primitive, revolved and closed mesh fill volumes.
 
 .. autosummary::
 
-   sample_volume_particles
+   embodichain.compute.geometry.particles.sample_volume_particles
+
+.. autofunction:: embodichain.compute.geometry.particles.sample_volume_particles
+embodichain.data
+----------------
+
+The public data namespace exposes dataset resolution, legacy database locations,
+and resource metadata. Its asset namespace loads on first access so extension
+asset definitions can import the dataset base without circular initialization.
+
+.. currentmodule:: embodichain.data
+
+.. autosummary::
+
+   assets
+   EMBODICHAIN_DEFAULT_DATABASE_ROOT
+   database_dir
+   database_2d_dir
+   database_agent_prompt_dir
+   database_demo_dir
+   EmbodiChainDataset
+   DEFAULT_DATA_MODULES
+   get_data_class
+   get_data_path
+   list_default_materials
+   get_default_material_info
 
 embodichain.data.assets.demo_assets
 -----------------------------------
@@ -49,6 +72,27 @@ EmbodiChain data cache.
    MultiW1Data
    RubiksCube
    ScoopIceNewEnv
+   TabletopFourBases
+
+embodichain.data.assets.materials
+------------------------------------
+
+Material, environment-map and background bundles use the shared asset cache.
+``DefaultMaterials`` downloads the pinned 18-preset collection and its auxiliary
+soap-film layer; it does not create a simulator World.
+
+.. currentmodule:: embodichain.data.assets.materials
+
+.. autosummary::
+
+   SimResources
+   EnvMapHDR
+   CocoBackground
+   BackgroundTexture
+   DefaultMaterials
+
+.. autoclass:: DefaultMaterials
+   :members: get_material_path
 
 embodichain.data.assets.planner_assets
 --------------------------------------
@@ -83,24 +127,133 @@ embodichain.data.assets.solver_assets
 
    download_neural_ik_checkpoint
 
-embodichain.data.assets.task_assets
------------------------------------
+embodichain.data.assets.w1_assets
+---------------------------------
 
-Task mesh bundles and reference demonstration data downloaded through the shared
-asset cache. Runtime meshes and demo recordings are separate downloads so task
-initialization does not require video assets.
+Versioned W1 URDF archives use the shared data-root and download cache. V021
+provides separate body components; V022 and V025 bundle the full robot and
+components. V030 packages the standard 20-DOF body without detachable grippers
+or wrist-camera attachments. Its component visuals and inertials match the
+corrected full-body definition.
 
-.. currentmodule:: embodichain.data.assets.task_assets
+.. currentmodule:: embodichain.data.assets.w1_assets
 
 .. autosummary::
    :nosignatures:
 
-   PourCupAssets
-   PourCupDemoData
+   DexforceW1V021
+   DexforceW1V022
+   DexforceW1V025
+   DexforceW1V030
+   DexforceW1ChassisV021
+   DexforceW1TorsoV021
+   DexforceW1EyesV021
+   DexforceW1HeadV021
+   DexforceW1LeftArmV021
+   DexforceW1RightArmV021
 
-.. autoclass:: PourCupAssets
+.. autoclass:: DexforceW1V021
 
-.. autoclass:: PourCupDemoData
+.. autoclass:: DexforceW1V022
+
+.. autoclass:: DexforceW1V025
+
+.. autoclass:: DexforceW1V030
+
+.. autoclass:: DexforceW1ChassisV021
+
+.. autoclass:: DexforceW1TorsoV021
+
+.. autoclass:: DexforceW1EyesV021
+
+.. autoclass:: DexforceW1HeadV021
+
+.. autoclass:: DexforceW1LeftArmV021
+
+.. autoclass:: DexforceW1RightArmV021
+
+embodichain.data.default_materials
+------------------------------------
+
+The wheel includes catalog metadata so these functions work offline without
+asset downloads. Both functions are also available from ``embodichain.data``. The 24-preset
+catalog combines six built-in parameter definitions and 18 downloadable
+resources; metadata identifies their source and download requirement.
+Metadata includes compatible renderer names, source revision, dependencies,
+auxiliary resources and suggested physical texture dimensions. Dimensions do
+not change geometry or UVs.
+
+.. currentmodule:: embodichain.data.default_materials
+
+.. autosummary::
+
+   list_default_materials
+   get_default_material_info
+
+.. autofunction:: list_default_materials
+
+.. autofunction:: get_default_material_info
+
+.. currentmodule:: embodichain.data
+
+.. autofunction:: list_default_materials
+   :no-index:
+
+.. autofunction:: get_default_material_info
+   :no-index:
+
+embodichain.data_pipeline
+-------------------------
+
+The configuration submodule derives bounded pipeline settings without starting
+an online worker. Importing the data-pipeline package remains lazy.
+
+.. currentmodule:: embodichain.data_pipeline
+
+.. autosummary::
+
+   configuration
+
+embodichain.data_pipeline.configuration
+---------------------------------------
+
+Configure ODS from measured generation and training capacities. A versioned
+profile bounds selections per trajectory; the planner never promotes provisional
+bounds to qualified ones. Runtime metadata constrains cache storage, refill
+latency and short-window consumption. The online engine and consumer must enforce
+the returned quota and pacing targets. Measurement helpers preserve the units,
+common monotonic window and difference between active and wall-clock rates.
+
+.. currentmodule:: embodichain.data_pipeline.configuration
+
+.. autosummary::
+
+   ODSReuseProfileCfg
+   ODSRuntimeCfg
+   ODSConfiguration
+   configure_ods
+   ODSRateMeasurementCfg
+   ODSThroughputMeasurement
+   measure_ods_throughput
+
+.. autoclass:: ODSReuseProfileCfg
+   :members:
+
+.. autoclass:: ODSRuntimeCfg
+   :members:
+
+.. autoclass:: ODSConfiguration
+   :members:
+
+.. autofunction:: configure_ods
+
+.. autoclass:: ODSRateMeasurementCfg
+   :members:
+
+.. autoclass:: ODSThroughputMeasurement
+   :members:
+
+.. autofunction:: measure_ods_throughput
 
 embodichain.data_pipeline.depth_video
 -------------------------------------
@@ -290,6 +443,19 @@ embodichain.gen_sim.gradio_ui.gradio_app
 
    main
 
+embodichain.gen_sim.scene_engine.cli.randomization
+--------------------------------------------------
+
+Command-line entry point for grouped layout generation from an existing
+Scene Engine workspace. Validates the YAML policy, prepares a reusable
+baseline and saves successful candidates with a completion manifest.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.cli.randomization
+
+.. autosummary::
+
+   main
+
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 
@@ -323,6 +489,161 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
    UsdEntityDesc
    UsdSceneBinding
    UsdSceneIndex
+
+embodichain.gen_sim.scene_engine.randomization.adapter
+------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.adapter
+
+.. autosummary::
+
+   scene_layout_input_from_export
+   randomize_scene_export
+   convert_layouts
+
+embodichain.gen_sim.scene_engine.randomization.baseline
+-------------------------------------------------------
+
+Extracts one table work area, group AABBs and root-relative member poses from
+rigid GLB exports. A group contains a direct table child and all descendants.
+The baseline cache is reused only when source identity, extraction version,
+structure and checksum match; preparation leaves the source export untouched.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.baseline
+
+.. autosummary::
+
+   PreparedSceneBaseline
+   prepare_scene_baseline
+
+embodichain.gen_sim.scene_engine.randomization.cfg
+--------------------------------------------------
+
+Loads a closed, versioned YAML policy and resolves the workspace's
+``scene_export/`` input and ``scene_randomization_base.yaml`` baseline path.
+The workspace is supplied separately through ``output_root``. For example:
+
+.. code-block:: yaml
+
+   schema_version: 1
+   seed: 42
+   candidate_count: 10
+   max_attempts: 1000
+   collision_margin_m: 0.02
+
+Generate and save layouts, then cycle the original scene and saved candidates:
+
+.. code-block:: bash
+
+   embodichain scene-randomization --output_root ./workspace --config policy.yaml
+   python -m embodichain.gen_sim.scene_engine.randomization.loading \
+       --layout-dir ./workspace/scene_layouts/run_001/layouts --interval 3
+
+Version 3 adds hierarchical member XY/yaw sampling on CPU or CUDA:
+
+.. code-block:: yaml
+
+   schema_version: 3
+   backend: batched
+   device: cuda:0
+   randomize_groups: true
+   intra_group:
+     targets:
+       mug_001:
+         xy_offset_bounds_m: null
+         yaw_delta_range_deg: [-180, 180]
+
+``randomize_groups: false`` holds group roots fixed. Unselected members retain
+parent-relative poses and follow moved ancestors. XY bounds, when supplied as
+``[[min_x, min_y], [max_x, max_y]]``, bound the original entity origin's offset
+in its parent support frame. A null bound uses the complete feasible region.
+Yaw increments rotate around the support normal while retaining authored tilt.
+Defaults are 2 mm boundary and sibling margins, 1 mm support gap and 1 mm grid
+resolution. ``intra_group.support_overrides`` accepts parent UID entries with
+a proper rigid ``parent_from_support`` matrix and GeoJSON ``polygon``; overrides
+must have mesh support evidence. Invalid polygons are rejected during policy
+loading before scene preparation. Ambiguous automatic layers raise an error.
+The positive height deviation of the selected near-planar layer is included in
+its conservative support height, retaining the configured minimum gap over
+shallow raised geometry.
+
+Content-addressed geometry caches leave the original baseline unchanged.
+Hierarchical layouts save v3 root XY translations and full selected member
+poses relative to their parents, using JSON or packed storage. Replay validates
+source, cache, policy, geometry and identity before exposing lazy variants and
+does not sample again. The existing v1/v2 group layouts and earlier v3
+hierarchical layouts remain readable. New hierarchical proposals use algorithm
+version 2: dynamic group centers are sampled from the remaining free rectangular
+area without nested retries. Support caches use extraction version 2 and include
+a conservative layer height ceiling; older caches retain their recorded height
+semantics on replay. Saving compares the on-disk cache against the generated
+snapshot before publishing a completed run.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.cfg
+
+.. autosummary::
+
+   MemberRandomizationCfg
+   SupportOverrideCfg
+   IntraGroupRandomizationCfg
+   SceneRandomizationCfg
+   load_randomization_config
+
+embodichain.gen_sim.scene_engine.randomization.generation
+---------------------------------------------------------
+
+Uses the shared seeded procedural generator and XY layout solver, then expands
+every group from the same baseline. Successful candidates contain a full
+``SceneFragment`` and a ``SceneVariant``. Group-only sampling preserves authored
+orientation and height. Hierarchical sampling changes selected members' support
+XY/yaw, aligns their geometric bottom to the support gap and propagates subtrees.
+Scale and exported collision hull budgets are preserved. Acceptance checks
+conservative support coverage, sibling/group AABBs and table bounds; it does not
+establish physical stability or task success.
+
+``budget_exhausted`` is a normal result that retains any successful candidates.
+The result records actual parameters, proposal attempts and solver outcomes;
+generation does not save candidates until ``save_layouts`` is called.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.generation
+
+.. autosummary::
+
+   SceneRandomizationResult
+   randomize_scene
+
+embodichain.gen_sim.scene_engine.randomization.loading
+------------------------------------------------------
+
+Validates a completed run's candidate files against its manifest, policy,
+baseline and unchanged source export, then reconstructs every group member's
+absolute pose without generating layouts or rewriting caches. Playback loads
+assets once and cycles original and candidate poses without advancing physics.
+Runs with no successful candidates cannot be previewed.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.loading
+
+.. autosummary::
+
+   LoadedLayouts
+   load_layouts
+   preview_layouts
+   main
+
+embodichain.gen_sim.scene_engine.randomization.persistence
+----------------------------------------------------------
+
+Saves each result in a distinct ``scene_layouts/run_NNN/`` directory containing
+the resolved policy and candidate group centers. Relative references identify
+the existing source export and baseline, so those files must remain available
+and unchanged. The completion manifest is published last, including for a run
+with zero candidates; interrupted writes may leave a run without that manifest.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.persistence
+
+.. autosummary::
+
+   save_layouts
 
 embodichain.gen_sim.simready_pipeline.cli.start
 -----------------------------------------------
@@ -373,29 +694,62 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnv
 
 embodichain.lab.sim.cfg.fluid
---------------------------------
+-----------------------------
 
-Fixed-count fluid source and render configuration. Numerical solver parameters remain owned by DexSim SPHSolverCfg.
-
-.. currentmodule:: embodichain.lab.sim.cfg.fluid
+Fixed-count fluid sources, physical properties and native particle or surface display.
 
 .. autosummary::
 
-   FluidSpawnCfg
-   FluidRenderCfg
-   FluidObjectCfg
+   embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+   embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+   embodichain.lab.sim.cfg.fluid.FluidObjectCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidObjectCfg
 
 embodichain.lab.sim.objects.fluid
-------------------------------------
+---------------------------------
 
-Scene-bound fluid state with detached particle snapshots and explicit state writes. Fluid rendering has no fixed mesh-connectivity contract.
-
-.. currentmodule:: embodichain.lab.sim.objects.fluid
+Scene-owned fluid state snapshots, explicit writes and initial-state restoration.
 
 .. autosummary::
 
-   FluidObject
-   FluidObjectData
+   embodichain.lab.sim.objects.fluid.FluidObject
+   embodichain.lab.sim.objects.fluid.FluidObjectData
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObject
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObjectData
+
+embodichain.lab.sim.scene.expansion.layout
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.expansion.layout
+
+.. autosummary::
+
+   SceneLayoutInput
+   PreparedSceneRandomization
+   SceneRandomizationBatch
+   SceneVariantApplicationResult
+   scene_layout_input_from_sim
+   prepare_scene_randomization
+   generate_scene_variants
+   apply_scene_variants
+
+embodichain.lab.sim.scene.expansion.persistence
+-----------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.expansion.persistence
+
+.. autosummary::
+
+   LoadedSceneVariants
+   save_scene_variants
+   load_scene_variants
 
 embodichain.lab.task_program.integrations.simulation.handover
 -------------------------------------------------------------
@@ -406,20 +760,21 @@ embodichain.lab.task_program.integrations.simulation.handover
 
    ConfiguredHandOverPoseProvider
 
-embodichain.lab.gym.envs.fluid_replay
--------------------------------------
+embodichain.lab.gym.envs.episode_context
+--------------------------------------
 
-.. currentmodule:: embodichain.lab.gym.envs.fluid_replay
+.. currentmodule:: embodichain.lab.gym.envs.episode_context
 
-One-way evaluation of qualified Task Program recordings with live SPH. Each
-row has an independent replay clock and reset. Policy action recording is
-unsupported because the measured source states drive motion.
+Row-local recording eligibility follows the buffered episode, independently of
+replaceable demo annotations. Synchronous checks retain pending and rejected
+state across internal resets, and snapshots own their JSON provenance.
 
 .. autosummary::
+   :nosignatures:
 
-   FluidReplayEnv
+   EpisodeContext
 
-.. autoclass:: FluidReplayEnv
+.. autoclass:: EpisodeContext
    :members:
 
 embodichain.lab.gym.envs.managers.action_manager
@@ -446,6 +801,7 @@ embodichain.lab.gym.envs.managers.actions
    JointPositionToLimitsAction
    JointVelocityAction
    ParallelGripperAction
+   RelativeEefPoseAction
    RelativeJointPositionAction
 
 embodichain.lab.gym.envs.managers.action_types
@@ -628,6 +984,24 @@ embodichain.lab.scripts.preview_lerobot_data
    main
    resolve_dataset_root
 
+embodichain.lab.scripts.preview_material
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_material
+
+Query the default catalog without loading simulation dependencies, or render
+presets and parameter variants with fixed preview settings and managed cleanup.
+
+.. autosummary::
+
+   main
+   cli
+
+.. autofunction:: main
+
+.. autofunction:: cli
+
+
 embodichain.lab.scripts.preview_robot
 -------------------------------------
 
@@ -649,10 +1023,10 @@ preview with managed control-part Gizmos and optional joint controls.
 .. autofunction:: main
 
 
-embodichain.lab.scripts.run_env
+embodichain.lab.scripts.run_task
 -------------------------------
 
-.. currentmodule:: embodichain.lab.scripts.run_env
+.. currentmodule:: embodichain.lab.scripts.run_task
 
 .. autosummary::
 
@@ -661,21 +1035,6 @@ embodichain.lab.scripts.run_env
    generate_function
    main
    preview
-
-embodichain.lab.scripts.run_fluid_task_program
-----------------------------------------------
-
-.. currentmodule:: embodichain.lab.scripts.run_fluid_task_program
-
-Generate and qualify the pour-cup Task Program in MuJoCo, then run fluid Gym
-replay in a separate world. The source trajectory and fluid metrics have
-separate acceptance records.
-
-.. autosummary::
-
-   main
-
-.. autofunction:: main
 
 embodichain.lab.sim
 -------------------
@@ -1085,6 +1444,35 @@ embodichain.lab.sim.diff.bridge
    NewtonStepFunc
    tape_context
 
+embodichain.lab.sim.cfg.source
+-------------------------------
+
+USD source configuration identifies a file and an optional exact prim inside
+that file. Source selection is independent of runtime identity, placement and
+parent/link attachment. Supply it through ``source`` on a visual, rigid-object
+or articulation configuration. Existing mesh and URDF file inputs remain
+available; each asset has one file owner.
+
+.. currentmodule:: embodichain.lab.sim.cfg.source
+
+.. autosummary::
+
+   UsdSourceCfg
+
+.. autoclass:: UsdSourceCfg
+   :members:
+
+embodichain.lab.sim.cfg.visual_object
+-------------------------------------
+
+Render-only geometry or a USD source, and initial visual state.
+
+.. currentmodule:: embodichain.lab.sim.cfg.visual_object
+
+.. autosummary::
+
+   VisualObjectCfg
+
 embodichain.lab.sim.diff.runtime
 --------------------------------
 
@@ -1163,6 +1551,18 @@ embodichain.lab.sim.objects.robot
    ControlGroup
    Robot
 
+
+embodichain.lab.sim.objects.visual_object
+-----------------------------------------
+
+Batched render-only objects provide pose, visibility and material-assignment operations without physical buffers or collision APIs.
+
+.. currentmodule:: embodichain.lab.sim.objects.visual_object
+
+.. autosummary::
+
+   VisualObject
+   VisualObjectCfg
 
 embodichain.lab.sim.physics
 ---------------------------
@@ -1284,11 +1684,17 @@ embodichain.lab.sim.motion.planners.toppra_planner
 
 .. currentmodule:: embodichain.lab.sim.motion.planners.toppra_planner
 
+Time-optimal joint-path parameterization. The planner solves timing for
+waypoint input; :func:`retime_joint_paths` applies the same parameterization to
+paths another planner already produced, such as a closed-loop policy rollout
+whose samples carry only nominal timing.
+
 .. autosummary::
 
    ToppraPlanner
    ToppraPlannerCfg
    ToppraPlanOptions
+   retime_joint_paths
 
 embodichain.lab.sim.motion.planners.se3
 ---------------------------------------
@@ -1584,7 +1990,9 @@ into DexSim Spawn descriptors.
    articulation_desc_from_cfg
    articulation_desc_from_usd
    rigid_desc_from_cfg
+   visual_desc_from_cfg
    rigid_desc_from_usd
+   visual_desc_from_usd
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 
@@ -1598,6 +2006,7 @@ embodichain.lab.sim.spawn.descriptors
    articulation_desc_from_cfg
    configure_articulation_desc
    rigid_desc_from_cfg
+   visual_desc_from_cfg
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 
@@ -1628,6 +2037,7 @@ embodichain.lab.sim.spawn.usd
 
    articulation_desc_from_usd
    rigid_desc_from_usd
+   visual_desc_from_usd
 
 embodichain.lab.sim.utility.dynamic_pybind
 ----------------------------------------
@@ -2099,28 +2509,28 @@ Row-wise action-adjoint clipping and its rollout-level diagnostics.
    BatchedGradientNormStats
    clip_batched_gradient_norm
 
-embodichain.learning.rl.models.actor_critic
--------------------------------------------
+embodichain.learning.rl.policies.actor_critic
+---------------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.actor_critic
+.. currentmodule:: embodichain.learning.rl.policies.actor_critic
 
 .. autosummary::
 
    ActorCritic
 
-embodichain.learning.rl.models.actor_only
------------------------------------------
+embodichain.learning.rl.policies.actor_only
+-------------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.actor_only
+.. currentmodule:: embodichain.learning.rl.policies.actor_only
 
 .. autosummary::
 
    ActorOnly
 
-embodichain.learning.rl.models.policy
--------------------------------------
+embodichain.learning.rl.policies.policy
+---------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.policy
+.. currentmodule:: embodichain.learning.rl.policies.policy
 
 .. autosummary::
 
@@ -2345,15 +2755,6 @@ joint-position action variants.
 .. autosummary::
 
 
-embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
------------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
-
-.. autosummary::
-
-   BlocksRankingRGBEnv
-
 embodichain_tasks.manipulation.tableware.blocks_ranking_size
 ------------------------------------------------------------
 
@@ -2381,24 +2782,6 @@ embodichain_tasks.manipulation.tableware.place_object_drawer
 
    PlaceObjectDrawerEnv
 
-embodichain_tasks.manipulation.tableware.scoop_ice
---------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.scoop_ice
-
-.. autosummary::
-
-   ScoopIce
-
-embodichain_tasks.manipulation.tableware.stack_blocks_two
----------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.stack_blocks_two
-
-.. autosummary::
-
-   StackBlocksTwoEnv
-
 embodichain_tasks.manipulation.tableware.stack_cups
 ---------------------------------------------------
 
@@ -2419,33 +2802,6 @@ kinematics route used by analytic policy-gradient experiments.
 .. autosummary::
 
    FrankaReachApgEnv
-
-embodichain_tasks.special.simple_task
--------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.simple_task
-
-.. autosummary::
-
-   SimpleTaskEnv
-
-embodichain_tasks.special.stay_still_save
------------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.stay_still_save
-
-.. autosummary::
-
-   StayStillSaveEnv
-
-embodichain_tasks.special.stay_still_save_3cam
-----------------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.stay_still_save_3cam
-
-.. autosummary::
-
-   StayStillSave3CamEnv
 
 embodichain_tasks.utils.importer
 --------------------------------
@@ -2480,21 +2836,65 @@ kernel policy; callers log and apply that seed to their own generators.
 .. autofunction:: resolve_seed
 
 
-embodichain_tasks.manipulation.tableware.pour_cup
--------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.pour_cup
-
-The registered Franka pouring replay deployment requires a previously
-qualified Task Program trajectory passed to the environment constructor.
-
-.. autosummary::
-
-   PourCupFluidReplayEnv
-
-.. autoclass:: PourCupFluidReplayEnv
-
 .. toctree::
    :hidden:
 
    object_asset_bundles
+
+
+embodichain.lab.sim.cfg.robot
+-----------------------------
+
+Robot construction and complete backend alternatives
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Robot configurations include optional mounted camera declarations.
+Standalone simulation initializes them only when ``enable_sensor`` is true;
+Gym uses its environment-wide sensor switch, which defaults to enabled.
+
+.. currentmodule:: embodichain.lab.sim.cfg.robot
+
+.. autosummary::
+   :nosignatures:
+
+   RobotCfg
+   RobotPresetCfg
+
+.. autoclass:: RobotCfg
+   :members: sensors, enable_sensor
+   :noindex:
+
+.. autoclass:: RobotPresetCfg
+   :noindex:
+
+
+Asset generalization contracts
+------------------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   asset_generalization
+
+Fluid task interfaces
+=====================
+
+The pouring task supplies downloadable scene assets and a diagnostic fluid
+replay environment. Its runner executes the configured Task Program against
+live one-way rigid-to-fluid simulation.
+
+.. autosummary::
+
+   embodichain.data.assets.task_assets.PourCupAssets
+   embodichain.data.assets.task_assets.PourCupDemoData
+   embodichain.lab.gym.envs.fluid_replay.FluidReplayEnv
+   embodichain.lab.scripts.run_fluid_task_program.main
+
+.. autoclass:: embodichain.data.assets.task_assets.PourCupAssets
+
+.. autoclass:: embodichain.data.assets.task_assets.PourCupDemoData
+
+.. autoclass:: embodichain.lab.gym.envs.fluid_replay.FluidReplayEnv
+   :members:
+
+.. autofunction:: embodichain.lab.scripts.run_fluid_task_program.main

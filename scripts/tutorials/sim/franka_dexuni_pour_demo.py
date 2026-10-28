@@ -19,14 +19,11 @@ Same scene, planning and qualification as ``franka_dfsph_pour_demo.py``. The
 physics solver is DexUni on a particle-free view: every joint, the cup's free
 joint included, is MuJoCo-owned, so DexUni runs its pure-MuJoCo backend and
 VBD is skipped. One DFSPH step advances the water against the live body
-boundaries, overlapping the MuJoCo substeps on a second CUDA stream. Coupling
-is one-way.
+boundaries after the MuJoCo substeps. Coupling is one-way.
 
 Defaults: DFSPH at 480 Hz (two steps per 1/240 s physics step) with 15 MuJoCo
-substeps each (7,200 Hz). A stiffer cup contact (``ke`` x4, ``kd`` x2) offsets
-the extra frictional creep of the coarser MuJoCo step, so the pour matches
-the PR's 10,080 Hz MuJoCo result. Requires a DexSim build with the DexUni
-DFSPH prototype options (``DexUniSolverCfg.sph_cfg``).
+substeps each (7,200 Hz). The task config supplies the cup contact settings.
+Requires a DexSim build with ``DexUniSolverCfg.sph_cfg``.
 """
 
 from __future__ import annotations
@@ -69,55 +66,17 @@ __all__ = ["main"]
 ROOT = Path(__file__).resolve().parents[3]
 TASK = (
     ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
 )
-
-
-# The PR's MuJoCo rigid solver settings DexUni accepts.
-_DEXUNI_MUJOCO_OPTIONS = (
-    "solver",
-    "integrator",
-    "iterations",
-    "ls_iterations",
-    "cone",
-    "impratio",
-)
-# Cup contact stiffness/damping (env.fluid.yaml: 4e5 / 1265): timeconst
-# 0.79 ms at damping ratio 1, against frictional creep at 7,200 Hz.
-_CUP_CONTACT_KE = 1.6e6
-_CUP_CONTACT_KD = 2530.0
 
 
 def _use_dexuni(cfg, args) -> None:
-    """Replace the SPH+MuJoCo composition with DexUni followed by DFSPH."""
+    """Apply the requested DexUni and DFSPH substep counts."""
     physics = cfg.sim_cfg.physics_cfg
-    solver = physics.solver_cfg
-    rigid = solver.get("rigid_solver_cfg") or {}
-    sph = {
-        k: v
-        for k, v in solver.items()
-        if k not in ("rigid_solver_cfg", "rigid_solver_substeps")
-    }
-    mujoco_options = {k: rigid[k] for k in _DEXUNI_MUJOCO_OPTIONS if k in rigid}
-    # One contact per geom pair and 10 GJK/EPA iterations leave the pour
-    # unchanged; multi-point CCD over the cup's convex pieces is not needed.
-    mujoco_options["enable_multiccd"] = False
-    mujoco_options["ccd_iterations"] = 10
+    solver = dict(physics.solver_cfg)
     physics.num_substeps = args.fluid_substeps
-    physics.solver_cfg = {
-        "solver_type": "dexuni",
-        "joint_mode": "dynamic",
-        "contact_mode": "auto",
-        "mujoco_options": mujoco_options,
-        "sph_rigid_substeps": args.rigid_substeps,
-        # Body accelerations are unused, so skip MuJoCo's post-constraint RNE.
-        "sph_rne_mode": "disabled",
-        "sph_concurrent": True,
-        "sph_cfg": sph,
-    }
-    cup = next(o for o in cfg.rigid_object if o.uid == "cup")
-    cup.attrs.material_props.ke = _CUP_CONTACT_KE
-    cup.attrs.material_props.kd = _CUP_CONTACT_KD
+    solver["sph_rigid_substeps"] = args.rigid_substeps
+    physics.solver_cfg = solver
 
 
 def main() -> None:
@@ -172,8 +131,9 @@ def main() -> None:
             sim.add_rigid_object(object_cfg)
         for fluid_cfg in cfg.fluid_object:
             sim.add_fluid_object(fluid_cfg)
-        for light_cfg in cfg.light.direct:
-            sim.add_light(light_cfg)
+        if sim.has_native_renderer:
+            for light_cfg in cfg.light.direct:
+                sim.add_light(light_cfg)
         sim.prepare()
         robot.build_pk_serial_chain()
         sim.reset_objects_state()

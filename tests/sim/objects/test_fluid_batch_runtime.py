@@ -52,9 +52,11 @@ def _run_fluid_partial_reset():
                 num_substeps=1,
                 collision_cfg=None,
                 solver_cfg={
-                    "solver_type": "sph",
-                    "sph_method": "dfsph",
-                    "volume_map_boundary_enabled": False,
+                    "solver_type": "dexuni",
+                    "sph_cfg": {
+                        "sph_method": "dfsph",
+                        "volume_map_boundary_enabled": False,
+                    },
                 },
             ),
         )

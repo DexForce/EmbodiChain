@@ -200,11 +200,7 @@ def test_recipe_invalid_bounds_fail_explicitly():
         generate(SceneRecipe(recipe.recipe_id, recipe.fragment, problem))
 
 
-def test_candidate_compatibility_imports_and_known_identity():
-    from embodichain.lab.sim.scene_expansion import SceneVariant as OldVariant
-    from embodichain.lab.sim.scene_expansion.contracts import ScenePoseChange as OldPose
-
-    assert OldVariant is SceneVariant and OldPose is ScenePoseChange
+def test_candidate_known_identity():
     pose = np.eye(4)
     pose[:3, 3] = [0.2, 0.3, 0.4]
     variant = SceneVariant("scene:v1", 0, 1, (ScenePoseChange("part", pose.tolist()),))

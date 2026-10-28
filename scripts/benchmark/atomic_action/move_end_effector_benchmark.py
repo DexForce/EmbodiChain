@@ -18,7 +18,7 @@
 
 Measures planning latency, memory usage, trajectory success, and final TCP
 translation error for several reachable pose targets.
-Run: embodichain benchmark atomic-action --action move_end_effector
+Run: embodichain benchmark atomic-action-profile --action move_end_effector
 """
 
 from __future__ import annotations
@@ -244,7 +244,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         MotionGenCfg,
     )
     from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
-    from scripts.tutorials.atomic_action.move_end_effector import (
+    from examples.sim.atomic_action.move_end_effector import (
         create_robot,
         initialize_simulation,
     )
@@ -323,7 +323,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    from scripts.tutorials.atomic_action.tutorial_utils import run_tutorial
+    from examples.sim.atomic_action.support import run_tutorial
 
     run_tutorial(main)
 

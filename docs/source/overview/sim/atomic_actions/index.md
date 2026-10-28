@@ -551,7 +551,7 @@ empty task state and scene snapshot. Supply an explicit context whenever goals
 depend on perceived entities or a previous verified attachment.
 
 Do not compile across a boundary where execution feedback changes a later goal.
-For example, `scripts/tutorials/atomic_action/coordinated_placement.py` compiles
+For example, `examples/sim/atomic_action/coordinated_placement.py` compiles
 the two pick-ups, executes them, rebuilds the held-object state from measured
 poses, and only then compiles placement.
 
@@ -939,7 +939,7 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
 - {doc}`../motion/motion_generator` — the motion generator owned by the engine
 - {doc}`../sim_robot` — robot control parts and kinematic configuration
 - {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples
-- `scripts/tutorials/atomic_action/moving_target_recovery.py` — runnable runner
+- `examples/sim/atomic_action/moving_target_recovery.py` — runnable runner
   example that visibly moves a late-bound target, replans, and picks up the cube
-- `scripts/tutorials/atomic_action/dynamic_obstacle_recovery.py` — cuRobo
+- `examples/sim/atomic_action/dynamic_obstacle_recovery.py` — cuRobo
   collision-world revision and obstacle-pose replanning example

@@ -18,13 +18,56 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
 
-from dexsim.engine.newton_physics.runtime_control import RuntimeControl
+from dexsim.engine.newton_physics.runtime_control import (
+    GraphRuntimeControl,
+    RuntimeControl,
+)
 
 __all__: list[str] = []
+
+
+class _DexUniFluidJointOwnership(GraphRuntimeControl):
+    """Assign the complete finalized joint topology to the fluid rigid solver."""
+
+    def __init__(self) -> None:
+        self._assigned: tuple[int, ...] | None = None
+
+    def initialize_model(self, model: Any, result: Any) -> None:
+        """Select all joints before DexUni constructs its coupled solver."""
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+        backend = get_newton_backend(result.world)
+        if backend is None or backend.solver_type != "dexuni":
+            raise RuntimeError("Fluid joint ownership requires a DexUni backend.")
+        cfg = backend.cfg.solver_cfg
+        if (
+            cfg.mujoco_articulations is not None
+            or cfg.mujoco_articulation_paths is not None
+            or (cfg.mujoco_joints is not None and cfg.mujoco_joints != self._assigned)
+        ):
+            raise RuntimeError(
+                "Fluid joint ownership conflicts with an explicit selector."
+            )
+        self._assigned = tuple(range(model.joint_count))
+        cfg.mujoco_joints = self._assigned
+
+    def __call__(
+        self, context: Any, substep_index: int, substep_count: int, substep_dt: float
+    ) -> None:
+        """Keep the solver-owned topology unchanged while stepping."""
+        del context, substep_index, substep_count, substep_dt
+
+    def prepare_episode_reset(
+        self, arena_indices: tuple[int, ...]
+    ) -> Callable[[], None]:
+        """Keep the fixed topology unchanged during selective episode resets."""
+        del arena_indices
+        return lambda: None
 
 
 class _KinematicNodalTrajectoryControl(RuntimeControl):
@@ -149,6 +192,14 @@ class _KinematicRigidTrajectoryControl(RuntimeControl):
     def reset(self) -> None:
         self._elapsed = 0.0
         self._previous = None
+
+    def prepare_episode_reset(
+        self, arena_indices: tuple[int, ...]
+    ) -> Callable[[], None]:
+        """Rewind only when this trajectory's arena is selected."""
+        if self._actor is None:
+            raise RuntimeError("Kinematic rigid trajectory is not initialized.")
+        return self.reset if self._actor._arena_index in arena_indices else lambda: None
 
     def __call__(
         self, context: Any, substep_index: int, substep_count: int, substep_dt: float

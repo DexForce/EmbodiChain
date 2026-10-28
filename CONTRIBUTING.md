@@ -29,7 +29,7 @@ We welcome pull requests for bug fixes, new features, and documentation improvem
     ```bash
     black .
     ```
-    > Currently, we use black==26.3.1 for formatting. Make sure to use the same version to avoid inconsistencies.
+    > Currently, we use black==26.10.1 for formatting. Make sure to use the same version to avoid inconsistencies.
 4.  **Check public API documentation coverage**. The checker is read-only and
     verifies that exports declared through `__all__` appear in the Sphinx API
     reference.

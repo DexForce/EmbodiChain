@@ -1,0 +1,195 @@
+{
+  "asset": {
+    "fpath": "MicroDuckLocomotion/microduck.urdf",
+    "build_pk_chain": false,
+    "init_pos": [
+      0.0,
+      0.0,
+      0.12
+    ],
+    "init_qpos": [
+      0.0,
+      0.3491,
+      0.0,
+      -0.0873,
+      0.3491,
+      0.0873,
+      -0.4579,
+      0.0,
+      0.4579,
+      -0.0049,
+      0.0,
+      0.0049,
+      0.453,
+      -0.453
+    ],
+    "root_props": {
+      "fixed_base": false,
+      "min_position_iters": 4,
+      "min_velocity_iters": 1,
+      "self_collision_enabled": false
+    },
+    "asset_physics_mode": "overlay"
+  },
+  "robot": {
+    "joint_names": [
+      "left_hip_yaw",
+      "left_hip_roll",
+      "left_hip_pitch",
+      "left_knee",
+      "left_ankle",
+      "neck_pitch",
+      "head_pitch",
+      "head_yaw",
+      "head_roll",
+      "right_hip_yaw",
+      "right_hip_roll",
+      "right_hip_pitch",
+      "right_knee",
+      "right_ankle"
+    ],
+    "body_names": [
+      "trunk_base",
+      "yaw2roll",
+      "hip_l",
+      "upper_leg_left",
+      "leg",
+      "ankle_left",
+      "neck",
+      "neck_pitch",
+      "yaw_roll_motion",
+      "jaw_soft",
+      "bearing_roll",
+      "hip_l_2",
+      "upper_leg_right",
+      "leg_2",
+      "ankle_right"
+    ],
+    "root_position": [
+      0.0,
+      0.0,
+      0.12
+    ],
+    "root_quaternion_wxyz": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "default_joint_position": [
+      0.0,
+      -0.0873,
+      -0.4579,
+      -0.0049,
+      0.453,
+      0.3491,
+      0.3491,
+      0.0,
+      0.0,
+      0.0,
+      0.0873,
+      0.4579,
+      0.0049,
+      -0.453
+    ],
+    "stiffness": [
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.55
+    ],
+    "damping": [
+      0.053,
+      0.053,
+      0.053,
+      0.053,
+      0.053,
+      0.053,
+      0.053,
+      0.053,
+      0.053,
+      0.053,
+      0.053,
+      0.053,
+      0.053,
+      0.053
+    ],
+    "armature": [
+      0.0018,
+      0.0018,
+      0.0018,
+      0.0018,
+      0.0018,
+      0.0018,
+      0.0018,
+      0.0018,
+      0.0018,
+      0.0018,
+      0.0018,
+      0.0018,
+      0.0018,
+      0.0018
+    ],
+    "effort_limit": [
+      0.96,
+      0.96,
+      0.96,
+      0.96,
+      0.96,
+      0.96,
+      0.96,
+      0.96,
+      0.96,
+      0.96,
+      0.96,
+      0.96,
+      0.96,
+      0.96
+    ],
+    "velocity_limit": [
+      10.2,
+      10.2,
+      10.2,
+      10.2,
+      10.2,
+      10.2,
+      10.2,
+      10.2,
+      10.2,
+      10.2,
+      10.2,
+      10.2,
+      10.2,
+      10.2
+    ]
+  },
+  "frames": {
+    "foot_link_names": [
+      "ankle_left",
+      "ankle_right"
+    ],
+    "foot_offsets": [
+      [
+        0.0,
+        -0.0238146,
+        -0.0140852
+      ],
+      [
+        0.0,
+        -0.0238146,
+        -0.0140852
+      ]
+    ],
+    "orientation_link_name": "trunk_base"
+  }
+}

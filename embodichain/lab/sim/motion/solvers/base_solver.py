@@ -21,6 +21,14 @@ from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union
 
 import numpy as np
 import torch
+from torch._dynamo import exc as _dynamo_exc
+
+# Dynamo added separate cache-limit exceptions across supported Torch versions.
+_FK_COMPILER_ERRORS = (
+    _dynamo_exc.TorchDynamoException,
+    getattr(_dynamo_exc, "FailOnRecompileLimitHit", _dynamo_exc.TorchDynamoException),
+    getattr(_dynamo_exc, "RecompileLimitExceeded", _dynamo_exc.TorchDynamoException),
+)
 
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import inv_transform
@@ -74,14 +82,14 @@ class SolverCfg:
     It must be a finite SE(3) rigid transform; affine transforms are not supported.
     """
 
-    ik_nearest_weight: List[float] | None = None
+    ik_nearest_weight: list[float] | None = None
     """Weights for the inverse kinematics nearest calculation.
     
     The weights influence how the solver prioritizes closeness to the seed position
     when multiple solutions are available.
     """
 
-    user_qpos_limits: List[float] | None = None
+    user_qpos_limits: list[float] | None = None
     """
         User defined Joint position limits [2, DOF] for the solver. 
         If not provided (None), this value will replace by joint limits defined in urdf when solver init from robot.
@@ -326,11 +334,11 @@ class BaseSolver(metaclass=ABCMeta):
 
             # Set specific weights for joint_ids to the provided ik_weight
             for i, joint_id in enumerate(joint_ids):
-                self.ik_nearest_weight[joint_id] = ik_weight[i]
+                self.ik_nearest_weight[joint_id] = float(ik_weight[i])
         else:
             # If ik_nearest_weight is not None, only fill joint_ids
             for i, joint_id in enumerate(joint_ids):
-                self.ik_nearest_weight[joint_id] = ik_weight[i]
+                self.ik_nearest_weight[joint_id] = float(ik_weight[i])
 
         return True
 
@@ -531,6 +539,45 @@ class BaseSolver(metaclass=ABCMeta):
         """
         return False
 
+    def _get_continuous_ik_candidates(
+        self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Generate path candidates before previous-frame constraints are applied.
+
+        Stateful step constraints belong to continuous selection, rather than
+        filtering every waypoint against the initial path seed.
+        """
+        return self.get_ik(
+            target_xpos=target_xpos,
+            qpos_seed=qpos_seed,
+            return_all_solutions=True,
+        )
+
+    def _get_continuous_ik_path(
+        self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Solve paths while permitting target-aware solver overrides.
+
+        Args:
+            target_xpos: Root-relative TCP goals shaped ``(B, N, 4, 4)``.
+            qpos_seed: Initial joints shaped ``(B, dof)``.
+
+        Returns:
+            Validity ``(B, N)`` and joints ``(B, N, dof)``. The default
+            preserves candidate generation followed by path selection.
+        """
+        b, n = target_xpos.shape[:2]
+        seed = qpos_seed[:, None].expand(b, n, self.dof).reshape(-1, self.dof)
+        valid, candidates = self._get_continuous_ik_candidates(
+            target_xpos=target_xpos.reshape(-1, 4, 4), qpos_seed=seed
+        )
+        k = valid.shape[-1]
+        return self._select_continuous_ik_path(
+            candidates.reshape(b, n, k, self.dof),
+            valid.reshape(b, n, k),
+            qpos_seed,
+        )
+
     def _select_continuous_ik_path(
         self,
         candidate_qpos: torch.Tensor,
@@ -602,8 +649,18 @@ class BaseSolver(metaclass=ABCMeta):
         if self.pk_serial_chain is None:
             logger.log_error("Kinematic chain is not initialized.")
             return torch.eye(4, device=self.device)
-        # Compute forward kinematics
-        ee_link_xpos = self.compiled_fk(qpos)[-1, :, :, :]
+        # A shape or chain guard can exhaust Dynamo after successful warmup.
+        # Recover only compiler failures, keeping the same differentiable FK.
+        try:
+            transforms = self.compiled_fk(qpos)
+        except _FK_COMPILER_ERRORS as exc:
+            logger.log_warning(
+                "Compiled FK became unavailable; using eager FK for "
+                f"{self.root_link_name}->{self.end_link_name}: {str(exc).splitlines()[0]}"
+            )
+            self.compiled_fk = self.pk_serial_chain.forward_kinematics_tensor
+            transforms = self.compiled_fk(qpos)
+        ee_link_xpos = transforms[-1, :, :, :]
 
         # Ensure batch format for TCP
         batch_size = qpos.shape[0]

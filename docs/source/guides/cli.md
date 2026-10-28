@@ -91,6 +91,24 @@ See {doc}`preview_robot` for robot files, overrides, and bounded headless runs.
 
 ---
 
+(cli-preview-material)=
+## Preview Material
+
+Query default presets, open a native material preview or export rendered images:
+
+```bash
+embodichain preview-material --list
+embodichain preview-material --material GlassClear
+embodichain preview-material --all --headless --gallery --output outputs/materials
+```
+
+OfflineRT (`--renderer rt`) is the default. Other renderers reject incompatible
+requests; `--all --compatible-only` explicitly selects and reports supported
+presets. See {doc}`preview_material` for JSON overrides, output metadata,
+direct-native comparisons and renderer requirements.
+
+---
+
 (cli-list-tasks)=
 ## List Tasks
 
@@ -148,16 +166,15 @@ catalog registration, and the current import paths.
 
 ---
 
-(cli-run-environment)=
-## Run Environment
+(cli-run-taskironment)=
+## Run Task
 
 Launch a Gymnasium environment for data generation, interactive preview, or trajectory replay.
-``embodichain run-task`` is an exact alias of ``embodichain run-env`` and accepts
-the same arguments.
+``embodichain run-task`` is the sole task execution command.
 
 For an end-to-end explanation of mode selection, preview, the differences
 between dataset/video/trajectory recording, and all three replay modes, see
-{doc}`run_env`.
+{doc}`run_task`.
 
 Task environments are **auto-discovered**: any installed package that declares
 an ``embodichain.tasks`` entry point is imported at startup, registering its
@@ -173,26 +190,26 @@ backend with ``environment.component`` or expose ``environment.default`` and
 
 ```bash
 # Run an environment with a gym config file
-embodichain run-env --gym_config path/to/config.yaml
+embodichain run-task --gym_config path/to/config.yaml
 
 # Run with multiple environments on GPU
-embodichain run-env \
+embodichain run-task \
     --gym_config config.yaml \
     --num_envs 4 \
     --device cuda \
     --gpu_id 0
 
 # Preview mode for interactive development
-embodichain run-env --gym_config config.yaml --preview
+embodichain run-task --gym_config config.yaml --preview
 
 # Headless execution
-embodichain run-env --gym_config config.yaml --headless
+embodichain run-task --gym_config config.yaml --headless
 
 # Headless browser visualization
-embodichain run-env --gym_config config.yaml --viser
+embodichain run-task --gym_config config.yaml --viser
 
 # Publish selected environments at controlled rates
-embodichain run-env --gym_config config.yaml \
+embodichain run-task --gym_config config.yaml \
     --viser \
     --viser-env-ids 0 2 \
     --viser-fps 15 \
@@ -200,19 +217,19 @@ embodichain run-env --gym_config config.yaml \
     --viser-soft-body-fps 5
 
 # Generate data AND record trajectories for later replay
-embodichain run-env --gym_config config.yaml --record_trajectory
+embodichain run-task --gym_config config.yaml --record_trajectory
 # trajectories auto-save to ~/.cache/embodichain_data/trajectories/<run_id>/
 
 # Replay a recorded trajectory (kinematic - exact reproduction, default)
-embodichain run-env --gym_config config.yaml \
+embodichain run-task --gym_config config.yaml \
     --replay --replay_trajectory path/to/traj.pt
 
 # Replay with physics re-simulation (dynamic)
-embodichain run-env --gym_config config.yaml \
+embodichain run-task --gym_config config.yaml \
     --replay --replay_trajectory path/to/traj.pt --replay_mode dynamic
 
 # Interactive scrubber (kinematic; step forward/back/jump via terminal)
-embodichain run-env --gym_config config.yaml \
+embodichain run-task --gym_config config.yaml \
     --replay --replay_trajectory path/to/traj.pt --replay_mode control
 ```
 
@@ -244,7 +261,7 @@ embodichain run-env --gym_config config.yaml \
 | ``--viser-host`` | ``127.0.0.1`` | Viser bind interface |
 | ``--viser-port`` | ``8080`` | Viser HTTP/WebSocket port |
 | ``--viser-fps`` | ``15.0`` | Maximum rigid pose and overlay update rate |
-| ``--viser-image-fps`` | every environment step | Maximum camera RGB preview rate when explicitly supplied; otherwise `run-env` captures after every environment step |
+| ``--viser-image-fps`` | every environment step | Maximum camera RGB preview rate when explicitly supplied; otherwise `run-task` captures after every environment step |
 | ``--viser-soft-body-fps`` | ``5.0`` | Maximum cloth and soft-body vertex rate |
 | ``--viser-env-ids`` | ``0`` | Space-separated environment IDs published to Viser, or ``all`` |
 
@@ -260,7 +277,7 @@ When ``--preview`` is enabled, an interactive REPL is available:
 - **``p``** — enter an IPython embed session with ``env`` in scope
 - **``q``** — quit
 
-See {doc}`run_env` for examples of inspecting and stepping ``env`` from the
+See {doc}`run_task` for examples of inspecting and stepping ``env`` from the
 embedded session, and for the distinction between interactive preview and the
 Viser browser backend.
 
@@ -288,7 +305,7 @@ Trajectories are recorded by passing ``--record_trajectory`` (or setting ``recor
 
 ``--replay`` and ``--preview`` are mutually exclusive.
 
-See {doc}`run_env` for the recorded file contents, environment compatibility
+See {doc}`run_task` for the recorded file contents, environment compatibility
 requirements, vectorized replay behavior, and a complete record/replay
 workflow.
 
@@ -299,7 +316,7 @@ and print a breakdown on ``env.close()``. Add ``--profile_output prof.json`` to
 also dump the report as JSON.
 
 ```bash
-embodichain run-env --gym_config config.yaml --headless --device cuda \
+embodichain run-task --gym_config config.yaml --headless --device cuda \
     --profile --profile_output prof.json --max_episodes 2
 ```
 
@@ -479,8 +496,76 @@ python -m embodichain.learning.rl.train --config embodichain_tasks/configs/tasks
 |---|---|---|
 | ``--config`` | *(required)* | Path to the RL training config file (``.json``, ``.yaml``, or ``.yml``) |
 | ``--distributed`` | ``None`` | Enable multi-GPU distributed training. If omitted, uses ``trainer.distributed`` from the config. Use ``--no-distributed`` to force single-process training. |
-| ``--profile`` | ``False`` | Same as ``run-env --profile``; profiles the training gym env during rollouts. Requires ``trainer.gym_config``. |
+| ``--profile`` | ``False`` | Same as ``run-task --profile``; profiles the training gym env during rollouts. Requires ``trainer.gym_config``. |
 | ``--profile_output`` | ``None`` | Dump the profiling report as JSON on ``env.close()`` (requires ``--profile``). |
+| ``--resume`` | ``None`` | Resume an explicit checkpoint file, or select ``latest`` / ``best`` from ``--run``. |
+| ``--run`` | ``None`` | Source training run for ``--resume latest`` or ``--resume best``. |
+| ``--resume-scheduler`` | ``restore`` | Continue the saved learning-rate curve. ``restart`` keeps optimizer momentum and starts the curve from the current config's learning rate. |
+
+### Resume training
+
+PPO, GRPO, and APG use the same resume arguments:
+
+```bash
+embodichain train-rl --config train.yaml --resume outputs/source/checkpoints/policy.pt
+embodichain train-rl --config train.yaml --resume latest --run outputs/source
+embodichain train-rl --config train.yaml --resume best --run outputs/source
+embodichain train-rl --config train.yaml --resume latest --run outputs/source --resume-scheduler restart
+```
+
+Training resumes into a new output run. Budgets remain cumulative: a checkpoint
+with 100 completed updates and a target of 300 continues for 200 updates. A
+target already reached performs zero updates. APG complete-rollout mode uses
+``iterations`` as its update target unless ``total_timesteps`` is supplied.
+
+Resume restores policy and normalization statistics, optimizer, scheduler,
+counters, best evaluation state, and Python/NumPy/Torch RNG. The environment
+starts a new episode. Compatibility checks run before collection and report
+the differing algorithm, policy, environment, input/output layout, or optimizer
+fields. Existing standard checkpoints and APG schema-v1 checkpoints load their
+available state; missing metadata and RNG are reported. GRPO with KL requires
+its saved reference policy.
+
+CLI and programmatic trainers can exchange checkpoints. When either trainer
+lacks CLI configuration context, loading reports that limitation and checks
+the runtime policy, algorithm, spaces, and available trainer metadata.
+APG additionally checks its effective rollout, gradient-accumulation, and
+action settings. Older schema-v2 files without APG settings load with a warning.
+
+``restore`` preserves the original scheduler horizon. Extending a zero-ending
+linear curve past that horizon requires ``restart``; an unspecified new horizon
+is bound to the remaining update budget. Subsequent checkpoints preserve the
+restarted curve.
+
+``latest`` and ``best`` resolve the exact path recorded in ``run-manifest.json``.
+A missing manifest, absent selected entry, missing file, or invalid checkpoint
+raises an error; training resume never substitutes another checkpoint. In
+particular, ``best`` requires a run that has produced a best checkpoint.
+Schema-v2 learning state can be restored from an explicit file without its
+source run. Selector-based resume also works when unselected historical
+checkpoints or archived configuration snapshots are missing; the current
+``--config`` still supplies the environment and policy construction settings.
+
+The historical best score is restored, but historical best files are not copied
+into the new run. Its ``best`` entry remains empty until a new evaluation improves
+that score. The source run retains its own best entry.
+
+Variable-horizon APG accepts an update budget or an explicit scheduler horizon.
+With a transition budget, the restored linear horizon is checked before each
+actual optimizer update.
+
+Periodic and best saves update ``run-manifest.json`` after atomically writing
+a completed-update checkpoint. Configuration snapshots are frozen from the
+loaded configuration on the first save and reused by subsequent saves. A final
+save reuses a periodic or best checkpoint from the same update. Before a
+subsequent save or final reuse, the active run checks its last saved checkpoint,
+manifest, and the files referenced by that manifest. Missing files raise an
+error at that boundary with their paths; deleted artifacts are not recreated.
+Unreferenced historical checkpoints may be removed. An interrupted update
+retains the preceding checkpoint. Distributed resume requires the same
+process count; every rank
+participates in saving and loading, while rank zero owns file writes. Each rank
+restores its own RNG and observation-normalization buffers.
 
 See the Profiling section under Run Env for report format. Outputs are written to ``./outputs/<exp_name>_<timestamp>/`` (TensorBoard logs and checkpoints). See the :doc:`../tutorial/rl` tutorial for config structure and training workflow.
 

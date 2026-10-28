@@ -179,6 +179,9 @@ def merge_solver_cfg(
 def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> RobotCfg:
     """Merge current robot configuration with overriding values from a dictionary.
 
+    Partial ``root_props`` mappings retain unspecified preset values. Explicit
+    ``None`` entries are applied, and iteration pairs validate after merging.
+
     Args:
         base_cfg (RobotCfg): The base robot configuration.
         override_cfg_dict (dict[str, any]): Dictionary of overriding configuration values.
@@ -200,18 +203,21 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
     base_safe = {
         k: v
         for k, v in override_cfg_dict.items()
-        if k in base_fields and k != "link_attrs"
+        if k in base_fields
+        and k != "link_attrs"
+        and not (k == "root_props" and isinstance(v, Mapping))
     }
     robot_cfg = RobotCfg.from_dict(base_safe)
 
     for key, value in override_cfg_dict.items():
         if key == "solver_cfg":
             # Per-part merge of provided solver_cfg into default solver config.
-            # Two modes:
-            #   1. Part dict includes "class_type" → new/replacement solver
+            # Three modes:
+            #   1. Typed SolverCfg → independent replacement solver.
+            #   2. Part dict includes "class_type" → new/replacement solver
             #      (already deserialized into a SolverCfg subclass by
             #      RobotCfg.from_dict above).
-            #   2. Part dict lacks "class_type" → attribute overrides for an
+            #   3. Part dict lacks "class_type" → attribute overrides for an
             #      existing solver part (e.g. {"tcp": ..., "stiffness": ...}).
             provided_solver_cfg = override_cfg_dict.get("solver_cfg")
             if isinstance(provided_solver_cfg, dict):
@@ -221,7 +227,11 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                     base_cfg.solver_cfg = {}
                     continue
                 for part, item in provided_solver_cfg.items():
-                    if isinstance(item, dict) and "class_type" in item:
+                    if isinstance(item, SolverCfg):
+                        # Robot binding fills model paths and joint names;
+                        # preserve the caller-owned configuration instance.
+                        base_cfg.solver_cfg[part] = item.copy()
+                    elif isinstance(item, dict) and "class_type" in item:
                         # New or replacement solver part — use the deserialized
                         # SolverCfg object produced by RobotCfg.from_dict.
                         parsed = (
@@ -278,6 +288,10 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                 logger.log_warning(
                     "joint_drive_props should be a dictionary. Skipping joint_drive_props merge."
                 )
+        elif key == "root_props" and isinstance(value, Mapping):
+            root_values = base_cfg.root_props.to_dict()
+            root_values.update(value)
+            base_cfg.root_props = type(base_cfg.root_props).from_dict(root_values)
         elif key == "attrs":
             # merge physics attributes
             user_attrs_dict = override_cfg_dict.get("attrs")

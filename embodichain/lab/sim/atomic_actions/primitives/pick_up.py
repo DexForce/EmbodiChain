@@ -178,7 +178,7 @@ class PickUpOptions(ActionOptions):
     """Approach fraction after which contact motion no longer invalidates grasp."""
 
     approach_direction: torch.Tensor = torch.tensor([0, 0, -1], dtype=torch.float32)
-    """World-frame direction from the pre-grasp pose to the grasp pose."""
+    """World approach direction, shared ``(3,)`` or per-environment ``(B,3)``."""
 
     approach_alignment_max_angle: float | None = None
     """Optional maximum TCP z-axis deviation from the approach direction."""
@@ -237,12 +237,19 @@ class PickUpOptions(ActionOptions):
             raise TypeError("grasp_commit_fraction must be a real number.")
         if not 0.0 < self.grasp_commit_fraction <= 1.0:
             raise ValueError("grasp_commit_fraction must be in (0, 1].")
-        if self.approach_direction.shape != (3,):
-            raise ValueError("approach_direction must have shape (3,).")
+        if (
+            not isinstance(self.approach_direction, torch.Tensor)
+            or self.approach_direction.ndim not in (1, 2)
+            or self.approach_direction.shape[-1] != 3
+            or not self.approach_direction.numel()
+        ):
+            raise ValueError("approach_direction must have shape (3,) or (B,3).")
         if not torch.isfinite(self.approach_direction).all():
             raise ValueError("approach_direction must contain finite values.")
-        if torch.linalg.vector_norm(self.approach_direction) <= 1.0e-6:
-            raise ValueError("approach_direction must be non-zero.")
+        if (
+            torch.linalg.vector_norm(self.approach_direction.float(), dim=-1) <= 1.0e-6
+        ).any():
+            raise ValueError("approach_direction rows must be non-zero.")
         if self.approach_alignment_max_angle is not None and not (
             0.0 <= self.approach_alignment_max_angle <= math.pi / 2
         ):
@@ -380,6 +387,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         )
         assert isinstance(motion_result.success, torch.Tensor)
         assert motion_result.positions is not None
+        assert motion_result.dt is not None
         approach_arm, lift_arm = split_joint_trajectory_at_pose(
             motion_result.positions,
             grasp_xpos,
@@ -387,7 +395,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             control_part=manipulator.control_part,
             first_sample_count=n_approach,
             second_sample_count=n_lift,
+            dt=motion_result.dt,
+            control_dt=interpolation_dt,
         )
+        n_approach = approach_arm.shape[1]
+        n_lift = lift_arm.shape[1]
         grasp_arm_qpos = approach_arm[:, -1, :]
         is_success = motion_result.success
 
@@ -410,8 +422,13 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         full[:, :, :] = last_qpos.unsqueeze(1)
         arm_joint_ids = list(manipulator.joint_ids)
         hand_joint_ids = list(end_effector.joint_ids)
+        approach_hand = interpolate_hand_qpos(
+            last_qpos[:, hand_joint_ids],
+            hand_open_qpos,
+            n_waypoints=n_approach,
+        )
         full[:, :n_approach, arm_joint_ids] = approach_arm
-        full[:, :n_approach, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
+        full[:, :n_approach, hand_joint_ids] = approach_hand
         full[:, close_start:settle_start, arm_joint_ids] = grasp_arm_qpos.unsqueeze(1)
         full[:, close_start:settle_start, hand_joint_ids] = hand_close_path
         if n_settle:
@@ -456,8 +473,13 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         approach_direction = options.approach_direction.to(
             device=self.device, dtype=torch.float32
         )
+        if (
+            approach_direction.ndim == 2
+            and approach_direction.shape[0] != self.num_envs
+        ):
+            raise ValueError("approach_direction must match the planning batch.")
         approach_direction = approach_direction / torch.linalg.vector_norm(
-            approach_direction
+            approach_direction, dim=-1, keepdim=True
         )
         binding = request.binding
         motion = binding.endpoint("primary", "motion")
@@ -715,8 +737,13 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         grasp_variants = torch.matmul(grasp_variants, grasp_frame_to_eef)
 
         pre_grasp_variants = grasp_variants.clone()
+        candidate_approach = (
+            approach_direction[:, None, None, :]
+            if approach_direction.ndim == 2
+            else approach_direction
+        )
         pre_grasp_variants[..., :3, 3] -= (
-            approach_direction * options.pre_grasp_distance
+            candidate_approach * options.pre_grasp_distance
         )
         lift_variants = grasp_variants.clone()
         lift_variants[..., :3, 3] += torch.tensor(
@@ -834,7 +861,12 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 grasp_poses.shape[:3], dtype=torch.bool, device=grasp_poses.device
             )
         grasp_z = torch.nn.functional.normalize(grasp_poses[..., :3, 2], dim=-1)
-        alignment = torch.sum(grasp_z * approach_direction, dim=-1)
+        candidate_approach = (
+            approach_direction[:, None, None, :]
+            if approach_direction.ndim == 2
+            else approach_direction
+        )
+        alignment = torch.sum(grasp_z * candidate_approach, dim=-1)
         return alignment >= math.cos(float(max_angle))
 
     def _compute_batch_candidate_ik(

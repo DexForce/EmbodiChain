@@ -427,6 +427,41 @@ class DeformableObject(BatchEntity):
             local_env_ids,
         )
 
+    def set_nodal_state(
+        self,
+        nodal_state: torch.Tensor,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Write world-frame particle positions and velocities.
+
+        This is the inverse of :attr:`DeformableObjectData.nodal_state_w`.
+        Use it to start from a deformed configuration while keeping the
+        authored rest shape, for example a pre-compressed block.
+
+        Args:
+            nodal_state: Tensor of shape ``(len(env_ids), num_nodes, 6)``
+                holding ``[position, velocity]`` per node in world frame.
+            env_ids: Environments to write. ``None`` selects all.
+
+        Raises:
+            ValueError: If the shape does not match or values are not finite.
+        """
+        local_env_ids = self._resolve_env_ids(env_ids)
+        self._require_data()
+        state = torch.as_tensor(nodal_state, dtype=torch.float32, device=self.device)
+        if state.dim() != 3 or state.shape[-1] != 6:
+            raise ValueError(
+                "nodal_state must have shape (len(env_ids), num_nodes, 6); got "
+                f"{tuple(state.shape)}."
+            )
+        if not torch.isfinite(state).all():
+            raise ValueError("nodal_state must contain only finite values.")
+        self._data._apply_nodal_state(
+            state[..., :3],
+            state[..., 3:],
+            local_env_ids,
+        )
+
     def _apply_local_pose(
         self,
         pose: torch.Tensor,

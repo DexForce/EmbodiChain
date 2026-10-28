@@ -749,3 +749,23 @@ def test_fluid_point_overlay_is_detached_and_display_filtered():
     assert len(overlays.point_clouds) == 1
     np.testing.assert_array_equal(overlays.point_clouds[0].points, [[0, 0, 1]])
     torch.testing.assert_close(original, torch.tensor([[[0.0, 0, -1], [0.0, 0, 1]]]))
+
+
+def test_visual_objects_export_pose_and_live_visibility_without_topology_refresh():
+    """Render-only assets publish their own node kind and visibility state."""
+    asset = _RigidObject()
+    visibility = [True, True]
+    asset.get_visibility = lambda ids: np.array([visibility[i] for i in ids])
+    sim = _EmptySimulation()
+    sim.num_envs = 2
+    sim.arena_offsets = np.zeros((2, 3), dtype=np.float32)
+    sim.get_visual_object_uid_list = lambda: ["prop"]
+    sim.get_visual_object = lambda uid: asset
+    exporter = SceneExporter(sim, VisualizationCfg(backend="viser", env_ids=(0, 1)))
+    manifest = exporter.build_manifest()
+    assert [node.kind for node in manifest.nodes] == ["visual_object"] * 2
+    assert manifest.nodes[0].path == "/envs/0/visual_objects/prop"
+    visibility[1] = False
+    frame = exporter.capture(sim_step=0, sim_time=0.0).frame
+    assert frame.visible.tolist() == visibility
+    assert exporter.resolve_node_target(manifest.nodes[0].node_id) == ("prop", "visual")

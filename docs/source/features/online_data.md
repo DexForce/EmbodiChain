@@ -1,16 +1,134 @@
-# Online Data Streaming
+# Online Data Streaming (ODS)
 
-This page documents the online data streaming pipeline used for live training from simulation. The core pieces are:
+ODS supplies owned, causally aligned training batches from continuously
+generated trajectories through a bounded CPU shared cache. The producer and
+learner can run independently; explicit provenance and optional per-trajectory
+delivery budgets make data use auditable. Shared APIs live in
+`embodichain.data_pipeline` and do not depend on a particular learner or task.
 
-- **OnlineDataEngine**: a process-safe shared buffer that stores trajectories coming from live simulation workers.
-- **OnlineDataset**: a PyTorch `IterableDataset` that samples trajectory chunks from the engine in either item mode or batch mode.
-- **ChunkSizeSampler**: an interface for drawing dynamic chunk sizes per iteration step.
+| Component | Responsibility |
+| --- | --- |
+| `OnlineDataEngine` | Own the simulation producer, shared storage, publication, locked selection/copy and optional live sampling ledger. |
+| `BatchSource` adapters | Present live, resident tensor and numeric LeRobot data under one explicit schema/context contract. |
+| `SequenceDataset` | Iterate causal contexts from a source; the caller owns production, loading, retry and refill. |
+| `OnlineDataset`, `ChunkSizeSampler` | Preserve item/batch chunk iteration and dynamic chunk lengths. |
+| `configure_ods()` | Calculate bounded reuse, cache and pacing/refill targets from measurements and a versioned profile; the host applies the plan. |
+| `ODSFlowController` | Apply an optional measured plan to a caller-managed manual engine: explicit refill, bounded waits, lifecycle draining and batch-start pacing. |
 
-These components live under `embodichain/data_pipeline/` and are designed to work with standard `DataLoader` patterns.
+## Guides and ownership
+
+```{toctree}
+:maxdepth: 1
+:hidden:
+
+ods/architecture
+ods/configuration
+```
+
+- [Architecture and data flow](ods/architecture.md): process structure, module
+  ownership and online/offline routes.
+- [Throughput configuration](ods/configuration.md): rate units, reuse profiles,
+  cache/rate limits, consumer responsibilities and runtime verification.
+- [Dataset/source architecture](https://github.com/DexForce/EmbodiChain/blob/main/docs/architecture/dataset-loading-design.md):
+  public schemas, source ownership and implementation boundaries.
+- [Simple BC demo](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/README.md):
+  one task/model binding, runnable commands and retained experiment results.
+
+These guides own reusable ODS behavior. Task-specific parameters, checkpoint
+results and historical validation remain with their examples.
 
 ---
 
 ## OnlineDataEngine
+
+The engine owns live production and publication. The training process chooses
+when to consume data, request manual refill and stop production. The engine
+does not own an optimizer or infer when a policy has learned the task.
+
+### Configuration and recorded-action meaning
+
+The engine preserves expert-controller recording by default. Policy requests
+have a separate schema and may have a different width from both robot state
+and expert commands.
+
+| Setting | Meaning |
+| --- | --- |
+| `state_dim` | Stored robot proprioception width. |
+| `action_dim` | Optional stored action width; omitted values preserve the historical `state_dim` width. |
+| `action_semantics` | `"expert_controller_command"` by default, or explicit `"policy_request"`. |
+| `action_contracts` | Ordered ActionManager contract IDs; required with an explicit `action_dim` for policy-request recording. |
+| `refill_policy` | `"sample_threshold"` by default, or owner-requested `"manual"` refill. |
+| `episode_sample_budget`, `episode_sample_hard_limit` | Optional per-source delivered-chunk budget and its configuration ceiling; supply both positive values or omit both. |
+| `include_provenance` | Add numeric frame identity and publication timestamps to sampled tensors. |
+| `lifecycle_event_capacity` | Optional bounded publication/eviction log; the owner must drain an enabled log during production and waits. |
+| `shutdown_timeout` | Finite, positive graceful-close wait in seconds; defaults to `5.0`. |
+
+For an environment with six relative EEF dimensions followed by one normalized
+parallel-gripper dimension, select the request schema explicitly:
+
+```python
+from embodichain.data_pipeline.engine import OnlineDataEngineCfg
+
+cfg = OnlineDataEngineCfg(
+    gym_config=your_gym_cfg,
+    state_dim=9,
+    action_dim=7,
+    action_semantics="policy_request",
+    action_contracts=("eef_pose.relative@1", "gripper.parallel@1"),
+    refill_policy="manual",
+    include_provenance=True,
+)
+```
+
+Before generating transitions, the worker checks the live rollout semantics,
+proprioception/action widths, ordered contracts, contiguous term slices and
+controlled-joint order. It selects the environment's
+`rollout_action_semantics` accordingly. Explicit policy recording preserves raw
+requests through ActionManager processing, requires finite floating values
+within the action-space bounds, and works without a DatasetManager. A direct
+`ControllerAction` cannot be stored as a policy request. Expert-controller
+recording continues to use `ExpertActionSpec`.
+
+With manual refill, `request_refill()` returns a target generation and coalesces
+an outstanding request; `wait_for_generation()` waits for complete publication
+with a timeout.
+
+With `include_provenance=True`, each sample carries `ods_run_id`,
+`ods_episode_id`, `ods_generation`, `ods_frame_index`, `ods_accepted_at_ns` and
+`ods_published_at_monotonic_ns`.
+Frame indices are zero-based positions in the stored episode. The timestamp
+uses Unix nanoseconds when a successful episode is accepted for publication;
+publication time separately uses host monotonic nanoseconds. These clocks must
+not be subtracted without an explicit alignment. The worker stamps provenance
+under the publication lock and samplers copy it with the corresponding payload.
+Invalid frames retain `-1` for every provenance field. Engine-local IDs identify
+live samples; validated offline corpus manifests provide separate content
+identities.
+
+### Statistics and accounting
+
+| Interface | Information and limits |
+| --- | --- |
+| `check_health()` | Require READY and surface worker failures without sampling or requesting refill. |
+| `get_flow_status()` | Compact READY-only generation/accepted-episode counters and optional unlocked/lifetime delivery totals. Counters use separate lock snapshots; quota is a coarse scheduling bound, not proof that a specific context/filter can be sampled. |
+| `get_stats()` | Production counts/time, refill generations and sampled chunks. Readable-frame counts exclude the active write window. Sampled chunks count deliveries, not completed optimizer work. |
+| `get_sampling_budget_snapshot()` | With quotas enabled, retained identities and assigned/delivered/remaining allowances, plus lifetime delivered chunks. Unlocked quota is a scheduling hint; context and generation filters can further restrict eligibility. |
+| `drain_lifecycle_events()` | Optional publication/eviction records and monotonic timestamps. Enable `lifecycle_event_capacity` and drain during production and waits; a full log backpressures the producer. |
+
+The application records completed optimizer work, retired-source exposure,
+latency distributions and resource peaks. These interfaces do not generate a
+training dashboard or an evaluation report. See
+[Verify the plan](ods/configuration.md#verify-the-plan) for measurement checks.
+
+### Causal context and padding
+
+`sample_batch_with_context(batch_size, history_length, prediction_horizon)`
+copies a fixed causal history and future supervision around each valid anchor
+under the producer lock. The current frame is at `history_length - 1`.
+Episode ends, validity gaps and continuity changes bound the context; numeric
+padding is zero, while language/provenance padding is `-1`. `valid` selects real
+frames and `loss_mask` selects real current/future targets. Decode language only
+for valid frames, as `resolve_language()` rejects padding IDs.
 
 **Module:** `embodichain/data_pipeline/engine/data.py`
 
@@ -23,7 +141,8 @@ These components live under `embodichain/data_pipeline/` and are designed to wor
 Key ideas:
 
 - **Shared buffer**: the simulation producer and training consumers can read/write concurrently.
-- **GPU-friendly**: buffer is designed for efficient sampling and minimal copying.
+- **CPU shared memory**: the supported process-shared buffer uses CPU storage;
+  sampled tensors can then be transferred to the learner's device.
 - **Chunked sampling**: training samples fixed-length or dynamically sized chunks.
 - **Transactional rows**: the current write window is locked until a complete,
   successful episode replaces it. Failed generation attempts never become
@@ -46,10 +165,11 @@ contains:
 
 ```text
 valid, episode_step, segment_id, segment_step,
-segment_start, segment_end, terminated, truncated
+segment_start, segment_end, segment_accepted, segment_attempt_id,
+continuity_id, terminated, truncated, task_index, subtask_index
 ```
 
-Tasks use the same `create_demo_segments()` protocol as `run-env`; legacy
+Tasks use the same `create_demo_segments()` protocol as `run-task`; legacy
 `create_demo_action_list()` tasks are treated as one segment. The worker checks
 termination after every action and retries a failed episode up to
 `max_generation_attempts` before reporting an error.
@@ -97,8 +217,8 @@ finally:
     engine.stop()
 ```
 
-`stop()` is idempotent after a successful cleanup. It waits for the producer
-and raises any failure reported while the worker closes its environment or
+`stop()` is idempotent after a successful cleanup. It waits up to
+`shutdown_timeout` seconds for graceful worker close and raises any failure reported while the worker closes its environment or
 flushes committed data. If graceful shutdown times out and the worker requires
 `terminate()` or `kill()`, durability cannot be confirmed: the engine remains
 `FAILED` and `stop()` raises instead of reporting a false `STOPPED` state. When
@@ -109,6 +229,114 @@ Start the engine before constructing multiprocessing `DataLoader` workers.
 Forked and spawned copies may call `sample_batch()`, but only the original
 owner process may call `start()` or `stop()`; consumer destructors never signal
 the shared producer.
+
+---
+
+## Per-trajectory delivery protection
+
+Set both `episode_sample_budget` and `episode_sample_hard_limit` on
+`OnlineDataEngineCfg` to positive integers with budget <= hard limit. Omit both
+for unrestricted historical behavior. Strict process-shared budgets use CPU
+storage and identify trajectories by immutable engine run/episode IDs, rather
+than reusable cache slots.
+
+One returned batch row/context consumes one selection, independent of chunk
+length. Within-batch duplicate draws count separately. Each sampling call
+selects, copies and debits its complete requested batch under the shared lock.
+A failed copy spends no quota; downstream transforms, optimizer failures and
+prefetch do not refund delivered data. A new Dataset iterator does not reset
+its source's allowance. Live replacement retires unused credits.
+
+`get_sampling_budget_snapshot()` exposes retained identities, assigned/delivered/
+remaining allowances and lifetime delivered chunks. Its unlocked total requires
+at least one valid continuity-qualified anchor, but does not apply every
+requested length, segment or generation filter. It is a scheduling hint, not
+proof that a specific batch can be sampled. Retired-source exposure and completed
+optimizer counts require consumer accounting.
+
+| Outcome | Required handling |
+| --- | --- |
+| Invalid schema/arguments | Fix the configuration; do not treat it as a data wait. |
+| `DataUnavailableError` | No eligible unlocked window/anchor exists. A live caller may wait with a deadline if production can change that condition. Fixed data cannot repair it by waiting. |
+| `DataBudgetExhaustedError` | Eligible data exists but cannot fund the requested full batch. Stop or have the owner schedule further supply within its declared production budget. No partial batch is silently debited. |
+| Worker/read/shutdown failure | Propagate the failure; do not continue indefinitely with old data. |
+
+`OnlineDataBudgetExhaustedError` is the engine-facing alias of common
+`DataBudgetExhaustedError`. Eligibility is checked before quota sufficiency;
+errors are immediate and Dataset wrappers do not silently retry. Worker health
+errors take precedence. Quota depletion does not automatically request refill.
+Use the [configuration guide](ods/configuration.md) to connect strict sampling
+protection to an explicit host pacing/refill policy.
+
+For a caller-managed manual engine, the optional
+[`ODSFlowController`](ods/configuration.md#apply-the-plan) provides reusable
+bounded retries, refill and pacing. It does not change Source or Dataset error
+semantics, own the optimizer, or start/stop the engine.
+
+## Shared online and offline context sources
+
+`OnlineDataSource`, `TensorDataSource` and `LeRobotDataSource` expose
+`sample_context(batch_size, spec, generator=...)` under one `BatchSource`
+contract. Every source requires an explicit observation/action schema, action
+semantics or representation, and positive control period `step_dt`. Vector width
+alone cannot establish compatible meaning, joint order, units or frame convention.
+
+For history H and prediction horizon F, each context has H+F-1 positions and
+its current frame is H-1. `obs`, `actions`, `valid`, `loss_mask` and `frame_ids`
+retain the same axes across sources. Frame identity is `(source run, episode,
+frame)`; padding IDs are -1. Numeric padding is zero, and the loss mask includes
+only real current/future targets. Episodes, validity gaps, continuity changes,
+segment mode and optional generation filtering constrain eligible contexts.
+The public source restores canonical zero padding after feature conversion,
+including nonlinear conversions that map neutral inputs to nonzero values.
+Model-side transformations outside that adapter must also respect these masks.
+
+The following sketch assumes a truthful schema for the recorded numeric fields:
+
+```python
+from torch.utils.data import DataLoader
+from embodichain.data_pipeline.datasets import (
+    LeRobotDataSource,
+    SequenceDataset,
+    SequenceSpecCfg,
+)
+
+source = LeRobotDataSource(
+    "/path/to/dataset",
+    schema=schema,
+    source_id="recording-v1",
+    memory_limit_bytes=512 * 1024 * 1024,
+)
+sequence = SequenceSpecCfg(history_length=2, prediction_horizon=64)
+dataset = SequenceDataset(source, sequence, batch_size=64, max_batches=1000)
+loader = DataLoader(dataset, batch_size=None, num_workers=0)
+for batch in loader:
+    train_step(batch)
+```
+
+The LeRobot adapter uses official SDK numeric reads once, then samples resident
+CPU tensors. The resident allowance does not bound SDK caches, temporary staging,
+total process memory or native GPU allocations. Explicit mappings are required
+when recorded field names differ; standard numeric data does not require the
+BC demo sidecar. Image/video and out-of-core decoding are outside this backend.
+
+For live data, use `OnlineDataSource(engine, schema=schema,
+observation_transform=feature_fn)` with the same truthful feature/action contract.
+The caller starts/stops the engine and schedules any refill/wait. The adapter
+owns none of those lifecycle decisions. The transform receives the copied
+observations as one argument and produces the declared numeric features. The
+adapter reapplies padding using the sampled `valid` and `loss_mask` afterward.
+
+`SequenceDataset` yields items when `batch_size=None` and complete batches when
+it is specified; use DataLoader `batch_size=None` for prebatched iteration.
+`max_batches` limits one iterator, not source cardinality or training epochs.
+Explicit generators and finite iteration require owner-process consumption;
+protected resident sources also reject unsupported worker copies. Start with
+`num_workers=0`. `OfflineDataset` is a compatibility alias of `SequenceDataset`.
+
+The [Dataset/source design](https://github.com/DexForce/EmbodiChain/blob/main/docs/architecture/dataset-loading-design.md)
+provides architecture and boundary details. The following `OnlineDataset`
+interface remains available for existing chunk consumers.
 
 ---
 
@@ -215,13 +443,22 @@ sampler = GMMChunkSampler(
 
 ---
 
-## End-to-end demo
+## Runnable examples
 
 A runnable example that wires everything together is provided in:
 
 - `examples/data_pipeline/online_dataset_demo.py`
 
-It shows item mode, batch mode, and dynamic chunk sizes. Run it with:
+The local [Franka BC demo](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/README.md)
+adds a complete learner, expert, checkpoint/evaluator and fixed-data controls:
+
+```bash
+python -m examples.ods.simple_bc_demo.train --smoke --no-viewer --no-video
+```
+
+Its architecture bindings, task-specific throughput packet, artifacts and
+learning results belong to the example. The generic chunk example shows item
+mode, batch mode and dynamic chunk sizes. Run it with:
 
 ```bash
 python examples/data_pipeline/online_dataset_demo.py

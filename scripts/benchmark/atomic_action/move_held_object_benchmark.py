@@ -18,7 +18,7 @@
 
 Measures MoveHeldObject-only planning latency and memory usage once a held
 object state has been produced by PickUp.
-Run: embodichain benchmark atomic-action --action move_held_object
+Run: embodichain benchmark atomic-action-profile --action move_held_object
 """
 
 from __future__ import annotations
@@ -186,7 +186,7 @@ def _prepare_held_state(
         PickUpOptions,
         SceneSnapshot,
     )
-    from scripts.tutorials.atomic_action.move_held_object import (
+    from examples.sim.atomic_action.move_held_object_cup import (
         get_hand_open_close_qpos,
         make_pre_pick_eef_pose,
     )
@@ -288,7 +288,7 @@ def _run_case(
         HeldObjectPoseGoal,
         MotionPolicy,
     )
-    from scripts.tutorials.atomic_action.move_held_object import (
+    from examples.sim.atomic_action.move_held_object_cup import (
         compute_pick_close_end_step,
     )
 
@@ -662,7 +662,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         MotionGenCfg,
     )
     from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
-    from scripts.tutorials.atomic_action.move_held_object import (
+    from examples.sim.atomic_action.move_held_object_cup import (
         create_robot,
         initialize_simulation,
     )
@@ -790,7 +790,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    from scripts.tutorials.atomic_action.tutorial_utils import run_tutorial
+    from examples.sim.atomic_action.support import run_tutorial
 
     run_tutorial(main)
 

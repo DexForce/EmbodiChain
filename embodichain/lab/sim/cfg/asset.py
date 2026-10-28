@@ -62,11 +62,20 @@ class ObjectBaseCfg:
     @classmethod
     def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> ObjectBaseCfg:
         """Initialize the configuration from a dictionary."""
+        from .source import _raise_removed_source_fields, _usd_source_from_value
+
+        _raise_removed_source_fields(init_dict)
         cfg = cls()  # Create a new instance of the class (cls)
         for key, value in init_dict.items():
             if hasattr(cfg, key):
                 attr = getattr(cfg, key)
-                if key == "attrs" and isinstance(value, Mapping):
+                if key == "source":
+                    setattr(cfg, key, _usd_source_from_value(value))
+                elif key == "shape" and isinstance(value, Mapping):
+                    from ..shapes import ShapeCfg
+
+                    setattr(cfg, key, ShapeCfg.from_dict(dict(value)))
+                elif key == "attrs" and isinstance(value, Mapping):
                     # Keep the base module independent of rigid schemas at
                     # import time; only rigid-derived configs expose this key.
                     from .rigid import _rigid_body_physics_from_dict

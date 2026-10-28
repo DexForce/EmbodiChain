@@ -73,25 +73,55 @@ class FluidObject:
     def __init__(
         self,
         cfg: FluidObjectCfg,
-        positions: np.ndarray,
-        pose: np.ndarray,
-        device: torch.device,
-        *,
-        on_write: Callable[[Sequence[int]], None],
+        device: torch.device = torch.device("cpu"),
     ) -> None:
+        """Create an unregistered facade without sampling or allocating state.
+
+        Args:
+            cfg: Particle-source recipe and initial physical/render settings.
+            device: Device for state and resolved source caches after declaration.
+        """
         self.cfg = deepcopy(cfg)
-        self.uid = cfg.uid
-        self.device = device
-        self._positions = torch.as_tensor(positions.copy(), device=device)
-        self._initial_pose = torch.as_tensor(pose.copy(), device=device)
+        self.uid = self.cfg.uid
+        self.device = torch.device(device)
+        self._rest_positions_local: torch.Tensor | None = None
+        self._initial_rotation: torch.Tensor | None = None
         self._entities: list[Any] = []
         self._spawn_result = None
         self._data: FluidObjectData | None = None
-        self._num_instances = 0
+        self._declared_num_instances: int | None = None
+        self._on_write: Callable[[Sequence[int]], None] | None = None
+
+    def _initialize_spawn_source(
+        self,
+        rest_positions_local: np.ndarray,
+        initial_rotation: np.ndarray,
+        *,
+        on_write: Callable[[Sequence[int]], None],
+    ) -> None:
+        """Cache Manager-resolved source data without changing the input config."""
+        if self._rest_positions_local is not None:
+            raise RuntimeError("Fluid source is already initialized.")
+        positions = np.asarray(rest_positions_local, dtype=np.float32)
+        rotation = np.asarray(initial_rotation, dtype=np.float32)
+        if positions.ndim != 2 or positions.shape[1] != 3 or not len(positions):
+            raise ValueError("Fluid source requires nonempty (N, 3) positions.")
+        if rotation.shape != (3, 3) or not np.isfinite(rotation).all():
+            raise ValueError("Fluid source requires a finite (3, 3) initial rotation.")
+        if not callable(on_write):
+            raise TypeError("Fluid state invalidation callback must be callable.")
+        self._rest_positions_local = torch.as_tensor(
+            positions.copy(), device=self.device
+        )
+        self._initial_rotation = torch.as_tensor(rotation.copy(), device=self.device)
         self._on_write = on_write
 
     def _initialize_spawn_declaration(self, num_instances: int) -> None:
-        self._num_instances = num_instances
+        if num_instances <= 0:
+            raise ValueError("FluidObject requires a positive instance count.")
+        if self._declared_num_instances not in (None, num_instances):
+            raise RuntimeError("FluidObject instance count is already declared.")
+        self._declared_num_instances = num_instances
 
     @property
     def is_declared(self) -> bool:
@@ -101,12 +131,18 @@ class FluidObject:
     @property
     def num_instances(self) -> int:
         """Number of scene-owned replicas."""
-        return self._num_instances
+        if self._declared_num_instances is None:
+            raise RuntimeError("FluidObject must be registered through SpawnScene.")
+        return self._declared_num_instances
 
     @property
     def num_particles(self) -> int:
         """Fixed particle count per replica."""
-        return len(self._positions)
+        if self._rest_positions_local is None:
+            raise RuntimeError(
+                "Fluid source requires SimulationManager.add_fluid_object()."
+            )
+        return len(self._rest_positions_local)
 
     @property
     def particle_mass(self) -> float:
@@ -135,6 +171,12 @@ class FluidObject:
         """Bind Scene batch state and capture configured initial velocities."""
         if self._data is not None:
             return
+        if (
+            self._rest_positions_local is None
+            or self._initial_rotation is None
+            or self._on_write is None
+        ):
+            raise RuntimeError("Fluid source must be initialized before binding.")
         data = FluidObjectData(self._entities, scene, self.device)
         if data._state.n_nodes != self.num_particles:
             raise RuntimeError("Spawn changed the fluid particle count.")
@@ -142,7 +184,7 @@ class FluidObject:
         velocity = torch.as_tensor(
             self.cfg.spawn.initial_velocity, device=self.device, dtype=torch.float32
         )
-        state[..., 3:] = velocity @ self._initial_pose[:3, :3].T
+        state[..., 3:] = velocity @ self._initial_rotation.T
         data._state._apply_nodal_state(
             state[..., :3], state[..., 3:], list(range(self.num_instances))
         )
@@ -186,13 +228,15 @@ class FluidObject:
             raise ValueError("Fluid state must be finite.")
         if not ids:
             return
+        assert self._on_write is not None
         self._on_write(ids)
         data._state._apply_nodal_state(state[..., :3], state[..., 3:], ids)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         """Restore selected initial particle states without advancing time."""
+        data = self.data
         ids = self._indices(env_ids)
-        self.write_particle_state_to_sim(self.data.default_particle_state_w[ids], ids)
+        self.write_particle_state_to_sim(data.default_particle_state_w[ids], ids)
 
     def reset_to_pose(
         self, pose_w: torch.Tensor, env_ids: Sequence[int] | None = None
@@ -203,6 +247,7 @@ class FluidObject:
             pose_w: Finite ``(selected E, 7)`` poses with unit quaternions.
             env_ids: Unique instance indices, or None for all.
         """
+        _ = self.data
         ids = self._indices(env_ids)
         if tuple(pose_w.shape) != (len(ids), 7) or not torch.isfinite(pose_w).all():
             raise ValueError("pose_w must be finite (selected E, 7).")
@@ -214,8 +259,10 @@ class FluidObject:
         ):
             raise ValueError("pose_w requires unit xyzw quaternions.")
         rotation = matrix_from_quat(pose[:, 3:])
+        assert self._rest_positions_local is not None
         points = (
-            torch.einsum("eij,nj->eni", rotation, self._positions) + pose[:, None, :3]
+            torch.einsum("eij,nj->eni", rotation, self._rest_positions_local)
+            + pose[:, None, :3]
         )
         velocity = torch.as_tensor(
             self.cfg.spawn.initial_velocity, device=self.device, dtype=torch.float32

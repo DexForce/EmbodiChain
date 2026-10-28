@@ -1926,10 +1926,8 @@ def test_phase_effect_gate_uses_independent_monitor_and_records_boundary_trace()
     )
     system.runtime._runner = SimpleNamespace(
         session=SimpleNamespace(
-            active_plan=SimpleNamespace(
-                expected_effects=StateDelta(held_object_updates={"arm": None}),
-                effect_candidates=StateDelta(held_object_updates={"arm": held}),
-            )
+            active_expected_effects=StateDelta(held_object_updates={"arm": None}),
+            active_effect_candidates=StateDelta(held_object_updates={"arm": held}),
         )
     )
     system.runtime._current_call_index = 0
@@ -1984,6 +1982,33 @@ def test_runtime_invokes_step_observer() -> None:
 
     assert result.status is SemanticExecutionStatus.COMPLETED
     assert observed_steps
+
+
+def test_motion_policy_metadata_includes_timing_limits() -> None:
+    from embodichain.lab.task_program.runtime.results import (
+        _motion_policy_to_metadata,
+    )
+
+    metadata = _motion_policy_to_metadata(
+        MotionPolicy(
+            sample_count=7,
+            velocity_limit=0.2,
+            acceleration_limit=0.5,
+        )
+    )
+
+    assert metadata["velocity_limit"] == pytest.approx(0.2)
+    assert metadata["acceleration_limit"] == pytest.approx(0.5)
+
+
+def test_motion_policy_metadata_preserves_omitted_velocity_limit() -> None:
+    from embodichain.lab.task_program.runtime.results import (
+        _motion_policy_to_metadata,
+    )
+
+    metadata = _motion_policy_to_metadata(MotionPolicy(sample_count=7))
+
+    assert metadata["velocity_limit"] is None
 
 
 def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None:

@@ -18,7 +18,8 @@
 The :func:`generate_curobo_robot_yaml` helper pulls the robot's URDF path and
 each link's collision mesh (vertices/faces) from the simulator, fits collision
 spheres to every link mesh with DexSim's sphere-fitting library, and writes a
-complete cuRobo V2 robot configuration YAML. The cuRobo planner adapter calls
+complete cuRobo V2 robot configuration YAML and a URDF copy carrying effective
+velocity limits. The source asset is preserved. The cuRobo planner adapter calls
 this automatically (with on-disk caching) on the first plan; see
 :class:`~embodichain.lab.sim.motion.planners.curobo.curobo_planner.CuroboAutoGenCfg`.
 
@@ -31,12 +32,19 @@ before being voxelized into an ESDF grid.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+import xml.etree.ElementTree as ET
 
 import torch
 from dexsim.types import RigidBodyShape
 
 from embodichain.lab.sim.objects.rigid_object import CollisionShapeDesc
+from .._joint_limits import (
+    _DEFAULT_VELOCITY,
+    _joint_velocity_limits,
+    _merge_limit,
+)
 from embodichain.utils import logger
 from embodichain.utils.math import (
     matrix_from_quat,
@@ -58,6 +66,53 @@ __all__ = [
 
 
 _ROBOT_MAX_CONVEX_HULL_NUM = 2
+_DEFAULT_CUROBO_ACCELERATION = 15.0
+
+
+def _curobo_joint_limits(
+    robot: Robot,
+    *,
+    max_velocity: float | list[float] | None = None,
+    max_acceleration: float | list[float] | None = None,
+) -> dict[str, list[float]]:
+    """Export effective caps in active cspace order rather than source order."""
+    ids = robot.active_joint_ids
+    if not ids:
+        return {"max_velocity": [], "max_acceleration": []}
+    limits = _joint_velocity_limits(robot)[:, ids].amin(dim=0)
+    velocity = _merge_limit(max_velocity, limits, _DEFAULT_VELOCITY, allow_zero=True)
+    acceleration = _merge_limit(
+        max_acceleration,
+        torch.full_like(limits, torch.inf),
+        _DEFAULT_CUROBO_ACCELERATION,
+    )
+    return {
+        "max_velocity": velocity.tolist(),
+        "max_acceleration": acceleration.tolist(),
+    }
+
+
+def _write_velocity_limited_urdf(
+    urdf_path: str, output_path: str, limits: Mapping[str, float]
+) -> str:
+    """Write a cache-owned URDF with absolute caps, keeping cuRobo scales at one.
+
+    cuRobo 0.8 reapplies velocity scales during loading and model cloning.
+    Encoding caps in a URDF copy makes both operations preserve the same limits.
+    """
+    path = Path(output_path).with_suffix(".motion.urdf").resolve()
+    if path == Path(urdf_path).resolve():
+        raise ValueError("The cuRobo motion URDF must differ from the source asset.")
+    tree = ET.parse(urdf_path)
+    for joint in tree.getroot().findall("joint"):
+        if joint.attrib["name"] in limits:
+            limit = joint.find("limit")
+            if limit is None:
+                limit = ET.SubElement(joint, "limit")
+            limit.set("velocity", str(limits[joint.attrib["name"]]))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tree.write(path, encoding="utf-8", xml_declaration=True)
+    return str(path)
 
 
 def _named_rigid_objects(
@@ -70,44 +125,6 @@ def _named_rigid_objects(
         (getattr(obj, "uid", None) or f"obstacle_{index}", obj)
         for index, obj in enumerate(rigid_objects or ())
     ]
-
-
-def _parse_mimic_joint_names(urdf_path: str) -> set[str]:
-    """Return the names of URDF joints that mimic another joint.
-
-    cuRobo's URDF parser folds each ``<mimic>`` joint into its active joint: the
-    mimic joint's body takes the active joint's name, so the mimic joint has no
-    independent entry in the kinematics tree. cuRobo therefore rejects mimic
-    joints in ``cspace`` and ``lock_joints`` - locking one raises ``KeyError``
-    because cuRobo finds no body for it. They must be excluded from both, so
-    cuRobo drives them from their active joint instead.
-
-    cuRobo's ``UrdfRobotParser`` exposes no public accessor for mimic joints (a
-    prior ``get_mimic_joint_map`` call did not exist on this cuRobo version and
-    silently left the set empty), so they are read directly from the URDF XML -
-    the same ``<mimic>`` tags cuRobo itself parses.
-
-    Args:
-        urdf_path: Path to the robot URDF file.
-
-    Returns:
-        The set of joint names declared with a ``<mimic>`` child element. Empty
-        if the URDF cannot be parsed (a warning is logged).
-    """
-    import xml.etree.ElementTree as ET
-
-    mimic_joints: set[str] = set()
-    try:
-        root = ET.parse(urdf_path).getroot()
-    except Exception as exc:  # noqa: BLE001
-        logger.log_warning(f"Could not parse mimic joints from URDF ({exc}).")
-        return mimic_joints
-    for joint in root.findall("joint"):
-        if joint.find("mimic") is not None:
-            name = joint.get("name")
-            if name is not None:
-                mimic_joints.add(name)
-    return mimic_joints
 
 
 def _to_open3d_legacy_mesh(
@@ -150,7 +167,8 @@ def generate_curobo_robot_yaml(
     surface_radius: float = 0.005,
     iterations: int = 200,
     collision_sphere_buffer: float = 0.0,
-    max_acceleration: float = 15.0,
+    max_velocity: float | list[float] | None = None,
+    max_acceleration: float | list[float] | None = None,
     max_jerk: float = 500.0,
     device: str = "cuda:0",
 ) -> str:
@@ -171,7 +189,8 @@ def generate_curobo_robot_yaml(
         robot: The EmbodiChain robot to generate a config for.
         control_part: Control-part name whose joints stay active; every other
             actuated joint is pinned via ``lock_joints``.
-        output_path: Destination YAML file path.
+        output_path: Destination YAML file path. A sibling ``.motion.urdf`` stores
+            effective velocity caps without modifying the source asset.
         tool_frame: cuRobo tool frame (a URDF link name) to plan to. If ``None``,
             defaults to the last link of the control part.
         urdf_path: URDF to generate the cuRobo model from. If ``None`` (default),
@@ -180,7 +199,8 @@ def generate_curobo_robot_yaml(
             caller already resolved the URDF (the planner does, so the on-disk
             cache key and the generation use the same file). Must be the full
             assembled URDF, not a solver's sub-chain URDF, or gripper links are
-            silently dropped from the collision model.
+            silently dropped from the collision model. Motion caps and active
+            joint selection always come from the bound robot.
         num_spheres: Per-link sphere count. If ``None``, DexSim auto-estimates
             it from the link's bounding-box volume.
         sphere_density: Multiplier on the auto sphere count (ignored when
@@ -188,7 +208,12 @@ def generate_curobo_robot_yaml(
         surface_radius: Fixed radius used by MorphIt's surface fallback.
         iterations: Adam iterations for MorphIt.
         collision_sphere_buffer: Padding added to every sphere's radius (m).
-        max_acceleration: cspace maximum acceleration.
+        max_velocity: Optional speed request intersected with effective Robot
+            caps. Scalars apply to all active joints; lists follow
+            ``robot.active_joint_ids`` order.
+        max_acceleration: Planning acceleration budget for active cspace joints,
+            as a scalar or a list in ``robot.active_joint_ids`` order.
+            ``None`` preserves cuRobo's default budget of 15.0.
         max_jerk: cspace maximum jerk.
         device: CUDA device for sphere fitting.
 
@@ -198,6 +223,8 @@ def generate_curobo_robot_yaml(
     Raises:
         ImportError: If DexSim or Open3D is not installed.
         RuntimeError: If CUDA is unavailable or no spheres could be fitted.
+        ValueError: If a controlled joint has a zero velocity cap, which cuRobo
+            cannot represent, or the output URDF would overwrite the source.
     """
     import os
 
@@ -210,6 +237,18 @@ def generate_curobo_robot_yaml(
     if not torch.cuda.is_available():
         raise RuntimeError("generate_curobo_robot_yaml requires a CUDA GPU.")
     urdf_path = urdf_path or robot.cfg.fpath
+    limits = _curobo_joint_limits(
+        robot, max_velocity=max_velocity, max_acceleration=max_acceleration
+    )
+    control_joints = set((robot.control_parts or {}).get(control_part, []))
+    velocity_caps = dict(
+        zip(
+            (robot.joint_names[index] for index in robot.active_joint_ids),
+            limits["max_velocity"],
+        )
+    )
+    if any(velocity_caps.get(name) == 0 for name in control_joints):
+        raise ValueError("cuRobo cannot plan a joint with a zero velocity limit.")
     link_vert_dict: dict = {}
     link_face_dict: dict = {}
     for link_name in robot.get_link_names() or []:
@@ -221,11 +260,8 @@ def generate_curobo_robot_yaml(
     #    ``robot.root_link_name`` is avoided because it touches an uninitialized
     #    ``entities`` attribute on some Robot instances; cuRobo's parser resolves
     #    the root link directly from the URDF.
-    #    Mimic joints are detected from the URDF XML (not cuRobo's parser, which
-    #    exposes no mimic accessor) so they can be excluded from cspace/lock_joints
-    #    below - cuRobo folds them into their active joint and raises
-    #    KeyError if they are locked.
-    mimic_joints: set[str] = _parse_mimic_joint_names(urdf_path)
+    #    Robot's active_joint_ids already excludes mimic followers, which cuRobo
+    #    folds into their leader and cannot represent in cspace/lock_joints.
     base_link: str | None = None
     try:
         parser = UrdfRobotParser(urdf_path, load_meshes=False, build_scene_graph=True)
@@ -289,14 +325,13 @@ def generate_curobo_robot_yaml(
         except Exception:  # noqa: BLE001
             init_qpos = [0.0] * len(joint_names)
     cspace_pairs = [
-        (jname, float(val))
-        for jname, val in zip(joint_names, init_qpos)
-        if jname not in mimic_joints
+        (joint_names[index], float(init_qpos[index]))
+        for index in robot.active_joint_ids
     ]
     cspace = {
         "joint_names": [j for j, _ in cspace_pairs],
         "default_joint_position": [v for _, v in cspace_pairs],
-        "max_acceleration": float(max_acceleration),
+        "max_acceleration": limits["max_acceleration"],
         "max_jerk": float(max_jerk),
         "cspace_distance_weight": [1.0] * len(cspace_pairs),
         "null_space_weight": [1.0] * len(cspace_pairs),
@@ -304,7 +339,6 @@ def generate_curobo_robot_yaml(
 
     # 4. lock_joints: actuated joints outside the control part, pinned to init values.
     #    Mimic joints are already excluded from cspace_pairs (see step 3).
-    control_joints = set((robot.control_parts or {}).get(control_part, []))
     lock_joints: dict[str, float] = {
         jname: val for jname, val in cspace_pairs if jname not in control_joints
     }
@@ -318,20 +352,28 @@ def generate_curobo_robot_yaml(
             )
         tool_frame = part_links[-1]
 
-    # 6. Assemble and write the YAML, mirroring franka.yml's schema.
+    # 6. Encode absolute speeds in a cache-owned URDF; leave scales at one.
+    motion_urdf_path = _write_velocity_limited_urdf(
+        urdf_path,
+        output_path,
+        # Zero-speed joints outside the part are fixed by lock_joints. cuRobo
+        # still needs a positive interval while loading them before locking.
+        {name: value if value > 0 else 1.0 for name, value in velocity_caps.items()},
+    )
+    # 7. Assemble and write the YAML, mirroring franka.yml's schema.
     data = {
         "robot_cfg": {
             "kinematics": {
                 "format_version": 2.0,
                 "base_link": base_link,
-                "urdf_path": urdf_path,
-                "asset_root_path": os.path.dirname(urdf_path),
+                "urdf_path": motion_urdf_path,
+                "asset_root_path": os.path.dirname(os.path.abspath(urdf_path)),
                 "tool_frames": [tool_frame],
                 "collision_link_names": collision_link_names,
                 "collision_spheres": collision_spheres,
                 "collision_sphere_buffer": float(collision_sphere_buffer),
                 "mesh_link_names": collision_link_names,
-                "lock_joints": lock_joints,
+                "lock_joints": lock_joints or None,
                 "cspace": cspace,
                 "use_global_cumul": True,
             }
@@ -882,12 +924,13 @@ def _get_or_create_dexsim_material(
     if material is None:
         material = env.create_pbr_material(name)
         material_inst = material.get_inst()
-        material_inst.update_pbr_material_type("BSDF_GGX_SMITH")
+        # Transmission selects the native scattering lobe before actor binding.
+        # A fourth color component controls the diagnostic shell's opacity.
+        opacity = color[3] if len(color) == 4 else 0.45
+        material_inst.set_transmission(1.0 - opacity)
         material_inst.set_pbr_param("baseColor", color[0], color[1], color[2])
         material_inst.set_pbr_param("roughness", 0.02)
         material_inst.set_pbr_param("ior", 1.12)
-        material_inst.set_pbr_param("colorAbsorption", 0.005, 0.005, 0.005)
-        material_inst.set_pbr_param("scaleAbsorption", 0.01)
         return material
     return material
 

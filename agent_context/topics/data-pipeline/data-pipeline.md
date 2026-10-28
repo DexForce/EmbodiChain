@@ -10,23 +10,62 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Request | Owner |
 |---|---|
 | Online worker and sample selection | `embodichain/data_pipeline/engine/data.py`: `OnlineDataEngine` |
-| Infinite PyTorch dataset | `embodichain/data_pipeline/datasets/online_data.py`: `OnlineDataset` |
+| Throughput-derived settings and protected reuse profiles | `embodichain/data_pipeline/configuration.py`: `configure_ods`; sampler enforcement in `engine/data.py` |
+| Explicit owner-side refill, waits and pacing | `embodichain/data_pipeline/runtime.py`: `ODSFlowController`; compact READY-only flow status in `engine/data.py` |
+| PyTorch iteration | `embodichain/data_pipeline/datasets/`: `sequence_data.py` owns `SequenceDataset`; `online_data.py` preserves `OnlineDataset`; `OfflineDataset` is an alias |
+| Shared sequence contract and sources | `embodichain/data_pipeline/datasets/sequence.py`, `sources.py`, `_sampling.py` |
+| Bounded numeric LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping |
+| Local Franka ChunkBC demo and offline comparisons | `examples/ods/simple_bc_demo/train.py`; local task/config/model/trainer/evaluator and evidence in the same directory |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
 | Depth sidecars | `embodichain/data_pipeline/depth_video/writer.py`, `reader.py` |
-| Offline collection retries and final partial batch | `embodichain/lab/scripts/run_env.py` |
+| Offline collection retries and final partial batch | `embodichain/lab/scripts/run_task.py` |
 | File-only validation and grouped quality splits | `embodichain/data_pipeline/datasets/inspection.py`; `embodichain dataset validate\|split` |
 | Durable commit diagnostics and metadata repair | `embodichain/data_pipeline/recording/journal.py`; `embodichain dataset recover` |
+| NeRD-specific HDF5 windows and teacher collection | `extensions/embodichain_models/embodichain_models/dynamics/nerd/data.py` and `examples/learning/nerd/_support/_generation.py`; contracts in [neural dynamics](../neural-dynamics/neural-dynamics.md) |
 | Isolated LeRobot 0.6.1 language/depth conversion | `tools/lerobot_export/` (Python >=3.12, independent dependencies) |
 
 Read [online sampling](online-sampling.md) for worker states, refill, shared
-errors, continuity and DataLoader behavior. Read [persistence](persistence.md)
+errors, action schemas, sample provenance, causal histories and example-runner
+boundaries. Read [persistence](persistence.md)
 for fragment transactions, async ownership, depth output and shutdown. Read
 [offline dataset tools](offline-datasets.md) for lineage, quality filtering,
 validation, and conversion across Python/LeRobot versions.
 
+Reusable user documentation belongs to the [ODS guide](../../../docs/source/features/online_data.md)
+and [configuration/runtime checks](../../../docs/source/features/ods/configuration.md).
+Example-local documentation owns its task binding, CLI/artifact names,
+comparison protocol and historical evidence. Keep generic operational contracts
+in the core guides.
+
+`BatchSource.sample_context()` returns owned TensorDicts under a shared
+`SequenceSpecCfg`; `SequenceDataset` supplies the common iteration interface.
+The package's `schema.py` owns common semantic validation and schema fingerprints;
+all source constructors require explicit action semantics and control period.
+ODS and resident sources reuse window/mask and quota-draw
+helpers while retaining distinct lifecycle/lock ownership. `LeRobotDataSource`
+requires explicit action semantics, step duration, field mapping and a resident
+memory limit; imports do not initialize simulation or import the SDK until load.
+The first backend samples resident numeric tensors after bounded SDK reads.
+
+`learning/sl/sequence.py` bridges these sources through an explicit encoder;
+the [SL context](../supervised-learning/supervised-learning.md) owns its identity
+and recovery admission. Online lifecycle and delivery credits remain here.
+Neither trainer RNG restoration nor encoding failure rewinds source quotas.
+
+The demo's `lerobot.py` owns writing and sidecar/hash auditing around the public
+reader. It measures initial loading rather than per-batch disk reads and does
+not replace recording or offline-inspection tools. See the
+[loading design](../../../docs/architecture/dataset-loading-design.md) for source boundaries.
+
 ## Online worker contract
+
+Shared image buffers are allocated by `init_rollout_buffer_from_config()` in
+`gym/utils/gym_utils.py`. It expands physical components and combines independent
+sensors with the selected robot's mounted defaults, without constructing a
+simulation. The environment acquisition switch controls both sources. See
+[environment configuration](../env-framework/configuration.md) for ownership.
 
 Online batches also carry engine-local, append-only task/subtask IDs. The shared
 registry and `resolve_language(batch)` expose the frozen texts separately from
@@ -38,28 +77,40 @@ shared memory: `CREATED → STARTING → READY`; `FAILED` and `STOPPED` are term
 Startup waits for initial fill with a timeout and demonstration generation has
 bounded attempts. Worker errors are published to all consumers; failed engines
 are replaced with new instances rather than restarted.
+The monitor waits for sentinel readiness without consuming the forkserver's
+single-reader exit-status pipe. Owner and monitor serialize status reads and
+process-handle closure with a local lock; shutdown releases it before joining
+the monitor. Consumer deserialization recreates that process-local lock.
 
 `sample_batch()` is READY-only. Selection excludes the currently written range,
-checks validity/continuity/segment boundaries, and clones the result while
-holding the shared write lock. Moving selection or cloning outside that scope
-can expose partially overwritten rows. Refill requests are threshold-driven.
+checks validity/continuity/segment boundaries, and copies the selected payload
+while holding the shared write lock. Moving selection or copying outside that scope
+can expose partially overwritten rows. Refill follows the configured automatic
+or manual policy. Explicit raw-policy recording validates its ordered live
+action contracts independently of the expert-controller schema; see
+[online sampling](online-sampling.md) before changing stored action meaning.
 
 Distinguish a terminal worker failure from a sampling request with no eligible
-unlocked window. The latter raises `RuntimeError` immediately without itself
-setting `FAILED` or triggering a refill. `OnlineDataset` propagates both kinds
-of exception; it does not supply an automatic retry loop.
+unlocked window. The latter raises `DataUnavailableError` (a `RuntimeError`)
+immediately without itself setting `FAILED` or triggering a refill. Datasets
+propagate both kinds of exception without an automatic retry loop. Applications
+can opt into `ODSFlowController` around their manual engine for bounded retries,
+refill and plan-based pacing; start/stop and training stay application-owned.
 
 ## Persistence contract
 
 `env.step()` buffers frames. An explicit reset/commit reaches
-`DatasetManager.apply("save", env_ids)` before rows are cleared. Finalization
+`DatasetManager.apply("save", env_ids)` before physical reset or buffer clearing.
+Normal output rows are filtered through the environment-owned `EpisodeContext`;
+its lifecycle and rejection rules are owned by
+[environment execution](../env-framework/execution.md). Finalization
 drains committed work; it does not commit a live rollout. Final partial vector
 batches use `commit_env_ids` to select dataset rows while preserving a full
 physical reset. The recorder requires an exactly representable integer FPS.
 
-Expert rollout actions use the environment's `ExpertActionSpec`, independently
-of the policy action space. The default position mode preserves active-joint
-qpos storage and rejects qvel/qf-only controller commands. Position-velocity
+Default expert rollout actions use the environment's `ExpertActionSpec`,
+independently of the policy action space. The default position mode preserves
+active-joint qpos storage and rejects qvel/qf-only controller commands. Position-velocity
 mode stores a flat `[qpos, qvel]` vector;
 LeRobot feature width and ordered names follow that layout, while episode and
 trajectory metadata publish its version, joint names, slices, mode, and
@@ -107,6 +158,7 @@ time are available through the recorder's async stats.
 
 | Change | Tests |
 |---|---|
+| Public schemas, sources, context wrappers and SDK reads | `tests/data_pipeline/test_schema.py`, `test_sources.py`, `test_lerobot_source.py` |
 | Worker states, valid sampling, continuity, DataLoader | `tests/data_pipeline/test_online_data.py` |
 | Sync commit, FPS, fragments and depth routing | `tests/gym/envs/managers/test_dataset_functors.py` |
 | Legacy/action-contract schemas and official task mapping | `tests/gym/envs/managers/test_dataset_functors.py` |
@@ -117,7 +169,7 @@ time are available through the recorder's async stats.
 For corrupt or duplicate recordings, establish whether failure preceded or
 followed the LeRobot commit before changing retry logic. For engine failure,
 inspect the shared worker error and attempt limit before adding consumer retries.
-Benchmark throughput using `scripts/benchmark/data_pipeline/benchmark_lerobot_save.py`
-with recorded hardware, image size, environment count and writer settings.
+Measure writer throughput using a runnable task, recording hardware, image size,
+environment count and writer settings alongside the results.
 The CPU-only `benchmark_segment_annotations.py` isolates the validated frame-map
 lookup from simulation and storage costs.

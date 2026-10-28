@@ -54,10 +54,10 @@ def fluid():
     scene.create_particle_set_batch = lambda entities: ParticleBatch(scene, entities)
     result = FluidObject(
         FluidObjectCfg(uid="water", spawn=FluidSpawnCfg(positions=points)),
-        points,
-        np.eye(4, dtype=np.float32),
         torch.device("cpu"),
-        on_write=lambda ids: None,
+    )
+    result._initialize_spawn_source(
+        points, np.eye(3, dtype=np.float32), on_write=lambda ids: None
     )
     result._initialize_spawn_declaration(2)
     result.attach_spawn_handles(
@@ -121,10 +121,10 @@ def test_integer_initial_velocity_is_normalized():
             uid="water",
             spawn=FluidSpawnCfg(positions=points, initial_velocity=(1, 0, 0)),
         ),
-        points,
-        np.eye(4, dtype=np.float32),
         torch.device("cpu"),
-        on_write=lambda ids: None,
+    )
+    fluid._initialize_spawn_source(
+        points, np.eye(3, dtype=np.float32), on_write=lambda ids: None
     )
     fluid._initialize_spawn_declaration(1)
     fluid.attach_spawn_handles([SimpleNamespace(index=0, particle_count=1)])
@@ -157,6 +157,7 @@ def test_rigid_trajectory_samples_solver_substeps_and_rewinds():
     poses = np.array([[0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 1]], dtype=np.float32)
     samples, velocities = [], []
     actor = SimpleNamespace(
+        _arena_index=1,
         set_world_pose=lambda value: samples.append(value.copy()),
         set_linear_velocity=lambda value: velocities.append(value.copy()),
         set_angular_velocity=lambda value: None,
@@ -169,7 +170,10 @@ def test_rigid_trajectory_samples_solver_substeps_and_rewinds():
         control(None, index, 3, 0.1)
     np.testing.assert_allclose([p[0, 3] for p in samples], [0, 0.1, 0.2])
     np.testing.assert_allclose(velocities[1], [1, 0, 0])
-    control.reset()
+    control.prepare_episode_reset((2,))()
+    control(None, 0, 1, 0.1)
+    assert samples[-1][0, 3] == pytest.approx(0.3)
+    control.prepare_episode_reset((1,))()
     control(None, 0, 1, 0.1)
     np.testing.assert_array_equal(samples[-1], samples[0])
     control.close()
@@ -202,3 +206,70 @@ def test_rigid_trajectory_rotation_hold_across_outer_steps():
     np.testing.assert_allclose(captured[4]["pose"], captured[5]["pose"])
     np.testing.assert_allclose(captured[5]["linear"], 0, atol=1e-6)
     np.testing.assert_allclose(captured[5]["angular"], 0, atol=1e-6)
+
+
+def test_constructor_only_copies_config_without_sampling(monkeypatch):
+    from unittest.mock import Mock
+
+    sample = Mock(side_effect=AssertionError("Construction must not sample."))
+    monkeypatch.setattr(FluidSpawnCfg, "sample", sample)
+    cfg = FluidObjectCfg(uid="water", spawn=FluidSpawnCfg(kind="box"))
+
+    fluid = FluidObject(cfg)
+    cfg.spawn.size = (9.0, 9.0, 9.0)
+
+    assert fluid.device == torch.device("cpu")
+    assert fluid.is_declared
+    assert fluid.cfg.spawn.size == (0.05, 0.05, 0.05)
+    sample.assert_not_called()
+    with pytest.raises(RuntimeError, match="source"):
+        _ = fluid.num_particles
+    with pytest.raises(RuntimeError, match="registered"):
+        _ = fluid.num_instances
+
+
+def test_binding_requires_a_resolved_source():
+    from unittest.mock import Mock
+
+    fluid = FluidObject(FluidObjectCfg(uid="water"))
+    fluid._initialize_spawn_declaration(1)
+    fluid.attach_spawn_handles([SimpleNamespace(index=0, particle_count=1)])
+    scene = SimpleNamespace(create_particle_set_batch=Mock())
+
+    with pytest.raises(RuntimeError, match="source"):
+        fluid.bind_spawn(scene)
+
+    scene.create_particle_set_batch.assert_not_called()
+
+
+def test_source_cache_is_independent_and_rotates_initial_velocity():
+    points = np.array([[0.01, 0.0, 0.0]], dtype=np.float32)
+    rotation = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+    fluid = FluidObject(
+        FluidObjectCfg(
+            uid="water",
+            init_rot=(0.0, 0.0, 90.0),
+            spawn=FluidSpawnCfg(positions=points, initial_velocity=(1, 0, 0)),
+        )
+    )
+    writes = []
+    fluid._initialize_spawn_source(points, rotation, on_write=writes.append)
+    fluid._initialize_spawn_declaration(1)
+    scene = SimpleNamespace(state=torch.tensor([[[0.0, 0.01, 0.0, 0.0, 0.0, 0.0]]]))
+    scene.create_particle_set_batch = lambda entities: ParticleBatch(scene, entities)
+    fluid.attach_spawn_handles([SimpleNamespace(index=0, particle_count=1)])
+    points.fill(99)
+    rotation.fill(0)
+
+    fluid.bind_spawn(scene)
+
+    torch.testing.assert_close(
+        fluid.data.particle_vel_w, torch.tensor([[[0.0, 1.0, 0.0]]])
+    )
+    fluid.reset_to_pose(torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]))
+    torch.testing.assert_close(
+        fluid.data.particle_pos_w, torch.tensor([[[0.01, 0.0, 0.0]]])
+    )
+    assert writes == [[0]]
+    with pytest.raises(RuntimeError, match="already"):
+        fluid._initialize_spawn_source(points, rotation, on_write=writes.append)

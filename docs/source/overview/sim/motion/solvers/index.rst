@@ -27,6 +27,8 @@ Choose a solver
      - Analytical IK for 6-DOF arms matching the OPW parameterization.
    * - :doc:`srs_solver`
      - Analytical IK for 7-DOF spherical-rotational-spherical arms.
+   * - :doc:`ssik_solver`
+     - Model-derived Warp IK for three-parallel 6R and strict SRS 7R chains, with an optional CPU reference.
    * - :doc:`ur_solver`
      - Analytical IK for supported Universal Robots models.
    * - :doc:`neural_ik_solver`
@@ -34,6 +36,8 @@ Choose a solver
 
 Analytical solvers require matching robot geometry. Numerical solvers support
 more general chains but depend on seed quality and convergence settings.
+For differentiable training and task-parameter optimization, use the standalone
+:doc:`Torch IK layer </overview/learning/differentiable_ik>`.
 
 .. _motion-solver-conventions:
 
@@ -74,5 +78,6 @@ For full signatures and configuration fields, see the
    pinocchio_solver
    opw_solver
    srs_solver
+   ssik_solver
    ur_solver
    neural_ik_solver

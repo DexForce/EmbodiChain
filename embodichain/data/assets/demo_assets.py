@@ -35,6 +35,7 @@ __all__ = [
     "MultiW1Data",
     "RubiksCube",
     "ScoopIceNewEnv",
+    "TabletopFourBases",
 ]
 
 
@@ -137,3 +138,29 @@ class RubiksCube(EmbodiChainDataset):
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
         super().__init__(prefix, data_descriptor, path)
+
+
+class TabletopFourBases(EmbodiChainDataset):
+    """Portable tabletop scene for grouped and intra-group layout demos.
+
+    The bundle contains ``scene_export/scene_config.json``, the explicit support
+    graph and twelve GLB assets. Layouts, preparation caches and previews are
+    generated in a caller-owned workspace rather than in this asset cache.
+    """
+
+    def __init__(self, data_root: str | None = None) -> None:
+        """Download and extract the four-support tabletop scene.
+
+        Args:
+            data_root: Optional cache root overriding the EmbodiChain default.
+        """
+        filename = "demo/tabletop_four_bases.zip"
+        hub_prefix = (
+            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
+        )
+        urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}"]
+        if EMBODICHAIN_DOWNLOAD_PREFIX != hub_prefix:
+            urls.append(f"{hub_prefix}{filename}")
+        descriptor = o3d.data.DataDescriptor(urls, "103d891625d1f9f90e1393d048ea87c2")
+        root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        super().__init__(type(self).__name__, descriptor, root)

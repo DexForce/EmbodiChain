@@ -40,6 +40,7 @@ from .articulation import (
 )
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .fluid import FluidObjectCfg, FluidSpawnCfg, FluidRenderCfg
+from .source import UsdSourceCfg
 from .deformable import (
     SurfaceElementPropertiesCfg,
     VolumeDeformableMeshingCfg,
@@ -64,6 +65,7 @@ from .rigid import (
     RigidBodyPhysicsCfg,
 )
 from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
+from .visual_object import VisualObjectCfg
 from .scene import LightCfg, RigidConstraintCfg
 from .physics import (
     DefaultPhysicsCfg,
@@ -121,8 +123,10 @@ __all__ = [
     "NewtonRigidBodyMaterialCfg",
     "RigidBodyPhysicsCfg",
     "ObjectBaseCfg",
+    "UsdSourceCfg",
     "LightCfg",
     "RigidObjectCfg",
+    "VisualObjectCfg",
     "DeformableObjectCfg",
     "VolumeDeformableObjectCfg",
     "SurfaceDeformableObjectCfg",

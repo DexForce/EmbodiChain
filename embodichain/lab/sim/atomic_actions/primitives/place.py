@@ -241,12 +241,6 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
-        hand_grasp_qpos = grasp.joint_positions(
-            GRASP_COMMAND,
-            num_envs=context.batch_size,
-            device=self.device,
-            dtype=context.robot.qpos.dtype,
-        )
         state = context
         held_mask = context.task.held_object_mask(task_state_key)
         exclusive_mask = context.task.exclusive_held_object_mask(task_state_key)
@@ -270,6 +264,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             place_xpos = place_xpos.unsqueeze(1)
 
         start_arm_qpos = arm_qpos_from_state(state, arm_joint_ids)
+        start_hand_qpos = state.last_qpos[:, hand_joint_ids]
         if isinstance(target, PlaceGoal) and target.tcp_symmetry == "z_roll_180":
             place_xpos = self._select_tcp_symmetric_place_variant(
                 place_xpos, start_arm_qpos, control_part
@@ -312,6 +307,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         )
         assert isinstance(motion_result.success, torch.Tensor)
         assert motion_result.positions is not None
+        assert motion_result.dt is not None
         down_arm, back_arm = split_joint_trajectory_at_pose(
             motion_result.positions,
             place_xpos[:, -1],
@@ -319,12 +315,28 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             control_part=control_part,
             first_sample_count=n_down,
             second_sample_count=n_back,
+            dt=motion_result.dt,
+            control_dt=context.control_dt,
         )
+        n_down = down_arm.shape[1]
+        n_back = back_arm.shape[1]
         reach_arm_qpos = down_arm[:, -1, :]
         success = motion_result.success & eligible
 
+        # A contact-blocked measured finger position does not retain the
+        # closing effort of its grasp target. Continue that target for held
+        # rows; free rows retain their observed hand state until release.
+        hand_grasp_qpos = grasp.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        hold_hand_qpos = torch.where(
+            held_mask.unsqueeze(1), hand_grasp_qpos, start_hand_qpos
+        )
         hand_open_path = interpolate_hand_qpos(
-            hand_grasp_qpos, hand_open_qpos, n_waypoints=n_open
+            hold_hand_qpos, hand_open_qpos, n_waypoints=n_open
         )
 
         n_settle = options.release_settle_steps
@@ -338,7 +350,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         )
         full[:, :, :] = state.last_qpos.unsqueeze(1)
         full[:, :n_down, arm_joint_ids] = down_arm
-        full[:, :n_down, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
+        full[:, :n_down, hand_joint_ids] = hold_hand_qpos.unsqueeze(1)
         full[:, open_start:settle_start, arm_joint_ids] = reach_arm_qpos.unsqueeze(1)
         full[:, open_start:settle_start, hand_joint_ids] = hand_open_path
         if n_settle:

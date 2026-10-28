@@ -50,7 +50,7 @@ from scripts.benchmark.rl.locomotion_ppo import (
 )
 
 ROOT = Path(__file__).resolve().parents[4]
-TASK_DIR = ROOT / "embodichain_tasks/configs/tasks/locomotion/velocity"
+TASK_DIR = ROOT / "extensions/embodichain_tasks/configs/tasks/locomotion/velocity"
 
 
 def _subprocess_env() -> dict[str, str]:

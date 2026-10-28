@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import torch
 import pytest
 import numpy as np
@@ -24,7 +25,7 @@ import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.cfg import RobotCfg, RenderCfg
-from embodichain.lab.sim.motion.solvers import PytorchSolver
+from embodichain.lab.sim.motion.solvers import PytorchSolver, PytorchSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils.utility import reset_all_seeds
 
@@ -39,6 +40,7 @@ def test_ik_removes_tcp_before_solving(monkeypatch, tcp_kind):
     solver.device = torch.device("cpu")
     solver.dof = 1
     solver._num_samples = 1
+    solver._is_only_position_constraint = False
     solver._seed_sampler = None
     solver.lower_qpos_limits = torch.tensor([-2.0])
     solver.upper_qpos_limits = torch.tensor([2.0])
@@ -72,6 +74,214 @@ def test_ik_removes_tcp_before_solving(monkeypatch, tcp_kind):
         torch.testing.assert_close(received[-1], flange_poses, atol=1e-7, rtol=0)
         torch.testing.assert_close(target, original_target, atol=0, rtol=0)
         np.testing.assert_array_equal(solver.get_tcp(), tcp)
+
+    valid, candidates = solver.get_ik(
+        target,
+        qpos_seed=torch.zeros((2, 1)),
+        return_all_solutions=True,
+    )
+    assert valid.shape == (2, 1)
+    assert candidates.shape == (2, 1, 1)
+
+
+@pytest.mark.no_sim
+def test_continuous_path_selection_tracks_previous_solution() -> None:
+    """Manipulability ordering cannot make a continuous path jump branches."""
+    solver = object.__new__(PytorchSolver)
+    solver.device = torch.device("cpu")
+    solver.dof = 1
+    solver.ik_nearest_weight = torch.ones(1)
+    candidates = torch.tensor(
+        [[[[0.1], [2.8]], [[2.9], [0.2]], [[0.3], [3.0]]]],
+        dtype=torch.float32,
+    )
+    valid = torch.ones(1, 3, 2, dtype=torch.bool)
+
+    path_valid, path = solver._select_continuous_ik_path(
+        candidates, valid, torch.zeros(1, 1)
+    )
+
+    assert path_valid.all()
+    torch.testing.assert_close(path, torch.tensor([[[0.1], [0.2], [0.3]]]))
+
+
+@pytest.mark.no_sim
+def test_return_all_solutions_preserves_candidate_validity(monkeypatch) -> None:
+    solver = object.__new__(PytorchSolver)
+    solver.device = torch.device("cpu")
+    solver.dof = 1
+    solver._num_samples = 2
+    solver._is_only_position_constraint = False
+    solver._seed_sampler = None
+    solver.lower_qpos_limits = torch.tensor([-2.0])
+    solver.upper_qpos_limits = torch.tensor([2.0])
+    solver.set_tcp(np.eye(4))
+    convergence = torch.tensor([True, False, False, True])
+    solutions = torch.tensor([[0.1], [0.2], [0.3], [0.4]])
+    monkeypatch.setattr(
+        solver,
+        "_compute_inverse_kinematics",
+        lambda target_pose, joint_seed: (convergence, solutions),
+    )
+
+    valid, candidates = solver.get_ik(
+        torch.eye(4).repeat(2, 1, 1),
+        qpos_seed=torch.zeros(2, 1),
+        return_all_solutions=True,
+    )
+
+    assert valid.tolist() == [[True, False], [False, True]]
+    torch.testing.assert_close(candidates, solutions.reshape(2, 2, 1))
+
+
+@pytest.mark.no_sim
+def test_continuous_path_selection_holds_last_solution_on_failure() -> None:
+    solver = object.__new__(PytorchSolver)
+    solver.device = torch.device("cpu")
+    solver.dof = 1
+    solver.ik_nearest_weight = torch.ones(1)
+    candidates = torch.tensor([[[[0.1]], [[float("nan")]], [[0.3]]]])
+    valid = torch.ones(1, 3, 1, dtype=torch.bool)
+
+    path_valid, path = solver._select_continuous_ik_path(
+        candidates, valid, torch.zeros(1, 1)
+    )
+
+    assert path_valid.tolist() == [[True, False, True]]
+    torch.testing.assert_close(path, torch.tensor([[[0.1], [0.1], [0.3]]]))
+
+
+@pytest.fixture
+def planar_cfg(tmp_path: Path) -> PytorchSolverCfg:
+    """A two-link planar arm cannot satisfy a rotation about X."""
+    source = tmp_path / "planar.urdf"
+    source.write_text(
+        '<robot name="planar"><link name="base"/><link name="first"/>'
+        '<link name="second"/><link name="tip"/>'
+        '<joint name="a" type="revolute"><parent link="base"/>'
+        '<child link="first"/><axis xyz="0 0 1"/>'
+        '<limit lower="-3" upper="3" effort="1" velocity="1"/></joint>'
+        '<joint name="b" type="revolute"><parent link="first"/>'
+        '<child link="second"/><origin xyz="1 0 0"/><axis xyz="0 0 1"/>'
+        '<limit lower="-3" upper="3" effort="1" velocity="1"/></joint>'
+        '<joint name="tool" type="fixed"><parent link="second"/>'
+        '<child link="tip"/><origin xyz="1 0 0"/></joint></robot>'
+    )
+    return PytorchSolverCfg(
+        urdf_path=str(source),
+        root_link_name="base",
+        end_link_name="tip",
+        joint_names=["a", "b"],
+        is_only_position_constraint=True,
+        pos_eps=1e-4,
+        rot_eps=1e-4,
+        max_iterations=120,
+        dt=0.5,
+        num_samples=1,
+    )
+
+
+def _planar_fk(qpos: torch.Tensor, tcp: np.ndarray) -> torch.Tensor:
+    """Independent closed-form FK for two unit-length links and a fixed tool."""
+    first, total = qpos[:, 0], qpos.sum(dim=-1)
+    pose = torch.eye(4, device=qpos.device).repeat(len(qpos), 1, 1)
+    pose[:, 0, 0] = pose[:, 1, 1] = total.cos()
+    pose[:, 1, 0] = total.sin()
+    pose[:, 0, 1] = -total.sin()
+    pose[:, 0, 3] = first.cos() + total.cos()
+    pose[:, 1, 3] = first.sin() + total.sin()
+    return pose @ torch.as_tensor(tcp, dtype=qpos.dtype, device=qpos.device)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "with_tcp,seed_selection,device",
+    [
+        (False, False, "cpu"),
+        (True, False, "cpu"),
+        (True, True, "cpu"),
+        pytest.param(True, False, "cuda", marks=pytest.mark.gpu),
+    ],
+)
+def test_position_only_dls_ignores_orientation_and_rejects_unreachable_position(
+    planar_cfg: PytorchSolverCfg, with_tcp: bool, seed_selection: bool, device: str
+) -> None:
+    tcp = np.eye(4)
+    if with_tcp:
+        tcp[:3, 3] = [0.25, 0.08, 0.04]
+        tcp[:3, :3] = [[1, 0, 0], [0, 0, -1], [0, 1, 0]]
+    planar_cfg.tcp = tcp
+    planar_cfg.enable_seed_selection = seed_selection
+    planar_cfg.seed_db_size = 128
+    planar_cfg.num_samples = 3 if seed_selection else 1
+    solver = planar_cfg.init_solver(device=device)
+    seeds = torch.tensor([[0.2, -0.4], [-0.2, 0.5], [0.2, -0.4]], device=device)
+    target = _planar_fk(
+        torch.tensor([[0.6, -0.7], [-0.4, 0.9], [0.6, -0.7]], device=device), tcp
+    )
+    target[:, :3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+    # Every configuration has the same TCP z; this third position is unreachable.
+    target[2, 2, 3] += 1.0
+    original = target.clone()
+    valid, candidates = solver.get_ik(target, seeds, return_all_solutions=True)
+    assert valid.shape == (3, planar_cfg.num_samples)
+    assert candidates.shape == (3, planar_cfg.num_samples, 2)
+    assert valid.any(dim=1).tolist() == [True, True, False]
+    actual = _planar_fk(candidates.reshape(-1, 2), tcp).reshape(3, -1, 4, 4)
+    error = torch.linalg.vector_norm(
+        actual[..., :3, 3] - target[:, None, :3, 3], dim=-1
+    )
+    assert (error[valid] < planar_cfg.pos_eps).all()
+    assert (candidates[valid].abs() <= 3.0).all()
+    torch.testing.assert_close(target, original, atol=0, rtol=0)
+
+    # Identical positions and seeds must give identical answers for another rotation.
+    target[:, :3, :3] = torch.eye(3)
+    other_valid, other_candidates = solver.get_ik(
+        target, seeds, return_all_solutions=True
+    )
+    assert torch.equal(valid, other_valid)
+    torch.testing.assert_close(candidates, other_candidates, atol=1e-6, rtol=0)
+
+
+@pytest.mark.no_sim
+def test_position_only_dls_updates_tcp_and_runtime_constraint_mode(
+    planar_cfg: PytorchSolverCfg,
+) -> None:
+    solver = planar_cfg.init_solver(device="cpu")
+    seed = torch.tensor([0.2, -0.4])
+    goal = torch.tensor([[0.6, -0.7]])
+    tcp = np.eye(4)
+    for offset in ([0.25, 0.08, 0.04], [-0.1, 0.15, -0.02]):
+        tcp[:3, 3] = offset
+        solver.set_tcp(tcp)
+        target = _planar_fk(goal, tcp)[0]
+        target[:3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+        valid, qpos = solver.get_ik(target, seed)
+        assert valid.tolist() == [True]
+        assert qpos.shape == (1, 1, 2)
+        actual = _planar_fk(qpos.reshape(1, 2), tcp)[0]
+        assert (actual[:3, 3] - target[:3, 3]).norm() < planar_cfg.pos_eps
+
+    params = solver.get_iteration_params()
+    assert params["is_only_position_constraint"] is True
+    assert solver.set_iteration_params(**params)
+    assert solver.get_iteration_params() == params
+    params["is_only_position_constraint"] = False
+    assert solver.set_iteration_params(**params)
+    # Full-pose mode must still reject the same unreachable orientation.
+    valid, _ = solver.get_ik(target, seed)
+    assert not valid.any()
+    full_target = _planar_fk(goal, tcp)
+    valid, qpos = solver.get_ik(full_target, seed)
+    assert valid.all(), (qpos, solver.pik.err_all, solver.get_iteration_params())
+    torch.testing.assert_close(
+        _planar_fk(qpos.reshape(1, 2), tcp), full_target, atol=3e-4, rtol=0
+    )
+    params["is_only_position_constraint"] = True
+    assert solver.set_iteration_params(**params)
+    valid, _ = solver.get_ik(target, seed)
+    assert valid.all()
 
 
 def grid_sample_qpos_from_limits(

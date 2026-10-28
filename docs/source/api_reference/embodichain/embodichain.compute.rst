@@ -31,6 +31,11 @@ and may omit interior input samples. ``warp_trajectory_qpos`` changes a joint
 trajectory using interpolated offsets at supplied keyframes; warping here
 means trajectory deformation.
 
+Use ``resample_with_distance(..., backend="torch")`` for dtype-preserving
+Torch resampling without entering Warp. The default ``auto`` path retains its
+float32 Warp implementation and Torch fallback. Both operate on batched paths;
+stationary paths and repeated endpoints remain valid inputs.
+
 .. code-block:: python
 
    import torch
@@ -47,6 +52,7 @@ means trajectory deformation.
    differentiate_positions
    resample_in_time
    interpolate_with_distance
+   interpolate_minimum_jerk
    interpolate_with_nums
    resample_with_distance
    sort_and_padding_key_frame
@@ -135,3 +141,34 @@ Geometry tensor kernels
    :maxdepth: 1
 
    embodichain.compute.scene_geometry
+
+Differentiable inverse kinematics
+--------------------------------
+
+The fixed-step DLS implementation preserves target and seed gradients through
+both FK and the geometric Jacobian. ``SerialChainKinematics`` adapts a copied
+PK chain without loading simulation. ``DifferentiableIKCfg`` configures the
+compute function and Torch layer; failed solves retain their last iterate.
+
+.. currentmodule:: embodichain.compute.kinematics
+
+.. autosummary::
+
+   damped_least_squares_step
+   solve_dls_ik
+   pose_error
+   SerialChainKinematics
+   DifferentiableIKCfg
+   DifferentiableIKResult
+
+.. automodule:: embodichain.compute.kinematics.dls
+   :members:
+
+.. automodule:: embodichain.compute.kinematics.pose_error
+   :members:
+
+.. automodule:: embodichain.compute.kinematics.serial_chain
+   :members:
+
+.. automodule:: embodichain.compute.kinematics.types
+   :members:

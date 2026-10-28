@@ -204,11 +204,13 @@ def _configure_newton_mimic_compliance(
     backend = get_newton_backend(result.world)
     if (
         backend is None
-        or backend.solver_type not in {"mujoco_warp", "sph"}
-        or backend.mujoco_solver is None
+        or backend.solver_type not in {"mujoco_warp", "dexuni"}
         or backend.cfg.requires_grad
         or (backend.model is not None and backend.model.requires_grad)
     ):
+        return False
+    solver = backend.mujoco_solver
+    if solver is None:
         return False
 
     relation_names = [
@@ -285,19 +287,21 @@ def _configure_newton_mimic_compliance(
             f"Newton model has no mimic constraint for joint pair {error.args[0]}."
         ) from error
 
-    solver = backend.mujoco_solver
     mapping = getattr(solver, "mjc_eq_to_newton_mimic", None)
     mjw_model = getattr(solver, "mjw_model", None)
     if mapping is None or mjw_model is None:
         raise RuntimeError("MuJoCo-Warp did not materialize Newton mimic rows.")
 
     mapping_values = np.asarray(mapping.numpy())
-    index_map = backend.get_mujoco_index_map(model.AttributeFrequency.CONSTRAINT_MIMIC)
-    if index_map is not None:
-        local_to_global = np.asarray(index_map.numpy())
-        valid = mapping_values >= 0
+    if backend.solver_type == "dexuni":
+        from newton import Model
+
+        scene_rows = backend.get_mujoco_index_map(
+            Model.AttributeFrequency.CONSTRAINT_MIMIC
+        ).numpy()
         mapping_values = mapping_values.copy()
-        mapping_values[valid] = local_to_global[mapping_values[valid]]
+        valid = mapping_values >= 0
+        mapping_values[valid] = scene_rows[mapping_values[valid]]
     selected = np.isin(mapping_values, constraint_rows)
     if int(selected.sum()) != len(constraint_rows):
         raise RuntimeError(
@@ -307,7 +311,9 @@ def _configure_newton_mimic_compliance(
     mimic_solref = _default_mujoco_mimic_solref(
         float(backend.cfg.dt),
         int(backend.cfg.num_substeps)
-        * int(getattr(backend.cfg.solver_cfg, "rigid_solver_substeps", 1)),
+        * int(
+            getattr(getattr(backend.cfg, "solver_cfg", None), "sph_rigid_substeps", 1)
+        ),
     )
     eq_solref[selected] = mimic_solref
     mjw_model.eq_solref.assign(eq_solref)

@@ -19,7 +19,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import ClassVar
 
 import torch
 
@@ -30,6 +31,7 @@ from embodichain.lab.sim.motion.expansion import (
 )
 
 from .plans import ActionPlan
+from ._expansion_phases import _canonical_samples, _free_joint_indices
 
 __all__ = ["ActionPlanTemplateAdapter"]
 
@@ -38,7 +40,7 @@ __all__ = ["ActionPlanTemplateAdapter"]
 class ActionPlanTemplateAdapter:
     """Export one explicit Atomic Action plan as a qpos template.
 
-    The first integration deliberately preserves the original control grid.
+    Canonical expansion removes zero-time joins; restoration retains the source grid.
     Every plan segment must declare its editable operators and phase kind;
     unlisted operators are rejected instead of being inferred from a skill name.
     """
@@ -84,13 +86,14 @@ class ActionPlanTemplateAdapter:
         source: ActionPlan,
         *,
         context: SourceContext,
+        row_index: int | None = None,
     ) -> TrajectoryTemplate:
         """Export a single-row, explicitly permissioned ActionPlan.
 
         Args:
-            source: Validated plan with one successful row and a retained qpos
-                trajectory.
+            source: Validated plan retaining a joint trajectory.
             context: Coordinator-owned source and scene identity.
+            row_index: Explicit batch row. Omission requires a single row.
 
         Returns:
             A detached :class:`TrajectoryTemplate` on the CPU/device of the
@@ -103,8 +106,14 @@ class ActionPlanTemplateAdapter:
         trajectory = source.joint_trajectory
         if trajectory is None:
             raise ValueError("ActionPlan must retain a joint trajectory")
-        if trajectory.batch_size != 1 or not source.success_all:
-            raise ValueError("the initial Atomic adapter supports one successful row")
+        if row_index is None:
+            if trajectory.batch_size != 1:
+                raise ValueError("select one successful row with row_index")
+            row_index = 0
+        if type(row_index) is not int or not 0 <= row_index < trajectory.batch_size:
+            raise ValueError("row_index must select a plan trajectory row")
+        if not bool(source.plan_success[row_index]):
+            raise ValueError("select one successful row with row_index")
         if trajectory.robot_dof != len(self.joint_names):
             raise ValueError("joint_names must cover the complete plan trajectory")
         declared = {segment.name for segment in source.segments}
@@ -112,32 +121,102 @@ class ActionPlanTemplateAdapter:
             raise ValueError(
                 "every ActionPlan segment requires an exact phase declaration"
             )
+        positions, dt, boundaries, _ = _canonical_samples(
+            trajectory.positions[row_index], trajectory.dt[row_index]
+        )
         phases = []
         for segment in source.segments:
+            start, stop = int(boundaries[segment.start]), int(boundaries[segment.stop])
+            if stop <= start:
+                # A terminal padding/zero-time phase has no editable interior.
+                continue
             phases.append(
                 TrajectoryPhase(
                     segment.name,
-                    segment.start,
-                    segment.stop,
+                    start,
+                    stop,
                     kind=self.phase_kinds[segment.name],
-                    allowed_operators=tuple(self.phase_permissions[segment.name]),
+                    allowed_operators=(
+                        tuple(self.phase_permissions[segment.name])
+                        if stop - start >= 3
+                        and self.phase_kinds[segment.name] == "free"
+                        else ()
+                    ),
                 )
             )
+        active = _free_joint_indices(
+            positions, tuple(phases), self.controlled_joint_indices
+        )
+        if not active:
+            phases = [replace(phase, allowed_operators=()) for phase in phases]
         return TrajectoryTemplate(
             source_id=context.source_id,
             source_revision=context.source_revision,
             template_id=context.unit_id,
             joint_names=self.joint_names,
-            positions=trajectory.positions[0],
-            dt=trajectory.dt[0],
+            positions=positions,
+            dt=dt,
             phases=tuple(phases),
             allowed_operators=tuple(
                 dict.fromkeys(
-                    operator
-                    for values in self.phase_permissions.values()
-                    for operator in values
+                    operator for phase in phases for operator in phase.allowed_operators
                 )
             ),
             validator_id=self.validator_id,
-            controlled_joint_indices=self.controlled_joint_indices,
+            controlled_joint_indices=active or self.controlled_joint_indices,
         )
+
+    def restore_positions(
+        self, source: ActionPlan, positions: torch.Tensor, *, row_index: int = 0
+    ) -> torch.Tensor:
+        """Restore canonical samples to the source grid and exact protected values.
+
+        Args:
+            source: Original plan used by :meth:`export_template`.
+            positions: Expanded canonical full-joint positions, shape ``(N, D)``.
+            row_index: Source batch row.
+
+        Returns:
+            Owned source-grid positions on the original dtype and device.
+        """
+        trajectory = source.joint_trajectory
+        if trajectory is None:
+            raise ValueError("ActionPlan must retain a joint trajectory")
+        original = trajectory.positions[row_index]
+        canonical, _, _, restore = _canonical_samples(
+            original, trajectory.dt[row_index]
+        )
+        if positions.shape != canonical.shape:
+            raise ValueError("expanded positions must preserve the canonical grid")
+        restored = positions[restore.to(positions.device)].to(original).clone()
+        # Only joints moving in editable phases may change. This also protects
+        # the stationary arm of a dual-arm action without control-part naming.
+        free = tuple(
+            TrajectoryPhase(
+                segment.name,
+                segment.start,
+                segment.stop,
+                allowed_operators=tuple(self.phase_permissions[segment.name]),
+            )
+            for segment in source.segments
+            if self.phase_permissions[segment.name]
+            and self.phase_kinds[segment.name] == "free"
+        )
+        active = _free_joint_indices(
+            original.detach().cpu(), free, self.controlled_joint_indices
+        )
+        protected = [
+            index for index in range(original.shape[-1]) if index not in active
+        ]
+        restored[:, protected] = original[:, protected]
+        for segment in source.segments:
+            restored[segment.start] = original[segment.start]
+            restored[segment.stop - 1] = original[segment.stop - 1]
+            if (
+                not self.phase_permissions[segment.name]
+                or self.phase_kinds[segment.name] != "free"
+            ):
+                restored[segment.start : segment.stop] = original[
+                    segment.start : segment.stop
+                ]
+        return restored

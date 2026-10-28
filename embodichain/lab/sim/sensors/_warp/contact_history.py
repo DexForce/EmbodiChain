@@ -84,6 +84,10 @@ def reduce_contact_rows(
     actors: wp.array(dtype=wp.int32, ndim=2),
     env_ids: wp.array(dtype=wp.int32),
     counts: wp.array(dtype=wp.int32),
+    quantity_valid: wp.array(dtype=wp.bool, ndim=2),
+    has_quantity_valid: bool,
+    impulse_available: bool,
+    friction_available: bool,
     keys: wp.array(dtype=wp.int64),
     rows: wp.array(dtype=wp.int32),
     counterparts: wp.array(dtype=wp.int64),
@@ -101,14 +105,19 @@ def reduce_contact_rows(
     env = env_ids[i]
     if env < 0 or env >= hits.shape[0] or hits.shape[1] == 0:
         return
-    force = (
-        wp.vec3(
-            data[i, 3] * data[i, 9] + data[i, 6],
-            data[i, 4] * data[i, 9] + data[i, 7],
-            data[i, 5] * data[i, 9] + data[i, 8],
-        )
-        / dt
-    )
+    normal_valid = impulse_available
+    tangent_valid = friction_available
+    if has_quantity_valid:
+        normal_valid = quantity_valid[i, 0]
+        tangent_valid = quantity_valid[i, 1]
+    # reduce_pair negates this vector for actor 0. Native friction already
+    # describes the impulse on actor 0, so subtract it here.
+    force = wp.vec3(0.0)
+    if normal_valid:
+        force = wp.vec3(data[i, 3], data[i, 4], data[i, 5]) * data[i, 9]
+    if tangent_valid:
+        force = force - wp.vec3(data[i, 6], data[i, 7], data[i, 8])
+    force = force / dt
     reduce_pair(
         env,
         actors[i, 0],
@@ -134,6 +143,8 @@ def reduce_contact_batch(
     normal: wp.array(dtype=wp.float32, ndim=3),
     friction: wp.array(dtype=wp.float32, ndim=3),
     impulse: wp.array(dtype=wp.float32, ndim=2),
+    impulse_valid: wp.array(dtype=wp.bool, ndim=2),
+    friction_valid: wp.array(dtype=wp.bool, ndim=2),
     keys: wp.array(dtype=wp.int64),
     rows: wp.array(dtype=wp.int32),
     counterparts: wp.array(dtype=wp.int64),
@@ -148,14 +159,17 @@ def reduce_contact_batch(
     env, i = wp.tid()
     if not valid[env, i] or hits.shape[1] == 0:
         return
-    force = (
-        wp.vec3(
-            normal[env, i, 0] * impulse[env, i] + friction[env, i, 0],
-            normal[env, i, 1] * impulse[env, i] + friction[env, i, 1],
-            normal[env, i, 2] * impulse[env, i] + friction[env, i, 2],
+    force = wp.vec3(0.0)
+    if impulse_valid[env, i]:
+        force = (
+            wp.vec3(normal[env, i, 0], normal[env, i, 1], normal[env, i, 2])
+            * impulse[env, i]
         )
-        / dt
-    )
+    if friction_valid[env, i]:
+        force = force - wp.vec3(
+            friction[env, i, 0], friction[env, i, 1], friction[env, i, 2]
+        )
+    force = force / dt
     reduce_pair(
         env,
         actors[env, i, 0],

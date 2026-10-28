@@ -99,13 +99,32 @@ def test_dirty_check_checks_index_and_worktree_independently(seed):
         build_snapshot(root, path)
 
 
-def test_extracts_only_unambiguous_absolute_module_imports_and_inheritance(seed):
+@pytest.mark.parametrize(
+    "package_path,module_root",
+    [
+        ("pkg", "pkg"),
+        (
+            "extensions/embodichain_models/embodichain_models/dynamics/nerd",
+            "embodichain_models.dynamics.nerd",
+        ),
+    ],
+)
+def test_extracts_only_unambiguous_absolute_module_imports_and_inheritance(
+    seed, package_path, module_root
+):
     data, root, path, schema = seed
+    source_a = f"{package_path}/a.py"
+    source_b = f"{package_path}/b.py"
+    write(root, source_b, (root / "pkg/b.py").read_text())
     write(
         root,
-        "pkg/a.py",
-        "from pkg.b import Beta as B\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\nclass Alpha(B):\n    def run(self):\n        return 1\n    def hidden(self):\n        import pkg.b\nraise RuntimeError('must never execute')\n",
+        source_a,
+        f"from {module_root}.b import Beta as B\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import {module_root}.b\nclass Alpha(B):\n    def run(self):\n        return 1\n    def hidden(self):\n        import {module_root}.b\nraise RuntimeError('must never execute')\n",
     )
+    locations = {"pkg/a.py": source_a, "pkg/b.py": source_b}
+    for item in [*data["nodes"], *data["edges"]]:
+        for evidence in item["evidence"]:
+            evidence["path"] = locations[evidence["path"]]
     data["nodes"][0]["evidence"][0]["excerpt"] = "class Alpha(B):"
     path.write_text(json.dumps(data))
     commit(root)
@@ -116,7 +135,7 @@ def test_extracts_only_unambiguous_absolute_module_imports_and_inheritance(seed)
     assert not any(p["start_line"] == 9 for e in extracted for p in e["evidence"])
     assert any("TYPE_CHECKING" in e["scope"] for e in extracted)
     assert all(e["id"] in result["views"][0]["edge_ids"] for e in extracted)
-    assert "pkg.a" not in sys.modules
+    assert f"{module_root}.a" not in sys.modules
     validate_snapshot(result, repo_root=root, schema_path=schema)
 
 

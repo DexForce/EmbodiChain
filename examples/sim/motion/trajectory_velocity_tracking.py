@@ -396,8 +396,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         robot: Robot = sim.add_robot(
             FrankaPandaCfg.from_dict({"uid": "tracking_franka"})
         )
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
+        sim.prepare()
         if not args.headless:
             sim.open_window()
         common_initial_qpos = robot.get_qpos().clone()

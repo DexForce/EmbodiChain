@@ -76,6 +76,141 @@ PROCESS_CLEANUP_TIMEOUT = 5.0
 LAB_PACKAGE_NAME = "embodichain.lab"
 
 
+def test_action_context_respects_locks_gaps_continuity_and_padded_provenance() -> None:
+    torch.manual_seed(13)
+    engine = _make_fake_engine(
+        buffer_size=2, max_episode_steps=6, lock_start=0, lock_end=1
+    )
+    source = engine.shared_buffer
+    source["valid"][1] = torch.tensor([True, True, False, True, True, True])
+    source["continuity_id"][1] = torch.tensor([0, 0, -1, 1, 1, 2])
+    source["obs"][0] = 1000
+    for index in range(6):
+        source["obs"][1, index] = index + 10
+    source["obs"][1, 2] = float("nan")
+    source["ods_frame_index"] = torch.arange(6).repeat(2, 1)
+    sample = engine.sample_batch_with_context(128, 2, 4)
+    assert sample.batch_size == (128, 5)
+    assert torch.isfinite(sample["obs"]).all()
+    assert not sample["loss_mask"][:, 0].any()
+    assert sample["valid"][:, 1].all()
+    assert (sample["ods_frame_index"][~sample["valid"]] == -1).all()
+    assert (sample["task_index"][~sample["valid"]] == -1).all()
+    assert (sample["subtask_index"][~sample["valid"]] == -1).all()
+    assert (sample["obs"][~sample["valid"]] == 0).all()
+    assert set(sample["ods_frame_index"][:, 1].tolist()) == {0, 1, 3, 4, 5}
+    spans = {0: {0, 1}, 1: {0, 1}, 3: {3, 4}, 4: {3, 4}, 5: {5}}
+    for row in range(128):
+        anchor = int(sample["ods_frame_index"][row, 1])
+        ids = sample["ods_frame_index"][row, sample["valid"][row]]
+        assert set(ids.tolist()) <= spans[anchor]
+        torch.testing.assert_close(
+            sample["obs"][row, sample["valid"][row], 0], ids.float() + 10
+        )
+    sample["obs"].zero_()
+    assert source["obs"][1, 0, 0] == 10
+
+
+@pytest.mark.parametrize("history,future", [(0, 2), (2, 0), (True, 2), (2, 1.5)])
+def test_action_context_rejects_invalid_lengths(history, future) -> None:
+    with pytest.raises(ValueError, match="positive integers"):
+        _make_fake_engine().sample_batch_with_context(2, history, future)
+
+
+@pytest.mark.parametrize("context", [False, True])
+def test_sample_owns_nested_noncontiguous_images_across_source_replacement(
+    context: bool,
+) -> None:
+    """Both sampling APIs detach every leaf, including repeated image indices."""
+    steps = 6
+    batch_size = 16  # One source row guarantees repeated anchors within the batch.
+    engine = _make_fake_engine(buffer_size=1, max_episode_steps=steps)
+    source = engine.shared_buffer
+    camera = torch.arange(steps * 2 * 3 * 4, dtype=torch.uint8).reshape(
+        1, steps, 2, 3, 4
+    )
+    source["obs"] = TensorDict(
+        {
+            "joint": source["obs"],
+            "cameras": TensorDict(
+                {"front": camera.transpose(-3, -2), "wrist": camera.flip(-1)},
+                batch_size=source.batch_size,
+            ),
+        },
+        batch_size=source.batch_size,
+    )
+    for key, value in (
+        ("ods_run_id", 17),
+        ("ods_episode_id", 23),
+        ("ods_generation", 1),
+        ("ods_accepted_at_ns", 100),
+        ("ods_published_at_monotonic_ns", 200),
+    ):
+        source[key] = torch.full(source.batch_size, value, dtype=torch.int64)
+    source["ods_frame_index"] = torch.arange(steps).reshape(1, steps)
+    source.share_memory_()
+    assert not source["obs", "cameras", "front"].is_contiguous()
+    original = source.clone()
+
+    def sample() -> TensorDict:
+        if context:
+            return engine.sample_batch_with_context(
+                batch_size, 2, 3, generator=torch.Generator().manual_seed(39)
+            )
+        return engine.sample_batch(batch_size, 1)
+
+    try:
+        batch = sample()
+        saved = batch.clone()
+        valid = batch["valid"]
+        frames = batch["ods_frame_index"].clamp(min=0)
+        anchor_index = 1 if context else 0
+        anchors = batch["ods_frame_index"][:, anchor_index]
+        assert anchors.unique().numel() < batch_size
+        for key, value in original.items(include_nested=True, leaves_only=True):
+            actual = batch[key]
+            assert (
+                actual.untyped_storage().data_ptr()
+                != source[key].untyped_storage().data_ptr()
+            )
+            expected = value[0, frames]
+            identifier = isinstance(key, str) and (
+                key.startswith("ods_") or key in {"task_index", "subtask_index"}
+            )
+            mask = valid.reshape(*valid.shape, *((1,) * (expected.ndim - valid.ndim)))
+            expected = expected.masked_fill(~mask, -1 if identifier else 0)
+            torch.testing.assert_close(actual, expected)
+            torch.testing.assert_close(source[key], value)
+
+        # Model a producer reusing the same physical slot, then another consumer read.
+        replacement = original.clone()
+        replacement["obs", "joint"].add_(10)
+        replacement["obs", "cameras", "front"].fill_(251)
+        replacement["obs", "cameras", "wrist"].fill_(252)
+        replacement["actions"].add_(10)
+        replacement["ods_episode_id"].fill_(24)
+        replacement["ods_generation"].fill_(2)
+        with engine._lock_index.get_lock():
+            source.copy_(replacement)
+        later = sample()
+        assert (later["ods_episode_id"][later["valid"]] == 24).all()
+        for key, value in saved.items(include_nested=True, leaves_only=True):
+            torch.testing.assert_close(batch[key], value)
+
+        # Duplicate gather positions own distinct output elements as well.
+        unique_anchors, counts = torch.unique(anchors, return_counts=True)
+        matches = (anchors == unique_anchors[counts.argmax()]).nonzero().flatten()
+        first, second = matches[:2].tolist()
+        for key, value in batch.items(include_nested=True, leaves_only=True):
+            second_before = value[second].clone()
+            value[first].zero_()
+            torch.testing.assert_close(value[second], second_before)
+            if key in source.keys(include_nested=True, leaves_only=True):
+                torch.testing.assert_close(source[key], replacement[key])
+    finally:
+        engine.stop()
+
+
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
@@ -200,6 +335,7 @@ def _make_fake_engine(
     engine._worker_error = None
     engine._owner_pid = os.getpid()
     engine._lifecycle_condition = threading.Condition(threading.RLock())
+    engine._process_status_lock = threading.RLock()
     engine._stop_requested = False
     engine._cleanup_complete = False
     engine._forced_shutdown_attempted = False
@@ -221,26 +357,419 @@ def _make_fake_engine(
     return engine
 
 
+def test_manual_refill_coalesces_pending_and_active_generation() -> None:
+    engine = _make_fake_engine(refill_threshold=1)
+    engine.cfg.refill_policy = "manual"
+    engine._progress = engine_module._ProducerProgress(engine._mp_ctx)
+    engine._progress.values[1] = 1
+    assert engine.request_refill() == 2
+    assert engine.request_refill() == 2
+    engine._fill_signal.clear()  # The producer accepted the same request.
+    assert engine.request_refill() == 2
+    engine.sample_batch(2, 1)
+    assert not engine._fill_signal.is_set()
+    assert engine._progress.values[6] == 2
+    engine._progress.values[1] = 2
+    assert engine.request_refill() == 3
+
+
+def test_generation_wait_rejects_unrequested_generation_and_times_out() -> None:
+    engine = _make_fake_engine()
+    engine._progress = engine_module._ProducerProgress(engine._mp_ctx)
+    engine._progress.values[1] = 1
+    engine.wait_for_generation(1, timeout=0.1)
+    with pytest.raises(ValueError, match="not been requested"):
+        engine.wait_for_generation(2, timeout=0.1)
+    engine._progress.values[0] = 2
+    with pytest.raises(TimeoutError):
+        engine.wait_for_generation(2, timeout=0.01)
+
+
+def test_manual_refill_requires_owner_and_ready() -> None:
+    engine = _make_fake_engine()
+    engine._owner_pid = -1
+    with pytest.raises(RuntimeError):
+        engine.request_refill()
+    engine._owner_pid = os.getpid()
+    engine._set_state(OnlineDataEngineState.STOPPED)
+    with pytest.raises(RuntimeError):
+        engine.request_refill()
+
+
+def test_stats_exclude_write_window_and_are_detached() -> None:
+    engine = _make_fake_engine(lock_start=0, lock_end=1)
+    engine._progress = engine_module._ProducerProgress(engine._mp_ctx)
+    engine.run_id = 12
+    stats = engine.get_stats()
+    assert stats["valid_frames"] == (BUFFER_SIZE - 1) * MAX_EPISODE_STEPS
+    engine._progress.add(2, 1)
+    assert stats["successful_episodes"] == 0
+    assert engine.get_stats()["successful_episodes"] == 1
+
+
+def test_config_buffer_allocates_independent_action_width() -> None:
+    from embodichain.lab.gym.utils.gym_utils import init_rollout_buffer_from_config
+
+    config = {"enable_sensor": False}
+    buffer = init_rollout_buffer_from_config(config, 5, 2, 9, action_dim=8)
+    assert buffer["obs", "robot", "qpos"].shape == (2, 5, 9)
+    assert buffer["actions"].shape == (2, 5, 8)
+    legacy = init_rollout_buffer_from_config(config, 5, 2, 9)
+    assert legacy["actions"].shape == (2, 5, 9)
+
+
+def test_new_config_options_preserve_legacy_positional_arguments() -> None:
+    cfg = OnlineDataEngineCfg(16, 300, 9, "cpu")
+    assert cfg.state_dim == 9 and cfg.buffer_device == "cpu"
+    assert cfg.action_dim is None and cfg.refill_policy == "sample_threshold"
+    assert cfg.shutdown_timeout == 5.0
+
+
+def test_worker_width_validation_uses_observation_selection_and_expert_layout() -> None:
+    from types import SimpleNamespace
+
+    attrs = {
+        "expert_action_spec": SimpleNamespace(width=8),
+        "rollout_action_semantics": "expert_controller_command",
+        "single_observation_space": {"robot": {"qpos": SimpleNamespace(shape=(7,))}},
+    }
+    env = SimpleNamespace(get_wrapper_attr=lambda name: attrs[name])
+    cfg = OnlineDataEngineCfg(state_dim=7, action_dim=8)
+    engine_module._validate_worker_dimensions(env, cfg)
+    cfg.action_dim = 9
+    with pytest.raises(ValueError, match="widths disagree"):
+        engine_module._validate_worker_dimensions(env, cfg)
+    cfg.action_dim, cfg.state_dim = 8, 9
+    with pytest.raises(ValueError, match="widths disagree"):
+        engine_module._validate_worker_dimensions(env, cfg)
+
+
+def _policy_recording_environment() -> SimpleNamespace:
+    """A seven-dimensional policy schema beside an eight-joint expert schema."""
+    joint_names = tuple(f"joint_{index}" for index in range(8))
+    terms = {
+        "arm": SimpleNamespace(
+            command_type="qpos", controlled_joint_ids=tuple(range(6))
+        ),
+        "grip": SimpleNamespace(command_type="qpos", controlled_joint_ids=(6, 7)),
+    }
+    descriptors = (
+        SimpleNamespace(
+            name="arm",
+            start=0,
+            stop=6,
+            term=SimpleNamespace(
+                contract="relative_pose/v1", action_dim=6, joint_names=joint_names[:6]
+            ),
+        ),
+        SimpleNamespace(
+            name="grip",
+            start=6,
+            stop=7,
+            term=SimpleNamespace(
+                contract="parallel_gripper/v1",
+                action_dim=1,
+                joint_names=joint_names[6:],
+            ),
+        ),
+    )
+    attrs = {
+        "rollout_action_semantics": "policy_request",
+        "expert_action_spec": SimpleNamespace(width=8),
+        "single_observation_space": {"robot": {"qpos": SimpleNamespace(shape=(9,))}},
+        "action_manager": SimpleNamespace(
+            descriptors=descriptors, total_action_dim=7, get_term=terms.__getitem__
+        ),
+        "robot": SimpleNamespace(joint_names=joint_names),
+    }
+    return SimpleNamespace(get_wrapper_attr=attrs.__getitem__, attrs=attrs)
+
+
+def test_policy_recording_validates_live_schema_independently_of_expert_width() -> None:
+    env = _policy_recording_environment()
+    cfg = OnlineDataEngineCfg(
+        state_dim=9,
+        action_dim=7,
+        action_semantics="policy_request",
+        action_contracts=("relative_pose/v1", "parallel_gripper/v1"),
+    )
+    engine_module._validate_worker_dimensions(env, cfg)
+    assert env.attrs["expert_action_spec"].width == 8
+
+
+@pytest.mark.parametrize(
+    "mismatch", ["semantics", "contracts", "slices", "joints", "width"]
+)
+def test_policy_recording_rejects_live_schema_mismatch(mismatch: str) -> None:
+    env = _policy_recording_environment()
+    cfg = OnlineDataEngineCfg(
+        state_dim=9,
+        action_dim=7,
+        action_semantics="policy_request",
+        action_contracts=("relative_pose/v1", "parallel_gripper/v1"),
+    )
+    manager = env.attrs["action_manager"]
+    if mismatch == "semantics":
+        env.attrs["rollout_action_semantics"] = "expert_controller_command"
+    elif mismatch == "contracts":
+        cfg.action_contracts = tuple(reversed(cfg.action_contracts))
+    elif mismatch == "slices":
+        manager.descriptors[1].start = 5
+    elif mismatch == "joints":
+        manager.descriptors[1].term.joint_names = ("joint_7", "joint_6")
+    else:
+        cfg.action_dim = 8
+    with pytest.raises(ValueError):
+        engine_module._validate_worker_dimensions(env, cfg)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"action_semantics": "unknown"},
+        {"action_semantics": "policy_request", "action_dim": 7},
+        {
+            "action_semantics": "policy_request",
+            "action_contracts": ("relative_pose/v1",),
+        },
+        {"action_contracts": ("relative_pose/v1",)},
+    ],
+)
+def test_recording_contract_requires_explicit_compatible_configuration(
+    options: dict,
+) -> None:
+    with pytest.raises(ValueError):
+        engine_module._validate_recording_config(OnlineDataEngineCfg(**options))
+
+
+def test_provenance_stamps_only_valid_frames_and_keeps_episode_frame_indices() -> None:
+    shape = (2, 4)
+    buffer = TensorDict(
+        {
+            "valid": torch.tensor(
+                [[True, True, False, False], [True, True, True, False]]
+            ),
+            **{
+                key: torch.full(shape, 999, dtype=torch.int64)
+                for key in (
+                    "ods_run_id",
+                    "ods_episode_id",
+                    "ods_generation",
+                    "ods_frame_index",
+                    "ods_accepted_at_ns",
+                    "ods_published_at_monotonic_ns",
+                )
+            },
+        },
+        batch_size=shape,
+    )
+    engine_module._populate_provenance(
+        buffer,
+        run_id=17,
+        generation=2,
+        episode_start=5,
+        accepted_at_ns=123456789,
+        published_monotonic_ns=987654321,
+    )
+    valid = buffer["valid"]
+    for key in buffer.keys():
+        if key != "valid":
+            assert (buffer[key][~valid] == -1).all()
+    assert buffer["ods_frame_index"].tolist() == [[0, 1, -1, -1], [0, 1, 2, -1]]
+    assert buffer["ods_episode_id"].tolist() == [[5, 5, -1, -1], [6, 6, 6, -1]]
+    assert (buffer["ods_accepted_at_ns"][valid] == 123456789).all()
+    assert (buffer["ods_published_at_monotonic_ns"][valid] == 987654321).all()
+    assert (buffer["ods_run_id"][valid] == 17).all()
+    assert (buffer["ods_generation"][valid] == 2).all()
+
+
 def _install_fake_starting_worker(
     engine: OnlineDataEngine, *, initialize: bool = True
 ) -> MagicMock:
     """Install a process mock that optionally completes the initial fill."""
     process = MagicMock(pid=1234, exitcode=None)
     process.is_alive.return_value = True
+    sentinel_read, sentinel_write = os.pipe()
+    process.sentinel = sentinel_read
+    write_closed = False
 
     def join(timeout=None) -> None:
+        nonlocal write_closed
         if timeout is None:
             engine._close_signal.wait(timeout=5.0)
         if engine._close_signal.is_set():
             process.is_alive.return_value = False
+            if not write_closed:
+                os.close(sentinel_write)
+                write_closed = True
 
     process.join.side_effect = join
+    process.close.side_effect = lambda: os.close(sentinel_read)
     if initialize:
         process.start.side_effect = engine._init_signal.set
     process_context = MagicMock()
     process_context.Process.return_value = process
     engine._mp_ctx = process_context
     return process
+
+
+def _forkserver_lifecycle_worker(
+    started: mp.Event,
+    finish: mp.Event,
+    exit_code: int,
+    error_channels: tuple | None,
+) -> None:
+    """Exercise parent status handling without importing a simulator."""
+    started.set()
+    if not finish.wait(CONSUMER_RESULT_TIMEOUT):
+        os._exit(124)
+    if error_channels is not None:
+        engine_module._publish_worker_error(
+            *error_channels, ValueError("original recorder close failure")
+        )
+    os._exit(exit_code)
+
+
+def _start_lifecycle_worker(
+    engine: OnlineDataEngine,
+    *,
+    finish: mp.Event | None = None,
+    exit_code: int = 0,
+    publish_close_error: bool = False,
+) -> mp.Process:
+    started = engine._mp_ctx.Event()
+    channels = (
+        engine._worker_error_buffer,
+        engine._worker_error_length,
+        engine._worker_failed_signal,
+        engine._state_value,
+    )
+    process = engine._mp_ctx.Process(
+        target=_forkserver_lifecycle_worker,
+        args=(
+            started,
+            engine._close_signal if finish is None else finish,
+            exit_code,
+            channels if publish_close_error else None,
+        ),
+    )
+    process.start()
+    engine._sim_process = process
+    assert started.wait(CONSUMER_RESULT_TIMEOUT), "Lifecycle worker did not start"
+    engine._monitor_thread = threading.Thread(
+        target=engine_module._monitor_worker_process,
+        args=(
+            process,
+            engine._process_status_lock,
+            engine._close_signal,
+            *channels,
+        ),
+        daemon=True,
+    )
+    engine._monitor_thread.start()
+    return process
+
+
+def test_forkserver_monitor_preserves_normal_shutdown_status() -> None:
+    """A monitor and owner must preserve the real zero status after close()."""
+    engine = _make_fake_engine()
+    process = _start_lifecycle_worker(engine)
+    popen = process._popen
+    monitor = engine._monitor_thread
+    try:
+        engine.stop()
+        assert popen.returncode == 0
+        assert monitor is not None and not monitor.is_alive()
+        assert engine.state is OnlineDataEngineState.STOPPED
+        assert not engine._worker_failed_signal.is_set()
+    finally:
+        engine.stop()
+
+
+def test_forkserver_status_pipe_has_one_reader_during_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pause the real status read where competing joins formerly produced 255."""
+    import multiprocessing.forkserver as forkserver
+
+    engine = _make_fake_engine()
+    process = _start_lifecycle_worker(engine)
+    popen = process._popen
+    original_read = forkserver.read_signed
+    first_read, second_read, release_read = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
+    readers: list[int] = []
+    errors: list[BaseException] = []
+
+    def paused_read(sentinel: int) -> int:
+        readers.append(threading.get_ident())
+        first_read.set()
+        if len(readers) > 1:
+            second_read.set()
+        assert release_read.wait(PROCESS_CLEANUP_TIMEOUT)
+        return original_read(sentinel)
+
+    def stop() -> None:
+        try:
+            engine.stop()
+        except BaseException as error:
+            errors.append(error)
+
+    monkeypatch.setattr(forkserver, "read_signed", paused_read)
+    owner = threading.Thread(target=stop)
+    owner.start()
+    try:
+        assert first_read.wait(PROCESS_CLEANUP_TIMEOUT)
+        # An old monitor.join() enters the same pipe read while the first
+        # reader is paused. The status lock now permits only one consumer.
+        competing_read = second_read.wait(0.2)
+    finally:
+        release_read.set()
+        owner.join(PROCESS_CLEANUP_TIMEOUT)
+        monkeypatch.setattr(forkserver, "read_signed", original_read)
+        if owner.is_alive():
+            engine._close_signal.set()
+    assert not owner.is_alive()
+    assert errors == []
+    assert not competing_read and len(readers) == 1
+    assert popen.returncode == 0
+    assert engine._cleanup_complete
+
+
+def test_forkserver_monitor_broadcasts_real_hard_exit_code() -> None:
+    """Sentinel monitoring still publishes an unexpected nonzero worker exit."""
+    engine = _make_fake_engine()
+    finish = engine._mp_ctx.Event()
+    process = _start_lifecycle_worker(engine, finish=finish, exit_code=23)
+    popen = process._popen
+    finish.set()
+    try:
+        assert engine._worker_failed_signal.wait(PROCESS_CLEANUP_TIMEOUT)
+        with pytest.raises(RuntimeError, match="exit code 23"):
+            engine.stop()
+        assert popen.returncode == 23
+        assert engine.state is OnlineDataEngineState.FAILED
+        assert engine._cleanup_complete
+    finally:
+        engine.stop()
+
+
+def test_forkserver_shutdown_preserves_original_worker_exception() -> None:
+    """A real close-time exception survives monitor/owner status serialization."""
+    engine = _make_fake_engine()
+    process = _start_lifecycle_worker(engine, publish_close_error=True)
+    popen = process._popen
+    try:
+        with pytest.raises(ValueError, match="original recorder close failure"):
+            engine.stop()
+        assert popen.returncode == 0
+        assert engine.state is OnlineDataEngineState.FAILED
+        assert engine._cleanup_complete
+    finally:
+        engine.stop()
 
 
 def _sample_engine_in_subprocess(
@@ -343,7 +872,7 @@ class TestOnlineDataEngine:
         )
 
         def make_environment(*, id: str, cfg: object) -> MagicMock:
-            assert id == "SimpleTask-v1"
+            assert id == "TaskProgramRepeatedPickPlace-Franka-v1"
             assert cfg is env_cfg
             assert task_packages_registered
             return env
@@ -367,7 +896,10 @@ class TestOnlineDataEngine:
 
         engine_module._run_sim_worker(
             OnlineDataEngineCfg(
-                gym_config={"id": "SimpleTask-v1", "num_envs": 1},
+                gym_config={
+                    "id": "TaskProgramRepeatedPickPlace-Franka-v1",
+                    "num_envs": 1,
+                },
             ),
             TensorDict({}, batch_size=[1, 1]),
             context.Array("i", [0, 1]),
@@ -435,7 +967,24 @@ class TestOnlineDataEngine:
             },
             batch_size=[1, 3],
         )
+        for key in (
+            "ods_run_id",
+            "ods_episode_id",
+            "ods_generation",
+            "ods_frame_index",
+            "ods_accepted_at_ns",
+        ):
+            buffer[key] = torch.full(buffer.batch_size, -1, dtype=torch.int64)
         lock = context.Array("i", [0, 1])
+        lifecycle_events = engine_module._LifecycleEvents(context, 2, 3)
+        original_populate = engine_module._populate_provenance
+
+        def stamp_while_locked(*args: object, **kwargs: object) -> None:
+            assert lock.get_lock()._semlock._is_mine()
+            original_populate(*args, **kwargs)
+
+        monkeypatch.setattr(engine_module, "_populate_provenance", stamp_while_locked)
+        monkeypatch.setattr(engine_module.time, "time_ns", lambda: 123456789)
         fill, close = context.Event(), context.Event()
         fill.set()
         initialized = MagicMock()
@@ -445,6 +994,11 @@ class TestOnlineDataEngine:
         def publish_ready() -> None:
             assert list(lock[:]) == [-1, -1]
             published.append(registry.resolve(buffer["subtask_index"], kind="subtask"))
+            events = lifecycle_events.drain()
+            assert len(events) == 1
+            assert events[0]["kind"] == "published"
+            assert events[0]["eligible_anchors"] == 3
+            assert events[0]["episode_id"] == 0
             close.set()
             fill.set()
 
@@ -457,7 +1011,9 @@ class TestOnlineDataEngine:
 
         monkeypatch.setattr(registry, "intern", register_while_locked)
         engine_module._run_sim_worker(
-            OnlineDataEngineCfg(gym_config={"id": "Fake-v1", "num_envs": 1}),
+            OnlineDataEngineCfg(
+                gym_config={"id": "Fake-v1", "num_envs": 1}, include_provenance=True
+            ),
             buffer,
             lock,
             fill,
@@ -471,9 +1027,12 @@ class TestOnlineDataEngine:
             ),
             [False],
             registry,
+            lifecycle_events=lifecycle_events,
         )
         assert published == [[["Pick", "Place", "Place"]]]
         assert registry.resolve(buffer["task_index"]) == [["Overall"] * 3]
+        assert buffer["ods_frame_index"].tolist() == [[0, 1, 2]]
+        assert buffer["ods_accepted_at_ns"].tolist() == [[123456789] * 3]
         env.close.assert_called_once_with()
 
     def test_start_transitions_through_starting_to_ready(self) -> None:
@@ -575,6 +1134,34 @@ class TestOnlineDataEngine:
 
         with pytest.raises(ValueError, match="must be finite"):
             OnlineDataEngine(cfg)
+
+    @pytest.mark.parametrize(
+        "timeout", [0.0, -1.0, float("nan"), float("inf"), float("-inf")]
+    )
+    def test_shutdown_timeout_rejects_nonpositive_or_nonfinite_values(
+        self, timeout: float
+    ) -> None:
+        """The graceful-close bound must be finite and allow forward progress."""
+        with pytest.raises(ValueError, match="shutdown_timeout must be finite"):
+            OnlineDataEngine(OnlineDataEngineCfg(shutdown_timeout=timeout))
+
+    @pytest.mark.parametrize("timeout", [None, 30.0])
+    def test_stop_uses_default_or_configured_graceful_shutdown_timeout(
+        self, timeout: float | None
+    ) -> None:
+        """A longer graceful close does not require forced termination."""
+        process = self.engine._sim_process
+        if timeout is not None:
+            self.engine.cfg.shutdown_timeout = timeout
+
+        self.engine.stop()
+
+        process.join.assert_called_once_with(
+            timeout=5.0 if timeout is None else timeout
+        )
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
+        assert self.engine.state is OnlineDataEngineState.STOPPED
 
     def test_sampling_reraises_original_runtime_worker_exception(self) -> None:
         """A refill failure is surfaced before any stale batch is returned."""
@@ -793,8 +1380,10 @@ class TestOnlineDataEngine:
         assert self.engine._worker_failed_signal.is_set()
         assert self.engine._cleanup_complete
 
-    def test_forced_termination_fails_durability_contract(self) -> None:
+    @pytest.mark.parametrize("timeout", [5.0, 30.0])
+    def test_forced_termination_fails_durability_contract(self, timeout: float) -> None:
         """Needing terminate means graceful recorder durability is unconfirmed."""
+        self.engine.cfg.shutdown_timeout = timeout
         process = self.engine._sim_process
         process.join.side_effect = None
         process.is_alive.return_value = True
@@ -811,6 +1400,11 @@ class TestOnlineDataEngine:
 
         assert self.engine.state is OnlineDataEngineState.FAILED
         assert self.engine._cleanup_complete
+        assert [call.kwargs["timeout"] for call in process.join.call_args_list] == [
+            timeout,
+            3.0,
+        ]
+        process.kill.assert_not_called()
 
     def test_stop_surfaces_worker_failure_during_shutdown(self) -> None:
         """A recorder failure during worker close cannot be published as stopped."""
@@ -1533,3 +2127,220 @@ class TestOnlineDatasetDynamicChunk(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _event_test_record(
+    episode_id: int, *, kind: str = "published"
+) -> dict[str, object]:
+    return {
+        "kind": kind,
+        "run_id": 42,
+        "episode_id": episode_id,
+        "generation": 1 + episode_id // 2,
+        "slot": episode_id % 2,
+        "monotonic_ns": 1234 + episode_id,
+        "valid_frame_indices": [0, 1, 3],
+        "eligible_anchor_indices": [0, 3],
+    }
+
+
+def _publish_lifecycle_in_subprocess(events, close, blocked, finished) -> None:
+    """Exercise real shared memory and interruptible backpressure without a GPU."""
+    for episode in range(4):
+        if not events.wait_for_space(1, close):
+            return
+        events.append(_event_test_record(episode))
+    blocked.set()
+    if events.wait_for_space(1, close):
+        events.append(_event_test_record(4))
+    finished.set()
+
+
+@pytest.mark.parametrize("release_with_close", [False, True])
+def test_lifecycle_ring_subprocess_backpressure_and_shutdown(
+    release_with_close,
+) -> None:
+    context = mp.get_context("forkserver")
+    events = engine_module._LifecycleEvents(context, capacity=4, max_steps=5)
+    close, blocked, finished = (context.Event() for _ in range(3))
+    process = context.Process(
+        target=_publish_lifecycle_in_subprocess,
+        args=(events, close, blocked, finished),
+    )
+    process.start()
+    try:
+        assert blocked.wait(20), "producer did not fill the ring"
+        assert not finished.wait(0.1), "full ring must backpressure, not drop records"
+        if release_with_close:
+            close.set()
+            assert finished.wait(5)
+        initial = events.drain()
+        assert [item["sequence"] for item in initial] == list(range(4))
+        assert [item["episode_id"] for item in initial] == list(range(4))
+        assert all(item["eligible_anchors"] == 2 for item in initial)
+        assert all(item["valid_frame_indices"] == [0, 1, 3] for item in initial)
+        if not release_with_close:
+            assert finished.wait(5)
+            assert events.drain()[0]["sequence"] == 4
+        else:
+            assert events.drain() == []
+        process.join(5)
+        assert process.exitcode == 0
+        assert initial[0]["episode_id"] == 0  # Detached after ring slot reuse.
+    finally:
+        close.set()
+        process.join(5)
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+
+
+def test_lifecycle_events_owner_only_and_drain_after_stop() -> None:
+    engine = _make_fake_engine()
+    assert engine.drain_lifecycle_events() == []
+    engine._lifecycle_events = engine_module._LifecycleEvents(
+        engine._mp_ctx, capacity=4, max_steps=5
+    )
+    engine._lifecycle_events.append(_event_test_record(1))
+    engine._set_state(OnlineDataEngineState.STOPPED)
+    assert engine.drain_lifecycle_events()[0]["episode_id"] == 1
+    engine._owner_pid = -1
+    with pytest.raises(RuntimeError, match="owner"):
+        engine.drain_lifecycle_events()
+    engine._owner_pid = os.getpid()
+
+
+@pytest.mark.parametrize("capacity", [-1, 1, 3, True, 1.5])
+def test_lifecycle_capacity_rejects_inadequate_initial_fill_storage(capacity) -> None:
+    with pytest.raises(ValueError, match="lifecycle_event_capacity"):
+        OnlineDataEngine(
+            OnlineDataEngineCfg(buffer_size=2, lifecycle_event_capacity=capacity)
+        )
+
+
+def test_publication_event_distinguishes_valid_frames_from_eligible_anchors() -> None:
+    row = TensorDict(
+        {
+            "valid": torch.tensor([True, False, True, True]),
+            "continuity_id": torch.tensor([0, -1, -1, 2]),
+        },
+        batch_size=[4],
+    )
+    event = engine_module._publication_event(
+        row, run_id=1, episode_id=2, generation=3, slot=4, monotonic_ns=5
+    )
+    assert event["valid_frame_indices"] == [0, 2, 3]
+    assert event["eligible_anchor_indices"] == [0, 3]
+
+
+def test_worker_lifecycle_publication_and_eviction_use_distinct_episode_ids(
+    monkeypatch,
+) -> None:
+    """Run the real producer loop with a CPU-only environment adapter."""
+    context = mp.get_context("forkserver")
+    buffer = TensorDict(
+        {
+            "valid": torch.ones(1, 4, dtype=torch.bool),
+            "continuity_id": torch.zeros(1, 4, dtype=torch.int64),
+        },
+        batch_size=[1, 4],
+    )
+    lock = context.Array("i", [0, 1])
+    fill, close = context.Event(), context.Event()
+    fill.set()
+    events = engine_module._LifecycleEvents(context, capacity=2, max_steps=4)
+    initialized = MagicMock()
+    initialized.is_set.side_effect = [False, True]
+    collected = []
+
+    def initialize() -> None:
+        collected.extend(events.drain())
+        fill.set()
+
+    initialized.set.side_effect = initialize
+    env = MagicMock()
+    config = SimpleNamespace(
+        num_envs=1,
+        sim_cfg=SimpleNamespace(
+            headless=True,
+            render_cfg=SimpleNamespace(renderer=None),
+            gpu_id=0,
+            device=None,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules, "gymnasium", SimpleNamespace(make=lambda **kwargs: env)
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "embodichain.lab.gym.utils.gym_utils",
+        SimpleNamespace(
+            config_to_cfg=lambda *args, **kwargs: config, get_manager_modules=lambda: []
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "embodichain.lab.gym.utils.registration",
+        SimpleNamespace(discover_task_packages=lambda: []),
+    )
+    calls = 0
+
+    def execute(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            # Successful shorter replacement must report only its valid frames.
+            buffer["valid"][0, 2:] = False
+            close.set()
+            fill.set()
+        return SimpleNamespace(completed=True, all_success=True)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "embodichain.lab.gym.envs.demo",
+        SimpleNamespace(execute_demo_episode=execute),
+    )
+    monkeypatch.delenv("EMBODICHAIN_SIM_EXIT_PROCESS", raising=False)
+    engine_module._run_sim_worker(
+        OnlineDataEngineCfg(gym_config={"id": "Fake-v1", "num_envs": 1}),
+        buffer,
+        lock,
+        fill,
+        initialized,
+        close,
+        context.Array("B", engine_module._ERROR_BUFFER_SIZE),
+        context.Value("i", 0),
+        context.Event(),
+        context.Value("i", 0),
+        [False],
+        progress=engine_module._ProducerProgress(context),
+        run_id=42,
+        lifecycle_events=events,
+    )
+    collected.extend(events.drain())
+    assert [event["kind"] for event in collected] == [
+        "published",
+        "evicted",
+        "published",
+    ]
+    assert [event["episode_id"] for event in collected] == [0, 0, 1]
+    assert [event["generation"] for event in collected] == [1, 1, 2]
+    assert [event["valid_frames"] for event in collected] == [4, 4, 2]
+    assert [event["sequence"] for event in collected] == [0, 1, 2]
+    assert (
+        collected[0]["monotonic_ns"]
+        <= collected[1]["monotonic_ns"]
+        <= collected[2]["monotonic_ns"]
+    )
+    assert list(lock[:]) == [-1, -1]
+    env.close.assert_called_once()
+
+
+def test_lifecycle_capacity_accounts_for_initial_overlapping_write_window() -> None:
+    # C=5, P=4 publishes 8 episodes and evicts 3 even before start returns.
+    with pytest.raises(ValueError, match="initial-fill"):
+        OnlineDataEngine(
+            OnlineDataEngineCfg(
+                buffer_size=5, gym_config={"num_envs": 4}, lifecycle_event_capacity=10
+            )
+        )

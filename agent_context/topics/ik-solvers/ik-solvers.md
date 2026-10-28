@@ -30,6 +30,7 @@ current options and dependencies. The main change sites are:
 | Need | Solver module under `motion/solvers/` |
 |---|---|
 | Analytical structure for SRS, OPW, UR or Franka (FEP) arms | `srs_solver.py`, `opw_solver.py`, `ur_solver.py`, `fep_solver.py` |
+| Model-derived 6R / SRS 7R, opt-in near-parallel correction, prepared Warp RR on CPU/CUDA and optional pinned CPU reference | `ssik_solver.py` |
 | General iterative PK solve and multi-start seeds | `pytorch_solver.py` |
 | Reduced Pinocchio model or task-based QP | `pinocchio_solver.py`, `pink_solver.py` |
 | Jacobian differential commands | `differential_solver.py` |
@@ -38,6 +39,11 @@ current options and dependencies. The main change sites are:
 Use [add-solver](../../../.agents/skills/add-solver/SKILL.md) for a new solver.
 Read [solver details](solver-details.md) for cross-call state, analytical buffer
 ownership, Pink frame/limit adaptation or seed-cache invalidation.
+
+For graph-preserving fixed-step DLS, use the standalone
+[learning layers](../learning-layers/learning-layers.md). They call the compute
+implementation directly without a registered runtime solver. Existing solver
+names do not imply end-to-end differentiability.
 
 ## Frame and result contracts
 
@@ -52,13 +58,19 @@ own any conversion.
 leading batch axes. FK returns `(..., 4, 4)`; nearest IK returns boolean success
 `(...)` and qpos `(..., dof)` without a candidate axis. Robot broadcasts root
 transforms over those axes without materializing per-target copies.
+`BaseSolver.get_fk()` falls back to the same eager PK computation if the optional
+compiled FK fails at warmup or later encounters a Dynamo compilation/cache limit.
+That fallback preserves TCP application and gradients; ordinary input/runtime
+errors still propagate. Do not raise global compiler-cache limits to make a
+multi-robot benchmark complete.
 
 Concrete `get_ik()` APIs retain their own candidate and failure shapes. Pink
 returns `(N, 1, dof)`. Pytorch's normal nearest path retains a singleton
-candidate axis and its all-solutions path returns `(N, samples, dof)`, but its
-early all-targets-failed path returns `(N, dof)`. Do not squeeze blindly or
-assume all-solutions masks share one universal shape. Preserve batch size one;
-prefer the batch adapter when only the nearest solution is needed.
+candidate axis when successful and returns `(N, dof)` when every target fails.
+Its all-solutions path always returns validity `(N, samples)` and positions
+`(N, samples, dof)`, including the early all-targets-failed path. Do not squeeze
+blindly or assume all-solutions masks share one universal shape. Preserve batch
+size one; prefer the batch adapter when only the nearest solution is needed.
 
 ## Continuous batch IK
 
@@ -68,14 +80,21 @@ generation. Unsupported solvers raise `ValueError`; independent per-target IK
 remains available without that capability.
 
 A supporting solver supplies all-candidate IK and `_select_continuous_ik_path`.
+Robot calls `_get_continuous_ik_path` after coordinate conversion; its default
+implementation generates candidates and invokes that selector. A solver may
+override this target-aware hook when generation depends on each previous result.
 The hook consumes candidates `(B, N, K, dof)`, validity `(B, N, K)` and initial
 seeds `(B, dof)`, returning validity `(B, N)` and a path `(B, N, dof)`.
 Candidate count `K` belongs to the solver; OPW implements this capability.
+Pytorch also implements it by choosing each valid multi-start candidate nearest
+to the preceding selected posture under `ik_nearest_weight`; this continuous
+path selection is independent of its ordinary per-target
+`ik_solution_selection` policy.
 
 ## Computation and state ownership
 
 Stateful configuration, device buffers, seed policy, TCP and limit updates stay
-in `lab/sim/motion/solvers`. Pure OPW/SRS/UR/FEP kernels belong to
+in `lab/sim/motion/solvers`. Pure OPW/SRS/UR/FEP/SSIK kernels belong to
 `compute/kinematics/_warp/` and cannot import simulation modules.
 `utils/warp/kinematics/*_solver.py` retains compatibility aliases only.
 
@@ -83,7 +102,11 @@ Analytical scratch reuse must not let later calls mutate earlier public results.
 See [buffer lifecycle](solver-details.md#analytical-buffers-and-selection) before
 changing allocation, stream behavior or nearest/all-solutions dispatch.
 
-FEP validates Franka-compatible URDF geometry and shares one CPU/CUDA kernel.
+FEP validates Franka-compatible URDF geometry at its configured `reference_qpos`
+and shares one CPU/CUDA kernel. The optional reference posture rebases geometric
+reconstruction; joint inputs, outputs, seeds, limits and final FK acceptance keep
+the original URDF coordinates. `axis_alignment_tolerance` permits explicitly
+calibrated CAD-axis deviations without relaxing the separate FK tolerances.
 The seed fixes q7 unless `redundancy_search` is enabled; finite search failure
 does not prove global unreachability. Arm-angle preferences are soft, while
 FK acceptance, joint limits and `max_joint_step` remain hard constraints.
@@ -96,6 +119,53 @@ scores use weighted seed distance to avoid mirror-branch jumps from roundoff.
 Franka defaults to FEP with `redundancy_search=True`; the
 `examples/sim/motion/solvers/fep_solver.py` circle demo uses that robot default
 and adds a per-step joint bound for its 50 Hz commands.
+
+SSIK derives normalized POE geometry from the actual PK chain. Strict Warp accepts
+three-parallel 6R or concurrent-shoulder/wrist SRS 7R. Explicit near-parallel 6R
+mode generates geometric branches and applies bounded original-model numerical
+polishing; it must not be described as pure geometric IK. Explicit Warp
+`geometry_mode="rr"` uses verified offline coefficients and matrix-pencil
+solving on CPU/CUDA, rejecting unrelated joint prefixes. `cuda_rr` remains
+a CUDA-only compatibility alias for the same provider. The runtime cannot derive
+coefficients or switch to another solver. The optional pinned reference is
+CPU-only; general algebraic models
+require an explicitly built artifact and matching manifest before initialization.
+Its build/load boundary lives in `solvers/_ssik_reference.py`; Warp imports do not
+load that dependency. Explicit prepared ARX5/Rizon4S reference artifacts live in
+`embodichain_robots/_ssik_artifacts/`; the former contains actual-model RR
+coefficients, while the latter certifies the pinned prebuilt joint prefix and
+bakes its terminal-frame correction. The offline builder's `--prebuilt-model`
+option verifies joint order, normalized axes and pre-terminal offsets before
+reuse. Loads verify prebuilt source and coefficient sidecars against the
+manifest before executing the adapter. Prepared joint-lock queries use only
+the verified fixed cached-RR grid: seed changes reorder those samples, and an
+empty sweep cannot enter an unprepared HP/symbolic path. These do not expand
+strict Warp geometry. The CUDA coefficient bundle and chart consistency
+certificate live under compute `_warp/data/`; its reproducible builder is under
+`scripts/benchmark/robotics/kinematic_solver/`. Preserve that manifest and
+third-party provenance when rebuilding. CUDA scratch validation includes driver
+local-stack allocation, not only Torch/Warp counters.
+SRS all-candidate results enumerate sampled swivels only. Opt-in seed-local
+search adds one geometric redundancy optimum to the unchanged global/seed pool.
+Its target-aware path hook uses the preceding result for both generation and
+selection. Near-parallel mode also regenerates its corrected candidates and
+periodic representatives from each preceding result on CPU/CUDA. Prepared RR's
+opt-in seed-local mode uses a separate parameterized POE coefficient bundle;
+local and Jacobian-predicted lock angles generate algebraic roots, never returned
+linearized joint solutions. Its path hook regenerates the full global/local
+pool from the preceding result. Fixed RR retains the original cached lock grid.
+Runtime CPU RR uses Warp kernels; its independent SciPy QZ oracle is never
+selected by production dispatch. Benchmark reference alignment is explicit and
+quality-only, keeping the official SSIK package outside normal execution.
+Parameterized RR conditions small valid-pose rotation roundoff only for its
+SO(3) coefficient identities; original targets still own final FK acceptance.
+CPU and CUDA share bounded algebraic root refinement against the original
+quadratic pencil before back substitution. It retains the existing root mask
+and lock samples, uses global chunked scratch, and cannot invoke pose IK or
+the optional QZ/reference oracle to repair a failed query.
+Other modes use `_get_continuous_ik_candidates` and the shared
+selector. Hard step bounds apply relative to the preceding selected posture;
+failed waypoints retain that posture and a false validity mask.
 
 ## Focused validation
 

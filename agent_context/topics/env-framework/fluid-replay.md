@@ -24,8 +24,8 @@ count times nominal spacing cubed, not a reconstructed-surface measurement.
 
 `lab/scripts/run_fluid_task_program.py` runs the configured pour-cup deployment
 through ordinary `EmbodiedEnv` and `execute_demo_episode()`. The environment
-component selects DexSim SPH with an existing MuJoCo configuration nested under
-`rigid_solver_cfg`. Robot drive targets, dynamic grasp contacts and fluid state
+component selects DexUni with DFSPH settings nested under `sph_cfg`. Robot
+drive targets, dynamic grasp contacts and fluid state
 advance in one World, with no recorded trajectory input. SPH reads live rigid
 boundaries; fluid reaction forces are not fed back into the rigid solver.
 The fluid program measures cup lift and alignment, transports the held cup
@@ -53,10 +53,11 @@ liquid visibility; use the image-based fluid regression linked below. The
 default record view focuses on the cup and receiver; the mesh kernel radius
 is 1.5 times the particle spacing to retain a connected surface after settling.
 Its interval `record_camera` event uses the existing `record_camera_data`
-functor with `per_env=True` and `fps=None`, recording every environment view at
+functor with `fps=None`, recording independent environment views at the
 control frequency. The runner only redirects the output directory and sets
 the recording limit to the resolved environment count. It explicitly commits
-at normal completion before close, which otherwise discards pending frames.
+before close, which otherwise discards pending frames. Incomplete or rejected
+runs use the recorder's diagnostic purpose rather than qualifying the output.
 Selected-row recording and camera consumption are owned by the
 [recording functor](../manager-functor/manager-functor.md#camera-recording).
 NoRender qualification removes the recorder before constructing the scene.

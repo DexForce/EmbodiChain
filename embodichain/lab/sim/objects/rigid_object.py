@@ -72,10 +72,10 @@ from embodichain.lab.sim import (
 )
 from embodichain.lab.sim.material import (
     _capture_render_materials,
+    _is_same_material_inst,
     _restore_render_materials,
     _set_render_material,
     _wrap_first_render_material,
-    _apply_volume_material_properties,
 )
 from ._mesh_utils import (
     get_combined_triangles,
@@ -1581,14 +1581,6 @@ class RigidObject(BatchEntity):
             if render_body is None:
                 continue
             original_materials = _capture_render_materials(render_body)
-            shape = getattr(self.cfg, "visual_shape", None) or getattr(
-                self.cfg, "shape", None
-            )
-            material_cfg = getattr(shape, "visual_material", None)
-            if material_cfg is not None:
-                for native in original_materials:
-                    if native is not None:
-                        _apply_volume_material_properties(native, material_cfg)
             self._original_visual_material[env_idx] = original_materials
             wrapped = _wrap_first_render_material(original_materials)
             if wrapped is not None:
@@ -1668,8 +1660,10 @@ class RigidObject(BatchEntity):
                     )
                 if working_inst is None:
                     working_name = f"{self.uid}_reuse_{env_idx}"
-                    template.create_inst(working_name)
-                    working_inst = VisualMaterialInst(working_name, template)
+                    native_inst = template.create_inst(working_name)
+                    working_inst = VisualMaterialInst(
+                        working_name, template, mat_inst=native_inst
+                    )
                 segments.append(
                     ReuseSegmentState(
                         mesh_id=mesh_id,
@@ -1696,6 +1690,10 @@ class RigidObject(BatchEntity):
         _set_render_material(
             self._entities[env_idx].get_render_body(), mesh_id, mat_inst
         )
+        if mesh_id == 0:
+            current = self._visual_material[env_idx]
+            if current is None or not _is_same_material_inst(current.mat, mat_inst):
+                self._visual_material[env_idx] = _wrap_first_render_material([mat_inst])
 
     def share_visual_material_inst(self, mat_insts: List[VisualMaterialInst]) -> None:
         """Share material instances for the rigid object.

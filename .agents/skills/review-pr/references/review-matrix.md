@@ -38,7 +38,9 @@ and current source code when this matrix and the repository diverge.
   at the earliest owning boundary with a useful error and without partially
   initialized state.
 - Check that tests target observable contracts and include boundary, negative,
-  partial-batch, or cleanup cases appropriate to the change.
+  partial-batch, or cleanup cases appropriate to the change. Apply the shared
+  [test necessity review](../../add-test/SKILL.md#test-necessity-review) to added
+  or extended cases; accept sufficient existing coverage.
 - Prefer focused tests. Treat GPU, renderer, real-simulation, and distributed
   paths as separate resource classes and report them as residual risk when they
   cannot be run.
@@ -210,7 +212,7 @@ tests. Run GPU/distributed tests serially and only when justified.
 
 ## Official tasks and configuration packages
 
-**Paths:** `embodichain_tasks/**` and reusable task components.
+**Paths:** `extensions/embodichain_tasks/**` and reusable task components.
 
 Check:
 

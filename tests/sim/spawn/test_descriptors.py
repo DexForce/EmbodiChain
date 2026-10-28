@@ -772,7 +772,7 @@ def test_grouped_rigid_physics_overlays_usd_without_erasing_source(
     )
     scene = SimpleNamespace(materials={})
 
-    def parse_singleton(path, collection, label):
+    def parse_singleton(path, collection, label, *, prim_path=None):
         return scene, source
 
     monkeypatch.setattr(
@@ -817,7 +817,10 @@ def test_rigid_usd_can_recompute_source_inertia(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda path, collection, label: (SimpleNamespace(materials={}), source),
+        lambda path, collection, label, *, prim_path=None: (
+            SimpleNamespace(materials={}),
+            source,
+        ),
     )
     cfg = RigidObjectCfg(
         uid="cube",
@@ -850,7 +853,10 @@ def test_rigid_usd_preserves_asset_physics_by_default(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda path, collection, label: (SimpleNamespace(materials={}), source),
+        lambda path, collection, label, *, prim_path=None: (
+            SimpleNamespace(materials={}),
+            source,
+        ),
     )
     cfg = RigidObjectCfg(
         uid="cube",
@@ -1138,6 +1144,274 @@ def test_articulation_constructor_defers_newton_properties_until_configure() -> 
     assert contact.ke is None
 
 
+@pytest.mark.parametrize("mode", ["preserve", "overlay"])
+@pytest.mark.usefixtures("requires_dexuni_two_way")
+def test_articulation_newton_gravity_compensation_is_creation_intent(mode) -> None:
+    cfg = ArticulationCfg.from_dict(
+        {
+            "uid": "robot",
+            "fpath": "robot.urdf",
+            "asset_physics_mode": mode,
+            "root_props": {"newton_gravity_compensation": 1.0},
+        }
+    )
+    descriptor = articulation_desc_from_cfg(cfg, newton_solver_type="dexuni")
+    assert descriptor.newton_gravity_compensation == 1.0
+
+    resolved = _resolved_articulation_desc()
+    configure_articulation_desc(resolved, cfg, newton_solver_type="dexuni")
+    assert resolved.newton_gravity_compensation == 1.0
+
+
+def test_articulation_unconfigured_gravity_compensation_preserves_source() -> None:
+    descriptor = _resolved_articulation_desc()
+    descriptor.newton_gravity_compensation = 0.5
+    configure_articulation_desc(
+        descriptor, ArticulationCfg(), newton_solver_type="dexuni"
+    )
+    assert descriptor.newton_gravity_compensation == 0.5
+
+
+@pytest.mark.parametrize("mode", ["preserve", "overlay"])
+@pytest.mark.usefixtures("requires_dexuni_two_way")
+def test_usd_articulation_forwards_gravity_compensation(monkeypatch, mode) -> None:
+    source = _resolved_articulation_desc()
+    monkeypatch.setattr(
+        "embodichain.lab.sim.spawn.usd._parse_singleton",
+        lambda *_args, **_kwargs: (SimpleNamespace(materials={}), source),
+    )
+    cfg = ArticulationCfg.from_dict(
+        {
+            "uid": "robot",
+            "fpath": "robot.usd",
+            "asset_physics_mode": mode,
+            "root_props": {"newton_gravity_compensation": 0.5},
+        }
+    )
+    descriptor, _ = articulation_desc_from_usd(cfg, newton_solver_type="dexuni")
+    assert descriptor.newton_gravity_compensation == 0.5
+
+
+_NEWTON_CREATION_ROOT_PROPS = {
+    "newton_kinematic": True,
+    "newton_sleep_policy": "never",
+    "newton_shape_collision": False,
+    "newton_shape_collision_links": ["base_link"],
+    "newton_particle_collision_links": ["base_link", "tool"],
+    "newton_mesh_approximation": {"method": "convex_hull", "link_names": ["tool"]},
+}
+
+
+@pytest.mark.parametrize("mode", ["preserve", "overlay"])
+def test_articulation_newton_creation_options_are_forwarded(mode) -> None:
+    from dexsim.spawn import NewtonMeshApproximationDesc, NewtonSleepPolicy
+
+    cfg = ArticulationCfg.from_dict(
+        {
+            "uid": "robot",
+            "fpath": "robot.urdf",
+            "asset_physics_mode": mode,
+            "root_props": _NEWTON_CREATION_ROOT_PROPS,
+        }
+    )
+    descriptor = articulation_desc_from_cfg(cfg, newton_solver_type="dexuni")
+    resolved = _resolved_articulation_desc()
+    configure_articulation_desc(resolved, cfg, newton_solver_type="dexuni")
+
+    for desc in (descriptor, resolved):
+        assert desc.newton_kinematic is True
+        assert desc.newton_sleep_policy is NewtonSleepPolicy.NEVER
+        assert desc.newton_shape_collision is False
+        assert desc.newton_shape_collision_links == ("base_link",)
+        assert desc.newton_particle_collision_links == ("base_link", "tool")
+        assert isinstance(desc.newton_mesh_approximation, NewtonMeshApproximationDesc)
+        assert desc.newton_mesh_approximation.link_names == ("tool",)
+
+
+@pytest.mark.parametrize("mode", ["preserve", "overlay"])
+@pytest.mark.parametrize("native_geometry", [False, True])
+@pytest.mark.parametrize("value", [None, False, True])
+def test_articulation_sdf_request_is_authored_before_source_resolution(
+    value: bool | None,
+    mode: str,
+    native_geometry: bool,
+) -> None:
+    """Preserve concave import intent without introducing contact overrides."""
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode=mode,
+        root_props=ArticulationRootPropertiesCfg(newton_force_sdf=value),
+    )
+    restored = ArticulationCfg.from_dict(cfg.to_dict())
+    descriptor = articulation_desc_from_cfg(restored, newton_solver_type="dexuni")
+    if value is None:
+        assert descriptor.newton_collision is None
+    else:
+        assert descriptor.newton_collision.force_sdf is value
+        assert descriptor.newton_collision.ke is None
+        assert descriptor.newton_collision.margin is None
+    resolved = _resolved_articulation_desc()
+    if native_geometry:
+        resolved.urdf_path = "robot.urdf"
+        for link in resolved.links:
+            link.collisions.clear()
+    configure_articulation_desc(resolved, restored, newton_solver_type="dexuni")
+    if value is not None:
+        for link in resolved.links:
+            for collision in link.collisions:
+                assert collision.newton.force_sdf is value
+
+
+def test_articulation_sdf_request_rejects_default_backend() -> None:
+    """Do not silently apply a Newton source option under Default physics."""
+    cfg = ArticulationCfg(
+        fpath="robot.urdf",
+        root_props=ArticulationRootPropertiesCfg(newton_force_sdf=True),
+    )
+    with pytest.raises(ValueError, match="newton_force_sdf.*Newton"):
+        articulation_desc_from_cfg(cfg)
+
+
+def test_articulation_sdf_request_rejects_truthy_strings() -> None:
+    """Require a boolean rather than treating the text 'false' as enabled."""
+    cfg = ArticulationCfg(
+        fpath="robot.urdf",
+        root_props=ArticulationRootPropertiesCfg(newton_force_sdf="false"),
+    )
+    with pytest.raises(TypeError, match="newton_force_sdf.*boolean"):
+        articulation_desc_from_cfg(cfg, newton_solver_type="dexuni")
+
+
+def test_articulation_unset_newton_creation_options_keep_dexsim_defaults() -> None:
+    descriptor = articulation_desc_from_cfg(
+        ArticulationCfg(), source_path="robot.urdf", newton_solver_type="dexuni"
+    )
+    defaults = ArticulationDesc(name="defaults", path="robot.urdf")
+    for name in (
+        "newton_kinematic",
+        "newton_sleep_policy",
+        "newton_shape_collision",
+        "newton_shape_collision_links",
+        "newton_particle_collision_links",
+        "newton_mesh_approximation",
+    ):
+        assert getattr(descriptor, name) == getattr(defaults, name), name
+
+
+@pytest.mark.parametrize("name", sorted(_NEWTON_CREATION_ROOT_PROPS))
+def test_articulation_newton_creation_options_reject_default_backend(name) -> None:
+    cfg = ArticulationCfg.from_dict(
+        {"root_props": {name: _NEWTON_CREATION_ROOT_PROPS[name]}}
+    )
+    with pytest.raises(ValueError, match="Newton backend"):
+        articulation_desc_from_cfg(cfg, source_path="robot.urdf")
+
+
+@pytest.mark.parametrize(
+    ("root_props", "error"),
+    [
+        ({"newton_sleep_policy": "sometimes"}, ValueError),
+        ({"newton_shape_collision_links": "base_link"}, TypeError),
+        ({"newton_mesh_approximation": "convex_hull"}, TypeError),
+    ],
+)
+def test_articulation_newton_creation_options_reject_invalid_values(
+    root_props, error
+) -> None:
+    with pytest.raises(error):
+        ArticulationCfg.from_dict({"root_props": root_props})
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.1, float("nan"), float("inf")])
+def test_articulation_gravity_compensation_rejects_invalid_values(value) -> None:
+    cfg = ArticulationCfg()
+    cfg.root_props.newton_gravity_compensation = value
+    with pytest.raises(ValueError, match="newton_gravity_compensation"):
+        articulation_desc_from_cfg(
+            cfg, source_path="robot.urdf", newton_solver_type="dexuni"
+        )
+
+
+def test_articulation_gravity_compensation_rejects_default_backend() -> None:
+    cfg = ArticulationCfg()
+    cfg.root_props.newton_gravity_compensation = 1.0
+    with pytest.raises(ValueError, match="Newton backend"):
+        articulation_desc_from_cfg(cfg, source_path="robot.urdf")
+
+
+def test_gravity_compensation_requires_native_descriptor_support(monkeypatch) -> None:
+    monkeypatch.delattr(ArticulationDesc, "newton_gravity_compensation", raising=False)
+    cfg = ArticulationCfg()
+    cfg.root_props.newton_gravity_compensation = 1.0
+    with pytest.raises(RuntimeError, match="requires DexSim dev"):
+        articulation_desc_from_cfg(
+            cfg, source_path="robot.urdf", newton_solver_type="dexuni"
+        )
+
+
+@pytest.mark.parametrize("target_mode", ["position_velocity", "none"])
+@pytest.mark.usefixtures("requires_dexuni_two_way")
+def test_newton_passive_damping_is_independent_of_drive_gains(target_mode) -> None:
+    cfg = ArticulationCfg.from_dict(
+        {
+            "asset_physics_mode": "overlay",
+            "joint_drive_props": {
+                "backend": "newton",
+                "target_mode": target_mode,
+                "stiffness": 12.0,
+                "damping": 4.0,
+                "passive_damping": {"arm_.*": 50.0},
+            },
+        }
+    )
+    descriptor = _resolved_articulation_desc()
+    configure_articulation_desc(descriptor, cfg, newton_solver_type="dexuni")
+    joint = descriptor.get_joint_desc("arm_joint")
+    assert joint.newton.damping == 50.0
+    expected_kd = 0.0 if target_mode == "none" else 4.0
+    assert joint.newton.target_kd == expected_kd
+    assert joint.dexsim.damping == expected_kd
+    round_trip = JointDrivePropertiesCfg.from_dict(cfg.joint_drive_props.to_dict())
+    assert round_trip.passive_damping == {"arm_.*": 50.0}
+
+
+@pytest.mark.parametrize("value", [-1.0, float("nan"), float("inf")])
+def test_newton_passive_damping_rejects_invalid_values(value) -> None:
+    cfg = ArticulationCfg(asset_physics_mode="overlay")
+    cfg.joint_drive_props = NewtonJointDrivePropertiesCfg()
+    cfg.joint_drive_props.passive_damping = value
+    with pytest.raises(ValueError, match="passive_damping"):
+        configure_articulation_desc(
+            _resolved_articulation_desc(), cfg, newton_solver_type="dexuni"
+        )
+
+
+def test_newton_passive_damping_rejects_default_backend() -> None:
+    cfg = ArticulationCfg(asset_physics_mode="overlay")
+    cfg.joint_drive_props = NewtonJointDrivePropertiesCfg()
+    cfg.joint_drive_props.passive_damping = 50.0
+    with pytest.raises(ValueError, match="Newton backend"):
+        configure_articulation_desc(_resolved_articulation_desc(), cfg)
+
+
+def test_passive_damping_rejects_native_merges_that_discard_it(monkeypatch) -> None:
+    cfg = ArticulationCfg(
+        asset_physics_mode="overlay",
+        joint_drive_props=NewtonJointDrivePropertiesCfg(passive_damping=50.0),
+    )
+    descriptor = _resolved_articulation_desc()
+    set_properties = descriptor.set_joint_properties
+
+    def discard_damping(*args, **kwargs):
+        set_properties(*args, **kwargs)
+        descriptor.get_joint_desc("arm_joint").newton.damping = None
+
+    monkeypatch.setattr(descriptor, "set_joint_properties", discard_damping)
+    with pytest.raises(RuntimeError, match="did not retain passive_damping"):
+        configure_articulation_desc(descriptor, cfg, newton_solver_type="dexuni")
+
+
 @pytest.mark.parametrize("solver_type", [None, "auto", "mujoco_warp"])
 @pytest.mark.parametrize("mode", ["preserve", "overlay"])
 @pytest.mark.parametrize("source_gap", [None, 0.0, 0.025])
@@ -1193,7 +1467,7 @@ def test_imported_rigid_gap_default_is_owned_by_embodichain(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda *_args: (SimpleNamespace(materials={}), source),
+        lambda *_args, **_kwargs: (SimpleNamespace(materials={}), source),
     )
     cfg = RigidObjectCfg(
         uid="cube", shape=MeshCfg(fpath="cube.usd"), asset_physics_mode=mode
@@ -1632,6 +1906,40 @@ def test_articulation_array_qpos_limits_compile_before_backend_build() -> None:
     joint = descriptor.get_joint_desc("arm_joint")
     assert joint.lower_limit == pytest.approx(-0.5)
     assert joint.upper_limit == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize("solver_type", [None, "auto"])
+@pytest.mark.parametrize("authored_velocity", [0.05, None])
+def test_robot_default_drive_preserves_authored_velocity_limit(
+    solver_type: str | None,
+    authored_velocity: float | None,
+) -> None:
+    descriptor = _resolved_articulation_desc()
+    joint = descriptor.get_joint_desc("arm_joint")
+    joint.velocity_limit = authored_velocity
+    joint.dexsim = DexsimJointDesc(max_velocity=authored_velocity)
+    cfg = RobotCfg(
+        uid="robot", fpath="robot.urdf", control_parts={"arm": ["arm_joint"]}
+    )
+    configure_articulation_desc(descriptor, cfg, newton_solver_type=solver_type)
+    assert joint.velocity_limit == authored_velocity
+    assert joint.dexsim.max_velocity == authored_velocity
+
+
+@pytest.mark.parametrize("solver_type", [None, "auto"])
+def test_explicit_zero_speed_override_is_preserved(solver_type: str | None) -> None:
+    descriptor = _resolved_articulation_desc()
+    joint = descriptor.get_joint_desc("arm_joint")
+    joint.velocity_limit = None
+    cfg = RobotCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        control_parts={"arm": ["arm_joint"]},
+        joint_drive_props=JointDrivePropertiesCfg(max_velocity=0.0),
+    )
+    configure_articulation_desc(descriptor, cfg, newton_solver_type=solver_type)
+    assert joint.velocity_limit == 0.0
+    assert joint.dexsim.max_velocity == 0.0
 
 
 def test_robot_control_part_drive_rule_expands_before_spawn() -> None:
@@ -2202,6 +2510,32 @@ def test_spawn_post_config_only_applies_render_uv() -> None:
     render_body.set_projective_uv.assert_called_once_with()
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_newton_mimic_stabilizer_can_be_disabled(monkeypatch, enabled) -> None:
+    configure = Mock(return_value=True)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.objects.articulation._configure_newton_mimic_compliance",
+        configure,
+    )
+    articulation = object.__new__(Articulation)
+    articulation.cfg = SimpleNamespace(
+        compute_uv=False,
+        root_props=ArticulationRootPropertiesCfg(newton_mimic_stabilizer=enabled),
+    )
+    articulation._entities = [Mock(joint_dof_layout=[])]
+    articulation._prepared_default_root_topology_revision = -1
+    articulation._mimic_info = SimpleNamespace(
+        mimic_id=np.array([1], dtype=np.int32),
+        mimic_parent=np.array([0], dtype=np.int32),
+    )
+    articulation._state_joint_names = Mock(return_value=["leader", "follower"])
+
+    articulation._apply_spawn_config()
+
+    assert articulation._newton_mimic_compliance_configured is enabled
+    assert configure.called is enabled
+
+
 def test_rigid_object_spawn_applies_projective_uv() -> None:
     render_body = Mock()
     entity = Mock()
@@ -2342,7 +2676,7 @@ def test_rigid_descriptor_rejects_orientation_without_principal_moments() -> Non
         rigid_desc_from_cfg(cfg)
 
 
-@pytest.mark.parametrize("solver", ["sph", "mujoco_warp"])
+@pytest.mark.parametrize("solver", ["dexuni", "mujoco_warp"])
 def test_particle_boundary_shares_body_without_replacing_rigid_contact(solver):
     from embodichain.lab.sim.cfg import RigidObjectCfg
     from embodichain.lab.sim.shapes import MeshCollisionCfg
@@ -2360,6 +2694,9 @@ def test_particle_boundary_shares_body_without_replacing_rigid_contact(solver):
             fpath="/assets/cavity.obj",
             collision=MeshCollisionCfg(approximation="sdf", sdf_resolution=192),
         ),
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=0.3, inertia=[0.001, 0.001, 0.001])
+        ),
     )
     desc, _ = rigid_desc_from_cfg(cfg, newton_solver_type=solver)
     assert len(desc.collisions) == 2
@@ -2369,7 +2706,8 @@ def test_particle_boundary_shares_body_without_replacing_rigid_contact(solver):
     assert boundary.approximation == CollisionApproximation.SDF
     assert boundary.enable_collision is False
     assert boundary.newton.has_particle_collision is True
-    assert boundary.newton.contributes_to_mass is False
+    if hasattr(boundary.newton, "contributes_to_mass"):
+        assert boundary.newton.contributes_to_mass is False
     assert boundary.newton.sdf_max_resolution == 192
     assert desc.renders[0].file_path == "/assets/cup.glb"
     assert cfg.shape.collision.approximation == "convex_decomposition"
@@ -2387,4 +2725,72 @@ def test_particle_boundary_requires_newton_and_sdf():
     with pytest.raises(ValueError, match="Newton"):
         rigid_desc_from_cfg(cfg)
     with pytest.raises(ValueError, match="sdf"):
-        rigid_desc_from_cfg(cfg, newton_solver_type="sph")
+        rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
+
+
+def test_dynamic_particle_boundary_requires_safe_mass_properties():
+    from dexsim.spawn import NewtonCollisionDesc
+
+    if "contributes_to_mass" in NewtonCollisionDesc.__dataclass_fields__:
+        pytest.skip("This DexSim build can exclude the boundary from mass directly.")
+    cfg = RigidObjectCfg(
+        uid="cup",
+        shape=CubeCfg(size=[0.1, 0.1, 0.1]),
+        particle_collision_shape=MeshCfg(
+            fpath="/assets/cavity.obj",
+            collision=MeshCollisionCfg(approximation="sdf"),
+        ),
+        attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=0.3)),
+    )
+    with pytest.raises(NotImplementedError, match="explicit mass and inertia"):
+        rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
+
+
+@pytest.mark.parametrize(
+    "kind", ["rigid", "visual", "volume", "surface", "surface_visual"]
+)
+def test_shape_optical_transmission_reaches_spawn_material(kind):
+    import json
+    from embodichain.lab.sim.cfg import (
+        RigidObjectCfg,
+        VisualObjectCfg,
+        VolumeDeformableObjectCfg,
+        SurfaceDeformableObjectCfg,
+    )
+    from embodichain.lab.sim.material import VisualMaterialCfg
+    from embodichain.lab.sim.spawn.descriptors import (
+        visual_desc_from_cfg,
+        volume_deformable_desc_from_cfg,
+        surface_deformable_desc_from_cfg,
+    )
+
+    cfg_type, compile_descriptor = {
+        "rigid": (RigidObjectCfg, rigid_desc_from_cfg),
+        "visual": (VisualObjectCfg, visual_desc_from_cfg),
+        "volume": (VolumeDeformableObjectCfg, volume_deformable_desc_from_cfg),
+        "surface": (SurfaceDeformableObjectCfg, surface_deformable_desc_from_cfg),
+        "surface_visual": (
+            SurfaceDeformableObjectCfg,
+            surface_deformable_desc_from_cfg,
+        ),
+    }[kind]
+    cfg = cfg_type(
+        uid="glass",
+        shape=MeshCfg(
+            fpath="/assets/glass.obj",
+            visual_material=VisualMaterialCfg(parameters={"transmission": 0.85}),
+        ),
+    )
+
+    if kind == "surface_visual":
+        cfg.visual_shape = MeshCfg(
+            fpath="/assets/render.obj", visual_material=cfg.shape.visual_material
+        )
+        cfg.shape.visual_material = VisualMaterialCfg(parameters={"transmission": 0.1})
+
+    _, materials = compile_descriptor(cfg)
+
+    assert (
+        json.loads(next(iter(materials.values())).parameters_json)["transmission"]
+        == 0.85
+    )

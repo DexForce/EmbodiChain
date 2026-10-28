@@ -18,7 +18,10 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 from zipfile import ZipFile
@@ -32,6 +35,110 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 def _load_workflow(name: str) -> dict:
     workflow_path = _REPOSITORY_ROOT / ".github" / "workflows" / name
     return yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+
+
+def _eligible_jobs(
+    name: str,
+    event_name: str,
+    *,
+    draft: bool = False,
+    ref: str = "refs/heads/main",
+) -> set[str]:
+    """Evaluate the workflows' boolean job conditions with successful dependencies."""
+    workflow = _load_workflow(name)
+    conditions = {
+        name: job.get("if", "true").removeprefix("${{").removesuffix("}}")
+        for name, job in workflow["jobs"].items()
+    }
+    # JavaScript shares the operators used by these GitHub Actions conditions.
+    # Translate the hyphenated job identifier to JavaScript bracket notation.
+    conditions = {
+        name: condition.replace("needs.docs-changes", "needs['docs-changes']")
+        for name, condition in conditions.items()
+    }
+    context = {
+        "github": {
+            "event_name": event_name,
+            "event": (
+                {"pull_request": {"draft": draft}}
+                if event_name == "pull_request"
+                else {}
+            ),
+            "ref": ref,
+        },
+        "needs": {
+            name: {
+                "result": "success",
+                "outputs": {
+                    "required": "true",
+                    "needs_tests": "true",
+                    "needs_docs": "true",
+                },
+            }
+            for name in workflow["jobs"]
+        },
+        "conditions": conditions,
+    }
+    script = """
+const {github, needs, conditions} = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const always = () => true;
+const startsWith = (value, prefix) => value.startsWith(prefix);
+const eligible = Object.entries(conditions).filter(([, condition]) =>
+  new Function('github', 'needs', 'always', 'startsWith', `return (${condition});`)(
+    github, needs, always, startsWith));
+process.stdout.write(JSON.stringify(eligible.map(([name]) => name)));
+"""
+    result = subprocess.run(
+        ["node", "-e", script],
+        input=json.dumps(context),
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    return set(json.loads(result.stdout))
+
+
+@pytest.mark.parametrize("workflow_name", ["main.yml", "dataset-tooling.yml"])
+def test_draft_pr_skips_every_ci_job(workflow_name: str) -> None:
+    assert _eligible_jobs(workflow_name, "pull_request", draft=True) == set()
+
+
+@pytest.mark.parametrize("workflow_name", ["main.yml", "dataset-tooling.yml"])
+def test_ready_pr_triggers_and_runs_ci(workflow_name: str) -> None:
+    workflow = _load_workflow(workflow_name)
+    assert {"opened", "synchronize", "reopened", "ready_for_review"} <= set(
+        workflow["on"]["pull_request"]["types"]
+    )
+    assert _eligible_jobs(workflow_name, "pull_request") == set(workflow["jobs"]) - {
+        "release-build"
+    }
+
+
+@pytest.mark.parametrize("event_name", ["schedule", "workflow_dispatch"])
+def test_non_pr_test_runs_do_not_require_a_pull_request(event_name: str) -> None:
+    assert _eligible_jobs("main.yml", event_name) == set(
+        _load_workflow("main.yml")["jobs"]
+    ) - {"release-build"}
+
+
+def test_main_push_preserves_lint_and_docs_build() -> None:
+    assert _eligible_jobs("main.yml", "push") == {"lint", "docs-changes", "build"}
+
+
+def test_release_tag_preserves_distribution_build() -> None:
+    assert _eligible_jobs("main.yml", "push", ref="refs/tags/v0.3.1") == {
+        "lint",
+        "docs-changes",
+        "release-build",
+    }
+
+
+def test_dataset_tools_can_still_run_manually() -> None:
+    assert _eligible_jobs("dataset-tooling.yml", "workflow_dispatch") == {
+        "offline-tools",
+        "lerobot-export",
+    }
 
 
 def test_automatic_pages_deployment_requires_existing_docs_artifact() -> None:
@@ -65,18 +172,170 @@ def test_manual_docs_build_trusts_checkout_before_architecture_generation() -> N
     )
 
 
-def test_test_package_install_uses_explicit_public_index_and_private_sources() -> None:
-    steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
-    install = next(step for step in steps if step.get("name") == "Install test package")
+@pytest.mark.parametrize("job_name", ["deploy-from-artifact", "deploy-manual-build"])
+def test_pages_paths_merge_under_deployment_lock_and_verify_versions(
+    job_name: str,
+) -> None:
+    workflow = _load_workflow("docs-pages.yml")
+    assert "'github-pages'" in workflow["concurrency"]["group"]
+    assert workflow["concurrency"]["cancel-in-progress"] == "false"
+    steps = workflow["jobs"][job_name]["steps"]
+    names = [step.get("name", "") for step in steps]
+    prepare = names.index("Preserve currently published versions")
+    upload = names.index("Upload Pages artifact")
+    publish = names.index("Deploy GitHub Pages")
+    verify = names.index("Verify deployed artifact")
+    assert prepare < upload < publish < verify
+    assert "prepare_docs_deployment.py prepare" in steps[prepare]["run"]
+    assert "prepare_docs_deployment.py verify" in steps[verify]["run"]
+    assert steps[upload]["with"]["retention-days"] == "90"
+    checkout = next(
+        step for step in steps if step.get("uses", "").startswith("actions/checkout@")
+    )
+    assert checkout["with"]["ref"] == "${{ github.workflow_sha }}"
+
+
+def test_release_dispatch_reports_child_without_timing_out_while_queued() -> None:
+    steps = _load_workflow("docs-pages.yml")["jobs"]["redispatch-release"]["steps"]
+    command = steps[0]["run"]
+    assert "gh workflow run docs-pages.yml" in command
+    assert "gh run watch" not in command
+    assert "GITHUB_STEP_SUMMARY" in command
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name", "step_name"),
+    [
+        ("main.yml", "test", "Install test package"),
+        ("main.yml", "build", "Build docs"),
+        ("docs-pages.yml", "build-and-deploy", "Build docs site"),
+    ],
+)
+def test_package_install_uses_explicit_public_index_and_private_sources(
+    workflow_name: str, job_name: str, step_name: str
+) -> None:
+    steps = _load_workflow(workflow_name)["jobs"][job_name]["steps"]
+    install = next(step for step in steps if step.get("name") == step_name)
     commands = install["run"].split("pip install")[1:]
 
     # Each invocation must override any mirror inherited from the runner image.
     assert commands
     assert all("--index-url https://pypi.org/simple" in command for command in commands)
-    package_install = next(command for command in commands if "${package}" in command)
+    package_install = next(
+        command for command in commands if "--extra-index-url" in command
+    )
     assert "--extra-index-url http://pyp.open3dv.site:2345/simple/" in package_install
     assert "--trusted-host pyp.open3dv.site" in package_install
     assert "--extra-index-url https://download.blender.org/pypi/" in package_install
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name", "step_name"),
+    [
+        ("main.yml", "build", "Build docs"),
+        ("main.yml", "test_docs", "Install docs test dependencies"),
+        ("docs-pages.yml", "build-and-deploy", "Build docs site"),
+    ],
+)
+def test_docs_dependencies_override_inherited_pip_index(
+    workflow_name: str, job_name: str, step_name: str
+) -> None:
+    steps = _load_workflow(workflow_name)["jobs"][job_name]["steps"]
+    install = next(step for step in steps if step.get("name") == step_name)
+    commands = install["run"].replace("\\\n", " ").splitlines()
+    arguments = shlex.split(
+        next(command for command in commands if "docs/requirements.txt" in command)
+    )
+    assert "--isolated" in arguments
+    assert arguments[arguments.index("--index-url") + 1] == "https://pypi.org/simple"
+
+
+def test_simulator_test_job_installs_node_before_workflow_contract_tests() -> None:
+    steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
+    setup_index = next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("uses", "").startswith("actions/setup-node@")
+    )
+    tests_index = next(
+        i for i, step in enumerate(steps) if step.get("name") == "Run selected tests"
+    )
+    assert steps[setup_index]["with"]["node-version"] == "22"
+    assert setup_index < tests_index
+    capture_index = next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("name") == "Preserve Node path for login shells"
+    )
+    assert setup_index < capture_index < tests_index
+    assert "GITHUB_ENV" in steps[capture_index]["run"]
+    assert 'export PATH="${CI_NODE_BIN_DIR}:${PATH}"' in steps[tests_index]["run"]
+
+
+def test_test_job_restores_git_access_before_running_selected_tests(
+    tmp_path: Path,
+) -> None:
+    """Run the workflow preparation against a checkout with untrusted ownership."""
+    steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
+    tests = next(step for step in steps if step.get("name") == "Run selected tests")
+    assert tests["shell"] == "bash -l {0}"
+    preparation = tests["run"].split("python scripts/ci/run_test_plan.py", 1)[0]
+    preparation = preparation.replace("source activate py311", ":").replace(
+        "node --version", ":"
+    )
+    repository = tmp_path / "checkout with spaces"
+    repository.mkdir()
+    config = tmp_path / "gitconfig"
+    config.write_text("")
+    environment = os.environ.copy()
+    environment.update(
+        GIT_CONFIG_GLOBAL=str(config),
+        GIT_CONFIG_NOSYSTEM="1",
+        GITHUB_WORKSPACE=str(repository),
+        CI_NODE_BIN_DIR="",
+    )
+    for args in (
+        ["init", "-q"],
+        [
+            "-c",
+            "user.name=CI Test",
+            "-c",
+            "user.email=ci@example.org",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "fixture",
+        ],
+    ):
+        subprocess.run(["git", *args], cwd=repository, env=environment, check=True)
+    revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repository, env=environment, text=True
+    ).strip()
+    environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+    untrusted = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert untrusted.returncode != 0
+    assert "dubious ownership" in untrusted.stderr
+    prepared = subprocess.run(
+        ["bash", "-e", "-c", preparation],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert prepared.returncode == 0, prepared.stdout + prepared.stderr
+    assert (
+        subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=repository, env=environment, text=True
+        ).strip()
+        == revision
+    )
 
 
 @pytest.mark.parametrize(
@@ -84,13 +343,16 @@ def test_test_package_install_uses_explicit_public_index_and_private_sources() -
     [
         None,
         "missing_robots",
+        "missing_models",
         "missing_entry_point",
         "wrong_entry_point_group",
+        "missing_asset_entry_point",
+        "retired_robot_module",
         "foreign_package",
         "bytecode",
     ],
 )
-def test_release_guard_validates_bundled_robot_catalog(
+def test_release_guard_validates_bundled_runtime_packages(
     tmp_path: Path, invalid_contents: str | None
 ) -> None:
     """Execute the release guard against wheels, including invalid artifacts."""
@@ -104,17 +366,24 @@ def test_release_guard_validates_bundled_robot_catalog(
     task_config = (
         "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml"
     )
-    source = tmp_path / task_config
+    source = tmp_path / "extensions" / task_config
     source.parent.mkdir(parents=True)
     source.write_text("physics: default\n")
     entry_points = (
         "[embodichain.tasks]\nembodichain_tasks = embodichain_tasks\n\n"
         "[embodichain.robots]\nofficial = embodichain_robots._catalog:ROBOT_CONFIGS\n"
+        "\n[embodichain.assets]\n"
+        "official_robots = embodichain_robots._asset_catalog:ROBOT_ASSETS\n"
     )
     if invalid_contents == "missing_entry_point":
-        entry_points = entry_points.split("[embodichain.robots]", 1)[0]
+        entry_points = entry_points.replace(
+            "[embodichain.robots]\nofficial = embodichain_robots._catalog:ROBOT_CONFIGS\n",
+            "",
+        )
     elif invalid_contents == "wrong_entry_point_group":
         entry_points = entry_points.replace("[embodichain.robots]", "[other.robots]")
+    elif invalid_contents == "missing_asset_entry_point":
+        entry_points = entry_points.split("[embodichain.assets]", 1)[0]
     members = {
         "embodichain/VERSION": version,
         "embodichain/gen_sim/simready_pipeline/configs/gen_config.json": "{}",
@@ -122,6 +391,13 @@ def test_release_guard_validates_bundled_robot_catalog(
         task_config: source.read_text(),
         "embodichain_robots/__init__.py": "",
         "embodichain_robots/_catalog.py": "ROBOT_CONFIGS = {}\n",
+        "embodichain_robots/_asset_catalog.py": "ROBOT_ASSETS = {}\n",
+        "embodichain/data/_asset_registry.py": "",
+        "embodichain_robots/franka/assets.py": "",
+        "embodichain_robots/dexforce/w1/assets.py": "",
+        "embodichain_benchmarks/__init__.py": "",
+        "embodichain_models/__init__.py": "",
+        f"embodichain-{version}.data/data/share/embodichain/examples/__init__.py": "",
         f"embodichain-{version}.dist-info/METADATA": f"Version: {version}\n",
         f"embodichain-{version}.dist-info/entry_points.txt": entry_points,
     }
@@ -131,6 +407,14 @@ def test_release_guard_validates_bundled_robot_catalog(
             for path, data in members.items()
             if not path.startswith("embodichain_robots/")
         }
+    elif invalid_contents == "missing_models":
+        members = {
+            path: data
+            for path, data in members.items()
+            if not path.startswith("embodichain_models/")
+        }
+    elif invalid_contents == "retired_robot_module":
+        members["embodichain_robots/franka_panda.py"] = ""
     elif invalid_contents == "foreign_package":
         members["foreign/__init__.py"] = ""
     elif invalid_contents == "bytecode":

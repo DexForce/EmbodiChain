@@ -49,16 +49,17 @@ from embodichain.utils.utility import load_config, save_config
 _REPOSITORY_ROOT = Path(__file__).parents[3]
 _CUBE_GYM_CONFIG_PATH = (
     _REPOSITORY_ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
 )
 _CUBE_TASK_PROGRAM_DIR = _CUBE_GYM_CONFIG_PATH.parent / "task_program"
 _CUBE_INTEGRATION_PATH = _CUBE_TASK_PROGRAM_DIR / "integration.yaml"
 _CUBE_ENVIRONMENT_PATH = _CUBE_GYM_CONFIG_PATH.parent / "envs/default.yaml"
-_COMPONENT_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs/components"
+_COMPONENT_ROOT = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs/components"
 _CUBE_POLICY_PATH = _COMPONENT_ROOT / "execution_policies/trajectory_open_loop.yaml"
 _CUBE_EMBODIMENT_PATH = _COMPONENT_ROOT / "embodiments/ur5_dh_pgi_140_80.yaml"
 _TABLEWARE_CONFIG_ROOT = (
-    _REPOSITORY_ROOT / "embodichain_tasks/configs/tasks/manipulation/tableware"
+    _REPOSITORY_ROOT
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware"
 )
 CUBE_ROBOT_PROFILE_ID = "ur5_dh_pgi_140_80"
 CUBE_SCENE_REGISTRY_ID = "task_program_repeated_pick_place"
@@ -331,6 +332,81 @@ def test_config_to_cfg_applies_explicit_cpu_to_newton() -> None:
 
 class TestInitRolloutBufferFromConfig:
     """Tests for init_rollout_buffer_from_config function."""
+
+    @pytest.mark.parametrize("enabled", [False, True])
+    def test_mounted_sensors_share_runtime_and_recording_declarations(
+        self, enabled: bool
+    ) -> None:
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "enable_sensor": enabled,
+            "env": {},
+            "robot": {
+                "uid": "robot",
+                "enable_sensor": not enabled,
+                "sensors": [
+                    {
+                        "sensor_type": "StereoCamera",
+                        "uid": "wrist",
+                        "width": 16,
+                        "height": 12,
+                        "enable_mask": True,
+                        "extrinsics": {"parent": "tool"},
+                    }
+                ],
+            },
+            "sensor": [
+                {"sensor_type": "Camera", "uid": "fixed", "width": 8, "height": 6}
+            ],
+        }
+        cfg = config_to_cfg(config)
+        assert cfg.robot.enable_sensor is enabled
+        assert config["robot"]["enable_sensor"] is not enabled
+        buffer = init_rollout_buffer_from_config(
+            config, max_episode_steps=2, batch_size=1, state_dim=7
+        )
+        if enabled:
+            assert set(buffer["obs", "sensor"].keys()) == {"fixed", "wrist"}
+            assert buffer["obs", "sensor", "wrist", "color"].shape == (1, 2, 12, 16, 4)
+            assert buffer["obs", "sensor", "wrist", "color_right"].shape == (
+                1,
+                2,
+                12,
+                16,
+                4,
+            )
+            assert buffer["obs", "sensor", "wrist", "mask"].shape == (1, 2, 12, 16)
+        else:
+            assert "sensor" not in buffer["obs"]
+
+    def test_robot_default_sensors_are_included_in_component_buffer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "embodichain_robots.agilex.cobotmagic.cfg.get_data_path",
+            lambda value: value,
+        )
+        config = {
+            "embodiment": {
+                "component": "extensions/embodichain_tasks/configs/components/embodiments/cobotmagic.yaml"
+            },
+            "env": {},
+        }
+        buffer = init_rollout_buffer_from_config(
+            config, max_episode_steps=1, batch_size=1, state_dim=16
+        )
+        assert set(buffer["obs", "sensor"].keys()) == {
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist",
+        }
+        assert buffer["obs", "sensor", "cam_right_wrist", "mask"].shape == (
+            1,
+            1,
+            480,
+            640,
+        )
 
     def test_basic_rollout_buffer(self):
         """Test that basic rollout buffer is created correctly."""
@@ -1529,12 +1605,17 @@ class TestConfigToCfgFromFile:
             "stack_cups",
         ),
     )
-    def test_official_handwritten_config_uses_shared_embodiment(
+    def test_official_tableware_config_uses_shared_embodiment(
         self,
         task_name: str,
     ) -> None:
-        """CobotMagic handwritten demos share one exact physical component."""
-        config_path = _TABLEWARE_CONFIG_ROOT / task_name / "env.json"
+        """CobotMagic task solutions share one exact physical component."""
+        filename = (
+            "task.cobotmagic.yaml"
+            if task_name in {"blocks_ranking_rgb", "stack_blocks_two"}
+            else "env.json"
+        )
+        config_path = _TABLEWARE_CONFIG_ROOT / task_name / filename
         config = load_config(config_path)
 
         assert config["embodiment"] == {
@@ -1550,18 +1631,23 @@ class TestConfigToCfgFromFile:
         )
 
         assert cfg.robot.uid == "CobotMagic"
-        assert [sensor.uid for sensor in cfg.sensor] == [
+        assert [sensor.uid for sensor in cfg.sensor] == ["cam_high"]
+        assert [sensor.uid for sensor in [*cfg.sensor, *cfg.robot.sensors]] == [
             "cam_high",
             "cam_right_wrist",
             "cam_left_wrist",
         ]
-        assert all(type(sensor) is CameraCfg for sensor in cfg.sensor)
+        assert all(
+            type(sensor) is CameraCfg for sensor in [*cfg.sensor, *cfg.robot.sensors]
+        )
 
-    def test_official_handwritten_config_can_disable_shared_embodiment_sensors(
+    def test_official_tableware_config_can_disable_shared_embodiment_sensors(
         self,
     ) -> None:
         """A deployment can keep the shared sensor declaration unused."""
-        config_path = _TABLEWARE_CONFIG_ROOT / "blocks_ranking_rgb" / "env.json"
+        config_path = (
+            _TABLEWARE_CONFIG_ROOT / "blocks_ranking_rgb" / "task.cobotmagic.yaml"
+        )
         config = load_config(config_path)
         config["enable_sensor"] = False
 
@@ -1572,7 +1658,8 @@ class TestConfigToCfgFromFile:
         )
 
         assert cfg.enable_sensor is False
-        assert [sensor.uid for sensor in cfg.sensor] == [
+        assert cfg.robot.enable_sensor is False
+        assert [sensor.uid for sensor in [*cfg.sensor, *cfg.robot.sensors]] == [
             "cam_high",
             "cam_right_wrist",
             "cam_left_wrist",
@@ -2591,3 +2678,54 @@ def test_mesh_asset_paths_resolve_collision_and_visual_geometry(
         parsed = parsed.rigid_objects["cup"]
     assert parsed.shape.fpath == paths["TaskMeshes/collision.obj"]
     assert parsed.visual_shape.fpath == paths["TaskMeshes/visual.glb"]
+
+
+def test_config_to_cfg_loads_render_only_objects():
+    """The production Gym loader keeps visuals outside the physical registries."""
+    from embodichain.lab.sim.cfg import VisualObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "default",
+        "env": {},
+        "robot": {"uid": "robot"},
+        "visual_object": [
+            {"uid": "prop", "shape": {"shape_type": "Cube", "size": [0.2, 0.3, 0.4]}}
+        ],
+    }
+    cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+    assert isinstance(cfg.visual_object[0], VisualObjectCfg)
+    assert isinstance(cfg.visual_object[0].shape, CubeCfg)
+    assert not cfg.rigid_object
+    assert not cfg.background
+
+
+def test_config_to_cfg_resolves_usd_source_files(monkeypatch, tmp_path):
+    from embodichain.lab.sim.cfg import UsdSourceCfg
+
+    monkeypatch.setattr(
+        "embodichain.data.get_data_path", lambda path: str(tmp_path / path)
+    )
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "default",
+        "env": {},
+        "robot": {"uid": "robot"},
+    }
+    for key in ("visual_object", "rigid_object", "background", "articulation"):
+        config[key] = [
+            {
+                "uid": key,
+                "source": {
+                    "file_path": "scene.usda",
+                    "source_prim_path": "/World/Asset",
+                },
+            }
+        ]
+    cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+    for key in ("visual_object", "rigid_object", "background", "articulation"):
+        asset = getattr(cfg, key)[0]
+        assert isinstance(asset.source, UsdSourceCfg)
+        assert asset.source.file_path == str(tmp_path / "scene.usda")
+        assert asset.source.source_prim_path == "/World/Asset"

@@ -19,12 +19,14 @@ The distribution and primary import package are **`embodichain`**, lowercase
 and one word. The repository directory is `EmbodiChain`; the same wheel
 bundles official tasks as **`embodichain_tasks`** and concrete robot presets as
 **`embodichain_robots`**, with the same version and distribution metadata.
+Their sources live under **`extensions/`**, a repository container rather than
+a Python namespace. Keep the `embodichain_` prefix for bundled extension modules.
 
 | Area | Owner |
 |---|---|
 | CLI dispatch / task discovery | `embodichain/cli/` |
 | Shared numerical algorithms | `embodichain/compute/` |
-| Assets and download registry | `embodichain/data/` |
+| Shared asset downloads, cache and registry | `embodichain/data/` |
 | Online datasets and depth video | `embodichain/data_pipeline/` |
 | Scene Engine and SimReady generation | `embodichain/gen_sim/` |
 | Simulation world, objects, sensors, solvers, planning | `embodichain/lab/sim/` |
@@ -34,14 +36,16 @@ bundles official tasks as **`embodichain_tasks`** and concrete robot presets as
 | RL algorithms, policies, collectors and trainers | `embodichain/learning/rl/` |
 | Real-device controllers / standalone tools | `embodichain/lab/devices/`, `embodichain/toolkits/` |
 | Shared config and math utilities | `embodichain/utils/` |
-| Official task entry points / components / deployments | `embodichain_tasks/` |
-| Concrete robot configurations / hardware revisions / calibrated defaults | `embodichain_robots/` |
+| Official task entry points / components / deployments | `extensions/embodichain_tasks/` |
+| Concrete robot configurations / model-owned asset definitions / calibrated defaults | `extensions/embodichain_robots/` |
 
 Generic robot runtime/configuration and dual-arm composition remain in
 `embodichain/lab/sim/`; lightweight catalog resolution lives in
 `embodichain/robot_registry.py`. Concrete robot presets register
-through the `embodichain.robots` catalog entry point. Concrete presets import
-from `embodichain_robots`; `embodichain.lab.sim.robots` owns only generic
+through the `embodichain.robots` catalog entry point. Concrete presets and migrated model-owned asset definitions use vendor/model
+namespaces in `embodichain_robots`. Shared download/cache machinery stays in
+`embodichain/data`; the `embodichain.assets` entry point registers robot assets.
+Concrete presets import from `embodichain_robots`; `embodichain.lab.sim.robots` owns only generic
 dual-arm composition.
 
 Shared numerical algorithms belong to `compute/<domain>/`, with Warp kernels
@@ -69,8 +73,8 @@ asset-defined spelling. Capabilities come from explicit configuration, not names
 
 Organize official tasks by family, optional subdomain and task identity.
 Keep import registration in the task-named module at
-`embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`; configs belong
-under `embodichain_tasks/configs/tasks/<category-path>/<task>/`. Do not add a
+`extensions/embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`; configs belong
+under `extensions/embodichain_tasks/configs/tasks/<category-path>/<task>/`. Do not add a
 same-named Python package for one entry point or `scenario` / `mdp` modules when
 existing config fields and manager functors express the task.
 
@@ -89,9 +93,18 @@ not switch it. Use a separate environment config for each backend.
 
 ## Code and validation
 
-- Run **`black==26.3.1`**, using `black .`, before every commit.
-- Use `/pre-commit-check` for proportional checks. New production fixes/features
-  need focused tests that prove their behavior; use `/add-test` for project patterns.
+- When task analysis identifies algorithmic complexity, data layout, batching,
+  memory use or synchronization costs as material to the implementation,
+  design and implement from a systems and HPC engineering perspective using
+  [implement-performance](.agents/skills/implement-performance/SKILL.md).
+  Preserve numerical correctness and public contracts; validate material
+  performance claims with representative measurements using `/benchmark`.
+- Run **`black==26.10.1`**, using `black .`, before every commit.
+- Use `/pre-commit-check` for proportional checks. Production fixes/features
+  need focused behavioral coverage; existing tests may suffice. Before and after
+  adding or extending tests, apply the
+  [test necessity review](.agents/skills/add-test/SKILL.md#test-necessity-review).
+  Add only cases that close meaningful coverage gaps.
 - Treat `scripts/tutorials/**` as examples, not production API test targets. Do
   not create or expand tests whose primary subject is a tutorial, and do not
   import tutorial scripts into new tests, unless the user explicitly requests
@@ -139,6 +152,7 @@ Keep branches and PRs focused on one logical change and use the PR template.
 | `/add-functor` | Add observation, reward, event, action, dataset or randomization operation |
 | `/add-test` | Add focused tests with project conventions |
 | `/benchmark` | Write a benchmark using project patterns |
+| `/implement-performance` | Design and implement performance-sensitive computation |
 | `/update-api-docs` | Synchronize public API documentation |
 | `/pre-commit-check` | Validate readiness proportionally |
 | `/review-pr` | Review a change for evidence-backed regressions |

@@ -46,6 +46,7 @@ from embodichain.lab.gym.envs.settling import (
 from embodichain.lab.task_program.compiler import (
     CompiledArticulationJointPositionValidator,
     CompiledObjectNearTargetValidator,
+    CompiledObjectStateValidator,
     CompiledPostPolicy,
     CompiledTaskProgramSegment,
     CompiledTaskProgramValidator,
@@ -189,6 +190,8 @@ class SimulationSegmentPolicyPort:
         self._post_policy_results: dict[int, dict[str, object]] = {}
         self._post_policy_success: dict[int, torch.Tensor] = {}
         self._validator_results: dict[int, dict[str, object]] = {}
+        self._validator_active_masks: dict[int, torch.Tensor] = {}
+        self._lift_baselines: dict[int, torch.Tensor] = {}
 
     @property
     def settle_preset_ids(self) -> tuple[str, ...]:
@@ -354,6 +357,34 @@ class SimulationSegmentPolicyPort:
             raise RuntimeError("Post-policy metadata is unavailable before execution.")
         return deepcopy(metadata)
 
+    def begin_segment(self, *, segment: Any, active_mask: torch.Tensor | None) -> None:
+        """Capture lift baselines just before the segment plans and executes.
+
+        This method only reads observed poses. Ineligible rows remain rejected,
+        and non-finite observations reject their own rows during validation.
+        """
+        if type(segment) is not CompiledTaskProgramSegment:
+            raise TypeError("segment must be exactly CompiledTaskProgramSegment.")
+        active = (
+            torch.ones_like(self._env_ids, dtype=torch.bool)
+            if active_mask is None
+            else self._validate_active_mask(active_mask)
+        )
+        for validator in segment.validators:
+            self.validate_validator(validator, segment=segment)
+            if type(validator) is CompiledObjectStateValidator:
+                if id(validator) in self._validator_active_masks:
+                    raise RuntimeError(
+                        "Segment validator baseline was already captured."
+                    )
+                self._validator_active_masks[id(validator)] = active.clone()
+                if validator.cfg.kind == "object_lifted":
+                    self._lift_baselines[id(validator)] = self._read_pose(
+                        self._objects[validator.object.entity_id],
+                        entity_id=validator.object.entity_id,
+                        require_finite=False,
+                    )
+
     def validate_validator(
         self,
         validator: Any,
@@ -364,9 +395,17 @@ class SimulationSegmentPolicyPort:
         if type(validator) not in (
             CompiledObjectNearTargetValidator,
             CompiledArticulationJointPositionValidator,
+            CompiledObjectStateValidator,
         ):
             raise TypeError("validator must be an exact compiled validator.")
         self._validate_segment_membership(segment, validator, kind="validator")
+        if type(validator) is CompiledObjectStateValidator:
+            for ref in (validator.object, validator.reference):
+                if ref is not None and ref.entity_id not in self._objects:
+                    raise KeyError(
+                        f"Canonical validator object {ref.entity_id!r} has no explicit object binding."
+                    )
+            return
         if type(validator) is CompiledObjectNearTargetValidator:
             if validator.cfg.kind != "object_near_target":
                 raise ValueError(
@@ -408,6 +447,8 @@ class SimulationSegmentPolicyPort:
             Boolean tensor with one result per simulation row.
         """
         self.validate_validator(validator, segment=segment)
+        if type(validator) is CompiledObjectStateValidator:
+            return self._validate_object_state(validator)
         if type(validator) is CompiledArticulationJointPositionValidator:
             return self._validate_articulation_joint_position(validator)
         if type(validator) is not CompiledObjectNearTargetValidator:
@@ -455,6 +496,7 @@ class SimulationSegmentPolicyPort:
         if type(validator) not in (
             CompiledObjectNearTargetValidator,
             CompiledArticulationJointPositionValidator,
+            CompiledObjectStateValidator,
         ):
             raise TypeError("validator must be an exact compiled validator.")
         self._validate_segment_membership(segment, validator, kind="validator")
@@ -462,6 +504,80 @@ class SimulationSegmentPolicyPort:
         if metadata is None:
             raise RuntimeError("Validator metadata is unavailable before validation.")
         return deepcopy(metadata)
+
+    def _validate_object_state(
+        self, validator: CompiledObjectStateValidator
+    ) -> torch.Tensor:
+        """Measure a declared object contract without changing physics state."""
+        entity_id = validator.object.entity_id
+        pose = self._read_pose(
+            self._objects[entity_id], entity_id=entity_id, require_finite=False
+        )
+        accepted = torch.isfinite(pose).all(dim=(1, 2))
+        active = self._validator_active_masks.get(id(validator))
+        if active is not None:
+            accepted &= active.to(device=accepted.device)
+        evidence: dict[str, object] = {}
+        if validator.cfg.kind == "object_lifted":
+            baseline = self._lift_baselines.get(id(validator))
+            if baseline is None:
+                raise RuntimeError(
+                    "object_lifted requires begin_segment before execution."
+                )
+            baseline = baseline.to(device=pose.device, dtype=pose.dtype)
+            lift = pose[:, 2, 3] - baseline[:, 2, 3]
+            accepted &= torch.isfinite(baseline).all(dim=(1, 2))
+            accepted &= lift >= float(validator.cfg.minimum_lift)
+            evidence = {
+                "minimum_lift": validator.cfg.minimum_lift,
+                "initial_height": _json_speed_values(baseline[:, 2, 3]),
+                "measured_lift": _json_speed_values(lift),
+            }
+        elif validator.cfg.kind == "object_relative_position":
+            assert validator.reference is not None
+            reference = self._read_pose(
+                self._objects[validator.reference.entity_id],
+                entity_id=validator.reference.entity_id,
+                require_finite=False,
+            ).to(device=pose.device, dtype=pose.dtype)
+            accepted &= torch.isfinite(reference).all(dim=(1, 2))
+            offset = pose.new_tensor(validator.cfg.position_offset)
+            displacement = pose[:, :3, 3] - reference[:, :3, 3]
+            if validator.cfg.reference_frame == "parent":
+                displacement = torch.bmm(
+                    reference[:, :3, :3].transpose(1, 2), displacement.unsqueeze(-1)
+                ).squeeze(-1)
+            error = torch.abs(displacement - offset)
+            for axis, tolerance in enumerate(validator.cfg.position_tolerance):
+                if tolerance is not None:
+                    accepted &= error[:, axis] < tolerance
+            evidence = {
+                "reference_id": validator.reference.entity_id,
+                "reference_frame": validator.cfg.reference_frame,
+                "position_offset": list(validator.cfg.position_offset),
+                "position_tolerance": list(validator.cfg.position_tolerance),
+                "position_error": [_json_speed_values(row) for row in error],
+            }
+        elif validator.cfg.kind == "object_upright":
+            tilt = torch.rad2deg(torch.acos(pose[:, 2, 2].clamp(-1.0, 1.0)))
+            accepted &= tilt < float(validator.cfg.maximum_tilt_degrees)
+            evidence = {
+                "maximum_tilt_degrees": validator.cfg.maximum_tilt_degrees,
+                "tilt_degrees": _json_speed_values(tilt),
+            }
+        else:
+            raise ValueError(
+                f"Unsupported object-state validator {validator.cfg.kind!r}."
+            )
+        self._validator_results[id(validator)] = {
+            "kind": validator.cfg.kind,
+            "object_id": entity_id,
+            "source_path": list(validator.source_path),
+            "env_ids": self._env_ids.detach().cpu().tolist(),
+            "accepted_mask": accepted.detach().cpu().tolist(),
+            **evidence,
+        }
+        return accepted.to(device=self._env_ids.device)
 
     def _validate_articulation_joint_position(
         self,
@@ -894,7 +1010,9 @@ class SimulationSegmentPolicyPort:
             )
         return qpos.clone()
 
-    def _read_pose(self, entity: Any, *, entity_id: str) -> torch.Tensor:
+    def _read_pose(
+        self, entity: Any, *, entity_id: str, require_finite: bool = True
+    ) -> torch.Tensor:
         """Read one rigid-object pose batch in simulator row order."""
         getter = getattr(entity, "get_local_pose", None)
         if not callable(getter):
@@ -913,7 +1031,7 @@ class SimulationSegmentPolicyPort:
                 f"Rigid object {entity_id!r} pose must have shape "
                 f"({batch_size}, 4, 4)."
             )
-        if not bool(torch.isfinite(pose).all().item()):
+        if require_finite and not bool(torch.isfinite(pose).all().item()):
             raise ValueError(f"Rigid object {entity_id!r} pose must be finite.")
         return pose.clone()
 

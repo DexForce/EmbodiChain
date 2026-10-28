@@ -44,7 +44,7 @@ from embodichain.utils.utility import load_config
 __all__ = ["main"]
 
 _TASK = (
-    "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/"
+    "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/"
     "task.franka.fluid.yaml"
 )
 
@@ -63,8 +63,10 @@ def _configure(
     if cfg.task_program is None:
         raise ValueError("The online fluid deployment must select a Task Program.")
     solver = cfg.sim_cfg.physics_cfg.solver_cfg
-    if solver.get("solver_type") != "sph" or solver.get("rigid_solver_cfg") is None:
-        raise ValueError("Online fluid execution requires SPH with rigid_solver_cfg.")
+    if solver.get("solver_type") != "dexuni" or not isinstance(
+        solver.get("sph_cfg"), dict
+    ):
+        raise ValueError("Online fluid execution requires DexUni with sph_cfg.")
     if num_envs < 1:
         raise ValueError("num_envs must be positive.")
     cfg.num_envs = num_envs
@@ -93,7 +95,7 @@ def _configure(
                 fluid.render.mesh_surface[key] *= scale
         fluid.particle_spacing = particle_spacing
         fluid.particle_radius = 0.3 * particle_spacing
-        solver["particle_support_radius"] = 2.25 * particle_spacing
+        solver["sph_cfg"]["particle_support_radius"] = 2.25 * particle_spacing
     return declaration["id"], cfg
 
 
@@ -176,14 +178,33 @@ def _run(args: argparse.Namespace, output: Path) -> dict[str, Any]:
                 poses.append(cup.get_local_pose().cpu().numpy().copy())
         samples.append(_sample(env))
         qualification = _cup_qualification(poses)
+        accepted = bool(
+            result.completed
+            and result.all_success
+            and all(qualification["accepted"])
+            and all(v >= 50 for v in samples[-1]["received_ml"])
+        )
         videos = []
         if args.renderer != "no-render":
-            env.event_manager.get_functor("record_camera").save_and_clear()
+            recorder = env.event_manager.get_functor("record_camera")
+            purpose = "recording" if accepted else "diagnostic"
             name = cfg.events.record_camera.params["name"]
-            videos = [
-                str(Path("videos") / f"episode_0_{name}_env{i}.mp4")
-                for i in range(env.num_envs)
-            ]
+            video_root = output / "videos"
+            if purpose == "diagnostic":
+                video_root /= "diagnostics"
+            existing = {
+                path: (path.stat().st_ino, path.stat().st_mtime_ns)
+                for path in video_root.glob(f"env_*/episode_*_{name}.mp4")
+            }
+            recorder.save_and_clear(purpose=purpose)
+            for i in range(env.num_envs):
+                matches = []
+                for path in (video_root / f"env_{i:03d}").glob(f"episode_*_{name}.mp4"):
+                    stat = path.stat()
+                    if existing.get(path) != (stat.st_ino, stat.st_mtime_ns):
+                        matches.append(path)
+                if matches:
+                    videos.append(str(sorted(matches)[-1].relative_to(output)))
         if args.record_trajectory:
             env.save_trajectory(str(output / "online_trajectory.pt"))
         report = {
@@ -192,7 +213,11 @@ def _run(args: argparse.Namespace, output: Path) -> dict[str, Any]:
             "num_envs": env.num_envs,
             "renderer": args.renderer,
             "videos": videos,
-            "video_fps": env.control_frequency if videos else None,
+            "video_fps": (
+                cfg.events.record_camera.params.get("fps") or env.control_frequency
+                if videos
+                else None
+            ),
             "particle_count_per_env": env.sim.get_fluid_object("water").num_particles,
             "fluid_source": cfg.fluid_object[0].spawn.to_dict(),
             "particle_spacing_m": cfg.fluid_object[0].particle_spacing,
@@ -203,12 +228,7 @@ def _run(args: argparse.Namespace, output: Path) -> dict[str, Any]:
             "wall_seconds": time.perf_counter() - started,
             "samples": samples,
         }
-        report["accepted"] = bool(
-            result.completed
-            and result.all_success
-            and all(qualification["accepted"])
-            and all(v >= 50 for v in samples[-1]["received_ml"])
-        )
+        report["accepted"] = accepted
         (output / "fluid_gym_result.json").write_text(
             json.dumps(report, indent=2) + "\n"
         )

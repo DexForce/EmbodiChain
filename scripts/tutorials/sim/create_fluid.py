@@ -14,9 +14,9 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Drop a procedural water block into a box using DexSim 0.5.1rc1 SPH.
+"""Drop a procedural water block into a box using DexUni and DFSPH.
 
-Run ``python scripts/tutorials/sim/create_fluid.py`` for native particles, or
+Run ``python scripts/tutorials/sim/create_fluid.py`` for a reconstructed mesh surface, or
 add ``--headless --renderer no-render`` for physics only. The scene uses five
 primitive walls and needs no task assets, robot, Gym or Task Program.
 """
@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(args: argparse.Namespace | None = None) -> None:
-    """Create, step, inspect and reset a single-world fluid.
+    """Create, step, inspect and reset one fluid per environment.
 
     Args:
         args: Parsed options; None reads the command line.
@@ -50,8 +50,8 @@ def main(args: argparse.Namespace | None = None) -> None:
         args = parser.parse_args()
     if args.physics != "newton" or not str(args.device).startswith("cuda"):
         parser.error("Fluids require --physics newton and a CUDA device.")
-    if args.num_envs != 1:
-        parser.error("This DexSim 0.5.1rc1 example requires --num-envs 1.")
+    if args.num_envs < 1:
+        parser.error("--num-envs must be positive.")
     if args.renderer not in {"fast-rt", "rt", "no-render"}:
         parser.error("Choose --renderer fast-rt, rt or no-render for fluids.")
     if args.steps <= 0:
@@ -76,6 +76,7 @@ def main(args: argparse.Namespace | None = None) -> None:
     sim = SimulationManager(
         SimulationManagerCfg(
             device=args.device,
+            num_envs=args.num_envs,
             headless=args.headless,
             gpu_id=args.gpu_id,
             physics_dt=1 / 240,
@@ -84,10 +85,12 @@ def main(args: argparse.Namespace | None = None) -> None:
                 num_substeps=4,
                 collision_cfg=None,
                 solver_cfg={
-                    "solver_type": "sph",
-                    "sph_method": "dfsph",
-                    "particle_diameter": spacing,
-                    "particle_support_radius": 2.25 * spacing,
+                    "solver_type": "dexuni",
+                    "sph_cfg": {
+                        "sph_method": "dfsph",
+                        "particle_diameter": spacing,
+                        "particle_support_radius": 2.25 * spacing,
+                    },
                 },
             ),
             visualization=visualization_cfg_from_args(args),
@@ -107,7 +110,7 @@ def main(args: argparse.Namespace | None = None) -> None:
             sim.add_rigid_object(
                 RigidObjectCfg(
                     uid=uid,
-                    body_type="kinematic",
+                    body_type="static",
                     init_pos=position,
                     shape=MeshCfg(
                         vertices=mesh.vertices,
@@ -123,13 +126,16 @@ def main(args: argparse.Namespace | None = None) -> None:
                 init_pos=(0, 0, 0.16),
                 spawn=FluidSpawnCfg(kind="box", size=(0.12, 0.12, 0.12)),
                 render=FluidRenderCfg(
-                    mode="none" if args.renderer == "no-render" else "particles"
+                    mode="none" if args.renderer == "no-render" else "mesh_surface"
                 ),
             )
         )
         sim.prepare()
         initial = fluid.data.default_particle_state_w
-        print(f"Created {fluid.num_particles} fluid particles.")
+        print(
+            f"Created {fluid.num_particles} fluid particles per environment "
+            f"in {fluid.num_instances} environments."
+        )
         if not args.headless:
             sim.open_window()
         for _ in range(args.steps):
@@ -138,7 +144,8 @@ def main(args: argparse.Namespace | None = None) -> None:
         if not bool(torch.isfinite(state).all()):
             raise RuntimeError("Fluid state is not finite.")
         print(
-            f"Mean particle height after stepping: {state[..., 2].mean().item():.3f} m"
+            f"Mean particle height per environment after stepping: "
+            f"{state[..., 2].mean(dim=1).tolist()} m"
         )
         fluid.reset()
         torch.testing.assert_close(fluid.data.particle_state_w, initial)

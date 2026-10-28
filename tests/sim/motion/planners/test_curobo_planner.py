@@ -55,7 +55,6 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
 from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
     _curobo_pose_to_components,
     _convex_hull_to_voxel_entry,
-    _parse_mimic_joint_names,
     _world_collision_sphere_data,
     generate_curobo_robot_yaml,
     generate_curobo_world_scene,
@@ -70,34 +69,6 @@ _SIM_ROBOT_UID = "curobo_franka_inprocess_test"
 _SIM_CONTROL_PART = "arm"
 _SIM_BLOCK_DIMS = [0.18, 0.40, 0.36]
 _SIM_BLOCK_POS = (0.45, 0.0, 0.18)
-
-# Minimal URDF mirroring the Franka Panda hand: finger joint 2 mimics joint 1.
-_MIMIC_URDF = """\
-<?xml version="1.0"?>
-<robot name="panda_hand">
-  <link name="base"/>
-  <link name="fr3_hand"/>
-  <link name="fr3_leftfinger"/>
-  <link name="fr3_rightfinger"/>
-  <joint name="fr3_hand_joint" type="fixed">
-    <parent link="base"/>
-    <child link="fr3_hand"/>
-  </joint>
-  <joint name="fr3_finger_joint1" type="prismatic">
-    <parent link="fr3_hand"/>
-    <child link="fr3_leftfinger"/>
-    <axis xyz="0 1 0"/>
-    <limit effort="100" lower="0.0" upper="0.04" velocity="0.2"/>
-  </joint>
-  <joint name="fr3_finger_joint2" type="prismatic">
-    <parent link="fr3_hand"/>
-    <child link="fr3_rightfinger"/>
-    <axis xyz="0 1 0"/>
-    <limit effort="100" lower="0.0" upper="0.04" velocity="0.2"/>
-    <mimic joint="fr3_finger_joint1"/>
-  </joint>
-</robot>
-"""
 
 _NO_MIMIC_URDF = """\
 <?xml version="1.0"?>
@@ -815,42 +786,77 @@ def test_graph_capture_mode_rejects_unknown_value():
 # Robot YAML generation
 
 
-def test_parse_mimic_joint_names_detects_mimic_joint(tmp_path):
-    urdf = tmp_path / "panda_hand.urdf"
-    urdf.write_text(_MIMIC_URDF, encoding="utf-8")
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    ("authored_velocity", "runtime_velocity", "expected_velocity", "mimic_multiplier"),
+    [
+        (2.0, 0.3, 0.3, None),
+        (1e10, 0.3, 0.3, None),
+        (None, float("inf"), 0.2, None),
+        (2.0, 0.0, 0.0, None),
+        (0.0, 1.0, 1.0, None),
+        (0.05, 0.3, 0.3, None),
+        (0.4, 0.3, 0.15, -2.0),
+        pytest.param(0.05, 0.05, 0.05, None, id="alohamini-lift"),
+        pytest.param(1.0, 0.25, 0.25, None, id="cobotmagic-gripper-override"),
+        pytest.param(0.0, float("inf"), 0.2, None, id="unspecified-gripper-speed"),
+        pytest.param(0.0, float("inf"), 0.2, -2.0, id="unspecified-mimic-speeds"),
+    ],
+)
+def test_robot_yaml_preserves_limits_through_curobo_loading(
+    tmp_path,
+    monkeypatch,
+    authored_velocity,
+    runtime_velocity,
+    expected_velocity,
+    mimic_multiplier,
+):
+    from dataclasses import replace
 
-    assert _parse_mimic_joint_names(str(urdf)) == {"fr3_finger_joint2"}
-
-
-def test_parse_mimic_joint_names_returns_empty_without_mimic(tmp_path):
-    urdf = tmp_path / "arm.urdf"
-    urdf.write_text(_NO_MIMIC_URDF, encoding="utf-8")
-
-    assert _parse_mimic_joint_names(str(urdf)) == set()
-
-
-def test_parse_mimic_joint_names_handles_missing_file(tmp_path):
-    assert _parse_mimic_joint_names(str(tmp_path / "does_not_exist.urdf")) == set()
-
-
-def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
     pytest.importorskip("curobo")
     import dexsim.kit.meshproc as meshproc
+    from curobo._src.types.robot import RobotCfg as CuroboRobotCfg
+    from curobo._src.types.device_cfg import DeviceCfg
 
-    urdf_path = tmp_path / "robot.urdf"
-    urdf_path.write_text(
-        '<?xml version="1.0"?><robot name="test"><link name="base"/></robot>',
-        encoding="utf-8",
+    urdf_path = tmp_path / "assets" / "robot.urdf"
+    urdf_path.parent.mkdir()
+    source_xml = _NO_MIMIC_URDF.replace(
+        'velocity="2.0"',
+        f'velocity="{authored_velocity}"' if authored_velocity is not None else "",
     )
+    if mimic_multiplier is not None:
+        source_xml = source_xml.replace(
+            "</robot>",
+            f'<link name="finger"/><joint name="follower" type="revolute">'
+            '<parent link="base"/><child link="finger"/><axis xyz="0 0 1"/>'
+            f'<limit effort="100" lower="-3.14" upper="3.14" velocity="{authored_velocity}"/>'
+            f'<mimic joint="joint1" multiplier="{mimic_multiplier}"/>'
+            "</joint></robot>",
+        )
+    urdf_path.write_text(source_xml, encoding="utf-8")
 
     class FakeRobot:
+        mimic_ids = [1] if mimic_multiplier is not None else []
+        mimic_parents = [0] if mimic_multiplier is not None else []
+        mimic_multipliers = [mimic_multiplier] if mimic_multiplier is not None else []
+        active_joint_ids = [0]
         cfg = type(
             "Cfg",
             (),
-            {"fpath": str(urdf_path), "init_qpos": [], "base_link_name": "base"},
+            {
+                "fpath": str(urdf_path),
+                "init_qpos": [0.0, 0.0] if mimic_multiplier is not None else [0.0],
+            },
         )()
-        joint_names = []
-        control_parts = {"arm": []}
+        joint_names = (
+            ["joint1", "follower"] if mimic_multiplier is not None else ["joint1"]
+        )
+        control_parts = {"arm": ["joint1"]}
+
+        def get_qvel_limits(self, **kwargs):
+            return torch.full(
+                (1, len(self.joint_names)), runtime_velocity, dtype=torch.float64
+            )
 
         def get_link_names(self):
             return ["base"]
@@ -859,7 +865,7 @@ def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
             return _unit_cube_vertices(), _cube_faces()
 
         def get_control_part_link_names(self, control_part):  # noqa: ARG002
-            return ["base"]
+            return ["link1"]
 
     calls = []
 
@@ -873,14 +879,19 @@ def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(meshproc, "sphere_fit", fake_sphere_fit)
-    output_path = tmp_path / "robot.yml"
+    output_path = tmp_path / "cache" / "robot.yml"
+
+    if expected_velocity == 0:
+        with pytest.raises(ValueError, match="zero velocity"):
+            generate_curobo_robot_yaml(
+                FakeRobot(), "arm", str(output_path), max_acceleration=0.4, device="cpu"
+            )
+        assert urdf_path.read_text(encoding="utf-8") == source_xml
+        assert not output_path.exists()
+        return
 
     generate_curobo_robot_yaml(
-        FakeRobot(),
-        "arm",
-        str(output_path),
-        urdf_path=str(urdf_path),
-        device="cuda:0",
+        FakeRobot(), "arm", str(output_path), max_acceleration=0.4, device="cpu"
     )
 
     assert len(calls) == 1
@@ -893,6 +904,28 @@ def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
     assert kinematics["collision_spheres"]["base"][0]["radius"] == pytest.approx(0.25)
     assert "self_collision_buffer" not in kinematics
     assert "self_collision_ignore" not in kinematics
+    assert kinematics["urdf_path"] != str(urdf_path)
+    assert kinematics["asset_root_path"] == str(urdf_path.parent)
+    assert urdf_path.read_text(encoding="utf-8") == source_xml
+
+    model = CuroboRobotCfg.create(
+        {"robot_cfg": {"kinematics": kinematics}},
+        device_cfg=DeviceCfg(device="cpu"),
+        load_collision_spheres=False,
+    )
+    expected = torch.tensor([[-expected_velocity], [expected_velocity]])
+    torch.testing.assert_close(
+        model.kinematics.get_joint_limits().acceleration, torch.tensor([[-0.4], [0.4]])
+    )
+    torch.testing.assert_close(model.kinematics.get_joint_limits().velocity, expected)
+    # Reinitialize copied native limits with the CPU device preserved. cuRobo's
+    # clone() omits device_cfg and otherwise assumes CUDA even for a CPU model.
+    copied = replace(
+        model.kinematics.kinematics_config,
+        joint_limits=model.kinematics.get_joint_limits().clone(),
+    )
+    torch.testing.assert_close(copied.joint_limits.velocity, expected)
+    torch.testing.assert_close(model.cspace.velocity_scale, torch.ones(1))
 
 
 def test_robot_collision_visualization_reads_cache_and_live_link_pose(tmp_path):
@@ -1139,7 +1172,7 @@ class _FakeDexsimMaterial:
     def __init__(self, name, color):
         self.name = name
         self.color = color
-        self.pbr_type = None
+        self.transmission = None
         self.pbr_params = {}
 
     def set_base_color(self, color):
@@ -1148,8 +1181,8 @@ class _FakeDexsimMaterial:
     def get_inst(self):
         return self
 
-    def update_pbr_material_type(self, material_type):
-        self.pbr_type = material_type
+    def set_transmission(self, value):
+        self.transmission = value
 
     def set_pbr_param(self, name, *values):
         self.pbr_params[name] = values
@@ -1228,6 +1261,9 @@ def test_obstacle_collision_visualization_loads_one_combined_dexsim_actor():
     assert bounds.get_extent() == pytest.approx([0.1, 0.1, 0.1])
     assert actors[0].material.name == "curobo_world_collision_material"
     assert actors[0].material.color == [1.0, 0.0, 0.0]
+    assert actors[0].material.transmission == pytest.approx(0.55)
+    assert "colorAbsorption" not in actors[0].material.pbr_params
+    assert "scaleAbsorption" not in actors[0].material.pbr_params
 
 
 def test_combined_collision_visualization_colors_and_cleans_two_actors(
@@ -1291,11 +1327,13 @@ def test_combined_collision_visualization_colors_and_cleans_two_actors(
     assert robot_bounds.get_extent() == pytest.approx([0.22, 0.22, 0.22])
     assert robot_actor.material.name == "curobo_robot_collision_material"
     assert robot_actor.material.color == [0.75, 0.75, 1.0]
+    assert robot_actor.material.transmission == pytest.approx(0.55)
     obstacle_bounds = obstacle_actor.mesh.get_axis_aligned_bounding_box()
     assert obstacle_bounds.get_center() == pytest.approx([2.0, 2.0, 3.0])
     assert obstacle_bounds.get_extent() == pytest.approx([0.1, 0.1, 0.1])
     assert obstacle_actor.material.name == "curobo_world_collision_material"
     assert obstacle_actor.material.color == [1.0, 0.75, 0.75]
+    assert obstacle_actor.material.transmission == pytest.approx(0.55)
     assert env.removed_actors == list(reversed(env.actors))
     assert all(not Path(path).exists() for path in env.loaded_paths)
     assert "Showing 2 cuRobo collision spheres" in prompts[0]
@@ -2140,3 +2178,44 @@ def test_curobo_failed_native_derivatives_do_not_poison_successful_peers() -> No
     _, _, _, actual, _ = planner._extract_segment(result, backend)
     torch.testing.assert_close(actual[0], velocities[0])
     assert torch.count_nonzero(actual[1]) == 0
+
+
+def test_curobo_assembly_preserves_exact_start_across_zero_time_action_boundary() -> (
+    None
+):
+    planner = object.__new__(CuroboPlanner)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    start = torch.tensor([[1.3, -2.1]])
+    rounded = torch.nextafter(start, torch.full_like(start, torch.inf))
+    path = torch.cat([rounded, start + 0.1, start + 0.2]).unsqueeze(0)
+    original = path.clone()
+    result = planner._assemble_result(
+        [[path[0]]],
+        [[torch.tensor([0.0, 0.5, 0.5])]],
+        start,
+        torch.tensor([True]),
+        1,
+        2,
+    )
+    # The preceding action ends at start; the next action repeats that sample
+    # at dt=0. No displacement may be introduced at that shared timestamp.
+    joined = torch.cat([start[:, None], result.positions], dim=1)
+    assert torch.equal(joined[:, 0], joined[:, 1])
+    assert torch.equal(result.positions[:, 1:], path[:, 1:])
+    assert torch.equal(path, original)
+
+
+def test_curobo_assembly_does_not_hide_a_real_start_mismatch() -> None:
+    planner = object.__new__(CuroboPlanner)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    start = torch.tensor([[1.3, -2.1]])
+    path = torch.cat([start + 0.001, start + 0.1]).unsqueeze(0)
+    result = planner._assemble_result(
+        [[path[0]]],
+        [[torch.tensor([0.0, 0.5])]],
+        start,
+        torch.tensor([True]),
+        1,
+        2,
+    )
+    assert torch.equal(result.positions, path)

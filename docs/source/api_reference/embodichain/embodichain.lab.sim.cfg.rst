@@ -15,7 +15,7 @@ drive properties, and the per-entity configs consumed by
 factory in :mod:`embodichain.lab.sim.utility.sim_utils`.
 
 Entity configs form a small inheritance hierarchy rooted at ``ObjectBaseCfg``
-(``LightCfg``, ``RigidObjectCfg``, ``VolumeDeformableObjectCfg``, ``SurfaceDeformableObjectCfg``,
+(``LightCfg``, ``VisualObjectCfg``, ``RigidObjectCfg``, ``VolumeDeformableObjectCfg``, ``SurfaceDeformableObjectCfg``,
 ``ArticulationCfg`` and its ``RobotCfg`` subclass), while ``URDFCfg`` and
 ``RigidConstraintCfg`` describe multi-component assembly and constraints.
 ``RobotPresetCfg`` provides replace-only complete robot alternatives when a
@@ -69,7 +69,9 @@ UV seams and render detail.
    JointDrivePropertiesCfg
    NewtonJointDrivePropertiesCfg
    ObjectBaseCfg
+   UsdSourceCfg
    LightCfg
+   VisualObjectCfg
    RigidObjectCfg
    RigidObjectGroupCfg
    RigidConstraintCfg
@@ -77,6 +79,33 @@ UV seams and render detail.
    ArticulationCfg
    RobotCfg
    RobotPresetCfg
+
+USD source selection
+--------------------
+
+``UsdSourceCfg`` groups the source file and its optional exact
+``source_prim_path``. The path addresses an object inside the source USD stage;
+``uid`` identifies the resulting runtime instance. Source selection does not
+set a destination path or attach the instance to a parent/link.
+
+.. code-block:: python
+
+   from embodichain.lab.sim.cfg import UsdSourceCfg, VisualObjectCfg
+
+   mug = VisualObjectCfg(
+       uid="mug_visual",
+       source=UsdSourceCfg(
+           file_path="scene.usda",
+           source_prim_path="/World/Props/Mug",
+       ),
+   )
+
+The same ``source`` configuration is supported by ``RigidObjectCfg`` and
+``ArticulationCfg`` (including ``RobotCfg``). Supply either ``source`` or the
+existing ``shape``/``fpath`` input. Ordinary mesh files continue to use
+``MeshCfg(fpath=...)``. Without a selector, USD loading requires one candidate
+of the requested type; ambiguous sources fail instead of selecting the first
+object. Whole-scene imports preserve this source address on their facades.
 
 Deformable physics and meshing
 -----------------------------
@@ -135,6 +164,13 @@ For manager-owned Newton steps, ``sync_to_renderer=None`` or ``False`` publishes
 only for visual consumers; ``True`` additionally requests publication on steps
 without consumers.
 
+DexUni accepts ``coupling="two_way"`` with ``joint_mode="dynamic"`` to feed
+contact reactions back to articulations. Keep ``collision_cfg=None`` when
+DexUni owns collision detection. ``coupling_options`` configures the native
+feedback policy; full-surface rigid-soft contacts are unsupported in this mode.
+Articulation gravity compensation and passive joint damping are configured
+separately below.
+
 .. currentmodule:: embodichain.lab.sim.cfg.physics
 
 .. autosummary::
@@ -147,6 +183,41 @@ without consumers.
    physics_cfg_for_backend
    physics_backend_from_cfg
    validate_physics_cfg
+
+Articulation configuration module
+---------------------------------
+
+Articulation types live in ``embodichain.lab.sim.cfg.articulation`` and remain
+available from the ``embodichain.lab.sim.cfg`` facade. Root creation settings
+are independent of sparse link and joint physics overlays.
+``root_props.newton_gravity_compensation`` compensates articulation link
+weight on MuJoCo-backed Newton solvers while retaining payload gravity and
+contact reactions. Omission preserves source intent.
+
+``NewtonJointDrivePropertiesCfg.passive_damping`` selects passive DOF damping
+through the same exact-name, regex and control-part rules as the drive gains.
+It is independent of the drive velocity gain ``damping`` and stays active for
+passive and effort target modes. In dictionaries, select this subtype with
+``joint_drive_props.backend="newton"``. Both settings require Newton.
+
+.. currentmodule:: embodichain.lab.sim.cfg.articulation
+
+.. autosummary::
+
+   ArticulationRootPropertiesCfg
+   LinkPhysicsOverrideCfg
+   link_attrs_from_dict
+   JointDrivePropertiesCfg
+   NewtonJointDrivePropertiesCfg
+   ArticulationCfg
+
+.. autoclass:: ArticulationRootPropertiesCfg
+   :members:
+   :no-index:
+
+.. autoclass:: NewtonJointDrivePropertiesCfg
+   :members:
+   :no-index:
 
 Compatibility facade
 --------------------

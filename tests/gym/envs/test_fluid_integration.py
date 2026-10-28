@@ -36,7 +36,7 @@ pytestmark = pytest.mark.no_sim
 ROOT = Path(__file__).resolve().parents[3]
 TASK = (
     ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
 )
 
 
@@ -47,7 +47,7 @@ def _replay_cfg():
     cup.body_type = "kinematic"
     cfg.background.append(cup)
     cfg.sim_cfg.physics_cfg.num_substeps = 1
-    cfg.sim_cfg.physics_cfg.solver_cfg.pop("rigid_solver_cfg", None)
+    cfg.sim_cfg.physics_cfg.solver_cfg["sph_rigid_substeps"] = 1
     return cfg
 
 
@@ -81,7 +81,6 @@ def task_mesh_cache(tmp_path, monkeypatch):
 def test_fluid_deployment_resolves_sources_and_observation_entities():
     cfg = config_to_cfg(load_config(TASK), source_path=TASK)
     assert cfg.sim_cfg.render_cfg.renderer == "fast-rt"
-    assert cfg.events.record_camera.params["per_env"] is True
     assert cfg.events.record_camera.params["fps"] is None
     assert cfg.events.record_camera.interval_step == 1
     assert len(cfg.fluid_object) == 1
@@ -209,7 +208,7 @@ def test_replay_adopts_source_root_before_scene_creation(monkeypatch):
     def initialize(self, cfg, **kwargs):
         captured.append(cfg)
         self.robot = SimpleNamespace(dof=9)
-        self.sim = SimpleNamespace(physics=SimpleNamespace(solver_type="sph"))
+        self.sim = SimpleNamespace(physics=SimpleNamespace(solver_type="dexuni"))
 
     monkeypatch.setattr(EmbodiedEnv, "__init__", initialize)
     env = FluidReplayEnv(cfg, trajectory=_qualified_source((1.0, 2.0, 3.0)))

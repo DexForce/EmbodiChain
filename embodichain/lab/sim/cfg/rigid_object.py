@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import MISSING
+from dataclasses import MISSING, field
 import os
 import warnings
 from typing import Any, Dict, Literal
@@ -31,6 +31,7 @@ from embodichain.utils import configclass, is_configclass, logger
 from ..shapes import ShapeCfg
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .rigid import RigidBodyPhysicsCfg
+from .source import UsdSourceCfg
 
 
 @configclass
@@ -41,8 +42,11 @@ class RigidObjectCfg(ObjectBaseCfg):
     such as physical attributes and collision group.
     """
 
-    shape: ShapeCfg = ShapeCfg()
+    shape: ShapeCfg | None = None
     """Shape configuration for the rigid body. """
+
+    source: UsdSourceCfg | None = field(default=None, kw_only=True)
+    """USD source asset; mutually exclusive with :attr:`shape`."""
 
     # TODO: supoort basic primitive shapes, such as box, sphere, etc cfg and spawn method.
 
@@ -219,7 +223,10 @@ class RigidObjectGroupCfg:
                                 list(init_dict["rigid_objects"].values())[0]
                             )
                             rigid_obj_cfg.uid = f"{cfg.uid}_obj_{i}"
-                            rigid_obj_cfg.shape.fpath = file_path
+                            if rigid_obj_cfg.source is not None:
+                                rigid_obj_cfg.source.file_path = file_path
+                            else:
+                                rigid_obj_cfg.shape.fpath = file_path
                             rigid_objects_cfg[rigid_obj_cfg.uid] = rigid_obj_cfg
                         setattr(cfg, "rigid_objects", rigid_objects_cfg)
                     else:

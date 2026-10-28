@@ -1,0 +1,335 @@
+{
+  "date": "2026-10-19",
+  "base_revision": "6d9e1708292131eb778d7f50b808682026d599d6",
+  "validated_with_uncommitted_public_loading_change": true,
+  "scope": "Public numeric BatchSource/sequence/LeRobot/Dataset APIs and migrated showcase; no learning-quality or general efficiency claim",
+  "implementation_sha256": {
+    "embodichain/data_pipeline/datasets/__init__.py": "74179cb6c2d88c700d6788cc77f80fad7a0350897ff118ffea6cade5956ad118",
+    "embodichain/data_pipeline/datasets/_sampling.py": "501193de2afa35cca41ff84fa54307089c32c7adeee3fcaab012d9581c396c45",
+    "embodichain/data_pipeline/datasets/inspection.py": "d0bfcf257ea0b6109979e803f613bbe39b7776b6d0835f978242ced8cdd0936a",
+    "embodichain/data_pipeline/datasets/lerobot.py": "e77414831b30081acd264dfcf9e75673a1bb0fd6b040b45fbbda3b86fdfc88cd",
+    "embodichain/data_pipeline/datasets/offline_data.py": "97c94cb8c67102bdfe5d5fc9b23e033fffc2d903ca843e3772a5e8f7fe571d12",
+    "embodichain/data_pipeline/datasets/online_data.py": "61c48c0023f6fd791eb5e3c5d95409ab256eed6cba80f325b8e220367c031b7d",
+    "embodichain/data_pipeline/datasets/sampler.py": "f0103e1ef36eeb16271be0a1563241964580597a711788f5d639e8d92dbaba17",
+    "embodichain/data_pipeline/datasets/sequence.py": "0198aa2563cc80ae7ac5f5afe3e1de7fef5b9d9fbe2c96bd49ec50e49dc45035",
+    "embodichain/data_pipeline/datasets/sources.py": "94a7223530a1a34c8425049f3ac0cf2d8626b8ca9e7dd09c4ce52b0567539454",
+    "embodichain/data_pipeline/engine/data.py": "17dc241ffddd59020b8d251d9f325291773d967b75767dda47420ba1fd27d567",
+    "examples/data_pipeline/_ods_pick_place_training.py": "d3318884e50b8c1d5492968551b4c95539a8bbbd3690bbb2a1c845dd8b99c620",
+    "examples/data_pipeline/_ods_pick_place_lerobot.py": "495850f79be45d7ceeb52cfac81a21650a3485c3f9ffc8b2c5183f23ee64694a",
+    "examples/data_pipeline/ods_pick_place_showcase.py": "2ce47105b5fe7f1fe4a336d6a35fe41a385917902f9849b91b3fe68fe5f2129a"
+  },
+  "runtime": {
+    "python": "3.11",
+    "torch": "2.7.0+cu128",
+    "tensordict": "0.13.0",
+    "lerobot": "0.4.4",
+    "black": "26.3.1",
+    "native_runtime_overlay": "/tmp/ods-dexsim-runtime"
+  },
+  "tests": {
+    "command": "python -m pytest -q tests/data_pipeline tests/docs/test_check_api_docs.py tests/test_agent_context_map.py tests/test_agent_context_tools.py",
+    "passed": 1245,
+    "skipped": 1,
+    "native_environment": "PYTHONPATH=.:extensions:extensions/embodichain_tasks:/tmp/ods-dexsim-runtime; CUDA_VISIBLE_DEVICES=GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d; OMP/MKL/OPENBLAS_NUM_THREADS=1",
+    "prior_environment_attempt": "988 passed, 1 skipped, then 3 simulator-import failures from missing reconstruct_cable_rings_kernel in the host native build; rerun with the previously validated runtime overlay, without modifying native source.",
+    "public_cases": [
+      "online/resident parity across continuity and accepted segments",
+      "explicit generation filters and isolated RNG",
+      "owned copies, nested tensors and source-local language dictionaries",
+      "legacy OnlineDataset chunks and new context wrappers",
+      "owner-only generator/finite iteration and sampling quotas",
+      "standard LeRobot datasets without showcase sidecars",
+      "numeric dtype/order/semantics/timestamp validation",
+      "resident limit rejection before allocation and bounded SDK reads"
+    ]
+  },
+  "golden_before_extraction": {
+    "base": "6d9e1708",
+    "cases": {
+      "B1-F1": true,
+      "B1-F64": true,
+      "B256-F1": true,
+      "B256-F64": true
+    },
+    "comparison": "Exact all-field equality with obs/observations naming mapped and identical generator states; real preserved G1 numeric corpus."
+  },
+  "physical_online": {
+    "audit": {
+      "scope": "physical producer, paired CPU tensors and optimization; not timing or held-out learning evidence",
+      "source_revision": "6d9e1708292131eb778d7f50b808682026d599d6",
+      "generations": [
+        {
+          "generation": 1,
+          "episodes": 2,
+          "valid_frames": 666,
+          "content_id": "db88299a40f0329bb064088449a644ac5ec85fe33c9f050b5c69150468adb310",
+          "episode_ids": [
+            0,
+            1
+          ]
+        },
+        {
+          "generation": 2,
+          "episodes": 2,
+          "valid_frames": 664,
+          "content_id": "85b86dd7f6a64970010f1d860e3b404a25418b8f4ef4fa830badb8d391447f6e",
+          "episode_ids": [
+            2,
+            3
+          ]
+        }
+      ],
+      "paired_batches": 4,
+      "paired_chunks": 32,
+      "optimizer_updates": 4,
+      "passed": true,
+      "parameters_updated": true,
+      "tensor_equality": "bitwise",
+      "optimizer_equality": "bitwise"
+    },
+    "process": {
+      "returncode": 0,
+      "forced": false,
+      "observed_owned_pids": [
+        390876,
+        390896,
+        390898,
+        391224,
+        391225,
+        391286,
+        391334
+      ],
+      "surviving_owned_pids": [],
+      "source_unchanged": true,
+      "elapsed_seconds": 149.34872659808025,
+      "gpu": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d"
+    },
+    "local_artifacts": "/tmp/ods-public-loading-online-ps39gkqm"
+  },
+  "physical_offline": {
+    "audit": {
+      "scope": "physical producer, paired CPU tensors and optimization; not timing or held-out learning evidence",
+      "source_revision": "6d9e1708292131eb778d7f50b808682026d599d6",
+      "generations": [],
+      "paired_batches": 0,
+      "paired_chunks": 0,
+      "optimizer_updates": 4,
+      "passed": true,
+      "offline_quota_protected": true,
+      "delivered_chunks": 32,
+      "source_type": "LeRobotDataSource",
+      "resident_memory_limit_bytes": 67108864
+    },
+    "process": {
+      "returncode": 0,
+      "forced": false,
+      "observed_owned_pids": [
+        390918,
+        391033,
+        391036,
+        391245,
+        391246,
+        391313,
+        391378
+      ],
+      "surviving_owned_pids": [],
+      "source_unchanged": true,
+      "elapsed_seconds": 162.37624193006195,
+      "gpu": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+    },
+    "local_artifacts": "/tmp/ods-public-loading-offline-ygfgpgif"
+  },
+  "sampler_microbenchmark": {
+    "scope": "resident CPU context sampling only, float32 C32/256 T600 D51/7, B1/256 F1/64; alternating paired order, warmup5/repeats40; one thread; shared-host timings, not full-path or telemetry qualification",
+    "baseline_revision": "6d9e1708",
+    "records": [
+      {
+        "capacity": 32,
+        "batch": 1,
+        "horizon": 1,
+        "baseline_p50_ms": 0.13826601207256317,
+        "public_p50_ms": 0.16817811410874128,
+        "overhead_percent": 21.63373455833817,
+        "owned_payload_bytes": 5088000,
+        "parity": true
+      },
+      {
+        "capacity": 32,
+        "batch": 1,
+        "horizon": 64,
+        "baseline_p50_ms": 0.14132598880678415,
+        "public_p50_ms": 0.17160293646156788,
+        "overhead_percent": 21.423481916109054,
+        "owned_payload_bytes": 5088000,
+        "parity": true
+      },
+      {
+        "capacity": 32,
+        "batch": 256,
+        "horizon": 1,
+        "baseline_p50_ms": 3.7705469876527786,
+        "public_p50_ms": 3.8040124345570803,
+        "overhead_percent": 0.8875488626421957,
+        "owned_payload_bytes": 5088000,
+        "parity": true
+      },
+      {
+        "capacity": 32,
+        "batch": 256,
+        "horizon": 64,
+        "baseline_p50_ms": 4.821860580705106,
+        "public_p50_ms": 4.860970540903509,
+        "overhead_percent": 0.8110968690157261,
+        "owned_payload_bytes": 5088000,
+        "parity": true
+      },
+      {
+        "capacity": 256,
+        "batch": 1,
+        "horizon": 1,
+        "baseline_p50_ms": 0.19725703168660402,
+        "public_p50_ms": 0.22811349481344223,
+        "overhead_percent": 15.642769671127365,
+        "owned_payload_bytes": 40704000,
+        "parity": true
+      },
+      {
+        "capacity": 256,
+        "batch": 1,
+        "horizon": 64,
+        "baseline_p50_ms": 0.20235998090356588,
+        "public_p50_ms": 0.23304158821702003,
+        "overhead_percent": 15.161894746410054,
+        "owned_payload_bytes": 40704000,
+        "parity": true
+      },
+      {
+        "capacity": 256,
+        "batch": 256,
+        "horizon": 1,
+        "baseline_p50_ms": 3.880229080095887,
+        "public_p50_ms": 3.9200100582093,
+        "overhead_percent": 1.0252224106425567,
+        "owned_payload_bytes": 40704000,
+        "parity": true
+      },
+      {
+        "capacity": 256,
+        "batch": 256,
+        "horizon": 64,
+        "baseline_p50_ms": 5.091277998872101,
+        "public_p50_ms": 5.156037514097989,
+        "overhead_percent": 1.2719697341263547,
+        "owned_payload_bytes": 40704000,
+        "parity": true
+      }
+    ],
+    "note": "Single-item sampling adds about 30 microseconds (15-22%); B256 adds about 0.8-1.3%. Payload bytes are not process/temporary peak memory. This is not the full-path telemetry overhead gate.",
+    "raw_json_sha256": "36d8ac74bf0e15bc018a29b9518d5efc730d8a41724dda8711baad7c4c499c78",
+    "local_report": "/tmp/ods-public-loading/performance.md"
+  },
+  "documentation": {
+    "api_exports": "2684/2684",
+    "targeted_sphinx_dummy_build": "affected source/loader/Dataset API modules, warnings treated as errors: passed",
+    "context_check": "passed; public loader/source entries and route updated"
+  },
+  "limitations": [
+    "Initial reader supports resident numeric vectors, not out-of-core image/video sequence decoding.",
+    "Schema mappings for unannotated external data are explicit caller declarations; width alone does not prove physical action semantics.",
+    "Resident memory cap excludes SDK caches, audit metadata and bounded staging; no total-process RSS guarantee.",
+    "Sampling quotas belong to one source ledger; independent runs and distributed workers do not share a global allowance.",
+    "Physical gates use small runs and no held-out final tests; the existing full-path telemetry and multi-seed efficiency qualification remain unfinished."
+  ],
+  "local_validation_directory": "/tmp/ods-public-loading",
+  "online_offline_initial_parity": {
+    "schema": true,
+    "initial_model_sha256": true,
+    "normalization_sha256": true,
+    "initial_data_content_id": true
+  },
+  "physical_implementation_sha256": {
+    "embodichain/data_pipeline/datasets/__init__.py": "74179cb6c2d88c700d6788cc77f80fad7a0350897ff118ffea6cade5956ad118",
+    "embodichain/data_pipeline/datasets/_sampling.py": "c20b0bdb088e70c56e929611dc68a9f94597b06bdbbc32b8391649de7ca7d2f2",
+    "embodichain/data_pipeline/datasets/inspection.py": "d0bfcf257ea0b6109979e803f613bbe39b7776b6d0835f978242ced8cdd0936a",
+    "embodichain/data_pipeline/datasets/lerobot.py": "866bcb20f6b2ce1ade8954095a1167f64c52df552c989500949013c46a787866",
+    "embodichain/data_pipeline/datasets/offline_data.py": "97c94cb8c67102bdfe5d5fc9b23e033fffc2d903ca843e3772a5e8f7fe571d12",
+    "embodichain/data_pipeline/datasets/online_data.py": "61c48c0023f6fd791eb5e3c5d95409ab256eed6cba80f325b8e220367c031b7d",
+    "embodichain/data_pipeline/datasets/sampler.py": "f0103e1ef36eeb16271be0a1563241964580597a711788f5d639e8d92dbaba17",
+    "embodichain/data_pipeline/datasets/sequence.py": "0198aa2563cc80ae7ac5f5afe3e1de7fef5b9d9fbe2c96bd49ec50e49dc45035",
+    "embodichain/data_pipeline/datasets/sources.py": "a550a98f6bc0c0baaf676a95a1169d422e890376f25eabdd3ad964b81f38de00",
+    "embodichain/data_pipeline/engine/data.py": "17dc241ffddd59020b8d251d9f325291773d967b75767dda47420ba1fd27d567",
+    "examples/data_pipeline/_ods_pick_place_training.py": "d3318884e50b8c1d5492968551b4c95539a8bbbd3690bbb2a1c845dd8b99c620",
+    "examples/data_pipeline/_ods_pick_place_lerobot.py": "495850f79be45d7ceeb52cfac81a21650a3485c3f9ffc8b2c5183f23ee64694a",
+    "examples/data_pipeline/ods_pick_place_showcase.py": "2ce47105b5fe7f1fe4a336d6a35fe41a385917902f9849b91b3fe68fe5f2129a"
+  },
+  "timestamp_followup": {
+    "scope": "After the physical common-payload integrations, preserve optional ODS acceptance/publication timestamps in canonical batches and LeRobot scalar mappings.",
+    "validation": "Final 1245-test regression and 40-case source/SDK/alignment group pass, including exact timestamp values and -1 padding.",
+    "clock_semantics": "accepted_at_ns is Unix nanoseconds; published_at_monotonic_ns belongs to the originating host clock and is provenance across offline replay."
+  },
+  "sequence_dataset_followup": {
+    "date": "2026-10-19",
+    "base_revision": "4704c9d91eb10e0f41041e2f1fe51b364ffb05f6",
+    "scope": "One common SequenceDataset, compatibility aliases/delegation, shared schema validation/fingerprints and typed unavailable-data errors. No new physical training or throughput experiment.",
+    "implementation_sha256": {
+      "embodichain/data_pipeline/datasets/__init__.py": "731259a672e56ba55cdd545b4b47280bec0d6fd833a71a9fe21f98b5b9b60125",
+      "embodichain/data_pipeline/datasets/schema.py": "e32ecd1fb8364cad340314730f95ee6997572acdd207d99de5960b4959d5ced5",
+      "embodichain/data_pipeline/datasets/sequence.py": "4db71355b04704936180a9f2546b5f2766d8a42f712a2e9f3e74cb2815c202d2",
+      "embodichain/data_pipeline/datasets/sequence_data.py": "73038dce33da170035f00be840d024fdbeb06d98131464a6a266bc0d79c045d1",
+      "embodichain/data_pipeline/datasets/offline_data.py": "5a54e62911abaa68bb49ab8b40dfb918a88150ba34d28986cd6e68a0cfe1f6fc",
+      "embodichain/data_pipeline/datasets/online_data.py": "23252abdb41b5a36749043b19854d443b6c367b180790d13ecd7522dda944725",
+      "embodichain/data_pipeline/datasets/sources.py": "f17787d24e8796b91eb8fc20e4975fead19dd6bf05144019752f081a2e6c52ba",
+      "embodichain/data_pipeline/datasets/lerobot.py": "a018a7df5d55cf4ee5fbe583dd99fefd546fcd0f223a3565c5302567c5f7f233",
+      "embodichain/data_pipeline/engine/data.py": "c4aab00cdcbe745c6387b93ca8168746495367057c6721caf5dc3521659cffa8",
+      "examples/data_pipeline/_ods_pick_place_training.py": "301eda72242630407f52a636a5694cdbb0101b8efb4b0127d61543ab077274b6",
+      "examples/data_pipeline/_ods_pick_place_benchmark.py": "186e557ec089cfefbd348f868abee19a8d17ee60f76acc9e5b407b595de011e6"
+    },
+    "tests": {
+      "command": "python -m pytest -q tests/data_pipeline tests/docs/test_check_api_docs.py tests/test_agent_context_map.py tests/test_agent_context_tools.py",
+      "passed": 1269,
+      "skipped": 1,
+      "elapsed_seconds": 31.78,
+      "native_environment": "PYTHONPATH=.:extensions:extensions/embodichain_tasks:/tmp/ods-dexsim-runtime; OMP/MKL/OPENBLAS_NUM_THREADS=1; default host CUDA visibility; PYTHONDONTWRITEBYTECODE=1",
+      "coverage": [
+        "Same common Dataset accepts actual engine sampler and resident source; exact all-field/RNG parity retains existing optimizer-alignment tests",
+        "OfflineDataset is only an alias; old OnlineDataset chunks remain supported and context mode delegates to SequenceDataset",
+        "Finite iterator limits and new iterators do not reset source delivery budgets",
+        "Failed downstream transforms remain charged; common transforms restore canonical padding",
+        "No eligible-window, budget depletion and permanent failures propagate without hidden retries",
+        "All source constructors reject malformed semantic declarations before SDK loading; nested feature dtype is checked",
+        "Schema identity preserves ordered features and versions, ignores dictionary key order and rejects nonfinite/non-JSON metadata",
+        "Public imports remain lazy and do not initialize simulation or import the SDK"
+      ]
+    },
+    "checks": {
+      "black": "26.3.1; black .; 1387 files unchanged",
+      "api_documentation": "2692/2692 exports documented",
+      "sphinx": "Affected API section and OnlineDataset built with dummy builder and warnings as errors; full site not built",
+      "context": "Map/link check and routing for SequenceDataset, DataUnavailableError and ActionDescriptor pass",
+      "whitespace_and_changed_python_structure": "pass"
+    },
+    "limitations": [
+      "Earlier physical integrations and performance measurements above retain their original implementation hashes and are not reruns of this follow-up.",
+      "Image/video decoding, distributed/global quota ownership, DAgger and RLinf integration remain outside this change.",
+      "Action semantics and positive step_dt are now required for every public numeric source; legacy engine/chunk defaults are unchanged."
+    ]
+  },
+  "unit_test_cleanup": {
+    "base_revision": "94a2a5cf1feeb8c6dd8e1d08c59a6e28a3a6981e",
+    "removed_example_test_files": 13,
+    "removed_example_test_lines": 3535,
+    "configuration_regime_cases": {
+      "before": 576,
+      "after": 8
+    },
+    "duplicate_dataset_iteration_cases_merged": 2,
+    "tests": {
+      "command": "python -m pytest -q tests/data_pipeline tests/docs/test_check_api_docs.py tests/test_agent_context_map.py tests/test_agent_context_tools.py",
+      "passed": 482,
+      "skipped": 0,
+      "elapsed_seconds": 23.82,
+      "environment": "Same Python 3.11/native runtime overlay and single-thread CPU settings as sequence_dataset_followup."
+    },
+    "scope": "No production implementation changes. Current unit tests target reusable ODS/dataset components, not example models, private writers, training or experiment reporting. Prior test counts, optimizer alignment and physical experiments remain historical evidence."
+  }
+}

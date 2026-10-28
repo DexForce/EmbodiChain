@@ -261,3 +261,28 @@ def test_main_writes_missing_json_to_stdout(
     assert exit_code == 1
     assert json.loads(captured.out)["missing_count"] == 1
     assert captured.err == ""
+
+
+@pytest.mark.parametrize(
+    "package,module,exports",
+    [
+        (
+            "embodichain_benchmarks",
+            "embodichain_benchmarks.motion_generation",
+            {"run_benchmark", "PlannerAdapter"},
+        ),
+        (
+            "embodichain_models",
+            "embodichain_models.dynamics.nerd.model",
+            {"NeRDModel", "NeRDModelCfg"},
+        ),
+    ],
+)
+def test_default_inventory_includes_bundled_extension_public_exports(
+    package, module, exports
+):
+    """Moving evaluation to an extension must not remove it from API coverage."""
+    roots = [root for root in _checker.DEFAULT_PACKAGE_ROOTS if root.module == package]
+    assert len(roots) == 1
+    modules = {module.name: module for module in discover_public_modules(roots)}
+    assert exports <= set(modules[module].exports)

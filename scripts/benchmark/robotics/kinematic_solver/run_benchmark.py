@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Unified benchmark for OPW, UR, FEP, and Pytorch kinematic solvers.
+"""Unified benchmark for analytical, numerical and SSIK kinematic solvers.
 
 Measures IK wall-clock latency, pose accuracy, success rate, and memory usage
 across OPW (Warp CUDA vs CPU), UR analytic (Warp CPU vs CUDA), FEP, and Pytorch.
@@ -26,10 +26,12 @@ Run: embodichain benchmark robotics-kinematic-solver
 from __future__ import annotations
 
 import argparse
+from importlib.metadata import version
 import os
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import psutil
@@ -43,6 +45,12 @@ from embodichain.lab.sim.motion.solvers.pytorch_solver import (
 )
 from embodichain.lab.sim.motion.solvers.ur_solver import URSolver, URSolverCfg
 from embodichain.lab.sim.motion.solvers.fep_solver import FEPSolver, FEPSolverCfg
+
+if TYPE_CHECKING:
+    from scripts.benchmark.robotics.kinematic_solver.ssik_benchmark import (
+        SSIKBenchmarkOptions,
+    )
+
 
 OPW_LOWER_LIMITS = [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944]
 OPW_UPPER_LIMITS = [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944]
@@ -66,7 +74,7 @@ UR_TCP = [
 ]
 
 SAMPLE_SIZES = [100, 1000, 10000]
-SUPPORTED_SOLVERS = ("opw", "pytorch", "ur", "fep")
+SUPPORTED_SOLVERS = ("opw", "pytorch", "ur", "fep", "differentiable")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -78,13 +86,133 @@ def _parse_args() -> argparse.Namespace:
         "--solvers",
         "-s",
         nargs="+",
-        choices=(*SUPPORTED_SOLVERS, "franka", "all"),
+        choices=(*SUPPORTED_SOLVERS, "franka", "ssik", "all"),
         default=["all"],
         help=(
-            "Solvers to benchmark. Use one or more of: opw, pytorch, ur, fep, "
-            "franka, all. The franka comparison runs only when selected explicitly. "
+            "Solvers to benchmark. Use one or more of: opw, pytorch, ur, fep, differentiable, "
+            "franka, ssik, all. Franka and SSIK comparisons run only when selected explicitly. "
             "Default: all."
         ),
+    )
+    parser.add_argument(
+        "--ssik-smoke",
+        action="store_true",
+        help="Use small SSIK workloads; never certifies acceptance gates.",
+    )
+    parser.add_argument(
+        "--ssik-models",
+        nargs="+",
+        default=None,
+        choices=(
+            "aloha_left",
+            "aloha_right",
+            "marvin_bare_left",
+            "marvin_bare_right",
+            "marvin_gripper_left",
+            "marvin_gripper_right",
+            "arx5",
+            "flexiv_rizon4s",
+        ),
+    )
+    parser.add_argument(
+        "--ssik-reference-artifacts",
+        nargs="+",
+        default=None,
+        metavar="MODEL=PATH",
+        help="Load explicitly built per-model reference artifacts and adjacent manifests.",
+    )
+    parser.add_argument(
+        "--ssik-devices", nargs="+", choices=("cpu", "cuda"), default=["cpu", "cuda"]
+    )
+    reference = parser.add_mutually_exclusive_group()
+    reference.add_argument(
+        "--ssik-reference",
+        dest="ssik_skip_reference",
+        action="store_false",
+        help="Align correctness with the optional pinned SSIK CPU reference; exclude reference timing.",
+    )
+    reference.add_argument(
+        "--ssik-skip-reference",
+        dest="ssik_skip_reference",
+        action="store_true",
+        help="Retain the default of no optional SSIK reference import.",
+    )
+    parser.set_defaults(ssik_skip_reference=True)
+    parser.add_argument(
+        "--ssik-skip-warp",
+        action="store_true",
+        help="Measure only explicit baselines/reference; Warp gates remain unvalidated.",
+    )
+    parser.add_argument(
+        "--ssik-quality-only",
+        action="store_true",
+        help="Run fixture correctness without latency certification.",
+    )
+    parser.add_argument(
+        "--ssik-skip-baseline",
+        action="store_true",
+        help="Diagnostic run only; comparison gates remain unvalidated.",
+    )
+    parser.add_argument(
+        "--ssik-timing-only",
+        action="store_true",
+        help="Measure selected shapes without rerunning quality; acceptance remains unvalidated without quality results.",
+    )
+    parser.add_argument(
+        "--ssik-batch-sizes",
+        nargs="+",
+        type=int,
+        choices=(1, 8, 100, 1000, 10000),
+        default=None,
+    )
+    parser.add_argument(
+        "--ssik-baseline-variants",
+        nargs="+",
+        choices=("original", "matched"),
+        default=["original", "matched"],
+    )
+    parser.add_argument(
+        "--ssik-scenarios",
+        nargs="+",
+        choices=("wide", "boundary", "singular", "unreachable", "trajectory"),
+        default=["wide", "boundary", "singular", "unreachable", "trajectory"],
+    )
+    parser.add_argument(
+        "--ssik-timing-scopes",
+        nargs="+",
+        choices=("resident", "transfer", "sustained"),
+        default=["resident", "transfer", "sustained"],
+    )
+    parser.add_argument("--ssik-cpu-threads", type=int, default=1)
+    parser.add_argument("--ssik-artifact-dir", type=Path, default=None)
+    parser.add_argument(
+        "--ssik-geometry-mode",
+        choices=("strict", "near_parallel", "rr"),
+        default=None,
+        help="Override the selected presets' geometry mode; otherwise inherit each preset.",
+    )
+    parser.add_argument("--ssik-axis-alignment-tolerance", type=float, default=1e-5)
+    parser.add_argument(
+        "--ssik-srs-search",
+        choices=("uniform", "seed_local"),
+        default=None,
+        help="Override SRS search; otherwise inherit each preset.",
+    )
+    parser.add_argument(
+        "--ssik-cuda-rr",
+        action="store_true",
+        help="Add the prepared Rizon4S CUDA RR backend to the selected CUDA workload.",
+    )
+    parser.add_argument(
+        "--ssik-rr-search",
+        choices=("fixed", "seed_local"),
+        default=None,
+        help="Override RR search; presets are inherited, while the legacy CUDA RR comparison defaults to fixed.",
+    )
+    parser.add_argument(
+        "--ssik-robot-e2e",
+        action="store_true",
+        help="Also measure real Robot.compute_ik in isolated engine-backed workers.",
     )
     return parser.parse_args()
 
@@ -92,11 +220,14 @@ def _parse_args() -> argparse.Namespace:
 def _normalize_selected_solvers(selected_solvers: list[str] | None) -> set[str]:
     """Normalize selected solver names to a canonical set."""
     if not selected_solvers or "all" in selected_solvers:
-        return set(SUPPORTED_SOLVERS)
+        explicit_comparisons = set(selected_solvers or ()).intersection(
+            ("franka", "ssik")
+        )
+        return set(SUPPORTED_SOLVERS) | explicit_comparisons
     return {
         solver
         for solver in selected_solvers
-        if solver in (*SUPPORTED_SOLVERS, "franka")
+        if solver in (*SUPPORTED_SOLVERS, "franka", "ssik")
     }
 
 
@@ -144,7 +275,7 @@ def _memory_snapshot() -> dict[str, float]:
 def _format_markdown_table(rows: list[dict[str, object]]) -> list[str]:
     """Format rows into a markdown table."""
     if not rows:
-        return ["No data."]
+        return ["| status |", "| --- |", "| No data. |"]
 
     headers = list(dict.fromkeys(key for row in rows for key in row))
     lines = [
@@ -158,23 +289,37 @@ def _format_markdown_table(rows: list[dict[str, object]]) -> list[str]:
 
 def _build_leaderboard_rows(
     metric_rows: list[dict[str, object]],
+    perf_rows: list[dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     """Aggregate and rank algorithms by overall success rate."""
     aggregate: dict[str, dict[str, float]] = {}
     for row in metric_rows:
         impl = str(row["impl"])
+        is_ssik = row.get("component") == "ssik_ik"
+        if is_ssik:
+            impl += ":" + str(row["model"])
+            if row.get("scenario") in (
+                "unreachable",
+                "streaming_control",
+                "robot_streaming_control",
+            ):
+                continue
         if impl not in aggregate:
             aggregate[impl] = {
                 "success_sum": 0.0,
                 "t_err_sum": 0.0,
                 "r_err_sum": 0.0,
                 "count": 0.0,
+                "error_count": 0.0,
             }
 
-        aggregate[impl]["success_sum"] += float(row["success_rate"])
-        aggregate[impl]["t_err_sum"] += float(row["translation_err_mm"])
-        aggregate[impl]["r_err_sum"] += float(row["rotation_err_deg"])
-        aggregate[impl]["count"] += 1.0
+        weight = float(row["sample_size"]) if is_ssik else 1.0
+        error_weight = weight * float(row["success_rate"]) if is_ssik else 1.0
+        aggregate[impl]["success_sum"] += float(row["success_rate"]) * weight
+        aggregate[impl]["t_err_sum"] += float(row["translation_err_mm"]) * error_weight
+        aggregate[impl]["r_err_sum"] += float(row["rotation_err_deg"]) * error_weight
+        aggregate[impl]["count"] += weight
+        aggregate[impl]["error_count"] += error_weight
 
     ranked = sorted(
         aggregate.items(),
@@ -185,15 +330,32 @@ def _build_leaderboard_rows(
     leaderboard_rows: list[dict[str, object]] = []
     for rank, (algorithm, stats) in enumerate(ranked, start=1):
         count = max(stats["count"], 1.0)
+        error_count = max(stats["error_count"], 1.0)
         leaderboard_rows.append(
             {
                 "rank": rank,
                 "algorithm": algorithm,
                 "overall_success_rate": f"{stats['success_sum'] / count:.2%}",
-                "avg_translation_err_mm": f"{stats['t_err_sum'] / count:.6f}",
-                "avg_rotation_err_deg": f"{stats['r_err_sum'] / count:.6f}",
+                "avg_translation_err_mm": f"{stats['t_err_sum'] / error_count:.6f}",
+                "avg_rotation_err_deg": f"{stats['r_err_sum'] / error_count:.6f}",
             }
         )
+    measured = set(aggregate)
+    for row in perf_rows or ():
+        impl = str(row["impl"])
+        if row.get("component") == "ssik_ik":
+            impl += ":" + str(row["model"])
+        if impl not in measured:
+            leaderboard_rows.append(
+                {
+                    "rank": "unranked",
+                    "algorithm": impl,
+                    "overall_success_rate": "UNMEASURED",
+                    "avg_translation_err_mm": "N/A",
+                    "avg_rotation_err_deg": "N/A",
+                }
+            )
+            measured.add(impl)
     return leaderboard_rows
 
 
@@ -208,7 +370,7 @@ def _write_markdown_report(
     output_dir = Path("outputs/benchmarks")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     report_path = output_dir / f"{benchmark_name}_{timestamp}.md"
 
     lines: list[str] = [
@@ -1026,7 +1188,7 @@ def benchmark_franka_solver_comparison() -> (
     """Compare Franka's default FEP and former Pytorch solver on shared inputs."""
     from scipy.spatial.transform import Rotation
 
-    from embodichain_robots.franka_panda import FrankaPandaCfg
+    from embodichain_robots.franka.panda import FrankaPandaCfg
 
     perf_rows: list[dict[str, object]] = []
     metric_rows: list[dict[str, object]] = []
@@ -1149,7 +1311,254 @@ def benchmark_franka_solver_comparison() -> (
     return perf_rows, metric_rows
 
 
-def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
+def benchmark_differentiable_solver() -> (
+    tuple[list[dict[str, object]], list[dict[str, object]]]
+):
+    """Measure complete training graphs and forward baselines on shared Franka data.
+
+    DLS settings use the public defaults except for the iteration count. The
+    comparison Pytorch solver uses two seeds and 64 iterations; FEP enables
+    redundancy search. Each mode receives identical targets and initial joints.
+    Component measurements are diagnostic and excluded from the leaderboard.
+    """
+    from embodichain.compute.kinematics import (
+        DifferentiableIKCfg,
+        SerialChainKinematics,
+        damped_least_squares_step,
+        pose_error,
+    )
+    from embodichain.learning.layers import DifferentiableIKLayer, KinematicsLayer
+
+    perf_rows: list[dict[str, object]] = []
+    metric_rows: list[dict[str, object]] = []
+    path = get_data_path("Franka/Panda/PandaWithHand.urdf")
+    devices = [torch.device("cpu")]
+    if torch.cuda.is_available():
+        devices.append(torch.device("cuda", torch.cuda.current_device()))
+    # Generate once on CPU so different devices get the same workloads.
+    cpu_model = SerialChainKinematics.from_urdf(
+        Path(path).read_text(), "fr3_hand_tcp", "base"
+    )
+    lower, upper = cpu_model.chain.low, cpu_model.chain.high
+    generator = torch.Generator().manual_seed(2026)
+    workloads = []
+    for count in (1, 64, 256, 1024):
+        seed = lower + (0.25 + 0.5 * torch.rand(count, 7, generator=generator)) * (
+            upper - lower
+        )
+        nearby = (seed + 0.04 * torch.randn(count, 7, generator=generator)).clamp(
+            min=lower, max=upper
+        )
+        distant = lower + (0.1 + 0.8 * torch.rand(count, 7, generator=generator)) * (
+            upper - lower
+        )
+        for scenario, joints in (("nearby", nearby), ("distant", distant)):
+            target = cpu_model.evaluate(joints, torch.eye(4))[0]
+            workloads.append((scenario, count, target, seed))
+
+    def measure(call, device):
+        # No retained graph survives across repetitions; input leaves are
+        # created outside the timing closure by the caller and never mutated.
+        for _ in range(2):
+            torch.manual_seed(2026)
+            output = call()
+            del output
+        times, peaks, ram, vram = [], [], [], []
+        for _ in range(3):
+            torch.manual_seed(2026)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+                torch.cuda.reset_peak_memory_stats(device)
+            before = _memory_snapshot()
+            start = time.perf_counter()
+            output = call()
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            times.append((time.perf_counter() - start) * 1000)
+            after = _memory_snapshot()
+            peaks.append(
+                torch.cuda.max_memory_allocated(device) / 1024**2
+                if device.type == "cuda"
+                else 0.0
+            )
+            ram.append(after["cpu_mb"] - before["cpu_mb"])
+            vram.append(
+                after["gpu_mb"] - before["gpu_mb"] if device.type == "cuda" else 0.0
+            )
+            del output
+        return {
+            "cost_time_ms": float(np.median(times)),
+            "cpu_delta_mb": max(ram),
+            "gpu_delta_mb": max(vram),
+            "peak_gpu_mb": max(peaks),
+        }
+
+    for device in devices:
+        model = cpu_model.to(device, torch.float32)
+        kinematics = KinematicsLayer(model)
+        common_cfg = dict(
+            urdf_path=path,
+            root_link_name="base",
+            end_link_name="fr3_hand_tcp",
+            joint_names=list(model.joint_names),
+        )
+        _ensure_warp_initialized()
+        fep = FEPSolverCfg(**common_cfg, redundancy_search=True).init_solver(
+            device=device
+        )
+        pytorch = PytorchSolverCfg(
+            **common_cfg, num_samples=2, max_iterations=64, dt=0.5
+        ).init_solver(device=device)
+        for scenario, count, cpu_target, cpu_seed in workloads:
+            target, seed = cpu_target.to(device), cpu_seed.to(device)
+            for iterations in (4, 8, 16):
+                layer = DifferentiableIKLayer(
+                    kinematics, DifferentiableIKCfg(max_iterations=iterations)
+                )
+                with torch.no_grad():
+                    quality = layer.solve(target, seed)
+                impl = f"differentiable_{iterations}_{device.type}"
+                common = {
+                    "sample_size": count,
+                    "scenario": scenario,
+                    "impl": impl,
+                    "component": "franka_ik",
+                }
+                metric_rows.append(
+                    {
+                        **common,
+                        "success_rate": quality.success.float().mean().item(),
+                        "translation_err_mm": quality.position_error.norm(dim=-1)
+                        .mean()
+                        .item()
+                        * 1000,
+                        "rotation_err_deg": quality.rotation_error.norm(dim=-1)
+                        .mean()
+                        .item()
+                        * 180
+                        / np.pi,
+                    }
+                )
+                del quality
+                goal = target.detach().requires_grad_()
+                initial = seed.detach().requires_grad_()
+                for mode in ("no_grad", "forward", "forward_backward"):
+
+                    def call():
+                        with torch.set_grad_enabled(mode != "no_grad"):
+                            result = layer.solve(goal, initial)
+                            if mode == "forward_backward":
+                                # autograd.grad avoids accumulating input leaf grads.
+                                return torch.autograd.grad(
+                                    result.qpos.square().mean(), (goal, initial)
+                                )
+                            return result.qpos
+
+                    measured = measure(call, device)
+                    perf_rows.append(
+                        {
+                            **common,
+                            "mode": mode,
+                            "iterations": iterations,
+                            **measured,
+                            "queries_per_second": count
+                            * 1000
+                            / measured["cost_time_ms"],
+                        }
+                    )
+                print(
+                    f"  differentiable {device.type} {scenario} n={count} steps={iterations}: {measured['cost_time_ms']:.2f} ms forward+backward",
+                    flush=True,
+                )
+
+            # Decompose work at the same seed without timing input preparation.
+            with torch.no_grad():
+                pose, jacobian = kinematics.evaluate(seed)
+                position, rotation = pose_error(pose, target)
+                error = torch.cat((position, rotation), -1)
+            for component in ("fk_jacobian", "dls_step"):
+                for backward in (False, True):
+                    q = seed.detach().requires_grad_()
+                    e = error.detach().requires_grad_()
+                    j = jacobian.detach().requires_grad_()
+
+                    def call_component():
+                        if component == "fk_jacobian":
+                            p, matrix = kinematics.evaluate(q)
+                            return (
+                                torch.autograd.grad(
+                                    p.square().mean() + matrix.square().mean(), q
+                                )
+                                if backward
+                                else (p, matrix)
+                            )
+                        delta = damped_least_squares_step(e, j, 0.05)
+                        return (
+                            torch.autograd.grad(delta.square().mean(), (e, j))
+                            if backward
+                            else delta
+                        )
+
+                    measured = measure(call_component, device)
+                    perf_rows.append(
+                        {
+                            "sample_size": count,
+                            "scenario": scenario,
+                            "impl": f"differentiable_{device.type}",
+                            "component": component,
+                            "mode": "forward_backward" if backward else "forward",
+                            **measured,
+                        }
+                    )
+
+            for name, solver in (
+                ("fep_search", fep),
+                ("pytorch_two_seeds_64", pytorch),
+            ):
+
+                def call_baseline():
+                    with torch.no_grad():
+                        return solver.get_ik(target, qpos_seed=seed)
+
+                measured = measure(call_baseline, device)
+                torch.manual_seed(2026)
+                with torch.no_grad():
+                    success, joints = call_baseline()
+                    joints = joints.reshape(count, 7)
+                    position, rotation = pose_error(kinematics(joints), target)
+                common = {
+                    "sample_size": count,
+                    "scenario": scenario,
+                    "impl": f"{name}_{device.type}",
+                    "component": "franka_ik",
+                }
+                perf_rows.append(
+                    {
+                        **common,
+                        "mode": "no_grad",
+                        **measured,
+                        "queries_per_second": count * 1000 / measured["cost_time_ms"],
+                    }
+                )
+                metric_rows.append(
+                    {
+                        **common,
+                        "success_rate": success.float().mean().item(),
+                        "translation_err_mm": position.norm(dim=-1).mean().item()
+                        * 1000,
+                        "rotation_err_deg": rotation.norm(dim=-1).mean().item()
+                        * 180
+                        / np.pi,
+                    }
+                )
+    return perf_rows, metric_rows
+
+
+def run_all_benchmarks(
+    selected_solvers: list[str] | None = None,
+    *,
+    ssik_options: SSIKBenchmarkOptions | None = None,
+) -> None:
     """Run unified OPW + UR + FEP + Pytorch kinematic solver benchmarks."""
     solvers_to_run = _normalize_selected_solvers(selected_solvers)
 
@@ -1204,7 +1613,22 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
         perf_rows.extend(franka_perf_rows)
         metric_rows.extend(franka_metric_rows)
 
-    leaderboard_rows = _build_leaderboard_rows(metric_rows)
+    if "differentiable" in solvers_to_run:
+        diff_perf, diff_metrics = benchmark_differentiable_solver()
+        perf_rows.extend(diff_perf)
+        metric_rows.extend(diff_metrics)
+
+    ssik_notes: list[str] = []
+    if "ssik" in solvers_to_run:
+        from scripts.benchmark.robotics.kinematic_solver.ssik_benchmark import (
+            benchmark_ssik_solver,
+        )
+
+        ssik_perf, ssik_metrics, ssik_notes = benchmark_ssik_solver(ssik_options)
+        perf_rows.extend(ssik_perf)
+        metric_rows.extend(ssik_metrics)
+
+    leaderboard_rows = _build_leaderboard_rows(metric_rows, perf_rows)
 
     benchmark_name = "kinematic_solver"
 
@@ -1218,8 +1642,17 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
         metric_rows=metric_rows,
         leaderboard_rows=leaderboard_rows,
         notes=[
-            "CPU/GPU memory fields are deltas measured around timed calls.",
+            *ssik_notes,
+            "Legacy CPU/GPU memory fields are deltas measured around timed calls; SSIK uses a separate warmed memory pass with separately named Torch and Warp fields.",
+            f"Runtime: Torch {torch.__version__}, pytorch_kinematics {version('pytorch_kinematics')}, CPU threads {torch.get_num_threads()}, GPU {torch.cuda.get_device_name() if torch.cuda.is_available() else 'unavailable'}. Numeric benchmark inputs use float32.",
             "This report contains exactly three tables: Time & Memory, Success & Other Metrics, and Leaderboard.",
+            *(
+                [
+                    "Differentiable mode uses shared CPU-generated Franka targets/seeds on CPU and CUDA. DLS: 4/8/16 steps, damping .05, step size .5, hard limits. FEP: redundancy search. Pytorch: two seeds, 64 iterations, lr .5. Timings are medians of three synchronized calls after two warmups, excluding data preparation and RNG reset to seed 2026; each backward call rebuilds its graph. Pose errors include all rows, including failures. Component rows are excluded from the success leaderboard. Peak GPU memory is absolute allocated Torch memory; Warp allocations in FEP are not captured by that counter."
+                ]
+                if "differentiable" in solvers_to_run
+                else []
+            ),
         ]
         + (
             [
@@ -1248,4 +1681,34 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     args = _parse_args()
-    run_all_benchmarks(selected_solvers=args.solvers)
+    from scripts.benchmark.robotics.kinematic_solver.ssik_benchmark import (
+        DEFAULT_MODEL_NAMES,
+        SSIKBenchmarkOptions,
+    )
+
+    run_all_benchmarks(
+        selected_solvers=args.solvers,
+        ssik_options=SSIKBenchmarkOptions(
+            smoke=args.ssik_smoke,
+            models=tuple(args.ssik_models or DEFAULT_MODEL_NAMES),
+            devices=tuple(args.ssik_devices),
+            skip_reference=args.ssik_skip_reference,
+            skip_baseline=args.ssik_skip_baseline,
+            skip_warp=args.ssik_skip_warp,
+            quality_only=args.ssik_quality_only,
+            timing_only=args.ssik_timing_only,
+            batch_sizes=tuple(args.ssik_batch_sizes) if args.ssik_batch_sizes else None,
+            baseline_variants=tuple(args.ssik_baseline_variants),
+            scenarios=tuple(args.ssik_scenarios),
+            timing_scopes=tuple(args.ssik_timing_scopes),
+            cpu_threads=args.ssik_cpu_threads,
+            artifact_dir=args.ssik_artifact_dir,
+            reference_artifacts=tuple(args.ssik_reference_artifacts or ()),
+            geometry_mode=args.ssik_geometry_mode,
+            axis_alignment_tolerance=args.ssik_axis_alignment_tolerance,
+            srs_search=args.ssik_srs_search,
+            rr_search=args.ssik_rr_search,
+            robot_e2e=args.ssik_robot_e2e,
+            cuda_rr=args.ssik_cuda_rr,
+        ),
+    )

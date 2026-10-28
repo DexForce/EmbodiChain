@@ -11,6 +11,10 @@
 
 EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It streamlines research and development by unifying high-performance simulation, automated generative data pipelines, modular model architectures, and efficient training workflows. This integration enables rapid experimentation, seamless deployment of intelligent agents, and effective Sim2Real transfer for real-world robotic systems.
 
+Official task and robot modules live under [extensions/](extensions/README.md)
+and ship with the main distribution. Their Python imports remain
+`embodichain_tasks` and `embodichain_robots`.
+
 > [!NOTE]
 > EmbodiChain is in Alpha and under active development:
 > * More features will be continually added in the coming months. You can find more details in the [roadmap](https://dexforce.github.io/EmbodiChain/main/resources/roadmap.html).
@@ -42,39 +46,16 @@ To get started with EmbodiChain, follow these steps:
 - [Quick Start Tutorial](https://dexforce.github.io/EmbodiChain/main/tutorial/index.html)
 - [API Reference](https://dexforce.github.io/EmbodiChain/main/api_reference/index.html)
 
-## Task Environments
+### Task Environments
 
-EmbodiChain's task environments are decoupled from the core framework at the
-import-package level. The official classic-control, manipulation, and special
-task families live in the
-[embodichain_tasks source tree](https://github.com/DexForce/EmbodiChain/tree/main/embodichain_tasks)
-and are included in the main `embodichain` wheel. Both `pip install embodichain`
-and editable `pip install -e .` therefore install
-`embodichain` and `embodichain_tasks`; no second installation command or
-independent task version is required. Third-party packages declaring an
-`embodichain.tasks` entry point are also auto-discovered. Launch any registered
-task with the unified CLI:
+Official task environments are included in the main `embodichain` installation.
+Use `embodichain list-task` to discover tasks and `embodichain run-task` to launch
+one with its configuration. See [Supported Tasks](https://dexforce.github.io/EmbodiChain/main/resources/task/index.html)
+for available tasks, runnable configurations, and task authoring guides.
 
-```bash
-embodichain run-env --gym_config path/to/gym_config.json
-```
-
-To build your own task environments, start from the
-[embodichain_task_template](https://github.com/DexForce/embodichain_task_template)
-repository. Tasks with custom Python behavior implement an `EmbodiedEnv`
-subclass with `@register_env`; supported configuration-defined Task Programs
-may instead compose the common environment from reusable `env.yaml`,
-embodiment, integration, and policy components. In either case, add a runnable
-gym config with `id`, install with `pip install -e .`, and launch it with
-`embodichain run-env`. See the
-[embodichain_tasks README](https://github.com/DexForce/EmbodiChain/blob/main/embodichain_tasks/README.md)
-for details.
-EmbodiChain environments can also be used with the optional
-[RLinf integration](https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html);
-the integration guide documents the separate runtime, task registration, and
-current compatibility boundary. The
-[official RLinf EmbodiChain recipe](https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/embodichain.html)
-provides a concrete end-to-end reference.
+For external training, see the optional
+[RLinf integration](https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html)
+and the [official RLinf EmbodiChain recipe](https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/embodichain.html).
 
 ## Contribution Guide
 

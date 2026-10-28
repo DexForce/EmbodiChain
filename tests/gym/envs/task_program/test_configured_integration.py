@@ -38,6 +38,7 @@ from embodichain.lab.task_program.integrations._configured_services import (
 from embodichain.lab.task_program.integrations.configured import (
     _decode_configured_task_program_integration,
     _decode_grasp_generator,
+    _decode_motion_policy,
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
     _compose_integration_payload,
@@ -66,6 +67,9 @@ from embodichain.lab.sim.atomic_actions.runtime_commands import (
     JointPositionPayload,
     RuntimeCommandFrame,
 )
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
+    TrapezoidalPlanOptions,
+)
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain_robots import TianjiMarvinCfg
 from embodichain.lab.task_program.semantics import (
@@ -82,7 +86,9 @@ from embodichain.toolkits.graspkit.pg_grasp import (
 )
 
 _REPOSITORY_ROOT = Path(__file__).parents[4]
-_CONFIG_DIRECTORY = _REPOSITORY_ROOT / "embodichain_tasks/configs/tasks/manipulation"
+_CONFIG_DIRECTORY = (
+    _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs/tasks/manipulation"
+)
 _TABLEWARE_CONFIG_DIRECTORY = _CONFIG_DIRECTORY / "tableware"
 _TASKS = {
     "rubiks_cube_pick_place": (
@@ -115,6 +121,16 @@ _TASKS = {
 }
 _TEST_ENV_ID = "ConfiguredTaskProgramIntegrationTest-v1"
 _TABLEWARE_TASKS = {
+    "stack_blocks_two": (
+        "task_program_stack_blocks_two",
+        "cobotmagic",
+        frozenset({"pick", "place", "hand_over"}),
+    ),
+    "blocks_ranking_rgb": (
+        "task_program_blocks_ranking_rgb",
+        "cobotmagic",
+        frozenset({"pick", "place", "hand_over"}),
+    ),
     "pour_water": (
         "task_program_pour_water",
         "cobotmagic",
@@ -286,9 +302,9 @@ def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
 def test_planner_policy_decoder_validates_backend_and_options() -> None:
     """Planner backends remain closed while typed options stay configurable."""
     assert _decode_planner_config(
-        {"type": "toppra", "config": {"max_workers": 2}},
+        {"type": "toppra", "config": {"grid_size": 127}},
         path="execution policy.planner",
-    ) == {"type": "toppra", "config": {"max_workers": 2}}
+    ) == {"type": "toppra", "config": {"grid_size": 127}}
 
     with pytest.raises(ValueError, match="execution policy.planner.type"):
         _decode_planner_config(
@@ -396,10 +412,10 @@ def test_task_rejects_embodiment_with_an_incompatible_contract() -> None:
         )
 
 
-def test_embodiment_owns_the_deployed_sensor_suite(
+def test_embodiment_and_robot_compose_the_deployed_sensor_suite(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Sensors are selected with the physical embodiment, not the task scene."""
+    """Independent and robot-mounted cameras retain the deployed sensor suite."""
     monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
     path = _tableware_config_path("pour_water")
     config = _tableware_gym_config("pour_water")
@@ -409,22 +425,17 @@ def test_embodiment_owns_the_deployed_sensor_suite(
     assert type(sensor_config[0]) is dict
     cfg = config_to_cfg(config, source_path=path)
 
-    assert [sensor["sensor_type"] for sensor in sensor_config] == [
-        "Camera",
-        "Camera",
-        "Camera",
-    ]
-    assert [sensor["uid"] for sensor in sensor_config] == [
+    assert [sensor["sensor_type"] for sensor in sensor_config] == ["Camera"]
+    assert [sensor["uid"] for sensor in sensor_config] == ["cam_high"]
+    assert cfg.robot.enable_sensor is True
+    assert [sensor.uid for sensor in [*cfg.sensor, *cfg.robot.sensors]] == [
         "cam_high",
         "cam_right_wrist",
         "cam_left_wrist",
     ]
-    assert [sensor.uid for sensor in cfg.sensor] == [
-        "cam_high",
-        "cam_right_wrist",
-        "cam_left_wrist",
-    ]
-    assert all(type(sensor) is CameraCfg for sensor in cfg.sensor)
+    assert all(
+        type(sensor) is CameraCfg for sensor in [*cfg.sensor, *cfg.robot.sensors]
+    )
 
 
 def test_pour_water_commands_preserve_idle_left_arm_targets(
@@ -558,10 +569,11 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
         "simulation.pour",
     }
     assert integration_payload["runtime_services"]["grasp_pose_generators"] == {
-        "right_eef": {
+        f"{side}_eef": {
             "kind": "antipodal_parallel_jaw",
             "model": "cobotmagic_v100_gripper",
         }
+        for side in ("right", "left")
     }
 
 
@@ -640,7 +652,7 @@ def test_pour_water_uses_shared_calibrated_embodiment(
     preset = _tableware_deployment(
         "pour_water"
     ).integration.registration.robot_profile_binding.presets[0]
-    assert preset.motion_policy.sample_count == 480
+    assert preset.motion_policy.sample_count == 160
     assert preset.effect_assurance.value == "projected"
 
 
@@ -955,7 +967,7 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
 ) -> None:
     """Both Marvin hands use source joint commands and toolkit policy defaults."""
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     path = _config_path("hand_over")
     config = _gym_config("hand_over")
@@ -969,7 +981,7 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     assert robot.with_gripper is True
     assert len(robot.control_parts[f"{side}_arm"]) == 7
     assert len(robot.control_parts[f"{side}_eef"]) == 2
-    assert physical.config["sensor"] == []
+    assert [sensor["uid"] for sensor in physical.config["sensor"]] == ["cam_high"]
 
     profile = physical.embodiment_skill_profile
     assert profile is not None
@@ -1517,6 +1529,125 @@ def test_motion_velocity_target_policy_rejects_unknown_mode(mode: str) -> None:
         )
 
 
+def test_motion_limit_policy_decodes() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    policy = _decode_motion_policy(
+        {
+            "sample_count": 40,
+            "velocity_limit": 0.2,
+            "acceleration_limit": 0.5,
+        },
+        path="motion",
+    )
+
+    assert policy.velocity_limit == pytest.approx(0.2)
+    assert policy.acceleration_limit == pytest.approx(0.5)
+
+
+def test_motion_limit_policy_preserves_omitted_velocity_limit() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    policy = _decode_motion_policy(
+        {"sample_count": 40, "acceleration_limit": 0.5},
+        path="motion",
+    )
+
+    assert policy.velocity_limit is None
+
+
+@pytest.mark.parametrize("field", ["velocity_limit", "acceleration_limit"])
+@pytest.mark.parametrize("value", [0.0, -0.1, float("inf")])
+def test_motion_limit_policy_rejects_nonpositive_or_nonfinite_values(
+    field: str,
+    value: float,
+) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    with pytest.raises(ValueError, match=field):
+        _decode_motion_policy(
+            {"sample_count": 40, field: value},
+            path="motion",
+        )
+
+
+def test_pour_dwell_duration_decodes() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_action_options,
+    )
+
+    options = _decode_action_options(
+        {"kind": "pour", "dwell_duration": 0.75},
+        path="options",
+    )
+
+    assert isinstance(options, PourOptions)
+    assert options.dwell_duration == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize("value", [-0.1, float("inf")])
+def test_pour_dwell_duration_rejects_negative_or_nonfinite_values(
+    value: float,
+) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_action_options,
+    )
+
+    with pytest.raises(ValueError, match="dwell_duration"):
+        _decode_action_options(
+            {"kind": "pour", "dwell_duration": value},
+            path="options",
+        )
+
+
+@pytest.mark.parametrize(
+    ("variant", "arm_dof", "velocity"),
+    [("dual_ur5", 6, 0.5), ("tianji_marvin", 7, 0.5)],
+)
+def test_configured_motion_budgets_reach_planner_options_and_metadata(
+    variant: str, arm_dof: int, velocity: float
+) -> None:
+    """The qualified speed budget survives deployment decoding and reporting."""
+    from embodichain.lab.task_program.runtime.results import _motion_policy_to_metadata
+
+    deployment = _deployment_from_path(
+        _CONFIG_DIRECTORY / "hand_over" / f"task.{variant}.yaml"
+    )
+    policy = deployment.integration.registration.robot_profile_binding.presets[
+        0
+    ].motion_policy
+    options = policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, arm_dof), control_part="left_arm"
+    )
+    assert options.velocity_limit == velocity
+    assert options.acceleration_limit == 0.5
+    metadata = _motion_policy_to_metadata(policy)
+    assert metadata["velocity_limit"] == velocity
+    assert metadata["acceleration_limit"] == 0.5
+
+
+@pytest.mark.parametrize("field", ["velocity_limit", "acceleration_limit"])
+@pytest.mark.parametrize("value", [0, -0.1, True, float("nan"), float("inf"), "fast"])
+def test_configured_motion_budgets_reject_invalid_values(
+    field: str, value: object
+) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    with pytest.raises((TypeError, ValueError), match=field):
+        _decode_motion_policy(
+            {"strategy": "motion_gen", "sample_count": 140, field: value},
+            path="motion",
+        )
+
+
 @pytest.mark.parametrize(
     ("task_name", "backend"),
     [
@@ -1586,3 +1717,127 @@ def test_segmented_examples_preserve_overall_and_segment_instructions(
     for segment in segments:
         assert isinstance(segment.instruction, str) and segment.instruction.strip()
         assert segment.instruction != overall
+
+
+def test_trapezoidal_motion_options_reach_the_runtime_policy() -> None:
+    payload = _integration_payload("repeated_pick_place")
+    preset = payload["robot_profile"]["presets"][0]
+    preset.pop("required_planner", None)
+    preset["motion"] = {
+        "strategy": "motion_gen",
+        "sample_count": 120,
+        "plan_opts": {
+            "kind": "trapezoidal",
+            "stop_at_waypoints": False,
+            "blend_tolerance": 0.001,
+            "collinearity_tolerance": 0.0001,
+        },
+    }
+    integration = _decode_configured_task_program_integration(payload)
+    decoded = integration.registration.robot_profile_binding.presets[0]
+    options = decoded.motion_policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 6), control_part="arm", interpolation_dt=0.01
+    )
+    assert decoded.required_planner == "trapezoidal"
+    assert isinstance(options.plan_opts, TrapezoidalPlanOptions)
+    assert not options.plan_opts.stop_at_waypoints
+    assert options.plan_opts.blend_tolerance == 0.001
+    assert options.plan_opts.collinearity_tolerance == 0.0001
+    assert options.plan_opts.sample_interval == options.sample_count == 120
+    # Resolve robot speed caps and the planner acceleration default at planning time.
+    assert options.plan_opts.constraints["velocity"] is None
+    assert options.plan_opts.constraints["acceleration"] is None
+
+
+@pytest.mark.parametrize(
+    ("options", "error", "message"),
+    [
+        ({"kind": "unknown"}, ValueError, "kind"),
+        ({"kind": "trapezoidal", "unknown": 1}, ValueError, "unsupported"),
+        ({"kind": "trapezoidal", "stop_at_waypoints": "false"}, TypeError, "bool"),
+        ({"kind": "trapezoidal", "blend_tolerance": True}, TypeError, "number"),
+        ({"kind": "trapezoidal", "blend_tolerance": -0.1}, ValueError, "finite"),
+        (
+            {"kind": "trapezoidal", "blend_tolerance": float("nan")},
+            ValueError,
+            "finite",
+        ),
+        (
+            {"kind": "trapezoidal", "blend_tolerance": float("inf")},
+            ValueError,
+            "finite",
+        ),
+        (
+            {"kind": "trapezoidal", "blend_tolerance": 0.001},
+            ValueError,
+            "stop_at_waypoints",
+        ),
+        (
+            {"kind": "trapezoidal", "collinearity_tolerance": 1.0},
+            ValueError,
+            "collinearity",
+        ),
+    ],
+)
+def test_trapezoidal_motion_options_reject_invalid_configuration(
+    options: dict[str, object], error: type[Exception], message: str
+) -> None:
+    with pytest.raises(error, match=message):
+        _decode_motion_policy(
+            {"strategy": "motion_gen", "sample_count": 120, "plan_opts": options},
+            path="motion",
+        )
+
+
+def test_trapezoidal_motion_options_require_backend_planning() -> None:
+    with pytest.raises(ValueError, match="requires strategy='motion_gen'"):
+        _decode_motion_policy(
+            {"sample_count": 120, "plan_opts": {"kind": "trapezoidal"}}, path="motion"
+        )
+    payload = _integration_payload("repeated_pick_place")
+    preset = payload["robot_profile"]["presets"][0]
+    preset["required_planner"] = "toppra"
+    preset["motion"] = {
+        "strategy": "motion_gen",
+        "sample_count": 120,
+        "plan_opts": {"kind": "trapezoidal"},
+    }
+    with pytest.raises(ValueError, match="requires the trapezoidal planner"):
+        _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize(
+    "limits",
+    [
+        {"velocity_limit": 0.05},
+        {"acceleration_limit": 0.1},
+        {"velocity_limit": 0.05, "acceleration_limit": 0.1},
+    ],
+)
+def test_motion_limits_reach_explicit_blended_planner_options(
+    limits: dict[str, float],
+) -> None:
+    """Configured scalar budgets still constrain explicitly selected blending."""
+    policy = _decode_motion_policy(
+        {
+            "strategy": "motion_gen",
+            "sample_count": 40,
+            **limits,
+            "plan_opts": {
+                "kind": "trapezoidal",
+                "stop_at_waypoints": False,
+                "blend_tolerance": 0.001,
+            },
+        },
+        path="motion",
+    )
+    options = policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 6), control_part="arm", interpolation_dt=0.01
+    )
+    assert isinstance(options.plan_opts, TrapezoidalPlanOptions)
+    assert options.plan_opts.constraints["velocity"] == limits.get("velocity_limit")
+    assert options.plan_opts.constraints["acceleration"] == limits.get(
+        "acceleration_limit"
+    )
+    assert TrapezoidalPlanOptions().constraints["velocity"] is None
+    assert TrapezoidalPlanOptions().constraints["acceleration"] is None

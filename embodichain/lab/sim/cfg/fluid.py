@@ -145,11 +145,15 @@ class FluidRenderCfg:
 
 @configclass
 class FluidObjectCfg(ObjectBaseCfg):
-    """A fixed-count Newton SPH fluid, declared before scene preparation.
+    """A fixed-count DexUni/DFSPH fluid, declared before scene preparation.
 
     Density and spacing determine mass and must agree across fluid objects.
     Solver viscosity, surface tension and iteration controls belong exclusively
-    to DexSim's SPHSolverCfg supplied to NewtonPhysicsCfg.solver_cfg.
+    to DexSim's SPHSolverCfg supplied through DexUniSolverCfg.sph_cfg.
+
+    This config owns density and spacing. Native SPH defaults for those fields
+    are placeholders in both mapping and native ``sph_cfg`` values; non-default
+    solver values must match the fluid declaration.
     """
 
     density: float = 1000.0

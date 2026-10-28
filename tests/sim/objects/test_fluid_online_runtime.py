@@ -40,6 +40,63 @@ pytestmark = [pytest.mark.gpu, pytest.mark.subprocess_sim]
 
 
 class _FluidOnlineRuntime:
+    def test_kinematic_trajectory_reset_keeps_other_world_clock(self):
+        sim = SimulationManager(
+            SimulationManagerCfg(
+                headless=True,
+                device="cuda",
+                num_envs=2,
+                arena_space=0,
+                physics_dt=0.001,
+                render_cfg=RenderCfg(renderer="no-render"),
+                physics_cfg=NewtonPhysicsCfg(
+                    num_substeps=1,
+                    collision_cfg=None,
+                    solver_cfg={
+                        "solver_type": "dexuni",
+                        "sph_cfg": {
+                            "sph_method": "dfsph",
+                            "volume_map_boundary_enabled": False,
+                        },
+                    },
+                ),
+            )
+        )
+        boundary = fluid = None
+        try:
+            boundary = sim.add_rigid_object(
+                RigidObjectCfg(
+                    uid="boundary", body_type="kinematic", shape=CubeCfg(size=[0.1] * 3)
+                )
+            )
+            poses = torch.tensor(
+                [[[0.0, 0, 1, 0, 0, 0, 1], [1.0, 0, 1, 0, 0, 0, 1]]] * 2
+            )
+            sim.register_kinematic_rigid_trajectory("boundary", poses, fps=10)
+            fluid = sim.add_fluid_object(
+                FluidObjectCfg(
+                    uid="water",
+                    particle_spacing=0.01,
+                    init_pos=(0, 0, 2),
+                    spawn=FluidSpawnCfg(kind="box", size=(0.02,) * 3),
+                    render=FluidRenderCfg(mode="none"),
+                )
+            )
+            sim.prepare()
+            sim.update(step=2, render_final_step=False)
+            sim.reset_objects_state(env_ids=[0])
+            sim.update(step=1, render_final_step=False)
+            torch.testing.assert_close(
+                boundary.get_local_pose()[:, 0],
+                torch.tensor([0.0, 0.02], device=sim.device),
+                rtol=0,
+                atol=1e-5,
+            )
+        finally:
+            boundary = fluid = None
+            sim.destroy(exit_process=False)
+            SimulationManager.flush_cleanup_queue()
+
     def test_live_dynamic_boundary_and_selected_reset(self):
         from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
@@ -56,13 +113,15 @@ class _FluidOnlineRuntime:
                     num_substeps=1,
                     collision_cfg=None,
                     solver_cfg={
-                        "solver_type": "sph",
-                        "sph_method": "dfsph",
-                        "rigid_solver_cfg": {"rne_mode": "disabled"},
-                        "rigid_solver_substeps": 2,
-                        "particle_support_radius": 0.0225,
-                        "volume_map_resolution": 16,
-                        "volume_map_quadrature_samples": 2,
+                        "solver_type": "dexuni",
+                        "sph_rne_mode": "disabled",
+                        "sph_rigid_substeps": 2,
+                        "sph_cfg": {
+                            "sph_method": "dfsph",
+                            "particle_support_radius": 0.0225,
+                            "volume_map_resolution": 16,
+                            "volume_map_quadrature_samples": 2,
+                        },
                     },
                 ),
             )
@@ -86,7 +145,12 @@ class _FluidOnlineRuntime:
                         ).to_dict(),
                         "body_type": "dynamic",
                         "init_pos": [0, 0, 1],
-                        "attrs": {"mass_props": {"mass": 0.3}},
+                        "attrs": {
+                            "mass_props": {
+                                "mass": 0.3,
+                                "inertia": [0.0005, 0.0005, 0.0005],
+                            }
+                        },
                     }
                 )
             )
@@ -113,6 +177,12 @@ class _FluidOnlineRuntime:
             torch.testing.assert_close(
                 torch.as_tensor(backend.model.body_mass.numpy()),
                 torch.tensor([0.3, 0.3]),
+            )
+            torch.testing.assert_close(
+                torch.as_tensor(backend.model.body_inertia.numpy()),
+                torch.eye(3).expand(2, 3, 3) * 0.0005,
+                rtol=1e-5,
+                atol=1e-8,
             )
             torch.testing.assert_close(
                 torch.as_tensor(backend.model.body_inertia.numpy())[
@@ -169,18 +239,23 @@ class _FluidOnlineRuntime:
                     num_substeps=1,
                     collision_cfg=None,
                     solver_cfg={
-                        "solver_type": "sph",
-                        "rigid_solver_cfg": {"rne_mode": "disabled"},
-                        "rigid_solver_substeps": 2,
-                        "volume_map_boundary_enabled": False,
-                        "sdf_boundary_enabled": False,
+                        "solver_type": "dexuni",
+                        "sph_rne_mode": "disabled",
+                        "sph_rigid_substeps": 2,
+                        "sph_cfg": {
+                            "sph_method": "dfsph",
+                            "volume_map_boundary_enabled": False,
+                            "sdf_boundary_enabled": False,
+                        },
                     },
                 ),
             )
         )
         robot = fluid = None
         try:
-            robot = sim.add_robot(FrankaPandaCfg.from_dict({}))
+            robot_cfg = FrankaPandaCfg.from_dict({})
+            robot_cfg.root_props.newton_mimic_stabilizer = True
+            robot = sim.add_robot(robot_cfg)
             fluid = sim.add_fluid_object(
                 FluidObjectCfg(
                     uid="water",
@@ -212,7 +287,7 @@ class _FluidOnlineRuntime:
 
         task = (
             Path(__file__).resolve().parents[3]
-            / "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
+            / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
         )
         discover_task_packages()
         declaration = load_config(task)
@@ -223,8 +298,10 @@ class _FluidOnlineRuntime:
         cfg.sim_cfg.headless = True
         cfg.sim_steps_per_control = 1
         cfg.events.record_camera = None
-        cfg.sim_cfg.physics_cfg.solver_cfg.update(
-            volume_map_boundary_enabled=False, sdf_boundary_enabled=False
+        cfg.sim_cfg.physics_cfg.solver_cfg["sph_cfg"].update(
+            volume_map_boundary_enabled=False,
+            sdf_boundary_enabled=False,
+            particle_support_radius=0.0225,
         )
         for obj in cfg.background + cfg.rigid_object:
             for shape in (obj.shape, obj.particle_collision_shape):
@@ -280,6 +357,7 @@ def test_online_fluid_boundaries_and_mimic_reset_in_fresh_process():
 
 if __name__ == "__main__":
     worker = _FluidOnlineRuntime()
+    worker.test_kinematic_trajectory_reset_keeps_other_world_clock()
     worker.test_live_dynamic_boundary_and_selected_reset()
     worker.test_mimic_follower_uses_inner_rigid_solver()
     worker.test_normal_gym_partial_reset_does_not_advance_peer()

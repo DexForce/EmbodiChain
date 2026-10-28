@@ -31,7 +31,7 @@ pytestmark = pytest.mark.no_sim
 ROOT = Path(__file__).resolve().parents[3]
 TASK = (
     ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
 )
 
 
@@ -72,11 +72,12 @@ def test_online_task_uses_live_grasp_and_same_body_particle_boundary(tmp_path):
     assert cup.particle_collision_shape.collision.approximation == "sdf"
     assert cup.shape.collision.approximation == "convex_decomposition"
     solver = cfg.sim_cfg.physics_cfg.solver_cfg
-    assert solver["rigid_solver_cfg"]["solver_type"] == "mujoco_warp"
-    assert solver["rigid_solver_substeps"] == 7
-    assert cfg.events.record_camera.params["per_env"] is True
+    assert solver["solver_type"] == "dexuni"
+    assert solver["sph_cfg"]["sph_method"] == "dfsph"
+    assert solver["sph_rigid_substeps"] == 15
     assert cfg.events.record_camera.params["max_env_num"] == 2
     assert cfg.record_trajectory is False
+    assert cfg.control_parts is None and cfg.active_joint_ids == []
     assert cfg.sim_steps_per_control * cfg.sim_cfg.physics_dt == pytest.approx(0.025)
     assert not hasattr(cfg.events, "settle_cup")
 
@@ -89,7 +90,7 @@ def test_no_render_coarse_override_resamples_and_keeps_physical_scale(tmp_path):
     assert fluid.render.mode == "none"
     assert fluid.particle_radius == pytest.approx(0.0009)
     assert fluid.render.mesh_surface["kernel_radius"] == pytest.approx(0.0045)
-    assert cfg.sim_cfg.physics_cfg.solver_cfg[
+    assert cfg.sim_cfg.physics_cfg.solver_cfg["sph_cfg"][
         "particle_support_radius"
     ] == pytest.approx(0.00675)
     assert cfg.events.record_camera is None
@@ -107,9 +108,11 @@ def test_physical_qualification_does_not_accept_motion_commands_alone():
     assert result["lift_m"] == pytest.approx([0.12, 0])
 
 
-@pytest.mark.parametrize("renderer", ["fast-rt", "no-render"])
+@pytest.mark.parametrize(
+    "renderer,stale", [("fast-rt", False), ("fast-rt", True), ("no-render", False)]
+)
 def test_online_runner_commits_last_recording_before_close(
-    renderer, tmp_path, monkeypatch
+    renderer, stale, tmp_path, monkeypatch
 ):
     import argparse
     from types import SimpleNamespace
@@ -118,9 +121,22 @@ def test_online_runner_commits_last_recording_before_close(
     from embodichain.lab.scripts import run_fluid_task_program as runner
 
     order = []
-    recorder = SimpleNamespace(
-        save_and_clear=Mock(side_effect=lambda: order.append("save"))
-    )
+
+    def save_recording(*, purpose):
+        order.append("save")
+        assert purpose == "diagnostic"
+        if stale:
+            return
+        for row in range(2):
+            directory = tmp_path / "videos" / "diagnostics" / f"env_{row:03d}"
+            directory.mkdir(parents=True)
+            (directory / "episode_000000_fluid_gym.mp4").touch()
+
+    if stale:
+        directory = tmp_path / "videos" / "diagnostics" / "env_000"
+        directory.mkdir(parents=True)
+        (directory / "episode_000000_fluid_gym.mp4").touch()
+    recorder = SimpleNamespace(save_and_clear=Mock(side_effect=save_recording))
     env = SimpleNamespace(
         num_envs=2,
         step_dt=0.05,
@@ -158,5 +174,5 @@ def test_online_runner_commits_last_recording_before_close(
     report = runner._run(args, tmp_path)
     assert report["accepted"] is False
     assert order == (["save", "close"] if renderer == "fast-rt" else ["close"])
-    assert len(report["videos"]) == (2 if renderer == "fast-rt" else 0)
+    assert len(report["videos"]) == (2 if renderer == "fast-rt" and not stale else 0)
     assert (tmp_path / "fluid_gym_result.json").is_file()

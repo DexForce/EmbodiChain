@@ -19,6 +19,7 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -28,6 +29,7 @@ from tensordict import TensorDict
 from torch.utils.tensorboard import SummaryWriter
 
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
+from embodichain.learning.rl.checkpoint import _load, _save, _sync_errors
 from embodichain.learning.rl.buffer import RolloutBuffer
 from embodichain.learning.rl.collector import SyncCollector
 from embodichain.learning.rl.evaluation import evaluate_episodes
@@ -90,7 +92,7 @@ class Trainer:
 
         if event_cfg is not None:
             self.event_manager = EventManager(event_cfg, env=self.env)
-        if eval_event_cfg is not None:
+        if self.eval_env is not None and eval_event_cfg is not None:
             self.eval_event_manager = EventManager(eval_event_cfg, env=self.eval_env)
 
         self.device = self.algorithm.device
@@ -98,6 +100,7 @@ class Trainer:
         self._training_start_step = 0
         self.num_updates = 0
         self.start_time = time.time()
+        self._pending_best = False
         self.ret_window = deque(maxlen=100)
         self.len_window = deque(maxlen=100)
         self.train_history: list[dict[str, float]] = []
@@ -184,35 +187,60 @@ class Trainer:
         if self.rank == 0:
             print(f"Start training, total steps: {total_timesteps}")
         num_envs = int(self.env.num_envs)
-        steps_per_update = self.buffer_size * num_envs
-        if total_timesteps > 0 and steps_per_update > 0:
-            total_updates = math.ceil(total_timesteps / steps_per_update)
-            self.algorithm.bind_schedule(total_updates=total_updates)
+        steps_per_update = self.buffer_size * num_envs * self.world_size
+        total_updates = math.ceil(total_timesteps / steps_per_update)
+        remaining = math.ceil(
+            max(0, total_timesteps - self.global_step) / steps_per_update
+        )
+        self.algorithm._prepare_schedule(total_updates, remaining)
         while self.global_step < total_timesteps:
             self._collect_rollout()
             losses = self.algorithm.update(self.buffer.get(flatten=False))
             self.num_updates += 1
             self._log_train(losses)
+            self._pending_best = False
             if (
                 self._next_eval_step is not None
-                and self.eval_env is not None
                 and self.global_step >= self._next_eval_step
             ):
-                self._eval_once(num_episodes=self.num_eval_episodes)
+                error = None
+                if self.rank == 0 and self.eval_env is not None:
+                    try:
+                        self._eval_once(num_episodes=self.num_eval_episodes)
+                    except Exception as exc:
+                        error = exc
+                _sync_errors(error, self.distributed)
+                if self.distributed:
+                    decision = [self._pending_best, self.best_eval_value]
+                    torch.distributed.broadcast_object_list(decision, src=0)
+                    self._pending_best, self.best_eval_value = decision
                 while self._next_eval_step <= self.global_step:
                     self._next_eval_step += self.eval_freq
-            if (
+            periodic = (
                 self._next_save_step is not None
                 and self.global_step >= self._next_save_step
-            ):
-                self.save_checkpoint()
-                while self._next_save_step <= self.global_step:
-                    self._next_save_step += self.save_freq
-            if (
+            )
+            by_update = (
                 self.save_frequency_updates > 0
                 and self.num_updates % self.save_frequency_updates == 0
-            ):
+            )
+            if self._pending_best:
+                previous_best = self.best_checkpoint_path
+                best_path = str(
+                    Path(self.checkpoint_dir)
+                    / f"{self.exp_name}_best_step_{self.global_step}.pt"
+                )
+                self.best_checkpoint_path = best_path
+                try:
+                    self.save_checkpoint(best_path)
+                except Exception:
+                    self.best_checkpoint_path = previous_best
+                    raise
+            elif periodic or by_update:
                 self.save_checkpoint()
+            if periodic:
+                while self._next_save_step <= self.global_step:
+                    self._next_save_step += self.save_freq
         return self.get_summary()
 
     @torch.no_grad()
@@ -413,8 +441,7 @@ class Trainer:
             )
             if improved:
                 self.best_eval_value = candidate
-                best_path = f"{self.checkpoint_dir}/{self.exp_name}_best.pt"
-                self.best_checkpoint_path = self.save_checkpoint(best_path)
+                self._pending_best = True
         self._finalize_eval_events()
         return summary
 
@@ -432,39 +459,45 @@ class Trainer:
             if hasattr(functor, "finalize"):
                 functor.finalize(save_path)
 
-    def save_checkpoint(self, path: str | None = None) -> str | None:
-        """Save policy, optimizer (when available), and trainer counters."""
-        if self.rank != 0:
-            return None
+    def save_checkpoint(self, path: str | Path | None = None) -> str:
+        """Save complete learning state; every distributed rank must participate.
+
+        Args:
+            path: Destination, or the current step's default checkpoint path.
+
+        Returns:
+            Saved checkpoint path. Rank zero owns file and manifest writes.
+        """
         if path is None:
-            path = f"{self.checkpoint_dir}/{self.exp_name}_step_{self.global_step}.pt"
-        policy_state = (
-            self.policy.module.state_dict()
-            if hasattr(self.policy, "module")
-            else self.policy.state_dict()
+            path = (
+                Path(self.checkpoint_dir)
+                / f"{self.exp_name}_step_{self.global_step}.pt"
+            )
+        return _save(self, path, {})
+
+    def load_checkpoint(
+        self, path: str | Path, *, resume_scheduler: str = "restore"
+    ) -> None:
+        """Validate and restore learning state, then start a new episode.
+
+        Args:
+            path: Checkpoint to load on every participating rank.
+            resume_scheduler: Restore the saved LR curve or restart the
+                configured curve while preserving optimizer momentum.
+        """
+        _load(self, path, resume_scheduler)
+        self._next_eval_step = (
+            (self.global_step // self.eval_freq + 1) * self.eval_freq
+            if self.eval_freq > 0
+            else None
         )
-        checkpoint = {
-            "global_step": self.global_step,
-            "num_updates": self.num_updates,
-            "policy": policy_state,
-            "best_eval_value": self.best_eval_value,
-        }
-        optimizer = getattr(self.algorithm, "optimizer", None)
-        if optimizer is not None:
-            checkpoint["optimizer"] = optimizer.state_dict()
-        lr_scheduler = getattr(self.algorithm, "lr_scheduler", None)
-        if lr_scheduler is not None:
-            checkpoint["lr_scheduler"] = lr_scheduler.state_dict()
-            sched_cfg = getattr(self.algorithm, "_lr_scheduler_cfg", None)
-            if sched_cfg is not None:
-                checkpoint["lr_scheduler_cfg"] = {
-                    "name": sched_cfg.name,
-                    "kwargs": dict(sched_cfg.kwargs),
-                }
-        torch.save(checkpoint, path)
-        self.latest_checkpoint_path = path
-        print(f"Checkpoint saved: {path}")
-        return path
+        self._next_save_step = (
+            (self.global_step // self.save_freq + 1) * self.save_freq
+            if self.save_freq > 0
+            else None
+        )
+        self.start_time = time.time()
+        self._training_start_step = self.global_step
 
     def get_summary(self) -> dict[str, Any]:
         """Return persistent counters and throughput for the current train call."""

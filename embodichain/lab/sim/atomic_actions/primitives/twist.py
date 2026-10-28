@@ -19,16 +19,13 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import ClassVar
 
 import torch
 
-from embodichain.utils.math import (
-    axis_angle_to_rotation_matrix,
-    pose_inv,
-    get_relative_rotation,
-)
+from embodichain.compute.geometry import rotate_rigid_grasp
 
 from embodichain.lab.sim.atomic_actions.affordance import TwistAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
@@ -58,7 +55,9 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    find_symmetric_nearest_xpos,
     arm_qpos_from_state,
+    hold_inactive_cartesian_rows,
     resample_planned_trajectory,
 )
 from embodichain.lab.sim.atomic_actions.requirements import (
@@ -68,6 +67,7 @@ from embodichain.lab.sim.atomic_actions.requirements import (
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    axis_translation_keyframes,
     build_pose_plan_states,
     interpolate_hand_qpos,
     resolve_pose_target,
@@ -146,29 +146,17 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         self.num_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
-    def _find_symmetric_nearest_xpos(
-        self, target_xpos: torch.Tensor, reference_xpos: torch.Tensor
-    ) -> torch.Tensor:
-        """Find the nearest symmetric pose to the reference pose."""
-        symmetric_xpos = target_xpos.clone()
-        symmetric_xpos[:, :3, 0] = -symmetric_xpos[:, :3, 0]
-        symmetric_xpos[:, :3, 1] = -symmetric_xpos[:, :3, 1]
-        angle_a = get_relative_rotation(
-            reference_xpos[:, :3, :3], target_xpos[:, :3, :3]
-        )
-        angle_b = get_relative_rotation(
-            reference_xpos[:, :3, :3], symmetric_xpos[:, :3, :3]
-        )
-        choose_target = (angle_a < angle_b)[..., None, None]
-        target_xpos = torch.where(choose_target, target_xpos, symmetric_xpos)
-        return target_xpos
-
     def _plan(
         self,
         request: ResolvedActionRequest[TwistGoal, TwistOptions],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan all six twisting segments without stepping simulation."""
+        if request.motion_policy.strategy != "ik_interp":
+            raise ValueError(
+                "Twist requires strategy='ik_interp' because the constrained "
+                "twist path must preserve every Cartesian sample."
+            )
         target = self.require_goal(request)
         affordance = self._require_twist_affordance(target.semantics)
         options = request.skill_options
@@ -208,7 +196,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             key=(request.invocation_id or self.skill_id) + ":grasp",
         )
         grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)
-        grasp_xpos = self._find_symmetric_nearest_xpos(
+        grasp_xpos = find_symmetric_nearest_xpos(
             grasp_xpos,
             reference_xpos=self.robot.compute_fk(
                 qpos=start_arm_qpos, name=control_part, to_matrix=True
@@ -218,18 +206,18 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             grasp_xpos,
             -grasp_xpos[:, :3, 2] * options.pre_grasp_distance,
         )
+        n_approach, n_reach, n_twist, n_retract = self._motion_segment_lengths(
+            request.motion_policy.sample_count,
+            options.hand_interp_steps,
+            options.twist_waypoint_count,
+        )
         twist_xpos = self._twisted_grasp_poses(
             link_pose,
             grasp_xpos,
             affordance.twist_axis,
             affordance.require_axis_origin(),
             options.twist_angle,
-            options.twist_waypoint_count,
-        )
-
-        n_approach, n_reach, n_twist, n_retract = self._motion_segment_lengths(
-            request.motion_policy.sample_count,
-            options.hand_interp_steps,
+            n_twist - 1,
         )
 
         approach_success, approach_arm = self._plan_pose_segment(
@@ -240,21 +228,68 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             n_approach,
             interpolation_dt=interpolation_dt,
         )
-        reach_success, reach_arm = self._plan_pose_segment(
+        reach_keyframes = axis_translation_keyframes(
+            pre_grasp_xpos,
             grasp_xpos,
+            grasp_xpos[:, :3, 2],
+            n_waypoints=n_reach - 1,
+        )
+        reach_active = grasp_sample.success & approach_success
+        reach_hold_pose = self.robot.compute_fk(
+            qpos=approach_arm[:, -1],
+            name=control_part,
+            to_matrix=True,
+        ).to(reach_keyframes)
+        reach_keyframes = hold_inactive_cartesian_rows(
+            reach_keyframes,
+            active_mask=reach_active,
+            hold_pose=reach_hold_pose,
+        )
+        reach_success, reach_arm = self._plan_pose_segment(
+            reach_keyframes,
             approach_arm[:, -1],
             control_part,
             request,
             n_reach,
             interpolation_dt=interpolation_dt,
+            cartesian_samples=True,
         )
-        twist_success, twist_arm = self._plan_pose_segment(
+        twist_active = reach_active & reach_success
+        twist_hold_pose = self.robot.compute_fk(
+            qpos=reach_arm[:, -1],
+            name=control_part,
+            to_matrix=True,
+        ).to(twist_xpos)
+        twist_keyframes = hold_inactive_cartesian_rows(
             twist_xpos,
+            active_mask=twist_active,
+            hold_pose=twist_hold_pose,
+        )
+
+        def sample_twist_path(progress: torch.Tensor) -> torch.Tensor:
+            sampled = self._twisted_grasp_poses_at_fractions(
+                link_pose,
+                grasp_xpos,
+                affordance.twist_axis,
+                affordance.require_axis_origin(),
+                options.twist_angle,
+                progress,
+            )
+            return hold_inactive_cartesian_rows(
+                sampled,
+                active_mask=twist_active,
+                hold_pose=twist_hold_pose,
+            )
+
+        twist_success, twist_arm = self._plan_pose_segment(
+            twist_keyframes,
             reach_arm[:, -1],
             control_part,
             request,
             n_twist,
             interpolation_dt=interpolation_dt,
+            cartesian_samples=True,
+            cartesian_path_sampler=sample_twist_path,
         )
         retract_success, retract_arm = self._plan_pose_segment(
             pre_grasp_xpos,
@@ -305,10 +340,18 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             hand_grasp_qpos,
             hand_open_qpos,
         )
-        for arm, hand in zip(arm_parts[:2], arm_hands[:2]):
+        for index, (arm, hand) in enumerate(zip(arm_parts[:2], arm_hands[:2])):
             stop = offset + arm.shape[1]
             full[:, offset:stop, arm_joint_ids] = arm
-            full[:, offset:stop, hand_joint_ids] = hand.unsqueeze(1)
+            full[:, offset:stop, hand_joint_ids] = (
+                interpolate_hand_qpos(
+                    context.last_qpos[:, hand_joint_ids],
+                    hand,
+                    n_waypoints=arm.shape[1],
+                )
+                if index == 0
+                else hand.unsqueeze(1)
+            )
             offset = stop
         stop = offset + hand_close.shape[1]
         full[:, offset:stop, arm_joint_ids] = reach_arm[:, -1].unsqueeze(1)
@@ -362,16 +405,23 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
     def _motion_segment_lengths(
         sample_count: int,
         hand_interp_steps: int,
+        twist_waypoint_count: int,
     ) -> tuple[int, int, int, int]:
         motion_count = sample_count - 2 * hand_interp_steps
-        if motion_count < 8:
+        minimum_twist_count = twist_waypoint_count + 1
+        if motion_count < minimum_twist_count + 6:
             raise ValueError(
                 "Not enough waypoints for Twist. Increase sample_count or "
-                "decrease hand_interp_steps."
+                "decrease hand_interp_steps or twist_waypoint_count."
             )
         base, remainder = divmod(motion_count, 4)
         values = [base + (index < remainder) for index in range(4)]
-        return values[0], values[1], values[2], values[3]
+        if values[2] >= minimum_twist_count:
+            return values[0], values[1], values[2], values[3]
+        remaining_count = motion_count - minimum_twist_count
+        other_base, other_remainder = divmod(remaining_count, 3)
+        other = [other_base + (index < other_remainder) for index in range(3)]
+        return other[0], other[1], minimum_twist_count, other[2]
 
     def _plan_pose_segment(
         self,
@@ -382,6 +432,8 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         sample_count: int,
         *,
         interpolation_dt: float,
+        cartesian_samples: bool = False,
+        cartesian_path_sampler: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
             build_pose_plan_states(target_pose),
@@ -390,12 +442,18 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
                 control_part=control_part,
                 sample_count=sample_count,
                 interpolation_dt=interpolation_dt,
+                cartesian_linear=cartesian_samples,
+                cartesian_path_sampler=cartesian_path_sampler,
             ),
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
+        assert result.dt is not None
         return result.success, resample_planned_trajectory(
-            result.positions, sample_count
+            result.positions,
+            sample_count,
+            dt=result.dt,
+            control_dt=interpolation_dt,
         )
 
     def _twisted_grasp_poses(
@@ -408,34 +466,40 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         waypoint_count: int,
     ) -> torch.Tensor:
         """Build Cartesian EEF keyframes that follow the target's twist arc."""
-        axis = twist_axis.to(device=self.device, dtype=torch.float32)
-        axis = axis / torch.linalg.vector_norm(axis)
-        angles = torch.linspace(
-            twist_angle / waypoint_count,
-            twist_angle,
+        fractions = torch.linspace(
+            1.0 / waypoint_count,
+            1.0,
             waypoint_count,
             dtype=torch.float32,
             device=self.device,
         )
-        rotations = (
-            torch.eye(4, dtype=torch.float32, device=self.device)
-            .reshape(1, 4, 4)
-            .repeat(waypoint_count, 1, 1)
+        return self._twisted_grasp_poses_at_fractions(
+            link_pose,
+            grasp_xpos,
+            twist_axis,
+            axis_origin,
+            twist_angle,
+            fractions,
         )
-        rotations[:, :3, :3] = axis_angle_to_rotation_matrix(angles[:, None] * axis)
-        link_to_eef = torch.bmm(pose_inv(link_pose), grasp_xpos)
-        origin = torch.tensor(axis_origin, dtype=torch.float32, device=self.device)
-        to_origin = torch.eye(4, dtype=torch.float32, device=self.device)
-        from_origin = torch.eye(4, dtype=torch.float32, device=self.device)
-        to_origin[:3, 3] = origin
-        from_origin[:3, 3] = -origin
-        local_rotations = torch.matmul(
-            torch.matmul(to_origin[None], rotations), from_origin[None]
+
+    def _twisted_grasp_poses_at_fractions(
+        self,
+        link_pose: torch.Tensor,
+        grasp_xpos: torch.Tensor,
+        twist_axis: torch.Tensor,
+        axis_origin: tuple[float, float, float],
+        twist_angle: float,
+        fractions: torch.Tensor,
+    ) -> torch.Tensor:
+        """Sample the rigid grasp path at normalized twist-angle fractions."""
+        _, eef_poses = rotate_rigid_grasp(
+            link_pose,
+            grasp_xpos,
+            twist_axis,
+            axis_origin,
+            twist_angle * fractions.to(device=self.device, dtype=torch.float32),
         )
-        return torch.matmul(
-            torch.matmul(link_pose[:, None], local_rotations[None]),
-            link_to_eef[:, None],
-        )
+        return eef_poses
 
 
 __all__ = ["Twist", "TwistGoal", "TwistOptions"]

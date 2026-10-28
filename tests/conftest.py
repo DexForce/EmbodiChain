@@ -18,12 +18,42 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+import hashlib
 import inspect
+import json
 import os
 import re
+from pathlib import Path
 import pytest
 
 os.environ.setdefault("EMBODICHAIN_SIM_EXIT_PROCESS", "0")
+
+
+@pytest.fixture
+def requires_dexuni_contact_query() -> None:
+    """Require per-row contact quantities while retaining released MJWarp tests."""
+    from dexsim.scene import ContactBuffer
+
+    if not hasattr(ContactBuffer, "impulse_valid"):
+        pytest.skip("DexUni contacts require per-row quantity validity.")
+
+
+@pytest.fixture
+def requires_particle_contact_material() -> None:
+    """Require the native per-object material descriptor."""
+    import dexsim.spawn
+
+    if not hasattr(dexsim.spawn, "NewtonParticleContactMaterialDesc"):
+        pytest.skip("Per-object particle materials require a supporting DexSim build.")
+
+
+@pytest.fixture
+def requires_dexuni_two_way() -> None:
+    """Qualify dev-only contracts without excluding released-engine coverage."""
+    from dexsim.engine.newton_physics import DexUniSolverCfg
+
+    if "coupling" not in inspect.signature(DexUniSolverCfg).parameters:
+        pytest.skip("DexUni two-way coupling requires DexSim dev f32785317 or newer.")
 
 
 @pytest.fixture(scope="session")
@@ -36,7 +66,7 @@ def _discover_task_packages():
     auto-registered by importing
     ``embodichain.lab.gym.envs``, so tests that build task envs via
     ``make(env_id)`` / ``build_env`` / ``train_from_config`` need discovery to
-    run first. This mirrors what the ``run_env`` and ``train-rl`` CLIs do at
+    run first. This mirrors what the ``run_task`` and ``train-rl`` CLIs do at
     startup.
     """
     from embodichain.lab.gym.utils.registration import (
@@ -69,9 +99,24 @@ def pytest_addoption(parser):
         default=False,
         help="Run tests marked gpu; these are skipped by default to limit VRAM use.",
     )
+    parser.addoption(
+        "--ci-collect-manifest",
+        type=Path,
+        help="Write the ordered resource-lane selection during collect-only.",
+    )
+    parser.addoption(
+        "--ci-expected-collection",
+        type=Path,
+        help="Require the same ordered selection before executing a resource lane.",
+    )
 
 
 def pytest_configure(config):
+    if config.getoption("--ci-collect-manifest") is not None and (
+        not config.option.collectonly
+        or config.getoption("--ci-expected-collection") is not None
+    ):
+        raise pytest.UsageError("--ci-collect-manifest requires collect-only discovery")
     renderer = config.getoption("--renderer")
     if renderer:
         if renderer not in ["hybrid", "fast-rt"]:
@@ -82,6 +127,46 @@ def pytest_configure(config):
         # DexSim initialization is intentionally deferred to the first real-simulation
         # test.  Most of the suite consists of pure-Python tests and should not acquire
         # a CUDA/Vulkan context merely because pytest has started.
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Record discovery or reject a changed selection before any test setup."""
+    config = session.config
+    output = config.getoption("--ci-collect-manifest")
+    expected = config.getoption("--ci-expected-collection")
+    if output is None and expected is None:
+        return
+    if session.testsfailed:
+        if expected is not None:
+            raise pytest.UsageError(
+                "Resource-lane collection failed after discovery; refusing to execute."
+            )
+        return
+    nodes = [item.nodeid for item in session.items]
+    manifest = {
+        "version": 1,
+        "files": list(dict.fromkeys(node.split("::", 1)[0] for node in nodes)),
+        "nodeids": nodes,
+        "markers": {
+            item.nodeid: sorted({marker.name for marker in item.iter_markers()})
+            for item in session.items
+        },
+    }
+    if output is not None:
+        output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    if expected is not None:
+        try:
+            recorded = json.loads(expected.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise pytest.UsageError(
+                f"Cannot read resource-lane selection: {error}"
+            ) from error
+        if recorded != manifest:
+            raise pytest.UsageError(
+                "Resource-lane collection changed after discovery; "
+                "refusing to execute a different ordered test selection."
+            )
 
 
 _SIMULATION_MANAGER_CONSTRUCTOR = re.compile(r"\bSimulationManager\s*\(")
@@ -179,17 +264,26 @@ def pytest_collection_modifyitems(config, items):
     """Classify real-simulation tests for fast and resource-aware test selection."""
     for item in items:
         nodeid = item.nodeid.lower()
+        if "cuda" in nodeid or "gpu" in nodeid:
+            item.add_marker(pytest.mark.gpu)
         requires_sim = _requires_real_sim(item)
         if requires_sim:
             item.add_marker(pytest.mark.requires_sim)
             item.add_marker(pytest.mark.xdist_group(name="simulation"))
         else:
             module_name = getattr(item.module, "__name__", "unknown")
-            item.add_marker(
-                pytest.mark.xdist_group(name=f"module-{module_name.replace('.', '-')}")
-            )
-        if "cuda" in nodeid or "gpu" in nodeid:
-            item.add_marker(pytest.mark.gpu)
+            group = f"module-{module_name.replace('.', '-')}"
+            if (
+                item.get_closest_marker("slow") is not None
+                and item.get_closest_marker("requires_sim") is None
+                and item.get_closest_marker("subprocess_sim") is None
+                and item.get_closest_marker("gpu") is None
+                and item.get_closest_marker("xdist_group") is None
+            ):
+                # Slow CPU cases are independent; distribute large reference
+                # matrices while preserving explicit resource-sharing groups.
+                group = f"slow-cpu-{hashlib.sha256(item.nodeid.encode()).hexdigest()}"
+            item.add_marker(pytest.mark.xdist_group(name=group))
         if requires_sim and (
             "/sensors/" in nodeid or "hybrid" in nodeid or "fastrt" in nodeid
         ):

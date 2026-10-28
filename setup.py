@@ -24,16 +24,21 @@ from pathlib import Path
 
 from setuptools import Command, find_namespace_packages, setup
 
-__all__ = ["get_package_dir", "get_packages", "get_version"]
+__all__ = ["get_example_data_files", "get_package_dir", "get_packages", "get_version"]
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 logger = logging.getLogger()
 
 THIS_DIR = Path(__file__).resolve().parent
 CORE_PACKAGE_PATTERNS = ["embodichain", "embodichain.*"]
-TASKS_PROJECT_DIR = THIS_DIR / "embodichain_tasks"
+EXTENSIONS_DIR = THIS_DIR / "extensions"
+TASKS_PROJECT_DIR = EXTENSIONS_DIR / "embodichain_tasks"
+MODELS_PROJECT_DIR = EXTENSIONS_DIR / "embodichain_models"
 TASKS_PACKAGE_PATTERNS = ["embodichain_tasks", "embodichain_tasks.*"]
 ROBOTS_PACKAGE_PATTERNS = ["embodichain_robots", "embodichain_robots.*"]
+BENCHMARKS_PACKAGE_PATTERNS = ["embodichain_benchmarks", "embodichain_benchmarks.*"]
+MODELS_PACKAGE_PATTERNS = ["embodichain_models", "embodichain_models.*"]
+EXAMPLES_DIR = THIS_DIR / "examples"
 
 # Defer importing torch until it's actually needed (when building extensions).
 # This prevents `setup.py` from failing at import time in environments where
@@ -58,7 +63,7 @@ class CleanCommand(Command):
             "build",
             "dist",
             "embodichain.egg-info",
-            "embodichain_tasks/embodichain_tasks.egg-info",
+            "extensions/embodichain_tasks/embodichain_tasks.egg-info",
         ]:
             rm_path = THIS_DIR / d
             if not rm_path.exists():
@@ -83,7 +88,7 @@ class CleanCommand(Command):
 
 
 def get_packages() -> list[str]:
-    """Return core, task, and robot packages shipped in the main wheel."""
+    """Return core and bundled extension packages shipped in the main wheel."""
     core_packages = find_namespace_packages(
         where=str(THIS_DIR), include=CORE_PACKAGE_PATTERNS
     )
@@ -91,7 +96,13 @@ def get_packages() -> list[str]:
         where=str(TASKS_PROJECT_DIR), include=TASKS_PACKAGE_PATTERNS
     )
     robot_packages = find_namespace_packages(
-        where=str(THIS_DIR), include=ROBOTS_PACKAGE_PATTERNS
+        where=str(EXTENSIONS_DIR), include=ROBOTS_PACKAGE_PATTERNS
+    )
+    benchmark_packages = find_namespace_packages(
+        where=str(EXTENSIONS_DIR), include=BENCHMARKS_PACKAGE_PATTERNS
+    )
+    model_packages = find_namespace_packages(
+        where=str(MODELS_PROJECT_DIR), include=MODELS_PACKAGE_PATTERNS
     )
     return sorted(
         set(
@@ -99,6 +110,8 @@ def get_packages() -> list[str]:
                 *core_packages,
                 *task_packages,
                 *robot_packages,
+                *benchmark_packages,
+                *model_packages,
                 "embodichain_tasks.configs",
             ]
         )
@@ -106,11 +119,38 @@ def get_packages() -> list[str]:
 
 
 def get_package_dir() -> dict[str, str]:
-    """Map the task package and configs without moving their source paths."""
+    """Map bundled extension sources to their stable Python package names."""
     return {
-        "embodichain_tasks": "embodichain_tasks/embodichain_tasks",
-        "embodichain_tasks.configs": "embodichain_tasks/configs",
+        "embodichain_tasks": "extensions/embodichain_tasks/embodichain_tasks",
+        "embodichain_tasks.configs": "extensions/embodichain_tasks/configs",
+        "embodichain_robots": "extensions/embodichain_robots",
+        "embodichain_benchmarks": "extensions/embodichain_benchmarks",
+        "embodichain_models": "extensions/embodichain_models/embodichain_models",
     }
+
+
+def get_example_data_files() -> list[tuple[str, list[str]]]:
+    """Preserve the ordinary examples tree as installed distribution data.
+
+    Returns:
+        Destination directories and source files, without Python package discovery.
+    """
+    directories: dict[str, list[str]] = {}
+    for source in sorted(EXAMPLES_DIR.rglob("*")):
+        relative = source.relative_to(EXAMPLES_DIR)
+        if (
+            not source.is_file()
+            or any(
+                part.startswith(".") or part == "__pycache__" for part in relative.parts
+            )
+            or source.suffix in {".pyc", ".pyo"}
+        ):
+            continue
+        destination = Path("share/embodichain/examples") / relative.parent
+        directories.setdefault(destination.as_posix(), []).append(
+            source.relative_to(THIS_DIR).as_posix()
+        )
+    return sorted(directories.items())
 
 
 def get_version() -> str:
@@ -144,8 +184,26 @@ def main():
         package_dir=get_package_dir(),
         package_data={
             "embodichain": ["VERSION"],
+            "embodichain_models.dynamics.nerd": ["THIRD_PARTY_LICENSES"],
+            "embodichain.data": ["default_materials.json"],
+            "embodichain.compute.kinematics._warp": [
+                "ssik_LICENSE.txt",
+                "data/*.npz",
+                "data/*.json",
+            ],
+            "embodichain_robots": [
+                "_ssik_artifacts/*.py",
+                "_ssik_artifacts/*.json",
+                "_ssik_artifacts/LICENSE.txt",
+            ],
+            "embodichain_robots.unitree.go1": ["profile.json"],
+            "embodichain_robots.unitree.go2": ["profile.json"],
+            "embodichain_robots.unitree.g1": ["profile.json"],
+            "embodichain_robots.unitree.h1_2": ["profile.json"],
+            "embodichain_robots.anybotics.anymal_c": ["profile.json"],
+            "embodichain_robots.pollen_robotics.microduck": ["profile.json"],
+            "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
-            "embodichain.lab.scripts._atomic_action": ["README.md"],
             "embodichain_tasks.configs": [
                 "**/*.json",
                 "**/*.yaml",
@@ -153,6 +211,7 @@ def main():
                 "**/README.md",
             ],
         },
+        data_files=get_example_data_files(),
         cmdclass=cmdclass,
         include_package_data=False,
     )

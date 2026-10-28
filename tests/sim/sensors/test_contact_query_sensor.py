@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 import warp as wp
 
@@ -37,6 +38,8 @@ class _FakeQuery:
         self.actor_info_calls = 0
         self.buffer = ContactBuffer.allocate(4, "cpu")
         self.buffer.count = 2
+        if hasattr(self.buffer, "quantity_valid"):
+            self.buffer.quantity_valid.fill_(True)
         self.buffer.data[0] = torch.tensor(
             [1.0, 2.0, 3.0, 0.0, 0.0, 1.0, 0.1, 0.2, 0.3, 0.4, -0.01]
         )
@@ -195,3 +198,100 @@ def test_scatter_overflow_is_counted_separately_and_reset_by_selected_row():
     assert sensor.dropped_contacts == 3
     sensor.reset()
     assert sensor.dropped_contacts == 0
+
+
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_mixed_contact_quantities_survive_scatter_filter_and_history(device):
+    query = _FakeQuery()
+    if not hasattr(query.buffer, "quantity_valid"):
+        pytest.skip("Per-row contact quantities require DexSim's current dev API.")
+    query.capabilities = ContactQueryCapabilities(True, False, False)
+    query.buffer.quantity_valid[:2] = torch.tensor([[True, False], [False, True]])
+    # Poison unsupported quantities; neither the observation mask nor the
+    # history reducer may promote them to measured forces.
+    query.buffer.data[0, 6:9] = float("nan")
+    query.buffer.data[1, 9] = float("nan")
+    query.buffer.data[1, 6:9] = torch.tensor([0.0, 0.5, 0.0])
+    if device != "cpu":
+        old = query.buffer
+        query.buffer = ContactBuffer.allocate(old.capacity, device)
+        for name in ("data", "actor_ids", "env_ids", "quantity_valid"):
+            getattr(query.buffer, name).copy_(getattr(old, name))
+        query.buffer.count = old.count
+        query.buffer.device_counts[0] = old.count
+        query.fetch_async = query.fetch
+    handles = (
+        SimpleNamespace(path="arena_0/cube"),
+        SimpleNamespace(path="arena_1/cube"),
+    )
+    owner = SimpleNamespace(
+        num_envs=2,
+        arena_offsets=torch.zeros((2, 3), device=device),
+        _spawn_scene=SimpleNamespace(handles=lambda uid: handles),
+        spawn_result=SimpleNamespace(
+            create_contact_query=lambda *args, **kwargs: query
+        ),
+    )
+    sensor = ContactSensor(
+        ContactSensorCfg(
+            uid="contacts",
+            rigid_uid_list=["cube"],
+            filter_need_both_actor=False,
+            max_contacts_per_env=2,
+        ),
+        torch.device(device),
+        owner=owner,
+    )
+    history = sensor.create_history(
+        "forces", torch.tensor([[4], [7]], device=device), force_threshold=1.0
+    )
+    sensor.update_physics_step(0.1)
+    data = sensor.get_data()
+    assert data["impulse_valid"].cpu().tolist() == [[True, False], [False, False]]
+    assert data["friction_valid"].cpu().tolist() == [[False, False], [True, False]]
+    torch.testing.assert_close(
+        history.force.cpu(), torch.tensor([[[0.0, 0.0, -4.0]], [[0.0, -5.0, 0.0]]])
+    )
+    assert history.contact.all()
+    filtered = sensor.filter_by_user_ids(torch.tensor([4]))
+    assert filtered["impulse_valid"].tolist() == [True]
+    assert filtered["friction_valid"].tolist() == [False]
+    sensor.reset([0])
+    assert not data["impulse_valid"].any()
+    assert data["friction_valid"][1, 0]
+    query.buffer.count = 0
+    query.buffer.device_counts.zero_()
+    sensor.update()
+    assert not data["is_valid"].any()
+    assert not data["friction_valid"].any()
+
+
+def test_legacy_contact_buffer_uses_query_quantity_capabilities():
+    query = _FakeQuery()
+    old = query.buffer
+    query.buffer = SimpleNamespace(
+        data=old.data,
+        actor_ids=old.actor_ids,
+        env_ids=old.env_ids,
+        device_counts=old.device_counts,
+        count_device=old.count_device,
+        dropped_count_device=old.dropped_count_device,
+        capacity=old.capacity,
+        count=old.count,
+        dropped_count=old.dropped_count,
+    )
+    query.capabilities = ContactQueryCapabilities(True, False, False)
+    query.buffer.data[:2, 6:10] = float("nan")
+    sensor = _sensor_for_query(query)
+    history = sensor.create_history(
+        "forces", torch.tensor([[4], [7]]), force_threshold=1.0
+    )
+    sensor.update_physics_step(0.1)
+    data = sensor.get_data()
+    assert data["is_valid"][:, 0].all()
+    assert not data["impulse_valid"].any()
+    assert not data["friction_valid"].any()
+    assert not history.force.any()
+    assert not history.found.any()

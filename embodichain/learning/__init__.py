@@ -14,10 +14,22 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Learning systems.
+"""Learning layers, shared models and reinforcement-learning systems.
 
-Currently exposes the ``rl`` subpackage for on-policy reinforcement learning."""
+Subpackages load on demand so standalone layers do not import RL or simulation.
+"""
 
-from . import rl
+from __future__ import annotations
 
-__all__ = ["rl"]
+from importlib import import_module
+from types import ModuleType
+
+__all__ = ["layers", "models", "rl", "sl"]
+
+
+def __getattr__(name: str) -> ModuleType:
+    if name in __all__:
+        module = import_module(f"{__name__}.{name}")
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

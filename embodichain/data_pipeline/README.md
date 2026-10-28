@@ -1,4 +1,27 @@
-# Expert dataset tools
+# Data pipeline
+
+The package owns live ODS supply, shared numeric training-data sources, durable
+recording and offline dataset tools.
+
+## ODS and training-data consumption
+
+Start with the [ODS user guide](../../docs/source/features/online_data.md) for
+engine lifecycle, manual refill, causal contexts, delivery budgets and source
+ownership. The reusable operational guides are:
+
+- [Architecture and data flow](../../docs/source/features/ods/architecture.md):
+  process ownership, online/offline routes and application boundaries.
+- [Throughput-based configuration](../../docs/source/features/ods/configuration.md):
+  measured rates, protected reuse profiles, cache/active-rate limits and the
+  host's pacing/refill responsibilities and runtime verification.
+- [Dataset/source architecture](../../docs/architecture/dataset-loading-design.md):
+  the public `BatchSource`/`SequenceDataset` contract and numeric LeRobot loading.
+
+The [simple BC demo](../../examples/ods/simple_bc_demo/README.md) binds these
+capabilities to one local task and learner. Its parameters and experimental
+results remain example evidence rather than generic ODS defaults.
+
+## Expert dataset tools
 
 EmbodiChain records with its existing Python >=3.10 runtime and LeRobot 0.4.x.
 Offline validation, quality filtering, and recovery do not start a simulator.
@@ -96,5 +119,5 @@ python -m scripts.benchmark.data_pipeline.benchmark_segment_annotations \
 
 The benchmark verifies exact annotation equivalence and reports lookup time and
 sampled process RSS. It does not measure simulation throughput or disk saving.
-The existing `benchmark_lerobot_save` script measures complete recording with a
-real environment.
+For complete recording measurements, run a surviving manipulation deployment
+with the Gym launcher profiler and dataset saving enabled.

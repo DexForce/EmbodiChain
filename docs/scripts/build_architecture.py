@@ -68,8 +68,11 @@ def _relocate(source: SourceRepository, proof: dict[str, Any], owner: str) -> No
 
 
 def _module_name(path: str) -> str:
+    path = path.removeprefix("extensions/")
     if path.startswith("embodichain_tasks/embodichain_tasks/"):
         path = path.removeprefix("embodichain_tasks/")
+    if path.startswith("embodichain_models/embodichain_models/"):
+        path = path.removeprefix("embodichain_models/")
     return path.removesuffix(".py").replace("/", ".").removesuffix(".__init__")
 
 

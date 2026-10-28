@@ -19,6 +19,7 @@ from __future__ import annotations
 import zlib
 
 import math
+import inspect
 from copy import deepcopy
 from collections.abc import Mapping
 from numbers import Integral, Real
@@ -44,6 +45,7 @@ from embodichain.lab.gym.utils import gym_utils
 from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
 from embodichain.utils import configclass
 from embodichain.utils import logger, set_seed
+from .episode_context import EpisodeContext
 
 __all__ = ["BaseEnv", "EnvCfg"]
 
@@ -229,6 +231,7 @@ class BaseEnv(gym.Env):
             # The UIDs of objects that are detached from automatic reset.
             self._detached_uids_for_reset: List[str] = []
 
+            self.episode_context = EpisodeContext(self.num_envs, self.device)
             self._init_sim_state(**kwargs)
 
             self.sim.capture_visualization_safely(force=True)
@@ -763,7 +766,11 @@ class BaseEnv(gym.Env):
                 )
                 self._proprio_joint_index_cache = cached
             obs = TensorDict(
-                dict(robot=self.robot.get_proprioception()[:, cached[1]]),
+                dict(
+                    robot=self.robot.get_proprioception().apply(
+                        lambda x: x[:, cached[1]]
+                    )
+                ),
                 batch_size=[self.num_envs],
                 device=self.device,
             )
@@ -816,6 +823,7 @@ class BaseEnv(gym.Env):
         evaluate = self.evaluate(**kwargs)
         if evaluate:
             info.update(evaluate)
+        info["episode_context"] = self.episode_context.snapshot()
         return info
 
     def check_truncated(self, obs: EnvObs, info: TensorDict[str, Any]) -> torch.Tensor:
@@ -941,58 +949,83 @@ class BaseEnv(gym.Env):
 
         Args:
             seed: The seed for the random number generator. Defaults to None, in which case the seed is not set.
-            options: Additional options for resetting the environment. This can include:
+            options: Additional reset options. A trusted host may supply a
+                zero-argument ``episode_prepare`` callback.
+                It runs after reset events and before objective initialization
+                and the final observation. The callback is not forwarded to
+                observation or event functors.
 
         Returns:
             A tuple containing the observations and infos.
         """
+        options = {} if options is None else dict(options)
+        prepare = options.pop("episode_prepare", None)
+        if prepare is not None:
+            if not callable(prepare):
+                raise TypeError("episode_prepare must be callable.")
+            try:
+                inspect.signature(prepare).bind()
+            except (TypeError, ValueError) as error:
+                raise TypeError(
+                    "episode_prepare must accept zero arguments."
+                ) from error
+        context = self.episode_context
+        reset_ids = context._ids(options.pop("reset_ids", None))
+        if "commit_env_ids" in options:
+            commit_ids = context._ids(options["commit_env_ids"])
+            if not bool(torch.isin(commit_ids, reset_ids).all()):
+                raise ValueError(
+                    "commit_env_ids must be a subset of the rows being reset."
+                )
+            options["commit_env_ids"] = commit_ids
         if seed is not None:
             seed = self._set_seed(seed)
         super().reset(seed=seed)
 
-        if options is None:
-            options = dict()
-
         with self._profiler.section("reset", is_root=True):
-            reset_ids = options.get(
-                "reset_ids",
-                torch.arange(self.num_envs, dtype=torch.int32, device=self.device),
-            )
-
-            # Save task success status before resetting objects
             with self._profiler.section("is_task_success"):
                 self._task_success = self.is_task_success()
-
-            with self._profiler.section("reset_objects_state"):
-                self.sim.reset_objects_state(
-                    env_ids=reset_ids,
-                    # Environment sensors are reset below, including sensors
-                    # supplied by custom _setup_sensors implementations.
-                    excluded_uids=self._detached_uids_for_reset,
-                    excluded_sensor_uids=[
-                        sensor.uid for sensor in self.sensors.values()
-                    ],
+            # Consume old buffers before any physical state or eligibility changes.
+            self._before_episode_reset(reset_ids, **options)
+            context._begin_episode(reset_ids)
+            try:
+                with self._profiler.section("reset_objects_state"):
+                    self.sim.reset_objects_state(
+                        env_ids=reset_ids,
+                        excluded_uids=self._detached_uids_for_reset,
+                        excluded_sensor_uids=[
+                            sensor.uid for sensor in self.sensors.values()
+                        ],
+                    )
+                for sensor in self.sensors.values():
+                    sensor.reset(env_ids=reset_ids)
+                with self._profiler.section("initialize_episode"):
+                    self._initialize_episode(reset_ids, **options)
+                if prepare is not None:
+                    with self._profiler.section("episode_prepare"):
+                        prepare()
+                self._reset_physical_objective(reset_ids)
+                self._elapsed_steps.index_fill_(
+                    0, reset_ids.to(self._elapsed_steps.device), 0
                 )
-
-            for sensor in self.sensors.values():
-                sensor.reset(env_ids=reset_ids)
-
-            # Reset hook for user to perform any custom reset logic.
-            with self._profiler.section("initialize_episode"):
-                self._initialize_episode(reset_ids, **options)
-            self._reset_physical_objective(reset_ids)
-            elapsed_ids = torch.as_tensor(reset_ids, dtype=torch.long).to(
-                device=self._elapsed_steps.device, non_blocking=True
-            )
-            self._elapsed_steps.index_fill_(0, elapsed_ids, 0)
-
-            with self.sim.render_frame(force_visualization=True):
-                with self._profiler.section("get_obs"):
-                    obs = self.get_obs(**options)
-            with self._profiler.section("get_info"):
-                info = self.get_info(**options)
-
+                with self.sim.render_frame(force_visualization=True):
+                    with self._profiler.section("get_obs"):
+                        obs = self.get_obs(**options)
+                self._after_episode_reset(obs, reset_ids)
+                context._finish_initialization(reset_ids)
+                with self._profiler.section("get_info"):
+                    info = self.get_info(**options)
+                info["episode_context"] = context.snapshot()
+            except BaseException as error:
+                context._abort_initialization(reset_ids, error)
+                raise
         return obs, info
+
+    def _before_episode_reset(self, env_ids: torch.Tensor, **kwargs: Any) -> None:
+        """Consume old recording buffers before the selected physical rows change."""
+
+    def _after_episode_reset(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
+        """Seed selected recorders from the authoritative post-reset observation."""
 
     @staticmethod
     def _component_seed(name: str, seed: int) -> int:

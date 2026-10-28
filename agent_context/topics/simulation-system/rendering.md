@@ -13,13 +13,19 @@ nonempty validation cameras, the original window intent, Viser, forced Newton
 render synchronization, and custom environment demand hooks reserve
 rendering. Existing sensor/visual filters run before preflight; disabled dataset
 managers do not contribute demand. Contact-only environments do not require it.
+Camera demand includes `RobotCfg.sensors` from the selected backend preset,
+even when the independent Gym `sensor` list is empty. This selection and
+disabled-sensor filtering run before the World is constructed.
 
 `BaseEnv._requires_native_renderer()` is the extension hook. Its result reaches
 `SimulationManager(..., requires_native_renderer=...)` before Gym temporarily
 sets headless for scene setup. With auto, no global default override and demand
 explicitly false, the manager selects NoRender without probing the GPU. Explicit
 renderer selections and global defaults retain precedence. The default demand
-`None` preserves standalone GPU selection. Custom camera/visual code, including
+`None` preserves standalone GPU selection. The run-task launcher scopes
+its native auto preference through `utility/render_utils.py`; this preference is
+consulted only after NoRender demand selection and explicit global overrides,
+and is restored on launcher exit. Custom camera/visual code, including
 cameras added after startup, must reserve rendering before construction; no
 runtime renderer switching or speculative constructors are used.
 
@@ -44,6 +50,25 @@ device-free NoRender engine. Native camera and window operations require a
 native renderer. Viser retains native rendering because its current exporter
 reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
 when the saved training configuration uses NoRender.
+
+## Default scene presentation
+
+`SimulationManager.set_default_background()` authors the native ground material
+before Spawn declares the plane, using the bundled `PlaneDark` color and
+roughness textures. Viser owns its separate browser grid and does not mirror
+native lights or PBR materials.
+
+`set_default_global_lighting()` initializes only environment emission; it does
+not create direct lights or change existing scene lights. Standalone callers
+declare direct lights through `SimulationManager.add_light()`. Task deployments
+own them through `light.direct`; `light.indirect` can override the initial
+environment emission or select IBL. Each explicitly declared light controls
+its own shadows through `LightCfg.enable_shadow`. NoRender skips native visual
+setup while retaining physical ground.
+
+`RenderCfg` owns final RGB tone mapping and fixed exposure for native windows
+and offscreen cameras. Tone mapping is disabled by default; explicit
+`tone_mapping_enabled=True` enables the tone-mapping curve.
 
 ## Rendering does not advance physics
 
@@ -71,6 +96,10 @@ The Newton backend step hook suppresses automatic DexSim publication during
 manager-owned updates to avoid publishing twice. The manager honors explicit
 `sync_to_renderer=True` even without consumers; `None`/`False` publish only for
 consumers. Raw DexSim `World.update()` retains its configured automatic policy.
+When fluids are present, publication orders Newton and Torch work before the
+native CUDA staging copy and waits for that copy before a camera reads the frame.
+After an explicit fluid-state write, it first drains prior staged updates so a
+busy native double buffer cannot silently discard the newer state.
 Render-thread recording only consumes already-published state and must never
 call the blocking physics-to-render bridge. Marker publication while paused uses
 `capture_visualization(force=True)` without advancing physics.
@@ -121,6 +150,10 @@ Scalar validation runs at construction and conversion after mutable edits.
 Configuration tests do not prove GPU/NGX/NRD runtime support, which initializes
 on a rendered frame. Read exact renderer and algorithm defaults in the config
 source.
+
+Optical settings use `VisualMaterialCfg.parameters` for direct and shape-owned
+materials. Resource definitions and their reset baselines are owned by the
+[material system](materials.md).
 
 ## Startup summaries
 

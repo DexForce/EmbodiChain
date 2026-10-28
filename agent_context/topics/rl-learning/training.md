@@ -19,7 +19,37 @@ restores its prior mode.
 
 Checkpoints include policy parameters, trainer and complete-rollout counters,
 best-evaluation state, observation-normalizer state when enabled, and optimizer
-or LR-scheduler state when present. Evaluation reuses the frozen training
+or LR-scheduler state when present. Schema v2 also stores compatibility metadata
+and rank-local RNG/normalization state; GRPO includes its fixed KL reference.
+Both trainers expose `load_checkpoint(path, resume_scheduler="restore")`.
+CLI `--resume` selects a file or `latest/best` from `--run`; the source and new
+output run remain separate. Selectors follow the exact manifest entry, fail when
+the entry or its file is missing, and never fall back to another checkpoint.
+Training selection defers unrelated file existence checks through
+`RunManifest.load(check_files=False)`; default manifest loading still validates
+every referenced file for evaluation. Schema-v2 files restore independently of
+source-run snapshots and historical checkpoints. Resume keeps the historical
+best score but does not copy its file: the new run gets a best entry only after
+an evaluation improves that score.
+Budgets are absolute targets and environments start
+fresh episodes. `restore` keeps the saved LR horizon; `restart` preserves
+optimizer momentum and binds the configured curve to remaining updates.
+Zero-ending linear curves cannot resume beyond their horizon in restore mode.
+The loader checks semantic and structural compatibility before updating state,
+including effective APG rollout, gradient-accumulation and action settings.
+CLI and Python API checkpoints interoperate; absent shared CLI context or older
+v2 APG settings produce a warning while available runtime metadata is checked.
+Variable-horizon APG transition budgets use the actual update count to check
+an explicit restored LR horizon.
+Legacy standard/APG-v1 files restore available fields and report missing metadata
+or RNG. `checkpoint.py` owns shared validation and atomic persistence.
+Configuration snapshots are frozen from loaded data on the first save; later
+saves update the run manifest without rewriting those snapshots. Final saves
+reuse the current update's periodic or best checkpoint. Subsequent saves and final
+reuse verify the previous saved file and active run manifest references; missing
+artifacts raise errors instead of being recreated. Unreferenced historical files
+are not required. Interrupted updates retain
+the previous complete checkpoint. Evaluation reuses the frozen training
 normalizer without updating its statistics.
 
 `trainer.seed` seeds Python, NumPy, Torch, CUDA, and Warp before environment
@@ -57,6 +87,11 @@ On the simulator path, distributed mode initializes NCCL, assigns one CUDA
 device per local rank, wraps the policy in
 `DistributedDataParallel`, aggregates step and episode statistics, and
 keeps logging, evaluation, and checkpoint ownership on rank zero.
+Because action evaluation calls the underlying policy, algorithms explicitly
+average gradients before clipping and stepping; adaptive PPO uses global KL.
+All ranks participate in checkpoint operations and error synchronization.
+Resume requires the same world size and restores each rank's RNG and local
+normalization statistics alongside common policy/optimizer state.
 Differentiable algorithms and lightweight learning environments do not
 currently support this distributed path.
 
@@ -64,10 +99,10 @@ currently support this distributed path.
 
 | Example | Environment path | Config location |
 |---------|------------------|-----------------|
-| CartPole | registered simulator Gym env | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/` |
-| PushCube | registered simulator Gym env | `embodichain_tasks/configs/tasks/manipulation/push_cube/agents/` |
-| PointMass PPO | registered lightweight env, standard rollout | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml` |
-| PointMass APG | differentiable lightweight env | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml` |
+| CartPole | registered simulator Gym env | `extensions/embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/` |
+| PushCube | registered simulator Gym env | `extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/agents/` |
+| PointMass PPO | registered lightweight env, standard rollout | `extensions/embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml` |
+| PointMass APG | differentiable lightweight env | `extensions/embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml` |
 | Newton planar reach | experimental differentiable FK reference | `embodichain/learning/rl/experimental/newton/` |
 
 `PointMassRL` is the reference environment for comparing standard and
@@ -101,7 +136,7 @@ example is an experimental gradient reference, not a general simulator task.
 5. Expose `observation_normalize_mask` when semantic dimensions must remain
    raw during normalization.
 6. Add an official config under
-   `embodichain_tasks/configs/tasks/<domain>/<task>/agents/` when it is a
+   `extensions/embodichain_tasks/configs/tasks/<domain>/<task>/agents/` when it is a
    bundled task.
 
 Use `add-task-env` for simulator-backed task environments and

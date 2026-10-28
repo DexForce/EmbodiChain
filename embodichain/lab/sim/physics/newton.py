@@ -28,6 +28,7 @@ from .base import PhysicsBackend
 
 if TYPE_CHECKING:
     import dexsim
+    import torch
 
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
     from embodichain.lab.sim.objects.fluid import FluidObject
@@ -60,6 +61,9 @@ class NewtonPhysicsBackend(PhysicsBackend):
         self._differentiable_runtime = None
         self._runtime_device: str | None = None
         self._configured_solver_type: str | None = None
+        self._fluid_render_clip_key: tuple[object, ...] | None = None
+        self._fluid_render_clip_z: torch.Tensor | None = None
+        self._fluid_render_dirty = False
 
     @property
     def solver_type(self) -> str | None:
@@ -115,27 +119,122 @@ class NewtonPhysicsBackend(PhysicsBackend):
             )
         fluids = getattr(self._manager, "_fluid_objects", {})
         clipped = [f for f in fluids.values() if f.cfg.render.clip_below_z is not None]
+        native_stream = producer_stream = None
+        if fluids and str(backend.state_0.particle_q.device).startswith("cuda"):
+            import torch
+
+            # DexSim stages fluid positions asynchronously on CUDA's default
+            # stream. Order the Newton step and clipping before that copy, and
+            # complete the copy before a camera consumes the staged geometry.
+            device = torch.device(str(backend.state_0.particle_q.device))
+            producer_stream = torch.cuda.current_stream(device)
+            warp_stream = wp.stream_to_torch(backend.state_0.particle_q.device)
+            if producer_stream.cuda_stream != warp_stream.cuda_stream:
+                producer_stream.wait_stream(warp_stream)
+            native_stream = torch.cuda.default_stream(device)
+            if self._fluid_render_dirty:
+                # A previous staged copy may still occupy the native double
+                # buffer. Drain it before submitting a newer explicit write;
+                # otherwise the renderer can silently discard the new state.
+                flush = getattr(result.world, "_flush_render_updates", None)
+                if not callable(flush):
+                    raise RuntimeError(
+                        "This DexSim build cannot synchronize fluid render updates."
+                    )
+                status = flush()
+                if status is not None and int(status) < 0:
+                    raise RuntimeError("Could not drain previous fluid render updates.")
         if not clipped:
-            backend.sync_to_dexsim(result.world)
-            return
-        positions = wp.to_torch(backend.state_0.particle_q).clone()
-        for fluid in clipped:
-            for entity in fluid._entities:
-                binding = entity._physics_binding
-                start = binding.particle_start
-                selected = positions[start : start + entity.particle_count]
-                selected[selected[:, 2] < fluid.cfg.render.clip_below_z] = float("nan")
-        backend.render_sync.sync(
-            result.world,
-            backend.state_0.body_q,
-            wp.from_torch(positions, dtype=wp.vec3),
-            simulation_time=backend.sim_time,
+            self._fluid_render_clip_key = None
+            self._fluid_render_clip_z = None
+            positions = None
+        else:
+            ranges = []
+            for fluid in clipped:
+                for entity in fluid._entities:
+                    start = entity._physics_binding.particle_start
+                    ranges.append(
+                        (
+                            start,
+                            start + entity.particle_count,
+                            fluid.cfg.render.clip_below_z,
+                        )
+                    )
+            positions = self._clip_fluid_render_positions(
+                wp.to_torch(backend.state_0.particle_q), tuple(ranges)
+            )
+        if native_stream is not None:
+            if native_stream.cuda_stream != producer_stream.cuda_stream:
+                native_stream.wait_stream(producer_stream)
+        try:
+            if positions is None:
+                backend.sync_to_dexsim(result.world)
+            else:
+                backend.render_sync.sync(
+                    result.world,
+                    backend.state_0.body_q,
+                    wp.from_torch(positions, dtype=wp.vec3),
+                    simulation_time=backend.sim_time,
+                )
+        finally:
+            if native_stream is not None:
+                native_stream.synchronize()
+        self._fluid_render_dirty = False
+
+    def _clip_fluid_render_positions(
+        self,
+        positions: torch.Tensor,
+        ranges: tuple[tuple[int, int, float], ...],
+    ) -> torch.Tensor:
+        """Create an owned render copy with one comparison and one selection.
+
+        A full-buffer fluid uses a scalar cutoff. Mixed particle scenes cache
+        immutable per-particle cutoffs; changing layout, dtype, device or CUDA
+        stream replaces that cache. Each output owns fresh storage so a later
+        publication cannot overwrite data still consumed by the render bridge.
+        """
+        import torch
+
+        if len(ranges) == 1 and ranges[0][:2] == (0, len(positions)):
+            self._fluid_render_clip_key = None
+            self._fluid_render_clip_z = None
+            return torch.where(
+                positions[:, 2:3] < ranges[0][2], float("nan"), positions
+            )
+
+        # Cache reads and initialization stay on the same Torch stream. A stream
+        # change gets a new tensor, leaving the old allocation's lifetime ordered
+        # on its creation stream without adding a device-wide synchronization.
+        stream = (
+            torch.cuda.current_stream(positions.device).cuda_stream
+            if positions.is_cuda
+            else None
         )
+        key = (positions.shape, positions.dtype, positions.device, stream, ranges)
+        if key != self._fluid_render_clip_key:
+            cutoffs = positions.new_full((len(positions), 1), float("-inf"))
+            for start, end, height in ranges:
+                cutoffs[start:end].fill_(height)
+            self._fluid_render_clip_z = cutoffs
+            self._fluid_render_clip_key = key
+        assert self._fluid_render_clip_z is not None
+        return torch.where(
+            positions[:, 2:3] < self._fluid_render_clip_z, float("nan"), positions
+        )
+
+    @property
+    def supports_dexuni_fluids(self) -> bool:
+        """Whether DexSim exposes the composed DexUni/DFSPH configuration."""
+        if self.solver_type != "dexuni":
+            return False
+        from dexsim.engine.newton_physics import DexUniSolverCfg
+
+        return "sph_cfg" in getattr(DexUniSolverCfg, "__dataclass_fields__", {})
 
     @property
     def supports_fluid_worlds(self) -> bool:
         """Whether the loaded SPH artifact supports isolated worlds and reset."""
-        if self.solver_type != "sph":
+        if not self.supports_dexuni_fluids:
             return False
         from dexsim.engine.newton_physics.solver_runtime import ensure_solver_available
 
@@ -156,10 +255,13 @@ class NewtonPhysicsBackend(PhysicsBackend):
         from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
         backend = get_newton_backend(self._manager._world)
-        if backend is None or getattr(backend, "sph_solver", None) is None:
-            raise RuntimeError("Prepared SPH backend required.")
+        if backend is None or backend.solver_type != "dexuni":
+            raise RuntimeError("Prepared DexUni fluid backend required.")
+        solver = getattr(backend, "sph_solver", None)
+        if solver is None:
+            raise RuntimeError("Prepared DexUni SPH solver required.")
         backend.invalidate_cuda_graph("fluid state write")
-        solver = getattr(backend, "sph_solver", backend.solver)
+        self._fluid_render_dirty = True
         if getattr(solver, "supports_world_reset", False):
             mask = [
                 env_ids is None or i in env_ids
@@ -184,7 +286,9 @@ class NewtonPhysicsBackend(PhysicsBackend):
         import torch
 
         backend = get_newton_backend(self._manager._world)
-        solver = getattr(backend, "sph_solver", backend.solver)
+        solver = getattr(backend, "sph_solver", None)
+        if solver is None:
+            raise RuntimeError("Prepared DexUni SPH solver required.")
         density = wp.to_torch(solver.particle_density)
         values = []
         for entity in fluid._entities:
@@ -215,6 +319,10 @@ class NewtonPhysicsBackend(PhysicsBackend):
         """Release Newton render views while Spawn still owns their parents."""
         if self._runtime_device is not None and self._runtime_device.startswith("cuda"):
             wp.synchronize_device(self._runtime_device)
+
+        self._fluid_render_clip_key = None
+        self._fluid_render_clip_z = None
+        self._fluid_render_dirty = False
 
         world = getattr(self._manager, "_world", None)
         if world is None:
@@ -291,19 +399,39 @@ class NewtonPhysicsBackend(PhysicsBackend):
     @property
     def supports_contact_sensor(self) -> bool:
         # ContactSensor consumes the backend-neutral Scene ContactQuery API,
-        # but not every Newton solver/device pair currently publishes that
-        # query. Keep this runtime-sensitive so ``solver_type='auto'`` can be
-        # rechecked after Spawn finalization resolves the concrete solver.
+        # but CPU MuJoCo cannot publish its force report. Keep this runtime-
+        # sensitive so DexUni's scene-selected solver path is
+        # rechecked after Spawn finalization.
         solver_type = self.solver_type
         if solver_type is None:
             return True
         solver_type = solver_type.lower()
         if solver_type.endswith("dexuni"):
-            return False
+            from dexsim.scene import ContactBuffer
+
+            # Current DexSim exposes mixed DexUni/MuJoCo contact reports with
+            # per-row quantity validity. Older wheels lack that contract.
+            if not hasattr(ContactBuffer, "impulse_valid"):
+                return False
+        world = getattr(self._manager, "_world", None)
+        if world is not None:
+            from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+            backend = get_newton_backend(world)
+            mujoco_solver = getattr(backend, "mujoco_solver", None)
+            if mujoco_solver is not None and mujoco_solver.use_mujoco_cpu:
+                features = getattr(getattr(backend, "solver", None), "features", None)
+                # One-way DexUni disables MuJoCo contacts and keeps the VBD
+                # geometry-only source. Other CPU MuJoCo paths cannot report
+                # contacts, even when the Newton model itself lives on CUDA.
+                return bool(
+                    solver_type.endswith("dexuni")
+                    and getattr(features, "backend", None) == "coupled"
+                    and not getattr(features, "two_way_coupling_enabled", False)
+                )
         runtime_device = self._runtime_device
         if runtime_device is None:
             runtime_device = str(getattr(self._manager, "device", ""))
         return not (
-            solver_type.endswith("mujoco_warp")
-            and runtime_device.lower().startswith("cpu")
+            solver_type == "mujoco_warp" and runtime_device.lower().startswith("cpu")
         )

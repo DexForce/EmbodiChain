@@ -43,7 +43,7 @@ class _FluidReplayRuntime:
             pytest.skip("requires world-isolated SPH build")
         task = (
             Path(__file__).resolve().parents[3]
-            / "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
+            / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
         )
         cfg = config_to_cfg(load_config(task), source_path=task)
         cfg.task_program = None
@@ -52,7 +52,7 @@ class _FluidReplayRuntime:
         cfg.background.append(cup_cfg)
         cfg.events.settle_cup = None
         cfg.sim_cfg.physics_cfg.num_substeps = 1
-        cfg.sim_cfg.physics_cfg.solver_cfg.pop("rigid_solver_cfg", None)
+        cfg.sim_cfg.physics_cfg.solver_cfg["sph_rigid_substeps"] = 1
         cfg.sim_cfg.render_cfg = RenderCfg(renderer="no-render")
         cfg.sim_cfg.headless = True
         cfg.enable_sensor = False
@@ -60,7 +60,7 @@ class _FluidReplayRuntime:
         cfg.sim_steps_per_control = 1
         cfg.sim_cfg.physics_dt = 0.001
         solver = cfg.sim_cfg.physics_cfg.solver_cfg
-        solver.update(
+        solver["sph_cfg"].update(
             volume_map_boundary_enabled=False,
             sdf_boundary_enabled=False,
             particle_support_radius=0.0225,

@@ -1,0 +1,14 @@
+task_key: match_object_container
+title: Match Object Container
+summary: Match tableware objects to compatible containers.
+tags:
+- tableware
+- reinforcement_learning
+default_deployment: default
+deployments:
+  default:
+    config: env.json
+  dual_ur5_dh_pgi_140_80:
+    config: task.dual_ur5_dh_pgi_140_80.yaml
+  tianji_marvin:
+    config: task.tianji_marvin.yaml

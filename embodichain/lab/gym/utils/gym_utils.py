@@ -26,7 +26,7 @@ import gymnasium
 import gymnasium as gym
 
 from collections.abc import Mapping
-from typing import Callable, Dict, Any, List, Tuple, Union, Sequence
+from typing import TYPE_CHECKING, Callable, Dict, Any, List, Tuple, Union, Sequence
 from gymnasium import spaces
 from copy import deepcopy
 from tensordict import TensorDict
@@ -36,6 +36,10 @@ from embodichain.lab.sim.objects import Robot
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.utils.utility import get_class_instance
 from dexsim.utility import log_debug, log_error
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.cfg import RobotCfg
+    from embodichain.lab.sim.sensors import SensorCfg
 
 # Default manager modules for config parsing
 DEFAULT_MANAGER_MODULES = [
@@ -420,6 +424,35 @@ def cat_tensor_with_ids(
     return out
 
 
+def _robot_cfg_from_dict(config: dict) -> RobotCfg:
+    """Decode the shared robot declaration without constructing an environment."""
+    from embodichain.lab.sim.cfg import RobotCfg
+
+    robot_config = deepcopy(config)
+    robot_class_type = robot_config.pop("class_type", None)
+    if robot_class_type is None and "robot_type" in robot_config:
+        robot_class_type = robot_config.pop("robot_type")
+    if robot_class_type is not None:
+        from embodichain.robot_registry import resolve_robot_cfg
+
+        return resolve_robot_cfg(robot_class_type, robot_config)
+    return RobotCfg.from_dict(robot_config)
+
+
+def _collect_sensor_cfgs(
+    robot_cfg: RobotCfg | None, sensors: Sequence[SensorCfg]
+) -> list[SensorCfg]:
+    """Collect independent then mounted declarations, rejecting duplicate UIDs."""
+    combined = [*sensors, *getattr(robot_cfg, "sensors", [])]
+    seen = set()
+    for sensor in combined:
+        if sensor.uid is not None:
+            if sensor.uid in seen:
+                raise ValueError(f"Duplicate sensor uid {sensor.uid!r}.")
+            seen.add(sensor.uid)
+    return combined
+
+
 def config_to_cfg(
     config: dict,
     manager_modules: list | None = None,
@@ -465,8 +498,9 @@ def config_to_cfg(
 
     from embodichain.lab.sim.cfg import (
         DenoisingCfg,
-        RobotCfg,
         RigidObjectCfg,
+        VisualObjectCfg,
+        MeshCfg,
         RigidObjectGroupCfg,
         ArticulationCfg,
         LightCfg,
@@ -489,9 +523,21 @@ def config_to_cfg(
     )
     from embodichain.utils import configclass
     from embodichain.data import get_data_path
+    from embodichain.lab.sim.cfg.source import _asset_file_path
+
+    def resolve_asset_paths(
+        asset: RigidObjectCfg | VisualObjectCfg | ArticulationCfg,
+    ) -> None:
+        path = _asset_file_path(asset)
+        if getattr(asset, "source", None) is not None:
+            asset.source.file_path = get_data_path(path)
+        elif isinstance(getattr(asset, "shape", None), MeshCfg) and path is not None:
+            asset.shape.fpath = get_data_path(path)
+        elif isinstance(asset, ArticulationCfg) and path is not None:
+            asset.fpath = get_data_path(path)
 
     def _resolve_mesh_asset_paths(obj_dict: dict[str, Any]) -> None:
-        for key in ("shape", "visual_shape", "particle_collision_shape"):
+        for key in ("visual_shape", "particle_collision_shape"):
             shape = obj_dict.get(key)
             if (
                 shape is not None
@@ -665,6 +711,10 @@ def config_to_cfg(
     env_cfg.num_envs = config.get("num_envs", 1)
     env_cfg.seed = config.get("seed", None)
     env_cfg.enable_sensor = config.get("enable_sensor", True)
+    ground_plane_visible = config.get("ground_plane_visible")
+    if ground_plane_visible is not None and type(ground_plane_visible) is not bool:
+        raise TypeError("ground_plane_visible must be a bool or None.")
+    env_cfg.ground_plane_visible = ground_plane_visible
 
     render_config = deepcopy(config.get("render_cfg", {}))
     if isinstance(render_config.get("denoising"), dict):
@@ -706,23 +756,10 @@ def config_to_cfg(
         ),
     )
 
-    # Parse the robot config. ``class_type`` selects a RobotCfg subclass while
-    # leaving subtype-specific fields such as URRobotCfg.robot_type intact.
-    # Keep ``robot_type`` as a backward-compatible class selector for existing
-    # configs such as {"robot_type": "CobotMagic"}.
-    robot_config = deepcopy(config["robot"])
-    robot_class_type = robot_config.pop("class_type", None)
-    if robot_class_type is None and "robot_type" in robot_config:
-        robot_class_type = robot_config.pop("robot_type")
-
-    if robot_class_type is not None:
-        from embodichain.robot_registry import resolve_robot_cfg
-
-        robot_cfg = resolve_robot_cfg(robot_class_type, robot_config)
-    else:
-        robot_cfg = RobotCfg.from_dict(robot_config)
-
-    env_cfg.robot = robot_cfg
+    env_cfg.robot = _robot_cfg_from_dict(config["robot"])
+    env_cfg.robot.enable_sensor = env_cfg.enable_sensor
+    if env_cfg.robot.source is not None:
+        resolve_asset_paths(env_cfg.robot)
 
     # Parse source-neutral expert trajectory settings owned by the environment.
     # Keep this under ``env`` so deployment configs do not duplicate runtime
@@ -736,6 +773,7 @@ def config_to_cfg(
 
     # parser sensor config
     env_cfg.sensor = [SensorCfg.from_dict(s) for s in config.get("sensor", [])]
+    _collect_sensor_cfgs(env_cfg.robot, env_cfg.sensor)
 
     # parser light config
     if "light" in config:
@@ -755,6 +793,10 @@ def config_to_cfg(
     env_cfg.fluid_object = [
         FluidObjectCfg.from_dict(item) for item in config.get("fluid_object", [])
     ]
+    for visual_dict in config.get("visual_object", []):
+        visual = VisualObjectCfg.from_dict(visual_dict)
+        resolve_asset_paths(visual)
+        env_cfg.visual_object.append(visual)
 
     # parser background objects config
     if "background" in config:
@@ -765,6 +807,7 @@ def config_to_cfg(
                 "static" if "body_type" not in obj_dict else obj_dict["body_type"]
             )
             cfg = RigidObjectCfg.from_dict(obj_dict)
+            resolve_asset_paths(cfg)
             env_cfg.background.append(cfg)
 
     # parser scene objects config
@@ -772,6 +815,7 @@ def config_to_cfg(
         for obj_dict in config["rigid_object"]:
             _resolve_mesh_asset_paths(obj_dict)
             cfg = RigidObjectCfg.from_dict(obj_dict)
+            resolve_asset_paths(cfg)
             env_cfg.rigid_object.append(cfg)
 
     if "rigid_object_group" in config:
@@ -781,12 +825,14 @@ def config_to_cfg(
             for rigid_obj in obj_dict["rigid_objects"].values():
                 _resolve_mesh_asset_paths(rigid_obj)
             cfg = RigidObjectGroupCfg.from_dict(obj_dict)
+            for member in cfg.rigid_objects.values():
+                resolve_asset_paths(member)
             env_cfg.rigid_object_group.append(cfg)
 
     if "articulation" in config:
         for obj_dict in config["articulation"]:
-            obj_dict["fpath"] = get_data_path(obj_dict["fpath"])
             cfg = ArticulationCfg.from_dict(obj_dict)
+            resolve_asset_paths(cfg)
             env_cfg.articulation.append(cfg)
 
     env_cfg.control_parts = config["env"].get("control_parts", None)
@@ -1363,12 +1409,7 @@ def _resolve_expansion_config_path(value: object, *, base_dir: Path) -> Path:
     if type(value) is not str or not value.strip() or value != value.strip():
         raise ValueError("expansion.config must be a nonempty path")
     path = Path(value).expanduser()
-    if path.is_absolute():
-        resolved = path.resolve()
-    elif path.parts[:2] == ("embodichain_tasks", "configs"):
-        resolved = resolve_config_path(path).resolve()
-    else:
-        resolved = (base_dir / path).resolve()
+    resolved = resolve_config_path(path, base_dir=base_dir).resolve()
     if resolved.suffix.lower() not in {".yaml", ".yml", ".json"}:
         raise ValueError(f"expansion.config must be a YAML or JSON file: {resolved}")
     if not resolved.is_file():
@@ -1459,6 +1500,7 @@ def _apply_expansion_runtime_overlay(
         "max_episode_steps",
         "num_envs",
         "arena_space",
+        "ground_plane_visible",
         "env",
     }
     unknown = set(runtime) - allowed
@@ -1480,7 +1522,13 @@ def _apply_expansion_runtime_overlay(
         return merged
 
     resolved = deepcopy(config)
-    for key in ("max_episodes", "max_episode_steps", "num_envs", "arena_space"):
+    for key in (
+        "max_episodes",
+        "max_episode_steps",
+        "num_envs",
+        "arena_space",
+        "ground_plane_visible",
+    ):
         if key in runtime:
             resolved[key] = deepcopy(runtime[key])
     for key in ("env",):
@@ -1730,6 +1778,7 @@ def init_rollout_buffer_from_config(
     batch_size: int,
     state_dim: int,
     device: Union[str, torch.device] = "cpu",
+    action_dim: int | None = None,
 ) -> TensorDict:
     """Initialize a rollout buffer based on the environment configuration.
 
@@ -1745,10 +1794,19 @@ def init_rollout_buffer_from_config(
         max_episode_steps (int): The number of steps in an episode.
         batch_size (int): The batch size for the rollout buffer.
         state_dim (int): The dimension of the flattened state vector.
+        action_dim: Stored action width, defaulting to state_dim.
 
     Returns:
         TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
     """
+
+    from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
+    from embodichain.lab.sim.sensors import SensorCfg
+
+    if action_dim is not None and (type(action_dim) is not int or action_dim < 1):
+        raise ValueError("action_dim must be a positive integer or None")
+
+    config = _resolve_gym_components(config, base_dir=Path.cwd()).config
 
     # TODO: Currently we use this method to pre-allocate a rollout buffer with fixed size for simplicity.
     # Parse extra observations from observation functors in 'add' mode
@@ -1779,7 +1837,16 @@ def init_rollout_buffer_from_config(
     # Parse sensor
     sensor_desc = {}
     if config.get("enable_sensor", True):
-        for cfg in config.get("sensor", []):
+        robot_cfg = _robot_cfg_from_dict(config["robot"]) if "robot" in config else None
+        sensor_cfgs = _collect_sensor_cfgs(
+            robot_cfg,
+            [
+                SensorCfg.from_dict({"sensor_type": "Camera", **s})
+                for s in config.get("sensor", [])
+            ],
+        )
+        for sensor_cfg in sensor_cfgs:
+            cfg = sensor_cfg.to_dict()
             desc = {}
             width = cfg.get("width", 640)
             height = cfg.get("height", 480)
@@ -1880,7 +1947,11 @@ def init_rollout_buffer_from_config(
             # TODO: For action, we may support TensorDict structure in the future, which may include
             # qpos, qvel and qf.
             "actions": torch.zeros(
-                (batch_size, max_episode_steps, state_dim),
+                (
+                    batch_size,
+                    max_episode_steps,
+                    state_dim if action_dim is None else action_dim,
+                ),
                 dtype=torch.float32,
                 device=device,
             ),

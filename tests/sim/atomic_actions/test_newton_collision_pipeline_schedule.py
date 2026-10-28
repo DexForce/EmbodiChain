@@ -26,7 +26,7 @@ from embodichain.lab.sim.cfg.simulation import NewtonPhysicsCfg
 
 @pytest.mark.no_sim
 def test_atomic_action_tutorial_disables_external_collision_pipeline() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.tutorial_utils")
+    module = importlib.import_module("examples.sim.atomic_action.support")
 
     physics_cfg = module._tutorial_physics_cfg("newton")
 
@@ -34,4 +34,14 @@ def test_atomic_action_tutorial_disables_external_collision_pipeline() -> None:
     assert physics_cfg.collision_cfg is None
     dexsim_cfg = physics_cfg.to_dexsim_cfg(gpu_id=0)
     assert dexsim_cfg.collision_pipeline_cfg is None
-    assert dexsim_cfg.solver_cfg.use_mujoco_contacts is True
+    assert dexsim_cfg.solver_cfg.solver_type == "dexuni"
+    assert dexsim_cfg.solver_cfg.mujoco_options == {
+        "solver": "newton",
+        "integrator": "implicitfast",
+        "iterations": 20,
+        "ls_iterations": 100,
+        "cone": "elliptic",
+        "impratio": 1_000.0,
+        "enable_multiccd": True,
+    }
+    assert dexsim_cfg.solver_cfg.vbd_options == {}

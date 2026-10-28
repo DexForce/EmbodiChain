@@ -25,11 +25,7 @@ from tensordict import TensorDict
 from embodichain.learning.rl.algo import PPO, PPOCfg, compute_gae
 from embodichain.learning.rl.buffer import RolloutBuffer
 from embodichain.learning.rl.collector import SyncCollector
-from embodichain.learning.rl.models import (
-    ActorCritic,
-    EmpiricalNormalizer,
-    build_policy,
-)
+from embodichain.learning.rl.policies import ActorCritic, build_policy
 from embodichain.learning.rl.train import _build_learning_policy
 from embodichain.learning.rl.utils import (
     LRSchedulerCfg,
@@ -109,20 +105,6 @@ def _algorithm(policy: ActorCritic, **overrides: object) -> PPO:
         **overrides,
     }
     return PPO(PPOCfg(**cfg), policy)
-
-
-def test_empirical_normalizer_tracks_and_restores_moments() -> None:
-    normalizer = EmpiricalNormalizer(2)
-    samples = torch.tensor([[1.0, 2.0], [3.0, 6.0]])
-
-    normalizer.update(samples)
-
-    torch.testing.assert_close(normalizer.mean, torch.tensor([[2.0, 4.0]]))
-    torch.testing.assert_close(normalizer.variance, torch.tensor([[1.0, 4.0]]))
-    restored = EmpiricalNormalizer(2)
-    restored.load_state_dict(normalizer.state_dict())
-    torch.testing.assert_close(restored(samples), normalizer(samples))
-    assert int(restored.count) == 2
 
 
 def test_ppo_updates_normalizers_after_using_the_rollout_distribution() -> None:

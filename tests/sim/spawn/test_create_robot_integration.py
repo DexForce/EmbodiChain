@@ -24,7 +24,7 @@ import pytest
 import dexsim
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain_robots.franka_panda import FrankaPandaCfg
+from embodichain_robots.franka.panda import FrankaPandaCfg
 from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,

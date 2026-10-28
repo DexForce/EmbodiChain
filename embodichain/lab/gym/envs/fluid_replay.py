@@ -123,8 +123,8 @@ class FluidReplayEnv(EmbodiedEnv):
             if isinstance(solver, dict)
             else getattr(solver, "solver_type", None)
         )
-        if not isinstance(physics, NewtonPhysicsCfg) or solver_type != "sph":
-            raise ValueError("Fluid replay requires Newton SPH.")
+        if not isinstance(physics, NewtonPhysicsCfg) or solver_type != "dexuni":
+            raise ValueError("Fluid replay requires Newton DexUni with DFSPH.")
         if cfg.sim_cfg.physics_cfg.num_substeps != 1:
             raise ValueError(
                 "Fluid Gym replay requires num_substeps=1; choose physics_dt for boundary cadence."

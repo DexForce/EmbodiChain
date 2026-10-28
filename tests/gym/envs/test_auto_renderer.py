@@ -37,7 +37,7 @@ from embodichain.lab.gym.envs.managers.randomization.visual import (
     set_rigid_object_visual_material,
 )
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RobotCfg, RobotPresetCfg
 from embodichain.lab.sim.sensors import (
     Camera,
     CameraCfg,
@@ -45,6 +45,7 @@ from embodichain.lab.sim.sensors import (
     StereoCameraCfg,
 )
 from embodichain.lab.visualization import VisualizationCfg
+from embodichain.utils import configclass
 
 pytestmark = pytest.mark.no_sim
 
@@ -72,6 +73,56 @@ def _env(**kwargs) -> EmbodiedEnv:
 def test_configured_sensor_render_demand(sensors, enabled, expected) -> None:
     env = _env(sensor=sensors, enable_sensor=enabled)
     assert env._requires_native_renderer() is expected
+
+
+@pytest.mark.parametrize("cfg_type", [CameraCfg, StereoCameraCfg])
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("preset", [False, True])
+def test_robot_mounted_camera_reserves_renderer_before_declaration(
+    cfg_type, enabled: bool, preset: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    robot_cfg = RobotCfg(
+        sensors=[
+            cfg_type(uid="wrist", extrinsics=CameraCfg.ExtrinsicsCfg(parent="tool"))
+        ]
+    )
+
+    @configclass
+    class Preset(RobotPresetCfg):
+        default: RobotCfg = robot_cfg
+
+    env = _env(robot=Preset() if preset else robot_cfg, enable_sensor=enabled)
+    create_sim = Mock(return_value=SimpleNamespace())
+    monkeypatch.setattr(base_module, "SimulationManager", create_sim)
+    monkeypatch.setattr(env, "_declare_robot", lambda **kwargs: None)
+    monkeypatch.setattr(env, "_prepare_scene", lambda **kwargs: None)
+
+    env._setup_scene()
+
+    assert create_sim.call_args.kwargs["requires_native_renderer"] is enabled
+    assert env.cfg.sensor == []
+    assert robot_cfg.enable_sensor is False
+
+
+@pytest.mark.parametrize("newton", [False, True])
+def test_render_preflight_uses_only_the_selected_robot_sensor_preset(
+    newton: bool,
+) -> None:
+    @configclass
+    class Preset(RobotPresetCfg):
+        default: RobotCfg = RobotCfg()
+        newton: RobotCfg = RobotCfg(
+            sensors=[
+                CameraCfg(
+                    uid="wrist", extrinsics=CameraCfg.ExtrinsicsCfg(parent="tool")
+                )
+            ]
+        )
+
+    env = _env(robot=Preset())
+    if newton:
+        env.sim_cfg.physics_cfg = NewtonPhysicsCfg()
+    assert env._requires_native_renderer() is newton
 
 
 def test_registered_camera_subclass_requires_rendering(monkeypatch) -> None:

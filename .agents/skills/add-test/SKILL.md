@@ -1,17 +1,46 @@
 ---
 name: add-test
-description: Use when writing tests for EmbodiChain modules, including observation functors, reward functors, solvers, sensors, environments, or any Python module
+description: Use when assessing the need for, adding, or extending tests for EmbodiChain modules
 ---
 
 # Add Test
 
-Write tests following EmbodiChain's conventions and patterns.
+Reuse sufficient existing coverage; add or extend focused tests following
+EmbodiChain's conventions when a meaningful coverage gap remains.
 
 ## When to Use
 
 - User asks to "add a test", "write tests for X", "test this module"
-- A new public module or function needs test coverage
-- PR checklist requires tests
+- A production change may leave a behavior or regression unverified
+- Assessing test coverage during PR preparation or review
+
+## Test necessity review
+
+Before adding or extending tests, inspect the production contract, supported
+callers and inputs, and the closest existing coverage. Reapply these criteria
+after writing the cases:
+
+- Identify the observable behavior, real regression, or explicit boundary the
+  case protects and the gap in existing coverage. Reuse adequate existing tests;
+  a new public function or PR checklist does not require a new test file.
+- Use an independent expected result derived from the contract, a known example,
+  or a trusted reference. A regression case should detect the original error.
+  Avoid reproducing the implementation to calculate its own expected result or
+  asserting only that a result exists when correctness matters.
+- Prefer extending a relevant case or adding a meaningful parameter to creating
+  parallel coverage. Remove or merge additions that repeat the same behavior
+  without detecting a distinct failure. Do not lock private layout, call order,
+  or source wording without a contract requirement.
+- Keep negative and boundary cases for explicit validation contracts, safety
+  constraints, and reachable failures. Do not enumerate hypothetical unsupported
+  states, chase coverage percentages, or add cases just to check a PR box.
+- Weigh distinct verification value against fixture complexity, brittleness,
+  maintenance, and runtime/resource cost. Preserve explicitly requested scenarios
+  while simplifying their implementation.
+
+Briefly report the coverage relied upon, including why no new cases were needed
+when existing tests or appropriate static checks suffice. No per-test
+justification ledger is required.
 
 ## Test File Location
 
@@ -21,7 +50,7 @@ Tests mirror the source tree under `tests/`:
 embodichain/lab/sim/motion/solvers/pytorch_solver.py  →  tests/sim/motion/solvers/test_pytorch_solver.py
 embodichain/lab/gym/envs/managers/rewards.py    →  tests/gym/envs/managers/test_reward_functors.py
 embodichain/toolkits/graspkit/pg_grasp/foo.py   →  tests/toolkits/test_pg_grasp.py
-embodichain_tasks/embodichain_tasks/manipulation/push_cube.py → tests/gym/envs/tasks/test_push_cube.py
+extensions/embodichain_tasks/embodichain_tasks/manipulation/push_cube.py → tests/gym/envs/tasks/test_push_cube.py
 ```
 
 Rules:
@@ -54,11 +83,6 @@ from embodichain.my_module import my_function
 def test_expected_output():
     result = my_function(input_value)
     assert result == expected_value
-
-
-def test_edge_case():
-    result = my_function(edge_input)
-    assert result is not None
 ```
 
 ### Class Style — For Sim-Dependent or Ordered Tests
@@ -111,6 +135,18 @@ Use the narrowest test type that proves the behavior:
   cannot reveal that requirement (for example, a hidden CUDA helper or an
   end-to-end toolkit test).
 
+Slow CPU cases that do not launch simulation can run on separate workers. Keep
+them independent of test order and shared mutable module state, or declare an
+explicit `xdist_group` when cases must stay together. Ordinary CPU modules and
+native resource groups retain their existing grouping.
+
+The CI runner discovers serial GPU/simulation selections in a separate
+collection-only process, then executes their exact ordered node IDs. Execution
+checks that node order and markers match discovery before setup. Keep imports
+and parametrization independent of unrelated test modules; discovery and
+execution startup both count toward lane time. Retain native destruction,
+cleanup-queue flushes and garbage collection in every test lifecycle.
+
 GPU tests are skipped by default to keep normal test runs within the shared VRAM budget. Run them explicitly and serially:
 
 ```bash
@@ -144,11 +180,12 @@ composition used by production. A `yaml.safe_load()` assertion alone does not
 prove closed fields, relative component paths, physical scene targets,
 contracts, catalog coverage, or program preflight.
 
-Add negative coverage for the earliest ownership boundary being changed:
-unknown fields, missing component files, duplicate inline/component ownership,
-absent `simulation_uid`, contract mismatch, unknown Semantic Calls, or missing
-registered lowerers. Keep live-simulation qualification separate from
-provider-free decode/compiler tests.
+When changed validation behavior lacks coverage, add a focused negative case at
+its earliest owning boundary. Candidate cases include unknown fields, missing
+component files, duplicate inline/component ownership, absent `simulation_uid`,
+contract mismatch, unknown Semantic Calls, or missing registered lowerers; they
+are not a required matrix for every change. Keep live-simulation qualification
+separate from provider-free decode/compiler tests.
 
 For a complete configured Task Program deployment, use
 `$add-task-program`'s read-only inspector as a focused smoke check before
@@ -193,12 +230,13 @@ Key points for mock objects:
 
 ## Steps
 
-### 1. Identify What to Test
+### 1. Identify the Behavior and Coverage Gap
 
-Ask the user:
-1. **Which module/function?** — determines file path
-2. **Does it need a live simulation?** — determines test style
-3. **Key behaviors to verify** — happy path, edge cases, error cases
+Inspect the changed code, its callers, and existing tests to determine the
+behavior to verify and whether it needs live simulation. Apply the
+[test necessity review](#test-necessity-review); reuse sufficient existing
+coverage instead of adding a case. Ask the user only when unresolved intent
+materially affects the required coverage.
 
 ### 2. Determine Test File Path
 
@@ -208,7 +246,8 @@ Map the source path to test path:
 embodichain/<subpath>/<module>.py  →  tests/<subpath>/test_<module>.py
 ```
 
-Check if the test file already exists — append new test classes/functions if so.
+Prefer extending a relevant existing case or test module when it closes the
+identified gap. Create a new test file only when no suitable module exists.
 
 ### 3. Choose Test Style
 
@@ -232,6 +271,9 @@ Rules:
 - **No magic numbers** — define expected values as named constants or comment their origin
 - **Test function names** — `test_<scenario>` (descriptive, not just `test_foo`)
 - **One assertion concept per test** — don't bundle unrelated checks
+
+Reapply the [test necessity review](#test-necessity-review) to the completed
+cases and remove or consolidate redundant additions before validation.
 
 ### 5. Add `if __name__ == "__main__"` Block
 

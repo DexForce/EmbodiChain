@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Drive a live Franka grasp/pour/place in SimulationManager with one-way SPH.
+"""Drive a live Franka grasp/pour/place with DexUni and one-way DFSPH.
 
 Atomic Actions plan controller targets from the current scene. MuJoCo solves
 joint drives, gravity and grasp contact; DFSPH reads the live cup boundary.
@@ -60,7 +60,7 @@ __all__ = ["main"]
 ROOT = Path(__file__).resolve().parents[3]
 TASK = (
     ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
 )
 
 
@@ -101,8 +101,9 @@ def main() -> None:
             sim.add_rigid_object(object_cfg)
         for fluid_cfg in cfg.fluid_object:
             sim.add_fluid_object(fluid_cfg)
-        for light_cfg in cfg.light.direct:
-            sim.add_light(light_cfg)
+        if sim.has_native_renderer:
+            for light_cfg in cfg.light.direct:
+                sim.add_light(light_cfg)
         sim.prepare()
         robot.build_pk_serial_chain()
         sim.reset_objects_state()

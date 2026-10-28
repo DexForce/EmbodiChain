@@ -16,12 +16,13 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
 import shutil
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -44,12 +45,16 @@ EXPECTED_COMMANDS = {
     "show-task",
     "preview-asset",
     "preview-robot",
+    "preview-material",
     "preview_lerobot_data",
-    "run-env",
+    "run-task",
+    "run-example",
     "run-atomic-action",
     "scene-engine",
+    "scene-randomization",
     "simready",
     "train-rl",
+    "train-sl",
     "preview-scene",
     "workspace-cache",
 }
@@ -112,10 +117,10 @@ def test_dispatch_forwards_subcommand_arguments(
     assert received == ["--asset_path", "robot.urdf", "--headless"]
 
 
-def test_run_task_alias_dispatches_to_run_env(
+def test_run_task_dispatches_to_task_launcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Run-task forwards to the canonical run-env handler unchanged."""
+    """Run-task forwards arguments to the task launcher unchanged."""
     loaded_targets: list[str] = []
     received: list[str] = []
 
@@ -130,8 +135,81 @@ def test_run_task_alias_dispatches_to_run_env(
 
     cli.main(["run-task", "--gym_config", "task.yaml", "--headless"])
 
-    assert loaded_targets == ["embodichain.lab.scripts.run_env:cli"]
+    assert loaded_targets == ["embodichain.lab.scripts.run_task:cli"]
     assert received == ["--gym_config", "task.yaml", "--headless"]
+
+
+@pytest.mark.parametrize("layout_format", ["json", "packed"])
+def test_scene_randomization_dispatch_preserves_generation_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+    layout_format: str,
+) -> None:
+    """The scene layout command forwards its workspace, policy and storage options."""
+    loaded_targets: list[str] = []
+    received: list[str] = []
+    arguments = [
+        "--output_root",
+        "outputs/tabletop scene",
+        "--config",
+        "configs/layout policy.yaml",
+        "--layout-format",
+        layout_format,
+        "--rebuild",
+    ]
+
+    def fake_handler(argv: Sequence[str] | None = None) -> None:
+        received.extend(argv or [])
+
+    def load_handler(target: str) -> Callable[[Sequence[str] | None], None]:
+        loaded_targets.append(target)
+        return fake_handler
+
+    monkeypatch.setattr(cli, "_load_handler", load_handler)
+
+    cli.main(["scene-randomization", *arguments])
+
+    assert loaded_targets == ["embodichain.gen_sim.scene_engine.cli.randomization:main"]
+    assert received == arguments
+
+
+def test_run_env_is_rejected_without_loading_a_handler(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The removed command fails before importing the launcher."""
+
+    def fail_if_loaded(_: str) -> None:
+        raise AssertionError("Removed command loaded a handler")
+
+    monkeypatch.setattr(cli, "_load_handler", fail_if_loaded)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["run-env", "--gym_config", "task.yaml"])
+
+    assert exc_info.value.code == 2
+    assert "invalid choice: 'run-env'" in capsys.readouterr().err
+
+
+def test_root_help_lists_only_the_task_launcher() -> None:
+    """Public help advertises the single task execution command."""
+    help_text = cli.build_parser().format_help()
+
+    assert "run-task" in help_text
+    assert "run-env" not in help_text
+
+
+def test_run_task_help_uses_canonical_name(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Dispatch reaches the task launcher's complete argument parser."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["run-task", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "usage: embodichain run-task" in output
+    assert "--gym_config" in output
+    assert "run-env" not in output
 
 
 def test_list_task_table_matches_startup_summary_style(
@@ -265,9 +343,9 @@ def test_list_task_discovers_and_prints_task_tree(
             list_task._EnvironmentListEntry(
                 "BlocksRankingRGB-v1",
                 ("manipulation", "tableware", "blocks_ranking_rgb"),
-                {list_task._HANDWRITTEN_DEMO},
+                {list_task._TASK_PROGRAM},
                 {"cobotmagic"},
-                {"env.json"},
+                {"task.cobotmagic.yaml"},
             ),
             list_task._EnvironmentListEntry(
                 "StackCups-v1",
@@ -318,7 +396,7 @@ def test_list_task_discovers_and_prints_task_tree(
     ):
         assert value in environment_column
     for value in (
-        "Expert Demo: Handwritten Trajectory",
+        "Expert Demo: Task Program",
         "Environment Only",
     ):
         assert re.sub(r"\s+", "", value) in re.sub(r"\s+", "", capability_column)
@@ -425,9 +503,13 @@ def test_handwritten_demo_detection_uses_environment_hooks() -> None:
     from embodichain_tasks.manipulation.tableware.blocks_ranking_size import (
         BlocksRankingSizeEnv,
     )
-    from embodichain_tasks.special.simple_task import SimpleTaskEnv
+    from embodichain.lab.gym.envs import EmbodiedEnv
 
-    assert list_task._implements_handwritten_demo(SimpleTaskEnv)
+    class HandwrittenDemoEnv(EmbodiedEnv):
+        def create_demo_segments(self, **kwargs: object) -> tuple[()]:
+            return ()
+
+    assert list_task._implements_handwritten_demo(HandwrittenDemoEnv)
     assert not list_task._implements_handwritten_demo(BlocksRankingSizeEnv)
 
 
@@ -485,3 +567,328 @@ def test_nested_benchmark_help_uses_suite_parser(
     assert "--tasks" in output
     assert "--algorithms" in output
     assert "--rebuild-report-only" in output
+
+
+def test_benchmark_help_distinguishes_benchmark_domains(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Benchmark categories remain discoverable at the shared command root."""
+    cli.main(["benchmark", "--help"])
+
+    output = " ".join(capsys.readouterr().out.split())
+    assert "motion-generation" in output
+    assert "Motion Planning or Atomic Skills suites" in output
+    assert "atomic-action-profile" in output
+    assert not re.search(r"\batomic-action\b(?!-profile)", output)
+    assert "Profile individual atomic actions" in output
+    assert "robotics-kinematic-solver" in output
+    assert "rendering" in output
+
+
+@pytest.mark.parametrize(
+    ("suite_args", "expected_suite"),
+    [
+        ([], "motion_panda_free_space_smoke"),
+        (
+            ["--suite", "motion_ur5_free_space_coverage"],
+            "motion_ur5_free_space_coverage",
+        ),
+        (["--suite", "atomic_franka_pgi_smoke"], "atomic_franka_pgi_smoke"),
+    ],
+)
+def test_motion_generation_dispatch_selects_suite(
+    monkeypatch: pytest.MonkeyPatch,
+    suite_args: list[str],
+    expected_suite: str,
+) -> None:
+    """The domain command forwards either family and its canonical default."""
+    from embodichain_benchmarks.motion_generation import cli as run_benchmark
+
+    received: dict[str, object] = {}
+
+    def fake_run_all_benchmarks(**kwargs: object) -> None:
+        received.update(kwargs)
+
+    monkeypatch.setattr(run_benchmark, "run_all_benchmarks", fake_run_all_benchmarks)
+
+    cli.main(["benchmark", "motion-generation", *suite_args, "--algorithms", "toppra"])
+
+    assert received["suite_name"] == expected_suite
+    assert received["algorithms"] == ["toppra"]
+
+
+def test_atomic_action_profile_help_uses_complete_parser(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Profiling help exposes the selected action and workload profile."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "atomic-action-profile", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "usage: embodichain benchmark atomic-action-profile" in output
+    assert "--action" in output
+    assert "--profile" in output
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_atomic_action_profile_forwards_arguments_and_restores_argv(
+    monkeypatch: pytest.MonkeyPatch,
+    fail: bool,
+) -> None:
+    """Delegated parsing preserves arguments and restores argv on either exit."""
+    from scripts.benchmark.atomic_action import run_benchmark
+
+    received: dict[str, object] = {}
+    original_argv = ["caller", "--unrelated-option"]
+    monkeypatch.setattr(sys, "argv", original_argv)
+
+    def fake_run_action_subprocess(action_name: str, args: argparse.Namespace) -> Path:
+        received.update(
+            action=action_name,
+            profile=args.profile,
+            argv=list(sys.argv),
+        )
+        if fail:
+            raise RuntimeError("profiling failed")
+        return Path("profile.md")
+
+    monkeypatch.setattr(
+        run_benchmark, "_run_action_subprocess", fake_run_action_subprocess
+    )
+    forwarded = ["--action", "move_joints", "--profile", "full"]
+
+    if fail:
+        with pytest.raises(SystemExit, match="profiling failed"):
+            cli.main(["benchmark", "atomic-action-profile", *forwarded])
+    else:
+        cli.main(["benchmark", "atomic-action-profile", *forwarded])
+
+    assert received == {
+        "action": "move_joints",
+        "profile": "full",
+        "argv": ["embodichain benchmark atomic-action-profile", *forwarded],
+    }
+    assert sys.argv is original_argv
+
+
+def test_atomic_action_benchmark_name_is_rejected(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The former command is removed rather than retained as an alias."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "atomic-action", "--smoke"])
+
+    assert exc_info.value.code == 2
+    assert "invalid choice: 'atomic-action'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "arguments", [["--help"], ["robotics-kinematic-solver", "--solvers", "pytorch"]]
+)
+def test_benchmark_dispatch_loads_extension_only_for_motion_generation(
+    monkeypatch, arguments
+):
+    """Other benchmark commands remain usable without importing the extension."""
+    import builtins
+    from embodichain.cli import benchmark
+
+    original_import = builtins.__import__
+
+    def reject_extension(name, *args, **kwargs):
+        if name == "embodichain_benchmarks" or name.startswith(
+            "embodichain_benchmarks."
+        ):
+            raise AssertionError("An unrelated benchmark command loaded the extension")
+        return original_import(name, *args, **kwargs)
+
+    received = []
+    monkeypatch.setattr(
+        benchmark,
+        "_run_robotics_kinematic_solver_cli",
+        lambda args: received.extend(args.solvers),
+    )
+    monkeypatch.setattr(builtins, "__import__", reject_extension)
+    benchmark.main(arguments)
+    assert received == ([] if arguments == ["--help"] else ["pytorch"])
+
+
+def test_kinematic_solver_help_is_lightweight_and_exposes_ssik(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Discovering benchmark flags must not initialize numerical backends."""
+    import builtins
+
+    original_import = builtins.__import__
+
+    def reject_numeric_import(name: str, *args: object, **kwargs: object):
+        if name == "torch" or name.startswith(
+            "scripts.benchmark.robotics.kinematic_solver"
+        ):
+            raise AssertionError("Kinematic benchmark help imported a numeric backend")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", reject_numeric_import)
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["benchmark", "robotics-kinematic-solver", "--help"])
+    assert exit_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "ssik" in output and "differentiable" in output
+    for flag in (
+        "--ssik-smoke",
+        "--ssik-models",
+        "--ssik-reference",
+        "--ssik-reference-artifacts",
+        "--ssik-devices",
+        "--ssik-quality-only",
+        "--ssik-timing-only",
+        "--ssik-artifact-dir",
+        "--ssik-geometry-mode",
+        "--ssik-axis-alignment-tolerance",
+        "--ssik-srs-search",
+        "--ssik-cuda-rr",
+        "--ssik-rr-search",
+        "--ssik-robot-e2e",
+    ):
+        assert flag in output
+    assert "arx5" in output and "flexiv_rizon4s" in output
+
+
+def test_kinematic_solver_model_and_reference_defaults_are_unspecified() -> None:
+    """Unspecified algorithms inherit each selected preset without importing solvers."""
+    from embodichain.cli.benchmark import _add_kinematic_solver_arguments
+
+    parser = argparse.ArgumentParser()
+    _add_kinematic_solver_arguments(parser)
+    args = parser.parse_args(["--solvers", "ssik"])
+
+    assert args.ssik_models is None
+    assert args.ssik_reference_artifacts is None
+    assert args.ssik_skip_reference is True
+    assert args.ssik_geometry_mode is None
+    assert args.ssik_axis_alignment_tolerance == 1e-5
+    assert args.ssik_srs_search is None
+    assert args.ssik_cuda_rr is False
+    assert args.ssik_rr_search is None
+    assert args.ssik_robot_e2e is False
+
+
+@pytest.mark.parametrize("mode", ["quality", "timing"])
+def test_kinematic_solver_dispatch_forwards_ssik_workload_options(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: str
+) -> None:
+    """The public CLI delivers typed scoped options to the unified runner."""
+    received: dict[str, object] = {}
+    runner = ModuleType("scripts.benchmark.robotics.kinematic_solver.run_benchmark")
+    options_module = ModuleType(
+        "scripts.benchmark.robotics.kinematic_solver.ssik_benchmark"
+    )
+
+    def run_benchmarks(**kwargs: object) -> None:
+        received.update(kwargs)
+        received["argv"] = list(sys.argv)
+
+    runner.run_all_benchmarks = run_benchmarks
+    options_module.SSIKBenchmarkOptions = lambda **kwargs: SimpleNamespace(**kwargs)
+    monkeypatch.setitem(sys.modules, runner.__name__, runner)
+    monkeypatch.setitem(sys.modules, options_module.__name__, options_module)
+    original_argv = ["caller", "--unrelated-option"]
+    monkeypatch.setattr(sys, "argv", original_argv)
+    artifact_dir = tmp_path / "SSIK benchmark"
+    reference_artifacts = (
+        f"arx5={tmp_path / 'ARX5 reference'}",
+        f"flexiv_rizon4s={tmp_path / 'Flexiv reference'}",
+    )
+    selected = ["ssik", "ur", "fep", "differentiable", "franka"]
+    forwarded = [
+        "-s",
+        *selected,
+        "--ssik-smoke",
+        "--ssik-skip-reference",
+        "--ssik-models",
+        "aloha_left",
+        "marvin_bare_right",
+        "arx5",
+        "flexiv_rizon4s",
+        "--ssik-reference-artifacts",
+        *reference_artifacts,
+        "--ssik-devices",
+        "cpu",
+        "--ssik-batch-sizes",
+        "1",
+        "1000",
+        "--ssik-baseline-variants",
+        "original",
+        "--ssik-scenarios",
+        "wide",
+        "boundary",
+        "--ssik-timing-scopes",
+        "resident",
+        "sustained",
+        "--ssik-cpu-threads",
+        "2",
+        "--ssik-geometry-mode",
+        "near_parallel",
+        "--ssik-axis-alignment-tolerance",
+        "9e-6",
+        "--ssik-srs-search",
+        "seed_local",
+        "--ssik-cuda-rr",
+        "--ssik-rr-search",
+        "seed_local",
+        *(["--ssik-robot-e2e"] if mode == "timing" else []),
+        "--ssik-artifact-dir",
+        str(artifact_dir),
+        f"--ssik-{mode}-only",
+        "--ssik-skip-baseline" if mode == "quality" else "--ssik-skip-warp",
+    ]
+
+    cli.main(["benchmark", "robotics-kinematic-solver", *forwarded])
+
+    assert received["selected_solvers"] == selected
+    assert vars(received["ssik_options"]) == {
+        "smoke": True,
+        "models": ("aloha_left", "marvin_bare_right", "arx5", "flexiv_rizon4s"),
+        "reference_artifacts": reference_artifacts,
+        "devices": ("cpu",),
+        "skip_reference": True,
+        "skip_baseline": mode == "quality",
+        "skip_warp": mode == "timing",
+        "quality_only": mode == "quality",
+        "timing_only": mode == "timing",
+        "batch_sizes": (1, 1000),
+        "baseline_variants": ("original",),
+        "scenarios": ("wide", "boundary"),
+        "timing_scopes": ("resident", "sustained"),
+        "cpu_threads": 2,
+        "artifact_dir": artifact_dir,
+        "geometry_mode": "near_parallel",
+        "axis_alignment_tolerance": 9e-6,
+        "srs_search": "seed_local",
+        "cuda_rr": True,
+        "rr_search": "seed_local",
+        "robot_e2e": mode == "timing",
+    }
+    assert received["argv"] == [
+        "embodichain benchmark robotics-kinematic-solver",
+        *forwarded,
+    ]
+    assert sys.argv is original_argv
+
+
+@pytest.mark.parametrize(
+    "flag,skip_reference",
+    [(None, True), ("--ssik-reference", False), ("--ssik-skip-reference", True)],
+)
+def test_kinematic_reference_is_explicit_correctness_alignment(
+    flag: str | None, skip_reference: bool
+) -> None:
+    from embodichain.cli.benchmark import _add_kinematic_solver_arguments
+
+    parser = argparse.ArgumentParser()
+    _add_kinematic_solver_arguments(parser)
+    selected = [] if flag is None else [flag]
+    args = parser.parse_args(["--ssik-geometry-mode", "rr", *selected])
+    assert args.ssik_skip_reference is skip_reference
+    assert args.ssik_geometry_mode == "rr"
