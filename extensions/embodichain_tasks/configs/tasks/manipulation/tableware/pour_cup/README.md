@@ -42,6 +42,9 @@ embodichain run-task \
 python scripts/tutorials/sim/franka_dexuni_pour_demo.py --headless --renderer fast-rt
 ```
 
+增加 `--num-envs 4` 可在同一个 World 中并行运行四个环境，分别输出
+`fluid_sim_env0.mp4` 至 `fluid_sim_env3.mp4`。
+
 默认粒子间距为 1.5 mm，初始填充 76,607 粒。Gym 的 `--particle-spacing 0.003`
 或 Sim 的 `--spacing 0.003` 可用于较快的物理检查，但会改变流体分辨率。
 `--seconds 2` 只运行起始片段，不代表完整任务验收。NoRender 仅用于物理检查。

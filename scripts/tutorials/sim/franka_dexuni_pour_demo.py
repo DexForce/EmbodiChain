@@ -13,13 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Prototype: live Franka grasp/pour/place solved by DexUni, then DFSPH.
+"""Drive a live Franka grasp/pour/place with DexUni and one-way DFSPH.
 
-Same scene, planning and qualification as ``franka_dfsph_pour_demo.py``. The
-physics solver is DexUni on a particle-free view: every joint, the cup's free
-joint included, is MuJoCo-owned, so DexUni runs its pure-MuJoCo backend and
-VBD is skipped. One DFSPH step advances the water against the live body
-boundaries after the MuJoCo substeps. Coupling is one-way.
+DexUni advances the MuJoCo-owned robot and cup and then solves the water
+against their live boundaries. Coupling is one-way.
 
 Defaults: DFSPH at 480 Hz (two steps per 1/240 s physics step) with 15 MuJoCo
 substeps each (7,200 Hz). The task config supplies the cup contact settings.
@@ -96,13 +93,13 @@ def main() -> None:
         "--fluid-substeps",
         type=int,
         default=2,
-        help="DFSPH steps per 1/240 s physics step (the PR uses 6)",
+        help="DFSPH steps per 1/240 s physics step",
     )
     parser.add_argument(
         "--rigid-substeps",
         type=int,
         default=15,
-        help="MuJoCo substeps per DFSPH step (the PR uses 7 at 6 DFSPH steps)",
+        help="MuJoCo substeps per DFSPH step",
     )
     args = parser.parse_args()
     if args.fluid_substeps < 1 or args.rigid_substeps < 1:
@@ -178,7 +175,7 @@ def main() -> None:
         )
         bindings = {"primary": {"motion": "arm", "grasp": "eef"}}
         policy = MotionPolicy(
-            strategy="ik_interp", sample_count=360, dynamic_collision_mode="off"
+            strategy="ik_interp", sample_count=160, dynamic_collision_mode="off"
         )
         receiver_pose = sim.get_rigid_object("receiver").get_local_pose(to_matrix=True)
         receiver_to_cup = torch.eye(4, device=sim.device)
