@@ -593,12 +593,35 @@ def test_nominal_sources_are_bound_to_compiled_program_identity() -> None:
         def instantiate(self, request, context):
             raise AssertionError("bridge construction must not instantiate a source")
 
-    adapter = TaskProgramEnvironmentAdapter(_FakeEnvironmentFactory(), step_dt=_STEP_DT)
+    class ValidatorPort:
+        def __init__(self):
+            self.sessions = []
+
+        def validate_validator(self, validator, *, segment):
+            pass
+
+        def validate(self, validator, *, segment):
+            return torch.ones(1, dtype=torch.bool)
+
+        def validator_metadata(self, validator, *, segment):
+            return {}
+
+        def new_task_program_session(self):
+            session = ValidatorPort()
+            self.sessions.append(session)
+            return session
+
+    validator = ValidatorPort()
+    adapter = TaskProgramEnvironmentAdapter(
+        _FakeEnvironmentFactory(), step_dt=_STEP_DT, validator_port=validator
+    )
     config = _program()
     compiled = adapter.compile(config)
+    assert adapter.create_bridge(compiled)._validator_port is validator
     bindings = BoundTaskProgramNominalSources(compiled, {0: Source()})
     bridge = adapter.create_bridge(compiled, nominal_source_factory=bindings)
     assert isinstance(bridge, TaskProgramDemoBridge)
+    assert bridge._validator_port is validator.sessions[0]
     config.instruction = "A different instruction for the same program."
     changed = adapter.compile(config)
     with pytest.raises(ValueError, match="do not match"):

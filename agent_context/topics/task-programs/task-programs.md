@@ -80,6 +80,11 @@ Atomic plan transform; the bridge exposes immutable
 `TaskProgramExpansionRecord` provenance. Nonmatching calls and episodes
 without a profile keep the ordinary path.
 
+Source-bound bridges request independent session state from the simulation
+post-policy/validator port while retaining its registered scene bindings. This
+isolates lift baselines and policy results across episodes. Native bridges and
+ports without the optional session factory retain their existing ownership.
+
 An optional nominal source is selected separately before Atomic planning and
 is bound to a compiled sequential call occurrence. Its configured declaration
 and verification boundary are described in [Real2Sim motion](../data-pipeline/real2sim.md).

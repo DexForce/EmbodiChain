@@ -1062,6 +1062,8 @@ class TaskProgramDemoBridge:
         runner_cfg: Runner transport policy selected by the runtime preset.
         parallel_safety_validator: Optional authoritative physical-safety gate
             required before any parallel branch can start.
+        isolate_policy_sessions: Request fresh state from ports that provide
+            ``new_task_program_session``; ports without it retain their behavior.
 
     Parallel blocks retain their branch lanes and explicit barrier.
     They are lowered through :class:`ParallelSemanticExecutor`; they are never
@@ -1080,6 +1082,7 @@ class TaskProgramDemoBridge:
         runner_cfg: ExecutionRunnerCfg | None = None,
         parallel_safety_validator: ParallelCommandSafetyValidator | None = None,
         expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None,
+        isolate_policy_sessions: bool = False,
     ) -> None:
         if not isinstance(program, CompiledTaskProgramPort):
             raise TypeError("program must implement CompiledTaskProgramPort.")
@@ -1104,6 +1107,8 @@ class TaskProgramDemoBridge:
             raise TypeError("validator_port must implement SegmentValidatorPort.")
         if runner_cfg is not None and not isinstance(runner_cfg, ExecutionRunnerCfg):
             raise TypeError("runner_cfg must be an ExecutionRunnerCfg or None.")
+        if type(isolate_policy_sessions) is not bool:
+            raise TypeError("isolate_policy_sessions must be a boolean")
         if parallel_safety_validator is not None and not isinstance(
             parallel_safety_validator, ParallelCommandSafetyValidator
         ):
@@ -1123,6 +1128,35 @@ class TaskProgramDemoBridge:
                 raise TypeError(
                     "expansion_trace_provider must be a supported expansion factory or None."
                 )
+        sessions: dict[int, object] = {}
+
+        def episode_port(port: object | None) -> object | None:
+            if port is None:
+                return None
+            factory = getattr(port, "new_task_program_session", None)
+            if factory is None:
+                return port
+            if not callable(factory):
+                raise TypeError("new_task_program_session must be callable")
+            key = id(port)
+            if key not in sessions:
+                session = factory()
+                if session is port:
+                    raise ValueError("a task program session must own fresh port state")
+                sessions[key] = session
+            return sessions[key]
+
+        if isolate_policy_sessions:
+            post_policy_port = episode_port(post_policy_port)
+            validator_port = episode_port(validator_port)
+        if post_policy_port is not None and not isinstance(
+            post_policy_port, SegmentPostPolicyPort
+        ):
+            raise TypeError("post-policy session must implement SegmentPostPolicyPort")
+        if validator_port is not None and not isinstance(
+            validator_port, SegmentValidatorPort
+        ):
+            raise TypeError("validator session must implement SegmentValidatorPort")
         self._program = program
         self._runtime = runtime
         self._sink = command_sink

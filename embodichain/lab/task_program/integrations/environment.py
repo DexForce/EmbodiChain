@@ -981,6 +981,7 @@ class TaskProgramEnvironmentAdapter:
             runner_cfg=assembly.runner_cfg,
             parallel_safety_validator=assembly.parallel_safety_validator,
             expansion_trace_provider=assembly.expansion_trace_provider,
+            isolate_policy_sessions=nominal_source_factory is not None,
         )
 
     @staticmethod
