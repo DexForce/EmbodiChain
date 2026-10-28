@@ -108,6 +108,9 @@ def load_inputs(root: Path = OUTPUT) -> dict:
         Config, mesh arrays (with measured node groups), joint names, targets
         and their time grid.
     """
+    from .download_artifacts import ensure_task_inputs
+
+    ensure_task_inputs("M01", root)
     config = json.loads((root / "inputs/m01_config.json").read_text())
     manifest = json.loads((root / "manifest.json").read_text())
     if not manifest.get("user_scene_approved"):

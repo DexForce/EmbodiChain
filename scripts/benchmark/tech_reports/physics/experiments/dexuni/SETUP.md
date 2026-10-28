@@ -32,6 +32,13 @@ textures, robot conversions, trajectories and required reference metadata.
 Videos and complete result archives are intentionally excluded. Small original
 JSON/CSV already published on Hugging Face remain report evidence.
 
+The default M01/M02 EmbodiChain and Isaac Lab scene/preview runs automatically
+restore missing inputs before simulator construction. Formal `--measure` runs
+still require their frozen measurement protocol to be prepared first. Set `DEXUNI_REPORT_CACHE_DIR` to
+use a separate cache. A complete local snapshot is checked by the existing task
+loader without a network request. Other tasks currently use the explicit
+preparation command below.
+
 ```bash
 python -m scripts.benchmark.tech_reports.physics.experiments.dexuni.download_artifacts --list
 # One task, including its runtime support files.

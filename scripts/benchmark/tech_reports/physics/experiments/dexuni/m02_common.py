@@ -156,6 +156,9 @@ def load_inputs(root: Path = OUTPUT) -> dict:
 
     Raises if approval is missing or the available reference evidence changed.
     """
+    from .download_artifacts import ensure_task_inputs
+
+    ensure_task_inputs("M02", root)
     config = json.loads((root / "inputs/m02_config.json").read_text())
     manifest = json.loads((root / "manifest.json").read_text())
     if not manifest.get("user_scene_approved"):

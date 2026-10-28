@@ -34,10 +34,12 @@ from huggingface_hub import hf_hub_download
 
 from .paths import ASSETS, OUTPUTS
 
-__all__ = ["restore_artifacts"]
+__all__ = ["restore_artifacts", "ensure_task_inputs"]
 _REPO = "DexForceAI/embodichain_reports"
 _INDEX = ASSETS / "publication.json"
-_CACHE = Path("~/.cache/embodichain/report-assets").expanduser()
+_CACHE = Path(
+    os.environ.get("DEXUNI_REPORT_CACHE_DIR", "~/.cache/embodichain/report-assets")
+).expanduser()
 
 
 def _relative(value: str) -> Path:
@@ -234,6 +236,33 @@ def restore_artifacts(
             _materialize(path, artifact, root)
             downloaded.append(path)
     return downloaded
+
+
+def ensure_task_inputs(task: str, root: Path) -> None:
+    """Restore missing runtime inputs before a task creates its simulator.
+
+    Args:
+        task: Published task code such as M01.
+        root: Task directory under the caller's writable output root.
+
+    Existing complete inputs use the task loader's normal integrity checks.
+    Partial restores use the same pin, checksums and overwrite protection as
+    the explicit downloader. Network failures propagate before simulation.
+    """
+    index = json.loads(_INDEX.read_text())
+    folder = index["tasks"][task]
+    required = json.loads((ASSETS / "runtime_checks.json").read_text())[folder]["files"]
+    if all((root / name).is_file() for name in required):
+        return
+    if root.name != folder:
+        raise ValueError(f"Restore {task} into a directory named {folder}: {root}")
+    print(
+        f"{task}: downloading missing input assets at {index['revision']}", flush=True
+    )
+    restore_artifacts(tasks=[task], output_root=root.parent, index_path=_INDEX)
+    missing = [name for name in required if not (root / name).is_file()]
+    if missing:
+        raise FileNotFoundError(f"Published {task} inputs are incomplete: {missing}")
 
 
 def main() -> None:

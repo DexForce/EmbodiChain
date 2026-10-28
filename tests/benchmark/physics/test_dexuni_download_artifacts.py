@@ -235,3 +235,28 @@ def test_relocated_robot_uses_frozen_asset_without_rewriting_record(tmp_path):
     local.parent.mkdir(parents=True)
     local.write_text("<robot/>")
     assert frozen_robot_urdf(inputs, original) == str(local)
+
+
+def test_cold_task_restores_once_and_warm_task_stays_offline(
+    publication, tmp_path, monkeypatch
+):
+    index_path, archive, _ = publication
+    assets = tmp_path / "source/assets/physics/dexuni"
+    assets.mkdir(parents=True)
+    (assets / "runtime_checks.json").write_text(
+        json.dumps({"case": {"files": {"inputs/state.json": "checked by loader"}}})
+    )
+    monkeypatch.setattr(download, "_INDEX", index_path)
+    monkeypatch.setattr(download, "ASSETS", assets)
+    fetched = []
+
+    def fetch(**kwargs):
+        fetched.append(kwargs)
+        return str(archive)
+
+    monkeypatch.setattr(download, "hf_hub_download", fetch)
+    root = tmp_path / "restored/case"
+    download.ensure_task_inputs("S01-C", root)
+    download.ensure_task_inputs("S01-C", root)
+    assert len(fetched) == 1
+    assert (root / "inputs/state.json").read_text() == '{"position": [1, 2, 3]}'
