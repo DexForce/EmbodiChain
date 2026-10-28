@@ -3146,14 +3146,3 @@ for training; policy configuration controls which observations reach the actor.
 .. autofunction:: assembly_contact_labels
 
 .. autofunction:: velocity_locomotion_observation
-
-Completed physics steps
------------------------
-
-Contact sensors use the manager's completed-step count to distinguish a new
-physical measurement from repeated observation reads. The count advances through
-``SimulationManager.update()`` independently of rendering; it is unchanged by
-selected-environment resets and does not follow a backend's resettable clock.
-
-.. autoattribute:: embodichain.lab.sim.sim_manager.SimulationManager.physics_step_index
-   :no-index:
