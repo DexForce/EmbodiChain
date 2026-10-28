@@ -15,7 +15,8 @@ Sensors without histories opt into `requires_control_update` and are sampled
 once after the control interval's physics, before auto-reset. Gym observation
 reads reuse that buffer. Reset clears selected rows without querying the SDK's
 invalidated contact snapshot or advancing physics; untouched rows retain their
-last sample. Explicit standalone `ContactSensor.update()` still requires a
+last sample. A Gym observation after an external simulation step, such as replay,
+refreshes control sensors once for the new step. Explicit standalone `ContactSensor.update()` still requires a
 completed physics step after a reset. Histories retain per-substep sampling,
 so ordinary contact acquisition does not acquire a decimation-factor overhead.
 

@@ -148,6 +148,32 @@ def test_ppo_updates_normalizers_after_using_the_rollout_distribution() -> None:
     assert all(torch.isfinite(torch.tensor(value)) for value in losses.values())
 
 
+def test_custom_policy_keeps_its_default_config_when_omitted(monkeypatch) -> None:
+    from embodichain.learning.rl.policies import Policy
+    from embodichain.learning.rl.policies import registry
+
+    class DefaultConfig:
+        gain = 3
+
+    class CustomPolicy(Policy):
+        def __init__(self, obs_dim, action_dim, device, cfg=DefaultConfig()):
+            super().__init__()
+            self.gain = cfg.gain
+
+        def forward(self, tensordict, deterministic=False):
+            return tensordict
+
+        def get_value(self, tensordict):
+            return tensordict
+
+        def evaluate_actions(self, tensordict):
+            return tensordict
+
+    monkeypatch.setitem(registry._POLICY_REGISTRY, "custom_default", CustomPolicy)
+    policy = build_policy({"name": "custom_default"}, 3, 1, torch.device("cpu"))
+    assert policy.gain == 3
+
+
 def test_observation_groups_preserve_order_and_configure_policy() -> None:
     observation = TensorDict(
         {

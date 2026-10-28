@@ -42,9 +42,53 @@ def test_hinge_cannot_silently_become_free_body() -> None:
         )
     )
     with pytest.raises(ValueError, match="articulation"):
-        to_rigid_configs(
-            asset,
-        )
+        to_rigid_configs(asset)
+
+
+def test_hinge_export_rejects_names_and_symlinks_outside_output(tmp_path: Path) -> None:
+    from embodichain.toolkits.assembly import (
+        AssemblyBody,
+        AssemblyGeometry,
+        AssemblyJoint,
+    )
+
+    outside = tmp_path / "outside.urdf"
+    outside.write_text("preserve")
+    body = AssemblyBody(
+        name="../outside",
+        joint=AssemblyJoint(name="joint", kind="hinge"),
+        geometries=[
+            AssemblyGeometry(kind="box", size=[0.01, 0.01, 0.01], visible=False)
+        ],
+    )
+    asset = AssemblyAsset.load(
+        AssemblyAsset(bodies=[body]).save(tmp_path / "asset.json")
+    )
+    with pytest.raises(ValueError, match="Unsafe assembly body name"):
+        to_articulation_configs(asset, tmp_path / "output", source_contact=False)
+    assert outside.read_text() == "preserve"
+
+    output = tmp_path / "output"
+    output.mkdir(exist_ok=True)
+    (output / "safe.urdf").symlink_to(outside)
+    asset.bodies[0].name = "safe"
+    with pytest.raises(ValueError, match="escapes its preparation directory"):
+        to_articulation_configs(asset, output, source_contact=False)
+    assert outside.read_text() == "preserve"
+
+
+def test_source_collision_only_body_remains_invisible() -> None:
+    from embodichain.toolkits.assembly import AssemblyBody, AssemblyGeometry
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    body = AssemblyBody(
+        name="hidden",
+        geometries=[AssemblyGeometry(kind="box", size=[0.01] * 3, visible=False)],
+    )
+    cfg = to_rigid_config(body, source_contact=False, backend="default")
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+    assert len(descriptor.collisions) == 1
+    assert descriptor.renders == []
 
 
 def test_hinge_visual_export_keeps_body_local_appearance_and_source_physics(

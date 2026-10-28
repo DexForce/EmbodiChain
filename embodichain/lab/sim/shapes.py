@@ -556,15 +556,16 @@ class CompoundShapeCfg(ShapeCfg):
     """Several convex collision shapes belonging to one rigid body.
 
     ``parts`` are independent collision shapes, never merged for cooking.
-    Optional ``visual_parts`` replace their rendered appearance. Without them,
+    Optional ``visual_parts`` replace their rendered appearance. If omitted,
     collision parts are rendered using their own materials, falling back to
-    :attr:`visual_material`. Overlapping collision volumes require explicit
-    body mass/inertia to avoid double counting during geometry integration.
+    :attr:`visual_material`. An explicitly empty list hides all visuals.
+    Overlapping collision volumes require explicit body mass/inertia to avoid
+    double counting during geometry integration.
     """
 
     shape_type: str = "Compound"
     parts: Sequence[ShapePartCfg] = MISSING
-    visual_parts: Sequence[ShapePartCfg] = ()
+    visual_parts: Sequence[ShapePartCfg] | None = None
 
     def __post_init__(self) -> None:
         """Validate the flat part layout and explicit convex representation."""
@@ -574,7 +575,7 @@ class CompoundShapeCfg(ShapeCfg):
             raise ValueError(
                 "CompoundShapeCfg.parts must contain at least one collision part."
             )
-        for part in (*self.parts, *self.visual_parts):
+        for part in (*self.parts, *(self.visual_parts or ())):
             if not isinstance(part, ShapePartCfg):
                 raise TypeError("Compound shape parts must be ShapePartCfg instances.")
             part.__post_init__()
@@ -592,7 +593,7 @@ class CompoundShapeCfg(ShapeCfg):
         """Decode flat collision and visual part lists."""
         data = dict(init_dict)
         for key in ("parts", "visual_parts"):
-            if key in data:
+            if key in data and data[key] is not None:
                 data[key] = [
                     ShapePartCfg.from_dict(value) if isinstance(value, dict) else value
                     for value in data[key]

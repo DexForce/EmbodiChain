@@ -1580,6 +1580,41 @@ def test_world_scene_cache_key_includes_registry_id():
     assert registry_key != renamed_key
 
 
+def test_curobo_rejects_different_variant_geometry_before_cloning_worlds():
+    shapes = [
+        [
+            CollisionShapeDesc(
+                name="shape",
+                shape_type=RigidBodyShape.BOX,
+                local_pose=torch.eye(4),
+                half_extents=torch.full((3,), size),
+            )
+        ]
+        for size in (0.1, 1.0)
+    ]
+    obj = SimpleNamespace(
+        uid="variant",
+        cfg=SimpleNamespace(env_variants={1: object()}),
+        num_instances=2,
+        get_collision_shapes=lambda env_id=0, **kwargs: shapes[env_id],
+        get_local_pose=lambda **kwargs: torch.eye(4).repeat(2, 1, 1),
+    )
+    planner = object.__new__(CuroboPlanner)
+    world = CuroboWorldCfg(rigid_objects=[obj], multi_env=True)
+    with pytest.raises(ValueError, match="different collision geometry"):
+        planner._world_scene_cache_key(world)
+
+    shapes[1] = [
+        CollisionShapeDesc(
+            name="shape",
+            shape_type=RigidBodyShape.BOX,
+            local_pose=torch.eye(4),
+            half_extents=torch.full((3,), 0.1),
+        )
+    ]
+    assert planner._world_scene_cache_key(world)
+
+
 def test_dynamic_update_uses_registry_id_in_curobo_backend():
     rigid_object = _FakeRigidObject(
         "legacy_uid",

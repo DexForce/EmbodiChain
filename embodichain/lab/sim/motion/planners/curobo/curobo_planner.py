@@ -203,6 +203,9 @@ class CuroboWorldCfg:
     multi_env: bool = False
     """Whether cuRobo allocates one collision-world instance per environment.
 
+    Differing per-environment collider geometry is rejected because these worlds
+    clone the geometry of environment zero. Only obstacle poses can vary.
+
     This setting concerns collision-world batching only; robot states and goals
     remain env-batched in either mode. The relevant comparison is between
     obstacle poses *after* each simulator-world pose has been rebased into that
@@ -1973,7 +1976,9 @@ class CuroboPlanner(BasePlanner):
         hasher.update(repr(world_cfg.plane_dims).encode("utf-8"))
         for name, obj in _named_rigid_objects(world_cfg.rigid_objects):
             hasher.update(name.encode("utf-8"))
-            for shape in obj.get_collision_shapes(env_id=0):
+            shapes = obj.get_collision_shapes(env_id=0)
+            self._validate_variant_collision_geometry(obj, shapes)
+            for shape in shapes:
                 hasher.update(shape.name.encode("utf-8"))
                 hasher.update(str(shape.shape_type.value).encode("utf-8"))
                 for value in (
@@ -1989,6 +1994,41 @@ class CuroboPlanner(BasePlanner):
             pose = obj.get_local_pose(to_matrix=True)[0]
             hasher.update(pose.detach().to("cpu").to(torch.float32).numpy().tobytes())
         return hasher.hexdigest()
+
+    @staticmethod
+    def _validate_variant_collision_geometry(obj: object, reference: list) -> None:
+        """Reject per-row physical geometry that a cloned cuRobo world would lose."""
+        variants = getattr(getattr(obj, "cfg", None), "env_variants", None)
+        if not variants:
+            return
+        count = int(obj.num_instances)
+        indices = set(variants)
+        if len(indices) < count:
+            indices.add(next(index for index in range(count) if index not in indices))
+
+        def same_tensor(left: torch.Tensor | None, right: torch.Tensor | None) -> bool:
+            if left is None or right is None:
+                return left is None and right is None
+            return torch.equal(left, right)
+
+        for env_id in sorted(indices - {0}):
+            current = obj.get_collision_shapes(env_id=env_id, allow_heterogeneous=True)
+            if len(current) != len(reference) or any(
+                a.name != b.name
+                or a.shape_type != b.shape_type
+                or a.radius != b.radius
+                or a.half_height != b.half_height
+                or any(
+                    not same_tensor(getattr(a, field), getattr(b, field))
+                    for field in ("local_pose", "half_extents", "vertices", "triangles")
+                )
+                for a, b in zip(reference, current)
+            ):
+                raise ValueError(
+                    f"RigidObject {obj.uid!r} has different collision geometry "
+                    f"in environment rows 0 and {env_id}; cuRobo cannot clone "
+                    "one collision world for these variants."
+                )
 
     def visualize_robot_collision_models(
         self,

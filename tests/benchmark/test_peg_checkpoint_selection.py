@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
+import pickle
+import shlex
 from pathlib import Path
 
 import pytest
@@ -77,6 +80,21 @@ def test_duplicate_update_requires_identical_policy_state(tmp_path: Path) -> Non
     torch.save(checkpoint, folder / "second.pt")
     with pytest.raises(ValueError, match="Different policy states"):
         _discover(tmp_path)
+
+
+def test_selection_does_not_execute_checkpoint_pickle(tmp_path: Path) -> None:
+    folder = tmp_path / "checkpoints"
+    folder.mkdir()
+    marker = tmp_path / "executed"
+
+    class Unsafe:
+        def __reduce__(self):
+            return (os.system, ("touch " + shlex.quote(str(marker)),))
+
+    torch.save(Unsafe(), folder / "untrusted.pt")
+    with pytest.raises(pickle.UnpicklingError):
+        _discover(tmp_path)
+    assert not marker.exists()
 
 
 def test_report_binds_selection_to_tested_weights_and_independent_seed(

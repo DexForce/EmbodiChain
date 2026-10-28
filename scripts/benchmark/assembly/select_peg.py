@@ -85,7 +85,7 @@ def _discover(run: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     policies: dict[int, dict[str, Any]] = {}
     for path in sorted((run / "checkpoints").glob("*.pt")):
-        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+        checkpoint = torch.load(path, map_location="cpu", weights_only=True)
         update = int(checkpoint["num_updates"])
         policy = checkpoint["policy"]
         if update in policies:

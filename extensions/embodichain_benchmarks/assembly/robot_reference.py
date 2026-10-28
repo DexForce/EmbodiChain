@@ -234,7 +234,19 @@ def prepare_rizon4s_urdf(
         ValueError: If the requested gripper approximation is unsupported.
         ImportError: If preparation needs the optional MuJoCo dependency.
     """
-    root = Path(source_root)
+    root = Path(source_root).resolve()
+    if root.parent.name == "extract":
+        from embodichain.data.dataset import _dataset_download_lock
+
+        # Preparation and source-cache repair share the dataset lock so a
+        # repair cannot move a model while its files are being authored.
+        with _dataset_download_lock(str(root.parent.parent), root.name):
+            return _prepare_rizon4s_urdf(root, gripper_model=gripper_model)
+    return _prepare_rizon4s_urdf(root, gripper_model=gripper_model)
+
+
+def _prepare_rizon4s_urdf(root: Path, *, gripper_model: str) -> str:
+    """Build the reference while its source-cache lifetime is protected."""
     if gripper_model not in {"four_bar_mimic", "parallel_jaw"}:
         raise ValueError("gripper_model must be four_bar_mimic or parallel_jaw.")
     output = root / (

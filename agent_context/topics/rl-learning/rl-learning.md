@@ -192,8 +192,9 @@ measurement. These rollout fields have explicit dimensions in the buffer.
 `evaluate_episodes` retains `first_completed` allocation as its compatibility
 default. Optional `balanced` allocation fixes per-arena quotas before stepping,
 preventing completion-time censoring when episode durations differ. Strict peg
-final assessment opts into balanced quotas; historical training validation keeps
-the default loaded by its running process.
+final assessment and the assembly suite opt into balanced quotas via the native
+headless `eval-policy --episode-allocation balanced`; training validation keeps
+the compatibility default.
 Optional `on_episode` receives CPU records only for scored completions; strict peg evaluation persists and verifies these records as a hashed JSONL file.
 
 Saved peg checkpoints can be ranked by the native balanced evaluator through

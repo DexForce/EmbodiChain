@@ -106,6 +106,9 @@ def test_prepared_variant_reset_pose_accepts_gym_tensor_indices() -> None:
     torch.testing.assert_close(
         poses[:, :3, 3], torch.tensor([[0.0, 0.0, 2.0], [0.0, 0.0, 1.0]])
     )
+    assert RigidObject._build_cfg_init_pose(
+        fixture, torch.tensor([], dtype=torch.long)
+    ).shape == (0, 4, 4)
 
 
 @pytest.mark.gpu
@@ -392,3 +395,78 @@ def test_get_collision_shapes_reads_new_spawned_body_descriptor():
     assert len(shapes) == 1
     assert shapes[0].shape_type == RigidBodyShape.BOX
     assert shapes[0].half_extents.tolist() == pytest.approx([0.1, 0.2, 0.3])
+
+
+def test_compound_cylinder_query_preserves_parts_and_scaled_local_positions() -> None:
+    from unittest.mock import Mock
+
+    import numpy as np
+    from scipy.spatial import ConvexHull
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import (
+        CompoundShapeCfg,
+        CubeCfg,
+        CylinderCfg,
+        ShapePartCfg,
+    )
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    cfg = RigidObjectCfg(
+        uid="fixture",
+        body_type="static",
+        body_scale=(2.0, 2.0, 2.0),
+        shape=CompoundShapeCfg(
+            parts=[
+                ShapePartCfg(shape=CubeCfg(size=(0.2, 0.2, 0.2)), position=(1, 0, 0)),
+                ShapePartCfg(
+                    shape=CylinderCfg(radius=0.1, half_height=0.2), position=(-1, 0, 0)
+                ),
+            ]
+        ),
+    )
+    desc, _ = rigid_desc_from_cfg(cfg)
+    fallback = Mock(side_effect=AssertionError("compound shapes must not be merged"))
+    entity = SimpleNamespace(
+        object_desc=desc,
+        native=lambda: None,
+        _physics_binding=SimpleNamespace(get_collision_mesh=fallback),
+    )
+    obj = RigidObject.__new__(RigidObject)
+    obj.uid = "fixture"
+    obj._entities = [entity]
+    shapes = obj.get_collision_shapes()
+
+    assert len(shapes) == 2
+    assert shapes[0].shape_type == RigidBodyShape.BOX
+    assert shapes[1].shape_type == RigidBodyShape.CONVEX
+    assert shapes[0].local_pose[0, 3].item() == pytest.approx(2.0)
+    assert shapes[1].local_pose[0, 3].item() == pytest.approx(-2.0)
+    assert shapes[0].half_extents.tolist() == pytest.approx([0.2, 0.2, 0.2])
+    # The planner proxy circumscribes the analytic cylinder rather than
+    # underestimating its radius between polygon vertices.
+    hull = ConvexHull(shapes[1].vertices[:, :2].numpy())
+    distances = -hull.equations[:, 2] / np.linalg.norm(hull.equations[:, :2], axis=1)
+    assert distances.min() >= 0.2 - 1e-7
+    fallback.assert_not_called()
+
+
+def test_compound_query_refuses_merged_fallback_for_unavailable_part() -> None:
+    from unittest.mock import Mock
+
+    from dexsim.spawn.descs import GeometryType
+
+    missing = SimpleNamespace(
+        geometry_type=GeometryType.MESH, vertices=None, triangles=None
+    )
+    second = CollisionDesc.from_geometry(GeometryDesc.cube(size=(1, 1, 1)))
+    fallback = Mock()
+    entity = SimpleNamespace(
+        object_desc=SimpleNamespace(collisions=[missing, second], body_scale=(1, 1, 1)),
+        native=lambda: None,
+        _physics_binding=SimpleNamespace(get_collision_mesh=fallback),
+    )
+    obj = RigidObject.__new__(RigidObject)
+    obj.uid, obj._entities = "compound", [entity]
+    with pytest.raises(RuntimeError, match="refusing a merged collision mesh"):
+        obj.get_collision_shapes()
+    fallback.assert_not_called()

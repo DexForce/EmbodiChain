@@ -35,6 +35,63 @@ from embodichain_robots import FlexivRizon4SCfg
 
 
 @pytest.mark.no_sim
+def test_rizon_preserves_explicit_usd_source(tmp_path: Path, monkeypatch) -> None:
+    from embodichain.lab.sim.cfg.source import _asset_file_path
+    from embodichain_robots.flexiv.rizon4s import cfg as module
+
+    arm = tmp_path / "arm.urdf"
+    arm.write_text('<robot name="arm"><link name="base_link"/></robot>')
+    usd = tmp_path / "robot.usda"
+    usd.write_text("#usda 1.0\n")
+    monkeypatch.setattr(module, "get_data_path", lambda name: str(arm))
+    robot = FlexivRizon4SCfg.from_dict(
+        {"fpath": None, "source": {"file_path": str(usd)}, "solver_cfg": {}}
+    )
+    assert robot.fpath is None
+    assert _asset_file_path(robot) == str(usd)
+
+
+@pytest.mark.no_sim
+def test_rizon_composition_keeps_sensor_and_component_prefix(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from embodichain_robots.flexiv.rizon4s import cfg as module
+
+    arm = tmp_path / "arm.urdf"
+    arm.write_text(
+        '<robot name="arm"><link name="base_link"/><link name="tip"/>'
+        '<joint name="fixed" type="fixed"><parent link="base_link"/>'
+        '<child link="tip"/></joint></robot>'
+    )
+    sensor = tmp_path / "camera.urdf"
+    sensor.write_text('<robot name="camera"><link name="sensor_link"/></robot>')
+    monkeypatch.setattr(module, "get_data_path", lambda name: str(arm))
+    robot = FlexivRizon4SCfg.from_dict(
+        {
+            "fpath": str(arm),
+            "urdf_cfg": {
+                "fpath_prefix": str(tmp_path / "assembled"),
+                "component_prefix": [["arm", "custom_"]],
+                "sensors": [
+                    {
+                        "sensor_name": "camera",
+                        "sensor_source": str(sensor),
+                        "parent_component": "arm",
+                        "parent_link": "tip",
+                    }
+                ],
+            },
+        }
+    )
+    assert dict(robot.urdf_cfg.component_prefix)["arm"] == "custom_"
+    assert robot.urdf_cfg.sensors[0]["sensor_name"] == "camera"
+    assert any(
+        "sensor_link" in link.get("name", "")
+        for link in ET.parse(robot.fpath).findall("link")
+    )
+
+
+@pytest.mark.no_sim
 def test_downloaded_asset_preserves_official_parameters() -> None:
     """The cached download contains complete meshes and source inertials."""
     root = Path(FlexivRizon4S().extract_dir)

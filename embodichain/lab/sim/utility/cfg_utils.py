@@ -340,12 +340,25 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             if isinstance(user_urdf_cfg, dict):
                 for field in (
                     "base_link_name",
+                    "fpath",
                     "fname",
                     "fpath_prefix",
                     "use_signature_check",
                 ):
                     if field in user_urdf_cfg:
                         setattr(base_cfg.urdf_cfg, field, user_urdf_cfg[field])
+                if "sensors" in user_urdf_cfg:
+                    decoded = type(base_cfg.urdf_cfg).from_dict(
+                        {"sensors": user_urdf_cfg["sensors"]}
+                    )
+                    base_cfg.urdf_cfg.sensors = decoded.sensors
+                if "component_prefix" in user_urdf_cfg:
+                    decoded = type(base_cfg.urdf_cfg).from_dict(
+                        {"component_prefix": user_urdf_cfg["component_prefix"]}
+                    )
+                    prefixes = dict(base_cfg.urdf_cfg.component_prefix)
+                    prefixes.update(decoded.component_prefix)
+                    base_cfg.urdf_cfg.component_prefix = list(prefixes.items())
                 # Merge name_case policy if the override specifies one.
                 user_name_case = user_urdf_cfg.get("name_case")
                 if isinstance(user_name_case, dict):

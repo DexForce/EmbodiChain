@@ -69,19 +69,23 @@ def test_contact_sampling_precedes_reset_without_extra_physics(
     def step(dt, count, after_substep=None, **kwargs):
         for _ in range(count):
             world.steps += 1
+            env.sim._visualization_sim_step += 1
             world.ready = True
             if after_substep is not None:
                 after_substep(dt)
 
     env = SimpleNamespace(
         sensors=sensors,
-        sim=SimpleNamespace(update=step, render_camera_group=lambda ids: None),
+        sim=SimpleNamespace(
+            update=step, render_camera_group=lambda ids: None, _visualization_sim_step=0
+        ),
         physics_dt=0.001,
         cfg=SimpleNamespace(sim_steps_per_control=20),
         num_envs=2,
         device=torch.device("cpu"),
         _camera_group_ids=[],
         _profiler=SimpleNamespace(section=lambda *args: nullcontext()),
+        _control_sensor_step=0,
     )
     BaseEnv._get_sensor_obs(env)
     assert contact.samples == 0
@@ -93,6 +97,11 @@ def test_contact_sampling_precedes_reset_without_extra_physics(
     obs = BaseEnv._get_sensor_obs(env)
     torch.testing.assert_close(obs["contact"]["touch"], torch.tensor([0.0, 1.0]))
     assert contact.samples == 1 and world.steps == 20
+    # Replay and event functors may advance the manager outside env.step().
+    env.sim.update(0.001, 1)
+    obs = BaseEnv._get_sensor_obs(env)
+    torch.testing.assert_close(obs["contact"]["touch"], torch.ones(2))
+    assert contact.samples == 2 and world.steps == 21
 
 
 def _configure_timing(

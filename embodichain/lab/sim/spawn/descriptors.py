@@ -380,7 +380,7 @@ def rigid_desc_from_cfg(
         )
         collision.render_source_index = (
             None
-            if isinstance(shape, CompoundShapeCfg) and shape.visual_parts
+            if isinstance(shape, CompoundShapeCfg) and shape.visual_parts is not None
             else index
         )
         collisions.append(collision)
@@ -446,7 +446,7 @@ def _compile_shape_renders(
     if isinstance(shape, CompoundShapeCfg):
         shape.validate()
         shape.__post_init__()
-        parts = shape.visual_parts or shape.parts
+        parts = shape.parts if shape.visual_parts is None else shape.visual_parts
     else:
         parts = [ShapePartCfg(shape=shape)]
     renders = []

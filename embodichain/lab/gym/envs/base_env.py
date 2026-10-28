@@ -205,6 +205,9 @@ class BaseEnv(gym.Env):
                 )
 
             self.sensors = self._setup_sensors(**kwargs)
+            self._control_sensor_step = getattr(
+                self.sim, "_visualization_sim_step", None
+            )
             self._camera_group_ids = [
                 sensor.group_id
                 for sensor in self.sensors.values()
@@ -652,6 +655,7 @@ class BaseEnv(gym.Env):
         for sensor in self.sensors.values():
             if getattr(sensor, "requires_control_update", False):
                 sensor.update()
+        self._control_sensor_step = getattr(self.sim, "_visualization_sim_step", None)
 
     def _update_sim_state(self, **kwargs):
         """Update the simulation state at each step.
@@ -720,14 +724,21 @@ class BaseEnv(gym.Env):
             self.sim.render_camera_group(self._camera_group_ids)
 
         with self._profiler.section("sensor_fetch"):
+            current_step = getattr(self.sim, "_visualization_sim_step", None)
+            previous_step = getattr(self, "_control_sensor_step", current_step)
+            refresh_control = current_step is not None and current_step != previous_step
             for sensor_name, sensor in self.sensors.items():
                 with self._profiler.section(f"sensor_update.{sensor_name}"):
-                    if not sensor.requires_substep_update and not getattr(
-                        sensor, "requires_control_update", False
-                    ):
-                        sensor.update(fetch_only=fetch_only)
+                    if not sensor.requires_substep_update:
+                        if getattr(sensor, "requires_control_update", False):
+                            if refresh_control:
+                                sensor.update()
+                        else:
+                            sensor.update(fetch_only=fetch_only)
                 with self._profiler.section(f"sensor_get_data.{sensor_name}"):
                     obs[sensor_name] = sensor.get_data()
+            if refresh_control:
+                self._control_sensor_step = current_step
         return obs
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
@@ -1170,10 +1181,12 @@ class BaseEnv(gym.Env):
                         truncateds & ~terminateds
                     ).clone()
                     if isinstance(obs, TensorDict):
-                        info["terminal_observation"] = obs[reset_env_ids].clone()
+                        # Tensor integer indexing already materializes independent
+                        # storage; cloning again duplicates every sensor buffer.
+                        info["terminal_observation"] = obs[reset_env_ids]
                     else:
                         info["terminal_observation"] = torch.utils._pytree.tree_map(
-                            lambda value: value[reset_env_ids].clone(), obs
+                            lambda value: value[reset_env_ids], obs
                         )
                     with self._profiler.section("auto_reset"):
                         obs, _ = self.reset(options={"reset_ids": reset_env_ids})

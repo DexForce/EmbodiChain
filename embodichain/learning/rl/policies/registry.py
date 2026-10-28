@@ -176,7 +176,7 @@ def build_policy(
     if not isinstance(raw_cfg, Mapping):
         raise TypeError("policy.cfg must be a mapping.")
     build_kwargs: dict[str, object] = {"device": device}
-    if "cfg" in init_params:
+    if "cfg" in init_params and "cfg" in policy_block:
         build_kwargs["cfg"] = dict(raw_cfg)
     elif raw_cfg:
         unknown = set(raw_cfg) - set(init_params)

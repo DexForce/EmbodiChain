@@ -77,10 +77,11 @@ class FlexivRizon4SCfg(RobotCfg):
         cfg = merge_robot_cfg(cfg, init_dict)
         # The application may attach tools through ordinary URDF components.
         # Simulation and kinematics must use that same assembled source.
-        cfg.fpath = cfg.urdf_cfg.assemble_urdf()
-        for solver in cfg.solver_cfg.values():
-            if hasattr(solver, "urdf_path"):
-                solver.urdf_path = cfg.fpath
+        if cfg.source is None:
+            cfg.fpath = cfg.urdf_cfg.assemble_urdf()
+            for solver in cfg.solver_cfg.values():
+                if hasattr(solver, "urdf_path"):
+                    solver.urdf_path = cfg.fpath
         return cfg
 
     def _build_defaults(self, init_dict: dict[str, Any] | None = None) -> None:

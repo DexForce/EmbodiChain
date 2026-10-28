@@ -2,11 +2,14 @@
 
 The native path attaches multiple convex collision pieces to one rigid body.
 An independent visual mesh never closes its collision aperture. The generator
-is an optional dependency pinned to mjfit revision
-`5833f465896e1e06bc4be4f003be847f5183a4db`:
+uses the separately installed optional mjfit provider pinned to revision
+`5833f465896e1e06bc4be4f003be847f5183a4db`. The assembly extra installs
+MuJoCo for MJCF conversion, while the Git installation keeps the required
+revision provenance outside the published wheel's dependency metadata:
 
 ```bash
 pip install '.[assembly]'
+pip install 'mjfit @ git+https://github.com/younghyopark/mjfit.git@5833f465896e1e06bc4be4f003be847f5183a4db'
 embodichain run-example sim/assembly/asset_gallery --output outputs/assembly_gallery
 embodichain run-example sim/assembly/asset_gallery --configs circle usb_c --collision-colors
 embodichain run-example sim/assembly/drop_peg --backend mujoco_cpu
@@ -24,6 +27,11 @@ The gallery writes self-contained manifests and USD files. A manifest can be
 loaded and constructed without mjfit or MuJoCo installed. Raw MJCF conversion
 requires MuJoCo. Names, source poses, explicit mass/COM/inertia, motor metadata,
 and source contact parameters remain in the manifest.
+
+Motion planning uses a separate convex proxy for each analytic cylinder and
+retains the other collision pieces individually. cuRobo currently rejects a
+batch whose prepared environments have different collider geometry; it can
+still plan with per-environment obstacle poses when the geometry is shared.
 
 The dynamic visual demo uses the same physical runner as the precision probes.
 Viser shows the native simulation; GIF/MP4 files render recorded physical poses

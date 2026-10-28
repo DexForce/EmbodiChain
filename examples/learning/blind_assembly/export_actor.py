@@ -41,7 +41,7 @@ def main() -> None:
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
     attributes = checkpoint["metadata"]["policy_attributes"]
     config = load_config(str(args.config))["policy"]
     if config["name"] != "proprioceptive_actor_critic":

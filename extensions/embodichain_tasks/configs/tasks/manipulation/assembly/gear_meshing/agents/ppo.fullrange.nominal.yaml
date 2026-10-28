@@ -11,8 +11,8 @@ trainer:
   enable_eval: true
   num_eval_envs: 32
   num_eval_episodes: 256
-  eval_freq: 100
-  save_freq: 100
+  eval_freq: 39321600
+  save_freq: 39321600
   use_wandb: false
 policy:
   name: proprioceptive_actor_critic

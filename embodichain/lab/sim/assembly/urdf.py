@@ -68,7 +68,38 @@ def to_articulation_configs(
     from ._visual import _VISUAL_FORMAT_VERSION, write_visual_mesh
 
     output = Path(directory).resolve()
+    for body in asset.bodies:
+        if body.joint.kind == "hinge" and (
+            not isinstance(body.name, str)
+            or not body.name
+            or body.name in {".", ".."}
+            or any(char in body.name for char in ("/", "\\", "\0"))
+        ):
+            raise ValueError(f"Unsafe assembly body name {body.name!r}.")
     output.mkdir(parents=True, exist_ok=True)
+
+    def output_path(name: str) -> Path:
+        path = output / name
+        if path.is_symlink() or not path.resolve().is_relative_to(output):
+            raise ValueError(
+                f"Assembly output escapes its preparation directory: {path}"
+            )
+        return path
+
+    # Validate every destination before creating any artifact, including the
+    # OBJ writer's companion MTL. Existing symlinks cannot redirect writes.
+    for body in asset.bodies:
+        if body.joint.kind != "hinge":
+            continue
+        output_path(f"{body.name}.urdf")
+        if any(geom.visible for geom in body.geometries):
+            visual_name = f"{body.name}_visual_v{_VISUAL_FORMAT_VERSION}.obj"
+            output_path(visual_name)
+            output_path(Path(visual_name).with_suffix(".mtl").name)
+        for index, geom in enumerate(body.geometries):
+            if geom.collision and geom.kind == "mesh":
+                output_path(f"{body.name}_{index}.obj")
+
     configs = {}
     for body in asset.bodies:
         if body.joint.kind != "hinge":
@@ -102,9 +133,11 @@ def to_articulation_configs(
         if any(geom.visible for geom in body.geometries):
             # Bake only geom-local transforms into the appearance. The link
             # retains the body/world pose and all source collision descriptors.
-            visual_path = write_visual_mesh(
-                body, output / f"{body.name}_visual_v{_VISUAL_FORMAT_VERSION}.obj"
+            visual_target = output_path(
+                f"{body.name}_visual_v{_VISUAL_FORMAT_VERSION}.obj"
             )
+            output_path(visual_target.with_suffix(".mtl").name)
+            visual_path = write_visual_mesh(body, visual_target)
             visual = ET.SubElement(link, "visual", name="body_visual")
             ET.SubElement(visual, "origin", xyz="0 0 0", rpy="0 0 0")
             ET.SubElement(
@@ -113,7 +146,7 @@ def to_articulation_configs(
         for index, geom in enumerate(body.geometries):
             if not geom.collision:
                 continue
-            mesh_path = output / f"{body.name}_{index}.obj"
+            mesh_path = output_path(f"{body.name}_{index}.obj")
             if geom.kind == "mesh":
                 with mesh_path.open("w", encoding="utf-8") as stream:
                     for v in geom.vertices:
@@ -157,7 +190,7 @@ def to_articulation_configs(
             damping=str(body.joint.damping),
             friction=str(body.joint.frictionloss),
         )
-        path = output / f"{body.name}.urdf"
+        path = output_path(f"{body.name}.urdf")
         ET.indent(root)
         ET.ElementTree(root).write(path, encoding="unicode")
         transform = np.eye(4)

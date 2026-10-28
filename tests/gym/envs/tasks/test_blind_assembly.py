@@ -56,6 +56,17 @@ _CONFIG_ROOT = (
 )
 
 
+def test_formal_and_nominal_profiles_schedule_every_100_updates() -> None:
+    paths = sorted(_CONFIG_ROOT.glob("*/agents/ppo.*.yaml"))
+    paths = [path for path in paths if ".dev." not in path.name]
+    assert len(paths) == 12
+    for path in paths:
+        trainer = load_config(str(path))["trainer"]
+        interval = 100 * trainer["num_envs"] * trainer["buffer_size"]
+        assert trainer["eval_freq"] == interval, path
+        assert trainer["save_freq"] == interval, path
+
+
 @pytest.mark.parametrize("task", ["peg_insertion", "gear_meshing", "nut_threading"])
 @pytest.mark.parametrize("profile", ["study", "fullrange"])
 def test_nominal_task_uses_production_component_loader(
@@ -158,6 +169,40 @@ def test_official_proprioception_uses_world_linear_and_tcp_angular_velocity() ->
         ]
     )
     torch.testing.assert_close(actual, expected)
+
+
+@pytest.mark.parametrize("kind", ["peg", "gear", "nut"])
+def test_partial_reset_recomputes_only_selected_proprioceptive_rows(kind: str) -> None:
+    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
+    env._num_envs = 2
+    env.assembly_kind = kind
+    env._assembly_revision = 0
+    env._assembly_physics_revision = 0
+    env._assembly_observation_convention = "legacy_v1"
+    q = torch.zeros((2, 7))
+    env.robot = SimpleNamespace(
+        get_qpos=lambda **kwargs: q, get_qvel=lambda **kwargs: torch.zeros_like(q)
+    )
+    calls = []
+
+    def jacobian(value, ret_eef_pose):
+        calls.append(len(value))
+        return torch.eye(6, 7).repeat(len(value), 1, 1), torch.eye(4).repeat(
+            len(value), 1, 1
+        )
+
+    env._assembly_chain = SimpleNamespace(jacobian=jacobian)
+    env.action_manager = None
+    before = env.proprioceptive_frame()
+    snapshot = before.clone()
+    q[1, 0] = 0.5
+    env._assembly_revision += 1
+    env._assembly_frame_reset_ids = torch.tensor([1])
+    after = env.proprioceptive_frame()
+    assert calls == [2, 1]
+    torch.testing.assert_close(before, snapshot)
+    torch.testing.assert_close(after[0], snapshot[0])
+    assert after[1, 0].item() == pytest.approx(0.5)
 
 
 def test_bilateral_grasp_requires_the_part_on_both_pads() -> None:
@@ -320,6 +365,77 @@ def _analytic_mating_state(
             pitch=0.004, major_diameter=0.036, nut_height=0.029
         )
     return env, part
+
+
+@pytest.mark.parametrize("kind", ["peg", "gear", "nut"])
+def test_partial_reset_recomputes_selected_assembly_geometry(
+    monkeypatch, kind: str
+) -> None:
+    from embodichain.lab.gym.envs import assembly_env as module
+
+    env, one_part = _analytic_mating_state(kind)
+    if kind == "gear":
+        env.assembly_asset.config.update(shaft_radius=0.004, bore_clearance=0.001)
+    env._num_envs = 2
+    part = one_part.repeat(2, 1, 1)
+    fixture = torch.eye(4).repeat(2, 1, 1)
+    objects = {
+        "peg": SimpleNamespace(get_local_pose=lambda **kwargs: part),
+        "plate": SimpleNamespace(get_local_pose=lambda **kwargs: fixture),
+    }
+    env.sim = SimpleNamespace(
+        device=torch.device("cpu"), get_rigid_object=lambda uid: objects[uid]
+    )
+    for field in (
+        "_assembly_angle",
+        "_assembly_previous_yaw",
+        "_assembly_reset_rows",
+        "_assembly_success_hold",
+        "_elapsed_steps",
+        "_assembly_capture_angle",
+        "_assembly_capture_depth",
+    ):
+        setattr(env, field, getattr(env, field).repeat(2))
+    env._assembly_new_milestones = env._assembly_new_milestones.repeat(2, 1)
+    env._assembly_milestones = env._assembly_milestones.repeat(2, 1)
+    data = {
+        "is_valid": torch.ones((2, 1), dtype=torch.bool),
+        "distance": torch.zeros((2, 1)),
+    }
+    env.get_sensor = lambda name: SimpleNamespace(
+        dropped_contacts=0, get_data=lambda: data
+    )
+    env._contact_grasp = lambda: torch.ones(2, dtype=torch.bool)
+    observed = []
+    original = module._signed_polygon_distance
+
+    def measured(samples, polygon):
+        observed.append(samples.shape[0])
+        return original(samples, polygon)
+
+    monkeypatch.setattr(module, "_signed_polygon_distance", measured)
+    env.compute_task_state()
+    before = {key: value[0].clone() for key, value in env._assembly_metrics.items()}
+    previous_metrics = dict(env._assembly_metrics)
+    metric_snapshots = {key: value.clone() for key, value in previous_metrics.items()}
+    previous_labels = env._assembly_labels
+    label_snapshot = previous_labels.clone()
+    labels_before = env._assembly_labels[0].clone()
+    hold_before = env._assembly_success_hold[0].clone()
+    part[1, 0, 3] = 0.004
+    env._assembly_reset_rows = torch.tensor([False, True])
+    env._assembly_pending_reset_ids = torch.tensor([1])
+    env._assembly_revision += 1
+    env.compute_task_state()
+    assert observed == ([2, 1] if kind == "peg" else [])
+    for key, value in previous_metrics.items():
+        torch.testing.assert_close(value, metric_snapshots[key], equal_nan=True)
+    torch.testing.assert_close(previous_labels, label_snapshot)
+    for key, value in before.items():
+        torch.testing.assert_close(env._assembly_metrics[key][0], value)
+    torch.testing.assert_close(env._assembly_labels[0], labels_before)
+    torch.testing.assert_close(env._assembly_success_hold[0], hold_before)
+    assert env._assembly_metrics["radial_error"][1].item() == pytest.approx(0.004)
 
 
 @pytest.mark.parametrize(

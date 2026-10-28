@@ -14,6 +14,8 @@ import GenSim, simulation runtime, task packages or benchmark helpers.
 `build_assembly` produces source body-local geometry, independent visual parts,
 mass/COM/inertia, world attachments and source contact metadata. Loading a
 checksummed manifest does not import either generator or MuJoCo.
+Install the pinned Git revision of mjfit separately for generation; the
+`assembly` extra installs index-distributed MuJoCo only.
 
 `many.py:build_many_pegs` prepares the public sampler/build/grid composition as
 one scene with separately owned plate/peg bodies. Its manifest records each
@@ -28,6 +30,9 @@ fixed-anchor hinge trees. Never combine all source convex pieces into one hull
 or recompute authored inertia from overlapping pieces. Compiled MuJoCo geom
 poses already account for mesh recentering; convert frame and quaternion order
 once at the adapter boundary.
+For native compound visuals, `visual_parts=None` renders the collision parts;
+an explicit empty list hides them. Hinge export validates generated names and
+destinations before writing into the output directory.
 
 `lab/sim/assembly/_visual.py` owns body-local OBJ visuals for native rigid objects and URDF
 moving links. The URDF visual origin stays identity because geom transforms

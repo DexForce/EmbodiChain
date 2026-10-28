@@ -58,7 +58,7 @@ dependencies = [
 
 [project.optional-dependencies]
 assembly = [
-  "mjfit @ git+https://github.com/younghyopark/mjfit.git@5833f465896e1e06bc4be4f003be847f5183a4db",
+  "mujoco>=3.3",
 ]
 rigidformer = [
   "einops>=0.8.1",

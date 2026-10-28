@@ -55,7 +55,8 @@ def load_mjfit() -> tuple[ModuleType, str]:
         import mjfit
     except ImportError as error:
         raise ImportError(
-            "Assembly generation requires `pip install 'embodichain[assembly]'`."
+            "Assembly generation requires the pinned mjfit provider: "
+            f"pip install 'mjfit @ git+https://github.com/younghyopark/mjfit.git@{MJFIT_REVISION}'."
         ) from error
     revision = "unverified"
     try:
@@ -80,7 +81,7 @@ def load_mjfit() -> tuple[ModuleType, str]:
     if revision != MJFIT_REVISION:
         raise RuntimeError(
             f"mjfit source revision is {revision!r}; expected {MJFIT_REVISION}. "
-            "Install the pinned assembly extra so generated assets have verified provenance."
+            "Install the pinned mjfit provider so generated assets have verified provenance."
         )
     return mjfit, revision
 

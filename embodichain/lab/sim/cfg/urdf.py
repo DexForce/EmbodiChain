@@ -327,7 +327,7 @@ class URDFCfg:
         """
         components = list(self.components.items())
         # If there is only one component, return its URDF path directly.
-        if len(components) == 1:
+        if len(components) == 1 and not self.sensors:
             _, comp_config = components[0]
             return comp_config["urdf_path"]
 

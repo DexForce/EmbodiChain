@@ -123,6 +123,8 @@ seeds and full/no-history/no-contact-supervision variants. Defaults preserve
 12,288 environments and 5,000 updates, with validation every 100 updates.
 Preparation does not run those experiments. Evaluation requires an actual
 validation-selected best checkpoint; it cannot silently fall back to latest.
+Final in-distribution evaluation uses fixed per-environment episode quotas so
+shorter episodes do not receive disproportionate weight.
 OOD axes remain pending until separately held-out geometry configurations are
 provided. The suite never substitutes training geometry for an OOD evaluation.
 

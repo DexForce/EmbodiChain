@@ -81,6 +81,9 @@ def _prepare(args: argparse.Namespace, path: Path) -> dict:
                 for seed in args.seeds:
                     config = deepcopy(template)
                     trainer = config["trainer"]
+                    # The suite uses update-based checkpoint scheduling; a
+                    # template's transition frequency must not also fire.
+                    trainer.pop("save_freq", None)
                     rollout_len = int(
                         trainer.get("buffer_size", trainer.get("rollout_steps", 32))
                     )
@@ -267,6 +270,8 @@ def _evaluate(manifest: dict, path: Path, args: argparse.Namespace) -> None:
                 str(evaluation["seed"]),
                 "--num-envs",
                 str(args.eval_envs),
+                "--episode-allocation",
+                "balanced",
                 "--renderer",
                 "no-render",
                 "--output",

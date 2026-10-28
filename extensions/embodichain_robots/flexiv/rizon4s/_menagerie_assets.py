@@ -18,12 +18,66 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+import tempfile
+
 import open3d as o3d
 
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 from embodichain.data.dataset import EmbodiChainDataset
 
 __all__ = ["FlexivRizon4SMenagerie"]
+
+
+@contextmanager
+def _preserve_prepared(extracted: Path) -> Iterator[None]:
+    """Keep user-maintained prepared models outside source-cache repair."""
+    backup_root = extracted.parent.parent / "generated" / "assembly" / "preserved"
+    if backup_root.is_dir():
+        # Recover an interrupted repair before attempting another cleanup.
+        for backup in sorted(backup_root.glob("rizon4s-*")):
+            if not backup.is_dir() or backup.is_symlink():
+                continue
+            for path in backup.iterdir():
+                destination = extracted / path.name
+                if destination.exists() or destination.is_symlink():
+                    raise FileExistsError(
+                        f"Prepared model recovery would replace {destination}; "
+                        f"the preserved copy is at {path}."
+                    )
+                extracted.mkdir(parents=True, exist_ok=True)
+                path.rename(destination)
+            backup.rmdir()
+    prepared = [
+        path
+        for path in extracted.glob("prepared_v*")
+        if path.is_dir() and not path.is_symlink()
+    ]
+    if not prepared:
+        yield
+        return
+    backup_root.mkdir(parents=True, exist_ok=True)
+    backup = Path(tempfile.mkdtemp(prefix="rizon4s-", dir=backup_root))
+    moved: list[Path] = []
+    try:
+        for path in prepared:
+            destination = backup / path.name
+            path.rename(destination)
+            moved.append(destination)
+        yield
+    finally:
+        extracted.mkdir(parents=True, exist_ok=True)
+        for path in moved:
+            destination = extracted / path.name
+            if destination.exists() or destination.is_symlink():
+                raise FileExistsError(
+                    f"Prepared model could not be restored without replacing {destination}; "
+                    f"the preserved copy is at {path}."
+                )
+            path.rename(destination)
+        backup.rmdir()
 
 
 class FlexivRizon4SMenagerie(EmbodiChainDataset):
@@ -34,6 +88,11 @@ class FlexivRizon4SMenagerie(EmbodiChainDataset):
     paper's identified robot model. Historical URDF preparation is owned by
     ``embodichain_benchmarks.assembly.robot_reference``; loading prepared URDFs does not require MuJoCo.
     """
+
+    def check_zip(self, prefix: str, data_descriptor: object, path: str) -> None:
+        """Preserve prepared models while the source download cache is repaired."""
+        with _preserve_prepared(Path(path) / "extract" / prefix):
+            super().check_zip(prefix, data_descriptor, path)
 
     def __init__(self, data_root: str | None = None) -> None:
         import hashlib

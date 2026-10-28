@@ -94,9 +94,10 @@ __all__ = ["CollisionShapeDesc", "RigidBodyData", "RigidObject", "RigidObjectCfg
 class CollisionShapeDesc:
     """Planner-independent snapshot of one DexSim physical collision shape.
 
-    Geometry values are copied from DexSim's runtime collision descriptor and
-    therefore already include its geometry scale. Consumers must not apply
-    :attr:`RigidObjectCfg.body_scale` again.
+    Geometry values already include geometry and body scale. Consumers must not
+    apply :attr:`RigidObjectCfg.body_scale` again. Cylinder descriptors use a
+    circumscribed 128-sided convex proxy for planning; their simulation shape
+    remains analytic.
 
     Attributes:
         name: Stable shape name within the owning rigid object.
@@ -2004,6 +2005,8 @@ class RigidObject(BatchEntity):
     ) -> torch.Tensor:
         """Build initial root poses from cfg as ``(N, 4, 4)`` matrices."""
         if self.cfg.env_variants:
+            if len(env_ids) == 0:
+                return torch.empty((0, 4, 4), dtype=torch.float32, device=self.device)
             from scipy.spatial.transform import Rotation
 
             # Config lookup is host-side; transfer batched IDs once rather than
