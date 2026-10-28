@@ -94,7 +94,12 @@ class MOViSequenceSource:
         seed: int = 42,
         max_batch_bytes: int = 512 * 1024 * 1024,
     ) -> None:
-        from ._native.data.dataset import MultiObjectDynamics, make_collate_fn
+        from ._native.data.dataset import (
+            MultiObjectDynamics,
+            _cached_numpy_load,
+            make_collate_fn,
+        )
+        from ._native.data.scene_frames import clear_cache
 
         self.root = Path(root)
         self.split_file, self.scale_file = Path(split_file), Path(object_scale_file)
@@ -102,6 +107,11 @@ class MOViSequenceSource:
         self.seed, self.max_batch_bytes = seed, max_batch_bytes
         if split not in ("train", "val", "test") or max_batch_bytes < 1:
             raise ValueError("Invalid split or batch memory limit")
+        for name in ("skip_step_size", "stride"):
+            if name in self.config and (
+                type(self.config[name]) is not int or self.config[name] < 1
+            ):
+                raise ValueError(f"{name} must be a positive integer")
         if self.config.get("partial_view", {}).get("enable", False) or self.config.get(
             "if_point_cloud", {}
         ).get("enable", False):
@@ -115,6 +125,10 @@ class MOViSequenceSource:
             else 1
         )
         self.manifest = _verified_manifest(self.root)
+        # A previous source may have cached the old inode or per-frame arrays
+        # at these paths before the newly verified manifest was committed.
+        clear_cache(self.root)
+        _cached_numpy_load.cache_clear()
         identity = {
             "manifest": self.manifest,
             "split": split,
@@ -133,7 +147,9 @@ class MOViSequenceSource:
             k: self.config[k]
             for k in (
                 "sequence_length",
+                "stride",
                 "skip_first_frames",
+                "skip_step_size",
                 "random_step_size",
                 "augmentation",
                 "anchor_fps_start",
@@ -151,6 +167,7 @@ class MOViSequenceSource:
             anchor_k=self.config.get("anchor_k", 4),
             if_phys_param=True,
             compact_index=True,
+            require_prepared_cache=True,
             **options,
         )
         # The author loader can generate FPS caches. Prepared sources must
@@ -185,7 +202,9 @@ class MOViSequenceSource:
             order = torch.randperm(len(self.dataset), generator=generator)
             total = self._per_rank * self.world_size
             if total > len(order):
-                order = torch.cat((order, order[: total - len(order)]))
+                padding = total - len(order)
+                repeats = (padding + len(order) - 1) // len(order)
+                order = torch.cat((order, order.repeat(repeats)[:padding]))
             self._order = order[self.rank : total : self.world_size]
             self._order_epoch = epoch
         return self._order
@@ -214,14 +233,17 @@ class MOViSequenceSource:
             epoch, cursor = epoch + 1, 0
         indices = self._indices(epoch)[cursor : cursor + batch_size]
         names = [self.dataset.all_sequences[int(i)]["dataset"] for i in indices]
-        objects = self.config.get("max_objects_per_frame") or max(
-            len(self.dataset._mesh_nv_by_dataset[name]) for name in names
-        )
+        objects = self.config.get("max_objects_per_frame", 16)
+        if objects is None:
+            objects = max(len(self.dataset._mesh_nv_by_dataset[name]) for name in names)
         points = self.config.get("max_vertices_per_object") or max(
             self.dataset._max_nv_by_dataset[name] for name in names
         )
         frames = self.dataset.sequence_length
-        estimate = batch_size * (objects * (points * (frames * 13 + 24) + 128) + 64)
+        estimate = batch_size * (
+            objects * (points * (frames * 13 + 24) + 9 * self.dataset.anchor_k + 128)
+            + 64
+        )
         if estimate > self.max_batch_bytes:
             raise ValueError(
                 "Padded geometry exceeds max_batch_bytes before reading payloads"

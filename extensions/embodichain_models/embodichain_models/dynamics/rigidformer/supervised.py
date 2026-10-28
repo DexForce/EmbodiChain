@@ -122,6 +122,20 @@ class RigidFormerObjective:
         values["valid_vtx_mask"] = torch.cat(
             (values["valid_vtx_mask"], values["valid_vtx_mask"][:, -1:]), dim=1
         )
+        # The native network centers its own input in-place when configured;
+        # its position outputs use that centered frame, while target is owned
+        # separately and remains in world coordinates.
+        reference = getattr(model, "reference_config", {})
+        centered = reference.get("data", {}).get("center_scene_by_t0", False)
+        centers = None
+        if centered:
+            positions = values.get("obj_positions_input", values["obj_positions"])
+            centers = torch.stack(
+                [
+                    positions[i, 0][values["valid_vtx_mask"][i, 0]].mean(dim=0)
+                    for i in range(positions.shape[0])
+                ]
+            )
         predictions = model(values)
         b, t, o, p, _ = target.shape
         anchors = values["anchor_idx"][:, None, :, :, None].expand(b, t, o, -1, 3)
@@ -130,6 +144,8 @@ class RigidFormerObjective:
             return torch.gather(value, 3, anchors)
 
         gt_pos = at_anchor(target)
+        if centers is not None:
+            gt_pos = gt_pos - centers[:, None, None, None, :]
         gt_acc = at_anchor(target - 2 * history[:, 1:] + history[:, :-1])
         errors = {
             "position_before_icp": at_anchor(predictions["obj_positions_norm"])

@@ -25,6 +25,14 @@ _OPEN_LIMIT = 128  # packed scenes kept memory-mapped per process
 _open = OrderedDict()  # scene dir -> (frames memmap, offsets)
 
 
+def clear_cache(root: Path) -> None:
+    """Forget packed scenes under a newly verified source root."""
+    root = Path(root).resolve()
+    for key in list(_open):
+        if Path(key).resolve().is_relative_to(root):
+            del _open[key]
+
+
 def is_packed(scene_dir: Path) -> bool:
     return (Path(scene_dir) / "frames.npy").is_file()
 

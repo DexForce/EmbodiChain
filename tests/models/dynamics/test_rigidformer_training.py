@@ -16,6 +16,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import numpy as np
 import pytest
 import torch
@@ -131,14 +134,262 @@ def test_changed_geometry_rejected_before_sampling_recovery(packed_data):
 
 
 def test_geometry_missing_from_manifest_is_not_a_verified_source(packed_data):
-    import json
-
     path = packed_data / "manifest.json"
     manifest = json.loads(path.read_text())
     manifest["files"].pop("scene_0/frames.npy")
     path.write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="not committed by manifest"):
         source(packed_data)
+
+
+@pytest.mark.parametrize("missing_cache", ["anchor", "fps_order"])
+def test_missing_prepared_cache_does_not_modify_source(packed_data, missing_cache):
+    from embodichain_models.dynamics.rigidformer.data import MOViSequenceSource
+
+    original = source(packed_data, random_step=False)
+    valid = dict(original.config)
+    if missing_cache == "anchor":
+        config = {**valid, "anchor_k": 2}
+        message = "Prepared anchor cache is missing"
+    else:
+        path = packed_data / "scene_0" / "anchors" / "obj_0_fpsorder_cf.npy"
+        path.unlink()
+        manifest_path = packed_data / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["files"].pop(str(path.relative_to(packed_data)))
+        manifest_path.write_text(json.dumps(manifest))
+        config = dict(valid)
+        valid["fps_order"] = False
+        message = "Prepared FPS-order cache is missing"
+    before = {p.relative_to(packed_data) for p in packed_data.rglob("*")}
+    with pytest.raises(ValueError, match=message):
+        MOViSequenceSource(
+            packed_data,
+            packed_data / "splits.json",
+            packed_data / "scales.json",
+            data_config=config,
+        )
+    assert {p.relative_to(packed_data) for p in packed_data.rglob("*")} == before
+    MOViSequenceSource(
+        packed_data,
+        packed_data / "splits.json",
+        packed_data / "scales.json",
+        data_config=valid,
+    )
+
+
+def test_new_manifest_reloads_replaced_packed_geometry(packed_data):
+    first = source(packed_data, random_step=False)
+    before = first.sample(1, generator=torch.Generator().manual_seed(17))
+    scene = packed_data / "scene_0"
+    manifest_path = packed_data / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    for name in ("frames.npy", "vis_traj.npy"):
+        path = scene / name
+        values = np.load(path).copy()
+        if name == "frames.npy":
+            values[1:, :, 0] += 0.5
+        else:
+            values[0, 1:, :, 0] += 0.5
+        replacement = scene / "replacement.tmp.npy"
+        np.save(replacement, values)
+        os.replace(replacement, path)
+        manifest["files"][str(path.relative_to(packed_data))] = hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+    second = source(packed_data, random_step=False)
+    after = second.sample(1, generator=torch.Generator().manual_seed(17))
+    assert second.source_id != first.source_id
+    torch.testing.assert_close(
+        after.inputs["obj_positions"][:, :, :, :, 0],
+        before.inputs["obj_positions"][:, :, :, :, 0] + 0.5,
+    )
+
+
+def test_new_manifest_reloads_replaced_per_frame_geometry(tmp_path):
+    root = make_packed(tmp_path / "ToyData", frames_count=10)
+    scene = root / "scene_0"
+    frames = np.load(scene / "frames.npy")
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    for frame, values in enumerate(frames):
+        directory = scene / f"frame_{frame:05d}"
+        directory.mkdir()
+        for obj in range(2):
+            path = directory / f"obj_{obj}_pos.npy"
+            np.save(path, values[obj * 4 : (obj + 1) * 4])
+            manifest["files"][str(path.relative_to(root))] = hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+    for name in ("frames.npy", "frames_counts.npy"):
+        (scene / name).unlink()
+        manifest["files"].pop(f"scene_0/{name}")
+    manifest_path.write_text(json.dumps(manifest))
+    first = source(root, random_step=False)
+    before = first.sample(1, generator=torch.Generator().manual_seed(17))
+    path = scene / "frame_00002" / "obj_0_pos.npy"
+    changed = np.load(path).copy()
+    changed[:, 0] += 0.5
+    replacement = path.with_suffix(".tmp.npy")
+    np.save(replacement, changed)
+    os.replace(replacement, path)
+    manifest["files"][str(path.relative_to(root))] = hashlib.sha256(
+        path.read_bytes()
+    ).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+    second = source(root, random_step=False)
+    after = second.sample(1, generator=torch.Generator().manual_seed(17))
+    assert second.source_id != first.source_id
+    assert after.inputs["obj_positions"][0, 0, 0, 0, 0].item() == pytest.approx(
+        before.inputs["obj_positions"][0, 0, 0, 0, 0].item() + 0.35
+    )
+
+
+def test_fixed_step_and_stride_are_applied(packed_data):
+    from embodichain_models.dynamics.rigidformer.data import MOViSequenceSource
+
+    original = source(packed_data, random_step=False)
+    updated = MOViSequenceSource(
+        packed_data,
+        packed_data / "splits.json",
+        packed_data / "scales.json",
+        data_config={**original.config, "skip_step_size": 5, "stride": 3},
+    )
+    batch = updated.sample(1, generator=torch.Generator().manual_seed(17))
+    assert batch.inputs["skip_step_size"].tolist() == [5.0]
+    assert np.diff(batch.metadata["frame_ids"][0]).tolist() == [5] * 7
+    assert len(updated.dataset) == 6
+
+
+def test_small_dataset_pads_every_distributed_rank(tmp_path, monkeypatch):
+    root = make_packed(tmp_path / "ToyData", frames_count=10)
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    monkeypatch.setattr(torch.distributed, "get_world_size", lambda: 4)
+    for rank in range(4):
+        monkeypatch.setattr(torch.distributed, "get_rank", lambda: rank)
+        dataset = source(root, random_step=False)
+        assert dataset.updates_per_epoch(1) == 1
+        batch = dataset.sample(1, generator=torch.Generator().manual_seed(17))
+        assert batch.metadata["scenes"] == ["scene_0"]
+
+
+def test_default_object_padding_counts_toward_memory_limit(packed_data):
+    from embodichain_models.dynamics.rigidformer.data import MOViSequenceSource
+
+    original = source(packed_data, random_step=False)
+    config = dict(original.config)
+    config.pop("max_objects_per_frame")
+    config["sequence_length"] = 3
+    bounded = MOViSequenceSource(
+        packed_data,
+        packed_data / "splits.json",
+        packed_data / "scales.json",
+        data_config=config,
+        max_batch_bytes=2000,
+    )
+    with pytest.raises(ValueError, match="max_batch_bytes"):
+        bounded.sample(1, generator=torch.Generator().manual_seed(17))
+
+
+def test_recipe_rejects_anchor_count_mismatched_with_model(packed_data, tmp_path):
+    from embodichain_models.dynamics.rigidformer.sl_recipe import (
+        build_rigidformer_trainer,
+    )
+
+    config = recovery_config(packed_data, tmp_path / "output", "cpu")
+    config["data"]["sampling"]["anchor_k"] = 2
+    with pytest.raises(ValueError, match="anchor_k must match"):
+        build_rigidformer_trainer(config)
+
+
+def test_centered_predictions_use_centered_position_targets():
+    class CenteredPrediction(torch.nn.Module):
+        reference_config = {"data": {"center_scene_by_t0": True}}
+
+        def forward(self, values):
+            positions = values["obj_positions"]
+            center = positions[:, 0].mean(dim=(1, 2))[:, None, None, None]
+            predicted = positions[:, 1:-1] - center
+            zero = torch.zeros_like(predicted)
+            return {
+                "obj_positions_norm": predicted,
+                "obj_positions_icp_norm": predicted,
+                "obj_accelerations_no_icp_norm_anchor": zero,
+                "obj_accelerations_norm": zero,
+            }
+
+    positions = torch.tensor([1.0, 2.0, 3.0]).view(1, 1, 1, 1, 3)
+    positions = positions.expand(1, 3, 2, 1, 3).clone()
+    values = {
+        "obj_positions": positions,
+        "valid_vtx_mask": torch.ones(1, 3, 2, 1, dtype=torch.bool),
+        "valid_obj_mask": torch.ones(1, 2, dtype=torch.bool),
+        "anchor_idx": torch.zeros(1, 2, 1, dtype=torch.long),
+        "skip_step_size": torch.ones(1),
+    }
+    result = RigidFormerObjective().compute_loss(
+        CenteredPrediction(), rigidformer_batch(values)
+    )
+    assert result.loss.item() == pytest.approx(0.0)
+
+
+@pytest.mark.gpu
+def test_centered_model_loss_is_translation_invariant():
+    pytest.importorskip("roma")
+    from embodichain_models.dynamics.rigidformer import RigidFormerModel
+
+    cfg = tiny_cfg()
+    cfg.architecture["data"]["center_scene_by_t0"] = True
+    model = RigidFormerModel(cfg).cuda().eval()
+    values = geometry_batch("cuda")
+    values["valid_obj_mask"][:] = True
+    moved = {key: value.clone() for key, value in values.items()}
+    translation = torch.tensor([0.4, -0.6, 1.2], device="cuda")
+    moved["obj_positions"] += translation
+    moved["ref_obj_positions"] += translation
+    objective = RigidFormerObjective()
+    with torch.no_grad():
+        original = objective.compute_loss(model, rigidformer_batch(values)).loss
+        translated = objective.compute_loss(model, rigidformer_batch(moved)).loss
+    torch.testing.assert_close(translated, original, rtol=1e-4, atol=1e-5)
+
+
+def test_export_accepts_legacy_numpy_rng_pickle(tmp_path, monkeypatch):
+    from embodichain_models.dynamics.rigidformer.checkpoint import (
+        export_rigidformer_checkpoint,
+    )
+
+    try:
+        reconstruct = np._core.multiarray._reconstruct
+    except AttributeError:
+        reconstruct = np.core.multiarray._reconstruct
+    checkpoint = tmp_path / "training.pt"
+    original_module = reconstruct.__module__
+    monkeypatch.setattr(reconstruct, "__module__", "numpy.core.multiarray")
+    raw, average = torch.tensor([1.0]), torch.tensor([2.0])
+    torch.save(
+        {
+            "rng": {"numpy": np.random.get_state()},
+            "signature": {
+                "family": "rigidformer-author-v1",
+                "reference_config": {},
+                "author_revision": "test",
+            },
+            "learner": {"model": {"network.weight": raw}, "num_updates": 1},
+            "training_states": {
+                "ema": {"state": {"shadow": {"network.weight": average}}}
+            },
+        },
+        checkpoint,
+    )
+    monkeypatch.setattr(reconstruct, "__module__", original_module)
+    for selection, expected in (("raw", raw), ("ema", average)):
+        output = export_rigidformer_checkpoint(
+            checkpoint, tmp_path / f"{selection}.pt", weights=selection
+        )
+        payload = torch.load(output, weights_only=True)
+        torch.testing.assert_close(payload["model_state_dict"]["weight"], expected)
 
 
 @pytest.mark.parametrize("random_sampling", [False, True])

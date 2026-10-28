@@ -181,6 +181,8 @@ def build_rigidformer_trainer(config: Mapping[str, Any]) -> SupervisedTrainer:
         )
     raw_data = dict(config["data"])
     sampling = {**reference["data"], **raw_data.pop("sampling", {})}
+    if sampling.get("anchor_k", 4) != reference["data"].get("anchor_k", 4):
+        raise ValueError("data.sampling.anchor_k must match the model architecture")
     seed = int(config.get("trainer", {}).get("seed", 42))
     source = MOViSequenceSource(
         raw_data.pop("root"),
