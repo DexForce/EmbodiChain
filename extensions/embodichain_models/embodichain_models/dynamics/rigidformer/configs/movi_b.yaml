@@ -1,0 +1,284 @@
+# RigidFormer on MOVi-B. Data: datasets/MOVi-B (data_generation/README.md), scene lists
+# dataset_split_MoviB_1200.json (960 / 120 / 120), object sizes data_generation/object_scales_MoviB.json.
+# Training: 300 epochs on 6 GPUs x 21 scenes.
+logging:
+  use_tensorboard: true
+  file_logging: true
+experiment_tag: rigidformer_movib
+paths:
+  log_dir: ./exps/logs_multi
+  checkpoint_dir: ./exps/checkpoints_multi
+data:
+  dataset_path: ./datasets/MOVi-B
+  split_file: dataset_split_MoviB_1200.json
+  scene_set: complete
+  multi_object: true
+  anchor_k: 4
+  num_workers: 4
+  sequence_length: 8
+  train_split: 0.99
+  val_split: 0.01
+  test_split: 0.0
+  skip_first_frames: 2
+  load_gt_motion: false
+  random_step_size:
+    enable: true
+    step_sizes:
+    - 1
+    - 5
+    - 10
+    random_start_frame: true
+    sampling_weights:
+    - 0.34
+    - 0.33
+    - 0.33
+  eval_step_sizes:
+  - 10
+  - 5
+  - 1
+  max_vertices_per_object: null
+  max_objects_per_frame: 16
+  augmentation:
+    random_walk:
+      enable: false
+      start_epoch: 5
+      noise_std: 0.0
+    independent:
+      enable: false
+      velocity_noise: 0.0
+      dist_vec_noise: 0.0
+      rel_pos_noise: 0.0
+    rotation_augmentation:
+      enable: true
+      angle_step_size: 5
+      prob_use_rotation: 0.5
+    object_permutation:
+      enable: true
+      prob_apply: 0.5
+      if_debug: false
+    anchor_resampling:
+      enable: false
+      prob: 0.5
+  anchor_fps_start: centroid_farthest
+  fps_order: true
+  object_scale_file: data_generation/object_scales_MoviB.json
+model:
+  if KV-caching: false
+  no_global_state: true
+  if_penetration: false
+  if_directional_distance: false
+  if_phys_param: true
+  if_time_step: true
+  film_conditioning: true
+  avp:
+    enable: true
+    output_dim: 256
+    init_sigma: 0.1
+  encoder:
+    input_dim: 12
+    hidden_dims:
+    - 1024
+    - 1024
+    output_dim: 768
+    backbone_dim: 1024
+    fusion_hidden_dim: 1024
+    use_batch_norm: true
+    use_stn: false
+    feature_transform: false
+    feature_transform_dim: 64
+    pooling_type: hierarchical
+    num_hierarchical_levels: 3
+    masked_pooling: true
+    hierarchical_subsets: true
+    packed: true
+    packed_pooling: segment
+    subset_small_objects: fraction
+    freeze_bn_stats: false
+  state:
+    token_dim: 768
+  decoder:
+    num_layers: 4
+    num_heads: 6
+    hidden_dim: 768
+    state_update_enabled: false
+    rope_set_aggregation: true
+    rope_dim: 96
+    dim_per_coord_3d: 32
+    dim_per_coord_multi: 8
+    feedforward_dim: null
+    dropout: 0.1
+    return_all_layers: true
+    activation: swiglu
+    use_self_attention: false
+    norm_type: rms_norm
+    qk_norm: true
+    num_register_tokens: 16
+    cross_attention:
+      enable: true
+      num_heads: 6
+    gated_attention:
+      enable: true
+      type: elementwise
+      if_debug: false
+    objects_self_attention: true
+    film_conditioning: true
+    block_attn_res:
+      enable: true
+      block_size: 4
+      final_aggregate: true
+  predictor:
+    rmsnorm_eps: training_dtype
+    fp32_output: true
+    input_dim: 271
+    hidden_dims:
+    - 768
+    - 256
+    output_dim: 3
+    dropout: 0.1
+    use_ref_pose: true
+    norm_type: rms_norm
+    qk_norm: true
+    cross_object_attention: true
+    cross_object_kv: true
+  transform:
+    method: kabsch
+    if_roma: true
+  integrator:
+    type: improved_verlet
+    use_damping: false
+    damping_factor: -100
+  intersection_handling:
+    enable: true
+    after_kabsch_loss: rigid
+    ground:
+      enable: true
+      z: 0.0
+      buffer: -0.01
+    object:
+      enable: false
+      buffer: 0.005
+  exp1:
+    output_type: raw_acceleration
+  ref_pose_object_centered: true
+  knn_packed: true
+  rope_interleaved_pairing: true
+  rope_center_positions: true
+  kabsch_reference: fixed
+training:
+  enable_validation: false
+  max_epochs: 300
+  scheduled_sampling:
+    enabled: false
+    mode: three_stage
+    teacher_epochs: 9999
+    ramping_epochs: 0
+  optimizer:
+    type: AdamW
+    lr: 1e-4
+    fusion_lr_mult: 10.0
+    betas:
+    - 0.9
+    - 0.999
+    weight_decay: 0.01
+    decay_matrices_only: true
+  gradient_clip: 1.0
+  scheduler:
+    type: cosine
+    warmup_epochs: 10
+    start_factor: 0.1
+    eta_min: 1e-6
+  loss_weights:
+    if_time_step_scale: true
+    global_anchor_mean: true
+    if_debug: false
+    position_before_icp: 10
+    position_after_icp: 10
+    acceleration_after_icp: 1
+    acceleration_before_icp: 1
+    penetration_sign: 0.0
+    rt_rot: 0.0
+    rt_trans: 0.0
+    velocity: 0.0
+    collision: 0.0
+    physics: 0.0
+    edge_length: 0.0
+  checkpoint:
+    best_metric:
+    - p_rmse_@200/s=1
+    - p_rmse_@300/s=1
+    - p_rmse_@400/s=1
+    save_every_n_epochs: 5
+    save_video: false
+    video_every_n_epochs: 1
+    original_video_num_frames: 480
+    original_video_fps: 240
+    num_videos_per_split:
+      train: 2
+      val: 0
+      test: 2
+    if_overlay: false
+    gt_transparency: 0.1
+    arrow_enable: true
+    arrow_scale: 0.01
+    arrow_subsample: 1
+    arrow_thickness: 0.0007
+    point_size: 0.0001
+    camera:
+      mode: fixed
+      center:
+      - 0.0
+      - 0.0
+      - 1.0
+      eye:
+      - 0.0
+      - -15.0
+      - 10.0
+      auto_direction:
+      - 2.0
+      - -2.0
+      - 2.0
+      auto_scale: 3.0
+    ground:
+      size: 10.0
+      color:
+      - 0.8
+      - 0.8
+      - 0.8
+  metrics_test:
+    enable: true
+    initial_eval: false
+    print_every_n_epochs: 1
+    eval_num_frames: 480
+    eval_warmup_frames: 4
+    hopnet_checkpoints:
+    - 25
+    - 50
+    - 75
+    - 100
+    - 200
+    - 300
+    - 400
+    position_rmse: true
+    position_final_frame: true
+    position_per_timestep: true
+    rotation_error_deg: true
+    rotation_final_frame: true
+    rotation_per_timestep: true
+    position_estimator: hopnet
+  train_batch_size: 21
+  val_batch_size: 18
+  eval_batch_size: 18
+  ema:
+    enable: true
+    decay: 0.9999
+    save_every_n_epochs: 5
+  rank_seeded_rng: true
+  time_batched_forward: false
+  compile:
+    enable: true
+    modules:
+    - decoder
+    - predictor
+    mode: default
+    dynamic: false
+

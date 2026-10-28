@@ -60,6 +60,10 @@ dependencies = [
 assembly = [
   "mjfit @ git+https://github.com/younghyopark/mjfit.git@5833f465896e1e06bc4be4f003be847f5183a4db",
 ]
+rigidformer = [
+  "einops>=0.8.1",
+  "roma==1.5.4",
+]
 policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
   "onnxruntime-gpu>=1.20,<1.27",

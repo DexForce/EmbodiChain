@@ -40,6 +40,19 @@ Scene API. Native learned-solver deployment and functional Gym integration are
 separate consumers. There are no NeRD-specific core `compute/dynamics`,
 `data_pipeline/dynamics`, `learning/dynamics` modules or core `dynamics` command.
 
+## RigidFormer author model
+
+The native family lives in
+`extensions/embodichain_models/embodichain_models/dynamics/rigidformer/`.
+`model.py` owns geometry/configuration; `_native/` preserves licensed author
+code. Checkpoint import validates recorded architecture and named tensors.
+The community `rigidformer` package is not a runtime dependency.
+
+Integration dt=1 differs from physical seconds. Geometry prediction requires
+CUDA and at least two valid objects; construction and weight inspection support
+CPU. Attention backend selection is explicit. The model predicts geometry
+without action inputs and does not qualify state/action gradients.
+
 ## Resource and physical identity
 
 `prepare --robot cartpole|ant --resource-root DIR` downloads the pinned dataset,

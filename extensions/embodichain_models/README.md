@@ -35,7 +35,7 @@ Use the following canonical packages for the four current model directions:
 | Ordinary state/visual BC | `embodichain_models.policy.bc` | Target for the BC follow-up; not created yet. |
 | NeRD | `embodichain_models.dynamics.nerd` | Implemented in this change. |
 | Robot world model (RWM) | `embodichain_models.dynamics.rwm` | Implemented. |
-| RigidFormer | `embodichain_models.dynamics.rigidformer` | Target for the RigidFormer follow-up; not created yet. |
+| RigidFormer | `embodichain_models.dynamics.rigidformer` | Native author architecture and strict official weights. |
 
 RWM predicts action-conditioned robot state transitions, so it belongs to
 `dynamics`. World models also describe future-state/observation prediction;
