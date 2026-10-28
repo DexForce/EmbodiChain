@@ -11,6 +11,19 @@ once with an `after_substep` observer. The manager invokes the observer after
 each world update, preserving its preparation, profiling and camera-capture
 boundary. Observation reads reuse the sampled sensor buffer.
 
+`ContactSensor` deduplicates raw reads and history reductions separately using
+`SimulationManager.physics_step_index` and the query's current actor binding.
+Reading a raw sample before its history callback does not consume the history
+update. Query metadata is checked even on cache hits so topology rebuilds cannot
+retain old contacts. Cached CUDA reads wait for the producing stream.
+
+Sensor reset clears only selected rows and invalidates this cache; it does not
+reset the physics solver. An explicit `update()` may therefore refresh a valid
+settled snapshot without advancing history, as scene preparation requires.
+It cannot recompute solved contacts after physical state writes; the backend's
+contact-availability rules still apply. Empty selections do not invalidate the
+cache. `BaseEnv` retains its ordinary acquisition and substep scheduling.
+
 CUDA queries use `fetch_async()` and device-resident counts. Sparse Warp kernels
 process valid contact rows, using precomputed sorted environment/actor indices;
 no environment-by-contact-by-body tensor is allocated. Per-body force, contact
