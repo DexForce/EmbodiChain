@@ -101,6 +101,14 @@ def test_tcp_jacobian_forward_and_backward():
     assert torch.autograd.gradcheck(
         lambda joints: evaluate(joints)[1], (q,), fast_mode=True
     )
+    fk = lambda joints: model.forward_kinematics(joints, tcp)
+    assert torch.autograd.gradcheck(fk, (q,), fast_mode=True)
+    torch.testing.assert_close(fk(q), evaluate(q)[0])
+    weights = torch.arange(16, dtype=q.dtype).reshape(4, 4)
+    torch.testing.assert_close(
+        torch.autograd.grad((fk(q) * weights).sum(), q)[0],
+        torch.autograd.grad((evaluate(q)[0] * weights).sum(), q)[0],
+    )
     reference = evaluate(q)[1]
     epsilon = 1e-6
     columns = []
@@ -113,6 +121,83 @@ def test_tcp_jacobian_forward_and_backward():
     torch.testing.assert_close(
         reference, torch.stack(columns, -1), atol=1e-5, rtol=1e-4
     )
+
+
+def test_forward_kinematics_planar_chain():
+    # A unit upper arm and half-unit forearm rotate about parallel Z axes.
+    # Side branches ensure that the controlled tip need not be the last frame.
+    urdf = """
+    <robot name="planar">
+      <link name="base"/><link name="upper"/><link name="forearm"/>
+      <link name="tip"/><link name="camera"/>
+      <joint name="shoulder" type="revolute">
+        <parent link="base"/><child link="upper"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="elbow" type="revolute">
+        <parent link="upper"/><child link="forearm"/>
+        <origin xyz="1 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-1" upper="1" effort="1" velocity="1"/>
+      </joint>
+      <joint name="flange" type="fixed">
+        <parent link="forearm"/><child link="tip"/><origin xyz="0.5 0 0"/>
+      </joint>
+      <joint name="camera_mount" type="fixed">
+        <parent link="base"/><child link="camera"/><origin xyz="0 0 10"/>
+      </joint>
+    </robot>
+    """
+    model = SerialChainKinematics.from_urdf(urdf, "tip", dtype=torch.float64)
+    tcp = torch.tensor(
+        [[0, -1, 0, 0.1], [1, 0, 0, 0.2], [0, 0, 1, 0.3], [0, 0, 0, 1]],
+        dtype=torch.float64,
+    )
+    # Both joints at pi/2 put the flange at (-0.5, 1, 0). Its rotation by pi
+    # moves the TCP offset to (-0.1, -0.2, 0.3), even beyond physical limits.
+    q = torch.tensor([[0, 0], [torch.pi / 2, torch.pi / 2]], dtype=torch.float64)
+    expected = torch.tensor(
+        [
+            [[0, -1, 0, 1.6], [1, 0, 0, 0.2], [0, 0, 1, 0.3], [0, 0, 0, 1]],
+            [[0, 1, 0, -0.6], [-1, 0, 0, 0.8], [0, 0, 1, 0.3], [0, 0, 0, 1]],
+        ],
+        dtype=torch.float64,
+    )
+    torch.testing.assert_close(model.forward_kinematics(q, tcp), expected)
+
+
+@pytest.mark.parametrize("batch", [(), (2, 3), (0,)])
+def test_forward_kinematics_batch_layout_and_per_sample_tcp(batch):
+    model, tcp = model_and_tcp()
+    # Move the joint axis to make multidimensional inputs noncontiguous.
+    q = torch.linspace(-0.2, 0.3, 7, dtype=torch.float64).expand(*batch, 7)
+    q = q.movedim(-1, 0).contiguous().movedim(0, -1).requires_grad_()
+    if batch == (2, 3):
+        assert not q.is_contiguous()
+    tcp = tcp.expand(*batch, 4, 4).clone()
+    tcp[..., 0, 3] += q.detach()[..., 0]
+    pose = model.forward_kinematics(q, tcp)
+    reference, _ = model.evaluate(q, tcp)
+    assert pose.shape == (*batch, 4, 4)
+    torch.testing.assert_close(pose, reference)
+    torch.testing.assert_close(
+        torch.autograd.grad(pose.sum(), q)[0],
+        torch.autograd.grad(reference.sum(), q)[0],
+    )
+
+
+@pytest.mark.parametrize("method", ["forward_kinematics", "evaluate"])
+def test_kinematics_rejects_mismatched_shapes_and_precision(method):
+    model, tcp = model_and_tcp()
+    evaluate = getattr(model, method)
+    q = torch.zeros(2, model.dof, dtype=torch.float64)
+    with pytest.raises(ValueError, match="shape"):
+        evaluate(q[..., :-1], tcp)
+    with pytest.raises(ValueError, match="shape"):
+        evaluate(q, tcp.expand(3, 4, 4))
+    with pytest.raises(ValueError, match="dtype/device"):
+        evaluate(q.float(), tcp)
+    with pytest.raises(ValueError, match="dtype/device"):
+        evaluate(q, tcp.float())
 
 
 def test_complete_ik_target_and_seed_gradcheck():

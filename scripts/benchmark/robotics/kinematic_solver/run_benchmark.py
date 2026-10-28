@@ -26,6 +26,7 @@ Run: embodichain benchmark robotics-kinematic-solver
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from importlib.metadata import version
 import os
 import time
@@ -86,11 +87,11 @@ def _parse_args() -> argparse.Namespace:
         "--solvers",
         "-s",
         nargs="+",
-        choices=(*SUPPORTED_SOLVERS, "franka", "ssik", "all"),
+        choices=(*SUPPORTED_SOLVERS, "franka", "ssik", "fk", "all"),
         default=["all"],
         help=(
             "Solvers to benchmark. Use one or more of: opw, pytorch, ur, fep, differentiable, "
-            "franka, ssik, all. Franka and SSIK comparisons run only when selected explicitly. "
+            "franka, ssik, fk, all. Franka, SSIK and FK comparisons run only when selected explicitly. "
             "Default: all."
         ),
     )
@@ -221,13 +222,13 @@ def _normalize_selected_solvers(selected_solvers: list[str] | None) -> set[str]:
     """Normalize selected solver names to a canonical set."""
     if not selected_solvers or "all" in selected_solvers:
         explicit_comparisons = set(selected_solvers or ()).intersection(
-            ("franka", "ssik")
+            ("franka", "ssik", "fk")
         )
         return set(SUPPORTED_SOLVERS) | explicit_comparisons
     return {
         solver
         for solver in selected_solvers
-        if solver in (*SUPPORTED_SOLVERS, "franka", "ssik")
+        if solver in (*SUPPORTED_SOLVERS, "franka", "ssik", "fk")
     }
 
 
@@ -1327,7 +1328,7 @@ def benchmark_differentiable_solver() -> (
         damped_least_squares_step,
         pose_error,
     )
-    from embodichain.learning.layers import DifferentiableIKLayer, KinematicsLayer
+    from embodichain.learning.layers import DifferentiableIKLayer, DifferentiableFKLayer
 
     perf_rows: list[dict[str, object]] = []
     metric_rows: list[dict[str, object]] = []
@@ -1395,7 +1396,7 @@ def benchmark_differentiable_solver() -> (
 
     for device in devices:
         model = cpu_model.to(device, torch.float32)
-        kinematics = KinematicsLayer(model)
+        kinematics = DifferentiableFKLayer(model)
         common_cfg = dict(
             urdf_path=path,
             root_link_name="base",
@@ -1554,6 +1555,155 @@ def benchmark_differentiable_solver() -> (
     return perf_rows, metric_rows
 
 
+def benchmark_differentiable_fk() -> (
+    tuple[list[dict[str, object]], list[dict[str, object]]]
+):
+    """Compare pure FK with pose extraction through FK/Jacobian evaluation.
+
+    Use identical seven-DOF Franka inputs, a translated/rotated TCP, and pose
+    losses for both implementations. Time device-resident steady-state calls;
+    measure warmed memory separately, retaining one output until after sampling.
+    """
+    from embodichain.compute.kinematics import SerialChainKinematics, pose_error
+    from embodichain.learning.layers import DifferentiableFKLayer
+
+    model = SerialChainKinematics.from_urdf(
+        Path(get_data_path("Franka/Panda/PandaWithHand.urdf")).read_text(),
+        "fr3_hand_tcp",
+        "base",
+    )
+    tcp = torch.tensor(
+        [[0, -1, 0, 0.1], [1, 0, 0, -0.05], [0, 0, 1, 0.08], [0, 0, 0, 1]],
+        dtype=torch.float32,
+    )
+    generator = torch.Generator().manual_seed(2026)
+    workloads = []
+    for count in (1, 64, 1024):
+        q = model.chain.low + (
+            0.25 + 0.5 * torch.rand(count, model.dof, generator=generator)
+        ) * (model.chain.high - model.chain.low)
+        target = model.forward_kinematics(q + 0.04, tcp)
+        workloads.append((q, target))
+
+    def measure(
+        call: Callable[[], torch.Tensor], device: torch.device
+    ) -> dict[str, object]:
+        def synchronize() -> None:
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+
+        for _ in range(5):
+            output = call()
+            del output
+        times = []
+        for _ in range(20):
+            synchronize()
+            start = time.perf_counter()
+            output = call()
+            synchronize()
+            times.append((time.perf_counter() - start) * 1000)
+            del output
+
+        # RSS measures retained memory, not CPU transient peak. Torch's CUDA
+        # counters cover allocations by these Torch/PK paths, not total VRAM.
+        synchronize()
+        process = psutil.Process()
+        cpu_before = process.memory_info().rss
+        cuda = device.type == "cuda"
+        gpu_before = torch.cuda.memory_allocated(device) if cuda else 0
+        if cuda:
+            torch.cuda.reset_peak_memory_stats(device)
+        output = call()
+        synchronize()
+        cpu_delta = (process.memory_info().rss - cpu_before) / 1024**2
+        gpu_delta = (
+            (torch.cuda.memory_allocated(device) - gpu_before) / 1024**2
+            if cuda
+            else "N/A"
+        )
+        peak = torch.cuda.max_memory_allocated(device) if cuda else 0
+        del output
+        return {
+            "cost_time_ms": float(np.median(times)),
+            "p90_time_ms": float(np.percentile(times, 90)),
+            "cpu_delta_mb": cpu_delta,
+            "gpu_delta_mb": gpu_delta,
+            "peak_gpu_mb": peak / 1024**2 if cuda else "N/A",
+            "peak_gpu_delta_mb": (peak - gpu_before) / 1024**2 if cuda else "N/A",
+        }
+
+    devices = [torch.device("cpu")]
+    if torch.cuda.is_available():
+        devices.append(torch.device("cuda", torch.cuda.current_device()))
+    perf_rows: list[dict[str, object]] = []
+    metric_rows: list[dict[str, object]] = []
+    for device in devices:
+        fk = DifferentiableFKLayer(model, tcp).to(device)
+        for cpu_q, cpu_target in workloads:
+            q = cpu_q.to(device).detach().requires_grad_()
+            target = cpu_target.to(device)
+
+            def loss(pose: torch.Tensor) -> torch.Tensor:
+                position, rotation = pose_error(pose, target)
+                return (position.square().sum(-1) + rotation.square().sum(-1)).mean()
+
+            reference = fk.evaluate(q)[0]
+            reference_gradient = torch.autograd.grad(loss(reference), q)[0]
+            reference = reference.detach()
+            for name, operation in (
+                ("fk_only", fk),
+                ("fk_via_jacobian", lambda joints: fk.evaluate(joints)[0]),
+            ):
+                pose = operation(q)
+                gradient = torch.autograd.grad(loss(pose), q)[0]
+                torch.testing.assert_close(pose, reference)
+                torch.testing.assert_close(gradient, reference_gradient)
+                with torch.no_grad():
+                    position, rotation = pose_error(pose, reference)
+                    position_norm = position.norm(dim=-1)
+                    rotation_norm = rotation.norm(dim=-1)
+                common = {
+                    "sample_size": q.shape[0],
+                    "impl": f"{name}_{device.type}",
+                    "component": "fk_pose",
+                }
+                metric_rows.append(
+                    {
+                        **common,
+                        "success_rate": (
+                            (position_norm < 1e-6) & (rotation_norm < 1e-6)
+                        )
+                        .float()
+                        .mean()
+                        .item(),
+                        "translation_err_mm": position_norm.mean().item() * 1000,
+                        "rotation_err_deg": rotation_norm.mean().item() * 180 / np.pi,
+                        "gradient_max_abs_error": (gradient - reference_gradient)
+                        .abs()
+                        .max()
+                        .item(),
+                    }
+                )
+                del pose, gradient
+                for mode in ("no_grad", "forward", "forward_backward"):
+
+                    def call() -> torch.Tensor:
+                        with torch.set_grad_enabled(mode != "no_grad"):
+                            pose = operation(q)
+                            if mode == "forward_backward":
+                                return torch.autograd.grad(loss(pose), q)[0]
+                            return pose
+
+                    measured = measure(call, device)
+                    perf_rows.append({**common, "mode": mode, **measured})
+                    print(
+                        f"  {name} {device.type} n={q.shape[0]} {mode}: "
+                        f"{measured['cost_time_ms']:.3f} ms",
+                        flush=True,
+                    )
+    return perf_rows, metric_rows
+
+
 def run_all_benchmarks(
     selected_solvers: list[str] | None = None,
     *,
@@ -1584,6 +1734,8 @@ def run_all_benchmarks(
         print(
             "- Franka comparison: default FEP search versus former Pytorch with 30 seeds."
         )
+    if "fk" in solvers_to_run:
+        print("- FK comparison: pure FK versus pose extraction through FK/Jacobian.")
 
     perf_rows: list[dict[str, object]] = []
     metric_rows: list[dict[str, object]] = []
@@ -1618,6 +1770,11 @@ def run_all_benchmarks(
         perf_rows.extend(diff_perf)
         metric_rows.extend(diff_metrics)
 
+    if "fk" in solvers_to_run:
+        fk_perf, fk_metrics = benchmark_differentiable_fk()
+        perf_rows.extend(fk_perf)
+        metric_rows.extend(fk_metrics)
+
     ssik_notes: list[str] = []
     if "ssik" in solvers_to_run:
         from scripts.benchmark.robotics.kinematic_solver.ssik_benchmark import (
@@ -1643,9 +1800,16 @@ def run_all_benchmarks(
         leaderboard_rows=leaderboard_rows,
         notes=[
             *ssik_notes,
-            "Legacy CPU/GPU memory fields are deltas measured around timed calls; SSIK uses a separate warmed memory pass with separately named Torch and Warp fields.",
-            f"Runtime: Torch {torch.__version__}, pytorch_kinematics {version('pytorch_kinematics')}, CPU threads {torch.get_num_threads()}, GPU {torch.cuda.get_device_name() if torch.cuda.is_available() else 'unavailable'}. Numeric benchmark inputs use float32.",
+            "Legacy CPU/GPU memory fields are deltas measured around timed calls; SSIK and FK use separate warmed memory passes. SSIK names Torch and Warp fields separately.",
+            f"Runtime: Torch {torch.__version__}, CUDA {torch.version.cuda}, pytorch_kinematics {version('pytorch_kinematics')}, CPU threads {torch.get_num_threads()}, GPU {torch.cuda.get_device_name() if torch.cuda.is_available() else 'unavailable'}. Numeric benchmark inputs use float32.",
             "This report contains exactly three tables: Time & Memory, Success & Other Metrics, and Leaderboard.",
+            *(
+                [
+                    "FK mode: float32 Franka with translated/rotated TCP, batches 1/64/1024 and CPU RNG seed 2026. Inputs and targets are generated once on CPU, then moved before timing. Median and p90 completed-call wall latency use 20 synchronized repetitions after five warmups. no_grad measures inference; forward retains the graph; forward_backward rebuilds the graph and differentiates the same position/rotation loss without accumulating leaf gradients. Memory uses one separate warmed call retaining its output; CPU delta is retained RSS, not transient peak. CUDA peak_gpu_mb is total Torch peak allocated memory; peak_gpu_delta_mb is additional peak above the warmed baseline. CPU-only CUDA metrics are N/A. FK success_rate is pose agreement within 1e-6 m/rad of evaluate()[0]; gradient_max_abs_error compares input gradients. Geometry construction and transfers are excluded."
+                ]
+                if "fk" in solvers_to_run
+                else []
+            ),
             *(
                 [
                     "Differentiable mode uses shared CPU-generated Franka targets/seeds on CPU and CUDA. DLS: 4/8/16 steps, damping .05, step size .5, hard limits. FEP: redundancy search. Pytorch: two seeds, 64 iterations, lr .5. Timings are medians of three synchronized calls after two warmups, excluding data preparation and RNG reset to seed 2026; each backward call rebuilds its graph. Pose errors include all rows, including failures. Component rows are excluded from the success leaderboard. Peak GPU memory is absolute allocated Torch memory; Warp allocations in FEP are not captured by that counter."

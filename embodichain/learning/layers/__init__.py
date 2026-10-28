@@ -18,7 +18,8 @@
 
 from __future__ import annotations
 
-from .kinematics import KinematicsLayer
+from .fk import DifferentiableFKLayer
 from .ik import DifferentiableIKLayer
+from .kinematics import KinematicsLayer
 
-__all__ = ["KinematicsLayer", "DifferentiableIKLayer"]
+__all__ = ["DifferentiableFKLayer", "DifferentiableIKLayer", "KinematicsLayer"]

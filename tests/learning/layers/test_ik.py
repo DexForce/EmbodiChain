@@ -27,7 +27,7 @@ import pytest
 import torch
 
 from embodichain.compute.kinematics import DifferentiableIKCfg, SerialChainKinematics
-from embodichain.learning.layers import DifferentiableIKLayer, KinematicsLayer
+from embodichain.learning.layers import DifferentiableIKLayer, DifferentiableFKLayer
 
 
 def make_layer(dtype=torch.float64, device="cpu", iterations=4, enforce=True):
@@ -38,7 +38,7 @@ def make_layer(dtype=torch.float64, device="cpu", iterations=4, enforce=True):
     tcp = torch.eye(4, device=device, dtype=dtype)
     tcp[:3, 3] = tcp.new_tensor([0.1, 0.02, -0.03])
     return DifferentiableIKLayer(
-        KinematicsLayer(model, tcp),
+        DifferentiableFKLayer(model, tcp),
         DifferentiableIKCfg(max_iterations=iterations, enforce_joint_limits=enforce),
     )
 
@@ -51,7 +51,10 @@ class Block(importlib.abc.MetaPathFinder):
         if any(fullname == n or fullname.startswith(n + '.') for n in ('embodichain.lab', 'embodichain.learning.rl', 'dexsim', 'warp', 'wandb', 'tensordict')):
             raise AssertionError(fullname)
 sys.meta_path.insert(0, Block())
-from embodichain.learning.layers import KinematicsLayer, DifferentiableIKLayer
+from embodichain.learning.layers import DifferentiableFKLayer, DifferentiableIKLayer
+from embodichain.learning.layers import KinematicsLayer
+from embodichain.learning.layers.kinematics import KinematicsLayer as LegacyKinematicsLayer
+assert KinematicsLayer is LegacyKinematicsLayer is DifferentiableFKLayer
 from embodichain.learning.models import MLP, EmpiricalNormalizer, build_mlp_from_cfg
 network = build_mlp_from_cfg({"type": "mlp", "network_cfg": {"hidden_sizes": [4]}}, 3, 2)
 assert isinstance(network, MLP)
@@ -149,6 +152,15 @@ def test_checkpoint_dtype_and_eval_lifecycle():
     target = layer.kinematics(q.detach() + 0.05)
     expected = layer(target, q)
     state = deepcopy(layer.state_dict())
+    # These are the pre-rename checkpoint keys; the FK layer remains registered
+    # under "kinematics" and has no extra wrapper or extra buffer namespace.
+    assert set(state) == {
+        "_extra_state",
+        "kinematics.tcp",
+        "kinematics.lower",
+        "kinematics.upper",
+        "kinematics._extra_state",
+    }
     rebuilt = make_layer(dtype=torch.float64, iterations=1)
     rebuilt.load_state_dict(state)
     torch.testing.assert_close(expected, rebuilt(target, q))
