@@ -16,6 +16,9 @@ python -m pip install 'embodichain[rigidformer]'
 embodichain run-example learning/rigidformer --help
 ```
 
+From a source checkout, use `python -m pip install -e '.[rigidformer]'` to install
+that checkout and its optional model dependencies.
+
 The standard native attention backend is Torch SDPA. The explicit `flash`
 backend requires a Flash-Attention build compatible with Torch, CUDA and the
 GPU. Reference evidence records the actual dependency/backend versions.
@@ -60,6 +63,56 @@ remain recorded; checksum preflight rejects bad assets before creating output.
 Readers reject altered payloads and geometry omitted from the manifest. FPS and
 anchor caches are committed inputs, rather than untracked files generated during
 training. Debug preparation verifies collision meshes as well as scene shards.
+
+## Engine demo
+
+Prepare the Sphere weights and a small geometry subset, then open the engine
+window:
+
+```bash
+embodichain run-example learning/rigidformer prepare \
+  --dataset movi_sphere --assets all --limit-per-split 1
+
+embodichain run-example learning/rigidformer demo
+```
+
+The left side contains dynamic Newton spheres. The right side contains engine
+`VisualObject` spheres driven by the official RigidFormer model. Both sides use
+the same geometry, masses, friction and restitution from a prepared test scene.
+The model observes four sampled simulation frames, then predicts the remaining
+trajectory in one free rollout. Predicted spheres have no colliders and provide
+no feedback to the physical simulation. The window holds the final frame for
+three seconds; Ctrl+C closes the demo early.
+
+To record on a machine without a display, pass `--headless`:
+
+```bash
+embodichain run-example learning/rigidformer demo --headless \
+  --output outputs/rigidformer/demo-headless
+```
+
+The output directory must be fresh. It contains engine-camera `rollout.mp4`,
+`frame.png`, aligned `trajectory.npz`, and a `summary.json` with source hashes,
+timing and center errors. Frames stream to the video writer as they are captured.
+The defaults show 51 samples at stride 5 from 240 Hz physics, played at 12 fps.
+`--frames`, `--stride`, `--fps` and `--hold-seconds` control the demonstration.
+`--scene` selects a prepared test scene; `--object-ids` selects two or three
+template objects. `--device cuda:1` selects a different visible GPU.
+
+Use existing resources or compatible exported inference weights explicitly:
+
+```bash
+embodichain run-example learning/rigidformer demo --headless \
+  --data-root /path/to/prepared/MOVi-Sphere \
+  --checkpoint /path/to/rigidformer_movisphere.pth \
+  --output outputs/rigidformer/my-demo
+```
+
+The scene uses Newton XPBD and newly chosen initial positions and velocities.
+Its center errors describe this engine comparison. The fixed-checkpoint
+`evaluate` command below reports the official MOVi data metrics. The preparation
+limit bounds converted scenes; downloading may still acquire the dataset's
+numeric shards and shared meshes.
 
 ## Train with shared SL
 

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Prepare official assets, evaluate inference weights, and export native runs."""
+"""Prepare RigidFormer assets, run an engine demo, evaluate and export weights."""
 
 from __future__ import annotations
 import argparse
@@ -40,6 +40,33 @@ def main() -> None:
         type=int,
         default=0,
         help="Debug subset only; zero prepares the full frozen corpus",
+    )
+    p = sub.add_parser("demo", help="Compare live Newton dynamics with RigidFormer")
+    p.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=Path("outputs/rigidformer/assets/model/rigidformer_movisphere.pth"),
+    )
+    p.add_argument(
+        "--data-root", type=Path, default=Path("outputs/rigidformer/data/MOVi-Sphere")
+    )
+    p.add_argument("--output", type=Path, default=Path("outputs/rigidformer/demo"))
+    p.add_argument("--scene", help="Prepared test scene; default selects the first")
+    p.add_argument(
+        "--object-ids", type=int, nargs="+", help="Two or three template object IDs"
+    )
+    p.add_argument("--device", default="cuda:0")
+    p.add_argument("--attention-backend", choices=("sdpa", "flash"), default="sdpa")
+    p.add_argument(
+        "--headless", action="store_true", help="Record without opening a window"
+    )
+    p.add_argument("--frames", type=int, default=51)
+    p.add_argument("--stride", type=int, default=5)
+    p.add_argument(
+        "--fps", type=int, default=12, help="Window playback and video frame rate"
+    )
+    p.add_argument(
+        "--hold-seconds", type=float, default=3.0, help="Final window hold duration"
     )
     p = sub.add_parser("export")
     p.add_argument("--checkpoint", type=Path, required=True)
@@ -104,6 +131,10 @@ def main() -> None:
                 indent=2,
             )
         )
+    elif args.command == "demo":
+        from ._demo import run_demo
+
+        run_demo(args)
     elif args.command == "export":
         from embodichain_models.dynamics.rigidformer.checkpoint import (
             export_rigidformer_checkpoint,

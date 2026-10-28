@@ -59,6 +59,9 @@ legacy research DataLoader's worker-RNG trajectory.
 
 The [showcase](../../../examples/learning/rigidformer/README.md) owns downloads,
 conversion, fixed-weight evaluation and independent author-Trainer comparison.
+Its `demo` command in `_demo.py` compares live Newton spheres with render-only
+model predictions after four observed frames, through a native window or an
+engine-camera recording. It uses explicit prepared geometry and weight paths.
 Assets/results stay outside the wheel. Numerical agreement, recovery and full
 benchmark/retraining qualification remain distinct evidence requirements.
 
