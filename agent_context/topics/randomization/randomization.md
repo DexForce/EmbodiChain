@@ -85,7 +85,7 @@ randomization remains active. See the owning
 | `randomize_robot_eef_pose` | Robot end-effector pose | `position_range`, `rotation_range` |
 | `randomize_robot_qpos` | Robot joint positions | (varies) |
 | `randomize_articulation_root_pose` | Articulation root | (varies) |
-| `randomize_target_pose` | Target pose | (varies) |
+| `randomize_target_pose` | Stored target pose and optional physical marker | `reference_entity_cfg`, `position_range`, `store_key`, optional `target_entity_cfg` |
 
 - Helper: `get_random_pose(init_pos, init_rot, ...)` generates batched random 4×4 poses.
 - Rotation ranges are in **degrees** (converted to radians internally).

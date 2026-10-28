@@ -187,5 +187,70 @@
       "current_budget_collection.json": "54dad6ab28f9eb236840982aecd7a345059f2c440c9cbeb1c47eb4fa00379a53",
       "portable_monitor_play.json": "1c5d912ff083315aa799f0f9c44b0f940254cd83fde516ee1c0031c507c0f0ff"
     }
+  },
+  "shared_task_revalidation": {
+    "task_identity": {
+      "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml": "b03cdef23e1cc4cddf1902ce670c505ee877a8ef49772850be5399c7f4137b2f",
+      "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.visual.yaml": "b1180524d662ce214ff43473be495faf6ce5dddd0c08df8fd93a936a6fa4e607",
+      "extensions/embodichain_tasks/configs/components/embodiments/franka_panda_rgb_224.yaml": "1ce9d0e62d26ec2ec252bce1e9559851af260b2d8fc72721b3a1858563e1b832",
+      "extensions/embodichain_tasks/embodichain_tasks/manipulation/push_cube.py": "ca76940b55ffffcf07da4fb6c8cffe6f04effc96f4306998251f3764a0e307fa"
+    },
+    "runtime": {
+      "python": "3.11.14",
+      "torch": "2.7.0+cu128",
+      "cuda": "12.8",
+      "device": "cuda:0",
+      "gpu": "NVIDIA RTX PRO 5000 72GB Blackwell",
+      "physics": "default",
+      "renderer": "no-render",
+      "dexsim": "0.5.1rc1",
+      "lerobot": "0.4.4"
+    },
+    "expert": {
+      "attempts": 100,
+      "successes": 100,
+      "seed_base": 610000
+    },
+    "rgb_recording": {
+      "attempts": 4,
+      "successes": 4,
+      "seed_base": 620000,
+      "renderer": "hybrid"
+    },
+    "recorded_dataset": {
+      "episodes": 4,
+      "valid_frames": 678,
+      "rgb_shape": [
+        4,
+        3,
+        224,
+        224
+      ],
+      "state_shape": [
+        4,
+        9
+      ],
+      "action_shape": [
+        4,
+        30,
+        8
+      ],
+      "valid_anchor_actions": true
+    },
+    "legacy_rl_smoke": {
+      "environment": "PushCubeEnv",
+      "deployment": "PushCubeRL",
+      "action_width": 6,
+      "steps": 1,
+      "finite_reward": true,
+      "metric": "distance_to_goal"
+    },
+    "training_smoke": {
+      "device": "cpu",
+      "updates": 2,
+      "batch_size": 2,
+      "resume_num_updates": 2
+    },
+    "scope": "Fresh shared PushCubeEnv expert, recording, data-loading, optimizer and checkpoint smoke checks. Historical trained-policy success rates above were not re-evaluated for this task identity."
   }
 }

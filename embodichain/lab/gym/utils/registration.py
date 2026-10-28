@@ -72,8 +72,14 @@ class EnvSpec:
         task_program_registration: SimulationTaskProgramRegistration | None = None,
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
         supports_rl: bool = False,
+        supports_handwritten_demo: bool | None = None,
     ):
         """A specification for a Embodied environment."""
+        if (
+            supports_handwritten_demo is not None
+            and type(supports_handwritten_demo) is not bool
+        ):
+            raise TypeError("supports_handwritten_demo must be a bool or None.")
         if type(supports_rl) is not bool:
             raise TypeError("supports_rl must be a bool.")
         if task_program_registration is not None:
@@ -130,6 +136,7 @@ class EnvSpec:
         self.max_episode_steps = max_episode_steps
         self.default_kwargs = {} if default_kwargs is None else default_kwargs
         self.supports_rl = supports_rl
+        self.supports_handwritten_demo = supports_handwritten_demo
         self.task_program_registration = task_program_registration
         self.task_program_adapter_factory = task_program_adapter_factory
 
@@ -172,6 +179,7 @@ def register(
     task_program_registration: SimulationTaskProgramRegistration | None = None,
     task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
     supports_rl: bool = False,
+    supports_handwritten_demo: bool | None = None,
 ):
     """Register a Embodied environment."""
 
@@ -188,6 +196,7 @@ def register(
         max_episode_steps=max_episode_steps,
         default_kwargs=default_kwargs,
         supports_rl=supports_rl,
+        supports_handwritten_demo=supports_handwritten_demo,
         task_program_registration=task_program_registration,
         task_program_adapter_factory=task_program_adapter_factory,
     )
@@ -287,6 +296,7 @@ def register_env(
     override=False,
     *,
     supports_rl: bool = False,
+    supports_handwritten_demo: bool | None = None,
     task_program_registration: SimulationTaskProgramRegistration | None = None,
     task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
     **kwargs,
@@ -298,6 +308,9 @@ def register_env(
         max_episode_steps (int): maximum number of steps in an episode.
         override (bool): whether to override the environment if it is already registered.
         supports_rl: Whether the environment has a supported RL training path.
+        supports_handwritten_demo: Optional per-registration expert capability.
+            None preserves inference from the environment class; False disables
+            the label for deployments without configured expert behavior.
 
     Notes:
         - `max_episode_steps` is processed differently from other keyword arguments in gym.
@@ -318,6 +331,7 @@ def register_env(
             override,
             max_episode_steps,
             supports_rl=supports_rl,
+            supports_handwritten_demo=supports_handwritten_demo,
             task_program_registration=task_program_registration,
             task_program_adapter_factory=task_program_adapter_factory,
             **kwargs,
@@ -334,6 +348,7 @@ def register_env_function(
     max_episode_steps=None,
     *,
     supports_rl: bool = False,
+    supports_handwritten_demo: bool | None = None,
     task_program_registration: SimulationTaskProgramRegistration | None = None,
     task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
     **kwargs,
@@ -355,6 +370,7 @@ def register_env_function(
         max_episode_steps=max_episode_steps,
         default_kwargs=deepcopy(kwargs),
         supports_rl=supports_rl,
+        supports_handwritten_demo=supports_handwritten_demo,
         task_program_registration=task_program_registration,
         task_program_adapter_factory=task_program_adapter_factory,
     )

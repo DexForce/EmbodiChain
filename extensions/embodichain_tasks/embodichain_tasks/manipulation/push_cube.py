@@ -16,120 +16,169 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import Any
+
 import torch
-from typing import Dict, Any, Tuple
 
 from embodichain.lab.gym.utils.registration import register_env
-from collections.abc import Iterable, Sequence
-
 from embodichain.lab.gym.envs import DemoSegment, EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.sim.types import EnvObs
+from embodichain.utils import configclass
+from embodichain.utils.math import matrix_from_quat
 
-__all__ = ["PushCubeEnv", "VisualPushCubeEnv"]
+__all__ = ["PushCubeEnv"]
 
 
-@register_env("PushCubeRL", max_episode_steps=50, override=True, supports_rl=True)
+@configclass
+class _PushExpertCfg:
+    """Configured geometry and timing for the task's handwritten expert."""
+
+    arm_part: str = "arm"
+    eef_command: float = -1.0
+    orientation_xyzw: tuple[float, ...] = (0.0, 1.0, 0.0, 0.0)
+    approach_offset: tuple[float, ...] = (-0.08, 0.0)
+    approach_height: float = 0.18
+    descend_height: float = 0.025
+    push_displacement: tuple[float, ...] = (0.22, 0.0, 0.0)
+    steps: tuple[int, ...] = (65, 35, 100)
+
+
+@configclass
+class _PushCubeCfg:
+    """Task parameters independent of cameras and policy models."""
+
+    cube_uid: str = "cube"
+    target_pose_key: str = "goal_pose"
+    success_threshold: float = 0.1
+    success_height_range: tuple[float, float] | None = None
+    failure_height: float | None = None
+    truncation_height: float | None = -0.1
+    distance_metric: str = "distance_to_goal"
+    expert: dict[str, Any] | None = None
+
+
+@register_env(
+    "PushCube-Franka-Visual-v1", max_episode_steps=300, supports_handwritten_demo=True
+)
+@register_env(
+    "PushCubeRL",
+    max_episode_steps=50,
+    override=True,
+    supports_rl=True,
+    supports_handwritten_demo=False,
+)
 class PushCubeEnv(EmbodiedEnv):
-    """Push cube task for reinforcement learning.
+    """Push a cube toward a configured target, with optional expert segments.
 
-    The task involves pushing a cube to a target goal position using a robotic arm.
-    The reward consists of reaching reward, placing reward, action penalty, and success bonus.
+    Scene entities, reset events, sensors and actions belong to the deployment.
+    ``cfg.extensions['push_cube']`` selects task thresholds and optional expert
+    geometry. The existing RL ``success_threshold`` extension remains supported.
+
+    Args:
+        cfg: Physical scene, managers and task parameters.
+        **kwargs: Arguments forwarded to the common environment.
     """
 
-    def __init__(self, cfg=None, **kwargs):
-        if cfg is None:
-            cfg = EmbodiedEnvCfg()
-        super().__init__(cfg, **kwargs)
-
-    def compute_task_state(
-        self, **kwargs
-    ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
-        cube = self.sim.get_rigid_object("cube")
-        cube_pos = cube.get_local_pose(to_matrix=True)[:, :3, 3]
-
-        # Check if goal_pose is defined (set by randomize_target_pose event)
-        goal_pose = getattr(self, "goal_pose", None)
-        if goal_pose is not None:
-            goal_pos = goal_pose[:, :3, 3]
-            xy_distance = torch.norm(cube_pos[:, :2] - goal_pos[:, :2], dim=1)
-            is_success = xy_distance < self.success_threshold
-        else:
-            xy_distance = torch.zeros(self.num_envs, device=self.device)
-            is_success = torch.zeros(
-                self.num_envs, device=self.device, dtype=torch.bool
-            )
-
-        is_fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-        metrics = {"distance_to_goal": xy_distance}
-
-        return is_success, is_fail, metrics
-
-    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
-        cube = self.sim.get_rigid_object("cube")
-        cube_pos = cube.get_local_pose(to_matrix=True)[:, :3, 3]
-        is_fallen = cube_pos[:, 2] < -0.1
-        return is_fallen
-
-
-@register_env("PushCube-Franka-Visual-v1", max_episode_steps=300)
-class VisualPushCubeEnv(EmbodiedEnv):
-    """Push a cube into a visible target using the stock Franka embodiment.
-
-    The expert consumes simulator geometry; policy observation and action
-    contracts remain the camera, joint state and ActionManager commands.
-    """
-
-    def _initialize_episode(
-        self, env_ids: Sequence[int] | None = None, **kwargs: Any
-    ) -> None:
-        super()._initialize_episode(env_ids, **kwargs)
-        ids = torch.as_tensor(
-            range(self.num_envs) if env_ids is None else env_ids,
-            dtype=torch.long,
-            device=self.device,
+    def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs: Any) -> None:
+        cfg = cfg if cfg is not None else EmbodiedEnvCfg()
+        extensions = cfg.extensions or {}
+        parameters = dict(extensions.get("push_cube", {}))
+        parameters.setdefault(
+            "success_threshold", extensions.get("success_threshold", 0.1)
         )
-        cube = self.sim.get_rigid_object("cube")
-        pose = cube.get_local_pose().clone()
-        pose[ids, :3] = torch.tensor([-0.52, -0.08, 0.02], device=self.device)
-        pose[ids, :2] += (torch.rand(len(ids), 2, device=self.device) - 0.5) * 0.2
-        pose[ids, 3:] = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
-        cube.clear_dynamics(env_ids=ids)
-        cube.set_local_pose(pose[ids], env_ids=ids)
-        if not hasattr(self, "goal_position"):
-            self.goal_position = torch.zeros(self.num_envs, 3, device=self.device)
-        self.goal_position[ids] = pose[ids, :3]
-        self.goal_position[ids, 0] += 0.2
-        marker = self.sim.get_rigid_object("goal_marker")
-        marker_pose = marker.get_local_pose().clone()
-        marker_pose[ids, :2] = self.goal_position[ids, :2]
-        marker.set_local_pose(marker_pose[ids], env_ids=ids)
+        self._push_cfg = _PushCubeCfg(**parameters)
+        self._push_cfg.validate()
+        if self._push_cfg.success_threshold <= 0:
+            raise ValueError("PushCube success_threshold must be positive")
+        heights = self._push_cfg.success_height_range
+        if heights is not None and (len(heights) != 2 or heights[0] > heights[1]):
+            raise ValueError(
+                "PushCube success_height_range must contain ordered bounds"
+            )
+        self._push_expert = (
+            None
+            if self._push_cfg.expert is None
+            else _PushExpertCfg(**self._push_cfg.expert)
+        )
+        if self._push_expert is not None:
+            self._push_expert.validate()
+            if len(self._push_expert.steps) != 3 or any(
+                type(steps) is not int or steps < 1 for steps in self._push_expert.steps
+            ):
+                raise ValueError(
+                    "PushCube expert requires three positive segment lengths"
+                )
+        super().__init__(cfg, **kwargs)
 
     def compute_task_state(
         self, **kwargs: Any
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
-        """Measure goal distance and table retention from the simulated cube."""
-        pose = self.sim.get_rigid_object("cube").get_local_pose()
-        goal = getattr(self, "goal_position", torch.zeros_like(pose[:, :3]))
-        distance = torch.linalg.vector_norm(pose[:, :2] - goal[:, :2], dim=-1)
-        on_table = (pose[:, 2] >= 0.0) & (pose[:, 2] <= 0.08)
-        return (
-            (distance < 0.1) & on_table,
-            pose[:, 2] < -0.05,
-            {"goal_distance": distance},
+        """Measure configured XY target distance and object height bounds.
+
+        Args:
+            **kwargs: Compatibility evaluation keywords.
+
+        Returns:
+            Success and failure masks, and the configured distance metric.
+        """
+        c = self._push_cfg
+        pose = self.sim.get_rigid_object(c.cube_uid).get_local_pose(to_matrix=True)
+        position = pose[:, :3, 3]
+        goal = getattr(self, c.target_pose_key, None)
+        success = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        distance = torch.zeros(self.num_envs, device=self.device)
+        if goal is not None:
+            distance = torch.linalg.vector_norm(
+                position[:, :2] - goal[:, :2, 3], dim=-1
+            )
+            success = distance < c.success_threshold
+            if c.success_height_range is not None:
+                low, high = c.success_height_range
+                success &= (position[:, 2] >= low) & (position[:, 2] <= high)
+        fail = (
+            position[:, 2] < c.failure_height
+            if c.failure_height is not None
+            else torch.zeros_like(success)
         )
+        return success, fail, {c.distance_metric: distance}
+
+    def check_truncated(self, obs: EnvObs, info: dict[str, Any]) -> torch.Tensor:
+        """Apply the configured fall truncation independently of task failure.
+
+        Args:
+            obs: Current observations.
+            info: Measured task results.
+
+        Returns:
+            Per-environment fall truncation mask.
+        """
+        c = self._push_cfg
+        if c.truncation_height is None:
+            return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        pose = self.sim.get_rigid_object(c.cube_uid).get_local_pose(to_matrix=True)
+        return pose[:, 2, 3] < c.truncation_height
 
     def is_task_success(self, **kwargs: Any) -> torch.Tensor:
-        """Return measured task success for recorder and expert validation."""
-        if not hasattr(self, "goal_position"):
-            return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        return self.compute_task_state()[0]
+        """Use measured success to accept recorded expert demonstrations.
+
+        Args:
+            **kwargs: Compatibility evaluation keywords.
+
+        Returns:
+            Measured per-environment success mask.
+        """
+        return self.compute_task_state(**kwargs)[0]
 
     def _expert_waypoints(
         self, targets: torch.Tensor, steps: int
     ) -> Iterable[torch.Tensor]:
-        arm_ids = self.robot.get_joint_ids("arm")
+        c = self._push_expert
+        if c is None:
+            raise ValueError("PushCube expert geometry must be configured")
+        arm_ids = self.robot.get_joint_ids(c.arm_part)
         start_qpos = self.robot.get_qpos()[:, arm_ids]
-        start_pose = self.robot.compute_fk(start_qpos, name="arm", to_matrix=True)
+        start_pose = self.robot.compute_fk(start_qpos, name=c.arm_part, to_matrix=True)
         for index in range(steps):
             fraction = float(index + 1) / steps
             pose = targets.clone()
@@ -137,44 +186,61 @@ class VisualPushCubeEnv(EmbodiedEnv):
                 start_pose[:, :3, 3] * (1 - fraction) + targets[:, :3, 3] * fraction
             )
             seed = self.robot.get_qpos()[:, arm_ids]
-            result = self.robot.compute_ik(pose, joint_seed=seed, name="arm")
+            result = self.robot.compute_ik(pose, joint_seed=seed, name=c.arm_part)
             if result is None or not bool(torch.as_tensor(result[0]).all()):
                 raise RuntimeError(f"PushCube expert IK failed at waypoint {index}")
             qpos = result[1].reshape(self.num_envs, -1)
             yield torch.cat(
-                (qpos, torch.full((self.num_envs, 1), -1.0, device=self.device)), dim=-1
+                (
+                    qpos,
+                    torch.full((self.num_envs, 1), c.eef_command, device=self.device),
+                ),
+                dim=-1,
             )
 
     def create_demo_segments(self, **kwargs: Any) -> Iterable[DemoSegment]:
-        """Produce bounded approach, descend and push action segments."""
-        cube = self.sim.get_rigid_object("cube").get_local_pose()
+        """Yield configured approach, descent and push segments.
+
+        Args:
+            **kwargs: Compatibility demonstration keywords.
+
+        Returns:
+            Lazy expert segments with measured final acceptance.
+
+        Raises:
+            ValueError: This deployment does not configure an expert.
+        """
+        c = self._push_expert
+        if c is None:
+            raise ValueError("This PushCube deployment does not configure an expert")
+        cube = self.sim.get_rigid_object(self._push_cfg.cube_uid).get_local_pose()
         target = torch.eye(4, device=self.device).repeat(self.num_envs, 1, 1)
-        target[:, :3, :3] = torch.diag(
-            torch.tensor([-1.0, 1.0, -1.0], device=self.device)
+        target[:, :3, :3] = matrix_from_quat(
+            torch.tensor(c.orientation_xyzw, device=self.device)
         )
         target[:, :3, 3] = cube[:, :3]
-        target[:, 0, 3] -= 0.08
-        target[:, 2, 3] = 0.18
+        target[:, :2, 3] += torch.tensor(c.approach_offset, device=self.device)
+        target[:, 2, 3] = c.approach_height
         yield DemoSegment(
             name="approach",
-            target_uid="cube",
+            target_uid=self._push_cfg.cube_uid,
             instruction="Move behind the cube.",
-            actions=self._expert_waypoints(target, 65),
+            actions=self._expert_waypoints(target, c.steps[0]),
         )
         target = target.clone()
-        target[:, 2, 3] = 0.025
+        target[:, 2, 3] = c.descend_height
         yield DemoSegment(
             name="descend",
-            target_uid="cube",
+            target_uid=self._push_cfg.cube_uid,
             instruction="Lower the gripper.",
-            actions=self._expert_waypoints(target, 35),
+            actions=self._expert_waypoints(target, c.steps[1]),
         )
         target = target.clone()
-        target[:, 0, 3] += 0.22
+        target[:, :3, 3] += torch.tensor(c.push_displacement, device=self.device)
         yield DemoSegment(
             name="push",
-            target_uid="cube",
+            target_uid=self._push_cfg.cube_uid,
             instruction="Push the cube into the target.",
-            actions=self._expert_waypoints(target, 100),
+            actions=self._expert_waypoints(target, c.steps[2]),
             validator=self.is_task_success,
         )

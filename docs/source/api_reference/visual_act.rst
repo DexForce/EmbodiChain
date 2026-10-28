@@ -9,6 +9,9 @@ and simulator evaluation are owned by the ``examples/learning/act`` example.
 Numeric windows and RGB frames share one
 :class:`~embodichain.data_pipeline.datasets.LeRobotDataSource`; configure its
 ``image_keys`` and use ``read_images`` for bounded, frame-aligned RGB access.
+The visual deployment reuses
+:class:`~embodichain_tasks.manipulation.push_cube.PushCubeEnv`; its reset events,
+task thresholds and handwritten expert parameters are selected by configuration.
 
 .. autosummary::
 
@@ -24,7 +27,6 @@ Numeric windows and RGB frames share one
    embodichain_models.policy.act.data.ACTSequenceSource
    embodichain_models.policy.act.rollout.ACTTemporalEnsembler
    embodichain_models.policy.act.sl_recipe.build_act_trainer
-   embodichain_tasks.manipulation.push_cube.VisualPushCubeEnv
 
 .. autoclass:: embodichain_models.policy.act.ACTCfg
    :members:
@@ -42,6 +44,3 @@ Numeric windows and RGB frames share one
    :members:
 
 .. autofunction:: embodichain_models.policy.act.build_act_trainer
-
-.. autoclass:: embodichain_tasks.manipulation.push_cube.VisualPushCubeEnv
-   :members:

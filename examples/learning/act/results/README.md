@@ -14,6 +14,14 @@ that path. The default action aggregation and model computations are unchanged.
 The later image-column-only reader produced byte-identical RGB for 100 sampled
 training frames compared with the SDK access used during the original runs.
 
+The table below describes the original qualification. After moving both
+RL and visual deployments to the shared `PushCubeEnv`, fresh checks recorded
+100/100 expert successes, four successful RGB recording episodes (678 frames),
+a legacy RL reset/step smoke, and two CPU ACT updates with checkpoint reload.
+The `shared_task_revalidation` section in the summary binds these checks to the
+new task identity. Reset randomness now follows configured EventManager streams;
+the original trained-policy scores were not repeated for this revision.
+
 | Check | Result |
 | --- | --- |
 | Expert qualification | 100/100 independent scenes |
