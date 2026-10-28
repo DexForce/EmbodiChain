@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from embodichain.compute.kinematics import pose_error
 from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AtomicActionEngine,
@@ -85,7 +86,7 @@ from .atomic_evaluation import (
     stage_evidence_batch,
     trace_validity,
 )
-from .atomic_grasps import parallel_jaw_sampler
+from .atomic_grasps import _native_panda_tcp_pose, parallel_jaw_sampler
 from .atomic_policy import with_plan_options
 from ..atomic_skill import register_atomic_skill_provider
 
@@ -811,7 +812,15 @@ def _case(
     full_start_qpos: torch.Tensor,
     parameters: dict[str, object],
 ) -> BenchmarkCase:
-    """Assemble a coordinated case whose primary waypoints were recorded."""
+    """Freeze a coordinated case only after both arms have endpoint evidence."""
+    references, evidence = _arm_endpoint_evidence(
+        scenario,
+        suite,
+        targets,
+        start_qpos,
+        full_start_qpos,
+        parameters["arm_waypoints"],
+    )
     return BenchmarkCase(
         suite_version=suite.suite_version,
         track=track.id,
@@ -830,7 +839,7 @@ def _case(
         start_state_bin="pre_action",
         start_qpos=start_qpos,
         target_waypoints=targets,
-        reference_qpos=scenario.solve_reference_qpos(start_qpos, targets),
+        reference_qpos=references,
         robot_id=suite.robot.id,
         skill_id=provider.skill_id,
         object_id=object_id,
@@ -839,10 +848,98 @@ def _case(
         full_start_qpos=full_start_qpos,
         case_parameters={
             **parameters,
+            "endpoint_qualification": evidence,
             "randomization": randomization_parameters(config, seed=seed),
             "difficulty_factors": dict(config.get("difficulty_factors", {})),
         },
     )
+
+
+def _arm_endpoint_evidence(
+    scenario: AtomicSkillScenario,
+    suite: SuiteCfg,
+    targets: torch.Tensor,
+    start_qpos: torch.Tensor,
+    full_start_qpos: torch.Tensor,
+    other_arm_waypoints: Mapping[str, list],
+) -> tuple[torch.Tensor, dict[str, object]]:
+    """Validate all frozen rows without selecting or resampling candidate cases."""
+    robot = scenario.robot
+    if robot is None:
+        raise RuntimeError("Atomic Skill runtime is not configured.")
+    protocol = suite.protocol
+    arm_targets = {scenario.control_part: targets}
+    arm_targets.update(
+        {
+            arm: torch.as_tensor(poses, dtype=targets.dtype, device=targets.device)
+            for arm, poses in other_arm_waypoints.items()
+        }
+    )
+    references = {}
+    arms = {}
+    for arm, requested in arm_targets.items():
+        # Use the original full snapshot, never a state left by the reference
+        # compile. Named Robot IK/FK share arena-frame TCP and base semantics.
+        start = (
+            start_qpos.clone()
+            if arm == scenario.control_part
+            else full_start_qpos[:, robot.get_joint_ids(name=arm)].clone()
+        )
+        qpos = scenario.solve_reference_qpos(start, requested, control_part=arm)
+        lower, upper = robot.get_qpos_limits(name=arm).to(qpos).unbind(-1)
+        violation = (
+            torch.maximum(lower[:, None] - qpos, qpos - upper[:, None])
+            .clamp_min(0)
+            .amax(-1)
+        )
+        qualified = torch.isfinite(qpos).all(-1) & (
+            violation <= protocol.joint_limit_tolerance_rad
+        )
+        if not bool(qualified.all()):
+            raise RuntimeError(
+                f"Independent endpoint qualification failed for arm {arm!r} at "
+                f"[row, waypoint] {(~qualified).nonzero().cpu().tolist()}: "
+                "nonfinite or out-of-bounds joint witness."
+            )
+        actual = torch.stack(
+            [
+                robot.compute_fk(qpos=qpos[:, index], name=arm, to_matrix=True)
+                for index in range(requested.shape[1])
+            ],
+            dim=1,
+        )
+        dp, dr = pose_error(actual, requested)
+        position_error = dp.norm(dim=-1)
+        rotation_error = dr.norm(dim=-1)
+        qualified &= (
+            torch.isfinite(actual).all(dim=(-1, -2))
+            & (position_error <= protocol.position_threshold_m)
+            & (rotation_error <= protocol.rotation_threshold_rad)
+        )
+        if not bool(qualified.all()):
+            raise RuntimeError(
+                f"Independent endpoint qualification failed for arm {arm!r} at "
+                f"[row, waypoint] {(~qualified).nonzero().cpu().tolist()}: "
+                "FK witness misses the original request; no case rows were removed."
+            )
+        references[arm] = qpos
+        arms[arm] = {
+            "start_qpos": start.detach().cpu().tolist(),
+            "reference_qpos": qpos.detach().cpu().tolist(),
+            "position_error_m": position_error.detach().cpu().tolist(),
+            "rotation_error_rad": rotation_error.detach().cpu().tolist(),
+            "max_joint_limit_violation_rad": violation.detach().cpu().tolist(),
+            "qualified": qualified.detach().cpu().tolist(),
+        }
+    return references[scenario.control_part], {
+        "method": "independent_per_arm_sequential_ik_fk",
+        "scope": "endpoint_reference_only_not_path_or_physical_success",
+        "frame": "arena_tcp",
+        "position_threshold_m": protocol.position_threshold_m,
+        "rotation_threshold_rad": protocol.rotation_threshold_rad,
+        "joint_limit_tolerance_rad": protocol.joint_limit_tolerance_rad,
+        "arms": arms,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -908,7 +1005,10 @@ class _HandOverCases(AtomicSkillCaseProvider):
             "control_parts": parts,
         }
         grasp_parts = [values["grasp"] for values in parts.values()]
-        sampler = parallel_jaw_sampler(int(config.get("grasp_sample_count", 10_000)))
+        sampler = parallel_jaw_sampler(
+            int(config.get("grasp_sample_count", 10_000)),
+            gripper_model=scenario.grasp_model(),
+        )
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(
             scenario,
@@ -1139,7 +1239,10 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
             "left_to_right_arm_direction": _left_to_right_direction(scenario, parts),
             "control_parts": parts,
         }
-        sampler = parallel_jaw_sampler(int(parameters["grasp_sample_count"]))
+        sampler = parallel_jaw_sampler(
+            int(parameters["grasp_sample_count"]),
+            gripper_model=scenario.grasp_model(),
+        )
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(
             scenario,
@@ -1272,6 +1375,7 @@ def _placement_pose_row(
     *,
     placing_target_frame_pose: torch.Tensor | None = None,
     support_target_frame_pose: torch.Tensor | None = None,
+    support_triangles: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Build one row of coordinated-placement grasps and targets."""
     from . import _placement_geometry as placement_geometry
@@ -1304,6 +1408,7 @@ def _placement_pose_row(
         support_vertices,
         support_target,
         device,
+        pan_triangles=support_triangles,
     )
     return {
         "placing_grasp_pose": placing_grasp,
@@ -1351,6 +1456,7 @@ def _placement_poses(
     world_to_task_frame = pose_inv(task_frame_pose)
     placing_target_frame_pose = torch.bmm(world_to_task_frame, placing_pose)
     support_target_frame_pose = torch.bmm(world_to_task_frame, support_pose)
+    support_triangles = support.entity.get_triangles(env_ids=[0])[0].to(device)
     rows = [
         _placement_pose_row(
             placing_pose[row],
@@ -1362,6 +1468,7 @@ def _placement_poses(
             config,
             placing_target_frame_pose=placing_target_frame_pose[row],
             support_target_frame_pose=support_target_frame_pose[row],
+            support_triangles=support_triangles,
         )
         for row in range(placing_pose.shape[0])
     ]
@@ -1503,6 +1610,23 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
         poses = _placement_poses(
             placing, support, placing_pose, support_pose, config, seed=seed
         )
+        grasp_model = scenario.grasp_model()
+        if grasp_model is not None and grasp_model.model_id == "franka_panda_hand":
+            # These calibrated top/handle frames close along X, like GraspKit.
+            # Freeze the actual native TCP pose; replay must not rotate it again.
+            for name in ("placing_grasp_pose", "support_grasp_pose"):
+                poses[name] = _native_panda_tcp_pose(poses[name])
+        from .._atomic_fixtures import get_local_vertices
+        from ._placement_qualification import _placement_input_geometry
+
+        geometry_evidence = _placement_input_geometry(
+            get_local_vertices(placing.entity),
+            placing.entity.get_triangles(env_ids=[0])[0],
+            get_local_vertices(support.entity),
+            support.entity.get_triangles(env_ids=[0])[0],
+            poses["placing_target_pose"],
+            poses["support_target_pose"],
+        )
         parts = _control_parts(config, ("placing", "support"))
         parameters: dict[str, object] = {
             "sample_count": int(config.get("sample_count", 120)),
@@ -1597,6 +1721,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
                 },
                 **{name: pose.detach().cpu().tolist() for name, pose in poses.items()},
                 "placing_relative_target_pose": relative_target.detach().cpu().tolist(),
+                "placement_input_geometry": geometry_evidence,
                 "arm_waypoints": other_arms,
                 "reference_plan_success": reference.compiled.plan_success.tolist(),
             },

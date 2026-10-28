@@ -371,6 +371,8 @@ class ExecutionObservation:
     gripper_open_qpos: Mapping[str, torch.Tensor] = field(default_factory=dict)
     gripper_grasp_qpos: Mapping[str, torch.Tensor] = field(default_factory=dict)
     replay_traces: Mapping[str, ReplayObservationTrace] = field(default_factory=dict)
+    replay_diagnostics: Mapping[str, object] = field(default_factory=dict)
+    """Optional bounded JSON-native measurements persisted with the trial."""
 
 
 class PhysicalStageEvaluator(Protocol):

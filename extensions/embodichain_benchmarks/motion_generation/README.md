@@ -91,6 +91,11 @@ provide that integration.
 Each call owns its simulator and returns after cleanup. Serial execution is the
 default; host calls in one process must run serially. Optional `workers` and
 `worker_threads` distribute whole quality cases across isolated spawned processes.
+The Python API's optional `quality_devices=["cuda:0", "cuda:1"]` assigns shards
+round-robin across explicit CUDA ordinals visible to the process. `workers`
+remains the total process count; a single worker uses the first listed device.
+The original case partition, ordering and raw merge are preserved. Parallel
+input preparation retains `device`; performance replay rejects `quality_devices`.
 Measure throughput before increasing workers: startup, duplicated initialization
 and contention can outweigh gains. Supply `case_manifest` to reuse frozen inputs,
 or call `prepare_case_manifest(suite, output, device=...)` at a new output path
@@ -101,7 +106,8 @@ Each worker retains its inputs, raw trials, console log and process outcome;
 the parent checks exact case/method/repeat coverage and recomputes aggregates
 from the complete raw population. Explicit unsupported and lifecycle-error
 records remain in the evidence. Worker failures raise and retain diagnostics.
-`execution.json` records actual concurrency, CPU threads and elapsed wall time.
+`execution.json` records actual concurrency, device assignments, CPU threads and
+elapsed wall time. Each shard and raw trial retains its actual runtime device.
 
 Parallel wall times and memory remain in raw records but are excluded from
 report timing aggregates. Performance replay requires `workers=1`. ONNX Runtime
@@ -127,6 +133,35 @@ The suite resources are installed with the package, so callers can run from
 any directory. Robot assets and optional cuRobo, TOPPRA or ONNX Runtime
 dependencies follow their normal installation and asset-resolution rules.
 
+### Native Panda hand
+
+`robot.provider: franka_panda` uses the stock `PandaWithHand.urdf`, including
+two prismatic finger joints and `fr3_hand_tcp`. For the same hand on both arms,
+select `provider: dual_arm` with `robot.config.robot_type: franka` and
+`robot.config.gripper_type: panda_hand`. This duplicates the complete native
+asset, preserves the arm mount transforms and exposes `left_arm` / `right_arm`
+and two-joint `left_eef` / `right_eef`. The native URDF owns the TCP; omit
+`tcp_z`. Each arm solver ends at its prefixed `fr3_hand_tcp` with an identity
+additional TCP transform. Give the assembly its own `uid` and `urdf_name`.
+
+Atomic tracks using this hardware declare `config.grasp_model: franka_panda_hand`
+and explicit per-hand commands `open_qpos: [0.04, 0.04]` and
+`grasp_qpos: [0.0, 0.0]`. Preparation and self-sampling replay both use that
+hand's geometry, including its 0.08 m maximum opening. Single-arm declarations
+use `gripper.control_part: eef`; dual declarations use the `grippers` list.
+Omitting these new selectors retains the existing PGI fixture behavior.
+
+GraspKit defines closing along grasp-frame X, while the native hand closes
+along TCP Y. The benchmark rotates sampled and explicit Placement grasp poses
+by -90 degrees about local Z before freezing them, keeping their contact center
+and approach direction. Frozen replay uses those native-TCP poses directly.
+This grasp convention conversion is separate from the policy/runtime TCP map.
+
+Changing hands changes case generation and requires fresh frozen Atomic inputs.
+Explicit Placement top/handle grasps still need native-hand input and physical
+qualification; matching TCP kinematics alone does not certify a successful grasp
+or task. Existing PGI suites and their generic services remain available.
+
 | Suite | Use |
 | --- | --- |
 | [`motion_panda_free_space_smoke`](./suites/motion_panda_free_space_smoke.yaml) | Small Panda EEF/joint planning check |
@@ -137,6 +172,7 @@ dependencies follow their normal installation and asset-resolution rules.
 | [`atomic_franka_pgi_door_pour_align_push`](./suites/atomic_franka_pgi_door_pour_align_push.yaml) | OpenDoor, Pour, AxisAlign and PushObject |
 | [`atomic_franka_pgi_spatial_generalization`](./suites/atomic_franka_pgi_spatial_generalization.yaml) | Ten task-level skills across nominal, pose and primitive-geometry domains |
 | [`atomic_dual_ur5_pgi_hand_over`](./suites/atomic_dual_ur5_pgi_hand_over.yaml), [`atomic_dual_ur5_pgi_coordinated_pickment`](./suites/atomic_dual_ur5_pgi_coordinated_pickment.yaml), [`atomic_dual_ur5_pgi_coordinated_placement`](./suites/atomic_dual_ur5_pgi_coordinated_placement.yaml) | Dual UR5 + PGI physical skills with TOPPRA |
+| [`atomic_dual_franka_pgi_hand_over`](./suites/atomic_dual_franka_pgi_hand_over.yaml), [`atomic_dual_franka_pgi_coordinated_placement`](./suites/atomic_dual_franka_pgi_coordinated_placement.yaml) | Nominal B=1 dual Franka + PGI development fixtures with TOPPRA, cuRobo and paired raw/retimed NMG |
 | [`atomic_dual_ur5_pgi_hand_over_spatial_generalization`](./suites/atomic_dual_ur5_pgi_hand_over_spatial_generalization.yaml), [`atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization`](./suites/atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization.yaml), [`atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization`](./suites/atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization.yaml) | Dual-arm pose, task-frame and composed domains |
 | [`atomic_ur5_embodiment`](./suites/atomic_ur5_embodiment.yaml) | Component-defined UR5 embodiment with nominal/object-XY PickUp domains |
 
@@ -172,6 +208,133 @@ Other benchmark domains use separate commands: `rl`,
 `rendering`. `embodichain benchmark atomic-action-profile --action pick_up
 --profile smoke` profiles individual actions over object and position presets;
 its reports do not contribute to this framework's planner rankings.
+
+### Dual Franka planner ownership
+
+The two Franka fixtures evaluate HandOver and CoordinatedPlacement through
+named `left_arm` and `right_arm` motion requests. The selected backend generates
+each arm segment; the skill owns sequencing, synchronization and gripper commands.
+This is task-level coordination with a shared single-arm policy for NMG.
+CoordinatedPickment remains a separate scenario-owned IK workload.
+
+Both NMG rows use the same 12-slot exported Franka policy. Their explicit
+`policy_frame_from_world_by_control_part` maps each arm's poses into the policy's
+training base. The runtime maps both goals and FK observations, including the
+retimed arrival check; an unmapped arm raises an error. The fixture TCP-to-policy
+mapping accounts for the PGI tool offset and Panda hand rotation. These transforms
+are tied to the declared mounts and TCPs: changing either requires updating the
+mapping and checking FK against the policy robot. Native cuRobo creates a backend
+for each named arm and locks all non-controlled joints; this does not establish
+coupled collision avoidance between simultaneously moving arms.
+
+These suites contain one nominal case at seed 11 and keep geometry, timing,
+execution and physical success separate. Input preparation freezes both arm
+waypoints and sampled grasps independently of the candidate methods. Their
+existence does not establish spatial generalization or physical success.
+New coordinated cases also retain `case_parameters.endpoint_qualification`:
+independent sequential IK witnesses and original-goal FK, finite-state and joint
+limit checks for every endpoint of each arm. Both arms start from their frozen
+joint slices and use named-arm arena-frame TCP transforms. The record includes
+per-row residuals and the unchanged suite thresholds. A failed check stops case
+preparation without deleting rows or resampling geometry; a missing IK witness
+does not prove unreachability. These joint witnesses are preparation evidence,
+not candidate planning seeds or targets, and certify neither paths nor physics.
+Previously frozen manifests remain unchanged.
+Placement additionally retains `placement_input_geometry` from the live scaled
+meshes and frozen targets. It checks complete XY projected-triangle-union
+containment in the basin (preserving holes and excluding handle triangles) and
+vertical gaps at mesh vertices, footprint boundaries and a 5 mm interior grid.
+The record includes mesh/topology hashes, unsupported area, boundary clearance,
+sample count and minimum sampled gap. Failed rows remain in this input audit;
+the experiment's preparation gate must review them before evaluating methods.
+This is neither continuous 3D collision certification nor physical task success.
+
+### Paired-arm performance replay
+
+`BenchmarkRunner.run_paired_arm_performance()` measures complete pairs of
+independent arm requests from frozen Atomic cases. It currently accepts one
+Atomic track and scene batch, with exactly two named FullPose requests per
+group. HandOver exposes ready transport/receiver requests and
+CoordinatedPlacement exposes ready approaches. The facade executes classical
+backends sequentially; an explicitly enabled NMG backend also runs a packed
+dispatch for comparison. Task dependencies and physical execution are unchanged.
+
+```python
+from embodichain_benchmarks.motion_generation import load_suite
+from embodichain_benchmarks.motion_generation.runner import BenchmarkRunner
+
+suite = load_suite("resolved_dual_suite.yaml")
+runner = BenchmarkRunner(
+    suite,
+    [spec for spec in suite.planners if spec.enabled],
+    case_manifest="frozen_atomic_cases.json",
+    device="cuda",
+)
+summary = runner.run_paired_arm_performance(
+    output="paired_performance/run_001",
+    request_manifest="frozen_paired_requests.json",
+    warmup_trials=2,
+    measured_trials=10,
+    source_cases_per_suite=1,
+)
+```
+
+The resolved suite must declare exactly one TOPPRA reference, and selected
+methods must have their dependencies and model paths configured. Source cases
+are selected by sorted case ID. Before any candidate measurement, reference
+compilation captures each group's starts, goals and task options into an
+immutable request cache. Its identity binds the source cases, reference
+configuration, suite protocol and resolved embodiment. Changed identities or
+corrupted requests raise errors; cached inputs are never silently regenerated.
+Every repeated call receives its own input copy. Missing backends, invalid
+preparation and a reference that never reaches a ready group are errors.
+
+Run this entry point serially. Warmups, validation and physical execution are
+outside latency measurement; the synchronized pair call includes FK, transfers
+and the selected method's retiming. Sequential and packed dispatch order
+alternates across repeats. Their native positions, timing, derivatives and
+success masks are compared outside timing, and both arms are independently
+scored. Inspect `dispatch_parity` before interpreting a speed difference as an
+equivalent-behavior comparison. Repeated calls do not enlarge the task-quality
+population; paired motion geometry is distinct from physical task success.
+
+Memory is measured on a separate warmed call. CPU values are retained RSS
+deltas; GPU values cover Torch allocations and exclude ONNX Runtime, cuRobo
+and other native allocator memory. Small-repeat p95 values are descriptive.
+The fresh output directory contains `requests.json`, `resolved_suite.yaml`,
+`planners.json`, `trials.jsonl`, `aggregates.json`, `execution.json` and
+`report.md`, with time/memory, success and leaderboard tables kept separate.
+Actual planner metadata records resolved motion limits and model/configuration
+identity; the cache remains independent of candidate checkpoint selection.
+
+### Physical replay diagnostics
+
+Atomic tracks may opt into bounded measured evidence with
+`physics.replay_diagnostics: {enabled: true, samples_per_segment: 8, max_contacts_per_env: 64}`.
+The default is disabled. Trial metadata records the resolved switch, and
+`metadata.physical_replay_trace` persists initial state, selected command ends
+from every compiled action segment (including prefix PickUps), and final settle.
+It retains scene-batched object/TCP poses in arena coordinates, measured and
+commanded gripper positions, simulation times, and contact actor identities,
+impulses, signed separation and overflow counts when the backend supports them.
+Unavailable contact channels remain unavailable. Sparse contact absence does
+not establish absence throughout a segment. The trace supplements the unchanged
+physical scoring windows; collection time is included in execution timing and
+excluded from planner timing. Runs with different diagnostic settings must not
+be combined to claim execution performance.
+
+Placement target generation centers the placing mesh footprint over the support
+basin and preserves its orientation and bottom-clearance rule. It uses actual
+mesh bounds rather than a fixed world offset; asset origins need not be centered.
+With triangle topology, the support height is the uppermost surface intersected
+by a vertical ray through the basin center, so a raised rim does not set the
+resting height. Missing center support raises an error; bounds-only callers
+retain the upper-bound rule. The dual Franka fixture uses bread scale 1.20,
+chosen from the gripper opening and object footprint clearance.
+The Franka/PGI placing grasp uses zero TCP clearance above the mesh top, allowing
+the authored fingertips (about 15 mm beyond its 150 mm TCP) to overlap the object
+sides. Independent physical qualification is still required for each fixture.
+Previously frozen cases retain their recorded grasps and targets.
 
 ## Read the results
 
@@ -306,6 +469,34 @@ to NMG; Position requires coincident runtime/policy TCP origins. The common
 Joint/FullPose comparison has its own canonical table. Legacy populations without
 `constraint_patterns` retain their existing scoring contract.
 
+The classical adapters opt into this expanded scope with
+`planner.config.masked_constraints: true`; omission retains their historical
+Joint/FullPose scope. IK+TOPPRA resolves partial/mixed sequences in order, using
+only each active Cartesian component or explicit Joint target and the preceding
+solution as its seed. Its masked DLS solve has bounded independent restarts and
+never consumes the screened Cartesian joint witness. Configure its fixed budget
+with `config.masked_ik`: `iterations: 96`, `restarts: 4`,
+`position_tolerance: 0.005`, `rotation_tolerance: 0.05`, `damping: 0.02`.
+These are solver tolerances, separate from the common evaluator thresholds.
+The resulting joint knots are passed to TOPPRA; an unsolved required token fails
+the row. The homogeneous Joint and FullPose routes retain the existing joint
+and Cartesian-interpolation pipelines.
+
+cuRobo receives the original ordered joint/Cartesian sequence and uses its native
+terminal pose criteria for Position and Orientation. Nonterminal pose weights
+remain zero; waypoint tasks impose no extra path constraint. Each subsequent
+FullPose goal restores all six terminal weights. Unused payload fields are
+discarded before frame conversion. A Position goal requires coincident runtime
+TCP and cuRobo tool origins; auto-derived stock Franka profiles meet this condition.
+Changing the supported comparison population requires a distinct reviewed
+suite/method fingerprint and reevaluation; this opt-in does not relabel old results.
+
+For selected-backend Atomic calls, adapter-injected planner options retain the
+suite's full joint-budget vectors. Generic scenario defaults are cleared on
+those invocations, so cuRobo prepares and plans with the same limits instead of
+rebuilding each arm for the default 0.5 rad/s² acceleration. Explicit invocation
+options remain unchanged. Scenario-owned IK retains its scalar motion budget.
+
 `run_benchmark(..., case_manifest=path)` replays a hashed manifest after checking
 schema, case hashes, shapes, tracks, version and robot. Replay requires the
 host-written `resolved_embodiment` identity: `embodiment_id`, `config_hash` and
@@ -321,7 +512,9 @@ suite version. Shared motion budgets remain under `protocol`; conflicting
 adapter-local budgets are rejected. Acceleration is a benchmark policy, not a
 hardware specification.
 
-Time and success tables retain target modality, batch mode, distance and motion
+Geometry and solved-timing leaderboards cover the complete selected population,
+including Joint, Position, Orientation, FullPose and mixed constraints. Time and
+success tables retain target modality, batch mode, distance and motion
 component. Success rows include unique input counts, measured difficulty and
 seed-cluster bootstrap intervals at `protocol.confidence_level`. Repeated calls
 and batch rows stay within their seed cluster; fewer than two seed clusters

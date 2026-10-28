@@ -78,8 +78,12 @@ class MotionPolicy:
     velocity_limit: float | None = None
     """Optional scalar speed request, capped by effective Robot joint limits."""
 
-    acceleration_limit: float = 0.5
-    """Scalar planner-owned acceleration budget in joint units per second squared."""
+    acceleration_limit: float | None = 0.5
+    """Scalar acceleration budget in joint units per second squared.
+
+    For ``motion_gen``, ``None`` retains the selected backend's configured
+    budget. ``ik_interp`` requires a positive scalar budget.
+    """
 
     def __post_init__(self) -> None:
         valid_strategies = {"motion_gen", "ik_interp"}
@@ -98,8 +102,9 @@ class MotionPolicy:
             raise ValueError("sample_count must be at least 2.")
         for name in ("velocity_limit", "acceleration_limit"):
             value = getattr(self, name)
-            if value is None and name == "velocity_limit":
-                continue
+            if value is None:
+                if name == "velocity_limit" or self.strategy == "motion_gen":
+                    continue
             if (
                 isinstance(value, bool)
                 or not isinstance(value, Real)

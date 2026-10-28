@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 import torch
@@ -37,6 +37,7 @@ from ..trajectory_ops import build_pose_plan_states
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.lab.sim.motion.planners.utils import PlanResult
 
     from ..policies import MotionPolicy
 
@@ -156,8 +157,11 @@ def resample_planned_trajectory(
         control_dt: Destination control interval, required together with ``dt``.
 
     Returns:
-        A control-grid path with at least ``sample_count`` samples when timing
-        is supplied, otherwise exactly ``sample_count`` distance samples.
+        A float32 control-command path with at least ``sample_count`` samples
+        when timing is supplied, otherwise exactly ``sample_count`` distance
+        samples. Interpolation retains the planner's precision until the final
+        conversion to the existing float32 simulation-command representation;
+        compiled dynamic checks apply to those converted samples.
 
     Raises:
         TypeError: If ``trajectory`` is not a floating-point tensor.
@@ -176,20 +180,23 @@ def resample_planned_trajectory(
     if sample_count < 1:
         raise ValueError("sample_count must be positive.")
     if trajectory.shape[0] == 0:
-        return trajectory.new_empty((0, sample_count, trajectory.shape[2]))
+        return trajectory.new_empty(
+            (0, sample_count, trajectory.shape[2]), dtype=torch.float32
+        )
     if (dt is None) != (control_dt is None):
         raise ValueError("dt and control_dt must be supplied together.")
     if dt is not None:
         assert control_dt is not None
         retimed, _, _, _ = retime_to_control_grid(trajectory, dt, control_dt)
+        retimed = retimed.to(torch.float32)
         if retimed.shape[1] >= sample_count:
             return retimed
         padding = retimed[:, -1:].expand(-1, sample_count - retimed.shape[1], -1)
         return torch.cat([retimed, padding], dim=1)
     if trajectory.shape[1] == sample_count:
-        return trajectory
+        return trajectory.to(torch.float32)
     if trajectory.shape[1] == 1:
-        return trajectory.expand(-1, sample_count, -1).clone()
+        return trajectory.expand(-1, sample_count, -1).to(torch.float32).clone()
     resampled = resample_with_distance(
         trajectory,
         sample_count,
@@ -201,7 +208,7 @@ def resample_planned_trajectory(
     resampled = resampled.to(dtype=trajectory.dtype).clone()
     resampled[:, 0] = trajectory[:, 0]
     resampled[:, -1] = trajectory[:, -1]
-    return resampled
+    return resampled.to(torch.float32)
 
 
 def assemble_full_robot_trajectory(
@@ -220,7 +227,7 @@ def assemble_full_robot_trajectory(
         n_waypoints,
     ).clone()
     for joint_ids, trajectory in part_trajectories:
-        full[:, :, list(joint_ids)] = trajectory
+        full[:, :, list(joint_ids)] = trajectory.to(full)
     return full
 
 
@@ -243,6 +250,15 @@ def plan_named_arm_trajectory(
             interpolation_dt=interpolation_dt,
         ),
     )
+    return _named_arm_result(result, n_waypoints, interpolation_dt)
+
+
+def _named_arm_result(
+    result: PlanResult,
+    n_waypoints: int,
+    interpolation_dt: float | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Retain a named arm's solved timing on the shared execution grid."""
     if not isinstance(result.success, torch.Tensor):
         raise TypeError("Motion planning success must be a torch.Tensor.")
     if result.positions is None:
@@ -255,6 +271,52 @@ def plan_named_arm_trajectory(
         dt=result.dt,
         control_dt=interpolation_dt,
     )
+
+
+def plan_named_arm_trajectories(
+    motion_generator: MotionGenerator,
+    requests: Mapping[str, tuple[torch.Tensor, torch.Tensor, int]],
+    motion_policy: MotionPolicy,
+    interpolation_dt: float | None,
+) -> tuple[dict[str, tuple[torch.Tensor, torch.Tensor]], dict[str, object] | None]:
+    """Plan independent arm requests and retain any packed-policy diagnostics.
+
+    Args:
+        motion_generator: Generator owning the selected planner backend.
+        requests: Part names mapped to start joints, target poses and sample count.
+        motion_policy: Common backend and execution policy.
+        interpolation_dt: Host command period used to preserve solved timing.
+
+    Returns:
+        Per-part success/trajectory pairs and optional shared policy-batch facts.
+        The caller still owns stage ordering and full-task failure propagation.
+    """
+    targets = {
+        part: build_pose_plan_states(poses) for part, (_, poses, _) in requests.items()
+    }
+    options = {
+        part: motion_policy.to_motion_gen_options(
+            start_qpos=start,
+            control_part=part,
+            sample_count=count,
+            interpolation_dt=interpolation_dt,
+        )
+        for part, (start, _, count) in requests.items()
+    }
+    results = motion_generator.generate_multi_part(targets, options)
+    trajectories = {
+        part: _named_arm_result(result, requests[part][2], interpolation_dt)
+        for part, result in results.items()
+    }
+    batching = [result.policy_batching for result in results.values()]
+    if any(item != batching[0] for item in batching[1:]):
+        raise ValueError("A grouped planner must report one consistent policy batch.")
+    diagnostics = (
+        None
+        if batching[0] is None
+        else {"control_parts": list(requests), **batching[0]}
+    )
+    return trajectories, diagnostics
 
 
 def pad_trajectory_to_length(
@@ -416,6 +478,7 @@ __all__ = [
     "assemble_full_robot_trajectory",
     "pad_trajectory_to_length",
     "plan_named_arm_trajectory",
+    "plan_named_arm_trajectories",
     "resample_planned_trajectory",
     "require_shared_task_state_key",
     "repeat_qpos",

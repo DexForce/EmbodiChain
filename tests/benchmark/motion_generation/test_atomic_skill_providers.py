@@ -995,12 +995,19 @@ def test_backend_plan_options_fill_only_unset_motion_generation_policies() -> No
 
     filled = with_plan_options(invocation(MotionPolicy(strategy="motion_gen")), options)
     kept = with_plan_options(
-        invocation(MotionPolicy(strategy="motion_gen", plan_opts=explicit)), options
+        invocation(
+            MotionPolicy(
+                strategy="motion_gen", plan_opts=explicit, acceleration_limit=0.7
+            )
+        ),
+        options,
     )
     interpolated = with_plan_options(invocation(MotionPolicy()), options)
 
     assert filled.motion_policy.plan_opts.sample_interval == 40
+    assert filled.motion_policy.acceleration_limit is None
     assert kept.motion_policy.plan_opts.sample_interval == 10
+    assert kept.motion_policy.acceleration_limit == 0.7
     assert interpolated.motion_policy.plan_opts is None
 
 

@@ -47,6 +47,14 @@ __all__ = ["NmgOnnxAdapter"]
 class NmgOnnxAdapter(PlannerAdapter):
     """Run a standalone NMG ONNX policy through :class:`NeuralPlanner`."""
 
+    configuration_features = frozenset(
+        {
+            "policy_frame_from_world_by_control_part",
+            "batch_control_parts",
+            "onnx_cuda_use_tf32",
+        }
+    )
+
     capabilities = frozenset(
         {
             "eef_waypoint",
@@ -157,6 +165,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             robot_uid=self.context.robot.uid,
             onnx_model_path=model_path,
             control_part=self.context.control_part,
+            batch_control_parts=bool(values.get("batch_control_parts", False)),
             max_steps=int(values.get("max_steps", 150)),
             action_scale=float(values.get("action_scale", 0.2)),
             num_arm_joints=int(values.get("num_arm_joints", 7)),
@@ -169,7 +178,11 @@ class NmgOnnxAdapter(PlannerAdapter):
             rot_eps=float(values.get("rot_eps", 0.1)),
             joint_eps=float(values.get("joint_eps", 0.01)),
             onnx_providers=list(providers) if providers is not None else None,
+            onnx_cuda_use_tf32=values.get("onnx_cuda_use_tf32"),
             policy_frame_from_world=values.get("policy_frame_from_world"),
+            policy_frame_from_world_by_control_part=values.get(
+                "policy_frame_from_world_by_control_part"
+            ),
             runtime_tcp_from_policy_tcp=values.get("runtime_tcp_from_policy_tcp"),
             dt=float(values.get("dt", 0.01)),
             constraints=self._retiming_constraints() if self.retime else None,

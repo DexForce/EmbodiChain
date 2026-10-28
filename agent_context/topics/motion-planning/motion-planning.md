@@ -268,6 +268,9 @@ optional explicit planner specs and a run-local adapter mapping. It copies calle
 configuration; explicit planners replace the suite list and are enabled.
 `PlannerAdapter` owns build/prepare/plan/close and returns `PlanResult` for
 free-space evaluation; Atomic Skills also require an exposed `MotionGenerator`.
+`registry.planner_configuration_features()` loads built-in registrations without
+constructing backends and reports supported configuration semantics for preflight.
+Runtime request support remains the adapter instance's `capabilities` contract.
 The host owns simulation lifetime, seeded cases, evaluation, and artifacts.
 Canonical case tensors and nested parameters stay independent of adapter
 mutations through untimed copies at capacity, preparation and plan boundaries.
@@ -277,6 +280,11 @@ measured difficulty and batch semantics live in
 Cartesian bases, retain `base_case_id`, and share independent maximum-joint/constrained
 matching in `metrics/_constraints.py`. Homogeneous Joint/FullPose cases keep
 classical input contracts; partial/mixed cases require `masked_constraints`.
+The TOPPRA and cuRobo adapters expose that capability only when their explicit
+`config.masked_constraints` opt-in is enabled, preserving historical populations.
+TOPPRA uses sequential component IK; cuRobo changes native terminal pose criteria.
+Neither consumes inactive pose payloads or Cartesian reference joint witnesses.
+See [planner details](planner-details.md) for component and arm-frame contracts.
 Validation preserves native samples with deterministic joint subdivisions.
 `NeuralPlanOptions.waypoint_modalities` supplies explicit meanings, and
 position-only goals require coincident runtime/policy TCP origins. The public
@@ -322,6 +330,16 @@ solver outcomes across schedules. Worker thread limits also bound ONNX Runtime
 through the host Torch intra-op setting. Suite resources ship in the wheel;
 the installed CLI dispatches through `embodichain/cli/benchmark.py`. Source
 launchers under `scripts/benchmark/` forward motion-generation evaluation.
+`BenchmarkRunner.run_paired_arm_performance()` delegates to
+`_paired_arm_performance.py` for serial replay of independent two-arm FullPose
+requests captured by a declared TOPPRA reference before candidate measurement.
+Its immutable cache binds source cases, suite protocol and embodiment;
+candidate inputs are copied per call. Classical facade fallback stays sequential,
+while capable NMG configurations additionally report packed dispatch and parity.
+Scoring and a separate warmed memory call sit outside synchronized latency.
+Request replicas do not enter task-quality counts, and native pair success does
+not certify compiled timing or physical execution. The benchmark README owns
+usage, measurement scope and artifact interpretation.
 `tests/benchmark/motion_generation/` covers contracts and lifecycle, while
 `tests/test_benchmark_package.py` builds and installs the wheel outside the checkout.
 

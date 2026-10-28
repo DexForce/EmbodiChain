@@ -26,6 +26,43 @@ from embodichain.compute.trajectory._toppra import _NumpyToppra
 from embodichain.compute.trajectory._toppra_warp import _retime_toppra_warp
 
 
+@pytest.mark.parametrize("samples", [128, 600])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_double_sampling_avoids_dense_position_quantization(
+    samples: int, device: str
+) -> None:
+    # Large joint offset and a short move amplify float32 position rounding
+    # under second differences, despite a correct continuous timing solution.
+    path = torch.tensor([[[2.8], [2.81]]], dtype=torch.float32, device=device)
+    result = _retime_toppra_warp(
+        path, 2.0, 4.0, sample_count=samples, output_dtype=torch.float64
+    )
+    assert result["success"].tolist() == [True]
+    q, dt = result["positions"], result["dt"]
+    assert q.dtype == dt.dtype == torch.float64
+    torch.testing.assert_close(q[:, [0, -1]], path.double())
+    velocity = q.diff(dim=1) / dt[:, 1:, None]
+    acceleration = velocity.diff(dim=1) / dt[:, 2:, None]
+    assert acceleration.abs().max() <= 4.0 + 1e-7
+    # Narrowing after sampling recreates the failure; the improvement must
+    # come from preserving samples, not from altering limits or the clock.
+    rounded = q.float().double()
+    rounded_acc = rounded.diff(n=2, dim=1) / dt[:, 2:, None].square()
+    assert rounded_acc.abs().max() > 4.01
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_double_output_keeps_float32_input_gradient_dtype(device: str) -> None:
+    points = torch.tensor([[[0.0], [0.2]]], requires_grad=True, device=device)
+    result = _retime_toppra_warp(
+        points, 1.0, 2.0, sample_dt=0.01, output_dtype=torch.float64
+    )
+    result["dt"].sum().backward()
+    assert points.grad.dtype == torch.float32
+    assert torch.isfinite(points.grad).all()
+    assert points.grad.abs().max() > 0
+
+
 @pytest.mark.parametrize("count", [2, 3, 4, 7, 20])
 def test_warp_matches_numpy_not_a_knot_geometry(count: int) -> None:
     points = np.random.default_rng(count).normal(size=(3, count, 3))

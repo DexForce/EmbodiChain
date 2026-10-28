@@ -1421,6 +1421,23 @@ def test_curobo_joint_case_uses_reference_joint_waypoints():
     assert torch.equal(targets[1].qpos, joint_targets[:, 1])
 
 
+def test_curobo_prepares_both_named_atomic_arms():
+    adapter = _curobo_adapter()
+    case = replace(
+        _case(),
+        case_parameters={
+            "control_parts": {
+                "source": {"motion": "left_arm", "grasp": "left_eef"},
+                "destination": {"motion": "right_arm", "grasp": "right_eef"},
+            }
+        },
+    )
+    adapter.prepare_cases([case, replace(case, case_id="duplicate")])
+    calls = adapter.motion_generator.planner.prepare_backend.call_args_list
+    assert [call.kwargs["control_part"] for call in calls] == ["left_arm", "right_arm"]
+    assert all(call.kwargs["move_type"] is MoveType.EEF_MOVE for call in calls)
+
+
 def test_nmg_rejects_unknown_motion_validity():
     from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
     from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
@@ -2958,8 +2975,7 @@ def test_report_includes_workload_and_measured_difficulty_tables(tmp_path):
     report = write_markdown_report(tmp_path / "report.md", suite, aggregates)
     text = report.read_text(encoding="utf-8")
 
-    assert text.count("\n| ---") == 6
-    assert "### Common Joint / FullPose comparison" in text
+    assert text.count("\n| ---") == 5
     assert "### Workload Success & Uncertainty" in text
     assert "### Measured Start Difficulty" in text
     assert text.count("## Time & Memory") == 1

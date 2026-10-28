@@ -2223,8 +2223,27 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
     )
     robot = Mock(device=torch.device("cpu"))
     robot.get_joint_ids.return_value = list(range(7))
-    result = scenario.evaluate_case(
+    batch_trace = {
+        "stages": ["approach"],
+        "control_parts": ["left_arm", "right_arm"],
+        "scene_batch_size": 2,
+        "control_part_count": 2,
+        "actor_batch_size": 4,
+        "policy_forward_calls": 7,
+    }
+    compiled = replace(
         _compiled_replay_batch([True, True]),
+        action_plans=(
+            SimpleNamespace(
+                skill_id="pick_up",
+                diagnostics=SimpleNamespace(
+                    metadata={"packed_motion_groups": [batch_trace]}
+                ),
+            ),
+        ),
+    )
+    result = scenario.evaluate_case(
+        compiled,
         case,
         robot,
         "arm",
@@ -2237,6 +2256,9 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
     ]
     assert result.outcomes[1].failure_code == "object_not_lifted"
     assert result.outcomes[1].failure_stage == "lift"
+    assert result.metadata["packed_motion_groups"] == [
+        {"action_index": 0, "skill_id": "pick_up", **batch_trace}
+    ]
     assert result.outcomes[0].stages[0].measurements["height_m"] == pytest.approx(0.1)
     if not motion_ok:
         assert result.outcomes[0].failure_code == "motion_failed"
@@ -2681,12 +2703,14 @@ def test_compiled_replay_uses_scheduled_ticks_for_completion_time():
             articulation_joint_effect_end=None,
             object_rotation_peak_signed_rad=None,
             replay_traces={},
+            replay_diagnostics={"samples": [{"phase": "settled"}]},
         )
     )
     observation = runtime.execute(
         _compiled_replay_batch([True]), _atomic_case(), Mock()
     )
     assert observation.task_completion_time_s == pytest.approx(0.05)
+    assert observation.replay_diagnostics == {"samples": [{"phase": "settled"}]}
 
 
 def test_compiled_clock_synchronizes_unequal_row_intervals():
@@ -2774,7 +2798,8 @@ def test_loaded_cases_bind_atomic_providers_without_regeneration(monkeypatch):
     factory.assert_called_once()
 
 
-def test_atomic_reference_ik_recovery_preserves_rows_and_original_targets():
+@pytest.mark.parametrize("control_part", [None, "right_arm"])
+def test_atomic_reference_ik_recovery_preserves_rows_and_original_targets(control_part):
     """An IK success near a probe must still satisfy the original arrival ball."""
     from embodichain_benchmarks.motion_generation.config import ProtocolCfg
 
@@ -2785,10 +2810,11 @@ def test_atomic_reference_ik_recovery_preserves_rows_and_original_targets():
     attempts = []
     row_two_attempts = 0
     robot = Mock()
+    expected_arm = "arm" if control_part is None else control_part
 
     def inverse(*, pose, joint_seed, name, env_ids=None):
         nonlocal row_two_attempts
-        assert name == "arm"
+        assert name == expected_arm
         if env_ids is None:
             return torch.tensor([True, False, False]), torch.zeros(batch, 1)
         attempts.append(list(env_ids))
@@ -2804,7 +2830,7 @@ def test_atomic_reference_ik_recovery_preserves_rows_and_original_targets():
         return torch.ones(len(env_ids), dtype=torch.bool), torch.tensor(qpos)
 
     def forward(*, qpos, name, env_ids, to_matrix):
-        assert to_matrix and name == "arm"
+        assert to_matrix and name == expected_arm
         poses = targets[env_ids].clone()
         for index, value in enumerate(qpos[:, 0].tolist()):
             if value == 1.0:
@@ -2829,7 +2855,9 @@ def test_atomic_reference_ik_recovery_preserves_rows_and_original_targets():
     scenario = AtomicSkillScenario()
     scenario.robot = robot
     scenario.suite = SimpleNamespace(protocol=ProtocolCfg())
-    references = scenario.solve_reference_qpos(torch.zeros(batch, 1), targets[:, None])
+    references = scenario.solve_reference_qpos(
+        torch.zeros(batch, 1), targets[:, None], control_part=control_part
+    )
     assert torch.equal(references[:, 0], torch.tensor([[0.0], [1.0], [3.0]]))
     assert torch.equal(targets, saved)
     assert sum(1 in ids for ids in attempts) == 1

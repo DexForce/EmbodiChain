@@ -125,8 +125,22 @@ def with_motion_budget(
 def with_plan_options(
     invocation: ActionInvocation, plan_opts: object
 ) -> ActionInvocation:
-    """Give a motion-generation invocation planner options it left unset."""
+    """Inject host options without replacing their vector budgets by defaults.
+
+    Explicit invocation options remain authoritative. Selected-backend options
+    own the suite's full per-joint budgets, so scenario scalar defaults must not
+    override them. Scenario-owned IK retains its scalar policy limits.
+    """
     policy = invocation.motion_policy
     if policy.strategy != "motion_gen" or policy.plan_opts is not None:
         return invocation
-    return replace(invocation, motion_policy=replace(policy, plan_opts=plan_opts))
+    limits = (
+        {"velocity_limit": None, "acceleration_limit": None}
+        if benchmark_motion_attribution(invocation.skill_id)[
+            "selected_planner_backend_used"
+        ]
+        else {}
+    )
+    return replace(
+        invocation, motion_policy=replace(policy, plan_opts=plan_opts, **limits)
+    )

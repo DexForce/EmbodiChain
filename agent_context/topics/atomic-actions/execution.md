@@ -172,6 +172,10 @@ a semantic effect boundary.
 scalar budgets to `MotionGenOptions` for both strategies. Omitted velocity
 preserves Robot caps; the default acceleration budget is 0.5. Typed `plan_opts`
 require `motion_gen`; each backend owns how they consume scalar budgets.
+For `motion_gen`, an explicit `acceleration_limit=None` preserves the backend's
+configured budget; `ik_interp` still requires a positive scalar. The benchmark
+uses this delegation when injecting selected-planner options so task defaults
+do not replace the suite's per-joint limits or invalidate prepared backends.
 Configured execution policies expose the same fields under `motion`, and
 requested budgets are retained in execution metadata. Use these fields when a
 physically qualified task needs a lower speed than the selected robot's limits.
@@ -197,3 +201,18 @@ of choosing the maximum. Simulation control periods and sleeps must be integer
 multiples of `physics_dt`; the adapter never rounds a motion-command request
 upward. Passive runner polling, including physical-effect waits, rounds the
 configured minimum cycle up to an advertised clock quantum before sleeping.
+
+
+## Benchmark physical replay evidence
+
+The motion-generation benchmark's Atomic replay can collect opt-in bounded
+`physics.replay_diagnostics` independently of stage scoring. It samples all
+compiled action segments, including prefix pickups, and persists scene-row
+object/TCP poses, commanded/measured gripper state, elapsed simulation time and
+available ContactSensor evidence in trial metadata. Contact identities retain
+Spawn paths/link names and overflow counts; missing channels and sparse absence
+must not be interpreted as a successful grasp or absence of intermediate contact.
+Collection contributes to execution time, so the resolved diagnostic switch is
+recorded before planning and must match for execution-performance comparisons.
+See `scenarios/_replay_diagnostics.py` and `atomic_replay.py` in the benchmark
+extension. This evidence does not attach objects or change controller commands.

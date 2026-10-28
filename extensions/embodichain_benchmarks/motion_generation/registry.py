@@ -32,6 +32,7 @@ __all__ = [
     "create_scenario_provider",
     "create_robot_provider",
     "planner_adapter_names",
+    "planner_configuration_features",
     "register_planner_adapter",
     "register_scenario_provider",
     "register_robot_provider",
@@ -63,6 +64,28 @@ def unregister_planner_adapter(name: str) -> None:
 def planner_adapter_names() -> tuple[str, ...]:
     """Return registered adapter names in deterministic order."""
     return tuple(sorted(_PLANNER_ADAPTERS))
+
+
+def planner_configuration_features(name: str) -> frozenset[str]:
+    """Describe optional configuration contracts without building a backend.
+
+    Args:
+        name: Registered planner-adapter name, such as ``nmg_onnx``.
+
+    Returns:
+        Feature identifiers implemented by the adapter class. These do not
+        assert runtime availability or support for every requested case.
+
+    Raises:
+        ValueError: If the adapter name is not registered.
+    """
+    from . import planners as _builtin_planners  # noqa: F401 - registration
+
+    try:
+        adapter_cls = _PLANNER_ADAPTERS[name]
+    except KeyError as exc:
+        raise ValueError(f"Unknown planner adapter {name!r}.") from exc
+    return adapter_cls.configuration_features
 
 
 def create_planner_adapter(

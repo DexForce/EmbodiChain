@@ -471,31 +471,46 @@ class TestInterpolateJointTrajectory:
             interpolate_joint_trajectory(start, waypoints, n_waypoints=2)
 
 
-def test_full_robot_trajectory_uses_retimed_positions_and_velocities() -> None:
+@pytest.mark.parametrize("planner_dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("command_dtype", [torch.float32, torch.float64])
+def test_full_robot_trajectory_uses_retimed_positions_and_velocities(
+    planner_dtype: torch.dtype, command_dtype: torch.dtype
+) -> None:
     result = PlanResult(
         success=torch.tensor([True]),
-        positions=torch.tensor([[[0.0, 10.0], [1.0, 12.0]]]),
-        velocities=torch.full((1, 2, 2), 99.0),
-        accelerations=torch.full((1, 2, 2), 88.0),
-        dt=torch.tensor([[0.0, 0.75]]),
+        positions=torch.tensor([[[0.0, 10.0], [1.0, 12.0]]], dtype=planner_dtype),
+        velocities=torch.full((1, 2, 2), 99.0, dtype=planner_dtype),
+        accelerations=torch.full((1, 2, 2), 88.0, dtype=planner_dtype),
+        dt=torch.tensor([[0.0, 0.75]], dtype=planner_dtype),
     )
+    native = {
+        name: getattr(result, name).clone()
+        for name in ("positions", "velocities", "accelerations", "dt")
+    }
+    base_qpos = torch.tensor([[5.0, 6.0, 7.0, 8.0]], dtype=command_dtype)
+    original_base = base_qpos.clone()
 
     success, trajectory = to_full_robot_trajectory(
         result,
-        base_qpos=torch.tensor([[5.0, 6.0, 7.0, 8.0]]),
+        base_qpos=base_qpos,
         joint_ids=[1, 3],
         env_ids=torch.tensor([7]),
         control_dt=0.5,
     )
 
     expected_positions = torch.tensor(
-        [[[5.0, 0.0, 7.0, 10.0], [5.0, 0.5, 7.0, 11.0], [5.0, 1.0, 7.0, 12.0]]]
+        [[[5.0, 0.0, 7.0, 10.0], [5.0, 0.5, 7.0, 11.0], [5.0, 1.0, 7.0, 12.0]]],
+        dtype=command_dtype,
     )
     expected_velocities = torch.tensor(
-        [[[0.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 2.0], [0.0, 0.0, 0.0, 0.0]]]
+        [[[0.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 2.0], [0.0, 0.0, 0.0, 0.0]]],
+        dtype=command_dtype,
     )
     assert torch.equal(success, torch.tensor([True]))
     torch.testing.assert_close(trajectory.positions, expected_positions)
     torch.testing.assert_close(trajectory.velocities, expected_velocities)
     torch.testing.assert_close(trajectory.dt, torch.tensor([[0.0, 0.5, 0.5]]))
     assert trajectory.accelerations is None
+    torch.testing.assert_close(base_qpos, original_base, rtol=0, atol=0)
+    for name, original in native.items():
+        torch.testing.assert_close(getattr(result, name), original, rtol=0, atol=0)
