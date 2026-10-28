@@ -375,7 +375,11 @@ def test_toppra_joint_cases_preserve_frozen_configurations_without_ik(
     )
     result = adapter.plan(case)
     assert result.success.tolist() == [True]
-    torch.testing.assert_close(result.positions[:, 0], case.start_qpos)
-    torch.testing.assert_close(result.positions[:, -1], targets[:, -1])
-    distances = torch.cdist(targets, result.positions).amin(dim=-1)
+    assert result.positions.dtype == torch.float64
+    expected_targets = targets.to(torch.float64)
+    torch.testing.assert_close(
+        result.positions[:, 0], case.start_qpos.to(torch.float64)
+    )
+    torch.testing.assert_close(result.positions[:, -1], expected_targets[:, -1])
+    distances = torch.cdist(expected_targets, result.positions).amin(dim=-1)
     assert bool((distances < 0.01).all())
