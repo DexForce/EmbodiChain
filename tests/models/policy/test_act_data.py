@@ -24,7 +24,7 @@ import numpy as np
 import pytest
 import torch
 
-from embodichain.data_pipeline.datasets import LeRobotDataSource, LeRobotImageReader
+from embodichain.data_pipeline.datasets import LeRobotDataSource
 from embodichain_models.policy.act import ACTSequenceSource, build_act_trainer
 
 
@@ -82,16 +82,12 @@ def test_rgb_and_action_windows_align_and_resume_checks_content(tmp_path: Path):
         source_id="act-test",
         repo_id="local/act-test",
         memory_limit_bytes=1024 * 1024,
+        image_keys=["observation.images.camera"],
+        image_cache_bytes=192,
     )
-    images = LeRobotImageReader(
-        root, "observation.images.camera", repo_id="local/act-test", cache_bytes=192
+    source = ACTSequenceSource(
+        numeric, horizon=4, image_key="observation.images.camera"
     )
-    misaligned = numeric.data["frame_ids"].clone()
-    numeric.data["frame_ids"][0, 0, 2] = 1
-    with pytest.raises(ValueError, match="episode/frame order"):
-        ACTSequenceSource(numeric, images, horizon=4)
-    numeric.data["frame_ids"] = misaligned
-    source = ACTSequenceSource(numeric, images, horizon=4)
     batch = source.sample(40, generator=torch.Generator().manual_seed(32))
     state, actions, valid, rgb = (
         batch.inputs["state"],

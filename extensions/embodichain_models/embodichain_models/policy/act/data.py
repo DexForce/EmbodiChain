@@ -19,14 +19,12 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 
 import torch
 from tensordict import TensorDict
 
 from embodichain.data_pipeline.datasets import (
     LeRobotDataSource,
-    LeRobotImageReader,
     SequenceSpecCfg,
 )
 from embodichain.learning.sl import SequenceBatchSource, SupervisedBatch
@@ -37,28 +35,26 @@ __all__ = ["ACTSequenceSource"]
 class ACTSequenceSource:
     """Join current RGB frames to immutable numeric action windows.
 
-    Both readers must refer to the same unmodified dataset, using SDK
-    episode/frame identities. Only the anchor image is decoded per window.
+    Numeric windows and images share canonical frame identities from one
+    dataset. Only the anchor image is decoded per window.
 
     Args:
-        numeric: Resident numeric LeRobot source.
-        images: Bounded image reader from the same dataset.
+        source: Unified numeric and RGB LeRobot source.
+        image_key: Configured RGB feature column.
         horizon: Current and future actions per training sample.
     """
 
     def __init__(
-        self, numeric: LeRobotDataSource, images: LeRobotImageReader, horizon: int
+        self, source: LeRobotDataSource, horizon: int, *, image_key: str
     ) -> None:
-        root = numeric.metadata.get("storage", {}).get("root")
-        if not root or Path(root).resolve() != images.root:
-            raise ValueError("ACT numeric and image readers must share a dataset root")
-        images.validate_frame_order(numeric.data["frame_ids"][numeric.data["valid"]])
-        self.images = images
+        self.source = source
+        self.image_key = image_key
+        self.image_content_id = source.image_fingerprint(image_key)
 
         def encode(context: TensorDict) -> SupervisedBatch:
             return SupervisedBatch(
                 inputs={
-                    "rgb": images.read(context["frame_ids"][:, 0]),
+                    "rgb": source.read_images(image_key, context["frame_ids"][:, 0]),
                     "state": context["obs"][:, 0],
                 },
                 targets=context["actions"],
@@ -66,7 +62,7 @@ class ACTSequenceSource:
             )
 
         self.bridge = SequenceBatchSource(
-            numeric,
+            source,
             SequenceSpecCfg(history_length=1, prediction_horizon=horizon),
             encoder=encode,
             encoder_version="act-rgb-current-action-chunk-v1",
@@ -75,7 +71,7 @@ class ACTSequenceSource:
         self.source_id = (
             "act:"
             + hashlib.sha256(
-                f"{self.bridge.source_id}:{images.content_id}".encode()
+                f"{self.bridge.source_id}:{self.image_content_id}".encode()
             ).hexdigest()
         )
 
@@ -94,5 +90,5 @@ class ACTSequenceSource:
     def validate_resume(self) -> None:
         """Reject recovery if numeric or image data have changed."""
         self.bridge.validate_resume()
-        if self.images.fingerprint() != self.images.content_id:
+        if self.source.image_fingerprint(self.image_key) != self.image_content_id:
             raise ValueError("ACT image dataset content changed")

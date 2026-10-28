@@ -39,8 +39,8 @@ operations remain in `compute`; source storage belongs to data adapters.
   state codec, objective, predictor and replay belong to that model family.
 - Visual ACT belongs to `embodichain_models.policy.act`; its recipe is
   `build_act_trainer`. `ACTSequenceSource` joins only the current RGB frame to
-  causal numeric action windows, checks episode/frame order and binds image
-  content to recovery. `examples/learning/act/` owns the PushCube collection,
+  causal numeric action windows from one `LeRobotDataSource`, sharing its
+  canonical frame index and binding image content to recovery. `examples/learning/act/` owns the PushCube collection,
   checkpoint selection and physical evaluation.
 
 Objectives own loss masks, normalization, integration and multi-step graph

@@ -24,7 +24,7 @@ from typing import Any
 
 import torch
 
-from embodichain.data_pipeline.datasets import LeRobotDataSource, LeRobotImageReader
+from embodichain.data_pipeline.datasets import LeRobotDataSource
 from embodichain.learning.sl import (
     SupervisedLearner,
     SupervisedTrainer,
@@ -77,17 +77,15 @@ def build_act_trainer(config: Mapping[str, Any]) -> SupervisedTrainer:
             schema=schema,
             source_id=f"act-{split}",
             repo_id=repo_id,
+            image_keys=[image_key],
+            image_cache_bytes=int(data_cfg.get("image_cache_bytes", 512 * 1024**2)),
             memory_limit_bytes=int(
                 data_cfg.get("numeric_memory_limit_bytes", 512 * 1024**2)
             ),
         )
-        images = LeRobotImageReader(
-            path,
-            image_key,
-            repo_id=repo_id,
-            cache_bytes=int(data_cfg.get("image_cache_bytes", 512 * 1024**2)),
+        return numeric, ACTSequenceSource(
+            numeric, model_cfg.horizon, image_key=image_key
         )
-        return numeric, ACTSequenceSource(numeric, images, model_cfg.horizon)
 
     numeric, source = make_source(train_path, "train")
     validation = (

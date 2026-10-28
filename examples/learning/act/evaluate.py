@@ -119,10 +119,13 @@ def _rollouts(
             if record_video:
                 frames.append(rgb[0].permute(1, 2, 0).cpu().numpy().copy())
             if shuffled is not None:
-                numeric, images = shuffled
+                numeric = shuffled
                 row = episode_index % numeric.data.batch_size[0]
                 ids = numeric.data["frame_ids"][row, numeric.data["valid"][row]]
-                rgb = images.read(ids[min(step, len(ids) - 1)].unsqueeze(0)).to(device)
+                rgb = numeric.read_images(
+                    "observation.images.cam_high",
+                    ids[min(step, len(ids) - 1)].unsqueeze(0),
+                ).to(device)
             before = time.perf_counter()
             with torch.inference_mode():
                 if mode == "fixed":
@@ -229,7 +232,6 @@ def main() -> None:
     if args.shuffle_images_report:
         from embodichain.data_pipeline.datasets import (
             LeRobotDataSource,
-            LeRobotImageReader,
         )
         from .train import _report
 
@@ -241,12 +243,9 @@ def main() -> None:
             source_id="act-shuffle",
             repo_id=path.name,
             memory_limit_bytes=512 * 1024**2,
+            image_keys=["observation.images.cam_high"],
         )
-        images = LeRobotImageReader(
-            path, "observation.images.cam_high", repo_id=path.name
-        )
-        images.validate_frame_order(numeric.data["frame_ids"][numeric.data["valid"]])
-        shuffled = (numeric, images)
+        shuffled = numeric
     env = None
     try:
         env = make_env(args.device, camera=True)

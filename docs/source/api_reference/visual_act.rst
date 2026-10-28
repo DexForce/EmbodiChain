@@ -6,10 +6,12 @@ Visual action chunking and PushCube
 These interfaces train a conditional variational action-chunking policy from
 current RGB/proprioception and recorded future actions. The episode collector
 and simulator evaluation are owned by the ``examples/learning/act`` example.
+Numeric windows and RGB frames share one
+:class:`~embodichain.data_pipeline.datasets.LeRobotDataSource`; configure its
+``image_keys`` and use ``read_images`` for bounded, frame-aligned RGB access.
 
 .. autosummary::
 
-   embodichain.data_pipeline.datasets.lerobot_images.LeRobotImageReader
    embodichain_models.policy.act.ACTCfg
    embodichain_models.policy.act.ACTPolicy
    embodichain_models.policy.act.ACTObjective
@@ -23,9 +25,6 @@ and simulator evaluation are owned by the ``examples/learning/act`` example.
    embodichain_models.policy.act.rollout.ACTTemporalEnsembler
    embodichain_models.policy.act.sl_recipe.build_act_trainer
    embodichain_tasks.manipulation.push_cube.VisualPushCubeEnv
-
-.. autoclass:: embodichain.data_pipeline.datasets.lerobot_images.LeRobotImageReader
-   :members:
 
 .. autoclass:: embodichain_models.policy.act.ACTCfg
    :members:

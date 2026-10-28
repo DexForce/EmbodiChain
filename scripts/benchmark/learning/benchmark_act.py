@@ -32,7 +32,7 @@ from typing import Callable
 
 import torch
 
-from embodichain.data_pipeline.datasets import LeRobotDataSource, LeRobotImageReader
+from embodichain.data_pipeline.datasets import LeRobotDataSource
 from embodichain.learning.sl import SupervisedLearner
 from embodichain_models.policy.act import (
     ACTCfg,
@@ -80,22 +80,20 @@ def main() -> None:
     report = json.loads(args.report.read_text())
     root = Path(report["dataset"])
     start = time.perf_counter()
-    numeric = LeRobotDataSource(
-        root,
-        schema=report["schema"],
-        source_id="act-benchmark",
-        repo_id=root.name,
-        memory_limit_bytes=512 * 1024**2,
-    )
-    readers = {
-        size: LeRobotImageReader(
-            root, "observation.images.cam_high", repo_id=root.name, cache_bytes=size
+    sources = {}
+    for size in (0, 512 * 1024**2):
+        source = LeRobotDataSource(
+            root,
+            schema=report["schema"],
+            source_id="act-benchmark",
+            repo_id=root.name,
+            memory_limit_bytes=512 * 1024**2,
+            image_keys=["observation.images.cam_high"],
+            image_cache_bytes=size,
         )
-        for size in (0, 512 * 1024**2)
-    }
-    sources = {
-        size: ACTSequenceSource(numeric, reader, 30) for size, reader in readers.items()
-    }
+        sources[size] = ACTSequenceSource(
+            source, 30, image_key="observation.images.cam_high"
+        )
     setup_seconds = time.perf_counter() - start
     output: dict[str, object] = {
         "hardware": (

@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     )
     from .sources import OnlineDataSource, TensorDataSource
     from .lerobot import LeRobotDataSource, LeRobotFieldMappingCfg
-    from .lerobot_images import LeRobotImageReader
     from .offline_data import OfflineDataset
     from .sequence_data import SequenceDataset
     from .schema import validate_data_schema, data_schema_fingerprint
@@ -49,7 +48,6 @@ __all__ = [
     "TensorDataSource",
     "LeRobotDataSource",
     "LeRobotFieldMappingCfg",
-    "LeRobotImageReader",
     "OfflineDataset",
     "SequenceDataset",
     "DataUnavailableError",
@@ -75,7 +73,6 @@ def __getattr__(name: str) -> Any:
         "TensorDataSource": "sources",
         "LeRobotDataSource": "lerobot",
         "LeRobotFieldMappingCfg": "lerobot",
-        "LeRobotImageReader": "lerobot_images",
     }.get(name, "sampler")
     value = getattr(import_module(f"{__name__}.{module_name}"), name)
     globals()[name] = value

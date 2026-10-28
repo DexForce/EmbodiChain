@@ -472,7 +472,7 @@ topics:
     SharedLanguageRegistry, resolve_language, configure_ods, ODSReuseProfileCfg,
     ODSFlowController, ODSFlowControllerCfg, get_flow_status, ODS 供数控制,
     episode_sample_budget, OnlineDataBudgetExhaustedError, ODS 自动配置, BatchSource, SequenceSpecCfg,
-    OnlineDataSource, TensorDataSource, LeRobotDataSource, LeRobotImageReader, OfflineDataset, SequenceDataset,
+    OnlineDataSource, TensorDataSource, LeRobotDataSource, OfflineDataset, SequenceDataset,
     DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, 数据集加载, 离线加载]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
@@ -484,7 +484,6 @@ topics:
   - embodichain/data_pipeline/datasets/sequence.py
   - embodichain/data_pipeline/datasets/sources.py
   - embodichain/data_pipeline/datasets/lerobot.py
-  - embodichain/data_pipeline/datasets/lerobot_images.py
   - embodichain/data_pipeline/datasets/offline_data.py
   - embodichain/data_pipeline/datasets/sequence_data.py
   - embodichain/data_pipeline/datasets/schema.py
