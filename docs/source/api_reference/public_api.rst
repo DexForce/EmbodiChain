@@ -3116,6 +3116,7 @@ observation belongs to the actor input.
 
 .. autoclass:: AssemblyProprioception
    :members: reset
+   :no-index:
 
 .. autofunction:: assembly_privileged_state
 
