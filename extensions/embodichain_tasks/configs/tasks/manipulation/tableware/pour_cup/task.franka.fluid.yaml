@@ -6,7 +6,7 @@ environment:
 task_program:
   program: task_program/program.fluid.yaml
   integration: task_program/integration.fluid.yaml
-  execution_policy: ../../../../components/execution_policies/trajectory_open_loop_gentle.yaml
+  execution_policy: ../../../../components/execution_policies/trajectory_open_loop_fluid_pour.yaml
 embodiment:
   component: ../../../../components/embodiments/franka_panda_firm_grip_newton.yaml
   overrides:

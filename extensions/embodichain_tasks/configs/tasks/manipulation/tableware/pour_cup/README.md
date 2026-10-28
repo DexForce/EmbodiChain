@@ -22,6 +22,11 @@ python -m embodichain.lab.scripts.run_fluid_task_program \
   --num-envs 1 --renderer fast-rt --output outputs/fluid-task-program-online
 ```
 
+任务的执行节奏由
+[`trajectory_open_loop_fluid_pour.yaml`](../../../../components/execution_policies/trajectory_open_loop_fluid_pour.yaml)
+配置。轨迹采样数是下限；规划器会根据关节速度和加速度约束增加采样点，并保留
+抓取及放回时的稳定等待。
+
 也可使用普通任务入口：
 
 ```bash

@@ -117,6 +117,11 @@ _DEPLOYMENTS = {
         "task_program_pour_water",
         "cobotmagic",
     ),
+    Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"): (
+        "pick_aim_pour_return_cup",
+        "task_program_pour_cup_fluid",
+        "franka_panda_firm_grip_newton",
+    ),
 }
 _DUAL_ARM_VARIANTS = (
     "dual_ur5_dh_pgi_140_80",
@@ -185,6 +190,12 @@ _RESOURCE_PATHS = frozenset(
     {
         Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
+        Path("tasks/manipulation/tableware/pour_cup/task_program/program.fluid.yaml"),
+        Path(
+            "tasks/manipulation/tableware/pour_cup/task_program/integration.fluid.yaml"
+        ),
+        Path("components/embodiments/franka_panda_firm_grip_newton.yaml"),
+        Path("components/execution_policies/trajectory_open_loop_fluid_pour.yaml"),
         *_DUAL_ARM_RESOURCES,
         *_PROGRAMS,
         *_DEPLOYMENTS,

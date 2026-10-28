@@ -1,0 +1,30 @@
+policy_id: trajectory_open_loop_fluid_pour_v1
+preset_id: trajectory
+
+requires:
+  embodiment_contract: single_arm_parallel_gripper
+
+motion:
+  strategy: ik_interp
+  # This is a minimum; interpolation adds samples to respect robot limits.
+  sample_count: 160
+  dynamic_collision_mode: "off"
+
+tracking:
+  kind: timed
+  settle_duration: 0.4
+
+recovery:
+  max_replans: 0
+  max_action_retries: 0
+  goal_rotation_threshold: 3.141592653589793
+
+workflow_recovery:
+  max_recovery_attempts: 0
+
+runner:
+  minimum_cycle_time: 0.0
+  hold_on_completion: true
+  hold_during_effect_verification: false
+
+effect_assurance: projected
