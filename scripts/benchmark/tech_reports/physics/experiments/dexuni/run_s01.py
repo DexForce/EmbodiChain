@@ -228,6 +228,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--batch", type=Path)
     parser.add_argument("--repeats", type=int, default=5)
+    parser.add_argument(
+        "--input-root", type=Path, help="Restored frozen inputs directory"
+    )
     parser.add_argument("--skip-media", action="store_true")
     parser.add_argument("--rebuild-report", action="store_true")
     args = parser.parse_args()
@@ -262,10 +265,15 @@ def main() -> None:
         shutil.copy2(__file__, batch / "report_builder.py")
         return
     batch.mkdir(parents=True, exist_ok=False)
-    cache = Path.home() / ".cache/embodichain/report-assets/local/dexuni/pilot_v1"
+    cache = (
+        args.input_root
+        or Path.home() / ".cache/embodichain/report-assets/local/dexuni/pilot_v1"
+    )
     inputs = batch / "inputs"
     for name in ("s01c", "s01t", "generated"):
         shutil.copytree(cache / name, inputs / name)
+    if (cache / "franka_emika_panda").is_dir():
+        shutil.copytree(cache / "franka_emika_panda", inputs / "franka_emika_panda")
     snapshot = batch / "source"
     shutil.copytree(
         TECH,

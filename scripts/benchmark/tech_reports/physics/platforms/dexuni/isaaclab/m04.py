@@ -469,7 +469,8 @@ def main() -> None:
             prim_path="{ENV_REGEX_NS}/Robot",
             actuators={},
             spawn=sim_utils.UsdFileCfg(
-                usd_path=meta["usd_path"], variants={"Physics": "mujoco"}
+                usd_path=str(assets / "w1_usd/robot/robot.usda"),
+                variants={"Physics": "mujoco"},
             ),
             init_state=ArticulationCfg.InitialStateCfg(
                 pos=tuple(cfg["robot"]["base_position"]),

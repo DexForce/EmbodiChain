@@ -114,6 +114,11 @@ def load_inputs(args) -> dict:
         INPUTS = Path(args.inputs).resolve()
     with open(INPUTS / "s02_config.json", encoding="utf-8") as stream:
         config = json.load(stream)
+    from scripts.benchmark.tech_reports.physics.experiments.dexuni.paths import (
+        frozen_robot_urdf,
+    )
+
+    config["robot"]["urdf"] = frozen_robot_urdf(INPUTS, config["robot"]["urdf"])
     for key, value in config["variants"][args.variant].items():
         set_path(config, key, value)
     for item in args.set or []:

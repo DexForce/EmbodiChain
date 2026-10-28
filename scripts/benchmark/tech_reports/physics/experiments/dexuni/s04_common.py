@@ -29,6 +29,10 @@ OUTPUT = (
     Path(__file__).resolve().parents[3].parents[2]
     / "outputs/benchmarks/tech_reports/dexuni/s04_rigid_soft_squeeze_grasp"
 )
+from scripts.benchmark.tech_reports.physics.experiments.dexuni.reference_inputs import (
+    verify_reference,
+)
+
 __all__ = ["OUTPUT", "load_inputs", "lame_to_youngs", "static_boxes", "record_preview"]
 
 
@@ -45,11 +49,7 @@ def load_inputs(root: Path = OUTPUT) -> dict:
     manifest = json.loads((root / "manifest.json").read_text())
     if not manifest["user_scene_approved"]:
         raise ValueError("Native S04 scene approval is required")
-    if (
-        hashlib.sha256((root / "preview/dexsim.mp4").read_bytes()).hexdigest()
-        != config["native_preview_sha256"]
-    ):
-        raise ValueError("Approved native preview changed")
+    verify_reference(root, config["native_preview_sha256"])
     mesh = dict(np.load(root / "inputs/soft_mesh.npz"))
     commands = dict(np.load(root / "inputs/joint_commands.npz"))
     names = commands["joint_names"].tolist()

@@ -46,6 +46,10 @@ from scripts.benchmark.tech_reports.physics.platforms.dexuni.dexsim.m06 import (
     write_json,
 )
 
+from scripts.benchmark.tech_reports.physics.experiments.dexuni.reference_inputs import (
+    verify_reference,
+)
+
 __all__ = ["main"]
 
 
@@ -59,8 +63,7 @@ def load_inputs() -> (
         or digest(TASK / "inputs/config.json") != approval["config_sha256"]
     ):
         raise ValueError("Approved M06 configuration is missing or has changed")
-    if digest(TASK / "preview/dexsim.mp4") != approval["video_sha256"]:
-        raise ValueError("Approved native preview video has changed")
+    verify_reference(TASK, approval["video_sha256"])
     manifest = json.loads((TASK / "inputs/manifest.json").read_text())
     for name, expected in manifest["sha256"].items():
         if digest(TASK / "inputs" / name) != expected:

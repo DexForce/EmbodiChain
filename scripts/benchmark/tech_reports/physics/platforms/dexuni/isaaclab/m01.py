@@ -151,7 +151,7 @@ def main() -> None:
         for joint in ET.parse(urdf).getroot().findall("joint")
         if joint.find("limit") is not None
     }
-    usd = json.loads((OUTPUT / "inputs/w1_usd_path.json").read_text())["usd_path"]
+    usd = str(OUTPUT / "inputs/w1_usd/robot/robot.usda")
     beam_usd = OUTPUT / "inputs/beam.usda"
     # The previewed authored mesh stays unchanged while timing.
     if not args.measure:

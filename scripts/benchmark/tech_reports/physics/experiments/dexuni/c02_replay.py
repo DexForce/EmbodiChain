@@ -30,6 +30,10 @@ from typing import Any
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from scripts.benchmark.tech_reports.physics.experiments.dexuni.reference_inputs import (
+    verify_reference_inputs,
+)
+
 __all__ = [
     "OUTPUT",
     "load",
@@ -80,13 +84,19 @@ def write_json(path: Path, value: Any) -> None:
 
 def load(reference: Path) -> dict[str, Any]:
     """Verify the accepted native inputs before reusing their exact bytes."""
+    compact_targets = reference / "inputs/native_tcp_targets.npz"
+    if compact_targets.is_file():
+        verify_reference_inputs(reference)
     manifest = json.loads((reference / "manifest.json").read_text())
     for rel, h in manifest["input_sha256"].items():
         assert sha(reference / "inputs" / rel) == h, rel
     for rel, h in json.loads(
         (reference / "analysis/platform_port/accepted_native_sha256.json").read_text()
     ).items():
-        assert sha(reference / rel) == h, rel
+        # Full historical audit also lists optional results and recordings.
+        # Required runtime files were verified above against the published pin.
+        if (reference / rel).is_file():
+            assert sha(reference / rel) == h, rel
     result = dict(reference=reference, manifest=manifest)
     for key, path in [
         ("bag", "inputs/bag.npz"),
@@ -96,7 +106,11 @@ def load(reference: Path) -> dict[str, Any]:
     ]:
         with np.load(reference / path) as a:
             result[key] = dict(a)
-    with np.load(reference / "preview/states.npz") as a:
+    with np.load(
+        compact_targets
+        if compact_targets.is_file()
+        else reference / "preview/states.npz"
+    ) as a:
         result["tcp_targets"] = a["tcp_targets"].copy()
     assert len(result["joints"]["time"]) == 3841
     return result

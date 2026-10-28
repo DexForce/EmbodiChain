@@ -155,7 +155,7 @@ def main() -> None:
         for joint in ET.parse(urdf).getroot().findall("joint")
         if joint.find("limit") is not None
     }
-    usd = json.loads((OUTPUT / "inputs/w1_usd_path.json").read_text())["usd_path"]
+    usd = str(OUTPUT / "inputs/w1_usd/robot/robot.usda")
     soft_usd = OUTPUT / "inputs/soft.usda"
     # The approved authored mesh is immutable during measurement.
     if not args.measure:

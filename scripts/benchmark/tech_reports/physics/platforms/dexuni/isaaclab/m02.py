@@ -258,7 +258,7 @@ def main() -> None:
     inputs = load_inputs()
     cfg, mesh, names = inputs["config"], inputs["mesh"], inputs["names"]
     cloth_cfg, camera_cfg = cfg["cloth"], cfg["camera"]
-    usd = json.loads((OUTPUT / "inputs/w1_usd_path.json").read_text())["usd_path"]
+    usd = str(OUTPUT / "inputs/w1_usd/robot/robot.usda")
     cloth_usd = OUTPUT / "inputs/cloth.usda"
     # The previewed authored mesh stays unchanged while timing.
     if not args.measure:

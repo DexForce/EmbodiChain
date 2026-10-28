@@ -34,6 +34,7 @@ __all__ = [
     "input_dir",
     "output_dir",
     "franka_usd",
+    "frozen_robot_urdf",
     "require_pilot",
 ]
 
@@ -129,3 +130,17 @@ def require_pilot() -> None:
             "are pending. Read physics/experiments/dexuni/PLAN.md. "
             "For development only, explicitly set DEXUNI_ALLOW_PILOT=1."
         )
+
+
+def frozen_robot_urdf(inputs: Path, configured: str) -> str:
+    """Prefer the relocated frozen Franka asset beside a task input snapshot.
+
+    Args:
+        inputs: The task input directory (s01c, s01t or s02).
+        configured: Historical robot path retained in the frozen configuration.
+
+    Returns:
+        Restored robot path if present; otherwise the caller's original path.
+    """
+    local = inputs.parent / "franka_emika_panda" / Path(configured).name
+    return str(local.resolve()) if local.is_file() else configured

@@ -174,3 +174,64 @@ def test_unknown_task_and_unpinned_release_make_no_request(
     index_path.write_text(json.dumps(index))
     with pytest.raises(ValueError, match="full verified dataset commit"):
         download.restore_artifacts(output_root=tmp_path / "out", index_path=index_path)
+
+
+def test_unpublished_media_is_rejected_before_download(
+    publication, tmp_path, monkeypatch
+):
+    index_path, _, _ = publication
+    monkeypatch.setattr(
+        download, "hf_hub_download", lambda **kw: pytest.fail("Unexpected download")
+    )
+    with pytest.raises(ValueError, match="Only input assets"):
+        download.restore_artifacts(
+            kinds=["videos"], output_root=tmp_path / "out", index_path=index_path
+        )
+
+
+def test_runtime_inputs_do_not_require_video_but_detect_changed_geometry(
+    tmp_path, monkeypatch
+):
+    from scripts.benchmark.tech_reports.physics.experiments.dexuni import (
+        reference_inputs,
+    )
+
+    root = tmp_path / "case"
+    (root / "inputs").mkdir(parents=True)
+    mesh = root / "inputs/mesh.bin"
+    mesh.write_bytes(b"frozen geometry")
+    index = tmp_path / "checks.json"
+    index.write_text(
+        json.dumps(
+            {
+                "case": {
+                    "files": {
+                        "inputs/mesh.bin": hashlib.sha256(mesh.read_bytes()).hexdigest()
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(reference_inputs, "_INDEX", index)
+    reference_inputs.verify_reference(root, "historical-video-not-downloaded")
+    assert not (root / "preview").exists()
+    mesh.write_bytes(b"modified geometry")
+    with pytest.raises(ValueError, match="runtime input changed"):
+        reference_inputs.verify_reference(root, "historical-video-not-downloaded")
+    mesh.unlink()
+    with pytest.raises(FileNotFoundError):
+        reference_inputs.verify_reference_inputs(root)
+
+
+def test_relocated_robot_uses_frozen_asset_without_rewriting_record(tmp_path):
+    from scripts.benchmark.tech_reports.physics.experiments.dexuni.paths import (
+        frozen_robot_urdf,
+    )
+
+    inputs = tmp_path / "inputs/s01c"
+    original = "/old/machine/franka/robot.urdf"
+    assert frozen_robot_urdf(inputs, original) == original
+    local = inputs.parent / "franka_emika_panda/robot.urdf"
+    local.parent.mkdir(parents=True)
+    local.write_text("<robot/>")
+    assert frozen_robot_urdf(inputs, original) == str(local)

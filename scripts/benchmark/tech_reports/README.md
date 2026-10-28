@@ -1,5 +1,3 @@
-> Publication in progress: data upload has not completed. Download remains disabled until the verified dataset commit is pinned.
-
 # EmbodiChain technical report benchmarks
 
 This directory groups technical-report assets, comparison experiment scaffolds,
@@ -116,11 +114,12 @@ Frozen source copies in results are execution evidence, not maintained entry poi
 Existing `outputs/benchmarks/dexuni/pilot_v1` remains unchanged. The obsolete
 `dexuni_benchmark` workspace has been removed; see the [retirement record](physics/experiments/dexuni/MIGRATION.md).
 
-The [published report](https://huggingface.co/datasets/DexForceAI/embodichain_reports/tree/main/reports/dexuni-physics-2026-10-27)
-contains retained inputs, raw measurements, reports and videos. The reviewed
+The [published report](https://huggingface.co/datasets/DexForceAI/embodichain_reports/tree/cafe3e14f650f93123d47fe338e49c003443f3a4/reports/dexuni-physics-2026-10-27)
+contains runtime inputs, readable reports and the published raw JSON/CSV. The reviewed
 [release index](assets/physics/dexuni/publication.json) pins the dataset commit,
-file sizes and SHA256 hashes. Inputs, results and videos are separate download
-selections. General assets retain their existing EmbodiChain resolvers.
+file sizes and SHA256 hashes. Downloads restore input assets only; videos and
+complete result archives remain local. General assets retain their existing
+EmbodiChain resolvers.
 
 Current plans and task descriptions live under `physics/experiments/dexuni/`.
 [Initial design snapshots](physics/experiments/dexuni/history/initial_design/INDEX.md)

@@ -17,5 +17,5 @@
 发布遵循 [资产规范](../../README.md) 和 [下载设计](../../DOWNLOAD_DESIGN.md)。
 已发布报告为 `dexuni-physics-2026-10-27`，真实输入 bundle 按任务目录划分，
 完整数据集 commit、大小和 SHA256 记录于 [publication.json](publication.json)。
-[下载命令](../../../physics/experiments/dexuni/SETUP.md) 默认只取输入，结果与视频需显式选择。
+[下载命令](../../../physics/experiments/dexuni/SETUP.md) 只恢复运行所需输入；本次不发布视频或完整结果大包。
 这些包保存正式运行所需的冻结输入；前述旧 pilot 缓存不等同于这些已发布包。

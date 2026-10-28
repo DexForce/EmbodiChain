@@ -1,5 +1,3 @@
-> Publication in progress: data upload has not completed. Download remains disabled until the verified dataset commit is pinned.
-
 ---
 pretty_name: EmbodiChain Technical Report Assets
 language:
@@ -20,8 +18,8 @@ This repository stores report-specific benchmark inputs, published measurement
 artifacts, figures, and videos for EmbodiChain technical reports.
 The [asset index](index.json) records published input bundles.
 The [DexUni release](physics/dexuni/publication.json) pins its dataset revision;
-its [setup guide](../physics/experiments/dexuni/SETUP.md) describes explicit input,
-result and media downloads. The [download design](DOWNLOAD_DESIGN.md) still
+its [setup guide](../physics/experiments/dexuni/SETUP.md) describes input downloads.
+This DexUni release intentionally excludes videos and complete result archives. The [download design](DOWNLOAD_DESIGN.md) still
 describes a future general helper and unified benchmark CLI.
 
 ## Ownership
@@ -67,8 +65,8 @@ the dataset layout below; do not publish `.gitkeep` files.
 Large input binaries remain in the selected asset repository and download to
 the external cache. Generated run artifacts and reports belong in
 `outputs/benchmarks/`. DexUni bundle IDs and hashes are recorded in the
-publication indexes. Results
-and videos are not input bundles and are downloaded separately.
+publication indexes. Results and videos are not input bundles; this release
+does not publish them as downloadable archives.
 
 ## Layout
 

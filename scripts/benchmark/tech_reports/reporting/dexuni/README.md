@@ -14,7 +14,7 @@ parity、compare_models 保留历史诊断用途；旧工作区已删除，旧 S
 
 ## 已发布结果与原始数据
 
-[13 项任务对比](RESULTS.md)提供各任务报告和视频入口，并明确正式测量、摸测及失败条件。
-[Hugging Face 报告](https://huggingface.co/datasets/DexForceAI/embodichain_reports/tree/main/reports/dexuni-physics-2026-10-27)
-同时提供原始 ZIP、可浏览的 JSON/CSV、输入和逐文件哈希。
-复算前按[恢复命令](../../physics/experiments/dexuni/SETUP.md)下载所需结果；无需重新仿真。
+[13 项任务对比](RESULTS.md)提供各任务报告入口，并明确正式测量、摸测及失败条件。
+[Hugging Face 报告](https://huggingface.co/datasets/DexForceAI/embodichain_reports/tree/cafe3e14f650f93123d47fe338e49c003443f3a4/reports/dexuni-physics-2026-10-27)
+提供可浏览的原始 JSON/CSV、输入资产和逐文件哈希。视频和完整结果大包仅在本地保留。
+按[恢复命令](../../physics/experiments/dexuni/SETUP.md)准备输入；完整数组复算仍需本地保留的测量结果。

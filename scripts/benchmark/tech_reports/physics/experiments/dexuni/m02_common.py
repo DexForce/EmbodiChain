@@ -52,6 +52,10 @@ PHASES = (
     (14.5, "retreat"),
     (16.5, "observe"),
 )
+from scripts.benchmark.tech_reports.physics.experiments.dexuni.reference_inputs import (
+    verify_reference,
+)
+
 __all__ = [
     "CLOTH_CENTER",
     "CLOTH_SIZE",
@@ -150,14 +154,13 @@ def _sha(path: Path) -> str:
 def load_inputs(root: Path = OUTPUT) -> dict:
     """Load the approved config, cloth mesh and named joint commands.
 
-    Raises if the approval is missing or the approved video or inputs changed.
+    Raises if approval is missing or the available reference evidence changed.
     """
     config = json.loads((root / "inputs/m02_config.json").read_text())
     manifest = json.loads((root / "manifest.json").read_text())
     if not manifest.get("user_scene_approved"):
         raise ValueError("Native M02 scene approval is required")
-    if _sha(root / "preview/dexsim.mp4") != config["native_preview_sha256"]:
-        raise ValueError("Approved native preview changed")
+    verify_reference(root, config["native_preview_sha256"])
     for name, expected in config["input_sha256"].items():
         if _sha(root / "inputs" / name) != expected:
             raise ValueError(f"Frozen M02 input changed: {name}")

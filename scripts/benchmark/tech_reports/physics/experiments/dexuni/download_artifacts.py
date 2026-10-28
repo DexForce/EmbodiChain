@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Restore selected published DexUni inputs/results outside measurement regions."""
+"""Restore published DexUni runtime inputs outside measurement regions."""
 
 from __future__ import annotations
 
@@ -156,8 +156,10 @@ def _select(
         raise ValueError(
             f"Unknown tasks: {sorted(unknown)}; available: {sorted(index['tasks'])}"
         )
-    if not kinds or set(kinds) - {"inputs", "results", "videos"}:
-        raise ValueError("Kinds must be inputs, results or videos")
+    if not kinds or set(kinds) - {"inputs"}:
+        raise ValueError(
+            "Only input assets are published; results and videos are not downloadable bundles"
+        )
     folders = (
         {index["tasks"][task] for task in tasks}
         if tasks
@@ -246,7 +248,7 @@ def main() -> None:
     parser.add_argument(
         "--kind",
         action="append",
-        choices=["inputs", "results", "videos"],
+        choices=["inputs"],
         help="Default: inputs only",
     )
     parser.add_argument("--output-root", type=Path, default=OUTPUTS)
