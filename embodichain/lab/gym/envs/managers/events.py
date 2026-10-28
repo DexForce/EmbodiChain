@@ -59,6 +59,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "reset_fluid_in_container",
     "apply_expansion_profile_reset",
     "replace_assets_from_group",
     "prepare_extra_attr",
@@ -866,3 +867,34 @@ def remove_rigid_constraint(
         name: Base constraint name to remove.
     """
     env.sim.remove_rigid_constraint(name, env_ids=env_ids)
+
+
+def reset_fluid_in_container(
+    env: EmbodiedEnv,
+    env_ids: Sequence[int] | torch.Tensor,
+    entity_cfgs: list[SceneEntityCfg],
+) -> None:
+    """Refill selected rows from the declared local template after container reset.
+
+    Args:
+        env: Owning environment.
+        env_ids: Selected environment indices.
+        entity_cfgs: Fluid and rigid container selections, in that order.
+    """
+    from embodichain.lab.sim.spawn.descriptors import _pose_from_cfg
+    from embodichain.utils.math import quat_from_matrix
+
+    if len(entity_cfgs) != 2:
+        raise ValueError("Expected fluid and container selections.")
+    fluid = env.sim.get_fluid_object(entity_cfgs[0].uid)
+    container = env.sim.get_rigid_object(entity_cfgs[1].uid)
+    if fluid is None or container is None:
+        raise ValueError("Unknown fluid or container.")
+    ids = torch.as_tensor(env_ids, device=env.device, dtype=torch.long)
+    local = torch.as_tensor(
+        _pose_from_cfg(fluid.cfg), dtype=torch.float32, device=env.device
+    )
+    world = container.get_local_pose(to_matrix=True)[ids] @ local
+    world[:, :3, 3] += env.sim.arena_offsets[ids]
+    pose = torch.cat((world[:, :3, 3], quat_from_matrix(world[:, :3, :3])), dim=-1)
+    fluid.reset_to_pose(pose, ids)

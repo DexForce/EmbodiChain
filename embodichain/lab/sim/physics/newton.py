@@ -276,6 +276,9 @@ class NewtonPhysicsBackend(PhysicsBackend):
         boundary = solver.sdf_boundary
         if boundary is not None and boundary._body_q_prev is not None:
             boundary._body_q_prev.assign(backend.state_0.body_q)
+        reset_warm_start = getattr(solver, "reset_dfsph_warm_start", None)
+        if reset_warm_start is not None:
+            reset_warm_start()
 
     def fluid_diagnostics(self, fluid: FluidObject) -> dict[str, object]:
         """Read detached native SPH diagnostics without publishing or stepping."""

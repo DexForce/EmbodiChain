@@ -487,6 +487,7 @@ def _make_runtime_control_sim_manager(
     sim._articulations = {}
     sim._rigid_objects = {"table": object()}
     sim._fluid_objects = {}
+    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {
         "cloth": SimpleNamespace(
             cfg=SurfaceDeformableObjectCfg(uid="cloth", particle_flags=[0, 1, 0])
@@ -569,6 +570,7 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     sim._constraints = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
+    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -1312,6 +1314,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
+    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -2548,6 +2551,7 @@ def test_remove_asset_marks_visualization_topology_dirty() -> None:
     sim._rigid_objects = {"cube": rigid_object}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
+    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -2813,6 +2817,7 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
     sim._lights = {}
     sim._sensors = {}
     sim._fluid_objects = {}
+    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {
         "soft": MagicMock(),
         "cloth": MagicMock(),
@@ -2849,6 +2854,7 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together(
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
+    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -2874,6 +2880,7 @@ def test_newton_reset_rejects_excluding_one_articulation_from_selected_worlds(
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
+    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -2903,6 +2910,7 @@ def test_newton_non_mujoco_reset_allows_excluding_an_articulation() -> None:
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
+    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -3135,7 +3143,7 @@ def test_process_no_render_is_detected_after_world_cleanup(monkeypatch) -> None:
     assert SimulationManager._get_process_renderer() == "no-render"
 
 
-def test_reset_fluid_selects_rows_and_honors_exclusions():
+def test_reset_fluid_and_rigid_controls_selects_rows_and_honors_exclusions():
     sim = object.__new__(SimulationManager)
     sim.physics = SimpleNamespace(name="default")
     sim.num_envs = 2
@@ -3149,9 +3157,16 @@ def test_reset_fluid_selects_rows_and_honors_exclusions():
         "_deformable_objects",
     ):
         setattr(sim, name, {})
-    fluid, excluded = MagicMock(), MagicMock()
-    sim._fluid_objects = {"water": fluid, "other": excluded}
+    first, second, excluded = MagicMock(), MagicMock(), MagicMock()
+    fluid = MagicMock()
+    sim._rigid_trajectory_controls = {
+        "cup": (first, second),
+        "other": (excluded, excluded),
+    }
+    sim._fluid_objects = {"water": fluid}
     sim.reset_objects_state(env_ids=[1], excluded_uids=["other"])
+    first.reset.assert_not_called()
+    second.reset.assert_called_once_with()
     excluded.reset.assert_not_called()
     fluid.reset.assert_called_once_with([1])
 

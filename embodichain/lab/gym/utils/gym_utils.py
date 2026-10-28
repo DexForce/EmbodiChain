@@ -536,6 +536,16 @@ def config_to_cfg(
         elif isinstance(asset, ArticulationCfg) and path is not None:
             asset.fpath = get_data_path(path)
 
+    def _resolve_mesh_asset_paths(obj_dict: dict[str, Any]) -> None:
+        for key in ("visual_shape", "particle_collision_shape"):
+            shape = obj_dict.get(key)
+            if (
+                shape is not None
+                and shape.get("shape_type") == "Mesh"
+                and shape.get("fpath") is not None
+            ):
+                shape["fpath"] = get_data_path(shape["fpath"])
+
     @configclass
     class ComponentCfg:
         """Configuration for env events.
@@ -773,6 +783,16 @@ def config_to_cfg(
         ]
         env_cfg.light.indirect = config["light"].get("indirect", None)
 
+    # Fluids use one typed declaration path for inline and component scenes.
+    from embodichain.lab.sim.cfg import FluidObjectCfg
+    from embodichain.lab.gym.utils._component_composition import (
+        _resolve_physical_source_paths,
+    )
+
+    config = _resolve_physical_source_paths(config, base_dir)
+    env_cfg.fluid_object = [
+        FluidObjectCfg.from_dict(item) for item in config.get("fluid_object", [])
+    ]
     for visual_dict in config.get("visual_object", []):
         visual = VisualObjectCfg.from_dict(visual_dict)
         resolve_asset_paths(visual)
@@ -781,6 +801,7 @@ def config_to_cfg(
     # parser background objects config
     if "background" in config:
         for obj_dict in config["background"]:
+            _resolve_mesh_asset_paths(obj_dict)
             # Set to static object if not specified.
             obj_dict["body_type"] = (
                 "static" if "body_type" not in obj_dict else obj_dict["body_type"]
@@ -792,6 +813,7 @@ def config_to_cfg(
     # parser scene objects config
     if "rigid_object" in config:
         for obj_dict in config["rigid_object"]:
+            _resolve_mesh_asset_paths(obj_dict)
             cfg = RigidObjectCfg.from_dict(obj_dict)
             resolve_asset_paths(cfg)
             env_cfg.rigid_object.append(cfg)
@@ -800,6 +822,8 @@ def config_to_cfg(
         for obj_dict in config["rigid_object_group"]:
             if "folder_path" in obj_dict:
                 obj_dict["folder_path"] = get_data_path(obj_dict["folder_path"])
+            for rigid_obj in obj_dict["rigid_objects"].values():
+                _resolve_mesh_asset_paths(rigid_obj)
             cfg = RigidObjectGroupCfg.from_dict(obj_dict)
             for member in cfg.rigid_objects.values():
                 resolve_asset_paths(member)
@@ -918,6 +942,12 @@ def config_to_cfg(
                 )
                 obs_params_modified["params"]["entity_cfg"] = entity_cfg
 
+            if "entity_cfgs" in obs_params_modified["params"]:
+                obs_params_modified["params"]["entity_cfgs"] = [
+                    SceneEntityCfg(**item)
+                    for item in obs_params_modified["params"]["entity_cfgs"]
+                ]
+
             # Find the function from multiple modules using the utility function
             obs_func = find_function_from_modules(
                 obs_params["func"],
@@ -930,6 +960,7 @@ def config_to_cfg(
                 mode=obs_params_modified["mode"],
                 name=obs_params_modified["name"],
                 params=obs_params_modified["params"],
+                extra=deepcopy(obs_params_modified.get("extra", {})),
             )
 
             setattr(env_cfg.observations, obs_name, observation)

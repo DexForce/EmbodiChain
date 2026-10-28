@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from embodichain.lab.sim.cfg.fluid import FluidObjectCfg
 from embodichain.lab.sim.objects.fluid import FluidObject
 
@@ -618,6 +617,7 @@ class SimulationManager:
         self._markers: dict[str, _AxisMarkerGroup] = {}
         self._constraints: dict[str, RigidConstraint] = {}
         self._fluid_objects: dict[str, FluidObject] = {}
+        self._rigid_trajectory_controls: dict[str, tuple] = {}
         self._visual_materials: dict[str, VisualMaterial] = {}
         self._texture_cache: dict[str, torch.Tensor | list[torch.Tensor]] = {}
 
@@ -1339,6 +1339,61 @@ class SimulationManager:
         from embodichain.data.assets import SimResources
 
         self._default_resources = SimResources()
+
+    def register_kinematic_rigid_trajectory(
+        self,
+        uid: str,
+        world_poses: torch.Tensor | np.ndarray,
+        *,
+        fps: float,
+    ) -> None:
+        """Drive declared kinematic rigid bodies at each Newton solver substep.
+
+        Args:
+            uid: Previously declared kinematic rigid-object UID.
+            world_poses: Finite unit-quaternion xyz+xyzw tracks, ``(E, frames, 7)``.
+            fps: Positive pose sample frequency in Hz. Positions interpolate
+                linearly, orientations use SLERP, and the last pose is held.
+
+        The host-side control disables CUDA graph replay. Register before
+        prepare; reset_objects_state rewinds only selected instance clocks.
+        """
+        from embodichain.lab.sim._runtime_controls import (
+            _KinematicRigidTrajectoryControl,
+        )
+
+        if not self.is_newton_backend or self._spawn_scene.builder.is_finalized:
+            raise RuntimeError("Register Newton rigid trajectories before prepare().")
+        rigid = self._rigid_objects.get(uid)
+        if rigid is None or rigid.body_type != "kinematic":
+            raise ValueError("uid must name a declared kinematic rigid object.")
+        if uid in self._rigid_trajectory_controls:
+            raise ValueError("A rigid trajectory already controls this object.")
+        poses = (
+            world_poses.detach().cpu().numpy()
+            if isinstance(world_poses, torch.Tensor)
+            else np.asarray(world_poses)
+        )
+        if (
+            poses.ndim != 3
+            or poses.shape[0] != self.num_envs
+            or poses.shape[1] == 0
+            or poses.shape[2] != 7
+        ):
+            raise ValueError("world_poses must have shape (E, frames, 7).")
+        if not np.isfinite(poses).all() or not np.allclose(
+            np.linalg.norm(poses[..., 3:], axis=-1), 1.0, atol=1e-5
+        ):
+            raise ValueError("world_poses must be finite with unit xyzw quaternions.")
+        if not np.isfinite(fps) or fps <= 0:
+            raise ValueError("fps must be finite and positive.")
+        controls = tuple(
+            _KinematicRigidTrajectoryControl(f"{arena}/{uid}", poses[i], fps)
+            for i, arena in enumerate(self._spawn_scene.arena_names)
+        )
+        for control in controls:
+            self._spawn_scene.builder.add_runtime_control(control)
+        self._rigid_trajectory_controls[uid] = controls
 
     def register_kinematic_joint_trajectory(
         self,
@@ -3049,6 +3104,25 @@ class SimulationManager:
             points, pose[:3, :3], on_write=self._invalidate_fluid_state
         )
         self._spawn_scene.declare("fluid_object", cfg.uid, descriptor, facade=fluid)
+        selectors = (
+            "mujoco_articulations",
+            "mujoco_articulation_paths",
+            "mujoco_joints",
+        )
+        solver_cfg = self.sim_config.physics_cfg.solver_cfg
+        if not getattr(self, "_fluid_joint_ownership_control", None) and all(
+            (
+                solver_cfg.get(name)
+                if isinstance(solver_cfg, Mapping)
+                else getattr(solver_cfg, name, None)
+            )
+            is None
+            for name in selectors
+        ):
+            from embodichain.lab.sim._runtime_controls import _DexUniFluidJointOwnership
+
+            self._fluid_joint_ownership_control = _DexUniFluidJointOwnership()
+            self.add_runtime_control(self._fluid_joint_ownership_control)
         self._fluid_objects[cfg.uid] = fluid
         self.notify_visualization_topology_changed()
         return fluid
@@ -5192,6 +5266,10 @@ class SimulationManager:
         for uid, rigid_obj_group in self._rigid_object_groups.items():
             if uid not in excluded_uids:
                 rigid_obj_group.reset(env_ids)
+        for uid, controls in self._rigid_trajectory_controls.items():
+            if uid not in excluded_uids:
+                for index in (range(self.num_envs) if env_ids is None else env_ids):
+                    controls[int(index)].reset()
         for uid, fluid_obj in self._fluid_objects.items():
             if uid not in excluded_uids:
                 fluid_obj.reset(env_ids)
@@ -5406,6 +5484,7 @@ class SimulationManager:
             finally:
                 self._spawn_scene = None
 
+        self._rigid_trajectory_controls.clear()
         self.clean_materials()
 
         if self._env:

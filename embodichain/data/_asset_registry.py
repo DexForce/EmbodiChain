@@ -37,6 +37,7 @@ _CATEGORY_MODULES: dict[str, tuple[str, ...]] = {
         "embodichain.data.assets.so101_assets",
     ),
     "scene": ("embodichain.data.assets.scene_assets",),
+    "task": ("embodichain.data.assets.task_assets",),
     "w1": ("embodichain.data.assets.w1_assets",),
 }
 

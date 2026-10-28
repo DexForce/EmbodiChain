@@ -310,7 +310,10 @@ def _configure_newton_mimic_compliance(
     eq_solref = np.asarray(mjw_model.eq_solref.numpy()).copy()
     mimic_solref = _default_mujoco_mimic_solref(
         float(backend.cfg.dt),
-        int(backend.cfg.num_substeps),
+        int(backend.cfg.num_substeps)
+        * int(
+            getattr(getattr(backend.cfg, "solver_cfg", None), "sph_rigid_substeps", 1)
+        ),
     )
     eq_solref[selected] = mimic_solref
     mjw_model.eq_solref.assign(eq_solref)

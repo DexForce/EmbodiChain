@@ -60,8 +60,27 @@ _SCENE_SIMULATION_FIELDS = frozenset(
         "rigid_object",
         "rigid_object_group",
         "articulation",
+        "fluid_object",
     }
 )
+
+
+def _resolve_physical_source_paths(simulation: dict, base_dir: Path) -> dict:
+    """Anchor file-backed fluid sources and explicitly relative visual meshes."""
+    result = deepcopy(dict(simulation))
+    for field in ("background", "rigid_object"):
+        for item in result.get(field, []):
+            for key in ("shape", "visual_shape", "particle_collision_shape"):
+                shape = item.get(key) or {}
+                path = shape.get("fpath")
+                if isinstance(path, str) and path.startswith(("./", "../")):
+                    shape["fpath"] = str((base_dir / path).resolve())
+    for fluid in result.get("fluid_object", []):
+        spawn = fluid.get("spawn", {})
+        path = spawn.get("file_path")
+        if isinstance(path, str) and not Path(path).is_absolute():
+            spawn["file_path"] = str((base_dir / path).resolve())
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,7 +265,9 @@ def _resolve_environment_component(
         for key, value in component.items()
         if key not in {"environment_id", "simulation"}
     }
-    environment_values.update(deepcopy(dict(simulation)))
+    environment_values.update(
+        _resolve_physical_source_paths(dict(simulation), component_path.parent)
+    )
     _resolve_local_resource_paths(environment_values, base_dir=component_path.parent)
 
     deployment_physics_fields = sorted(
@@ -356,7 +377,7 @@ def _resolve_scene_component(
         required=frozenset(),
         optional=_SCENE_SIMULATION_FIELDS,
     )
-    resolved = deepcopy(dict(simulation))
+    resolved = _resolve_physical_source_paths(dict(simulation), component_path.parent)
     _resolve_local_resource_paths(resolved, base_dir=component_path.parent)
     return resolved
 

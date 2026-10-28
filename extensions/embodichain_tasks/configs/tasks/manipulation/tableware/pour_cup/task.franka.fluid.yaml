@@ -1,0 +1,26 @@
+id: PourCup-Franka-Fluid-v1
+seed: 0
+enable_sensor: false
+environment:
+  component: env.fluid.yaml
+task_program:
+  program: task_program/program.fluid.yaml
+  integration: task_program/integration.fluid.yaml
+  execution_policy: ../../../../components/execution_policies/trajectory_open_loop_fluid_pour.yaml
+embodiment:
+  component: ../../../../components/embodiments/franka_panda_firm_grip_newton.yaml
+  overrides:
+    init_rot:
+    - 0.0
+    - 0.0
+    - 180.0
+    init_qpos:
+    - 0.0023885604459792376
+    - -0.09648692607879639
+    - -0.0022385704796761274
+    - -2.388152599334717
+    - 0.00024301925441250205
+    - 3.862462282180786
+    - 0.7850000262260437
+    - 0.04
+    - 0.04

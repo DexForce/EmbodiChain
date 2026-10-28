@@ -86,3 +86,31 @@ Focused checks are `tests/compute/test_particles.py`,
 `tests/sim/objects/test_fluid_runtime.py`; `test_fluid_visibility.py` checks
 camera pixels after stepping and direct state writes. Tutorial checks remain
 syntax/CLI smoke checks rather than tutorial import tests.
+
+## Online task and replay layer
+
+The pouring task uses DexUni with nested DFSPH, a shared simulation clock and
+one-way rigid-to-fluid coupling. When no joint ownership was explicitly authored,
+the fluid setup assigns every finalized joint to MuJoCo before solver construction,
+which covers a robot and a free cup across replicated worlds. Explicit ownership
+selectors remain caller-owned. The current native prototype requires the pure
+MuJoCo rigid path when bodies exist and does not support fluid reaction forces.
+
+`RigidObjectCfg.particle_collision_shape` puts a particle-only SDF boundary on
+the same body as its rigid contact hulls. Where DexSim exposes
+`NewtonCollisionDesc.contributes_to_mass`, the boundary explicitly excludes
+itself from mass. Older builds need explicit mass and inertia for dynamic bodies;
+the pouring cup authors its COM and body-frame inertia from its contact hulls.
+Static/kinematic boundaries retain their respective motion semantics. Independent
+`visual_shape` settings preserve the render mesh.
+
+Replay may write `RigidObject.set_kinematic_state()` or register a manager-owned
+kinematic rigid trajectory before preparation. These host controls disable graph
+replay and rewind selected clocks on object reset; they do not qualify online
+grasping. Normal Gym reset restores or refills selected fluid rows without
+stepping peer worlds. Online action execution supplies physical settling.
+
+The robot demonstrations, task assets, Gym declarations, observations, recording,
+Task Program runner and replay belong to the pouring task layer. See
+[fluid Gym integration](../env-framework/fluid-replay.md) and the task's
+`extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/README.md`.

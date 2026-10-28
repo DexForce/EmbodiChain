@@ -66,6 +66,15 @@ def test_record_camera_is_marked_for_visualization() -> None:
     assert env.sim.sensor_cfg.visualization_role == "record"
 
 
+@pytest.mark.parametrize("fps", [0, -1, float("nan"), float("inf")])
+def test_invalid_recording_rate_does_not_create_camera(fps):
+    env = _Environment()
+    cfg = FunctorCfg(func=record_camera_data, params={"name": "camera", "fps": fps})
+    with pytest.raises(ValueError, match="fps"):
+        record_camera_data(cfg, env)
+    assert env.sim.sensor_cfg is None
+
+
 @pytest.fixture
 def camera_env():
     context = EpisodeContext(4)
@@ -79,10 +88,41 @@ def camera_env():
         num_envs=4,
         device=torch.device("cpu"),
         episode_context=context,
-        sim=SimpleNamespace(add_sensor=lambda **kwargs: camera),
+        sim=SimpleNamespace(
+            add_sensor=lambda **kwargs: camera, render_camera_group=lambda groups: None
+        ),
         add_camera_group_id=lambda group_id: None,
     )
     return env, rgb
+
+
+def test_camera_recording_uses_control_rate_and_renders_current_state(
+    camera_env, tmp_path, monkeypatch
+):
+    from embodichain.lab.gym.envs.managers import record
+
+    env, _ = camera_env
+    env.control_frequency = 40.0
+    rendered = []
+    env.sim.render_camera_group = rendered.append
+    rates = []
+
+    def save(frames, directory, name, fps):
+        rates.append(fps)
+        (Path(directory) / (name + ".mp4")).write_bytes(b"video")
+
+    monkeypatch.setattr(record, "images_to_video", save)
+    recorder = record_camera_data(
+        FunctorCfg(
+            func=record_camera_data,
+            params={"name": "camera", "save_path": str(tmp_path), "fps": None},
+        ),
+        env,
+    )
+    recorder(env, [0], name="camera", fps=None)
+    recorder.save_and_clear([0])
+    assert rendered == [[1]]
+    assert rates == [40.0]
 
 
 @pytest.mark.parametrize("kind", [record_camera_data, record_camera_data_async])

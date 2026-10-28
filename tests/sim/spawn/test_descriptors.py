@@ -2676,6 +2676,76 @@ def test_rigid_descriptor_rejects_orientation_without_principal_moments() -> Non
         rigid_desc_from_cfg(cfg)
 
 
+@pytest.mark.parametrize("solver", ["dexuni", "mujoco_warp"])
+def test_particle_boundary_shares_body_without_replacing_rigid_contact(solver):
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import MeshCollisionCfg
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    cfg = RigidObjectCfg(
+        uid="cup",
+        shape=MeshCfg(
+            fpath="/assets/cup.glb",
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition", max_hulls=32
+            ),
+        ),
+        particle_collision_shape=MeshCfg(
+            fpath="/assets/cavity.obj",
+            collision=MeshCollisionCfg(approximation="sdf", sdf_resolution=192),
+        ),
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=0.3, inertia=[0.001, 0.001, 0.001])
+        ),
+    )
+    desc, _ = rigid_desc_from_cfg(cfg, newton_solver_type=solver)
+    assert len(desc.collisions) == 2
+    contact, boundary = desc.collisions
+    assert contact.approximation == CollisionApproximation.CONVEX_DECOMPOSITION
+    assert contact.newton.has_particle_collision is False
+    assert boundary.approximation == CollisionApproximation.SDF
+    assert boundary.enable_collision is False
+    assert boundary.newton.has_particle_collision is True
+    if hasattr(boundary.newton, "contributes_to_mass"):
+        assert boundary.newton.contributes_to_mass is False
+    assert boundary.newton.sdf_max_resolution == 192
+    assert desc.renders[0].file_path == "/assets/cup.glb"
+    assert cfg.shape.collision.approximation == "convex_decomposition"
+
+
+def test_particle_boundary_requires_newton_and_sdf():
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    cfg = RigidObjectCfg(
+        uid="cup",
+        shape=MeshCfg(fpath="/assets/cup.glb"),
+        particle_collision_shape=MeshCfg(fpath="/assets/cavity.obj"),
+    )
+    with pytest.raises(ValueError, match="Newton"):
+        rigid_desc_from_cfg(cfg)
+    with pytest.raises(ValueError, match="sdf"):
+        rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
+
+
+def test_dynamic_particle_boundary_requires_safe_mass_properties():
+    from dexsim.spawn import NewtonCollisionDesc
+
+    if "contributes_to_mass" in NewtonCollisionDesc.__dataclass_fields__:
+        pytest.skip("This DexSim build can exclude the boundary from mass directly.")
+    cfg = RigidObjectCfg(
+        uid="cup",
+        shape=CubeCfg(size=[0.1, 0.1, 0.1]),
+        particle_collision_shape=MeshCfg(
+            fpath="/assets/cavity.obj",
+            collision=MeshCollisionCfg(approximation="sdf"),
+        ),
+        attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=0.3)),
+    )
+    with pytest.raises(NotImplementedError, match="explicit mass and inertia"):
+        rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
+
+
 @pytest.mark.parametrize(
     "kind", ["rigid", "visual", "volume", "surface", "surface_visual"]
 )

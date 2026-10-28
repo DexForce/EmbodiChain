@@ -49,7 +49,7 @@ topics:
   keywords: [BaseEnv, EmbodiedEnv, EpisodeContext, EnvCfg, register_env, list-task, run-task, run-example, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
-    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
+    FluidReplayEnv, fluid Gym, 流体 Gym, ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
     task_instruction, resolve_demo_instruction,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标]
   paths: [topics/env-framework/env-framework.md]
@@ -72,11 +72,13 @@ topics:
   - embodichain/lab/gym/envs/embodied_env.py
   - embodichain/lab/gym/envs/episode_context.py
   - embodichain/lab/gym/envs/expert_trajectory.py
+  - embodichain/lab/gym/envs/fluid_replay.py
+  - embodichain/lab/scripts/run_fluid_task_program.py
   - embodichain/lab/gym/envs/demo.py
   - embodichain/lab/gym/utils/profiler.py
   watch_paths: [embodichain/lab/gym/envs/episode_context.py, embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
-    embodichain/lab/gym/envs/demo.py,
-    embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_task.py,
+    embodichain/lab/gym/envs/demo.py, embodichain/lab/gym/envs/fluid_replay.py,
+    embodichain/lab/scripts/run_fluid_task_program.py, embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_task.py,
     extensions/embodichain_tasks/, tests/gym/envs/, embodichain/lab/gym/envs/objectives/,
     embodichain/lab/scripts/evaluate_task_objective.py, tests/lab/scripts/test_evaluate_task_objective.py]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]
@@ -445,7 +447,7 @@ topics:
   title: Data Assets
   aliases: [data assets, data path, asset download, 数据资产, 资产下载, 数据路径]
   keywords: [get_data_path, get_data_class, EmbodiChainDataset, TabletopFourBases, demo assets, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
-    CATEGORY_MODULES, embodichain.assets, ROBOT_ASSETS, 资产注册, download lock, get_registry, DefaultMaterials, list_default_materials, get_default_material_info]
+    CATEGORY_MODULES, embodichain.assets, ROBOT_ASSETS, 资产注册, download lock, get_registry, DefaultMaterials, list_default_materials, get_default_material_info, task_assets, PourCupAssets, PourCupDemoData]
   paths: [topics/data-assets/data-assets.md]
   source_of_truth:
   - embodichain/data/dataset.py

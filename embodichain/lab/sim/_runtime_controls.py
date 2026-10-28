@@ -18,13 +18,56 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
 
-from dexsim.engine.newton_physics.runtime_control import RuntimeControl
+from dexsim.engine.newton_physics.runtime_control import (
+    GraphRuntimeControl,
+    RuntimeControl,
+)
 
 __all__: list[str] = []
+
+
+class _DexUniFluidJointOwnership(GraphRuntimeControl):
+    """Assign the complete finalized joint topology to the fluid rigid solver."""
+
+    def __init__(self) -> None:
+        self._assigned: tuple[int, ...] | None = None
+
+    def initialize_model(self, model: Any, result: Any) -> None:
+        """Select all joints before DexUni constructs its coupled solver."""
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+        backend = get_newton_backend(result.world)
+        if backend is None or backend.solver_type != "dexuni":
+            raise RuntimeError("Fluid joint ownership requires a DexUni backend.")
+        cfg = backend.cfg.solver_cfg
+        if (
+            cfg.mujoco_articulations is not None
+            or cfg.mujoco_articulation_paths is not None
+            or (cfg.mujoco_joints is not None and cfg.mujoco_joints != self._assigned)
+        ):
+            raise RuntimeError(
+                "Fluid joint ownership conflicts with an explicit selector."
+            )
+        self._assigned = tuple(range(model.joint_count))
+        cfg.mujoco_joints = self._assigned
+
+    def __call__(
+        self, context: Any, substep_index: int, substep_count: int, substep_dt: float
+    ) -> None:
+        """Keep the solver-owned topology unchanged while stepping."""
+        del context, substep_index, substep_count, substep_dt
+
+    def prepare_episode_reset(
+        self, arena_indices: tuple[int, ...]
+    ) -> Callable[[], None]:
+        """Keep the fixed topology unchanged during selective episode resets."""
+        del arena_indices
+        return lambda: None
 
 
 class _KinematicNodalTrajectoryControl(RuntimeControl):
@@ -122,3 +165,67 @@ class _KinematicNodalTrajectoryControl(RuntimeControl):
         """Release runtime particle references retained after initialization."""
         self._particle_set = None
         self._initial_positions = None
+
+
+class _KinematicRigidTrajectoryControl(RuntimeControl):
+    """Sample world pose tracks on the native solver substep clock."""
+
+    def __init__(self, target: str, poses: np.ndarray, fps: float) -> None:
+        from scipy.spatial.transform import Rotation, Slerp
+
+        self.target = target
+        self.poses = poses.copy()
+        self.fps = fps
+        self._times = np.arange(len(poses)) / fps
+        self._rotations = Rotation.from_quat(poses[:, 3:])
+        self._slerp = Slerp(self._times, self._rotations) if len(poses) > 1 else None
+        self._actor = None
+        self.reset()
+
+    def initialize(self, context: Any) -> None:
+        self._actor = context.result.get_actor(self.target)
+        self.reset()
+
+    def exclusive_resource_claims(self) -> tuple[object, ...]:
+        return (("kinematic_rigid_trajectory", self.target),)
+
+    def reset(self) -> None:
+        self._elapsed = 0.0
+        self._previous = None
+
+    def prepare_episode_reset(
+        self, arena_indices: tuple[int, ...]
+    ) -> Callable[[], None]:
+        """Rewind only when this trajectory's arena is selected."""
+        if self._actor is None:
+            raise RuntimeError("Kinematic rigid trajectory is not initialized.")
+        return self.reset if self._actor._arena_index in arena_indices else lambda: None
+
+    def __call__(
+        self, context: Any, substep_index: int, substep_count: int, substep_dt: float
+    ) -> None:
+        from scipy.spatial.transform import Rotation
+
+        del context, substep_index, substep_count
+        if self._actor is None:
+            raise RuntimeError("Kinematic rigid trajectory is not initialized.")
+        t = min(self._elapsed, self._times[-1])
+        position = np.array(
+            [np.interp(t, self._times, self.poses[:, axis]) for axis in range(3)]
+        )
+        rotation = self._rotations[0] if self._slerp is None else self._slerp(t)
+        pose = np.eye(4, dtype=np.float32)
+        pose[:3, :3] = rotation.as_matrix()
+        pose[:3, 3] = position
+        previous = pose if self._previous is None else self._previous
+        self._actor.set_world_pose(pose)
+        self._actor.set_linear_velocity((pose[:3, 3] - previous[:3, 3]) / substep_dt)
+        self._actor.set_angular_velocity(
+            Rotation.from_matrix(pose[:3, :3] @ previous[:3, :3].T).as_rotvec()
+            / substep_dt
+        )
+        self._previous = pose
+        self._elapsed += substep_dt
+
+    def close(self) -> None:
+        self._actor = None

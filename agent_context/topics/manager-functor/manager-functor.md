@@ -9,6 +9,7 @@
 | Observation manager + built-in functors | `managers/observation_manager.py`, `managers/observations.py` |
 | Reward manager + built-in functors | `managers/reward_manager.py`, `managers/rewards.py` |
 | Event manager + built-in functors | `managers/event_manager.py`, `managers/events.py` |
+| Episode camera recording events | `managers/record.py` |
 | Action manager + built-in terms | `managers/action_manager.py`, `managers/actions.py` |
 | Dataset manager + built-in recorders | `managers/dataset_manager.py`, `managers/datasets.py`, `managers/async_datasets.py` |
 | Randomization functors (event sub-type) | `managers/randomization/` (spatial, visual, physics, geometry) |
@@ -111,6 +112,22 @@ seed stream because the name is part of the stream identity.
 Event and observation calls have per-functor profiling through
 `ManagerBase._call_functor()`; reward/action/dataset calls do not yet use that
 helper. See [profiling](../env-framework/profiling.md).
+
+### Camera recording
+
+`record_camera_data` is an interval event, independent of policy dataset
+recording. It renders its camera group before reading the buffers because
+interval events precede observation rendering. Views use arena-relative camera
+extrinsics. It retains separate owned CPU frames and episode counters per row.
+It captures only the event's selected `env_ids` within `max_env_num`, preserving
+their original arena IDs; `None` captures all views within that limit. Selected
+save/discard only touches those rows. `fps=None` follows control frequency for
+an every-step recording event; an explicit fps fixes the output cadence.
+
+Reset commits or discards frames via `save_and_clear` / `discard_and_clear`.
+Close discards uncommitted frames, so a host ending without reset must explicitly
+commit its last episode. Source and regression tests live in `record.py` and
+`tests/gym/envs/managers/test_record.py`.
 
 ## Change sites and validation
 

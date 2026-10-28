@@ -2875,3 +2875,26 @@ Asset generalization contracts
    :maxdepth: 2
 
    asset_generalization
+
+Fluid task interfaces
+=====================
+
+The pouring task supplies downloadable scene assets and a diagnostic fluid
+replay environment. Its runner executes the configured Task Program against
+live one-way rigid-to-fluid simulation.
+
+.. autosummary::
+
+   embodichain.data.assets.task_assets.PourCupAssets
+   embodichain.data.assets.task_assets.PourCupDemoData
+   embodichain.lab.gym.envs.fluid_replay.FluidReplayEnv
+   embodichain.lab.scripts.run_fluid_task_program.main
+
+.. autoclass:: embodichain.data.assets.task_assets.PourCupAssets
+
+.. autoclass:: embodichain.data.assets.task_assets.PourCupDemoData
+
+.. autoclass:: embodichain.lab.gym.envs.fluid_replay.FluidReplayEnv
+   :members:
+
+.. autofunction:: embodichain.lab.scripts.run_fluid_task_program.main
