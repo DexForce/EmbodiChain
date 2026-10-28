@@ -8,11 +8,19 @@
   "reports": {
     "author_flash": {
       "all_recorded_max_abs_errors": 0.0,
-      "artifact": "installed-final-flash/summary.json",
+      "artifact": "post-review-flash/summary.json",
       "checkpoint_origin": "official-release",
       "checkpoint_sha256": "ffb0efc6904b5a63504a5005bb6c4df2e79e8de20641dc205885593747fcf7d9",
+      "model_source_commit": "acb01d18e28832557dbd4bff39ede7b6d12bb02f",
+      "nccl_runtime": [
+        2,
+        26,
+        2
+      ],
+      "previous_artifact": "installed-final-flash/summary.json",
+      "previous_sha256": "bc33e89c7f29431a679007b7dd567aae26eac9494f56cd5a80c881a4e0a049ee",
       "seed": 42,
-      "sha256": "bc33e89c7f29431a679007b7dd567aae26eac9494f56cd5a80c881a4e0a049ee",
+      "sha256": "4e037cfb591fc73f9a47fd42d2927a7c9246583a78723b029edc54de99f4c2ed",
       "updates": 3
     },
     "fixed_weight_evaluation": {
@@ -30,7 +38,7 @@
       ]
     },
     "full_architecture_recovery": {
-      "artifact": "installed-final-recovery/summary.json",
+      "artifact": "post-review-recovery/summary.json",
       "compared_exactly": [
         "learner",
         "training_states",
@@ -41,7 +49,10 @@
         "ema": 485,
         "raw": 485
       },
-      "sha256": "6619a190694b2a4e8bfb954a6ee4fa6c17703b0bd77f081d0398184aede3ddf7",
+      "model_source_commit": "acb01d18e28832557dbd4bff39ede7b6d12bb02f",
+      "previous_artifact": "installed-final-recovery/summary.json",
+      "previous_sha256": "6619a190694b2a4e8bfb954a6ee4fa6c17703b0bd77f081d0398184aede3ddf7",
+      "sha256": "2daad678a5b633615a871db5b2a610bae55819650779a00567dee10273a4545b",
       "stop_after": 2,
       "updates": 4
     },
@@ -50,7 +61,7 @@
       "sha256": "4b07998f2222853c8e789aaa849235067f0740bf7eeb83b62a0caf912436e5e5"
     },
     "two_rank_nccl": {
-      "artifact": "final-gpu-tests/test_nccl_weighted_syncbn_and_0/summary.json",
+      "artifact": "post-review-two-rank/test_nccl_weighted_syncbn_and_0/summary.json",
       "backend": "nccl",
       "compared": [
         "model",
@@ -63,6 +74,9 @@
       ],
       "epochs": 3,
       "loaded_nccl_version": 22907,
+      "model_source_commit": "acb01d18e28832557dbd4bff39ede7b6d12bb02f",
+      "previous_artifact": "final-gpu-tests/test_nccl_weighted_syncbn_and_0/summary.json",
+      "previous_sha256": "cbabbf2e951fa12a86baf2fc9ba60dcbcebbf2e3058731a69db43abfb1e36e36",
       "recovery": "exact",
       "sha256": "cbabbf2e951fa12a86baf2fc9ba60dcbcebbf2e3058731a69db43abfb1e36e36",
       "split_after": 3,
@@ -134,6 +148,9 @@
       "sha256": "6e94ed43b02c14495e39a6d054d7474dd7c025f8d2e9c232443a5f70da02aab2"
     },
     "gpu_tests": 6,
-    "test_basis": "Full behavioral run plus per-layer checks; subsequent production edits only clarify API docstrings."
+    "post_review_cpu_tests": 86,
+    "post_review_gpu_tests": 3,
+    "post_review_note": "Flash comparison, full-model recovery and two-rank NCCL were rerun after the model review fixes; other indexed reports retain their original source hashes.",
+    "test_basis": "Initial full behavioral run and per-layer checks; post-review model fixes were checked separately."
   }
 }
