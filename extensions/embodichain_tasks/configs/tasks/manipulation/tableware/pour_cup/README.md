@@ -44,6 +44,8 @@ python scripts/tutorials/sim/franka_dexuni_pour_demo.py --headless --renderer fa
 
 增加 `--num-envs 4` 可在同一个 World 中并行运行四个环境，分别输出
 `fluid_sim_env0.mp4` 至 `fluid_sim_env3.mp4`。
+场景间距按录制相机的视野设置，以避免相邻环境的倒水工作区出现在预览中。
+各环境仍共享渲染场景；其他相机视角不自动隔离环境。
 
 默认粒子间距为 1.5 mm，初始填充 76,607 粒。Gym 的 `--particle-spacing 0.003`
 或 Sim 的 `--spacing 0.003` 可用于较快的物理检查，但会改变流体分辨率。
