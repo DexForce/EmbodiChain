@@ -257,6 +257,7 @@ def run_demo(args: argparse.Namespace) -> None:
     )
     from embodichain.lab.sim.sensors import CameraCfg
     from embodichain.lab.sim.shapes import SphereCfg
+    from embodichain.lab.visualization import VisualizationCfg
     from embodichain_models.dynamics.rigidformer import load_rigidformer_checkpoint
     from embodichain_models.dynamics.rigidformer.data import _verified_manifest
 
@@ -300,6 +301,7 @@ def run_demo(args: argparse.Namespace) -> None:
                 width=_WIDTH,
                 height=_HEIGHT,
                 render_cfg=RenderCfg(renderer="hybrid"),
+                visualization=VisualizationCfg(backend="none"),
                 physics_cfg=NewtonPhysicsCfg(
                     physics_dt=1 / _PHYSICS_HZ,
                     num_substeps=2,

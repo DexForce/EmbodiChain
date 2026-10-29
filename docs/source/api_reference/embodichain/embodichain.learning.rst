@@ -38,8 +38,7 @@ The layer owns fixed TCP and limit buffers, and its copied PK geometry follows
 ``to(device/dtype)``. Reconstruct the same robot model before loading a checkpoint;
 its geometry fingerprint is checked. ``DifferentiableIKLayer`` composes an FK layer:
 its ``forward`` returns joints for network composition, while ``solve`` returns
-residuals and a success mask. ``KinematicsLayer`` remains a direct compatibility
-alias of ``DifferentiableFKLayer``, including its original module import path.
+residuals and a success mask.
 Both retain input gradients in training and evaluation mode. Callers own rollout
 state, optimizers, and detach boundaries.
 
@@ -49,12 +48,8 @@ state, optimizers, and detach boundaries.
 
    DifferentiableFKLayer
    DifferentiableIKLayer
-   KinematicsLayer
 
 .. automodule:: embodichain.learning.layers.fk
-   :members:
-
-.. automodule:: embodichain.learning.layers.kinematics
    :members:
 
 .. automodule:: embodichain.learning.layers.ik

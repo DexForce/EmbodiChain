@@ -52,9 +52,6 @@ class Block(importlib.abc.MetaPathFinder):
             raise AssertionError(fullname)
 sys.meta_path.insert(0, Block())
 from embodichain.learning.layers import DifferentiableFKLayer, DifferentiableIKLayer
-from embodichain.learning.layers import KinematicsLayer
-from embodichain.learning.layers.kinematics import KinematicsLayer as LegacyKinematicsLayer
-assert KinematicsLayer is LegacyKinematicsLayer is DifferentiableFKLayer
 from embodichain.learning.models import MLP, EmpiricalNormalizer, build_mlp_from_cfg
 network = build_mlp_from_cfg({"type": "mlp", "network_cfg": {"hidden_sizes": [4]}}, 3, 2)
 assert isinstance(network, MLP)

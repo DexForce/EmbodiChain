@@ -13,8 +13,7 @@ returns TCP poses and geometric Jacobians from one FK pass, retaining dJ/dq.
 `learning/layers/fk.py` owns `DifferentiableFKLayer`: joints to root-frame TCP
 poses through a pure FK path; `evaluate` also returns geometric Jacobians from
 one FK pass. `DifferentiableIKLayer` composes this FK layer with fixed-step DLS.
-`KinematicsLayer` remains a direct alias at both its original module and package
-import paths. IK keeps its `kinematics` child name for checkpoint compatibility.
+IK keeps its `kinematics` child name for checkpoint compatibility.
 `learning/models/` owns general MLPs, feature normalization
 and configuration-driven MLP construction. These shared components do not import
 RL, TensorDict or simulation. Concrete NeRD models, codecs and the shared-SL
@@ -85,6 +84,4 @@ Tests live under `tests/compute/kinematics/` and `tests/learning/layers/`.
 Validate FK, dJ/dq, full IK and recurrent-state gradients separately; include
 nonzero TCP offsets, repeated solves, checkpoint migration and import boundaries. GPU validation runs serially with `--run-gpu`.
 The unified kinematic benchmark's `differentiable` mode measures training and
-forward-only baselines, including FK/Jacobian and DLS component costs. Its explicit
-`fk` mode compares pure FK with pose extraction through `evaluate`, including
-matching pose-loss gradients and separately measured warmed memory.
+forward-only baselines, including FK/Jacobian and DLS component costs.

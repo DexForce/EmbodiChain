@@ -158,9 +158,8 @@ check still uses physical limits. Numerical options belong to
   dict. Checkpoints store TCP/limit buffers, geometry identity and, for IK,
   numerical settings. `load_state_dict(assign=True)` also migrates fixed
   geometry to the loaded buffers' device and dtype, including nested loads.
-  `KinematicsLayer` remains a direct alias of `DifferentiableFKLayer` at its
-  original package and module import paths. IK retains the `kinematics`
-  constructor argument and child name for existing state dicts.
+  IK retains the `kinematics` constructor argument and child name for existing
+  state dicts.
 
 ## Examples and measurement
 
@@ -177,16 +176,13 @@ The READMEs own runnable commands, dependencies, artifacts and evaluation
 protocols. These are kinematic examples; collision, contact, dynamics and physical
 execution are outside their validation scope.
 
-The unified kinematic benchmark provides two relevant modes:
+The unified kinematic benchmark measures differentiable IK:
 
 ```bash
-python -m scripts.benchmark.robotics.kinematic_solver.run_benchmark -s fk
 python -m scripts.benchmark.robotics.kinematic_solver.run_benchmark -s differentiable
 ```
 
-`fk` compares pure FK with pose extraction through `evaluate` using identical
-inputs and pose losses, checking pose/gradient agreement and separately measuring
-warmed memory. `differentiable` measures IK forward and forward/backward passes,
-FK/Jacobian and DLS components, and FEP/Pytorch forward-only baselines. Reports
+`differentiable` measures IK forward and forward/backward passes, FK/Jacobian
+and DLS components, and FEP/Pytorch forward-only baselines. Reports
 describe workloads, error metrics, timing and memory-accounting scope; benchmark
 results do not establish performance for a different task or device.
