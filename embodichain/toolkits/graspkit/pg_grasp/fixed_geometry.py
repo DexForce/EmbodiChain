@@ -227,7 +227,11 @@ class FixedGripperCollisionGeometry:
             kind = joint.attrib["type"]
             if kind in {"prismatic", "revolute", "continuous"}:
                 position = joint_position(joint)
-                axis = np.fromstring(joint.find("axis").attrib["xyz"], sep=" ")
+                axis_element = joint.find("axis")
+                axis = np.fromstring(
+                    "1 0 0" if axis_element is None else axis_element.attrib["xyz"],
+                    sep=" ",
+                )
                 if (
                     axis.shape != (3,)
                     or not np.isfinite(axis).all()

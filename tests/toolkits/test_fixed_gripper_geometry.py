@@ -74,6 +74,34 @@ def test_urdf_collision_geometry_respects_joint_mesh_and_tcp_frames(
         FixedGripperCollisionGeometry.from_urdf(urdf, **arguments)
 
 
+@pytest.mark.parametrize("kind", ["prismatic", "revolute", "continuous"])
+def test_urdf_missing_joint_axis_defaults_to_positive_x(
+    tmp_path: Path, kind: str
+) -> None:
+    trimesh.creation.box(extents=(0.01, 0.02, 0.03)).export(tmp_path / "finger.stl")
+    path = tmp_path / "default_axis.urdf"
+    path.write_text(f"""<robot name="fixture"><link name="base"/>
+      <link name="finger"><collision><origin xyz="0 0.02 0"/>
+        <geometry><mesh filename="finger.stl"/></geometry></collision></link>
+      <joint name="drive" type="{kind}"><parent link="base"/><child link="finger"/>
+        <limit lower="-2" upper="2" effort="10" velocity="1"/>
+      </joint></robot>""")
+    geometry = FixedGripperCollisionGeometry.from_urdf(
+        path,
+        root_link="base",
+        tcp_link="base",
+        collision_links=("finger",),
+        joint_positions={"drive": 0.04 if kind == "prismatic" else np.pi / 2},
+        grasp_from_tcp=np.eye(4),
+        point_spacing=0.012,
+    )
+    bounds = np.array(geometry.provenance["parts"][0]["bounds_m"])
+    center = [0.04, 0.02, 0] if kind == "prismatic" else [0, 0, 0.02]
+    extents = [0.01, 0.02, 0.03] if kind == "prismatic" else [0.01, 0.03, 0.02]
+    np.testing.assert_allclose(bounds.mean(0), center, atol=2e-9)
+    np.testing.assert_allclose(bounds[1] - bounds[0], extents, atol=2e-9)
+
+
 def test_fixed_collision_chunks_match_full_reduction_and_bound_storage() -> None:
     coordinates = torch.linspace(-0.3, 0.3, 1025)
     points = torch.stack((coordinates, coordinates.flip(0), coordinates * 0.5), dim=1)
