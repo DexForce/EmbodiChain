@@ -20,12 +20,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import torch
 from torch import nn
 
-__all__ = ["SupervisedBatch", "LossResult", "SupervisedObjective"]
+if TYPE_CHECKING:
+    from .learner import SupervisedLearner
+
+__all__ = [
+    "SupervisedBatch",
+    "LossResult",
+    "SupervisedObjective",
+    "SupervisedTrainingState",
+]
 
 
 def _map_tensors(value: Any, function: Any) -> Any:
@@ -93,6 +101,46 @@ class LossResult:
     loss: torch.Tensor
     metrics: Mapping[str, torch.Tensor | float] = field(default_factory=dict)
     weight: float = 1.0
+
+
+class SupervisedTrainingState(Protocol):
+    """Explicit update participant with owned rank-local checkpoint state.
+
+    Participants commit in insertion order after optimizer success and before
+    scheduling/evaluation. Validation must not mutate live state.
+    """
+
+    def on_update(self, learner: SupervisedLearner) -> None:
+        """Commit state after the learner's successful optimizer update.
+
+        Args:
+            learner: Learner at its new committed update boundary.
+        """
+        ...
+
+    def state_dict(self) -> Mapping[str, Any]:
+        """Return an owned serializable snapshot of the committed state.
+
+        Returns:
+            State whose mutable values do not alias the live participant.
+        """
+        ...
+
+    def validate_state_dict(self, state: Mapping[str, Any]) -> None:
+        """Validate compatibility without changing live state.
+
+        Args:
+            state: Candidate checkpoint state.
+        """
+        ...
+
+    def load_state_dict(self, state: Mapping[str, Any]) -> None:
+        """Restore a previously validated snapshot.
+
+        Args:
+            state: State accepted by validate_state_dict.
+        """
+        ...
 
 
 class SupervisedObjective(Protocol):

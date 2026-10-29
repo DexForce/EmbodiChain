@@ -273,7 +273,7 @@ topics:
   aliases: [neural dynamics, neural robot dynamics, NeRD, RigidFormer, 神经动力学, 动力学模型训练, NeRD 示例, RigidFormer 示例]
   keywords: [NeRDStateCodec, NeRDModel, DynamicsGenerationCfg,
     DynamicsShardWriter, DynamicsWindowDataset, DynamicsTrainer, embodichain_models,
-    learning/nerd, nerd reference assets, RigidFormerModel,
+    learning/nerd, nerd reference assets, RigidFormerModel, MOViSequenceSource, build_rigidformer_trainer,
     官方训练精度对比]
   paths: [topics/neural-dynamics/neural-dynamics.md]
   source_of_truth:
@@ -283,7 +283,8 @@ topics:
   - examples/learning/nerd/_support/
   - examples/learning/nerd/configs/
   - extensions/embodichain_models/embodichain_models/dynamics/rigidformer/
-  watch_paths: [extensions/embodichain_models/, examples/learning/nerd/,
+  - examples/learning/rigidformer/
+  watch_paths: [extensions/embodichain_models/, examples/learning/nerd/, examples/learning/rigidformer/,
     docs/source/features/neural_dynamics.md,
     docs/source/api_reference/model_catalogs.rst]
   related_topics: [supervised-learning, learning-layers, data-pipeline, data-assets]
