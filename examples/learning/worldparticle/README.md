@@ -23,6 +23,7 @@ Then pass the produced CPython 3.12 wheel explicitly:
 
 ```bash
 uv venv --python 3.12 .venv-worldparticle --seed
+uv pip install --python .venv-worldparticle/bin/python 'setuptools>=78.1.1' wheel
 SDK_WHEEL=/absolute/path/to/dexsim_engine-0.5.1rc1+worldparticle.6367b2-cp312-cp312-manylinux_2_35_x86_64.whl
 uv pip install --python .venv-worldparticle/bin/python --no-build-isolation \
   -e '.[worldparticle]' "$SDK_WHEEL" \
@@ -73,8 +74,9 @@ to `NewtonPhysicsCfg(solver_cfg=..., use_cuda_graph=False, collision_cfg=None)`.
 For `SimulationManager`, set `enable_default_ground=False` because neural
 boundaries are authored in the input NPZ. The ordinary manager ground default
 and built-in solver selection are unchanged.
-Alternatively, the installed `worldparticle` solver entry point belongs to the
-EmbodiChain distribution. Use the checkpoint dt/gravity and matching authored
+Alternatively, pass `RegisteredNewtonSolverCfg(solver_type="worldparticle", options=...)`
+to the same physics config; its installed entry point belongs to the EmbodiChain
+distribution. Use the checkpoint dt/gravity and matching authored
 particle order. Only a single CUDA particle world is supported, without native
 rigid collision shapes, gradients or CUDA Graph capture. Static boundaries and
 features come from model inputs. Changing them requires closing/recreating the

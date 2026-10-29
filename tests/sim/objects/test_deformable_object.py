@@ -183,12 +183,13 @@ def test_manager_rejects_non_particle_newton_solver(solver_type: str) -> None:
     sim.physics = NewtonPhysicsBackend(SimpleNamespace())
     sim.physics._configured_solver_type = solver_type
     sim.device = torch.device("cuda")
+    sim.sim_config = SimpleNamespace(physics_cfg=NewtonPhysicsCfg())
 
     with pytest.raises(NotImplementedError, match="does not support deformable"):
         sim.add_deformable_object(VolumeDeformableObjectCfg(uid="soft"))
 
 
-@pytest.mark.parametrize("solver_type", ["auto", "dexuni", "provider"])
+@pytest.mark.parametrize("solver_type", ["auto", "dexuni", "provider", "worldparticle"])
 @pytest.mark.parametrize(
     "config_type", [SurfaceDeformableObjectCfg, VolumeDeformableObjectCfg]
 )
@@ -199,12 +200,20 @@ def test_manager_declares_deformables_with_supported_solver(
 ) -> None:
     from embodichain.lab.sim.shapes import MeshCfg
     from embodichain.lab.sim.spawn.scene import SpawnScene
+    from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
 
     sim = object.__new__(SimulationManager)
     sim.physics = NewtonPhysicsBackend(SimpleNamespace())
     sim.physics._configured_solver_type = solver_type
     sim.device = torch.device("cuda")
-    sim.sim_config = SimpleNamespace(physics_cfg=NewtonPhysicsCfg())
+    solver_cfg = (
+        RegisteredNewtonSolverCfg(solver_type=solver_type)
+        if solver_type == "worldparticle"
+        else None
+    )
+    sim.sim_config = SimpleNamespace(
+        physics_cfg=NewtonPhysicsCfg(solver_cfg=solver_cfg)
+    )
     sim._deformable_objects = {}
     sim._visualization_topology_revision = 0
     builder = SimpleNamespace(

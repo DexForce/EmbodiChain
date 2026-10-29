@@ -2875,13 +2875,18 @@ class SimulationManager:
             "vbd",
             "provider",
         }
-        if solver_type not in supported_solvers:
-            raise NotImplementedError(
-                f"Newton solver {solver_type!r} does not support deformable "
-                "particle sets; select one of 'auto', 'dexuni', 'xpbd', "
-                "'semi_implicit', or 'vbd'."
-            )
         physics_cfg = self.sim_config.physics_cfg
+        if solver_type not in supported_solvers:
+            from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+
+            # Registered names retain their entry-point identity rather than
+            # the direct factory's "provider" type. Spawn validates their
+            # actual particle capabilities during finalization.
+            if not isinstance(physics_cfg.solver_cfg, RegisteredNewtonSolverCfg):
+                raise NotImplementedError(
+                    f"Newton solver {solver_type!r} does not support deformable "
+                    "particle sets; select a particle solver or an external Provider."
+                )
         if isinstance(physics_cfg, NewtonPhysicsCfg) and physics_cfg.requires_grad:
             raise NotImplementedError(
                 "Newton deformable state mutation is unavailable when "
