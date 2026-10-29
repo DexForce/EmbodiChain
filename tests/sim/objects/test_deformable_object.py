@@ -188,7 +188,7 @@ def test_manager_rejects_non_particle_newton_solver(solver_type: str) -> None:
         sim.add_deformable_object(VolumeDeformableObjectCfg(uid="soft"))
 
 
-@pytest.mark.parametrize("solver_type", ["auto", "dexuni"])
+@pytest.mark.parametrize("solver_type", ["auto", "dexuni", "provider"])
 @pytest.mark.parametrize(
     "config_type", [SurfaceDeformableObjectCfg, VolumeDeformableObjectCfg]
 )

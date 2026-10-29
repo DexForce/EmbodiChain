@@ -57,6 +57,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Only this validated CUDA operator ABI is supported.
+worldparticle = [
+    "torchvision==0.22.1+cu128; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'",
+    "numpy==2.2.6; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'",
+    "torch==2.7.1+cu128; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'",
+    "einops==0.8.2; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'",
+    "open3d @ http://192.168.3.43:8080/packages/open3d-0.19.0%2B1e7b174-1torch271cu128sm120-cp312-cp312-manylinux_2_35_x86_64.whl#sha256=209bcee758d25953bcc4cab284ad4fb17f5aace0a3e1e3c296750511bf4257ad ; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'",
+    "flash-attn @ http://192.168.3.43:8080/packages/flash_attn-2.8.3%2Bcu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl#sha256=cafd4f708725e1be95495a86cbf418cfada08e707c8a797def61488a2a3c4f72 ; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'",
+]
 rigidformer = [
   "einops>=0.8.1",
   "roma==1.5.4",
@@ -85,6 +94,9 @@ gensim = [
 # asset and LeRobot dataset preview, grasp annotation, RL training, URDF convex
 # decomposition, benchmarks, and workspace cache management.
 embodichain = "embodichain.__main__:main"
+
+[project.entry-points."dexsim.newton_solvers"]
+worldparticle = "embodichain.lab.sim.physics.worldparticle:WorldParticleProvider"
 
 [project.entry-points."embodichain.tasks"]
 embodichain_tasks = "embodichain_tasks"

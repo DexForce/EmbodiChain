@@ -260,3 +260,58 @@ Other dynamics families
    :maxdepth: 2
 
    rwm
+
+WorldParticle inference
+-----------------------
+
+WorldParticle owns frozen networks, strict official checkpoint loading and
+sample-ordered features, static boundaries and CSR topology. Inputs and outputs
+are world-space particle positions and velocities; external force conditioning
+is total acceleration, including gravity. Model-frame conversion uses float32,
+while neural inference retains the official BF16 arithmetic. Loading and use
+must occur on the caller-owned execution stream.
+
+.. currentmodule:: embodichain_models.dynamics.worldparticle
+
+.. autosummary::
+
+   WorldParticleModel
+   load_model
+
+.. autoclass:: WorldParticleModel
+   :members: __call__
+
+.. autofunction:: load_model
+
+The implementation module exposes the same frozen model contract.
+
+.. currentmodule:: embodichain_models.dynamics.worldparticle.model
+
+.. autosummary::
+
+   WorldParticleModel
+   load_model
+
+.. autoclass:: WorldParticleModel
+   :no-index:
+
+.. autofunction:: load_model
+   :no-index:
+
+The NPZ reader applies task stride before the configured frame slice and then
+selects initial position and velocity. Optional reference frames are returned
+for evaluation and are never used as future solver inputs.
+
+.. currentmodule:: embodichain_models.dynamics.worldparticle.data
+
+.. autosummary::
+
+   load_sample
+
+.. autofunction:: load_sample
+
+The model package imports neither simulation nor examples. Its simulator
+Provider belongs to ``embodichain.lab.sim.physics.worldparticle`` and uses
+DexSim's native particle inference adapter. Model weights and datasets remain
+outside the wheel. The retained ToMe CC-BY-NC-4.0 license requires separate
+commercial redistribution review.
