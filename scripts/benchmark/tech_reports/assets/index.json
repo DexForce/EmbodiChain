@@ -1,4 +1,207 @@
 {
   "schema_version": 1,
-  "bundles": {}
+  "bundles": {
+    "dexuni-2026-10-27-c01_supermarket_packing-inputs": {
+      "report_id": "dexuni-physics-2026-10-27",
+      "benchmark_id": "c01_supermarket_packing",
+      "files": [
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/c01_supermarket_packing/c01_supermarket_packing.zip",
+          "size_bytes": 316548158,
+          "sha256": "18c8fa8be31350b63e66bc69097df89a58ebbd92e7290c93bd1f4c53a54798e6"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/c01_supermarket_packing/runtime_support.zip",
+          "size_bytes": 38989,
+          "sha256": "c7f800fe1cd8aff10975078b12b3e77e67b3a8afea7bb30563681d01baa13d49"
+        }
+      ]
+    },
+    "dexuni-2026-10-27-c02_bag_frame_packing-inputs": {
+      "report_id": "dexuni-physics-2026-10-27",
+      "benchmark_id": "c02_bag_frame_packing",
+      "files": [
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/c02_bag_frame_packing/c02_bag_frame_packing.zip",
+          "size_bytes": 258976297,
+          "sha256": "cd087c5c18eceec3238e114af7e813113e3bd083ccf409e892cf7d84aca49d9c"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/c02_bag_frame_packing/runtime_support.zip",
+          "size_bytes": 138978,
+          "sha256": "a48e935ddef34896faa27d872c7d077de212a31e8a62fa1536a9e83f735887a1"
+        }
+      ]
+    },
+    "dexuni-2026-10-27-m01_soft_beam_bend-inputs": {
+      "report_id": "dexuni-physics-2026-10-27",
+      "benchmark_id": "m01_soft_beam_bend",
+      "files": [
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/m01_soft_beam_bend/m01_soft_beam_bend.zip",
+          "size_bytes": 41841164,
+          "sha256": "5f27fe88d4204d7bf5eaa51a3177bd332638da1da5fba7b7e2ff90ac3b3499ac"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/m01_soft_beam_bend/runtime_support.zip",
+          "size_bytes": 22736,
+          "sha256": "1734b715c1a68deb766f0846ee0a50c906ec52763ce86b723f79e2ab12a421ba"
+        }
+      ]
+    },
+    "dexuni-2026-10-27-m02_cloth_single_fold-inputs": {
+      "report_id": "dexuni-physics-2026-10-27",
+      "benchmark_id": "m02_cloth_single_fold",
+      "files": [
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/m02_cloth_single_fold/m02_cloth_single_fold.zip",
+          "size_bytes": 41854282,
+          "sha256": "d6059987b9d5bc6bc820e884655b5cb6657477699f8580f249168f64795ba157"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/m02_cloth_single_fold/runtime_support.zip",
+          "size_bytes": 23016,
+          "sha256": "219b67b426223e886b0145b132f3ebc4ba3140fe86aece9d64cfd7bcb5f2fc7c"
+        }
+      ]
+    },
+    "dexuni-2026-10-27-m03_four_layer_cloth_pick_place-inputs": {
+      "report_id": "dexuni-physics-2026-10-27",
+      "benchmark_id": "m03_four_layer_cloth_pick_place",
+      "files": [
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/m03_four_layer_cloth_pick_place/m03_four_layer_cloth_pick_place.zip",
+          "size_bytes": 41936621,
+          "sha256": "7b19f92167a62652cd7c9547cb24abef64deb69315b63962cded57b38314829c"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/m03_four_layer_cloth_pick_place/runtime_support.zip",
+          "size_bytes": 2423,
+          "sha256": "dc8351e05a2409c6a7777b0d8c4db5c88aa3e0ed95b047497667a84b57a6600c"
+        }
+      ]
+    },
+    "dexuni-2026-10-27-m04_bimanual_tshirt_single_fold-inputs": {
+      "report_id": "dexuni-physics-2026-10-27",
+      "benchmark_id": "m04_bimanual_tshirt_single_fold",
+      "files": [
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/m04_bimanual_tshirt_single_fold/m04_bimanual_tshirt_single_fold.zip",
+          "size_bytes": 45826693,
+          "sha256": "00f91dc6b6564cb1963439eadde8a168a834a9ec7b1497ca2ae069986ccbbc5e"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/m04_bimanual_tshirt_single_fold/runtime_support.zip",
+          "size_bytes": 179435,
+          "sha256": "d5ceb15ba50300b89b632d8ee550bd29053bdfaad9b451788de6ea2a5b593548"
+        }
+      ]
+    },
+    "dexuni-2026-10-27-m05_inflatable_pouch_load-inputs": {
+      "report_id": "dexuni-physics-2026-10-27",
+      "benchmark_id": "m05_inflatable_pouch_load",
+      "files": [
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/m05_inflatable_pouch_load/m05_inflatable_pouch_load.zip",
+          "size_bytes": 28105453,
+          "sha256": "02efb2bd9a2b78a2d4e7ccd6eefa54dea3c1753b488e8ad7719b7d5f5a5d2dfa"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/m05_inflatable_pouch_load/runtime_support.zip",
+          "size_bytes": 35730,
+          "sha256": "f28f0ba6115c70fe50010b918c885b944e6ad41494784c5c534832ed3c64f72d"
+        }
+      ]
+    },
+    "dexuni-2026-10-27-m06_franka_tshirt_fold-inputs": {
+      "report_id": "dexuni-physics-2026-10-27",
+      "benchmark_id": "m06_franka_tshirt_fold",
+      "files": [
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/m06_franka_tshirt_fold/m06_franka_tshirt_fold.zip",
+          "size_bytes": 60284357,
+          "sha256": "a985f62e41f4d93b3cca98d6db089c94b59a9098b80d9dfefb3d8709711bbfd6"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/m06_franka_tshirt_fold/runtime_support.zip",
+          "size_bytes": 2068,
+          "sha256": "47ba7b14e443c9f53bed2d5e28ce47239e1844e70065515af7efc67a3a53126a"
+        }
+      ]
+    },
+    "dexuni-2026-10-27-s01_fixed_five-inputs": {
+      "report_id": "dexuni-physics-2026-10-27",
+      "benchmark_id": "s01_fixed_five",
+      "files": [
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/s01_fixed_five/s01_fixed_five.zip",
+          "size_bytes": 6339239,
+          "sha256": "93c817cbe5de868e2f08a5f9acdf8651a9f4ded70fca29b3a776e3e0faae4435"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/s01_fixed_five/runtime_support.zip",
+          "size_bytes": 1548,
+          "sha256": "ae90af62d427bf7fd82c5c20535cc5921a778a5e5d8fd1fec12add2e5ea9222f"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/s01_fixed_five/robot_support.zip",
+          "size_bytes": 7756878,
+          "sha256": "280ec7312236ab0aa98d902544597f897cad3feb1330a4c75a5b3c656a0d19b5"
+        }
+      ]
+    },
+    "dexuni-2026-10-27-s02_fixed_five-inputs": {
+      "report_id": "dexuni-physics-2026-10-27",
+      "benchmark_id": "s02_fixed_five",
+      "files": [
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/s02_fixed_five/s02_fixed_five.zip",
+          "size_bytes": 6048962,
+          "sha256": "a9b480d063a793c92d6a69a89f905bb1164a36aa20731bff085f33367702226f"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/s02_fixed_five/runtime_support.zip",
+          "size_bytes": 1231,
+          "sha256": "749e02fcb07344aa5770cb7b86f78a0c55d13b160c81662a3fa609521fea0f39"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/s02_fixed_five/robot_support.zip",
+          "size_bytes": 7756878,
+          "sha256": "1c0be7ea6683ddfb699a76775ae14cd5eda9f97541cea8c9ae162333eb7aa713"
+        }
+      ]
+    },
+    "dexuni-2026-10-27-s03_cloth_corner_lift-inputs": {
+      "report_id": "dexuni-physics-2026-10-27",
+      "benchmark_id": "s03_cloth_corner_lift",
+      "files": [
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/s03_cloth_corner_lift/s03_cloth_corner_lift.zip",
+          "size_bytes": 32544276,
+          "sha256": "0be1e835eb6c1b21154df5509f4064abf8b027ad53ef46306c543f1dbeeb5757"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/s03_cloth_corner_lift/runtime_support.zip",
+          "size_bytes": 24285,
+          "sha256": "bc550b82a2d2a487c9b35b12dd6642955c4478a945fe1a5c302f70d8ea6d67da"
+        }
+      ]
+    },
+    "dexuni-2026-10-27-s04_rigid_soft_squeeze_grasp-inputs": {
+      "report_id": "dexuni-physics-2026-10-27",
+      "benchmark_id": "s04_rigid_soft_squeeze_grasp",
+      "files": [
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/s04_rigid_soft_squeeze_grasp/s04_rigid_soft_squeeze_grasp.zip",
+          "size_bytes": 41793198,
+          "sha256": "ec7d9515936c9a2de8ebaa4969be28fd6a490c7a21088054e32f7b6d8ca8ff76"
+        },
+        {
+          "path": "reports/dexuni-physics-2026-10-27/inputs/s04_rigid_soft_squeeze_grasp/runtime_support.zip",
+          "size_bytes": 2205,
+          "sha256": "f16ce61226802bce2396905beb4621aae60cb4416a036d7e9a9d04891a798091"
+        }
+      ]
+    }
+  }
 }

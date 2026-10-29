@@ -1,0 +1,358 @@
+{
+  "task": "S01",
+  "subtask": "S01-T",
+  "description": "Franka FR3 grips the far end of stretch block T whose near end is held by a static table clamp, pulls along +X under a closed-loop rule shared by both platforms until the centre material line is 5 % longer, holds 1 s, returns the end to its start position, opens the fingers and observes recovery for 2 s.",
+  "status": "pilot (not frozen)",
+  "units": "m, kg, s; Z up, X towards the worktop, Y to the robot's left",
+  "coupling": "two_way",
+  "joint_mode": "dynamic",
+  "platform_solvers": {
+    "dexsim": "DexUniSolverCfg(contact_mode='full', coupling='two_way'): MuJoCo owns the Franka; VBD owns the stretch block and static shapes; per-vertex particle-shape contact",
+    "isaaclab": "Newton CouplerProxy: MuJoCo-Warp entry owns the Franka; VBD entry owns the stretch block and static shapes; every robot link proxied into VBD; per-vertex particle contact"
+  },
+  "robot": {
+    "urdf": "/home/oem/code/assets/franka_emika_panda/fr3_franka_hand.dexsim.urdf",
+    "urdf_sha256": "recorded in inputs/inputs_manifest.json",
+    "model_note": "Newton-assets FR3 arm + Franka Hand (franka_hand_white); the repo panda_arm_hand.urdf has no local meshes.",
+    "base_position": [
+      0.0,
+      0.0,
+      0.86
+    ],
+    "arm_joints": [
+      "fr3_joint1",
+      "fr3_joint2",
+      "fr3_joint3",
+      "fr3_joint4",
+      "fr3_joint5",
+      "fr3_joint6",
+      "fr3_joint7"
+    ],
+    "finger_joints": [
+      "fr3_finger_joint1",
+      "fr3_finger_joint2"
+    ],
+    "finger_mimic": "both finger joints are driven independently with identical targets on both platforms",
+    "tcp_body": "fr3_hand",
+    "tcp_offset": [
+      0.0,
+      0.0,
+      0.1034
+    ],
+    "tcp_rotation_xyzw": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "arm_kp": [
+      12000.0,
+      12000.0,
+      12000.0,
+      12000.0,
+      4000.0,
+      4000.0,
+      4000.0
+    ],
+    "arm_kd": [
+      400.0,
+      400.0,
+      400.0,
+      400.0,
+      120.0,
+      120.0,
+      120.0
+    ],
+    "arm_effort_limit": [
+      87.0,
+      87.0,
+      87.0,
+      87.0,
+      12.0,
+      12.0,
+      12.0
+    ],
+    "finger_kp": 2000.0,
+    "finger_kd": 50.0,
+    "finger_effort_limit": 100.0,
+    "finger_armature": 0.1,
+    "arm_armature": 0.1,
+    "gravity": "robot links do not feel gravity (DexSim gravity compensation 1.0 / IsaacLab disable_gravity)",
+    "seed_q": [
+      0.0,
+      -0.3,
+      0.0,
+      -2.2,
+      0.0,
+      1.95,
+      0.785
+    ],
+    "finger_initial_q": 0.025,
+    "finger_note": "fingers start open at q=0.025 (pad gap 50 mm; block 40 mm + 2 x 2 mm particle radius + offset margin) and close during the grip phase"
+  },
+  "scene": {
+    "table_z": 0.86,
+    "table": {
+      "center": [
+        0.5,
+        0.0,
+        0.835
+      ],
+      "size": [
+        0.6,
+        1.0,
+        0.05
+      ]
+    },
+    "robot_stand": {
+      "center": [
+        0.0,
+        0.0,
+        0.4275
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.855
+      ]
+    },
+    "ground_z": 0.0
+  },
+  "stretch_block": {
+    "size": [
+      0.12,
+      0.04,
+      0.04
+    ],
+    "center": [
+      0.46,
+      -0.1,
+      0.92
+    ],
+    "cells": [
+      24,
+      8,
+      8
+    ],
+    "tet_split": "Freudenthal 6 tets per hexahedral cell (shared main diagonal)",
+    "density": 250.0,
+    "youngs_modulus": 30000.0,
+    "poisson_ratio": 0.35,
+    "k_damp": 0.001,
+    "particle_radius": 0.002,
+    "note": "plan: 120x40x40 mm, long axis X, centre about (0.46,-0.10, h=0.06); the block sits 40 mm above the table on the clamp so the fingers can wrap the far end; bottom nodes at z=0.900"
+  },
+  "clamp": {
+    "x_range": [
+      0.395,
+      0.43
+    ],
+    "base_top_z": 0.898,
+    "jaw_bottom_z": 0.936,
+    "jaw_thickness": 0.02,
+    "half_width": 0.034,
+    "post_inner_y": 0.028,
+    "pre_squeeze": 0.15,
+    "pre_squeeze_ramp": 0.01,
+    "note": "static collision bodies: a base under the near end, a top jaw and two side posts. The near-end nodes start squeezed in Z by pre_squeeze (40 -> 34 mm between base and jaw) from an unsqueezed rest shape, so the clamp holds the block by elastic normal force and friction (mu 0.6), not by attachment. The squeeze ramps to zero over pre_squeeze_ramp beyond the jaw edge. Friction capacity / needed pull at 5 % = 2*mu*0.15*(30x40) / (0.05*(40x40)) = 2.7, independent of E"
+  },
+  "grip": {
+    "tcp_x": 0.509,
+    "tcp_y": -0.1,
+    "tcp_z": 0.92,
+    "finger_close_target": 0.012,
+    "close_duration": 0.5,
+    "finger_open": 0.03,
+    "open_duration": 0.5,
+    "note": "pads (17.5 x 18.5 mm) centred on the TCP, 2 mm in from the far end; fingers close along world Y from q=0.025 to target 0.012. With finger kp 2000 N/m the settled squeeze is about 2000 x (15.4 - 12) mm = 7 N per finger (effort limit 100 N unchanged). Pilot 2026-10-21: target 0.016 (about 3.6 N) let the far end creep and stick-slip out of the pads in 4/10 DexSim and 2/10 Isaac Lab states; 0.010 passed but once pushed the fingers open at hold start in DexSim; 0.012 passed all tested states on both platforms (see results/S01T_DECISIONS.md)"
+  },
+  "material_lines": {
+    "x_range": [
+      0.44,
+      0.49
+    ],
+    "lines_yz": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.02
+      ],
+      [
+        0.0,
+        -0.02
+      ],
+      [
+        0.02,
+        0.0
+      ],
+      [
+        -0.02,
+        0.0
+      ]
+    ],
+    "primary": 0,
+    "note": "each line is the ordered nodes at block-local (y,z) with x in x_range (11 nodes, L0 50 mm, 10 mm from the jaw edge and from the pads); strain = L/L0 - 1 with L the sum of neighbour distances. The centre line (index 0) is the controlled and reported value; the other four surface lines are recorded. Node ids are fixed in inputs/s01t_block_mesh.npz"
+  },
+  "solver": {
+    "dt": 0.016666666666666666,
+    "num_substeps": 10,
+    "vbd_iterations": 40,
+    "proxy_mass_scale": 4.0,
+    "proxy_relaxation": 0.5,
+    "coupling_iterations": 1,
+    "use_cuda_graph": true,
+    "coupling_mode": "staggered",
+    "vbd_friction_epsilon": 0.0001,
+    "vbd_rigid_contact_hard": false,
+    "mujoco_cone": "pyramidal",
+    "proxied_robot_links": "all",
+    "parity_note": "all coupling/VBD/MuJoCo options carried over explicitly from S01-C (see ../PARITY_CHECKLIST.md)"
+  },
+  "contact": {
+    "friction": 0.6,
+    "friction_rule": "every shape and particle set uses mu=0.6 except the finger pads below; all platforms blend particle-shape friction as the average, so pad-block contact gets (0.6 + 1.4) / 2 = 1.0 and every other contact 0.6",
+    "finger_pad_friction": 1.4,
+    "finger_pad_links": ["fr3_leftfinger", "fr3_rightfinger"],
+    "finger_pad_note": "2026-10-21: raised from 0.6 to increase the far-end grip margin (effective pad-block mu 1.0, a rubber-like pad). With 0.6 the far end stick-slipped at the end of the pull at random (s00 repeats: EmbodiChain 5/11, DexSim 0-2 per 8 depending on layout, Isaac Lab in 1-2 of 10 states); tightening the finger target instead (0.010, 0.008) barely raised the squeeze on the soft block and made the contact kick at grip onset larger. Applied identically: DexSim ContactMaterialSchedule on the finger links from t=0, EmbodiChain link_attrs, Isaac Lab USD physics material on the finger collision prims. See results/S01T_DECISIONS.md",
+    "particle_contact_ke": 20000.0,
+    "particle_contact_kd": 10.0,
+    "shape_ke": 20000.0,
+    "shape_kd": 100.0,
+    "shape_gap": 0.002,
+    "shape_margin": 0.0,
+    "shape_margin_note": "explicit on both platforms: DexSim NewtonCollisionDesc defaults to margin=0.001 m, Isaac Lab NewtonShapeCfg to 0.0; round 1 left the DexSim default, so DexSim shapes were 1 mm thicker",
+    "soft_contact_margin": 0.003,
+    "contact_model": "per-vertex particle-shape contact on both platforms: DexSim contact_mode='full' (required for two-way with a VBD-owned body) leaves collision_options enable_rigid_soft_full_surface_contact at False; Isaac Lab passes enable_rigid_soft_full_surface_contact=False. Round 1 wrongly reported DexSim as full-surface"
+  },
+  "trajectory": {
+    "frame_rate": 60,
+    "ik_axis": "x",
+    "ik_table_range": [
+      -0.01,
+      0.03
+    ],
+    "ik_table_step": 0.00025,
+    "ik_table_note": "TCP x offsets from grip.tcp_x at fixed y, z and top-down orientation",
+    "grip_duration": 0.5,
+    "rest_duration": 2.0,
+    "pull_speed": 0.002,
+    "pull_timeout": 4.0,
+    "hold_duration": 1.0,
+    "hold_integral_gain": 0.05,
+    "hold_max_speed": 0.001,
+    "return_duration": 1.0,
+    "release_duration": 0.5,
+    "recover_duration": 2.0,
+    "strain_filter_frames": 6,
+    "controller": "closed-loop rule implemented identically in both platform scripts (class StretchController): close fingers; rest; move the TCP along +X at pull_speed until the 6-frame mean of the centre-line strain >= target; hold with dx = gain*(target - strain)*dt clipped to hold_max_speed; quintic return to the start TCP x; open fingers; recover"
+  },
+  "target_strain": 0.05,
+  "initial_states": {
+    "file": "inputs/s01t_initial_states.npz",
+    "count": 10,
+    "seed": 20261021,
+    "rule": "s00 nominal; s01-s09 move the block by dx, dy ~ U(-2, 2) mm and yaw ~ U(-1.5, 1.5) deg about its centre before the clamp pre-squeeze; robot, clamp and joint targets unchanged; the file stores the actual world-space initial and rest node positions",
+    "dx_dy_range": [
+      -0.002,
+      0.002
+    ],
+    "yaw_range_deg": [
+      -1.5,
+      1.5
+    ]
+  },
+  "variants": {
+    "nominal": {},
+    "substeps5": {
+      "solver.num_substeps": 5
+    },
+    "substeps20": {
+      "solver.num_substeps": 20
+    },
+    "direct": {
+      "solver.use_cuda_graph": false
+    }
+  },
+  "variants_note": "plan 3.3 (5/10/20 substep convergence) and 7.2 (CUDA Graph vs direct paired check); each variant is run on state s00; nominal = 10 substeps with CUDA Graph",
+  "measurement": {
+    "reference_window": [
+      1.8,
+      2.0
+    ],
+    "camera_rate_hz": 30,
+    "camera_resolution": [
+      1280,
+      960
+    ],
+    "camera_hfov_deg": 47.2,
+    "cameras": {
+      "oblique": {
+        "eye": [
+          0.86,
+          -0.42,
+          1.1
+        ],
+        "target": [
+          0.46,
+          -0.1,
+          0.92
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ]
+      },
+      "side45": {
+        "eye": [
+          0.46,
+          -0.42,
+          1.24
+        ],
+        "target": [
+          0.46,
+          -0.1,
+          0.92
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    "images": {
+      "outputs": [
+        "rgb",
+        "depth (planar distance to the image plane, m)",
+        "instance segmentation (common label ids)"
+      ],
+      "labels": {
+        "0": "background",
+        "1": "ground",
+        "2": "table",
+        "3": "robot_stand",
+        "4": "robot",
+        "5": "clamp",
+        "6": "stretch_block"
+      },
+      "full": "every 30 Hz frame: RGB video + depth/segmentation arrays (state s00 runs)",
+      "keyframes": "RGB video every 30 Hz frame; depth/segmentation at phase starts, hold end and episode end (perturbed states and variants), to bound data volume"
+    },
+    "cameras_note": "second view looks down at 45 deg from -Y along the block's long side; a view from +X would face the hand at the far end",
+    "depth_background": "no-hit pixels: DexSim returns a very large value (~1e16), Isaac Lab returns 0 (depth_clipping_behavior='none'); raw values are stored, plots mask both",
+    "image_downsample": 2,
+    "resolution_note": "cameras render at camera_resolution (1280x960) for the HD comparison video; depth, segmentation and RGB keyframes are stored at the plan's 640x480 by taking every image_downsample-th pixel (row/column 0, 2, 4, ...), with the matching intrinsics K stored next to them; the full-resolution K is in the run manifest",
+    "video_policy": "only one exported video per task: tools/analyze.py writes videos/s01c_comparison.mp4 (2x2: columns platform, rows oblique/front45, HD, real-time frame-rate overlay). The s00 full runs keep rgb_<camera>.mp4 inside their raw_data run directory as the source; other runs keep RGB only as keyframes in images_<camera>.npz"
+  },
+  "acceptance": {
+    "strain_tolerance_pp": 2.0,
+    "recovery_error_max": 0.05,
+    "table_penetration_tolerance": 0.004,
+    "end_drift_max": 0.003,
+    "end_drift_rule": "clamp end: mean X displacement of the nodes inside the jaw (x <= 0.43 at rest) between the reference window and the end of hold, relative to the static clamp; grip end: change of the mean node position inside the pad box relative to the fingertip midpoint, same window; both <= 3 mm, larger values count as slip, not stretch"
+  }
+}

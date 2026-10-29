@@ -1,9 +1,12 @@
 # EmbodiChain report asset download design
 
-Status: design only. The dataset is initialized with documentation and an empty
-index. The interfaces in this document do not exist yet, and existing benchmark
-scripts retain their current behavior. The first real asset publication will
-provide the inputs needed to implement and validate those interfaces.
+Status: proposed general helper and unified CLI, not yet implemented. The
+DexUni publication now supplies real input bundles and a suite-local explicit
+[restore command](../physics/experiments/dexuni/SETUP.md). It uses pinned
+commits, the official endpoint, standard Hub caching and integrity validation;
+it does not register the general interfaces proposed below. References to the
+empty index/initialization below describe the original bootstrap, not the
+current published dataset.
 
 ## Goal and ownership
 

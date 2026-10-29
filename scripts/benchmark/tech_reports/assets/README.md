@@ -15,11 +15,12 @@ tags:
 Public asset repository: [DexForceAI/embodichain_reports](https://huggingface.co/datasets/DexForceAI/embodichain_reports).
 
 This repository stores report-specific benchmark inputs, published measurement
-artifacts, figures, and videos for EmbodiChain technical reports. It starts with
-documentation and an [empty asset index](index.json): **no asset bundles are
-available yet**. The [download design](DOWNLOAD_DESIGN.md) specifies future
-integration; the Python helper and benchmark download commands are not
-implemented by this initialization.
+artifacts, figures, and videos for EmbodiChain technical reports.
+The [asset index](index.json) records published input bundles.
+The [DexUni release](physics/dexuni/publication.json) pins its dataset revision;
+its [setup guide](../physics/experiments/dexuni/SETUP.md) describes input downloads.
+This DexUni release intentionally excludes videos and complete result archives. The [download design](DOWNLOAD_DESIGN.md) still
+describes a future general helper and unified benchmark CLI.
 
 ## Ownership
 
@@ -33,13 +34,11 @@ implemented by this initialization.
 - This repository owns report-specific inputs and supporting results/media.
   Downloading benchmark inputs will not automatically download results or media.
 
-The three initialization files are maintained together in
-`scripts/benchmark/tech_reports/assets/` in the code repository. Publish those three files
-to this dataset's root together;
-asset directories are created only when real files are uploaded. The code
-repository copy of `index.json` is the empty bootstrap template; after assets
-are published, the dataset index at the selected commit is authoritative and
-must not be replaced with that empty template during documentation updates.
+The dataset index at the selected commit is authoritative. The code copy of
+`index.json` is a publication snapshot, not a replacement for newer remote
+entries. Preserve unrelated bundles during publication. Publish inputs, report
+metadata and their index entries together; never upload the entire source assets
+directory as a dataset root.
 
 ## Benchmark source assets
 
@@ -58,15 +57,16 @@ demonstrations/
 These match the L/R/P/G/D families in
 [issue #679](https://github.com/DexForce/EmbodiChain/issues/679). Put future
 experiment-specific material under the appropriate family and experiment ID;
-shared definitions belong in `shared/`. The directories initially contain only
-Git placeholders. They are source organization, separate from the dataset's
-report layout below. Publish the three named bootstrap files explicitly, not
-the entire source directory or its `.gitkeep` files.
+shared definitions belong in `shared/`. Reserved directories retain Git
+placeholders; DexUni adds actual small input
+definitions and publication metadata. Source organization remains separate from
+the dataset layout below; do not publish `.gitkeep` files.
 
 Large input binaries remain in the selected asset repository and download to
 the external cache. Generated run artifacts and reports belong in
-`outputs/benchmarks/`. The first real input publication will define the matching
-bundle IDs and hashes; this scaffold does not supply datasets or measured results.
+`outputs/benchmarks/`. DexUni bundle IDs and hashes are recorded in the
+publication indexes. Results and videos are not input bundles; this release
+does not publish them as downloadable archives.
 
 ## Layout
 
@@ -82,8 +82,8 @@ reports/<report-id>/
   videos/...
 ```
 
-The `reports/` subtree above is a convention, not a claim that those files
-already exist. Hugging Face may also maintain repository metadata such as
+The first published report is `reports/dexuni-physics-2026-10-27/`.
+Hugging Face may also maintain repository metadata such as
 `.gitattributes`.
 
 ## Access
@@ -95,7 +95,7 @@ project's existing `huggingface_hub>=0.35.3,<1.0` dependency, publishers can use
 Credentials must not be written into report files, commands recorded in reports,
 or benchmark provenance. Downloads use `https://huggingface.co` directly.
 
-A client can retrieve the current empty index without logging in using the existing
+A client can retrieve the current index without logging in using the existing
 Hugging Face SDK; this is not the proposed EmbodiChain download helper:
 
 ```python
