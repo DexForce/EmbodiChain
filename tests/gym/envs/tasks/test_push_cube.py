@@ -32,6 +32,7 @@ from embodichain_tasks.manipulation.push_cube import PushCubeEnv
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.managers import EventManager, SceneEntityCfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
+from embodichain.lab.sim.cfg import VisualObjectCfg
 
 
 def _configuration(filename: str):
@@ -63,6 +64,9 @@ def test_deployment_composes_franka_camera_and_policy_action_terms():
     ]
     assert cfg.max_episode_steps == 300
     assert cfg.target_control_frequency == 30
+    assert isinstance(cfg.visual_object[0], VisualObjectCfg)
+    assert cfg.visual_object[0].uid == "goal_marker"
+    assert "goal_marker" not in {obj.uid for obj in cfg.background + cfg.rigid_object}
     assert REGISTERED_ENVS["PushCubeRL"].supports_handwritten_demo is False
     assert (
         REGISTERED_ENVS["PushCube-Franka-Visual-v1"].supports_handwritten_demo is True
@@ -86,7 +90,7 @@ def test_configured_reset_synchronizes_marker_for_selected_environments():
     cube_pose = torch.eye(4).repeat(2, 1, 1)
     cube_pose[:, :3, 3] = torch.tensor(cfg.rigid_object[0].init_pos)
     marker_pose = torch.eye(4).repeat(2, 1, 1)
-    marker_pose[:, :3, 3] = torch.tensor(cfg.background[0].init_pos)
+    marker_pose[:, :3, 3] = torch.tensor(cfg.visual_object[0].init_pos)
     cube_before, marker_before = cube_pose.clone(), marker_pose.clone()
 
     def set_cube(pose, env_ids):
@@ -95,15 +99,15 @@ def test_configured_reset_synchronizes_marker_for_selected_environments():
     def set_marker(pose, env_ids):
         marker_pose[env_ids] = pose
 
-    entities = {
+    rigid_objects = {
         "cube": SimpleNamespace(
             cfg=cfg.rigid_object[0],
             get_local_pose=lambda **kwargs: cube_pose,
             set_local_pose=set_cube,
             clear_dynamics=Mock(),
         ),
-        "goal_marker": SimpleNamespace(set_local_pose=set_marker),
     }
+    visual_objects = {"goal_marker": SimpleNamespace(set_local_pose=set_marker)}
     goal_before = torch.eye(4).repeat(2, 1, 1)
     env = SimpleNamespace(
         cfg=cfg,
@@ -111,9 +115,11 @@ def test_configured_reset_synchronizes_marker_for_selected_environments():
         device=torch.device("cpu"),
         goal_pose=goal_before.clone(),
         sim=SimpleNamespace(
-            asset_uids=list(entities),
-            get_rigid_object=entities.get,
-            get_rigid_object_uid_list=lambda: list(entities),
+            has_native_renderer=True,
+            asset_uids=[*rigid_objects, *visual_objects],
+            get_rigid_object=rigid_objects.get,
+            get_visual_object=visual_objects.get,
+            get_rigid_object_uid_list=lambda: list(rigid_objects),
             update=Mock(),
         ),
     )

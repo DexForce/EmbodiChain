@@ -88,9 +88,11 @@ randomization remains active. See the owning
 | `randomize_target_pose` | Stored virtual target pose | `reference_entity_cfg`, `position_range`, `store_key` |
 
 Target sampling only writes environment state. To synchronize a scene marker,
-configure the deterministic `events.set_rigid_object_pose_from_env` event after
+configure the deterministic `events.set_visual_object_pose_from_env` event after
 the target-producing event, using `entity_cfg` and `pose_key`. Marker geometry
-and materials remain owned by the scene configuration.
+and materials belong to a `visual_object` scene declaration, without rigid-body
+or collision configuration. Synchronization is skipped without a native renderer;
+the virtual target remains available to task logic.
 
 - Helper: `get_random_pose(init_pos, init_rot, ...)` generates batched random 4×4 poses.
 - Rotation ranges are in **degrees** (converted to radians internally).
