@@ -65,6 +65,7 @@ __all__ = [
     "register_entity_attrs",
     "register_entity_pose",
     "register_info_to_env",
+    "set_rigid_object_pose_from_env",
     "resolve_uids",
     "resolve_dict",
     "get_pose",
@@ -74,6 +75,45 @@ __all__ = [
     "create_rigid_constraint",
     "remove_rigid_constraint",
 ]
+
+
+def set_rigid_object_pose_from_env(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | Sequence[int] | slice | None,
+    entity_cfg: SceneEntityCfg,
+    pose_key: str,
+) -> None:
+    """Set a rigid object's arena-local pose from stored environment state.
+
+    This deterministic event can synchronize a goal marker after an event that
+    populates ``env.<pose_key>``. It does not sample a pose, modify the stored
+    poses, or advance physics. Configure it after the event supplying the pose.
+
+    Args:
+        env: Environment holding the source poses and destination rigid object.
+        env_ids: Environment rows to update. None selects all environments.
+        entity_cfg: Destination rigid object, such as a configured goal marker.
+        pose_key: Environment attribute containing arena-local poses with shape
+            ``(num_envs, 4, 4)`` or ``(num_envs, 7)`` in position/xyzw form.
+
+    Raises:
+        AttributeError: The source pose attribute has not been populated.
+        ValueError: The destination is not a registered rigid object.
+    """
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
+    elif isinstance(env_ids, slice):
+        env_ids = torch.arange(*env_ids.indices(env.num_envs), device=env.device)
+    else:
+        env_ids = torch.as_tensor(env_ids, dtype=torch.long, device=env.device)
+    if len(env_ids) == 0:
+        return
+
+    poses = getattr(env, pose_key)[env_ids]
+    target = env.sim.get_rigid_object(entity_cfg.uid)
+    if target is None:
+        raise ValueError(f"Rigid object '{entity_cfg.uid}' does not exist.")
+    target.set_local_pose(poses, env_ids=env_ids)
 
 
 def apply_expansion_profile_reset(

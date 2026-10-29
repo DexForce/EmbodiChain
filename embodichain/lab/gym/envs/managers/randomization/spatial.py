@@ -384,7 +384,6 @@ def randomize_target_pose(
     relative_rotation: bool = False,
     reference_entity_cfg: SceneEntityCfg | None = None,
     store_key: str = "target_pose",
-    target_entity_cfg: SceneEntityCfg | None = None,
 ) -> None:
     """Randomize a virtual target pose and store in env state.
 
@@ -403,9 +402,6 @@ def randomize_target_pose(
             If None and relative mode is True, uses world origin.
         store_key (str): The key to store the target pose in env state. Default is "target_pose".
             The pose will be stored as a public attribute env.{store_key}.
-        target_entity_cfg: Optional physical target marker receiving the same
-            arena-local pose for selected environments. Existing virtual-only
-            behavior is preserved when omitted.
     """
     num_instance = len(env_ids)
 
@@ -458,9 +454,6 @@ def randomize_target_pose(
 
     target_poses = getattr(env, store_key)
     target_poses[env_ids] = pose
-    if target_entity_cfg is not None:
-        target = env.sim.get_rigid_object(target_entity_cfg.uid)
-        target.set_local_pose(pose, env_ids=env_ids)
 
 
 class sample_rigid_object_pose_from_workspace(Functor):

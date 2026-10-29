@@ -508,6 +508,7 @@ class MockEnv:
 from embodichain.lab.gym.envs.managers.events import (
     resolve_uids,
     resolve_dict,
+    set_rigid_object_pose_from_env,
     set_detached_uids_for_env_reset,
     wait_for_dynamic_objects_to_settle,
 )
@@ -525,6 +526,29 @@ from embodichain.lab.gym.envs.managers.randomization.visual import (
 from embodichain.lab.gym.envs.managers.cfg import EventCfg, SceneEntityCfg
 from embodichain.lab.gym.envs.managers import EventManager, FunctorCfg
 from embodichain.utils.module_utils import find_function_from_modules
+
+
+@pytest.mark.parametrize(
+    "selection, selected_rows",
+    [(None, [0, 1]), (slice(None), [0, 1]), ([1], [1]), ([1, 0], [1, 0]), ([], [])],
+)
+def test_pose_from_env_updates_only_selected_rows(selection, selected_rows) -> None:
+    env = MockEnv(num_envs=2)
+    env.desired_pose = torch.eye(4).repeat(2, 1, 1)
+    env.desired_pose[:, :3, 3] = torch.tensor([[0.2, 0.1, 0.01], [0.4, -0.1, 0.02]])
+    env.desired_pose[1, :3, :3] = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+    source_before = env.desired_pose.clone()
+    expected = env.target_object.get_local_pose().clone()
+    expected[selected_rows] = source_before[selected_rows]
+    env.sim.update = Mock()
+
+    set_rigid_object_pose_from_env(
+        env, selection, SceneEntityCfg(uid="target"), pose_key="desired_pose"
+    )
+
+    torch.testing.assert_close(env.target_object.get_local_pose(), expected)
+    torch.testing.assert_close(env.desired_pose, source_before)
+    env.sim.update.assert_not_called()
 
 
 class TestResolveUids:

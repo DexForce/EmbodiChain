@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -29,7 +30,7 @@ from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modul
 from embodichain.utils.utility import load_config
 from embodichain_tasks.manipulation.push_cube import PushCubeEnv
 from embodichain.lab.gym.envs import EmbodiedEnv
-from embodichain.lab.gym.envs.managers import SceneEntityCfg
+from embodichain.lab.gym.envs.managers import EventManager, SceneEntityCfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 
 
@@ -68,11 +69,65 @@ def test_deployment_composes_franka_camera_and_policy_action_terms():
     )
     assert REGISTERED_ENVS["PushCubeRL"].cls is PushCubeEnv
     assert REGISTERED_ENVS["PushCube-Franka-Visual-v1"].cls is PushCubeEnv
-    assert set(cfg.events.__dict__) >= {"randomize_cube", "set_goal"}
+    assert set(cfg.events.__dict__) >= {
+        "randomize_cube",
+        "set_goal",
+        "sync_goal_marker",
+    }
     assert isinstance(
         cfg.events.set_goal.params["reference_entity_cfg"], SceneEntityCfg
     )
-    assert isinstance(cfg.events.set_goal.params["target_entity_cfg"], SceneEntityCfg)
+    assert isinstance(cfg.events.sync_goal_marker.params["entity_cfg"], SceneEntityCfg)
+
+
+def test_configured_reset_synchronizes_marker_for_selected_environments():
+    _, cfg = _configuration("task.franka.visual.yaml")
+    cfg.seed = 123
+    cube_pose = torch.eye(4).repeat(2, 1, 1)
+    cube_pose[:, :3, 3] = torch.tensor(cfg.rigid_object[0].init_pos)
+    marker_pose = torch.eye(4).repeat(2, 1, 1)
+    marker_pose[:, :3, 3] = torch.tensor(cfg.background[0].init_pos)
+    cube_before, marker_before = cube_pose.clone(), marker_pose.clone()
+
+    def set_cube(pose, env_ids):
+        cube_pose[env_ids] = pose
+
+    def set_marker(pose, env_ids):
+        marker_pose[env_ids] = pose
+
+    entities = {
+        "cube": SimpleNamespace(
+            cfg=cfg.rigid_object[0],
+            get_local_pose=lambda **kwargs: cube_pose,
+            set_local_pose=set_cube,
+            clear_dynamics=Mock(),
+        ),
+        "goal_marker": SimpleNamespace(set_local_pose=set_marker),
+    }
+    goal_before = torch.eye(4).repeat(2, 1, 1)
+    env = SimpleNamespace(
+        cfg=cfg,
+        num_envs=2,
+        device=torch.device("cpu"),
+        goal_pose=goal_before.clone(),
+        sim=SimpleNamespace(
+            asset_uids=list(entities),
+            get_rigid_object=entities.get,
+            get_rigid_object_uid_list=lambda: list(entities),
+            update=Mock(),
+        ),
+    )
+
+    EventManager(cfg.events, env).apply("reset", torch.tensor([1]))
+
+    torch.testing.assert_close(
+        env.goal_pose[1, :3, 3], cube_pose[1, :3, 3] + torch.tensor([0.2, 0.0, -0.019])
+    )
+    torch.testing.assert_close(marker_pose[1], env.goal_pose[1])
+    torch.testing.assert_close(cube_pose[0], cube_before[0])
+    torch.testing.assert_close(env.goal_pose[0], goal_before[0])
+    torch.testing.assert_close(marker_pose[0], marker_before[0])
+    env.sim.update.assert_not_called()
 
 
 def test_measured_success_uses_configured_radius_and_table_bounds(monkeypatch):

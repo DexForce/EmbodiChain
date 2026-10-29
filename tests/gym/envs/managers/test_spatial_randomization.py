@@ -194,19 +194,11 @@ def test_rigid_pose_randomization_preserves_unselected_velocity() -> None:
     env.sim.update.assert_not_called()
 
 
-@pytest.mark.parametrize("with_marker", [False, True])
-def test_relative_target_pose_updates_selected_goal_and_optional_marker(with_marker):
+def test_relative_target_pose_updates_only_selected_virtual_goal():
     source_pose = torch.eye(4).repeat(2, 1, 1)
     source_pose[:, :3, 3] = torch.tensor([[-0.5, -0.1, 0.02], [-0.4, 0.1, 0.02]])
-    marker_pose = torch.eye(4).repeat(2, 1, 1)
-    marker_before = marker_pose.clone()
-
-    def set_marker(value, env_ids):
-        marker_pose[env_ids] = value
-
     entities = {
         "cube": SimpleNamespace(get_local_pose=lambda **kw: source_pose),
-        "marker": SimpleNamespace(set_local_pose=set_marker),
     }
     goal_before = torch.eye(4).repeat(2, 1, 1)
     env = SimpleNamespace(
@@ -221,14 +213,9 @@ def test_relative_target_pose_updates_selected_goal_and_optional_marker(with_mar
         position_range=([0.2, 0.0, -0.019], [0.2, 0.0, -0.019]),
         relative_position=True,
         reference_entity_cfg=SceneEntityCfg(uid="cube"),
-        target_entity_cfg=SceneEntityCfg(uid="marker") if with_marker else None,
         store_key="goal_pose",
     )
     torch.testing.assert_close(
         env.goal_pose[1, :3, 3], torch.tensor([-0.2, 0.1, 0.001])
     )
     torch.testing.assert_close(env.goal_pose[0], goal_before[0])
-    torch.testing.assert_close(marker_pose[0], marker_before[0])
-    torch.testing.assert_close(
-        marker_pose[1], env.goal_pose[1] if with_marker else marker_before[1]
-    )
