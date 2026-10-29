@@ -188,8 +188,8 @@ class OPWSolver(BaseSolver):
         else:
             qpos_batch = qpos
         n_sample = qpos_batch.shape[0]
-        qpos_wp = wp.from_torch(qpos_batch.reshape(-1))  # dtype=float, device="cuda")
-        # qpos_wp = wp.array(qpos_batch.detach().cpu().numpy().reshape(-1), dtype=float, device=self.device)
+        # Retimed trajectories retain float64; the OPW kernel consumes float32.
+        qpos_wp = wp.from_torch(qpos_batch.to(dtype=torch.float32).reshape(-1))
         xpos_wp = wp.zeros(
             n_sample * 16, dtype=float, device=standardize_device_string(self.device)
         )
