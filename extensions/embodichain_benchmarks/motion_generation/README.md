@@ -245,6 +245,10 @@ Placement additionally retains `placement_input_geometry` from the live scaled
 meshes and frozen targets. It checks complete XY projected-triangle-union
 containment in the basin (preserving holes and excluding handle triangles) and
 vertical gaps at mesh vertices, footprint boundaries and a 5 mm interior grid.
+Containment uses a 1e-12 m precision grid after the triangle unions to remove
+floating-point overlay holes. Vertical-ray samples retain the original unsnapped
+projections and the zero-gap threshold. The evidence records this precision;
+requalifying frozen cases preserves their targets, grasps and endpoint witnesses.
 The record includes mesh/topology hashes, unsupported area, boundary clearance,
 sample count and minimum sampled gap. Failed rows remain in this input audit;
 the experiment's preparation gate must review them before evaluating methods.

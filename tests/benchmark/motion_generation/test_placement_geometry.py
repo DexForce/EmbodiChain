@@ -142,7 +142,16 @@ def test_placing_target_rejects_missing_center_support_surface() -> None:
 
 
 @pytest.mark.parametrize(
-    "condition", ["supported", "overhang", "penetrating", "hole", "handle"]
+    "condition",
+    [
+        "supported",
+        "overhang",
+        "near_overhang",
+        "penetrating",
+        "hole",
+        "thin_hole",
+        "handle",
+    ],
 )
 def test_frozen_placement_mesh_audit_checks_full_footprint_and_sampled_gaps(condition):
     """Origins, bounds or a support somewhere under the object are insufficient."""
@@ -154,12 +163,16 @@ def test_frozen_placement_mesh_audit_checks_full_footprint_and_sampled_gaps(cond
     pan_faces = faces.clone()
     placing, support = torch.eye(4)[None], torch.eye(4)[None]
     placing[:, 2, 3] = 0.006
-    if condition == "overhang":
-        placing[:, 0, 3] = 0.095  # Center is supported; a corner extends outside.
+    if condition in {"overhang", "near_overhang"}:
+        # Even a real 10 nm overhang must fail the picometre overlay grid.
+        placing[:, 0, 3] = 0.095 if condition == "overhang" else 0.08000001
     elif condition == "penetrating":
         placing[:, 2, 3] = -0.001
-    elif condition == "hole":
-        pan = torch.cat((pan, bread / 2))
+    elif condition in {"hole", "thin_hole"}:
+        inner = bread / 2
+        if condition == "thin_hole":
+            inner[:, 0] *= 1e-5
+        pan = torch.cat((pan, inner))
         pan_faces = torch.tensor(
             [
                 [0, 1, 5],
@@ -181,7 +194,7 @@ def test_frozen_placement_mesh_audit_checks_full_footprint_and_sampled_gaps(cond
     result = _placement_input_geometry(bread, faces, pan, pan_faces, placing, support)
     row = result["rows"][0]
     assert row["qualified"] is (condition == "supported")
-    if condition in {"overhang", "hole", "handle"}:
+    if condition in {"overhang", "near_overhang", "hole", "thin_hole", "handle"}:
         assert not row["footprint_covered"]
         assert row["unsupported_area_m2"] > 0
     else:
@@ -213,3 +226,37 @@ def test_placement_mesh_audit_retains_each_transformed_target_row():
     assert [
         row["minimum_sampled_vertical_gap_m"] for row in result["rows"]
     ] == pytest.approx([0.006, 0.006], abs=1e-7)
+
+
+def test_placement_overlay_covers_an_explicitly_included_support_triangle() -> None:
+    # The first support face is exactly the complete placing footprint. Other
+    # overlapping faces exposed a GEOS overlay boundary/false-hole regression.
+    support = torch.tensor(
+        [
+            [0.011445822376227668, -0.0213415672648513, 0.0],
+            [-0.02159610273972397, -0.038208493535725, 0.0],
+            [-0.042596265478847185, 0.07063838905816863, 0.0],
+            [0.03952113001942484, -0.058749279891731246, 0.0],
+            [0.04599055897515414, -0.08793302096735432, 0.0],
+            [0.0758258280248719, -0.014193465619503895, 0.0],
+            [-0.09968107017292843, 0.08224718721033761, 0.0],
+            [-0.0005873569081919633, -0.06513274093354135, 0.0],
+            [0.046434362177007193, 0.07395736233171199, 0.0],
+        ],
+        dtype=torch.float64,
+    )
+    placing_pose = torch.eye(4, dtype=torch.float64)[None]
+    placing_pose[:, 2, 3] = 0.006
+    result = _placement_input_geometry(
+        support[:3],
+        torch.tensor([[0, 1, 2]]),
+        support,
+        torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]]),
+        placing_pose,
+        torch.eye(4, dtype=torch.float64)[None],
+    )
+    row = result["rows"][0]
+    assert row["qualified"]
+    assert row["footprint_covered"]
+    assert row["unsupported_area_m2"] == 0
+    assert row["minimum_sampled_vertical_gap_m"] == pytest.approx(0.006)

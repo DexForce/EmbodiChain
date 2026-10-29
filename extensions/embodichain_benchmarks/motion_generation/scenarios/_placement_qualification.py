@@ -22,7 +22,7 @@ import hashlib
 
 import numpy as np
 import torch
-from shapely import intersects_xy
+from shapely import intersects_xy, set_precision
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
@@ -32,6 +32,8 @@ __all__: list[str] = []
 
 _SAMPLE_SPACING_M = 0.005
 _BARYCENTRIC_EPS = 1e-9
+# One picometre resolves overlay roundoff without adding a physical margin.
+_PROJECTION_GRID_M = 1e-12
 
 
 def _projection(triangles: np.ndarray):
@@ -120,8 +122,12 @@ def _placement_input_geometry(
         footprint, basin = _projection(bread_triangles), _projection(basin_triangles)
         if footprint.is_empty or basin.is_empty:
             raise ValueError("Placement input geometry has an empty XY projection.")
-        outside = footprint.difference(basin)
-        covered = basin.covers(footprint)
+        # Reduce precision after union, which removes roundoff-sized false holes.
+        # Keep unsnapped geometry for the original vertical-ray sample locations.
+        coverage_footprint = set_precision(footprint, _PROJECTION_GRID_M)
+        coverage_basin = set_precision(basin, _PROJECTION_GRID_M)
+        outside = coverage_footprint.difference(coverage_basin)
+        covered = outside.is_empty
         x0, y0, x1, y1 = footprint.bounds
         xx, yy = np.meshgrid(
             np.arange(x0, x1, _SAMPLE_SPACING_M), np.arange(y0, y1, _SAMPLE_SPACING_M)
@@ -155,7 +161,9 @@ def _placement_input_geometry(
                 "footprint_area_m2": float(footprint.area),
                 "unsupported_area_m2": float(outside.area),
                 "boundary_clearance_m": (
-                    float(footprint.distance(basin.boundary)) if covered else None
+                    float(coverage_footprint.distance(coverage_basin.boundary))
+                    if covered
+                    else None
                 ),
                 "sample_count": len(samples),
                 "samples_without_surface": int((~finite).sum()),
@@ -173,6 +181,7 @@ def _placement_input_geometry(
         "basin_local_z_max_m": PAN_BASIN_LOCAL_Z_MAX,
         "basin_triangle_count": len(basin_faces),
         "sample_spacing_m": _SAMPLE_SPACING_M,
+        "coverage_precision_grid_m": _PROJECTION_GRID_M,
         "samples": "all_mesh_vertices_xy_plus_footprint_boundary_and_interior_grid",
         "ray_barycentric_epsilon": _BARYCENTRIC_EPS,
         "minimum_gap_threshold_m": 0.0,
