@@ -123,6 +123,6 @@ After completing this tutorial, you can explore:
 - Using other sensor types (e.g., stereo cameras, force sensors)
 - Recording sensor data for offline analysis
 - Integrating sensor feedback into robot control or learning algorithms
-- Configuring :doc:`/overview/sim/viser_visualization` for remote camera inspection
+- Configuring :doc:`/overview/sim/visualization/viser` for remote camera inspection
 
 This tutorial provides a foundation for integrating perception into robotic simulation scenarios with SimulationManager.

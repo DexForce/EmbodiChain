@@ -96,5 +96,5 @@ factory-created controller and does not create or update a duplicate.
 
 For the complete robot setup and IK walkthrough, continue with the
 {doc}`Gizmo tutorial </tutorial/gizmo>`. See
-{doc}`Viser browser visualization </overview/sim/viser_visualization>` for
+{doc}`Viser browser visualization <viser>` for
 server configuration and remote-access guidance.
