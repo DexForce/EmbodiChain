@@ -950,7 +950,11 @@ def _export_material_without_texture(
     material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
     _set_safe_material_input(
         source_material=source_material,
-        getter_name="get_base_color",
+        getter_name=(
+            "get_base_color_linear"
+            if callable(getattr(source_material, "get_base_color_linear", None))
+            else "get_base_color"
+        ),
         shader=shader,
         input_name="diffuseColor",
         value_type=Sdf.ValueTypeNames.Color3f,

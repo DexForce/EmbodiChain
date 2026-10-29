@@ -24,6 +24,7 @@ import math
 import re
 import xml.etree.ElementTree as ET
 from argparse import Namespace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
@@ -52,6 +53,7 @@ from examples.sim.atomic_action.coordinated_pickment import (
     compute_left_to_right_arm_direction,
 )
 from examples.sim.atomic_action.scenario import (
+    add_dual_tutorial_robot,
     create_dual_tutorial_robot_cfg,
 )
 from examples.sim.atomic_action.support import (
@@ -267,7 +269,7 @@ def _run_obstacle_animation(*, pace_wall_time: bool) -> tuple[MagicMock, MagicMo
     return obstacle, adapter
 
 
-def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
+def test_atomic_action_tutorial_uses_native_dexuni_settings() -> None:
     module = importlib.import_module("examples.sim.atomic_action.support")
 
     default_cfg = module._tutorial_physics_cfg("default")
@@ -278,29 +280,24 @@ def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
     assert newton_cfg.num_substeps == 20
     assert newton_cfg.collision_cfg is None
     assert newton_cfg.solver_cfg == {
-        "solver_type": "mujoco_warp",
-        "solver": "newton",
-        "integrator": "implicitfast",
-        "iterations": 20,
-        "ls_iterations": 100,
-        "cone": "elliptic",
-        "impratio": 1_000.0,
-        "use_mujoco_contacts": True,
-        "enable_multiccd": True,
+        "solver_type": "dexuni",
+        "mujoco_options": {
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
+            "cone": "elliptic",
+            "impratio": 1_000.0,
+            "enable_multiccd": True,
+        },
     }
 
     dexsim_cfg = newton_cfg.to_dexsim_cfg(gpu_id=0)
-    assert dexsim_cfg.solver_cfg.solver_type == "mujoco_warp"
-    assert dexsim_cfg.solver_cfg.solver == "newton"
-    assert dexsim_cfg.solver_cfg.integrator == "implicitfast"
-    assert dexsim_cfg.solver_cfg.iterations == 20
-    assert dexsim_cfg.solver_cfg.ls_iterations == 100
-    assert dexsim_cfg.solver_cfg.nconmax is None
-    assert dexsim_cfg.solver_cfg.njmax is None
-    assert dexsim_cfg.solver_cfg.cone == "elliptic"
-    assert dexsim_cfg.solver_cfg.impratio == pytest.approx(1_000.0)
-    assert dexsim_cfg.solver_cfg.use_mujoco_contacts is True
-    assert dexsim_cfg.solver_cfg.enable_multiccd is True
+    assert dexsim_cfg.solver_cfg.solver_type == "dexuni"
+    assert (
+        dexsim_cfg.solver_cfg.mujoco_options == newton_cfg.solver_cfg["mujoco_options"]
+    )
+    assert dexsim_cfg.solver_cfg.vbd_options == {}
     assert dexsim_cfg.collision_pipeline_cfg is None
 
 
@@ -540,6 +537,101 @@ def test_franka_tutorial_config_uses_ur5_gripper_component() -> None:
         assert "fr3_finger_joint[1-2]" not in franka_values
 
 
+def test_place_waypoints_are_rigid_transforms() -> None:
+    from examples.sim.atomic_action.place import make_place_eef_poses
+
+    poses = make_place_eef_poses(torch.device("cpu"))
+    rotation = poses[:, :3, :3]
+    torch.testing.assert_close(
+        rotation.transpose(-1, -2) @ rotation,
+        torch.eye(3).expand(len(poses), 3, 3),
+        rtol=0.0,
+        atol=1e-6,
+    )
+    torch.testing.assert_close(
+        torch.linalg.det(rotation), torch.ones(len(poses)), rtol=0.0, atol=1e-6
+    )
+
+
+def test_coordinated_placement_preserves_baseline_scene_frames() -> None:
+    from examples.sim.atomic_action import coordinated_placement as module
+    from embodichain.utils.math import matrix_from_euler
+
+    for angles in (module.TABLE_INIT_ROT, module.PAN_INIT_ROT):
+        rotation = matrix_from_euler(torch.tensor(angles).deg2rad(), "XYZ")
+        assert float(rotation[2, 2]) > 0.999
+    assert module.TABLE_TOP_Z - module.ROBOT_INIT_POS[2] == pytest.approx(
+        module.BASELINE_TABLE_TOP_Z - module.BASELINE_ROBOT_INIT_POS[2]
+    )
+
+
+def test_placement_mesh_cache_preserves_authored_axes_and_texture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import trimesh
+    from PIL import Image
+    from examples.sim.atomic_action import coordinated_placement as module
+
+    mesh = trimesh.creation.box(extents=(0.1, 0.2, 0.3))
+    mesh.visual = trimesh.visual.TextureVisuals(
+        uv=torch.zeros((len(mesh.vertices), 2)).numpy(),
+        image=Image.new("RGB", (2, 2), (210, 70, 15)),
+    )
+    source = tmp_path / "asset.glb"
+    mesh.export(source)
+    monkeypatch.setattr(module, "resolve_cached_data_path", lambda _: str(source))
+    monkeypatch.setattr(
+        module, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(tmp_path / "cache")
+    )
+
+    path = Path(module._placement_mesh_path("asset.glb"))
+    loaded = trimesh.load(path, force="mesh", process=False)
+    torch.testing.assert_close(
+        torch.as_tensor(loaded.bounds.copy()),
+        torch.tensor([[-0.05, -0.1, -0.15], [0.05, 0.1, 0.15]], dtype=torch.float64),
+        atol=1e-7,
+        rtol=0,
+    )
+    assert loaded.visual.material.image.getpixel((0, 0))[:3] == (210, 70, 15)
+    loader = MagicMock(side_effect=AssertionError("Cached mesh must not be reloaded"))
+    monkeypatch.setattr(module.trimesh, "load", loader)
+    assert module._placement_mesh_path("asset.glb") == str(path)
+    loader.assert_not_called()
+
+
+@pytest.mark.parametrize("is_newton_backend", [False, True])
+def test_rubiks_cube_initialization_clears_supported_scope_and_keeps_lock(
+    monkeypatch: pytest.MonkeyPatch, is_newton_backend: bool
+) -> None:
+    from examples.sim.atomic_action import pickup_rubiks_cube as module
+
+    cleared = []
+    cube = SimpleNamespace(locked=False, clear_dynamics=lambda: cleared.append("cube"))
+
+    def reset_world():
+        cleared.append("world")
+        cube.locked = False
+
+    def update(*, step):
+        assert cube.locked
+
+    sim = SimpleNamespace(
+        is_newton_backend=is_newton_backend,
+        add_articulation=lambda **kwargs: cube,
+        prepare=lambda: None,
+        update=update,
+        reset_objects_state=reset_world,
+    )
+    monkeypatch.setattr(module.Path, "is_file", lambda _: True)
+    monkeypatch.setattr(
+        module, "lock_turn_joint", lambda obj: setattr(obj, "locked", True)
+    )
+
+    assert module.create_pick_object(sim, "/tmp/cube.usdc") is cube
+    assert cube.locked
+    assert cleared == (["world"] if is_newton_backend else ["cube"])
+
+
 def test_ur5_and_franka_configs_share_place_binding_contract() -> None:
     configs = (
         create_ur5_gripper_robot_cfg(),
@@ -671,6 +763,19 @@ def test_dual_tutorial_configs_share_hand_binding_contract(
     if robot_type == "ur10":
         assert len(dual_cfg.init_qpos) == 24
         assert dual_cfg.init_qpos[-12:] == [0.0] * 12
+
+
+@pytest.mark.parametrize("stabilizer", [None, True])
+def test_dual_scene_mimic_stabilization_is_explicit(stabilizer: bool | None) -> None:
+    sim = SimpleNamespace(is_newton_backend=True, add_robot=lambda *, cfg: cfg)
+    cfg = add_dual_tutorial_robot(
+        sim,
+        robot_type="ur5",
+        uid="test_dual_mimic",
+        urdf_name="test_dual_mimic",
+        newton_mimic_stabilizer=stabilizer,
+    )
+    assert cfg.root_props.newton_mimic_stabilizer is (stabilizer is True)
 
 
 @pytest.mark.parametrize("robot_type", ("ur5", "ur10"))
@@ -1021,6 +1126,7 @@ def test_place_tutorial_registers_pick_object_with_simulation_engine_factory() -
         n_sample=1,
         no_vis_eef_axis=True,
         robot="ur5",
+        physics="default",
     )
     sim = MagicMock()
     sim.device = torch.device("cpu")
@@ -1303,9 +1409,13 @@ def test_pour_tutorial_uses_configured_pickup_and_local_rotation_axis() -> None:
     assert module.POUR_INTERNAL_AXIS == (1.0, 0.0, 0.0)
     pick_policy = module._create_pick_motion_policy()
     assert pick_policy.sample_count == module.PICK_SAMPLE_INTERVAL
-    assert isinstance(pick_policy.plan_opts, module.TrapezoidalPlanOptions)
-    assert pick_policy.plan_opts.sample_method is module.TrajectorySampleMethod.QUANTITY
-    assert pick_policy.plan_opts.sample_interval == module.PICK_MOTION_SAMPLE_COUNT
+    assert pick_policy.plan_opts is None
+    toppra_policy = module._create_pick_motion_policy("toppra")
+    assert isinstance(toppra_policy.plan_opts, module.ToppraPlanOptions)
+    assert (
+        toppra_policy.plan_opts.sample_method is module.TrajectorySampleMethod.QUANTITY
+    )
+    assert toppra_policy.plan_opts.sample_interval == module.PICK_MOTION_SAMPLE_COUNT
 
 
 def test_replay_timed_trajectory_uses_arrival_intervals() -> None:

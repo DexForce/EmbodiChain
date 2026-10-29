@@ -25,7 +25,7 @@ Create sensors through `SimulationManager.add_sensor()`. The explicit manager
 owns the World, ordered Arenas, preparation and semantic parent resolution;
 sensors must not rediscover a singleton manager. Cameras are render features
 on both physics backends. Contact availability is a backend capability checked
-before preparation and again after Newton AutoSolver selection.
+before preparation and again after DexUni's scene-based dispatch.
 
 Robot-mounted cameras are declared in `RobotCfg.sensors` with robot-local
 parent links. `SimulationManager.add_robot()` initializes them only when the

@@ -122,6 +122,28 @@ Author contact dimensions and material settings before `prepare()`, never by
 rewriting captured solver arrays. The current values live in
 `examples/sim/atomic_action/support.py` and the selected physical components.
 
+Scene-specific DexUni contact options are authored through
+`create_tutorial_simulation(newton_solver_options=...)` before model construction.
+`add_tutorial_robot` owns optional `newton_gripper_friction` and `arm_damping`
+overrides; `scenario.add_dual_tutorial_robot` owns dual-arm friction and optional
+mimic stabilization.
+Scene modules retain calibrated close targets, fixture TCPs and grippers, including
+Handover's Robotiq 2F-140 fixture. Read those example owners for current values;
+calibration does not establish generic physical success or solver equivalence.
+The coordinated-placement host opts into mimic stabilization and two-way DexUni
+feedback, checks measured
+lift and release placement, and retains commanded jaw preload when reconciling
+measured arm/held-object state. A contact-blocked jaw measurement is not its
+holding command. Its mesh fixtures use
+the authored Z-up frame; shared pan geometry selects the handle and basin along
+local Y. Keep these asset-specific conventions in the scene/geometry owners.
+The host caches textured OBJ geometry so native renderers and NoRender load the
+same baked asset frame.
+Keep the base-to-table height invariant when raising the fixture.
+Read held poses without resetting them at the replan boundary.
+The launcher preserves an omitted device through simulation configuration so the
+selected backend owns its default; explicit device selections retain priority.
+
 ## Semantic integration boundary
 
 `semantics` contains:

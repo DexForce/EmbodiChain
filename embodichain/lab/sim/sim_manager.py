@@ -624,9 +624,9 @@ class SimulationManager:
         self._requested_renderer = sim_config.render_cfg.renderer
         solver_cfg = getattr(sim_config.physics_cfg, "solver_cfg", None)
         self._requested_solver = str(
-            solver_cfg.get("solver_type", solver_cfg.get("class_type", "auto"))
+            solver_cfg.get("solver_type", solver_cfg.get("class_type", "dexuni"))
             if isinstance(solver_cfg, Mapping)
-            else getattr(solver_cfg, "solver_type", "auto")
+            else getattr(solver_cfg, "solver_type", "dexuni")
         )
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
@@ -1514,26 +1514,31 @@ class SimulationManager:
     def register_particle_contact_material_schedule(
         self,
         keyframes: Mapping[str, Sequence[Sequence[float]]],
+        *,
+        uid: str | None = None,
     ) -> None:
         """Register time-varying Newton particle contact properties.
 
         Supported tracks are ``dynamic_friction``, ``stiffness``, and
-        ``damping``. Values apply scene-wide to particle-versus-rigid contacts
-        and are sampled piecewise-constantly in simulation time.
+        ``damping``. Values are sampled piecewise-constantly in simulation
+        time. Supply ``uid`` for a DexUni cloth/soft-body material; otherwise
+        register the legacy scene-wide control for other Newton solvers.
 
         .. attention::
-            Register this control before :meth:`prepare`. This host-side
-            control requires direct Newton stepping and therefore disables
-            CUDA Graph replay for the finalized simulation.
+            Register before :meth:`prepare`. Targeted DexUni controls support
+            CUDA Graph replay. The legacy scene-wide host control requires
+            direct Newton stepping and disables graph replay.
 
         Args:
             keyframes: Particle contact-property tracks containing ``(time,
                 value)`` pairs.
+            uid: Optional declared deformable UID for DexUni object materials.
 
         Raises:
             RuntimeError: If the backend is not Newton or the scene is already
                 finalized.
             ValueError: If the keyframes are invalid.
+            KeyError: If ``uid`` is not a declared deformable.
         """
         if not self.is_newton_backend:
             raise RuntimeError(
@@ -1545,6 +1550,31 @@ class SimulationManager:
                 "Particle contact material schedules must be registered before "
                 "SimulationManager.prepare()."
             )
+
+        if uid is not None:
+            if uid not in self._deformable_objects:
+                raise KeyError(f"Deformable object {uid!r} is not declared.")
+            arena_names = scene.arena_names
+            if len(arena_names) != self.num_envs:
+                raise RuntimeError(
+                    "Spawn arena count does not match SimulationManager.num_envs."
+                )
+            from dexsim.engine import newton_physics
+
+            control_type = getattr(
+                newton_physics, "DexUniParticleContactMaterialSchedule", None
+            )
+            if control_type is None:
+                raise RuntimeError(
+                    "Targeted particle materials require a supporting DexSim build."
+                )
+            controls = tuple(
+                control_type(keyframes, target=f"{arena_name}/{uid}")
+                for arena_name in arena_names
+            )
+            for control in controls:
+                scene.builder.add_runtime_control(control)
+            return
 
         from dexsim.engine.newton_physics import ParticleContactMaterialSchedule
 
@@ -1710,6 +1740,71 @@ class SimulationManager:
         )
         for control in controls:
             scene.builder.add_runtime_control(control)
+
+    def add_runtime_control(
+        self,
+        control: Any | Callable[[str, int], Any],
+    ) -> tuple[Any, ...]:
+        """Register DexSim Newton runtime controls before :meth:`prepare`.
+
+        Use this for controls that have no dedicated ``register_*`` method,
+        such as ``RealtimeJointTargetControl``, ``PinnedParticleControl`` or
+        ``IndexedConveyorControl`` from ``dexsim.engine.newton_physics``.
+
+        Pass either one control instance, which is registered once for the
+        whole scene, or a factory called as ``factory(arena_name, env_index)``
+        for every environment. Controls address entities by Spawn path, which
+        is ``f"{arena_name}/{uid}"`` for an object declared with ``uid``.
+
+        Args:
+            control: A ``RuntimeControl`` instance, or a per-environment
+                factory returning one.
+
+        Returns:
+            The registered controls, in environment order for a factory.
+            Keep them to drive live controls such as joint targets.
+
+        Raises:
+            RuntimeError: If the backend is not Newton, the Spawn scene is
+                already finalized, or its arena count is inconsistent.
+            TypeError: If a control is not a ``RuntimeControl``.
+        """
+        from dexsim.engine.newton_physics.runtime_control import RuntimeControl
+
+        if not self.is_newton_backend:
+            raise RuntimeError("Runtime controls require the Newton backend.")
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError(
+                "Runtime controls must be registered before "
+                "SimulationManager.prepare()."
+            )
+        if isinstance(control, RuntimeControl):
+            controls: tuple[Any, ...] = (control,)
+        elif callable(control):
+            arena_names = scene.arena_names
+            if len(arena_names) != self.num_envs:
+                raise RuntimeError(
+                    "Spawn arena count does not match SimulationManager.num_envs: "
+                    f"{len(arena_names)} != {self.num_envs}."
+                )
+            controls = tuple(
+                control(arena_name, env_index)
+                for env_index, arena_name in enumerate(arena_names)
+            )
+        else:
+            raise TypeError(
+                "control must be a RuntimeControl or a factory returning one."
+            )
+        for item in controls:
+            if not isinstance(item, RuntimeControl):
+                raise TypeError(
+                    "Runtime control factories must return RuntimeControl "
+                    f"instances; got {type(item).__name__}."
+                )
+        for item in controls:
+            scene.builder.add_runtime_control(item)
+        return controls
 
     def prepare(self) -> None:
         """Materialize declarations, bind state, and restore camera parents."""
@@ -3992,8 +4087,8 @@ class SimulationManager:
             sensor_factory, ContactSensor
         ):
             self.prepare()
-            # ``solver_type='auto'`` is resolved while preparing the Spawn
-            # scene, so the early capability check above is not sufficient.
+            # DexUni resolves its contact path while preparing the Spawn scene,
+            # so the early capability check above is not sufficient.
             if not self.physics.supports_contact_sensor:
                 raise NotImplementedError(
                     f"ContactSensor is not supported by the {self.physics.name} "
@@ -4915,6 +5010,7 @@ class SimulationManager:
             None,
             "auto",
             "mujoco_warp",
+            "dexuni",
         }
         if (
             use_coordinated_newton_clear
@@ -5022,6 +5118,9 @@ class SimulationManager:
             bool: True if export is successful, False otherwise.
         """
         try:
+            # The optional USD kit registers the export methods on DexSim Env.
+            import dexsim.kit.usd
+
             self._env.export_to_usd_file(fpath)
             logger.log_info(f"Simulation scene exported to USD file: {fpath}")
             return True
@@ -5141,6 +5240,14 @@ class SimulationManager:
                 for asset in getattr(self, registry_name, {}).values():
                     if isinstance(asset, VisualObject):
                         asset._release_spawn_references()
+                    # Parsed material wrappers must die before their native renderer.
+                    for material_attr in (
+                        "_visual_material",
+                        "_original_visual_material",
+                        "_original_visual_material_inst",
+                    ):
+                        if hasattr(asset, material_attr):
+                            setattr(asset, material_attr, [])
                     if hasattr(asset, "_data"):
                         asset._data = None
                     if hasattr(asset, "_spawn_result"):

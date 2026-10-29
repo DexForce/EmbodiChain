@@ -6,7 +6,13 @@ environment:
 task_program:
   program: task_program/program.yaml
   integration: task_program/integration.yaml
-  execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
+  execution_policy:
+    component: ../../../components/execution_policies/trajectory_open_loop.yaml
+    overrides:
+      motion:
+        sample_count: 160
+      recovery:
+        goal_rotation_threshold: 3.141592653589793
 
 embodiment:
   component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml

@@ -35,6 +35,15 @@ from .rigid import (
     _rigid_body_physics_from_dict,
 )
 
+__all__ = [
+    "ArticulationRootPropertiesCfg",
+    "LinkPhysicsOverrideCfg",
+    "link_attrs_from_dict",
+    "JointDrivePropertiesCfg",
+    "NewtonJointDrivePropertiesCfg",
+    "ArticulationCfg",
+]
+
 
 def _normalize_joint_target_mode(value: object) -> int:
     """Normalize a portable joint target mode to its backend integer value."""
@@ -95,6 +104,85 @@ class ArticulationRootPropertiesCfg:
     min_velocity_iters: int | None = None
     """Default-only minimum root velocity-solver iterations (0 to 255)."""
 
+    newton_gravity_compensation: float | None = None
+    """MuJoCo link-weight compensation fraction in [0, 1], on Newton only.
+
+    ``None`` preserves the source/default policy; zero retains gravity and one
+    compensates every link in this articulation. Payload gravity and contact
+    reactions remain active. This creation setting applies in both asset
+    physics modes, independently of DexUni's coupling policy. The finalized
+    Newton solver must support MuJoCo gravity compensation.
+    """
+
+    newton_kinematic: bool | None = None
+    """Whether every Newton link body is kinematic, on Newton only.
+
+    ``True`` keeps authored mass and inertia but stops Newton from integrating
+    the links; prescribed motion then needs a kinematic controller such as
+    :meth:`SimulationManager.register_kinematic_joint_trajectory`. ``None``
+    preserves the DexSim default (dynamic links).
+    """
+
+    newton_sleep_policy: Literal["auto", "never", "allowed", "init"] | None = None
+    """MuJoCo sleeping policy for every movable tree, on Newton only.
+
+    ``None`` preserves the DexSim default (``"auto"``).
+    """
+
+    newton_shape_collision: bool | None = None
+    """Whether link collision shapes take part in rigid shape-shape contact.
+
+    Particle contact is configured separately by
+    :attr:`newton_particle_collision_links`. ``None`` preserves the DexSim
+    default (enabled).
+    """
+
+    newton_shape_collision_links: Sequence[str] | None = None
+    """Exact link names allowed in rigid shape-shape contact, on Newton only.
+
+    When set, this list takes precedence over :attr:`newton_shape_collision`.
+    ``None`` keeps every link eligible.
+    """
+
+    newton_particle_collision_links: Sequence[str] | None = None
+    """Exact link names allowed to collide with particles, on Newton only.
+
+    Shapes on other links still render but ignore cloth and soft bodies.
+    ``None`` keeps every link eligible.
+    """
+
+    newton_mimic_stabilizer: bool = False
+    """Whether URDF mimic joints are tuned toward Default-backend behavior.
+
+    ``False`` (default) keeps the configured follower drives and Newton's
+    native mimic constraint, as a plain DexSim scene does; reset starts each
+    follower on its mimic relation so the constraint does not kick on the
+    first step. On MuJoCo-Warp and
+    DexUni, ``True`` opts in to a Default-parity stabilizer: each mimic
+    follower's drive becomes one percent of its leader's gains (replacing the
+    follower gains in :attr:`ArticulationCfg.joint_drive_props`), follower
+    targets follow the mimic relation, and the MuJoCo equality ``solref`` is
+    retuned.
+    """
+
+    newton_mesh_approximation: Mapping[str, Any] | None = None
+    """Newton collision-mesh preprocessing applied before finalization.
+
+    Keys follow DexSim ``NewtonMeshApproximationDesc``: ``method``,
+    ``link_names``, ``raise_on_failure``, ``keep_visual_shapes`` and
+    ``options``. ``None`` uses the source collision meshes unchanged.
+    """
+
+    newton_force_sdf: bool | None = None
+    """Keep imported collision meshes as concave Newton SDF boundaries.
+
+    This pre-build request lowers to ``NewtonCollisionDesc.force_sdf`` on
+    the articulation source. It avoids converting imported collision meshes
+    to convex hulls. ``None`` preserves source/default behavior; primitives
+    retain their analytic geometry. It is independent of the rigid and
+    particle collision participation flags.
+    """
+
     def __post_init__(self) -> None:
         """Require the two values consumed by the atomic Default setter."""
         if (self.min_position_iters is None) != (self.min_velocity_iters is None):
@@ -102,6 +190,30 @@ class ArticulationRootPropertiesCfg:
                 "Articulation-root min_position_iters and min_velocity_iters "
                 "must be configured together."
             )
+        for name in (
+            "newton_shape_collision_links",
+            "newton_particle_collision_links",
+        ):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                raise TypeError(f"{name} must be a sequence of link names.")
+            setattr(self, name, tuple(str(item) for item in value))
+        if self.newton_sleep_policy is not None and self.newton_sleep_policy not in (
+            "auto",
+            "never",
+            "allowed",
+            "init",
+        ):
+            raise ValueError(
+                "newton_sleep_policy must be 'auto', 'never', 'allowed' or "
+                f"'init'; got {self.newton_sleep_policy!r}."
+            )
+        if self.newton_mesh_approximation is not None and not isinstance(
+            self.newton_mesh_approximation, Mapping
+        ):
+            raise TypeError("newton_mesh_approximation must be a mapping.")
 
     @classmethod
     def from_dict(
@@ -378,12 +490,23 @@ class JointDrivePropertiesCfg:
 
 @configclass
 class NewtonJointDrivePropertiesCfg(JointDrivePropertiesCfg):
-    """Compatibility subtype for serialized Newton joint-drive configs.
+    """Joint-drive configuration with Newton-specific passive dynamics.
 
     ``target_mode`` is now portable and lives on
     :class:`JointDrivePropertiesCfg`. The subtype remains so existing
-    ``backend="newton"`` dictionaries and round trips retain their type; new
-    robot definitions should use the common class.
+    ``backend="newton"`` dictionaries and round trips retain their type. Use
+    the common class when no Newton-specific dynamics are required.
+    """
+
+    passive_damping: dict[str, float] | float | None = None
+    """Nonnegative passive joint damping, independent of drive damping.
+
+    Uses the same joint-name, regex and robot control-part rules as the drive
+    gains. Apply it with ``asset_physics_mode='overlay'``; ``None`` preserves
+    source damping. Unlike :attr:`damping`, this
+    lowers to Newton's ``JointDofConfig.damping`` and remains active when the
+    drive target mode is ``none`` or ``effort``. It requires Newton and is
+    consumed by MuJoCo-backed solvers, including dynamic DexUni.
     """
 
 

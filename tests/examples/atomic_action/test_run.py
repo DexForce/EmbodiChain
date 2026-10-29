@@ -509,6 +509,41 @@ def test_every_sample_defaults_to_one_reference_environment(skill: str) -> None:
     assert cfg.variants == 1
     assert not cfg.affordance_enabled and not cfg.trajectory_enabled
     assert _scene_args(cfg).num_envs == 1
+    assert cfg.device is None
+    assert _scene_args(cfg).device is None
+
+
+@pytest.mark.parametrize(
+    "physics, expected_device", [("default", "cpu"), ("newton", "cuda:0")]
+)
+def test_sample_omitted_device_preserves_backend_default(
+    monkeypatch: pytest.MonkeyPatch, physics: str, expected_device: str
+) -> None:
+    from examples.sim.atomic_action import support
+
+    captured = {}
+
+    def create_sim(cfg):
+        captured["cfg"] = cfg
+        return SimpleNamespace(add_light=lambda cfg: None)
+
+    monkeypatch.setattr(support, "SimulationManager", create_sim)
+    args = launcher._create_parser().parse_args(
+        ["--skill", "pickup", "--physics", physics]
+    )
+    cfg = launcher._resolve_sample(args)
+    support.create_tutorial_simulation(_scene_args(cfg))
+    assert captured["cfg"].device == expected_device
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda:2"])
+def test_sample_explicit_device_is_preserved(device: str) -> None:
+    args = launcher._create_parser().parse_args(
+        ["--skill", "pickup", "--physics", "newton", "--device", device]
+    )
+    cfg = launcher._resolve_sample(args)
+    assert cfg.device == device
+    assert _scene_args(cfg).device == device
 
 
 @pytest.mark.parametrize("count", (2, 8))
@@ -538,6 +573,7 @@ def test_variant_count_is_the_parallel_environment_count(count: int, mode: str) 
         (["--gpu-id", "-1"], "non-negative"),
         (["--seed", "-1"], "seed must"),
         (["--arena-space", "nan"], "finite"),
+        (["--device", ""], "device must"),
         (["--save-video", "--renderer", "no-render"], "requires a renderer"),
     ),
 )
@@ -608,3 +644,102 @@ def test_cli_persists_failure_and_interruption(
     manifest = json.loads((tmp_path / "expansion_manifest.json").read_text())
     assert manifest["status"] == "failed"
     assert type(error).__name__ in manifest["error"]
+
+
+@pytest.mark.no_sim
+def test_sample_solver_overrides_preserve_configured_host_fields(monkeypatch) -> None:
+    from examples.sim.atomic_action import support
+
+    captured = {}
+
+    def create_sim(cfg):
+        captured["cfg"] = cfg
+        return SimpleNamespace(add_light=lambda cfg: None)
+
+    monkeypatch.setattr(support, "SimulationManager", create_sim)
+    args = SimpleNamespace(
+        physics="newton",
+        num_envs=2,
+        device="cpu",
+        renderer="no-render",
+        gpu_id=3,
+        arena_space=4.0,
+        run=SimpleNamespace(),
+    )
+    support.create_tutorial_simulation(
+        args, newton_solver_options={"vbd_options": {"rigid_contact_history": True}}
+    )
+    cfg = captured["cfg"]
+    assert cfg.arena_space == 4.0
+    assert cfg.gpu_id == 3
+    assert cfg.physics_cfg.collision_cfg is None
+    assert cfg.physics_cfg.solver_cfg["solver_type"] == "dexuni"
+    assert cfg.physics_cfg.solver_cfg["mujoco_options"]["enable_multiccd"]
+    assert cfg.physics_cfg.solver_cfg["vbd_options"]["rigid_contact_history"]
+
+
+@pytest.mark.no_sim
+def test_sample_newton_options_reject_other_backends_before_creation(
+    monkeypatch,
+) -> None:
+    from examples.sim.atomic_action import support
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Simulation should not be created for incompatible options")
+
+    monkeypatch.setattr(support, "SimulationManager", unexpected)
+    with pytest.raises(ValueError, match="Newton backend"):
+        support.create_tutorial_simulation(
+            SimpleNamespace(physics="default"),
+            newton_solver_options={"coupling": "two_way"},
+        )
+
+
+@pytest.mark.no_sim
+def test_sample_friction_and_arm_damping_are_applied_before_spawn(monkeypatch) -> None:
+    from examples.sim.atomic_action import support
+    from embodichain.lab.sim.cfg import JointDrivePropertiesCfg
+
+    cfg = RobotCfg(joint_drive_props=JointDrivePropertiesCfg(damping={"arm": 2000.0}))
+    captured = {}
+
+    def create_cfg(*args, **kwargs):
+        captured.update(kwargs)
+        return cfg
+
+    monkeypatch.setattr(support, "create_tutorial_robot_cfg", create_cfg)
+    sim = SimpleNamespace(is_newton_backend=True, add_robot=lambda cfg: cfg)
+    result = support.add_tutorial_robot(
+        sim, "ur5", tcp_point="grasp", newton_gripper_friction=4.0, arm_damping=1000.0
+    )
+    assert captured["tcp_point"] == "grasp"
+    assert "newton_gripper_friction" not in captured
+    assert "arm_damping" not in captured
+    assert result.joint_drive_props.damping["arm"] == 1000.0
+    material = result.link_attrs["newton_gripper_contacts"].attrs.material_props
+    assert material.static_friction == material.dynamic_friction == 4.0
+
+
+@pytest.mark.no_sim
+def test_dual_sample_gripper_friction_retains_fixture_selection(monkeypatch) -> None:
+    cfg = RobotCfg()
+    captured = {}
+
+    def create_cfg(**kwargs):
+        captured.update(kwargs)
+        return cfg
+
+    monkeypatch.setattr(scenario, "create_dual_tutorial_robot_cfg", create_cfg)
+    sim = SimpleNamespace(is_newton_backend=True, add_robot=lambda cfg: cfg)
+    result = scenario.add_dual_tutorial_robot(
+        sim,
+        robot_type="ur5",
+        uid="robot",
+        urdf_name="fixture",
+        gripper="robotiq_2f_140",
+        newton_gripper_friction=4.0,
+    )
+    assert captured["gripper"] == "robotiq_2f_140"
+    assert "newton_gripper_friction" not in captured
+    material = result.link_attrs["newton_gripper_contacts"].attrs.material_props
+    assert material.static_friction == material.dynamic_friction == 4.0

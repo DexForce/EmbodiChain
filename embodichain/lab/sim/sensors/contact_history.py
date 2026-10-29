@@ -160,9 +160,17 @@ class ContactHistory:
             ],
         )
 
-    def _update_from_query(self, buffer: ContactBuffer, dt: float) -> None:
+    def _update_from_query(
+        self,
+        buffer: ContactBuffer,
+        dt: float,
+        *,
+        impulse_available: bool = True,
+        friction_available: bool = True,
+    ) -> None:
         """Reduce compact query rows using its device-resident valid-row count."""
         args = self._start_sample(dt)
+        quantity_valid = getattr(buffer, "quantity_valid", None)
         self._launch(
             reduce_contact_rows,
             buffer.capacity,
@@ -171,6 +179,12 @@ class ContactHistory:
                 wp.from_torch(buffer.actor_ids),
                 wp.from_torch(buffer.env_ids),
                 wp.from_torch(buffer.count_device),
+                wp.from_torch(
+                    quantity_valid if quantity_valid is not None else self.contact
+                ),
+                quantity_valid is not None,
+                impulse_available,
+                friction_available,
                 *args,
             ],
         )
@@ -200,6 +214,8 @@ class ContactHistory:
                     wp.from_torch(data[name])
                     for name in ("is_valid", "normal", "friction", "impulse")
                 ],
+                wp.from_torch(data.get("impulse_valid", data["is_valid"])),
+                wp.from_torch(data.get("friction_valid", data["is_valid"])),
                 *args,
             ],
         )

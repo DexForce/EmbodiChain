@@ -341,14 +341,51 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     Genuine Newton/Warp warnings and errors are not suppressed.
     """
 
+    async_sync: bool = False
+    """Whether Newton-to-render publication returns without waiting for rendering.
+
+    ``True`` removes the render-thread wait from each published step, which
+    mostly matters while a window is open. ``False`` keeps the blocking
+    DexSim default.
+    """
+
+    rigid_transform_sync_mode: Literal["all", "dynamic"] = "all"
+    """Rigid transforms copied from Newton to the renderer after each step.
+
+    ``"all"`` copies every mapped body. ``"dynamic"`` skips static and
+    kinematic bodies, which are already posed by their setters.
+    """
+
+    capture_acquire_timeout: float | None = None
+    """Seconds to wait for CUDA-graph capture rights shared with other users.
+
+    ``None`` waits indefinitely. A finite value lets DexSim fall back to
+    uncaptured stepping when another component holds capture.
+    """
+
+    capture_wait_log_interval: float | None = 10.0
+    """Seconds between progress logs while waiting for capture rights.
+
+    ``None`` or a non-positive value disables the progress log.
+    """
+
     solver_cfg: Mapping[str, Any] | NewtonSolverCfg | None = None
     """Optional Newton solver configuration.
 
     A mapping is converted to the matching DexSim Newton solver config. Include
     ``solver_type`` or ``class_type`` to select the solver, then add any
     parameters accepted by that DexSim solver config. If omitted, EmbodiChain
-    preserves DexSim's scene-aware ``AutoSolverCfg`` default. A DexSim build
-    exporting ``AutoSolverCfg`` is required; no concrete-solver fallback is used.
+    preserves DexSim's ``DexUniSolverCfg`` default and its scene-based dispatch.
+    Legacy ``auto``/``AutoSolverCfg`` mappings select DexUni as well.
+    For ``solver_type='dexuni'``, the current DexSim contract keeps expert
+    options under ``vbd_options``, ``mujoco_options`` and
+    ``collision_options``; use ``joint_mode`` and ``contact_mode`` for the
+    coupled dispatch policy. ``coupling='two_way'`` enables contact reactions
+    on dynamically integrated articulations. Optional ``coupling_options``
+    accepts ``mass_scale``, ``proxy_relaxation`` and ``iterations``. Two-way
+    coupling requires ``joint_mode='dynamic'``. Current DexSim supports
+    full-surface rigid-soft feedback; native validation owns the compatible
+    contact modes and option combinations.
     """
 
     collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(
@@ -366,6 +403,19 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         """Normalize dictionary collision settings at the config boundary."""
         if isinstance(self.collision_cfg, Mapping):
             self.collision_cfg = NewtonCollisionPipelineCfg(**self.collision_cfg)
+        if self.rigid_transform_sync_mode not in ("all", "dynamic"):
+            raise ValueError(
+                "NewtonPhysicsCfg.rigid_transform_sync_mode must be 'all' or "
+                f"'dynamic'; got {self.rigid_transform_sync_mode!r}."
+            )
+        if self.capture_acquire_timeout is not None and not (
+            math.isfinite(self.capture_acquire_timeout)
+            and self.capture_acquire_timeout >= 0.0
+        ):
+            raise ValueError(
+                "NewtonPhysicsCfg.capture_acquire_timeout must be None or a "
+                "finite non-negative number of seconds."
+            )
 
     def to_dexsim_cfg(
         self,
@@ -373,7 +423,6 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     ) -> NewtonCfg:
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
         from dexsim.engine.newton_physics import (
-            AutoSolverCfg,
             DexUniSolverCfg,
             FeatherstoneSolverCfg,
             MJWarpSolverCfg,
@@ -394,7 +443,6 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         )
 
         solver_cfg_map: dict[str, type] = {
-            "auto": AutoSolverCfg,
             "dexuni": DexUniSolverCfg,
             "mujoco_warp": MJWarpSolverCfg,
             "xpbd": XPBDSolverCfg,
@@ -412,7 +460,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         ):
             logger.log_error(
                 "Newton gradient mode requires an explicit "
-                "solver_type='semi_implicit'; AutoSolver does not select a "
+                "solver_type='semi_implicit'; the default does not select a "
                 "differentiable solver."
             )
 
@@ -445,6 +493,10 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "suppress_warp_kernel_logs": self.suppress_warp_kernel_logs,
             "collision_pipeline_cfg": collision_pipeline_cfg,
             "sync_to_dexsim": self.sync_to_renderer,
+            "async_sync": self.async_sync,
+            "rigid_transform_sync_mode": self.rigid_transform_sync_mode,
+            "capture_acquire_timeout": self.capture_acquire_timeout,
+            "capture_wait_log_interval": self.capture_wait_log_interval,
         }
         if solver_cfg is not None:
             newton_cfg_args["solver_cfg"] = solver_cfg
@@ -460,11 +512,11 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
     """Normalize public EmbodiChain and DexSim Newton solver aliases."""
     key = solver_type.replace("-", "_").lower()
     aliases = {
-        "auto": "auto",
-        "autosolver": "auto",
-        "autosolvercfg": "auto",
-        "auto_solver": "auto",
-        "auto_solver_cfg": "auto",
+        "auto": "dexuni",
+        "autosolver": "dexuni",
+        "autosolvercfg": "dexuni",
+        "auto_solver": "dexuni",
+        "auto_solver_cfg": "dexuni",
         "mjwarp": "mujoco_warp",
         "mjwarpsolver": "mujoco_warp",
         "mjwarpsolvercfg": "mujoco_warp",
@@ -522,7 +574,7 @@ def _newton_solver_cfg_to_dexsim(
     configured_solver_type = (
         solver_cfg_data.pop("solver_type", None)
         or solver_cfg_data.pop("class_type", None)
-        or "auto"
+        or "dexuni"
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
     solver_cfg_type = solver_cfg_map[normalized_solver_type]

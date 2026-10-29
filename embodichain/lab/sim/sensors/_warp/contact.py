@@ -41,7 +41,7 @@ def _scatter_contact_row(
 ):
     env_id = env_ids[i]
     if env_id < 0 or env_id >= num_contacts_per_env.shape[0]:
-        return
+        return wp.vec2i(-1, -1)
     # Atomically increment contact counter for this environment
     contact_idx = wp.atomic_add(num_contacts_per_env, env_id, 1)
 
@@ -51,7 +51,7 @@ def _scatter_contact_row(
             wp.atomic_add(dropped, env_id, 1)
         # Decrement counter since we didn't write this contact
         wp.atomic_sub(num_contacts_per_env, env_id, 1)
-        return
+        return wp.vec2i(-1, -1)
 
     # Extract contact data columns
     x = contact_data[i, 0]
@@ -86,6 +86,7 @@ def _scatter_contact_row(
     user_ids_out[env_id, contact_idx, 1] = user_ids[i, 1]
 
     is_valid[env_id, contact_idx] = True
+    return wp.vec2i(env_id, contact_idx)
 
 
 @wp.kernel(enable_backward=False)
@@ -141,11 +142,17 @@ def scatter_contact_rows(
     is_valid: wp.array(dtype=wp.bool, ndim=2),
     counts: wp.array(dtype=wp.int32),
     dropped: wp.array(dtype=wp.int32),
+    quantity_valid: wp.array(dtype=wp.bool, ndim=2),
+    has_quantity_valid: bool,
+    impulse_available: bool,
+    friction_available: bool,
+    impulse_valid: wp.array(dtype=wp.bool, ndim=2),
+    friction_valid: wp.array(dtype=wp.bool, ndim=2),
 ):
     """Scatter valid device-counted rows and record per-environment overflow."""
     i = wp.tid()
     if i < counts[0]:
-        _scatter_contact_row(
+        row = _scatter_contact_row(
             i,
             contact_data,
             user_ids,
@@ -162,3 +169,11 @@ def scatter_contact_rows(
             True,
             dropped,
         )
+        if row[0] >= 0:
+            normal_valid = impulse_available
+            tangent_valid = friction_available
+            if has_quantity_valid:
+                normal_valid = quantity_valid[i, 0]
+                tangent_valid = quantity_valid[i, 1]
+            impulse_valid[row[0], row[1]] = normal_valid
+            friction_valid[row[0], row[1]] = tangent_valid
