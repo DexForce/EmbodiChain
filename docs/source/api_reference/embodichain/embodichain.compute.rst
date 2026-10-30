@@ -142,12 +142,14 @@ Geometry tensor kernels
 
    embodichain.compute.scene_geometry
 
-Differentiable inverse kinematics
---------------------------------
+Differentiable kinematics
+-------------------------
 
 The fixed-step DLS implementation preserves target and seed gradients through
 both FK and the geometric Jacobian. ``SerialChainKinematics`` adapts a copied
-PK chain without loading simulation. ``DifferentiableIKCfg`` configures the
+PK chain without loading simulation. Its ``forward_kinematics`` method computes
+only TCP poses, while ``evaluate`` also constructs differentiable Jacobians in
+the same FK pass. ``DifferentiableIKCfg`` configures the
 compute function and Torch layer; failed solves retain their last iterate.
 
 .. currentmodule:: embodichain.compute.kinematics

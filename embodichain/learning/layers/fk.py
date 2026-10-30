@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Torch module interface to fixed robot geometry, independent of simulation."""
+"""A differentiable forward-kinematics layer with fixed robot geometry."""
 
 from __future__ import annotations
 
@@ -25,10 +25,10 @@ from torch import nn
 
 from embodichain.compute.kinematics.serial_chain import SerialChainKinematics
 
-__all__ = ["KinematicsLayer"]
+__all__ = ["DifferentiableFKLayer"]
 
 
-class KinematicsLayer(nn.Module):
+class DifferentiableFKLayer(nn.Module):
     """Expose FK and differentiable Jacobians as a reusable network layer.
 
     Args:
@@ -43,6 +43,8 @@ class KinematicsLayer(nn.Module):
         ``load_state_dict(assign=True)`` adopts checkpoint device and precision
         for both tensor buffers and fixed geometry, including nested loads.
         ``train()`` and ``eval()`` do not disable input gradients.
+        Joint inputs follow ``model.joint_names`` and are not clipped to limits.
+        Only first-order input gradients are part of the public contract.
     """
 
     def __init__(
@@ -101,11 +103,11 @@ class KinematicsLayer(nn.Module):
         """Number of movable joints in solver order."""
         return self.model.dof
 
-    def _apply(self, fn: Any, recurse: bool = True) -> KinematicsLayer:
+    def _apply(self, fn: Any, recurse: bool = True) -> DifferentiableFKLayer:
         # PK is not an nn.Module: explicitly migrate all of its geometry tensors.
         probe = fn(self.tcp)
         if probe.dtype not in (torch.float32, torch.float64):
-            raise ValueError("KinematicsLayer supports float32 and float64")
+            raise ValueError("DifferentiableFKLayer supports float32 and float64")
         super()._apply(fn, recurse=recurse)
         self.model = self.model.to(self.tcp.device, self.tcp.dtype)
         return self
@@ -116,7 +118,7 @@ class KinematicsLayer(nn.Module):
         # assign=True replaces buffers without calling _apply, also when a parent
         # network loads this layer recursively. PK geometry is not a buffer.
         if self.tcp.dtype not in (torch.float32, torch.float64):
-            raise ValueError("KinematicsLayer supports float32 and float64")
+            raise ValueError("DifferentiableFKLayer supports float32 and float64")
         if (
             self.model.chain.device != self.tcp.device
             or self.model.chain.dtype != self.tcp.dtype
@@ -135,15 +137,40 @@ class KinematicsLayer(nn.Module):
             )
 
     def forward(self, qpos: torch.Tensor) -> torch.Tensor:
-        """Return root-frame TCP transforms for ``(..., dof)`` joints."""
-        return self.evaluate(qpos)[0]
+        """Compute TCP transforms without constructing a geometric Jacobian.
+
+        Args:
+            qpos: Joint positions in model order, shape ``(..., dof)``. Device
+                and dtype must match this layer's buffers and geometry.
+
+        Returns:
+            Root-frame TCP transforms, shape ``(..., 4, 4)``, retaining input
+            gradients and all leading batch dimensions.
+        """
+        return self.model.forward_kinematics(qpos, self.tcp)
 
     def evaluate(self, qpos: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return TCP transforms and root-frame geometric Jacobians."""
+        """Compute TCP transforms and geometric Jacobians in one FK pass.
+
+        Args:
+            qpos: Joint positions in model order, shape ``(..., dof)``.
+
+        Returns:
+            Root-frame TCP transforms ``(..., 4, 4)`` and geometric Jacobians
+            ``(..., 6, dof)``, with linear rows preceding angular rows.
+        """
         return self.model.evaluate(qpos, self.tcp)
 
     def jacobian(self, qpos: torch.Tensor) -> torch.Tensor:
-        """Return differentiable TCP Jacobians, shape ``(..., 6, dof)``."""
+        """Return differentiable TCP Jacobians in the root frame.
+
+        Args:
+            qpos: Joint positions in model order, shape ``(..., dof)``.
+
+        Returns:
+            Geometric Jacobians ``(..., 6, dof)``, with linear rows preceding
+            angular rows. Their gradients remain connected to ``qpos``.
+        """
         return self.evaluate(qpos)[1]
 
     def default_seed(self) -> torch.Tensor:

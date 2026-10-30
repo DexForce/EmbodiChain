@@ -38,7 +38,7 @@ from torch import nn
 
 from embodichain.compute.kinematics import DifferentiableIKCfg, SerialChainKinematics
 from embodichain.data import get_data_path
-from embodichain.learning.layers import DifferentiableIKLayer, KinematicsLayer
+from embodichain.learning.layers import DifferentiableIKLayer, DifferentiableFKLayer
 from embodichain.learning.models import MLP
 from embodichain.utils import configclass
 from ._benchmark import _measure, _sync, _table
@@ -90,10 +90,10 @@ class GraspLearningCfg:
             raise ValueError("learning_rate must be finite and positive")
 
 
-def load_kinematics(device: str = "cpu") -> KinematicsLayer:
+def load_kinematics(device: str = "cpu") -> DifferentiableFKLayer:
     """Build the official Franka arm chain without importing simulation."""
     path = Path(get_data_path("Franka/Panda/PandaWithHand.urdf"))
-    return KinematicsLayer(
+    return DifferentiableFKLayer(
         SerialChainKinematics.from_urdf(
             path.read_text(), "fr3_hand_tcp", "base", device=device
         )
@@ -116,12 +116,12 @@ def target_pose(angle: torch.Tensor, position: torch.Tensor) -> torch.Tensor:
     )
 
 
-def ready_joints(k: KinematicsLayer) -> torch.Tensor:
+def ready_joints(k: DifferentiableFKLayer) -> torch.Tensor:
     """Return the official reference posture in the model's dtype/device."""
     return k.tcp.new_tensor([0.0, -0.569, 0.0, -2.810, 0.0, 3.037, 0.741])
 
 
-def current_heading(k: KinematicsLayer, q: torch.Tensor) -> torch.Tensor:
+def current_heading(k: DifferentiableFKLayer, q: torch.Tensor) -> torch.Tensor:
     """Project current TCP X into root XY; data stays near downward grasps."""
     pose = k(q)
     return torch.atan2(pose[..., 1, 0], pose[..., 0, 0])
@@ -134,7 +134,7 @@ class GraspYawPredictor(nn.Module):
     declared task scales, not statistics from validation or test targets.
     """
 
-    def __init__(self, k: KinematicsLayer) -> None:
+    def __init__(self, k: DifferentiableFKLayer) -> None:
         super().__init__()
         base = ready_joints(k)
         with torch.no_grad():
@@ -161,7 +161,7 @@ class GraspYawPredictor(nn.Module):
 class ConstantYaw(nn.Module):
     """Fit one absolute grasp angle shared by every task, without conditioning."""
 
-    def __init__(self, k: KinematicsLayer) -> None:
+    def __init__(self, k: DifferentiableFKLayer) -> None:
         super().__init__()
         self.angle = nn.Parameter(k.tcp.new_zeros(()))
 
@@ -174,7 +174,7 @@ class ConstantYaw(nn.Module):
 
 @torch.no_grad()
 def sample_tasks(
-    k: KinematicsLayer, count: int, seed: int, split: str
+    k: DifferentiableFKLayer, count: int, seed: int, split: str
 ) -> dict[str, torch.Tensor]:
     """Sample independent local problems with a disjoint Cartesian-Y holdout."""
     g = torch.Generator().manual_seed(seed)
@@ -313,7 +313,7 @@ def grid_reference(
 
 
 def fit_model(
-    k: KinematicsLayer,
+    k: DifferentiableFKLayer,
     cfg: GraspLearningCfg,
     train: dict[str, torch.Tensor],
     validation: dict[str, torch.Tensor],
@@ -432,7 +432,9 @@ def summarize(
     }
 
 
-def validate_gradients(k: KinematicsLayer, iterations: int = 24) -> dict[str, Any]:
+def validate_gradients(
+    k: DifferentiableFKLayer, iterations: int = 24
+) -> dict[str, Any]:
     """Check complete policy→IK task gradients and reject hidden input truncation."""
     # These are executable demo checks, not a new tutorial-importing pytest suite.
     torch.manual_seed(101)
@@ -482,7 +484,7 @@ def validate_gradients(k: KinematicsLayer, iterations: int = 24) -> dict[str, An
 
 def load_predictors(
     run_dir: Path, device: str = "cpu"
-) -> tuple[KinematicsLayer, dict[str, nn.Module], GraspLearningCfg]:
+) -> tuple[DifferentiableFKLayer, dict[str, nn.Module], GraspLearningCfg]:
     """Restore the first seeded run's validation-selected, frozen predictors."""
     meta = json.loads((run_dir / "metrics.json").read_text())
     cfg = GraspLearningCfg(**meta["config"])

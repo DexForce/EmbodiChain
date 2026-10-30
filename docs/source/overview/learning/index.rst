@@ -2,16 +2,18 @@ Learning Infrastructure
 =======================
 
 Embodied learning trains agents to act through a robot's observations and
-actions. This section covers policy training and evaluation in EmbodiChain;
-the built-in training framework currently focuses on reinforcement learning.
-Standalone differentiable kinematics layers also support task-parameter
-optimization and training without a simulation environment.
+actions. This section describes the learning infrastructure and its policy
+training and evaluation workflows.
+Shared Torch models live in ``learning.models``; ``learning.layers`` composes
+simulation-independent kinematics from ``compute.kinematics`` as reusable network
+layers. For FK/IK usage, pose losses and gradient contracts, see
+:doc:`differentiable_kinematics`.
 
 .. toctree::
    :maxdepth: 1
 
    /overview/rl/index
-   differentiable_ik
+   differentiable_kinematics
 
 Related Workflows
 -----------------

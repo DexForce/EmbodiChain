@@ -314,10 +314,10 @@ Viser port behind an authenticated gateway.
 
 ## Related pages
 
-- {doc}`sim_manager`
-- {doc}`sim_assets`
-- {doc}`sensors/index`
-- {doc}`/features/interaction/gizmo`
+- {doc}`../sim_manager`
+- {doc}`../sim_assets`
+- {doc}`../sensors/index`
+- {doc}`gizmo`
 - {doc}`/guides/preview_asset`
 - {doc}`/tutorial/create_scene`
 - {doc}`/tutorial/sensor`

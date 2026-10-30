@@ -1,9 +1,9 @@
-{% set target = pathto(robot_doc_redirects[pagename]) %}
+{% set target = pathto(doc_redirects[pagename]) %}
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Robot documentation moved</title>
+    <title>Documentation moved</title>
     <meta name="robots" content="noindex">
     <link rel="canonical" href="{{ target | e }}">
     <script>
@@ -14,6 +14,6 @@
     </noscript>
   </head>
   <body>
-    <p>This page has moved. <a href="{{ target | e }}">Continue to the robot documentation.</a></p>
+    <p>This page has moved. <a href="{{ target | e }}">Continue to the documentation.</a></p>
   </body>
 </html>

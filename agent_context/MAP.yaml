@@ -291,9 +291,9 @@ topics:
   status: active
 - id: learning-layers
   title: Differentiable Learning Layers
-  aliases: [learning layers, differentiable IK layer, 可微 IK, 训练层, 学习模块分层]
-  keywords: [DifferentiableIKLayer, KinematicsLayer, SerialChainKinematics, DifferentiableIKCfg,
-    solve_dls_ik, damped_least_squares_step, Jacobian gradient, dJ/dq, learn_grasp_yaw, grasp yaw, 抓取角度优化, 抓取姿态学习]
+  aliases: [learning layers, differentiable FK layer, differentiable IK layer, 可微 FK, 可微 IK, 训练层, 学习模块分层]
+  keywords: [DifferentiableFKLayer, DifferentiableIKLayer, SerialChainKinematics, DifferentiableIKCfg,
+    solve_dls_ik, damped_least_squares_step, Jacobian gradient, dJ/dq, learn_grasp_yaw, learn_pose_reaching, grasp yaw, 抓取角度优化, 抓取姿态学习]
   paths: [topics/learning-layers/learning-layers.md]
   source_of_truth:
   - embodichain/compute/kinematics/dls.py
@@ -305,10 +305,13 @@ topics:
   - embodichain/learning/models/
   - examples/learning/differentiable_ik/learn_grasp_yaw.py
   - examples/learning/differentiable_ik/view_learned_yaw.py
+  - examples/learning/differentiable_fk/learn_pose_reaching.py
+  - examples/learning/differentiable_fk/view_pose_reaching.py
   watch_paths: [embodichain/compute/kinematics/, embodichain/learning/layers/,
     embodichain/learning/models/, embodichain/learning/__init__.py,
-    tests/compute/kinematics/, tests/learning/layers/, examples/learning/differentiable_ik/]
-  related_topics: [ik-solvers, rl-learning]
+    tests/compute/kinematics/, tests/learning/layers/, examples/learning/differentiable_ik/,
+    examples/learning/differentiable_fk/]
+  related_topics: [ik-solvers, rl-learning, supervised-learning]
   status: active
 - id: rl-learning
   title: RL Learning Pipeline
