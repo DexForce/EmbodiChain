@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "model_id": "native-blind-peg-nominal-seed0-v4-v5",
+  "status": "local_research_candidate_assessed_training_stability_failed",
+  "artifact_type": "local_archive",
+  "published_download_url": null,
+  "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_rl_attempt_20261026/native-blind-peg-nominal-seed0-step45875200-v2.zip",
+  "filename": "native-blind-peg-nominal-seed0-step45875200-v2.zip",
+  "bytes": 19230128,
+  "sha256": "8533414b3f6438b076018165ca83e6c16b127b80210d65521e9cc1bb8d55ff68",
+  "archive_root": "native-blind-peg-nominal-seed0",
+  "run_relative_path": "run",
+  "checkpoint_relative_path": "run/checkpoints/blind_peg_study_nominal_floor_epa128_seed0_best_step_45875200.pt",
+  "checkpoint_sha256": "e8454a0a59d8c3b50d4f472965c95a24a0ee97d09b71aa1757948483ad7d75ce",
+  "checkpoint_global_step": 45875200,
+  "checkpoint_updates": 350,
+  "checkpoint_selection": "native validation-best frozen before heldout seed20000",
+  "assessment": {
+    "seed": 20000,
+    "episodes": 8192,
+    "num_envs": 1024,
+    "allocation": "balanced",
+    "quota_per_env": 8,
+    "successes": 8006,
+    "success_rate": 0.977294921875,
+    "wilson_ci95_low": 0.9738384900930109,
+    "wilson_ci95_high": 0.9803039294853718,
+    "fresh_native_health": "passed sampled control-boundary raw-state/capacity checks"
+  },
+  "training_stability": "failed; V4 nonfinite gradient and V5 nonfinite native state guard; causes unconfirmed",
+  "full_paper_reproduction": "not_established",
+  "scope": "one nominal geometry, one training seed, local reset support, approximate public robot dynamics, simulation only",
+  "asset_sha256": "8d5592ea6da84da3a55f0233616e864b35b29d3950831f397fe2c8ecab1260b7",
+  "weights_license": "Apache-2.0",
+  "original_resource_licenses": "retained in package LICENSES and run/configs/resources/robot/licenses",
+  "author_weights_redistributed": false,
+  "source_pull_request": "https://github.com/DexForce/EmbodiChain/pull/876",
+  "preview": {
+    "seeds": [
+      30000,
+      30001,
+      30002
+    ],
+    "all_outcomes_included": true,
+    "successes": [
+      true,
+      true,
+      true
+    ],
+    "controls": [
+      48,
+      48,
+      60
+    ],
+    "source": "actual DexSim window/native camera, relocated run"
+  },
+  "integrity": {
+    "internal_files_hashed": 118,
+    "zip_crc_verified": true,
+    "extracted_sha256_files_verified": true
+  },
+  "clean_sdk_installation": "not tested; relocated runtime replay tested in the recorded qualified native environment"
+}

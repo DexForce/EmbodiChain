@@ -56,6 +56,10 @@ class SyncCollector(BaseCollector):
         self.distribution_param_dim = getattr(
             policy_module, "distribution_param_dim", None
         )
+        self.training_observation_groups = getattr(
+            policy_module, "training_observation_groups", {}
+        )
+        self.training_field_specs = getattr(policy_module, "training_field_specs", {})
         self._supports_shared_rollout = hasattr(self.env, "set_rollout_buffer")
         self.obs_td = self._reset_env()
 
@@ -88,6 +92,16 @@ class SyncCollector(BaseCollector):
         if initial_critic_obs is not None:
             rollout["critic_obs"][:, 0] = initial_critic_obs
         for step_idx in range(num_steps):
+            # Copy before env.step: auto-reset and reused observation buffers may
+            # replace the labels with those of the following state.
+            for name, groups in self.training_observation_groups.items():
+                labels = flatten_observation_groups(self.obs_td, groups)
+                target = rollout[name][:, step_idx]
+                if labels.shape != target.shape:
+                    raise ValueError(f"Training observation '{name}' shape mismatch.")
+                if labels.dtype != target.dtype:
+                    raise TypeError(f"Training observation '{name}' dtype mismatch.")
+                target.copy_(labels)
             step_fields = {"obs": rollout["obs"][:, step_idx]}
             if self.uses_separate_critic_obs:
                 step_fields["critic_obs"] = rollout["critic_obs"][:, step_idx]
@@ -102,6 +116,7 @@ class SyncCollector(BaseCollector):
                 self._to_env_action(step_td["action"])
             )
             next_obs_td = dict_to_tensordict(next_obs, self.device)
+            self._write_timeout_values(rollout, step_idx, env_info)
             self._write_step(
                 rollout=rollout,
                 step_idx=step_idx,
@@ -140,6 +155,36 @@ class SyncCollector(BaseCollector):
         )
         self.policy.get_value(last_next_td)
         rollout["value"][:, -1] = last_next_td["value"]
+
+    def _write_timeout_values(
+        self, rollout: TensorDict, step_idx: int, env_info: dict
+    ) -> None:
+        """Use pre-reset terminal observations for time-limit bootstrapping."""
+        if "timeout_value" not in rollout.keys():
+            return
+        rollout["timeout_value"][:, step_idx].fill_(float("nan"))
+        terminal = env_info.get("terminal_observation")
+        if terminal is None:
+            return
+        observation = dict_to_tensordict(terminal, self.device)
+        actor_obs, critic_obs = self._model_observations(observation)
+        fields = {"obs": actor_obs}
+        if critic_obs is not None:
+            fields["critic_obs"] = critic_obs
+        terminal_td = TensorDict(
+            fields, batch_size=[actor_obs.shape[0]], device=self.device
+        )
+        self.policy.get_value(terminal_td)
+        env_ids = env_info.get("terminal_env_ids")
+        if env_ids is None:
+            env_ids = torch.arange(self.env.num_envs, device=self.device)
+        else:
+            env_ids = env_ids.to(self.device)
+        values = terminal_td["value"]
+        mask = env_info.get("terminal_observation_mask")
+        if mask is not None:
+            values = torch.where(mask.to(self.device)[env_ids], values, float("nan"))
+        rollout["timeout_value"][env_ids, step_idx] = values
 
     def _reset_env(self) -> TensorDict:
         obs, _ = self.env.reset()
@@ -230,6 +275,8 @@ class SyncCollector(BaseCollector):
                     num_steps + 1,
                     self.distribution_param_dim,
                 )
+        for name, (shape, _) in self.training_field_specs.items():
+            expected_shapes[name] = (self.env.num_envs, num_steps + 1, *shape)
         for key, expected_shape in expected_shapes.items():
             actual_shape = tuple(rollout[key].shape)
             if actual_shape != expected_shape:

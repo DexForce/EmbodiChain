@@ -306,3 +306,25 @@ pip install embodichain
 # From a development checkout, refresh its bundled package/entry-point metadata:
 pip install -e .
 ```
+
+
+## Flexiv Rizon 4S with application-selected tools
+
+`FlexivRizon4SCfg` defines the bare seven-axis arm. The tasks extension's
+`configs/components/embodiments/flexiv_rizon4s_robotiq2f85.yaml` adds the existing
+Robotiq URDF through `urdf_cfg.components` and owns its mount, solver TCP, EEF
+control group, drives and contact overrides. No combined robot type or gripper
+variant is registered in the robot catalog.
+
+Historical nominal comparisons use the optional
+`embodichain_benchmarks.assembly.robot_reference` preparation utility and a separate
+application component selecting that prepared artifact. Its parallel-jaw and
+mimic approximations are not identified closed-loop dynamics. Source revision
+and licenses remain pinned by the `FlexivRizon4SMenagerie` data entry; the
+source manifest lives beside the bare model's assets.
+
+Task environments own grasp reset assumptions and exact-dynamics qualification.
+Training bundles freeze the prepared physical URDF, ordinary solver TCP and
+local resource references, so replay does not regenerate geometry or consult
+source caches. See `examples/learning/blind_assembly/README.md` for configuration
+migration of historical bundles and the distinct measured experiments.

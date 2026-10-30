@@ -1,0 +1,231 @@
+{
+  "checkpoint_sha256": "e8454a0a59d8c3b50d4f472965c95a24a0ee97d09b71aa1757948483ad7d75ce",
+  "checkpoint_weights_changed": false,
+  "default_assets": [
+    "FlexivRizon4S/rizon4s.urdf",
+    "Robotiq2F85/Robotiq2F85.urdf"
+  ],
+  "source_main": "3a9e10939",
+  "operation": "Native policy inference after robot/hand asset replacement; previous assessment does not apply.",
+  "preview_seeds": [
+    30000,
+    30001,
+    30002
+  ],
+  "policy_observations": "actual new robot FK/encoders and unchanged training normalization",
+  "initial_arm_q": "preserved trained ready pose; hand resets via source mimic mapping",
+  "source_default_urdf": "/home/dex/.cache/embodichain_data/assembled/rizon4s_2f85_default_47beba6e921706b7/rizon4s_2f85_default_47beba6e921706b7.urdf",
+  "prepared_asset_fidelity": {
+    "converter_version": 1,
+    "arm_sha256": "587e2f25b4e4b1994efb7863d50d4a02a32562ffd9b1dd0d33dfde5cba69f6e6",
+    "hand_sha256": "caff31f48fe3d1d5f1d1602f568bd8bb756018fef77dc715d5e6b5d267ead689",
+    "mount": "identity at flange",
+    "tcp_xyz": [
+      0,
+      0,
+      0.145
+    ],
+    "tcp_rpy": [
+      0,
+      0,
+      1.5707963267948966
+    ],
+    "asset_source": "default",
+    "arm_asset": "FlexivRizon4S/rizon4s.urdf",
+    "gripper_asset": "Robotiq2F85/Robotiq2F85.urdf",
+    "source_visuals_and_materials_preserved": true,
+    "source_collisions_and_inertials_preserved": true,
+    "source_mimic_tree_preserved": true,
+    "exact_source_dynamics": false,
+    "paper_dynamics_identified": false,
+    "qualification": "Default registered URDF composition; mimic tree is not a calibrated closed-loop gripper model or a validated policy transfer."
+  },
+  "runtime": {
+    "dexsim-engine": "0.5.1+528daf12fd44b9383b30165ac484cf79b574e873",
+    "newton": "1.7.0",
+    "mujoco": "3.15.0",
+    "mujoco-warp": "3.15.0",
+    "warp-lang": "1.17.0",
+    "torch": "2.7.1+cu128"
+  },
+  "sdk_overlay": "/tmp/embodichain-sdk-default-assets-20261026",
+  "epa_overlay": {
+    "version": "3.15.0",
+    "source": "/home/dex/miniconda3/envs/open/lib/python3.11/site-packages/mujoco_warp",
+    "changed_file": "_src/types.py",
+    "original_sha256": "5ff63b8186bafba2e2d51d5aae84875fb289411d9984f4e06b51813ea088491b",
+    "patched_sha256": "21e2c4b19ad1d082bf572e4640b8345ec8b3c4fcec6198bf7da3f2357a0c0e5f",
+    "change": "EPA horizon allocation24to128 only; not a numerical-accuracy or solver-equivalence claim",
+    "scope": "new default-asset inference runtime; not previous3.12assessment"
+  },
+  "kinematics_at_unchanged_ready_q": {
+    "old_tcp": [
+      [
+        -1.749151721242015e-07,
+        0.9999997019767761,
+        0.0007962742820382118,
+        0.5151900053024292
+      ],
+      [
+        1.0,
+        1.7484549630353285e-07,
+        8.756200031712069e-08,
+        -0.11299987882375717
+      ],
+      [
+        8.742274815176643e-08,
+        0.0007962742820382118,
+        -0.9999997019767761,
+        0.5215941667556763
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "default_tcp": [
+      [
+        -8.749242397243506e-08,
+        0.9999997019767761,
+        0.0007962742820382118,
+        0.5152100920677185
+      ],
+      [
+        1.0,
+        8.7422719730057e-08,
+        8.756200031712069e-08,
+        -0.11299987882375717
+      ],
+      [
+        8.749236002358884e-08,
+        0.0007962742820382118,
+        -0.9999997019767761,
+        0.49639418721199036
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "position_delta_m": [
+      2.008676528930664e-05,
+      0.0,
+      -0.025199979543685913
+    ],
+    "note": "Actual new FK is used by the policy; no observation remapping to old TCP."
+  },
+  "video": {
+    "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_assets_20261026/preview_ready/preview.mp4",
+    "sha256": "c26e6c5d5f765396fce8f6f23e707c41fc0130e0f9c5bdb30fad87cb39faa0ef",
+    "frames": 326,
+    "fps": 25.0,
+    "all_fixed_seed_outcomes_included": true,
+    "episodes": [
+      {
+        "episode": 0,
+        "seed": 30000,
+        "steps": 250,
+        "simulation_seconds": 5.0,
+        "reward": 0.0,
+        "success": false,
+        "fail": false,
+        "truncated": true,
+        "terminal_metrics": {
+          "radial_error": [
+            0.01245210599154234
+          ],
+          "tilt": [
+            0.005039010662585497
+          ],
+          "depth": [
+            -0.00011539459228515625
+          ],
+          "penetration": [
+            4.1719053456290567e-07
+          ],
+          "grasped": [
+            true
+          ],
+          "captured": [
+            false
+          ]
+        },
+        "first_frame": 0,
+        "terminal_frame": 125
+      },
+      {
+        "episode": 1,
+        "seed": 30001,
+        "steps": 140,
+        "simulation_seconds": 2.8000000000000003,
+        "reward": 0.0,
+        "success": false,
+        "fail": true,
+        "truncated": false,
+        "terminal_metrics": {
+          "radial_error": [
+            0.007470235228538513
+          ],
+          "tilt": [
+            0.072684645652771
+          ],
+          "depth": [
+            -0.001553807407617569
+          ],
+          "penetration": [
+            5.109134235681267e-07
+          ],
+          "grasped": [
+            false
+          ],
+          "captured": [
+            false
+          ]
+        },
+        "first_frame": 136,
+        "terminal_frame": 206
+      },
+      {
+        "episode": 2,
+        "seed": 30002,
+        "steps": 195,
+        "simulation_seconds": 3.9,
+        "reward": 0.0,
+        "success": false,
+        "fail": true,
+        "truncated": false,
+        "terminal_metrics": {
+          "radial_error": [
+            0.01587657444179058
+          ],
+          "tilt": [
+            0.0
+          ],
+          "depth": [
+            -5.178153514862061e-07
+          ],
+          "penetration": [
+            3.277510245425219e-07
+          ],
+          "grasped": [
+            false
+          ],
+          "captured": [
+            false
+          ]
+        },
+        "first_frame": 217,
+        "terminal_frame": 315
+      }
+    ]
+  },
+  "qualification": "Policy transfer preview only; 0/3 successes. Previous97.73percent assessment is not applicable to these replaced assets/runtime. No retraining or pose forcing.",
+  "source_main_commit": "3a9e10939ec92bb69b972337a6a4a6eb18b6798a",
+  "trace_sha256": "7829b19ac059b4d90d8cfcd4b1ea00bcb7139080088ffa1b8c9d0d606590612d",
+  "finite_logged_policy_action_qpos_and_PD_target": true,
+  "scope_of_finiteness": "logged arm controls only, not full native qvel/qacc health qualification"
+}

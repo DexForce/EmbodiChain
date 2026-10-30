@@ -189,6 +189,20 @@ observation groups. The collector and standard buffer preserve separate
 collector also records the old Gaussian mean and standard deviation for KL
 measurement. These rollout fields have explicit dimensions in the buffer.
 
+`evaluate_episodes` retains `first_completed` allocation as its compatibility
+default. Optional `balanced` allocation fixes per-arena quotas before stepping,
+preventing completion-time censoring when episode durations differ. Strict peg
+final assessment and the assembly suite opt into balanced quotas via the native
+headless `eval-policy --episode-allocation balanced`; training validation keeps
+the compatibility default.
+Optional `on_episode` receives CPU records only for scored completions; strict peg evaluation persists and verifies these records as a hashed JSONL file.
+
+Saved peg checkpoints can be ranked by the native balanced evaluator through
+`scripts/benchmark/assembly/select_peg.py` before independent testing. The
+learning report's `--selection-report` keeps this ranking separate from the
+trainer's compatibility diagnostics and verifies the final weight hash and
+independent seed. Selection never uses final-test episodes.
+
 Read [training and extension](training.md) for evaluation, checkpoints,
 distributed ownership, official examples and adding algorithms/policies/envs.
 
@@ -226,6 +240,50 @@ for differentiable IK ownership. Root exports load on demand; importing a
 lightweight APG component must not eagerly load the simulator-backed Trainer.
 
 ## Invariants
+
+Simulator `train_from_config(..., on_trainer_ready=...)` invokes optional
+instrumentation after checkpoint restoration and before collection, under the
+normal runtime cleanup boundary. The callback receives the native Trainer,
+including train/evaluation environments; lightweight environment routing rejects
+it. `scripts/benchmark/assembly/train_peg.py` uses this hook for read-only native
+capacity checks before auto-reset, while preserving the native PPO path.
+
+Blind assembly uses the registered `proprioceptive_actor_critic` policy with
+explicit actor/critic groups. Assembly observations and training labels live in
+`embodichain.lab.gym.envs.managers.observations`, which provides the existing
+config names. Its `architecture_version` preserves checkpoint
+semantics: omitted versions retain `legacy_v1` with previous history followed by
+current; `official_v1` matches the author's public actor export with current
+followed by history including current. Deployments must pair the policy version
+with the manager's `history_layout` and environment's
+`proprioception_convention`; equal tensor dimensions do not imply equal feature
+semantics. The peg study nominal and development configurations opt into the
+official version; other assembly profiles retain their declared legacy version.
+The official inference normalizer follows the exported formula, while its
+training-statistics updates and privileged critic remain native conventions.
+
+Contact labels travel as state-aligned training-only rollout fields. PPO's
+optional auxiliary decoder loss recomputes the latent during minibatch updates
+so gradients reach the encoder. Normalization statistics stay fixed through
+collection and every PPO epoch, then update for the next rollout. Actor export
+excludes the critic and decoder. See `examples/learning/blind_assembly/` for the
+public-reference record, nominal development recipe, suite generation and policy
+capacity. Inference alignment and tensor capacity do not qualify task learning
+or simulator throughput.
+
+Auto-reset timeouts retain completed-row terminal observations and row IDs.
+The collector evaluates the terminal state before using its value for timeout
+bootstrap; true termination suppresses bootstrap even when truncation is also
+set. Legacy environments without terminal observations retain their previous
+fallback contract.
+
+Training snapshots freeze physical environment/embodiment/scene components
+relative to their declaring deployment before moving configs into a run.
+An optional unwrapped environment `export_checkpoint_gym_config` hook owns
+materialized task resources; assembly uses it to pin the actual robot and
+manifest. Explicit `./` resource paths resolve relative to the saved config,
+including robot `fpath`/solver `urdf_path` and `assembly_manifest`. Raw checkpoint context remains
+unchanged so resource packaging does not redefine resume compatibility.
 
 - The selected environment must expose batched observation/action spaces and
   `num_envs`.

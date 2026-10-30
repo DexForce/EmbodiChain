@@ -151,6 +151,11 @@ def rigid_desc_from_usd(
     newton_solver_type: str | None = None,
 ) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
     """Select a rigid object by exact prim path, or require a singleton stage."""
+    if cfg.env_variants:
+        raise NotImplementedError(
+            "env_variants currently requires directly configured shapes; "
+            "load assembly manifests and construct the per-environment rigid configs."
+        )
     uid = _required_uid(cfg.uid, "Rigid object")
     path = _asset_file_path(cfg)
     scene, desc = _parse_singleton(

@@ -24,6 +24,9 @@ from typing import Any
 __all__ = [
     "ActorCritic",
     "ActorOnly",
+    "ObservationHistory",
+    "ProprioceptiveActorCriticCfg",
+    "ProprioceptiveActorCritic",
     "register_policy",
     "get_registered_policy_names",
     "build_policy",
@@ -35,6 +38,9 @@ __all__ = [
 _EXPORT_MODULES = {
     "ActorCritic": "actor_critic",
     "ActorOnly": "actor_only",
+    "ObservationHistory": "proprioceptive_actor_critic",
+    "ProprioceptiveActorCriticCfg": "proprioceptive_actor_critic",
+    "ProprioceptiveActorCritic": "proprioceptive_actor_critic",
     "Policy": "policy",
     "register_policy": "registry",
     "get_registered_policy_names": "registry",

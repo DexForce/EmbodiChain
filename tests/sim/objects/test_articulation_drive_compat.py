@@ -88,3 +88,79 @@ def test_runtime_effort_mode_disables_pd_gains_on_newton() -> None:
     assert calls[0]["target_mode"] == 4
     assert calls[0]["target_ke"] == 0.0
     assert calls[0]["target_kd"] == 0.0
+
+
+@pytest.mark.parametrize("override_impedance", [False, True])
+def test_mimic_profile_only_changes_selected_articulation_equalities(
+    monkeypatch, override_impedance: bool
+) -> None:
+    from dexsim.engine.newton_physics import backend_registry
+    from embodichain.lab.sim.objects.backends.newton import (
+        _configure_newton_mimic_compliance,
+    )
+
+    class Array:
+        def __init__(self, values) -> None:
+            self.values = np.asarray(values).copy()
+
+        def numpy(self):
+            return self.values
+
+        def assign(self, values) -> None:
+            self.values[:] = values
+
+    initial_ref = np.tile([0.02, 1.0], (1, 3, 1))
+    initial_imp = np.tile([0.9, 0.95, 0.001, 0.5, 2.0], (1, 3, 1))
+    mjw_model = SimpleNamespace(
+        eq_solref=Array(initial_ref), eq_solimp=Array(initial_imp)
+    )
+    cpu = SimpleNamespace(
+        eq_solref=initial_ref[0].copy(), eq_solimp=initial_imp[0].copy()
+    )
+    solver = SimpleNamespace(
+        mjc_eq_to_newton_mimic=Array([[-1, 0, 1]]), mjw_model=mjw_model, mj_model=cpu
+    )
+    model = SimpleNamespace(
+        requires_grad=False,
+        joint_target_ke=Array([100.0, 0.0, 100.0, 0.0]),
+        joint_target_kd=Array([10.0, 0.0, 10.0, 0.0]),
+        joint_target_mode=Array([1, 0, 1, 0]),
+        constraint_mimic_joint0=Array([1, 3]),
+        constraint_mimic_joint1=Array([0, 2]),
+    )
+    runtime = SimpleNamespace(model=model, solver=solver)
+    binding = SimpleNamespace(
+        _runtime=runtime,
+        joints=[
+            SimpleNamespace(name=name, joint_id=i, qd_size=1, qd_start=i)
+            for i, name in enumerate(["leader", "follower"])
+        ],
+    )
+    entity = SimpleNamespace(
+        _physics_binding=binding, set_newton_drive=lambda **kwargs: 1
+    )
+    backend = SimpleNamespace(
+        solver_type="mujoco_warp",
+        model=model,
+        cfg=SimpleNamespace(requires_grad=False, dt=0.001, num_substeps=1),
+    )
+    monkeypatch.setattr(backend_registry, "get_newton_backend", lambda world: backend)
+    impedance = [0.99, 0.99, 0.001, 0.5, 2.0]
+    assert _configure_newton_mimic_compliance(
+        result=SimpleNamespace(backend="newton", world=object()),
+        entities=[entity],
+        state_joint_names=["leader", "follower"],
+        mimic_ids=[1],
+        mimic_parents=[0],
+        solref=[0.002, 1.0],
+        solimp=impedance if override_impedance else None,
+    )
+    expected_ref = initial_ref.copy()
+    expected_ref[0, 1] = [0.002, 1.0]
+    expected_imp = initial_imp.copy()
+    if override_impedance:
+        expected_imp[0, 1] = impedance
+    np.testing.assert_allclose(mjw_model.eq_solref.numpy(), expected_ref)
+    np.testing.assert_allclose(mjw_model.eq_solimp.numpy(), expected_imp)
+    np.testing.assert_allclose(cpu.eq_solref, expected_ref[0])
+    np.testing.assert_allclose(cpu.eq_solimp, expected_imp[0])

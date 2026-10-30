@@ -1082,7 +1082,10 @@ class BaseEnv(gym.Env):
             action: The action applied to the robot agent.
 
         Returns:
-            A tuple contraining the observation, reward, terminated, truncated, and info dictionary.
+            Observation, reward, terminated, truncated, and an info mapping.
+            Auto-reset adds owned ``terminal_observation`` rows with their
+            ``terminal_env_ids`` and a full ``terminal_observation_mask`` for
+            time-limit bootstrapping. Live observations contain reset states.
         """
 
         with self._profiler.section("step", is_root=True):
@@ -1150,6 +1153,25 @@ class BaseEnv(gym.Env):
             ):
                 reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
                 if len(reset_env_ids) > 0:
+                    if isinstance(info, TensorDict):
+                        # Terminal rows have a smaller batch than live info.
+                        # The step API permits a plain mapping for this payload.
+                        info = info.to_dict()
+                    # Preserve the terminal state before reset reuses observation
+                    # buffers. Only completed rows are copied, including their
+                    # history, so PPO can bootstrap time limits from V(s_{t+1}).
+                    info["terminal_env_ids"] = reset_env_ids.clone()
+                    info["terminal_observation_mask"] = (
+                        truncateds & ~terminateds
+                    ).clone()
+                    if isinstance(obs, TensorDict):
+                        # Tensor integer indexing already materializes independent
+                        # storage; cloning again duplicates every sensor buffer.
+                        info["terminal_observation"] = obs[reset_env_ids]
+                    else:
+                        info["terminal_observation"] = torch.utils._pytree.tree_map(
+                            lambda value: value[reset_env_ids], obs
+                        )
                     with self._profiler.section("auto_reset"):
                         obs, _ = self.reset(options={"reset_ids": reset_env_ids})
 

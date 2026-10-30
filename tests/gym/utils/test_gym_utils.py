@@ -2726,3 +2726,29 @@ def test_config_to_cfg_resolves_usd_source_files(monkeypatch, tmp_path):
         assert isinstance(asset.source, UsdSourceCfg)
         assert asset.source.file_path == str(tmp_path / "scene.usda")
         assert asset.source.source_prim_path == "/World/Asset"
+
+
+def test_checkpoint_resource_paths_resolve_from_config_owner(tmp_path, monkeypatch):
+    """Prepared robot and manifest paths survive a change of working directory."""
+    from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
+
+    owner = tmp_path / "run" / "configs"
+    resources = owner / "resources"
+    resources.mkdir(parents=True)
+    (resources / "robot.urdf").write_text('<robot name="frozen"/>')
+    (resources / "part.json").write_text("{}")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    raw = {
+        "id": "FrozenAssembly-v1",
+        "physics": "newton",
+        "robot": {"fpath": "./resources/robot.urdf"},
+        "env": {"extensions": {"assembly_manifest": "./resources/part.json"}},
+    }
+    resolved = _resolve_gym_components(raw, base_dir=owner).config
+    assert resolved["robot"]["fpath"] == str(resources / "robot.urdf")
+    assert resolved["env"]["extensions"]["assembly_manifest"] == str(
+        resources / "part.json"
+    )
+    assert raw["robot"]["fpath"] == "./resources/robot.urdf"

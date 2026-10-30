@@ -1,0 +1,25 @@
+{
+  "qualification": "Local native model bundle with migrated application-owned configuration; not a hosted release or private SDK distribution. Historical primary assessment remains unchanged.",
+  "path": "/home/dex/Downloads/EmbodiChain_Rizon4S_Robotiq2F85_retrained_peg_embodiment_20261027.zip",
+  "bytes": 13204707,
+  "sha256": "a0de5f34b75dd7b1b8c7203aa4dc7d9befcc995742232558d04e5e1845e34272",
+  "checkpoint_sha256": "68c9625efbb7f85c07e22b1b2b0111e1a5e83d4ac386121927c57e0a898da116",
+  "verified_file_hashes": 160,
+  "zip_crc_verified": true,
+  "run_manifest": "default_assets_peg/run-manifest.json",
+  "configuration_migration": "default_assets_peg/configuration_migration.json",
+  "source_archive_sha256": "6a8c6e092702e05e1686656b9c67a57ce16bfc126d0dc21b493696889d589dd1",
+  "weights_and_physical_resources_changed": false,
+  "inference_smoke": {
+    "episodes": 8,
+    "successes": 6,
+    "num_envs": 8,
+    "seed": 47000,
+    "native_state_finite": true,
+    "capacity_loss": false,
+    "unclassified_overflow": false,
+    "iteration_budget_flag_seen": true,
+    "cleanup_warning": "SDK entity accounting 1024 != 1023, diff 1",
+    "qualification": "Integration smoke only; not a replacement success-rate assessment or physical-convergence qualification."
+  }
+}

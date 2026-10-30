@@ -1,0 +1,264 @@
+{
+  "schema": "embodichain-native-peg-final-result/v1",
+  "scope": "One nominal peg geometry, one training seed; simulation only; incomplete paper reproduction.",
+  "status": {
+    "frozen_candidate_assessment": "passed",
+    "nominal_95_percent_point_target": "met",
+    "training_stability": "failed",
+    "formal_paper_reproduction": "not_established"
+  },
+  "checkpoint": {
+    "global_step": 45875200,
+    "updates": 350,
+    "sha256": "e8454a0a59d8c3b50d4f472965c95a24a0ee97d09b71aa1757948483ad7d75ce"
+  },
+  "evaluation": {
+    "successes": 8006,
+    "episodes": 8192,
+    "success_rate": 0.977294921875,
+    "wilson_ci95": [
+      0.9738384900930109,
+      0.9803039294853718
+    ],
+    "seed": 20000,
+    "num_envs": 1024,
+    "episode_allocation": "balanced",
+    "episodes_per_arena": 8,
+    "elapsed_wall_seconds": 146.7834343179129,
+    "duration_definition": "episode length times declared 0.02 s control period; not per-episode measured clock",
+    "statistics": {
+      "all": {
+        "episodes": 8192,
+        "duration_control_grid_seconds": {
+          "mean": 1.1775830078125,
+          "median": 1.12,
+          "p95": 1.58,
+          "min": 0.46,
+          "max": 5.0
+        },
+        "terminal_task_penetration_um": {
+          "mean": 1.769374293497986,
+          "median": 1.1039535934287414,
+          "p95": 6.318092346191406,
+          "max": 24.896220566006377
+        }
+      },
+      "success": {
+        "episodes": 8006,
+        "duration_control_grid_seconds": {
+          "mean": 1.1780864351736198,
+          "median": 1.1400000000000001,
+          "p95": 1.58,
+          "min": 0.46,
+          "max": 4.86
+        },
+        "terminal_task_penetration_um": {
+          "mean": 1.796220598529317,
+          "median": 1.1622905731201172,
+          "p95": 6.358719474519603,
+          "max": 24.896220566006377
+        }
+      },
+      "failure": {
+        "episodes": 186,
+        "duration_control_grid_seconds": {
+          "mean": 1.1559139784946237,
+          "median": 0.7000000000000001,
+          "p95": 5.0,
+          "min": 0.54,
+          "max": 5.0
+        },
+        "terminal_task_penetration_um": {
+          "mean": 0.6138284973644659,
+          "median": 0.0,
+          "p95": 3.4183405546173162,
+          "max": 11.446099961176515
+        }
+      }
+    },
+    "failure_endpoint_conditions": {
+      "terminal_grasped_false": 170,
+      "terminal_captured_true": 74,
+      "length_250": 16
+    },
+    "failure_endpoint_conditions_overlap": true,
+    "failure_endpoint_conditions_are_causes": false,
+    "native_health": {
+      "scope": "fresh assessment only; 712 complete control-boundary observations of 1024 worlds",
+      "raw_state_finite": true,
+      "capacity_flags": false,
+      "convergence_budget_flags": false,
+      "unclassified_flags": false,
+      "zero_flags_prove_convergence": false
+    }
+  },
+  "training": {
+    "v4": {
+      "status": "failed",
+      "collector_transitions": 43909120,
+      "completed_updates": 334,
+      "elapsed_wall_seconds": 3400.3743402268738,
+      "failure": "guarded nonfinite PPO gradient; offending optimizer step skipped",
+      "native_raw_state": "unverified"
+    },
+    "v5": {
+      "status": "failed",
+      "resume_global_step": 39321600,
+      "resume_update": 300,
+      "collector_global_step": 49631232,
+      "completed_updates": 378,
+      "new_collector_transitions": 10309632,
+      "elapsed_wall_seconds": 911.2635038669687,
+      "failure": "nonfinite native qpos/qvel/qacc at observation 2518, world 515; cause unconfirmed"
+    },
+    "last_validation_first_completed": {
+      "v4": {
+        "global_step": 39321600.0,
+        "eval/avg_reward": 1.8984375,
+        "eval/avg_length": 65.265625,
+        "eval/success_rate": 0.9453125,
+        "eval/completed_episodes": 256.0,
+        "eval/success_samples": 256.0,
+        "eval/success_ci95_low": 0.9103104192747177,
+        "eval/success_ci95_high": 0.9671477085959906,
+        "eval/metrics/radial_error": 0.0011998262777979107,
+        "eval/metrics/tilt": 0.018421017302671316,
+        "eval/metrics/depth": 0.016515365336090326,
+        "eval/metrics/penetration": 1.5388311979391833e-06,
+        "eval/metrics/grasped": 0.953125,
+        "eval/metrics/captured": 0.953125
+      },
+      "v5": {
+        "global_step": 45875200.0,
+        "eval/avg_reward": 1.93359375,
+        "eval/avg_length": 57.75390625,
+        "eval/success_rate": 0.9609375,
+        "eval/completed_episodes": 256.0,
+        "eval/success_samples": 256.0,
+        "eval/success_ci95_low": 0.9296001682001327,
+        "eval/success_ci95_high": 0.9786459641572671,
+        "eval/metrics/radial_error": 0.0008298819943775015,
+        "eval/metrics/tilt": 0.014739533644728908,
+        "eval/metrics/depth": 0.016892589861527085,
+        "eval/metrics/penetration": 1.7191062692267778e-06,
+        "eval/metrics/grasped": 0.9609375,
+        "eval/metrics/captured": 0.97265625
+      }
+    },
+    "recorded_v4_v5_collector_transitions_total": 54218752,
+    "completed_updates_total": 412,
+    "selected_lineage_transitions": 45875200,
+    "selected_lineage_updates": 350,
+    "total_wall_seconds_v4_v5": 4311.637844093842,
+    "cost_excludes": "Earlier A-C attempts, generation/reference work, preview and unmeasured resources; collector counters exclude failed step work not returned to collector."
+  },
+  "gpu_process_memory": {
+    "v4": {
+      "pid": 391309,
+      "samples": 3412,
+      "sampled_process_vram_max_mib": 10532,
+      "transient_peak_vram": "unmeasured",
+      "source": "outputs/assembly_rl_attempt_20261026/v4_gpu_process_samples.csv",
+      "source_sha256": "2ae61538423d74455e8cfb193587dbf0dd3d6b5d4c309a65185ffcd09ecea10a"
+    },
+    "v5": {
+      "pid": 465549,
+      "samples": 919,
+      "sampled_process_vram_max_mib": 10570,
+      "transient_peak_vram": "unmeasured",
+      "source": "outputs/assembly_rl_attempt_20261026/v5_gpu_process_samples.csv",
+      "source_sha256": "b33400b6b71341329dd5743b8958f355f65bacf2221b4313ecfe3c9e0bc30cf5"
+    }
+  },
+  "provenance": {
+    "final_evaluation_health.json": {
+      "source": "outputs/assembly_rl_attempt_20261026/final_eval/20261025T202918.104052Z-strict-peg-health/health.json",
+      "bytes": 36957,
+      "sha256": "72b446736d3c01638c31422e032192eb52fd18be93717eea4bc46e82345f806c"
+    },
+    "final_evaluation_health.md": {
+      "source": "outputs/assembly_rl_attempt_20261026/final_eval/20261025T202918.104052Z-strict-peg-health/health.md",
+      "bytes": 2359,
+      "sha256": "146aa344e44d5af6f6f52235e37185c7262af4223bf244b892cee9ac667da261"
+    },
+    "final_evaluation.json": {
+      "source": "outputs/assembly_rl_attempt_20261026/final_eval/20261025T203144.902398Z-policy/evaluation.json",
+      "bytes": 1776,
+      "sha256": "0b24c22a36c0b5c0907daf180a5a378608b06e886cf925d3f14611e8abed75e6"
+    },
+    "training_v4_health.json": {
+      "source": "outputs/assembly_rl_attempt_20261026/v4_health.json",
+      "bytes": 101145,
+      "sha256": "eb30981eb2f4dff179a68b31be415545813e783a7781a2946e0daeb7632c72fd"
+    },
+    "training_v5_health.json": {
+      "source": "outputs/assembly_rl_attempt_20261026/v5_health.json",
+      "bytes": 45537,
+      "sha256": "636ef607c9032c14cf0bd455b29c2d196d50a6d92bfab11c677deb3a0206c15f"
+    },
+    "preview_contact_sheet.png": {
+      "source": "outputs/assembly_rl_attempt_20261026/native_preview/contact_sheet.png",
+      "bytes": 298439,
+      "sha256": "5138ee3b44079b217d6b9e19487251344e456c37048767a79723dc89daeb808d"
+    },
+    "preview_trace.json": {
+      "source": "outputs/assembly_rl_attempt_20261026/native_preview/trace.json",
+      "bytes": 240307,
+      "sha256": "9610cb5efe4c03b8357dde6607d215a890ea0c2fc8262a20aaea26f0f6f343ed"
+    },
+    "actor_export.json": {
+      "source": "outputs/assembly_rl_attempt_20261026/model_bundle/run/exports/actor.json",
+      "bytes": 792,
+      "sha256": "cad9f4710317ecec3a2d83b5141c25b36a10cd68ed75bcca226c6584d608367c"
+    },
+    "episodes.jsonl.gz": {
+      "source": "outputs/assembly_rl_attempt_20261026/final_eval/20261025T202918.104052Z-strict-peg-health/episodes.jsonl",
+      "uncompressed_bytes": 2194779,
+      "uncompressed_sha256": "2c67d77d7d79cb5ff99cce73ec7a292c618060e24a9840632f1235c6374770b3",
+      "sha256": "b2143b382bfea333eec1dc3c298b4f33b1875975139f09e5d70050e37e1f69a8"
+    }
+  },
+  "tensorboard_sources": [
+    {
+      "path": "outputs/blind_peg_study_nominal_floor_epa128_seed0_20261026_030302_853493134/logs/blind_peg_study_nominal_floor_epa128_seed0/events.out.tfevents.1792954982.dex-X870-EAGLE-WIFI7.391309.0",
+      "bytes_at_read": 4583628,
+      "source_id": "v4",
+      "sha256": "277410b61e40b827469be6cdbe378b900de7d61702490ab756582aeb9754452a"
+    },
+    {
+      "path": "outputs/blind_peg_study_nominal_floor_epa128_seed0_20261026_041223_647955945/logs/blind_peg_study_nominal_floor_epa128_seed0/events.out.tfevents.1792959143.dex-X870-EAGLE-WIFI7.465549.0",
+      "bytes_at_read": 1076586,
+      "source_id": "v5",
+      "sha256": "f9735fdb8409590c072ca79f9107654c49cb6da47013602d2369852a1b75652e"
+    }
+  ],
+  "preview": {
+    "seeds": [
+      30000,
+      30001,
+      30002
+    ],
+    "successes": 3,
+    "episodes": 3,
+    "control_steps": [
+      48,
+      48,
+      60
+    ],
+    "declared_control_grid_seconds": [
+      0.96,
+      0.96,
+      1.2
+    ],
+    "frames": 111,
+    "encoded_fps": 25,
+    "source": "DexSim native RGB sensor sharing window viewpoint",
+    "relocated_checkpoint_sha256": "e8454a0a59d8c3b50d4f472965c95a24a0ee97d09b71aa1757948483ad7d75ce",
+    "strict_raw_native_state": "unverified; no strict preview observer"
+  },
+  "export": {
+    "actor_sha256": "c0c4a2948f7ecf0d515e02c14776a72d3a3ef1facbc6505f180f6b7f64112e71",
+    "max_abs_error": 0.0,
+    "success_rate_field": null
+  }
+}

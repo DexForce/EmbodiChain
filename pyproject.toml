@@ -57,6 +57,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+assembly = [
+  "mujoco>=3.3",
+]
 rigidformer = [
   "einops>=0.8.1",
   "roma==1.5.4",

@@ -32,6 +32,9 @@ shapes to convex-hull ESDF voxels. Direct native mesh entries are unsupported.
 Dense allocations obey `max_voxel_count`, and representation changes require
 cache-version invalidation. Compatibility-only options must not silently regain
 old representation-selection behavior; inspect their config definitions.
+Native cylinders expose a circumscribed convex planning proxy per collider;
+the simulation retains analytic cylinders. Compound pieces are never combined
+into a single hull, and unsupported piece extraction fails explicitly.
 
 Generated robot YAML omits self-collision metadata. Both the motion planner
 and the exact trajectory collision checker load it through
@@ -62,6 +65,8 @@ sample distinct initial poses for other environments. Objects differing by row
 must be declared dynamic and supplied current `(B, 4, 4)` world poses. Keep the
 cached raw scene representation until the backend's multi-env constructor has
 materialized it; inspect `_materialize_multi_env_scene_model()` for that boundary.
+Prepared per-environment geometry variants are rejected if their collision
+shapes differ, since cloning env 0 would otherwise produce an incorrect world.
 
 ## Bind and validate before execution
 

@@ -1,0 +1,42 @@
+{
+  "created_at": "2026-10-26T17:43:37.204319+00:00",
+  "inputs": {
+    "checkpoint": {
+      "path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/selected_checkpoint.pt",
+      "requested": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/selected_checkpoint.pt",
+      "selected": "explicit"
+    },
+    "configs": {
+      "gym": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/configs/gym.yaml",
+      "train": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/configs/train.yaml"
+    },
+    "device": "cuda:0",
+    "embodichain_version": "0.3.2",
+    "num_envs": 1024,
+    "run": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568",
+    "seed": 20000,
+    "task_id": "BlindPegInsertionRL-v1"
+  },
+  "mode": "headless",
+  "result": {
+    "episodes": 8192,
+    "metrics": {
+      "eval/avg_length": 45.059326171875,
+      "eval/avg_reward": 1.8017578125,
+      "eval/completed_episodes": 8192.0,
+      "eval/episodes_per_env_max": 8.0,
+      "eval/episodes_per_env_min": 8.0,
+      "eval/metrics/captured": 0.9178466796875,
+      "eval/metrics/depth": 0.01582705998430356,
+      "eval/metrics/grasped": 0.8902587890625,
+      "eval/metrics/penetration": 3.670120212297277e-06,
+      "eval/metrics/radial_error": 0.0017005603734088215,
+      "eval/metrics/tilt": 0.01814193368853978,
+      "eval/success_ci95_high": 0.8905497458960139,
+      "eval/success_ci95_low": 0.8766686088749416,
+      "eval/success_rate": 0.8837890625,
+      "eval/success_samples": 8192.0
+    }
+  },
+  "schema_version": 1
+}

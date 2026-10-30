@@ -28,6 +28,7 @@ import torch
 from .actor_critic import ActorCritic
 from .actor_only import ActorOnly
 from .policy import Policy
+from .proprioceptive_actor_critic import ProprioceptiveActorCritic
 
 # In-module policy registry
 _POLICY_REGISTRY: Dict[str, Type[Policy]] = {}
@@ -171,7 +172,17 @@ def build_policy(
         )
 
     init_params = inspect.signature(policy_cls.__init__).parameters
+    raw_cfg = policy_block.get("cfg", {})
+    if not isinstance(raw_cfg, Mapping):
+        raise TypeError("policy.cfg must be a mapping.")
     build_kwargs: dict[str, object] = {"device": device}
+    if "cfg" in init_params and "cfg" in policy_block:
+        build_kwargs["cfg"] = dict(raw_cfg)
+    elif raw_cfg:
+        unknown = set(raw_cfg) - set(init_params)
+        if unknown:
+            raise TypeError(f"Unsupported policy.cfg fields: {sorted(unknown)}.")
+        build_kwargs.update(raw_cfg)
     if "obs_space" in init_params:
         build_kwargs["obs_space"] = obs_space
     elif "obs_dim" in init_params:
@@ -186,12 +197,31 @@ def build_policy(
         build_kwargs["actor"] = actor
     if "critic" in init_params and critic is not None:
         build_kwargs["critic"] = critic
+    if "critic_obs_dim" in init_params and critic_obs_space is not None:
+        build_kwargs["critic_obs_dim"] = _resolve_space_dim(
+            critic_obs_space, "critic_obs_space"
+        )
+    for key, value in (
+        ("actor_obs_groups", actor_obs_groups),
+        ("critic_obs_groups", critic_obs_groups),
+    ):
+        if key in init_params:
+            build_kwargs[key] = value
+    for key in (
+        "actor_obs_normalization",
+        "critic_obs_normalization",
+        "initial_action_std",
+        "action_std_range",
+    ):
+        if key in init_params and key in policy_block:
+            build_kwargs[key] = policy_block[key]
     return policy_cls(**build_kwargs)
 
 
 # default registrations
 register_policy("actor_critic", ActorCritic)
 register_policy("actor_only", ActorOnly)
+register_policy("proprioceptive_actor_critic", ProprioceptiveActorCritic)
 
 __all__ = [
     "register_policy",

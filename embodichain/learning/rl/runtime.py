@@ -197,7 +197,9 @@ def _build_gym_environment(
         base_dir=config_dir,
     )
     gym_config = load_config(gym_config_path)
-    env_cfg = config_to_cfg(gym_config, manager_modules=get_manager_modules())
+    env_cfg = config_to_cfg(
+        gym_config, manager_modules=get_manager_modules(), source_path=gym_config_path
+    )
     if num_envs is not None:
         env_cfg.num_envs = int(num_envs)
     if seed is not None:
@@ -379,9 +381,14 @@ def _build_gym_policy(
         )
     return build_policy(
         policy_block,
-        env.observation_space,
+        (
+            actor_observation_dim
+            if policy_name == "proprioceptive_actor_critic"
+            else env.observation_space
+        ),
         env.action_space,
         device,
+        critic_obs_space=(critic_observation_dim if uses_separate_critic_obs else None),
     )
 
 
@@ -408,7 +415,8 @@ def _build_learning_policy(
         policy_block,
         (
             actor_observation_dim
-            if policy_block["name"].lower() in {"actor_critic", "actor_only"}
+            if policy_block["name"].lower()
+            in {"actor_critic", "actor_only", "proprioceptive_actor_critic"}
             else env.single_observation_space
         ),
         env.single_action_space,

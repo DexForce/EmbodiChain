@@ -13,7 +13,8 @@ topics:
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, VisualMaterial, VisualMaterialCfg, VisualMaterialInst, preview-material, 材质预览, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
-    fixed-cadence playback, quaternion, xyzw]
+    fixed-cadence playback, quaternion, xyzw, CompoundShapeCfg, ShapePartCfg, CylinderCfg, env_variants,
+    enable_ground_plane, ground_plane_attrs]
   paths: [topics/simulation-system/simulation-system.md]
   source_of_truth:
   - embodichain/lab/sim/motion/__init__.py
@@ -82,8 +83,8 @@ topics:
   status: active
 - id: manager-functor
   title: Manager & Functor Pattern
-  aliases: [manager functor, functor pattern, observation manager, reward manager, event manager, action
-      manager, dataset manager, 管理器]
+  aliases: [manager functor, functor pattern, observation manager, observation functor, obs functor,
+    reward manager, event manager, action manager, dataset manager, 观测 functor, 观测管理器, 管理器]
   keywords: [FunctorCfg, ObservationCfg, RewardCfg, ActionTermCfg, ObservationManager, RewardManager,
     EventManager, ActionManager, ActionDescriptor, ActionTermDescriptor, ParallelGripperAction,
     DatasetManager, SceneEntityCfg]
@@ -95,6 +96,7 @@ topics:
   - embodichain/lab/gym/envs/managers/manager_base.py
   - embodichain/lab/gym/envs/managers/cfg.py
   - embodichain/lab/gym/envs/managers/observation_manager.py
+  - embodichain/lab/gym/envs/managers/observations/
   - embodichain/lab/gym/envs/managers/reward_manager.py
   - embodichain/lab/gym/envs/managers/event_manager.py
   - embodichain/lab/gym/envs/managers/dataset_manager.py
@@ -126,7 +128,8 @@ topics:
   aliases: [robot system, robot config, robot catalog, list robot, robot preview, 机器人配置, 机器人系统, 机型解析, 列出机器人, 机器人预览]
   keywords: [UnitreeGo1Cfg, UnitreeGo2Cfg, UnitreeG1Cfg, UnitreeH12Cfg, ANYmalCCfg, MicroDuckCfg, load_locomotion_robot_profile, RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg, ARX5Cfg, ARX5, FlexivRizon4SCfg, FlexivRizon4S,
     FrankaPandaCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
-    asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot]
+    asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot,
+    FlexivRizon4SCfg, Rizon4S]
   paths: [topics/robot-system/robot-system.md]
   source_of_truth:
   - embodichain/lab/sim/objects/robot.py
@@ -318,7 +321,8 @@ topics:
   aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置]
   keywords: [train-rl, Trainer, trainer.gym_config, learning_env, RolloutKind, DifferentiableTrainer,
     PPO, GRPO, APG, SyncCollector, ScheduledDifferentiableVecEnv, DifferentiableRolloutSpec,
-    complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization]
+    complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization,
+    ProprioceptiveActorCritic, temporal proprioception, blind assembly, 本体感知装配]
   paths: [topics/rl-learning/rl-learning.md]
   source_of_truth:
   - embodichain/learning/rl/train.py
@@ -443,7 +447,25 @@ topics:
   - embodichain/gen_sim/gradio_ui/app_processes.py
   - embodichain/gen_sim/gradio_ui/app_env.py
   watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, tests/gen_sim/]
-  related_topics: [simulation-system, data-assets, env-framework]
+  related_topics: [simulation-system, data-assets, env-framework, assembly-assets]
+  status: active
+- id: assembly-assets
+  title: Precision Assembly Assets
+  aliases: [precision assembly, assembly assets, mjfit, 精密装配资产, 精密装配]
+  keywords: [AssemblyAsset, AssemblyBody, build_assembly, build_many_pegs, import_mjcf,
+    to_rigid_config, to_articulation_configs, PrecisionRunCfg, ClearanceProbeCfg]
+  paths: [topics/assembly-assets/assembly-assets.md]
+  source_of_truth:
+  - embodichain/toolkits/assembly/
+  - embodichain/lab/sim/assembly/
+  - extensions/embodichain_benchmarks/assembly/
+  - extensions/embodichain_tasks/embodichain_tasks/manipulation/assembly/assets.py
+  watch_paths: [embodichain/toolkits/assembly/, embodichain/lab/sim/assembly/,
+    extensions/embodichain_benchmarks/assembly/,
+    extensions/embodichain_tasks/embodichain_tasks/manipulation/assembly/assets.py,
+    examples/sim/assembly/, scripts/benchmark/assembly/, tests/toolkits/assembly/,
+    tests/sim/assembly/, tests/benchmark/assembly/]
+  related_topics: [gen-sim, data-assets, simulation-system, env-framework, rl-learning]
   status: active
 - id: data-assets
   title: Data Assets

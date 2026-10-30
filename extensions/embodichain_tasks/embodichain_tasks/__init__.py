@@ -24,6 +24,9 @@ registry.
 
 from __future__ import annotations
 
+from importlib import import_module as _import_module
+from pathlib import Path as _Path
+
 from embodichain.lab.gym.utils.gym_utils import register_manager_modules
 
 from .utils.importer import import_packages
@@ -32,8 +35,26 @@ __all__: list[str] = []
 
 _BLACKLIST = ["utils"]
 
+# Editable installs map the separate configs package to an absolute checkout.
+# Prefer the resources beside the selected source package when PYTHONPATH
+# selects another worktree. Restore the code-only search path before walking
+# task modules, so the extension container cannot be imported recursively.
+_source_root = _Path(__file__).resolve().parent.parent
+_source_config = _source_root / "configs" / "__init__.py"
+if _source_root.parent.name == "extensions" and _source_config.is_file():
+    __path__.append(str(_source_root))
+    try:
+        _config_package = _import_module(f"{__name__}.configs")
+        if _Path(_config_package.__file__).resolve() != _source_config.resolve():
+            raise ImportError(
+                "Task code and configuration resources belong to different checkouts."
+            )
+    finally:
+        __path__.remove(str(_source_root))
+
 register_manager_modules(
     [
+        "embodichain.lab.gym.envs.managers.assembly",
         "embodichain_tasks.locomotion.managers.observations",
         "embodichain_tasks.locomotion.managers.rewards",
     ]

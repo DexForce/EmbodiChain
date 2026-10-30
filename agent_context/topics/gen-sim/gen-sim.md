@@ -125,6 +125,13 @@ without sampling. File/model coordinate adaptation remains owned here.
 
 ## Runtime and extension boundaries
 
+GenSim can consume precision assembly through the reusable
+`embodichain/toolkits/assembly/` API; see
+[assembly assets and precision](../assembly-assets/assembly-assets.md)
+for pinned mjfit adaptation, portable manifests and native/USD construction.
+It does not use Scene Engine inference or the general SimReady decomposition
+pipeline, because approximate recooking can consume an assembly's clearance.
+
 Keep parser capabilities idempotent so recorded stages support resume.
 Provider configuration belongs to its loader/client, while coordinate and graph
 contracts belong to importer/exporter. Task registration and physical/semantic

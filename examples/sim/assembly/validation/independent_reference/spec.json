@@ -1,0 +1,125 @@
+{
+  "profile_version": "explicit-source-plate-contact-v2",
+  "cells": [
+    {
+      "name": "circle@20um",
+      "mjcf": "a0d8f37284187b325c1c6ddb4ed072229c8fbadafdc2334b239b9037e51afeff.xml",
+      "asset_sha256": "a0d8f37284187b325c1c6ddb4ed072229c8fbadafdc2334b239b9037e51afeff",
+      "probe_mjcf_sha256": "d76100ac0dc2f54979dc40d9166a8f7e764ab2404b529e00d70cf144b8511175",
+      "source_config": {
+        "clearance": 2e-05,
+        "hole": {
+          "n": 32,
+          "radius": 0.008,
+          "type": "circle"
+        },
+        "kind": "peg",
+        "peg_length": 0.03,
+        "plate_size": 0.05,
+        "plate_thickness": 0.01
+      },
+      "timestep": 0.001,
+      "duration": 0.3,
+      "force_N": 0.1,
+      "truth_m": 2e-05,
+      "tolerance_m": 5e-06,
+      "directions_rad": [
+        0.0,
+        1.5707963267948966,
+        3.141592653589793,
+        -1.5707963267948968
+      ],
+      "multiccd": true
+    },
+    {
+      "name": "circle@50um",
+      "mjcf": "2f50c1a7785be0b2ed92cfb2c060ad4e24207fa36c809962cd1be6af8a32ad9b.xml",
+      "asset_sha256": "2f50c1a7785be0b2ed92cfb2c060ad4e24207fa36c809962cd1be6af8a32ad9b",
+      "probe_mjcf_sha256": "efc0399334296123250b65538be78657fedfe02f32669a1748f1187ae84b1b6f",
+      "source_config": {
+        "clearance": 5e-05,
+        "hole": {
+          "n": 32,
+          "radius": 0.008,
+          "type": "circle"
+        },
+        "kind": "peg",
+        "peg_length": 0.03,
+        "plate_size": 0.05,
+        "plate_thickness": 0.01
+      },
+      "timestep": 0.001,
+      "duration": 0.3,
+      "force_N": 0.1,
+      "truth_m": 5e-05,
+      "tolerance_m": 5e-06,
+      "directions_rad": [
+        0.0,
+        1.5707963267948966,
+        3.141592653589793,
+        -1.5707963267948968
+      ],
+      "multiccd": true
+    },
+    {
+      "name": "circle@100um",
+      "mjcf": "f8675e0e01c1695c72d7ef1fe32370b6069bde522dabd1ca605af99a3a94384b.xml",
+      "asset_sha256": "f8675e0e01c1695c72d7ef1fe32370b6069bde522dabd1ca605af99a3a94384b",
+      "probe_mjcf_sha256": "d4aed4e5203c5da6562ab5eb4e00853027f3b4cc443bae5e264ab36b9ee2fdd5",
+      "source_config": {
+        "clearance": 0.0001,
+        "hole": {
+          "n": 32,
+          "radius": 0.008,
+          "type": "circle"
+        },
+        "kind": "peg",
+        "peg_length": 0.03,
+        "plate_size": 0.05,
+        "plate_thickness": 0.01
+      },
+      "timestep": 0.001,
+      "duration": 0.3,
+      "force_N": 0.1,
+      "truth_m": 0.0001,
+      "tolerance_m": 1e-05,
+      "directions_rad": [
+        0.0,
+        1.5707963267948966,
+        3.141592653589793,
+        -1.5707963267948968
+      ],
+      "multiccd": true
+    },
+    {
+      "name": "circle@200um",
+      "mjcf": "2c1622a9d69f47f0e5f3df83fc0eb02b087cd37bf9da8420e720a05b8735f2b4.xml",
+      "asset_sha256": "2c1622a9d69f47f0e5f3df83fc0eb02b087cd37bf9da8420e720a05b8735f2b4",
+      "probe_mjcf_sha256": "129920d279e3e8214321262cf8cc04a10d286cb006ae3a39af1bbca7b8149155",
+      "source_config": {
+        "clearance": 0.0002,
+        "hole": {
+          "n": 32,
+          "radius": 0.008,
+          "type": "circle"
+        },
+        "kind": "peg",
+        "peg_length": 0.03,
+        "plate_size": 0.05,
+        "plate_thickness": 0.01
+      },
+      "timestep": 0.001,
+      "duration": 0.3,
+      "force_N": 0.1,
+      "truth_m": 0.0002,
+      "tolerance_m": 2e-05,
+      "directions_rad": [
+        0.0,
+        1.5707963267948966,
+        3.141592653589793,
+        -1.5707963267948968
+      ],
+      "multiccd": true
+    }
+  ]
+}

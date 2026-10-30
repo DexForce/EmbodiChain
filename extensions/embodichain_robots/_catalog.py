@@ -153,6 +153,7 @@ ROBOT_CONFIGS = {
     for name, class_path in _CONFIG_CLASSES.items()
 }
 
+
 _W1_VERSIONS = ("v021", "v022", "v025", "v030")
 _W1_HANDS = {
     "BRAINCO_HAND": ("BrainCo", 6, 6),

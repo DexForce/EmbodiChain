@@ -19,6 +19,10 @@
 from __future__ import annotations
 
 ROBOT_ASSETS = {
+    "FlexivRizon4SMenagerie": {
+        "class_path": "embodichain_robots.flexiv.rizon4s._menagerie_assets:FlexivRizon4SMenagerie",
+        "category": "robot",
+    },
     "UnitreeGo1Locomotion": {
         "class_path": "embodichain_robots.unitree.go1.assets:UnitreeGo1Locomotion",
         "category": "robot",

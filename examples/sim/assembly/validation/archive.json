@@ -1,0 +1,20 @@
+{
+  "schema": "embodichain-assembly-evidence-archive/v1",
+  "source_commit": "f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0",
+  "file_count": 156,
+  "uncompressed_file_bytes": 19964731,
+  "local_archive": {
+    "filename": "EmbodiChain_assembly_evidence_before_cleanup_20261027.tar.gz",
+    "bytes": 16031564,
+    "sha256": "648eba94ccc4c575219d69cd3d20696b3872fe5033b1771be5c8ed552ee26293",
+    "manifest": "assembly_evidence_f8f5dfcc81b0/manifest.json",
+    "verified_file_hashes": 156,
+    "availability": "Local download deliverable; not a hosted model or dataset release."
+  },
+  "remote_evidence": {
+    "repository": "DexForce/EmbodiChain",
+    "commit": "f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0",
+    "browse_url": "https://github.com/DexForce/EmbodiChain/tree/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0",
+    "raw_base_url": "https://raw.githubusercontent.com/DexForce/EmbodiChain/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/"
+  }
+}

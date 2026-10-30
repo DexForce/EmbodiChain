@@ -1,0 +1,20 @@
+{
+  "qualification": "export_verified_task_performance_unqualified",
+  "num_updates": 850,
+  "global_step": 111411200,
+  "actor_path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/export/actor.pt",
+  "actor_sha256": "ca46b830ebc95085f8fb9a4362dfaff30aec09348237826adb8138a089d80b7f",
+  "checkpoint_path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_default_retrain_20261026/selected_checkpoint.pt",
+  "config_path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/configs/train.yaml",
+  "input_shape": [
+    "batch",
+    1023
+  ],
+  "output_shape": [
+    "batch",
+    7
+  ],
+  "action_semantics": "normalized joint-position increments; apply task action scales and limits",
+  "max_export_error": 0.0,
+  "assembly_success_rate": null
+}

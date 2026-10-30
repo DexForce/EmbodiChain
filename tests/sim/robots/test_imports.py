@@ -155,6 +155,7 @@ if module.startswith("embodichain_robots") or module == "embodichain.robot_regis
         "cobotmagic",
         "franka_panda",
         "flexiv_rizon4s",
+        "_menagerie",
         "tianji_marvin",
         "ur_robot",
         "so101",

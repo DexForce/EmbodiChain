@@ -67,6 +67,7 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
         query = _CudaQuery(device)
         owner = SimpleNamespace(
             num_envs=2,
+            physics_step_index=0,
             arena_offsets=torch.zeros((2, 3), device=device),
             _spawn_scene=SimpleNamespace(
                 handles=lambda uid: tuple(
@@ -89,25 +90,29 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
         )
         sensor.begin_control_step()
 
+        def sample() -> None:
+            owner.physics_step_index += 1
+            sensor.update_physics_step(0.1)
+
         def assert_air_time(value: float) -> None:
             torch.testing.assert_close(
                 history.current_air_time,
                 torch.full((2, 1), value, device=device),
             )
 
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is None
         assert_air_time(0.1)
-        sensor.update_physics_step(0.1)
+        sample()
         graph = sensor._sample_graph
         assert graph is not None
         assert_air_time(0.2)
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is graph
         assert_air_time(0.3)
 
         query.buffer.device_counts[0] = 2
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is graph
         assert history.contact.all()
         assert history.found.all()
@@ -145,16 +150,16 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
 
         sensor.begin_control_step()
         history.force_threshold = 3.0
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is None
         assert not history.contact.any()
         assert not history.found.any()
         assert_air_time(0.1)
-        sensor.update_physics_step(0.1)
+        sample()
         recaptured = sensor._sample_graph
         assert recaptured is not None and recaptured is not graph
         assert_air_time(0.2)
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is recaptured
         assert not history.contact.any()
         assert_air_time(0.3)

@@ -651,6 +651,7 @@ def test_sim_update_owns_physics_and_visualization_time(step: int) -> None:
     assert events == ["control", "physics", "capture"] * step
     assert sim._world.physics_updates == [physics_dt] * step
     assert sim._visualization_sim_step == step
+    assert sim.physics_step_index == step
     assert sim._visualization_sim_time == pytest.approx(step * physics_dt)
 
 
@@ -2040,6 +2041,7 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
 
 def test_default_plane_authors_repeated_uv_before_spawn() -> None:
     sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg()
     sim._spawn_scene = MagicMock()
     sim._spawn_scene.handles.return_value = []
     sim._spawn_default_plane_material = object()
@@ -2060,6 +2062,43 @@ def test_default_plane_authors_repeated_uv_before_spawn() -> None:
             dtype=np.float32,
         ),
     )
+
+
+def test_ground_plane_can_be_disabled_before_declaration() -> None:
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(enable_ground_plane=False)
+    sim._spawn_scene = MagicMock()
+    sim._declare_spawn_default_plane()
+    sim._spawn_scene.declare.assert_not_called()
+
+
+def test_ground_plane_uses_explicit_portable_contact_material() -> None:
+    from embodichain.lab.sim.cfg import (
+        CollisionPropertiesCfg,
+        RigidBodyMaterialCfg,
+        RigidBodyPhysicsCfg,
+    )
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(
+        ground_plane_attrs=RigidBodyPhysicsCfg(
+            collision_props=CollisionPropertiesCfg(contact_offset=0, rest_offset=0),
+            material_props=RigidBodyMaterialCfg(
+                dynamic_friction=0.7, static_friction=0.7
+            ),
+        )
+    )
+    sim.physics = SimpleNamespace(name="default", solver_type=None)
+    sim._spawn_scene = MagicMock()
+    sim._spawn_scene.handles.return_value = []
+    sim._spawn_default_plane_material = None
+    sim._declare_spawn_default_plane()
+    collision = sim._spawn_scene.declare.call_args.args[2].collisions[0]
+    assert collision.dexsim.contact_offset == 0
+    assert collision.dexsim.dynamic_friction == pytest.approx(0.7)
+    assert collision.newton.margin == 0
+    assert collision.newton.gap == 0
+    assert collision.newton.mu == pytest.approx(0.7)
 
 
 @pytest.mark.parametrize("num_envs", [1, 8])

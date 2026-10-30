@@ -1,0 +1,91 @@
+{
+  "date": "2026-10-25",
+  "embodichain_base": "19c254577",
+  "mjfit_revision": "5833f465896e1e06bc4be4f003be847f5183a4db",
+  "sdk_source_base": "39c817973111a1dea0e716cf7efb45594c134099",
+  "menagerie_revision": "f3b6013629c7b94f8ee93fd977b161fa8350f9bc",
+  "qualification": "implementation_and_smoke_only_full_reproduction_incomplete",
+  "reference_unit_tests": {
+    "python": "3.12.14",
+    "mujoco": "3.14.0",
+    "passed": 197
+  },
+  "files": {
+    "independent_reference/2f50c1a7785be0b2ed92cfb2c060ad4e24207fa36c809962cd1be6af8a32ad9b.xml": "efc0399334296123250b65538be78657fedfe02f32669a1748f1187ae84b1b6f",
+    "independent_reference/2c1622a9d69f47f0e5f3df83fc0eb02b087cd37bf9da8420e720a05b8735f2b4.xml": "129920d279e3e8214321262cf8cc04a10d286cb006ae3a39af1bbca7b8149155",
+    "independent_reference/mujoco_3.14.0.json": "2cea34a255ecf9c3695946aceb3f5d86e63268b6700ef8697ad8f0aafb84f787",
+    "independent_reference/a0d8f37284187b325c1c6ddb4ed072229c8fbadafdc2334b239b9037e51afeff.xml": "d76100ac0dc2f54979dc40d9166a8f7e764ab2404b529e00d70cf144b8511175",
+    "independent_reference/f8675e0e01c1695c72d7ef1fe32370b6069bde522dabd1ca605af99a3a94384b.xml": "d4aed4e5203c5da6562ab5eb4e00853027f3b4cc443bae5e264ab36b9ee2fdd5",
+    "independent_reference/mujoco_3.12.0.json": "672069250897741209f06acda5365ddae171b727a2d5556ab21a93620c13e5de",
+    "independent_reference/README.md": "642f85e84e8bb466b1694d51deb3705f3967e74b2ebba3bb87d4caf3de97f219",
+    "independent_reference/spec.json": "cdf61283a6788b0c2f12bf950b5160517f562c698f8789405f6c2d6b2a2b95d4",
+    "20261026/README.md": "e9a385d7f83ff69c1f0ae32c7131d79f3b9e42f4b407ab93abe1886b4461ff73",
+    "20261026/gears.md": "4280e1f2581fb66532f72454e5498417b6b808b445e7ad72e6480624b8220727",
+    "20261026/many_pegs.md": "5da19bc042f89d3e6b0fd0ab85bb29e8c8fc0662febbfb31f1ff01d369b19012"
+  },
+  "checks": {
+    "integration_cpu": {
+      "passed": 1086,
+      "skipped": 2
+    },
+    "focused_native_gpu": {
+      "passed": 9,
+      "warnings": 1
+    },
+    "historical_upstream": {
+      "passed": 197
+    },
+    "api_coverage": {
+      "documented": 3092,
+      "exports": 3092
+    },
+    "black": "26.10.1",
+    "scoped_sphinx": "passed",
+    "full_sphinx": "blocked_by_existing_dirty_source_architecture_gate",
+    "packaging_tests": {
+      "passed": 4
+    }
+  },
+  "latest_native_validation": {
+    "date": "2026-10-26",
+    "directory": "20261026",
+    "focused_cpu_tests": 242,
+    "context_tests": 42,
+    "full_training": "not_run"
+  },
+  "pr_preflight": {
+    "date": "2026-10-26",
+    "base_commit": "319bc207e65e94e4f42b845f47730b038dda7ebb",
+    "affected_suite": {
+      "passed": 1242,
+      "skipped": 41,
+      "deselected": 1
+    },
+    "data_download_tests": {
+      "passed": 19
+    },
+    "context_tests": {
+      "passed": 42
+    },
+    "black": "26.10.1",
+    "api_coverage": {
+      "documented": 3199,
+      "exports": 3199
+    },
+    "wheel_and_sdist": "built; clean sdist-to-wheel build verified vendor/model files, retired flat-module absence and patch documentation",
+    "gpu_physics_reexecuted": false,
+    "robot_catalog_compatibility": "Bare FlexivRizon4S preserved; assembly preset named FlexivRizon4SRobotiq",
+    "affected_suite_base_commit": "8cb2b53537e8c83b42a79c166e2777336ca0a2d0",
+    "post_vendor_model_compatibility": {
+      "passed": 214,
+      "isolation": "Disable unrelated older editable import finders in this test process only; shared installed environment restored."
+    }
+  },
+  "archived_evidence": {
+    "source_commit": "f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0",
+    "descriptor": "archive.json",
+    "readme": "ARCHIVE.md",
+    "original_index_url": "https://github.com/DexForce/EmbodiChain/blob/f8f5dfcc81b03e0fe4a9698d46bfcf406d9a89a0/examples/sim/assembly/validation/index.json",
+    "qualification": "Historical validation counts and measurements below are unchanged. The files map lists only artifacts retained in the current tree; full original evidence is archived."
+  }
+}

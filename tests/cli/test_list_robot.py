@@ -132,8 +132,9 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "ur10",
         "ur10e",
     }
+    robot_ids = _column_text(output, 1)
     for robot_id in expected_ids - {"ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"}:
-        assert re.search(rf"│\s*{re.escape(robot_id)}\s*│", output)
+        assert robot_id in robot_ids
     assert set(registry.list_robot_cfgs()) == expected_ids
     for alias in (
         "aloha_mini",

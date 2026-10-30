@@ -94,9 +94,10 @@ __all__ = ["CollisionShapeDesc", "RigidBodyData", "RigidObject", "RigidObjectCfg
 class CollisionShapeDesc:
     """Planner-independent snapshot of one DexSim physical collision shape.
 
-    Geometry values are copied from DexSim's runtime collision descriptor and
-    therefore already include its geometry scale. Consumers must not apply
-    :attr:`RigidObjectCfg.body_scale` again.
+    Geometry values already include geometry and body scale. Consumers must not
+    apply :attr:`RigidObjectCfg.body_scale` again. Cylinder descriptors use a
+    circumscribed 128-sided convex proxy for planning; their simulation shape
+    remains analytic.
 
     Attributes:
         name: Stable shape name within the owning rigid object.
@@ -1803,7 +1804,9 @@ class RigidObject(BatchEntity):
             device=self.device,
         )
 
-    def get_collision_shapes(self, env_id: int = 0) -> list[CollisionShapeDesc]:
+    def get_collision_shapes(
+        self, env_id: int = 0, *, allow_heterogeneous: bool = False
+    ) -> list[CollisionShapeDesc]:
         """Snapshot the physical collision shapes used by DexSim.
 
         Unlike :meth:`get_vertices` and :meth:`get_triangles`, this method reads
@@ -1819,6 +1822,9 @@ class RigidObject(BatchEntity):
 
         Args:
             env_id: Environment row whose collision geometry is returned.
+            allow_heterogeneous: Return only the selected row without requiring
+                identical topology in other environments. Useful for prepared
+                asset variants; batched planner callers retain the default guard.
 
         Returns:
             Physical collision-shape descriptors in stable shape-index order.
@@ -1834,6 +1840,8 @@ class RigidObject(BatchEntity):
             )
 
         requested = self._get_collision_shapes_for_entity(env_id)
+        if allow_heterogeneous:
+            return requested
         requested_topology = self._collision_shape_topology(requested)
         for other_env_id in range(self.num_instances):
             if other_env_id == env_id:
@@ -1992,8 +2000,36 @@ class RigidObject(BatchEntity):
         for i, env_idx in enumerate(self._all_indices):
             set_visible(self._entities[env_idx], visible)
 
-    def _build_cfg_init_pose(self, env_ids: Sequence[int]) -> torch.Tensor:
+    def _build_cfg_init_pose(
+        self, env_ids: Sequence[int] | torch.Tensor
+    ) -> torch.Tensor:
         """Build initial root poses from cfg as ``(N, 4, 4)`` matrices."""
+        if self.cfg.env_variants:
+            if len(env_ids) == 0:
+                return torch.empty((0, 4, 4), dtype=torch.float32, device=self.device)
+            from scipy.spatial.transform import Rotation
+
+            # Config lookup is host-side; transfer batched IDs once rather than
+            # synchronizing each CUDA scalar during a vectorized environment reset.
+            ids = (
+                env_ids.detach().cpu().tolist()
+                if isinstance(env_ids, torch.Tensor)
+                else env_ids
+            )
+            configs = [
+                self.cfg.env_variants.get(int(env_id), self.cfg) for env_id in ids
+            ]
+            poses = np.repeat(np.eye(4)[None], len(configs), axis=0)
+            positions = np.asarray([cfg.init_pos for cfg in configs])
+            rotations = Rotation.from_euler(
+                "XYZ", [cfg.init_rot for cfg in configs], degrees=True
+            ).as_matrix()
+            poses[:, :3, 3] = positions
+            poses[:, :3, :3] = rotations
+            for index, cfg in enumerate(configs):
+                if cfg.init_local_pose is not None:
+                    poses[index] = np.asarray(cfg.init_local_pose).reshape(4, 4)
+            return torch.as_tensor(poses, dtype=torch.float32, device=self.device)
         num_instances = len(env_ids)
         if self.cfg.init_local_pose is not None:
             return (

@@ -21,7 +21,7 @@ import json
 import os
 import random
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from pathlib import Path
 
@@ -370,6 +370,7 @@ def train_from_config(
     resume: str | Path | None = None,
     run: str | Path | None = None,
     resume_scheduler: str = "restore",
+    on_trainer_ready: Callable[[Trainer], None] | None = None,
 ) -> dict[str, object] | None:
     """Run training from a config file path.
 
@@ -383,6 +384,10 @@ def train_from_config(
         run: Source run directory when resume selects latest/best.
         resume_scheduler: Restore the saved LR curve or restart the configured
             curve with optimizer momentum retained.
+        on_trainer_ready: Optional simulator instrumentation callback, called
+            after checkpoint restoration and before collection. The callback
+            receives the native Trainer and can observe its train/evaluation
+            environments. Callback failures use the normal runtime cleanup.
 
     Returns:
         The lightweight trainer summary, or ``None`` for simulator training.
@@ -400,6 +405,8 @@ def train_from_config(
 
     trainer_cfg = cfg_data["trainer"]
     if "learning_env" in trainer_cfg:
+        if on_trainer_ready is not None:
+            raise ValueError("on_trainer_ready requires a simulator gym_config.")
         return _train_learning_env(
             cfg_data,
             config_path=config_path,
@@ -652,7 +659,7 @@ def train_from_config(
         env=env,
         algorithm=algo,
         buffer_size=buffer_size,
-        batch_size=algo_cfg["batch_size"],
+        batch_size=int(algo.cfg.batch_size),
         writer=writer,
         eval_freq=eval_freq if enable_eval else 0,  # Disable eval if not enabled
         save_freq=save_freq,
@@ -698,6 +705,14 @@ def train_from_config(
             gym_data=gym_config_data,
         )
         _resume_training(trainer, resume, run, resume_scheduler)
+        observer_error = None
+        if on_trainer_ready is not None:
+            try:
+                on_trainer_ready(trainer)
+            except Exception as exc:
+                observer_error = exc
+        # Every rank participates even when instrumentation is rank-local.
+        _sync_errors(observer_error, distributed)
         trainer.train(total_steps)
         _save_final_checkpoint(trainer)
     except KeyboardInterrupt:
@@ -746,6 +761,24 @@ def _checkpoint_context(cfg_data: dict, gym_data: dict | None = None) -> dict:
     return result
 
 
+def _freeze_gym_config(gym_data: dict, source_path: str | Path) -> dict:
+    """Freeze reusable physical components before relocating a task config.
+
+    Relative component and local asset paths belong to the original deployment,
+    not the run's ``configs`` directory. Configured Task Programs retain their
+    selectors because embodiment selection also carries semantic skill metadata.
+    """
+    if "task_program" in gym_data:
+        return deepcopy(gym_data)
+    from embodichain.lab.gym.utils._component_composition import (
+        _resolve_gym_components,
+    )
+
+    return _resolve_gym_components(
+        gym_data, base_dir=Path(source_path).expanduser().resolve().parent
+    ).config
+
+
 def _configure_checkpoints(
     trainer,
     cfg_data: dict,
@@ -769,7 +802,18 @@ def _configure_checkpoints(
     )
     snapshots = {train_path: trainer._checkpoint_config}
     if gym_path is not None:
-        snapshots[gym_path] = deepcopy(gym_data)
+        frozen_gym = _freeze_gym_config(gym_data, gym_config or config_path)
+        environment = getattr(trainer, "env", None)
+        environment = getattr(environment, "unwrapped", environment)
+        export_gym_config = getattr(environment, "export_checkpoint_gym_config", None)
+        if "task_program" not in gym_data and callable(export_gym_config):
+            config_dir.mkdir(parents=True, exist_ok=True)
+            frozen_gym = export_gym_config(frozen_gym, config_dir)
+            if not isinstance(frozen_gym, dict):
+                raise TypeError(
+                    "export_checkpoint_gym_config must return a Gym configuration dict."
+                )
+        snapshots[gym_path] = frozen_gym
 
     def update_manifest(summary: dict) -> None:
         for path, data in snapshots.items():

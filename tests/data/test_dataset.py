@@ -33,6 +33,40 @@ PROCESS_JOIN_TIMEOUT_SECONDS = 5.0
 PROCESS_START_TIMEOUT_SECONDS = 60.0
 
 
+def test_cache_repair_preserves_prepared_rizon_model(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from embodichain_robots.flexiv.rizon4s._menagerie_assets import _preserve_prepared
+    from embodichain.data.dataset import EmbodiChainDataset
+
+    root = tmp_path / "embodichain_data"
+    extracted = root / "extract" / "FlexivRizon4SMenagerie"
+    prepared = extracted / "prepared_v4_parallel_jaw"
+    prepared.mkdir(parents=True)
+    (prepared / "fidelity.json").write_text("custom calibration")
+    (extracted / "stale-source").write_text("remove during repair")
+    descriptor = SimpleNamespace(urls=["https://example.invalid/LICENSE"], md5="unused")
+    with _preserve_prepared(extracted):
+        EmbodiChainDataset.check_zip(
+            SimpleNamespace(), "FlexivRizon4SMenagerie", descriptor, str(root)
+        )
+    assert (prepared / "fidelity.json").read_text() == "custom calibration"
+    assert not (extracted / "stale-source").exists()
+
+    with pytest.raises(RuntimeError, match="failed repair"):
+        with _preserve_prepared(extracted):
+            raise RuntimeError("failed repair")
+    assert (prepared / "fidelity.json").read_text() == "custom calibration"
+
+    # A process killed after moving the model leaves a recoverable backup.
+    abandoned = root / "generated" / "assembly" / "preserved" / "rizon4s-abandoned"
+    abandoned.mkdir(parents=True)
+    prepared.rename(abandoned / prepared.name)
+    with _preserve_prepared(extracted):
+        pass
+    assert (prepared / "fidelity.json").read_text() == "custom calibration"
+    assert not abandoned.exists()
+
+
 @pytest.mark.no_sim
 def test_get_data_path_accepts_dataset_root_without_subpath(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

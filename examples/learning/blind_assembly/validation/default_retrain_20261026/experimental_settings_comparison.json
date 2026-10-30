@@ -1,0 +1,781 @@
+{
+  "schema": "embodichain-default-asset-setting-comparison/v1",
+  "review_head": "40e8ed41ab83cebdf1776a19a462172702ee4e63",
+  "nominal": {
+    "run": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_rl_attempt_20261026/model_bundle/run",
+    "gym_path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_rl_attempt_20261026/model_bundle/run/configs/gym.yaml",
+    "gym_sha256": "1e8e66b346beb69e27e803576af014ea10f2b89196f95ab628964a2b44bded9c",
+    "urdf_path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_rl_attempt_20261026/model_bundle/run/configs/resources/robot/rizon4s_robotiq2f85.urdf",
+    "urdf_sha256": "798c69ecd29a129506b0918939fa94204d7b5c961732ea233ec4e182d3216a3c",
+    "link_count": 25,
+    "moving_joints": [
+      [
+        "joint1",
+        "revolute"
+      ],
+      [
+        "joint2",
+        "revolute"
+      ],
+      [
+        "joint3",
+        "revolute"
+      ],
+      [
+        "joint4",
+        "revolute"
+      ],
+      [
+        "joint5",
+        "revolute"
+      ],
+      [
+        "joint6",
+        "revolute"
+      ],
+      [
+        "joint7",
+        "revolute"
+      ],
+      [
+        "gripper_left_jaw_joint",
+        "prismatic"
+      ],
+      [
+        "gripper_right_jaw_joint",
+        "prismatic"
+      ]
+    ],
+    "mimic_relations": {},
+    "moving_arm_mass_kg": 16.93,
+    "hand_mass_kg": 1.0526083388427392,
+    "base_masses_kg": {
+      "base": 1.8748820503940926
+    },
+    "colliders": 20,
+    "arm_link_inertias": {
+      "link1": [
+        [
+          0.0274,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.027299975663190555,
+          0.0010999985852014303
+        ],
+        [
+          0.0,
+          0.0010999985852014303,
+          0.00710000433680944
+        ]
+      ],
+      "link7": [
+        [
+          0.0032,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0032,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0018
+        ]
+      ],
+      "link2": [
+        [
+          0.023,
+          1.4993815393912062e-19,
+          -2.4897887993533847e-20
+        ],
+        [
+          1.4993815393912023e-19,
+          0.023900007403886984,
+          -9.999973056687409e-05
+        ],
+        [
+          -2.4897887993533853e-20,
+          -9.99997305668741e-05,
+          0.0036000025961130163
+        ]
+      ],
+      "link6": [
+        [
+          0.008500010828910103,
+          0.00040001791097635996,
+          0.0012000044484496524
+        ],
+        [
+          0.00040001791097635974,
+          0.00900002669248469,
+          0.0018000089518781085
+        ],
+        [
+          0.0012000044484496522,
+          0.001800008951878108,
+          0.004200002478605224
+        ]
+      ],
+      "link3": [
+        [
+          0.014300022550328742,
+          0.00010000401258153147,
+          -0.001500004371804494
+        ],
+        [
+          0.00010000401258153168,
+          0.013700001045337362,
+          -0.0005000014178132131
+        ],
+        [
+          -0.0015000043718044944,
+          -0.0005000014178132131,
+          0.003999996404333891
+        ]
+      ],
+      "link5": [
+        [
+          0.014199999999999997,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.01349995593814251,
+          0.0004999979820203043
+        ],
+        [
+          0.0,
+          0.0004999979820203042,
+          0.0037000040618574833
+        ]
+      ],
+      "link4": [
+        [
+          0.0180000249878578,
+          0.00010000001297034888,
+          -0.0016000044494773734
+        ],
+        [
+          0.0001000000129703507,
+          0.018400026344206073,
+          -0.0012000036504144806
+        ],
+        [
+          -0.0016000044494773734,
+          -0.0012000036504144804,
+          0.0029999986679361385
+        ]
+      ]
+    },
+    "declared_robot_drive": {
+      "drive_type": "force",
+      "target_mode": "position_velocity",
+      "stiffness": {
+        "joint1": 289.0,
+        "joint2": 673.0,
+        "joint3": 224.0,
+        "joint4": 373.0,
+        "joint5": 237.0,
+        "joint6": 232.0,
+        "joint7": 186.0,
+        "gripper_.*": 5000.0
+      },
+      "damping": {
+        "joint1": 61.0,
+        "joint2": 143.0,
+        "joint3": 36.0,
+        "joint4": 59.0,
+        "joint5": 13.0,
+        "joint6": 12.0,
+        "joint7": 9.9,
+        "gripper_.*": 10.0
+      },
+      "max_effort": {
+        "joint1": 123,
+        "joint2": 123,
+        "joint3": 64,
+        "joint4": 64,
+        "joint5": 39,
+        "joint6": 39,
+        "joint7": 39,
+        "gripper_.*": 30.0
+      },
+      "max_velocity": {
+        "joint[1-7]": 2.0,
+        "gripper_.*": 0.2
+      },
+      "friction": null,
+      "armature": {
+        "joint1": 3.17,
+        "joint2": 3.17,
+        "joint3": 1.38,
+        "joint4": 1.38,
+        "joint5": 0.13,
+        "joint6": 0.13,
+        "joint7": 0.13
+      }
+    },
+    "task_extensions": {
+      "assembly_profile": "study",
+      "preserve_source_contacts": true,
+      "require_heterogeneous_assets": false,
+      "grasp_warmup_steps": 10,
+      "initial_position_range": 0.0125,
+      "grasp_position_range": 0.0055,
+      "joint_stiffness": 80.0,
+      "joint_damping": 20.0,
+      "proprioception_convention": "official_v1",
+      "proprioceptive_joint_limits": [
+        [
+          -2.8222039999999997,
+          2.8222039999999997
+        ],
+        [
+          -2.3090759999999997,
+          2.3090759999999997
+        ],
+        [
+          -2.993214,
+          2.993214
+        ],
+        [
+          -1.9075010000000001,
+          2.7278010000000004
+        ],
+        [
+          -2.993214,
+          2.993214
+        ],
+        [
+          -1.4224140000000003,
+          4.564014
+        ],
+        [
+          -2.993214,
+          2.993214
+        ]
+      ],
+      "proprioceptive_velocity_scale": [
+        2.0943951023931953,
+        2.0943951023931953,
+        2.443460952792061,
+        2.443460952792061,
+        4.886921905584122,
+        4.886921905584122,
+        4.886921905584122
+      ],
+      "assembly_contact_capacity": 256,
+      "grasp_contact_capacity": 64,
+      "assembly_config": {
+        "bottom_thickness": 0.002
+      },
+      "assembly_manifest": "./resources/assembly/8d5592ea6da84da3a55f0233616e864b35b29d3950831f397fe2c8ecab1260b7.json"
+    },
+    "actions": {
+      "arm_delta": {
+        "func": "RelativeJointPositionAction",
+        "params": {
+          "part_name": "arm",
+          "scale": 0.02,
+          "target_limits": [
+            [
+              -2.8222039999999997,
+              2.8222039999999997
+            ],
+            [
+              -2.3090759999999997,
+              2.3090759999999997
+            ],
+            [
+              -2.993214,
+              2.993214
+            ],
+            [
+              -1.9075010000000001,
+              2.7278010000000004
+            ],
+            [
+              -2.993214,
+              2.993214
+            ],
+            [
+              -1.4224140000000003,
+              4.564014
+            ],
+            [
+              -2.993214,
+              2.993214
+            ]
+          ]
+        }
+      }
+    },
+    "observations": {
+      "proprioception": {
+        "func": "AssemblyProprioception",
+        "mode": "add",
+        "name": "proprioception",
+        "params": {
+          "history_length": 30,
+          "history_layout": "current_history"
+        },
+        "extra": {
+          "shape": [
+            1023
+          ]
+        }
+      },
+      "privileged": {
+        "func": "assembly_privileged_state",
+        "mode": "add",
+        "name": "privileged",
+        "params": {}
+      },
+      "contact_labels": {
+        "func": "assembly_contact_labels",
+        "mode": "add",
+        "name": "contact_labels",
+        "params": {},
+        "extra": {
+          "shape": [
+            64
+          ]
+        }
+      }
+    },
+    "rewards": {
+      "assembly_milestones": {
+        "func": "assembly_milestone_reward",
+        "mode": "add",
+        "weight": 1.0,
+        "params": {}
+      }
+    },
+    "assembly_manifest": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/assembly_rl_attempt_20261026/model_bundle/run/configs/resources/assembly/8d5592ea6da84da3a55f0233616e864b35b29d3950831f397fe2c8ecab1260b7.json",
+    "assembly_manifest_sha256": "6205601cd09ac6d483affc57b63cadcf4197473f78197b6d099e4e5fe869653e"
+  },
+  "default": {
+    "run": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568",
+    "gym_path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/configs/gym.yaml",
+    "gym_sha256": "33881d4cd40730517e01bdc2a1f139df93b057fcf8dfdf7d8a220751b763178a",
+    "urdf_path": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/configs/resources/robot/rizon4s_2f85_default_47beba6e921706b7.urdf",
+    "urdf_sha256": "554c145b8c7007fc902c1e5435d3660c53d9d00d8371bda4047d14b13f66db26",
+    "link_count": 21,
+    "moving_joints": [
+      [
+        "joint1",
+        "revolute"
+      ],
+      [
+        "joint2",
+        "revolute"
+      ],
+      [
+        "joint3",
+        "revolute"
+      ],
+      [
+        "joint4",
+        "revolute"
+      ],
+      [
+        "joint5",
+        "revolute"
+      ],
+      [
+        "joint6",
+        "revolute"
+      ],
+      [
+        "joint7",
+        "revolute"
+      ],
+      [
+        "finger_joint",
+        "revolute"
+      ],
+      [
+        "left_inner_knuckle_joint",
+        "revolute"
+      ],
+      [
+        "left_inner_finger_joint",
+        "revolute"
+      ],
+      [
+        "right_inner_knuckle_joint",
+        "revolute"
+      ],
+      [
+        "right_inner_finger_joint",
+        "revolute"
+      ],
+      [
+        "right_outer_knuckle_joint",
+        "revolute"
+      ]
+    ],
+    "mimic_relations": {
+      "left_inner_knuckle_joint": {
+        "joint": "finger_joint",
+        "multiplier": "1",
+        "offset": "0"
+      },
+      "left_inner_finger_joint": {
+        "joint": "finger_joint",
+        "multiplier": "-1",
+        "offset": "0"
+      },
+      "right_inner_knuckle_joint": {
+        "joint": "finger_joint",
+        "multiplier": "-1",
+        "offset": "0"
+      },
+      "right_inner_finger_joint": {
+        "joint": "finger_joint",
+        "multiplier": "1",
+        "offset": "0"
+      },
+      "right_outer_knuckle_joint": {
+        "joint": "finger_joint",
+        "multiplier": "-1",
+        "offset": "0"
+      }
+    },
+    "moving_arm_mass_kg": 16.93,
+    "hand_mass_kg": 0.41413685180504234,
+    "base_masses_kg": {
+      "base_link": 3.788
+    },
+    "colliders": 17,
+    "arm_link_inertias": {
+      "link1": [
+        [
+          0.0274,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0273,
+          0.0011
+        ],
+        [
+          0.0,
+          0.0011,
+          0.0071
+        ]
+      ],
+      "link7": [
+        [
+          0.0032,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0032,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0018
+        ]
+      ],
+      "link2": [
+        [
+          0.023,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0239,
+          -0.0001
+        ],
+        [
+          0.0,
+          -0.0001,
+          0.0036
+        ]
+      ],
+      "link6": [
+        [
+          0.0085,
+          0.0004,
+          0.0012
+        ],
+        [
+          0.0004,
+          0.009,
+          0.0018
+        ],
+        [
+          0.0012,
+          0.0018,
+          0.0042
+        ]
+      ],
+      "link3": [
+        [
+          0.0143,
+          0.0001,
+          -0.0015
+        ],
+        [
+          0.0001,
+          0.0137,
+          -0.0005
+        ],
+        [
+          -0.0015,
+          -0.0005,
+          0.004
+        ]
+      ],
+      "link5": [
+        [
+          0.0142,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0135,
+          0.0005
+        ],
+        [
+          0.0,
+          0.0005,
+          0.0037
+        ]
+      ],
+      "link4": [
+        [
+          0.018,
+          0.0001,
+          -0.0016
+        ],
+        [
+          0.0001,
+          0.0184,
+          -0.0012
+        ],
+        [
+          -0.0016,
+          -0.0012,
+          0.003
+        ]
+      ]
+    },
+    "declared_robot_drive": {
+      "drive_type": "force",
+      "target_mode": null,
+      "stiffness": {
+        "joint[1-2]": 4000.0,
+        "joint[3-4]": 5000.0,
+        "joint[5-7]": 1500.0,
+        "finger_joint": 100.0
+      },
+      "damping": {
+        "joint[1-2]": 240.0,
+        "joint[3-4]": 210.0,
+        "joint[5-7]": 45.0,
+        "finger_joint": 10.0
+      },
+      "max_effort": {
+        "joint[1-2]": 123.0,
+        "joint[3-4]": 64.0,
+        "joint[5-7]": 39.0,
+        "finger_joint": 5.0
+      },
+      "max_velocity": {
+        "joint[1-2]": 2.0944,
+        "joint[3-4]": 2.4435,
+        "joint[5-7]": 4.8869,
+        "finger_joint": 2.0
+      },
+      "friction": 0.0,
+      "armature": {
+        "joint[1-2]": 3.169792,
+        "joint[3-4]": 1.375488,
+        "joint[5-7]": 0.134325
+      }
+    },
+    "task_extensions": {
+      "assembly_profile": "study",
+      "preserve_source_contacts": true,
+      "require_heterogeneous_assets": false,
+      "grasp_warmup_steps": 10,
+      "initial_position_range": 0.0125,
+      "grasp_position_range": 0.0055,
+      "joint_stiffness": 80.0,
+      "joint_damping": 20.0,
+      "proprioception_convention": "official_v1",
+      "proprioceptive_joint_limits": [
+        [
+          -2.8222039999999997,
+          2.8222039999999997
+        ],
+        [
+          -2.3090759999999997,
+          2.3090759999999997
+        ],
+        [
+          -2.993214,
+          2.993214
+        ],
+        [
+          -1.9075010000000001,
+          2.7278010000000004
+        ],
+        [
+          -2.993214,
+          2.993214
+        ],
+        [
+          -1.4224140000000003,
+          4.564014
+        ],
+        [
+          -2.993214,
+          2.993214
+        ]
+      ],
+      "proprioceptive_velocity_scale": [
+        2.0943951023931953,
+        2.0943951023931953,
+        2.443460952792061,
+        2.443460952792061,
+        4.886921905584122,
+        4.886921905584122,
+        4.886921905584122
+      ],
+      "assembly_contact_capacity": 256,
+      "grasp_contact_capacity": 64,
+      "assembly_config": {
+        "bottom_thickness": 0.002
+      },
+      "assembly_manifest": "./resources/assembly/ae3907d94cfd31237bdec545fbff0f5327d618c91244b288c1003756f06e716c.json"
+    },
+    "actions": {
+      "arm_delta": {
+        "func": "RelativeJointPositionAction",
+        "params": {
+          "part_name": "arm",
+          "scale": 0.02,
+          "target_limits": [
+            [
+              -2.8222039999999997,
+              2.8222039999999997
+            ],
+            [
+              -2.3090759999999997,
+              2.3090759999999997
+            ],
+            [
+              -2.993214,
+              2.993214
+            ],
+            [
+              -1.9075010000000001,
+              2.7278010000000004
+            ],
+            [
+              -2.993214,
+              2.993214
+            ],
+            [
+              -1.4224140000000003,
+              4.564014
+            ],
+            [
+              -2.993214,
+              2.993214
+            ]
+          ]
+        }
+      }
+    },
+    "observations": {
+      "proprioception": {
+        "func": "AssemblyProprioception",
+        "mode": "add",
+        "name": "proprioception",
+        "params": {
+          "history_length": 30,
+          "history_layout": "current_history"
+        },
+        "extra": {
+          "shape": [
+            1023
+          ]
+        }
+      },
+      "privileged": {
+        "func": "assembly_privileged_state",
+        "mode": "add",
+        "name": "privileged",
+        "params": {}
+      },
+      "contact_labels": {
+        "func": "assembly_contact_labels",
+        "mode": "add",
+        "name": "contact_labels",
+        "params": {},
+        "extra": {
+          "shape": [
+            64
+          ]
+        }
+      }
+    },
+    "rewards": {
+      "assembly_milestones": {
+        "func": "assembly_milestone_reward",
+        "mode": "add",
+        "weight": 1.0,
+        "params": {}
+      }
+    },
+    "assembly_manifest": "/home/dex/.codex/worktrees/d58c/EmbodiChain/outputs/blind_peg_default_assets_epa128_seed0_20261027_004939_658337568/configs/resources/assembly/ae3907d94cfd31237bdec545fbff0f5327d618c91244b288c1003756f06e716c.json",
+    "assembly_manifest_sha256": "bd625215e10c3846b2ad23126fea3d1f4f9e117032ad6b926fa3d168e730947b"
+  },
+  "policy_algorithm_exactly_equal": true,
+  "moving_arm_max_inertia_tensor_difference_kg_m2": 4.406185748900837e-08,
+  "fixture_numeric_difference_count": 125,
+  "fixture_max_absolute_numeric_difference": 1.1102230246251565e-16,
+  "fixture_non_numeric_differences": [
+    [
+      "/asset/source_options/mujoco_version",
+      "3.12.0",
+      "3.15.0"
+    ],
+    [
+      "/sha256",
+      "8d5592ea6da84da3a55f0233616e864b35b29d3950831f397fe2c8ecab1260b7",
+      "ae3907d94cfd31237bdec545fbff0f5327d618c91244b288c1003756f06e716c"
+    ]
+  ],
+  "runtime_gain_override": {
+    "arm_kp": 80,
+    "arm_kd": 20,
+    "source": "embodichain/lab/gym/envs/assembly_env.py:409-422",
+    "note": "Both task extensions set these; robot-preset drive values above are overwritten on initialization."
+  },
+  "reviewers": {
+    "robotics": "/root/review_default_assets_robotics",
+    "engine": "/root/review_default_assets_engine",
+    "ai": "/root/review_default_assets_ai"
+  },
+  "confirmed_introduced_defects": [],
+  "causal_status": "Gripper dynamics and unqualified stable retention are highest-priority hypotheses, not proven causal attribution; old/new runtime also changed."
+}
