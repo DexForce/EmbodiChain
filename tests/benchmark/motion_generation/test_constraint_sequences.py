@@ -316,7 +316,8 @@ def test_franka_masked_baseline_runtime(backend):
             )
             assert failed.success.tolist() == [False]
             torch.testing.assert_close(
-                failed.positions, start[:, None].expand_as(failed.positions)
+                failed.positions,
+                start.to(failed.positions)[:, None].expand_as(failed.positions),
             )
     finally:
         if adapter is not None:
