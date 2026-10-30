@@ -181,6 +181,7 @@ def main():
             "embodichain.gen_sim.asset_engine.configs": ["*.json"],
             "embodichain.gen_sim.task_engine": [
                 "*.yaml",
+                "fresh_tasks.json",
                 "_semantic_graph_viewer.html",
                 "_semantic_graph_viewer.css",
                 "_semantic_graph_viewer.js",

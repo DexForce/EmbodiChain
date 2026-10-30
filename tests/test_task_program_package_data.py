@@ -306,6 +306,7 @@ def test_graph_viewer_resources_survive_package_staging(tmp_path: Path) -> None:
     command.run()
     staged = destination / "embodichain/gen_sim/task_engine"
     for name in (
+        "fresh_tasks.json",
         "_semantic_graph_viewer.html",
         "_semantic_graph_viewer.css",
         "_semantic_graph_viewer.js",
