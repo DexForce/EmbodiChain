@@ -3368,7 +3368,7 @@
           "label": "Official model library"
         },
         {
-          "docname": "features/neural_dynamics",
+          "docname": "features/neural_dynamics/nerd",
           "label": "NeRD data and training workflow"
         }
       ]
@@ -3397,7 +3397,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/neural_dynamics",
+          "docname": "features/neural_dynamics/nerd",
           "label": "NeRD showcase commands"
         }
       ]
@@ -3486,6 +3486,10 @@
         {
           "docname": "api_reference/rwm",
           "label": "RWM state, objectives, prediction, replay and SL recipe"
+        },
+        {
+          "docname": "features/neural_dynamics/rwm",
+          "label": "RWM principles and usage"
         }
       ]
     }

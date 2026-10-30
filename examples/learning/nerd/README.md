@@ -86,6 +86,6 @@ source revisions and quality gates. Relocating an implementation or passing a
 new smoke does not rerun earlier frozen evidence. Offline prediction, live
 rollout and paper-scale accuracy are separate claims.
 
-See the [feature guide](../../../docs/source/features/neural_dynamics.md) and
+See the [NeRD guide](../../../docs/source/features/neural_dynamics/nerd.md) and
 [model API](../../../docs/source/api_reference/model_catalogs.rst) for the
 resource format and runtime interfaces.

@@ -1,5 +1,8 @@
 # RigidFormer author implementation
 
+See the [RigidFormer guide](../../../docs/source/features/neural_dynamics/rigidformer.md)
+for working principles, input/output layout and a PyTorch prediction example.
+
 This showcase integrates the author's RigidFormer implementation at
 `160fe0852c51cffae7b7440452b58d0b49db6df6` from
 [Frank-ZY-Dou/Dynamics-Modeling](https://github.com/Frank-ZY-Dou/Dynamics-Modeling/tree/160fe0852c51cffae7b7440452b58d0b49db6df6/RigidFormer).

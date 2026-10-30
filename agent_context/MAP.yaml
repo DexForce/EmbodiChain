@@ -285,9 +285,10 @@ topics:
   - extensions/embodichain_models/embodichain_models/dynamics/rigidformer/
   - examples/learning/rigidformer/
   watch_paths: [extensions/embodichain_models/, examples/learning/nerd/, examples/learning/rigidformer/,
-    docs/source/features/neural_dynamics.md,
-    docs/source/api_reference/model_catalogs.rst]
-  related_topics: [supervised-learning, learning-layers, data-pipeline, data-assets]
+    docs/source/features/neural_dynamics.md, docs/source/features/neural_dynamics/,
+    docs/source/guides/neural_dynamics.md, docs/source/api_reference/model_catalogs.rst,
+    docs/source/api_reference/model_rigidformer.rst]
+  related_topics: [supervised-learning, robot-world-model, learning-layers, data-pipeline, data-assets]
   status: active
 - id: learning-layers
   title: Differentiable Learning Layers
@@ -572,6 +573,6 @@ topics:
   - examples/learning/rwm/
   watch_paths: [extensions/embodichain_models/embodichain_models/dynamics/rwm/,
     examples/learning/rwm/, tests/models/dynamics/rwm/,
-    docs/source/api_reference/rwm.rst]
+    docs/source/features/neural_dynamics/rwm.md, docs/source/api_reference/rwm.rst]
   related_topics: [supervised-learning, learning-layers, neural-dynamics]
   status: active

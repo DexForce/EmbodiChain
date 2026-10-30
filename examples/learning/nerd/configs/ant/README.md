@@ -35,6 +35,6 @@ assuming the entire dataset fits a fixed device budget.
 The pretrained evaluation default uses the pinned published dataset/model from
 `prepare`. Downloaded data retains its Scene teacher provenance; new direct
 Newton data has a distinct physical signature. See the
-[feature guide](../../../../../docs/source/features/neural_dynamics.md) and
+[NeRD guide](../../../../../docs/source/features/neural_dynamics/nerd.md) and
 [research acceptance](../../research/acceptance.md) for format and evidence
 boundaries. Preset names do not establish accuracy qualification.

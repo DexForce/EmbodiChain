@@ -1,5 +1,8 @@
 # Robot world model supervised acceptance
 
+See the [RWM guide](../../../docs/source/features/neural_dynamics/rwm.md) for
+working principles, state layout, prediction and replay examples.
+
 Run with the `py311` environment from a source checkout or an installed wheel:
 
 ```bash
