@@ -10,7 +10,7 @@ The native window and the Viser backend are mutually exclusive;
 native window while Viser is enabled.
 Likewise, `SimulationManager.start_visualization()` rejects Viser startup while
 the native window is open.
-See {doc}`Viser browser visualization </overview/sim/viser_visualization>` for
+See {doc}`Viser browser visualization <viser>` for
 the headless browser frontend.
 
 ## Default Window Controls
@@ -111,7 +111,7 @@ tutorial enables this option after preparing its initial joint pose.
 The entity gizmo is native-window only. The Viser backend offers an analogous
 **click-to-pick** flow (an *Enable click-to-pick Gizmo* checkbox instead of the
 **G** hotkey, since browsers do not expose keyboard events); see
-:doc:`tutorial/gizmo` for details.
+{doc}`Gizmo tutorial </tutorial/gizmo>` for details.
 
 ## Customizing Window Events
 

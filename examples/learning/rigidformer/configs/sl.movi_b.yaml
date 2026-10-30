@@ -1,0 +1,15 @@
+factory: embodichain_models.dynamics.rigidformer.sl_recipe:build_rigidformer_trainer
+model:
+  preset: movi_b
+  attention_backend: sdpa
+precision: bf16
+data:
+  root: outputs/rigidformer/data/MOVi-B
+  split_file: outputs/rigidformer/data/MOVi-B/splits.json
+  scale_file: outputs/rigidformer/data/MOVi-B/object_scales.json
+trainer:
+  output_dir: outputs/rigidformer/movi_b/sl
+  device: cuda
+  batch_size: 21
+  seed: 42
+  checkpoint_interval: 5000

@@ -18,6 +18,10 @@ episode succeeds when the cube is on the table and its XY distance to the
 target is below 10 cm. Simulation/control run at 240/30 Hz; actions are seven
 absolute arm joint targets and a normalized parallel-gripper command.
 
+The RL and visual deployments share `extensions.success_threshold` and the
+`distance_to_goal` metric. Expert geometry and segment lengths are declared in
+`env.visual.yaml`; the task does not supply a second set of expert defaults.
+
 ## Requirements
 
 Run from a source checkout with EmbodiChain's matching DexSim runtime, Franka
@@ -142,23 +146,6 @@ reader decodes only anchor frames and has a 512 MiB CPU cache by default.
 Inference uses the CVAE prior mean (`z=0`) and temporally ensembles overlapping
 chunks, clearing its history on every reset.
 
-Use `scripts/benchmark/learning/benchmark_act.py` to measure current batch
-sampling, model update and inference costs on the target machine. Record actual
-peak GPU memory and wall time when reporting results; the example's acceptance
-is based on physical rollouts rather than loss alone.
-
-To sample both compute and graphics process memory during a capped rollout,
-install `nvidia-ml-py` and run:
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python -m scripts.benchmark.learning.monitor_act_runtime \
-  --module examples.learning.act.play --torch-cap-gib 20 --report /tmp/act-memory.json -- \
-  --checkpoint /tmp/act-dev19001/best.pt --output /tmp/act-memory-play
-```
-
-The report also captures the child log and device-level memory readings. The
-cap applies to Torch's allocator only; NVML samples may miss short peaks, and
-compute/graphics counters for one process can overlap. Use the same monitor
-with `examples.learning.act.collect`, `train`, or `evaluate` for the other
-stages. On a machine with a physical 24 GB GPU, run the full recipe there to
-confirm the target hardware independently.
+Report peak GPU memory and wall time on the target machine. Acceptance is based
+on physical rollouts rather than loss alone. On a physical 24 GB GPU, run the
+full recipe there to qualify that hardware independently.

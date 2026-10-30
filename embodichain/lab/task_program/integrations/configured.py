@@ -1778,82 +1778,72 @@ def _decode_parallel_jaw_gripper_model(
     *,
     path: str,
 ) -> ParallelJawGripperModelCfg:
-    """Resolve one built-in model ID or validate one inline geometry model."""
+    """Resolve a registered aperture model, with optional inline bounds."""
     if type(value) is str:
         try:
             return get_parallel_jaw_gripper_model(value)
         except ValueError as exc:
             raise ValueError(f"{path}: {exc}") from exc
-
     model = _mapping(
         value,
         path=path,
         required=frozenset({"model_id"}),
-        optional=frozenset(
-            {
-                "min_opening_width",
-                "max_opening_width",
-                "finger_length",
-                "finger_width",
-                "finger_thickness",
-                "palm_depth",
-            }
-        ),
+        optional=frozenset({"min_opening_width", "max_opening_width"}),
     )
-    defaults = ParallelJawGripperModelCfg()
-    min_opening_width = _real(
+    model_id = _identifier(model["model_id"], path=f"{path}.model_id")
+    try:
+        defaults = get_parallel_jaw_gripper_model(model_id)
+    except ValueError as exc:
+        raise ValueError(f"{path}: {exc}") from exc
+    minimum = _real(
         model.get("min_opening_width", defaults.min_opening_width),
         path=f"{path}.min_opening_width",
         minimum=0.0,
         strict_minimum=True,
     )
-    max_opening_width = _real(
+    maximum = _real(
         model.get("max_opening_width", defaults.max_opening_width),
         path=f"{path}.max_opening_width",
         minimum=0.0,
         strict_minimum=True,
     )
-    if min_opening_width >= max_opening_width:
+    if minimum >= maximum:
         raise ValueError(
             f"{path}.min_opening_width must be less than {path}.max_opening_width."
         )
     return ParallelJawGripperModelCfg(
-        model_id=_identifier(model["model_id"], path=f"{path}.model_id"),
-        min_opening_width=min_opening_width,
-        max_opening_width=max_opening_width,
-        finger_length=_real(
-            model.get("finger_length", defaults.finger_length),
-            path=f"{path}.finger_length",
-            minimum=0.0,
-            strict_minimum=True,
-        ),
-        finger_width=_real(
-            model.get("finger_width", defaults.finger_width),
-            path=f"{path}.finger_width",
-            minimum=0.0,
-            strict_minimum=True,
-        ),
-        finger_thickness=_real(
-            model.get("finger_thickness", defaults.finger_thickness),
-            path=f"{path}.finger_thickness",
-            minimum=0.0,
-            strict_minimum=True,
-        ),
-        palm_depth=_real(
-            model.get("palm_depth", defaults.palm_depth),
-            path=f"{path}.palm_depth",
-            minimum=0.0,
-            strict_minimum=True,
-        ),
+        model_id=model_id, min_opening_width=minimum, max_opening_width=maximum
     )
 
 
+def _geometry_pose(value: object, *, path: str) -> tuple[float, ...]:
+    """Freeze and validate one explicit rigid geometry/TCP transform."""
+    import numpy as np
+
+    rows = _sequence(value, path=path)
+    if len(rows) != 4:
+        raise ValueError(f"{path} must have shape (4, 4).")
+    values = []
+    for index, row in enumerate(rows):
+        row_values = _sequence(row, path=f"{path}[{index}]")
+        if len(row_values) != 4:
+            raise ValueError(f"{path} must have shape (4, 4).")
+        values.extend(_real(item, path=f"{path}[{index}]") for item in row_values)
+    matrix = np.asarray(values).reshape(4, 4)
+    rotation = matrix[:3, :3]
+    if (
+        not np.allclose(matrix[3], [0, 0, 0, 1], atol=1e-7, rtol=0)
+        or not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-6, rtol=0)
+        or not np.isclose(np.linalg.det(rotation), 1, atol=1e-6, rtol=0)
+    ):
+        raise ValueError(f"{path} must be a proper rigid transform.")
+    return tuple(values)
+
+
 def _decode_grasp_generator(
-    value: object,
-    *,
-    path: str,
+    value: object, *, path: str
 ) -> _AntipodalGraspPoseGeneratorFactory:
-    """Decode one allowlisted parallel-jaw antipodal generator declaration."""
+    """Decode explicit physical geometry; removed box fields are rejected."""
     config = _mapping(
         value,
         path=path,
@@ -1862,37 +1852,49 @@ def _decode_grasp_generator(
             {
                 "sample_count",
                 "approach_direction_samples",
-                "opening_margin",
-                "point_sample_density",
                 "filter_ground_collision",
                 "force_refresh",
+                "point_spacing",
+                "side",
+                "root_from_tcp",
             }
         ),
     )
     kind = _identifier(config["kind"], path=f"{path}.kind")
     if kind != "antipodal_parallel_jaw":
         raise ValueError(
-            f"Unsupported {path}.kind {kind!r}; supported kinds are "
-            "['antipodal_parallel_jaw']."
+            f"Unsupported {path}.kind {kind!r}; supported kinds are ['antipodal_parallel_jaw']."
         )
-    model = _decode_parallel_jaw_gripper_model(
-        config["model"],
-        path=f"{path}.model",
+    model = _decode_parallel_jaw_gripper_model(config["model"], path=f"{path}.model")
+    side = (
+        _identifier(config["side"], path=f"{path}.side") if "side" in config else None
     )
+    root_from_tcp = (
+        _geometry_pose(config["root_from_tcp"], path=f"{path}.root_from_tcp")
+        if "root_from_tcp" in config
+        else None
+    )
+    if model.model_id == "tianji_marvin_gripper":
+        if side not in ("left", "right"):
+            raise ValueError(
+                f"{path}: Marvin geometry requires explicit left/right side."
+            )
+    elif side is not None:
+        raise ValueError(f"{path}: side is only supported by Marvin geometry.")
     return _AntipodalGraspPoseGeneratorFactory(
         model_id=model.model_id,
         min_opening_width=model.min_opening_width,
         max_opening_width=model.max_opening_width,
-        finger_length=model.finger_length,
-        finger_width=model.finger_width,
-        finger_thickness=model.finger_thickness,
-        palm_depth=model.palm_depth,
+        point_spacing=_real(
+            config.get("point_spacing", 0.012),
+            path=f"{path}.point_spacing",
+            minimum=0,
+            strict_minimum=True,
+        ),
+        side=side,
+        root_from_tcp=root_from_tcp,
         sample_count=(
-            _integer(
-                config["sample_count"],
-                path=f"{path}.sample_count",
-                minimum=1,
-            )
+            _integer(config["sample_count"], path=f"{path}.sample_count", minimum=1)
             if "sample_count" in config
             else None
         ),
@@ -1903,25 +1905,6 @@ def _decode_grasp_generator(
                 minimum=1,
             )
             if "approach_direction_samples" in config
-            else None
-        ),
-        opening_margin=(
-            _real(
-                config["opening_margin"],
-                path=f"{path}.opening_margin",
-                minimum=0.0,
-            )
-            if "opening_margin" in config
-            else None
-        ),
-        point_sample_density=(
-            _real(
-                config["point_sample_density"],
-                path=f"{path}.point_sample_density",
-                minimum=0.0,
-                strict_minimum=True,
-            )
-            if "point_sample_density" in config
             else None
         ),
         filter_ground_collision=(

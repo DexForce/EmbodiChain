@@ -91,20 +91,12 @@ HANDOVER_GRIPPER_MODEL = ParallelJawGripperModelCfg(
     model_id="robotiq_2f_140",
     min_opening_width=0.005,
     max_opening_width=0.140,
-    finger_length=0.08,
-    finger_width=0.027,
-    finger_thickness=0.0075,
-    palm_depth=0.10,
 )
 HORIZONTAL_HAND_CLOSE_QPOS = 0.025
 HORIZONTAL_GRIPPER_MODEL = ParallelJawGripperModelCfg(
     model_id="dh_pgc_140_50",
     min_opening_width=0.002,
     max_opening_width=0.050,
-    finger_length=0.030,
-    finger_width=0.030,
-    finger_thickness=0.012,
-    palm_depth=0.105,
 )
 HANDOVER_SAMPLE_INTERVAL = 220
 HANDOVER_HAND_INTERP_STEPS = 10
@@ -248,6 +240,8 @@ def run_handover_demo(
         hand_interp_steps=HANDOVER_HAND_INTERP_STEPS,
     )
     grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
+        robot=robot,
+        arm_control_part="left_arm",
         n_sample=args.n_sample,
         force_refresh=args.force_reannotate,
         approach_direction_samples=getattr(args, "grasp_approach_samples", 4),

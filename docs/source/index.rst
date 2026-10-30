@@ -49,7 +49,6 @@ Table of Contents
    features/neural_dynamics.md
    features/generative_sim/index*
    features/workspace_analyzer/index*
-   features/interaction/index*
    features/toolkits/index*
 
 .. toctree::

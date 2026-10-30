@@ -102,7 +102,11 @@ Robot-backed planning retains shared speed-cap and control-part resolution,
 including gradients of uncapped requested limits.
 The runtime and reference preserve uniform not-a-knot cubic geometry, the existing waypoint
 deduplication tolerance and final knot, and signed velocity/acceleration bounds
-containing rest. Planner outputs retain float32 and quantity sampling retains
+containing rest. Public planner and joint-path retiming outputs retain float64
+sampling precision: narrowing joint positions before differentiating dense
+samples can amplify quantization into dynamic-limit violations. Input cleanup
+retains its original precision semantics. Consumers that narrow or resample
+outputs must validate their resulting trajectories. Quantity sampling retains
 the existing integer coercion, independently of backend or input precision.
 Interval bounds are conservative; timing need not match the former external
 TOPPRA package. Tiny real moves must retain positive duration.
@@ -117,6 +121,10 @@ The benchmark adapter enables this mode only when the Atomic host supplies
 `atomic_plan_options(control_dt=...)`. Primitive sample counts remain lower
 bounds, and compiled control-grid checks still decide timing validity. NMG keeps
 its complete request and original rollout budget.
+Native timing does not certify an action after it inserts an intermediate hold:
+splitting a moving path at its closest target-pose sample introduces a rest
+boundary the original solve may not provide. Compiled dynamics remain a separate
+validity check, including for retimed neural rollouts.
 
 Warp constructs splines, bounds, controllable sets and samples on the input
 device. It honors the current Torch stream and reads a scalar to size output.
@@ -191,6 +199,36 @@ the graph. Validate complete observation-layout metadata/fingerprint before
 rollout; model dimensions and waypoint capacity belong to the export contract.
 Inspect the `policy-deploy` package extra for runtime dependencies.
 
+With `batch_control_parts=True`, `MotionGenerator.generate_multi_part()` can
+route independent named-arm requests to `NeuralPlanner.plan_multi_part()`.
+The shared actor receives arm-major `A * B` rows, while each named-arm FK call
+retains its original `B` scene rows. Valid goal counts, step budgets, completion
+and failure masks remain independent. Results split back into ordinary per-arm
+plans; another arm's terminal padding is removed before retiming. Fixed-batch
+exports must fit the packed batch. `PlanResult.policy_batching` records actual
+scene/arm/actor batch sizes and shared forward calls, not a speed estimate.
+CUDA arithmetic is owned by ONNX Runtime's provider options, independently of
+Torch's TF32 flags. `onnx_cuda_use_tf32=None` preserves historical provider
+defaults; an explicit Boolean fixes that option. The expanded Franka benchmark
+disables TF32 consistently across its NMG configurations to limit batch-size
+dependent numerical differences. Check actual selected provider options when
+validating CUDA parity; CPU equality alone does not establish it.
+The CUDA execution provider's `device_id` follows the planner's runtime device
+ordinal within `CUDA_VISIBLE_DEVICES`. Quality workers on separate devices must
+retain this binding; setting Torch's current device alone does not bind ORT.
+
+Callers must establish independence before grouping requests. HandOver can batch
+ready transport/receiver plans while retaining serial execution stages;
+CoordinatedPlacement groups its simultaneous approaches. Dependencies and
+execution order remain task-owned. Other backends and historical neural configs
+use sequential facade fallback for the same ready group. Both independent
+requests are evaluated before the task's failure gate, including when the first
+placing arm fails; dependent phases and command execution remain blocked.
+Grouping a request does not imply a packed backend. Atomic benchmark
+`packed_motion_groups` diagnostics
+record groups actually planned, so an enabled flag alone does not prove batching
+ran when a prior stage failed.
+
 `NeuralPlannerCfg.dt` is bookkeeping, not solved timing: the rollout integrates
 a joint delta per step, so a saturated step implies `action_scale / dt` rad/s
 and overshoots a typical arm's velocity limit several times over. Setting
@@ -207,7 +245,12 @@ output plan fails. External completion-step evaluation must match constraints
 on those original states, independently of planner success and retimed output.
 
 Runtime/training frame differences must be expressed through explicit policy
-frame and TCP transforms. Target/FK quaternions follow the shared
+frame and TCP transforms. A shared single-arm policy can serve both arms of a
+fixed-base assembly through `policy_frame_from_world_by_control_part`; every
+requested arm must have an entry. The selected transform applies to targets,
+rollout FK, and retimed arrival checks. Atomic task orchestration coordinates
+the arms; reusing the policy does not create a jointly trained dual-arm policy.
+Target/FK quaternions follow the shared
 [simulation convention](../simulation-system/simulation-system.md); do not
 convert a value twice. Failed waypoint convergence retains native rollout
 samples through the capability described above. Validate export metadata and
@@ -222,6 +265,24 @@ or failure. Backend import side effects must not change numerical policy for
 other planners/solvers. Native derivatives are mapped into simulator joint order;
 only missing velocity segments are derived. Scene conversion and batch-world
 semantics are owned by [collision worlds](collision-worlds.md).
+
+`CuroboPlanOptions.waypoint_modalities` preserves each target's joint, position,
+orientation, or full-pose meaning in mixed sequences. Partial poses change
+native terminal costs and convergence criteria without adding path constraints;
+reset full-pose criteria after a partial segment. Position-only conversion
+requires coincident native tool and runtime TCP origins. Do not complete missing
+pose components using hidden benchmark witnesses. Per-control-part backends and
+root transforms support dual-arm Atomic calls; benchmark preparation and joint
+budgets must cover both bound motion parts.
+
+The benchmark TOPPRA adapter's opt-in masked route uses
+`compute/kinematics/_masked_ik.py` with caller-owned batched FK. It solves active
+components from the preceding joint state, preserves failed rows as failures,
+then times the joint path. Joint targets supply their requested joint values;
+Cartesian reference joint solutions never seed the solve. Historical homogeneous
+Joint/FullPose routes retain their existing behavior. Validate component masking,
+mixed order and real Franka adapter calls in
+`tests/benchmark/motion_generation/test_constraint_sequences.py`.
 
 ## Retiming and playback
 
@@ -245,6 +306,10 @@ Control-grid retiming requires zero first-arrival intervals. It rounds each
 row's duration up to the destination clock, samples uniform source-path phase,
 and recomputes qvel with zero first/last-valid and padded-hold velocities.
 Source `PlanResult.dt` remains planner timing.
+Atomic `trajectory_ops.to_full_robot_trajectory()` converts sampled positions
+and velocities to the destination `base_qpos` dtype/device only after this
+control-grid resampling. Native planner tensors remain unchanged; compiled
+dynamics are evaluated on the resulting command samples.
 
 `compute/trajectory/interpolation.py::interpolate_minimum_jerk()` expands joint
 keyframes onto a fixed control interval while preserving every keyframe. The

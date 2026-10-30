@@ -79,8 +79,11 @@ def retime_joint_paths(
     Warp handles both CPU and CUDA inputs. Sufficiently large CPU inference
     batches share a bounded thread pool; small requests and gradient recording
     run inline. Interval constraints enforce limits between grid points.
-    Floating outputs retain float32/float64 input precision; other input dtypes
-    are promoted to float32 before solving.
+    Floating outputs use float64 so finite differences of dense position samples
+    do not amplify float32 quantization into spurious dynamic-limit violations.
+    Input filtering retains float32/float64 input precision; other input dtypes
+    are promoted to float32 before solving. Consumers that narrow or resample
+    these positions must recheck the resulting trajectory's dynamic limits.
 
     The path geometry is resampled along the fitted spline, so poses derived
     from the input samples must be recomputed from the returned positions.
@@ -161,9 +164,10 @@ def retime_joint_paths(
             sample_count=int(resolved_interval) if quantity else None,
             sample_dt=None if quantity else float(resolved_interval),
             grid_size=grid_size,
+            output_dtype=torch.float64,
         )
     except (ValueError, FloatingPointError, OverflowError):
-        return _failed_result(batch, dofs, resolved_device, waypoints.dtype)
+        return _failed_result(batch, dofs, resolved_device, torch.float64)
     return PlanResult(
         **{key: value.to(resolved_device) for key, value in result.items()}
     )
@@ -336,14 +340,8 @@ class ToppraPlanner(BasePlanner):
                         else None
                     ),
                     grid_size=self.cfg.grid_size,
+                    output_dtype=torch.float64,
                 )
         except (ValueError, FloatingPointError, OverflowError):
-            return _failed_result(b, dofs, self.device, torch.float32)
-        # The existing planner contract returns float32 for all floating
-        # fields, independently of input precision.
-        return PlanResult(
-            **{
-                key: value if key == "success" else value.to(torch.float32)
-                for key, value in result.items()
-            }
-        )
+            return _failed_result(b, dofs, self.device, torch.float64)
+        return PlanResult(**result)

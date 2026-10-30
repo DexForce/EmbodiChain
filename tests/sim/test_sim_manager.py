@@ -33,6 +33,7 @@ import torch
 import embodichain.lab.sim.sim_manager as sim_manager_module
 import embodichain.lab.visualization as visualization_module
 from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
     DefaultPhysicsCfg,
     DenoisingCfg,
     DLSSCfg,
@@ -51,6 +52,7 @@ from embodichain.lab.sim.sim_manager import (
     _WindowRecordState,
 )
 from embodichain.lab.sim.sensors import Camera, CameraCfg, StereoCamera, StereoCameraCfg
+from embodichain.lab.sim.sensors.stereo import PairCameraView
 from embodichain.lab.visualization import (
     GizmoCommand,
     PickCommand,
@@ -1871,14 +1873,15 @@ def test_robot_mounted_camera_creation_and_local_parent_binding(
     enabled: bool, stereo: bool
 ) -> None:
     sim = _make_camera_attachment_manager()
-    sim._spawn_scene.builder.result = None
     sim._spawn_scene.builder.is_finalized = False
+    sim._ready_spawn_topology_revision = -1
     sim.physics = SimpleNamespace(supports_robot=True)
-    asset, nodes = _make_camera_parent_asset()
+    asset, nodes = _make_unbound_camera_parent_asset(sim.num_envs, uid="renamed_robot")
     sim._declare_spawn_articulation = MagicMock(return_value=asset)
     cfg_type = StereoCameraCfg if stereo else CameraCfg
     camera_type = StereoCamera if stereo else Camera
     camera = object.__new__(camera_type)
+    camera._is_attached = False
     camera.attach_to_parent_nodes = MagicMock()
 
     class CameraFactory(camera_type):
@@ -1902,7 +1905,8 @@ def test_robot_mounted_camera_creation_and_local_parent_binding(
         assert sim.get_sensor("wrist_camera") is camera
         assert camera.cfg.extrinsics.parent == "renamed_robot/wrist"
         camera.attach_to_parent_nodes.assert_not_called()
-        sim._spawn_scene.builder.result = object()
+        _bind_camera_parent_asset(asset, sim.num_envs)
+        sim._spawn_scene.builder.is_finalized = True
         sim._attach_parented_cameras()
         camera.attach_to_parent_nodes.assert_called_once_with(nodes)
     else:
@@ -2454,6 +2458,7 @@ def test_manager_resolves_camera_parent_before_attachment() -> None:
 
 def test_parented_cameras_include_only_configured_camera_sensors() -> None:
     parented_camera = object.__new__(sim_manager_module.Camera)
+    parented_camera._is_attached = False
     parented_camera.cfg = CameraCfg(
         extrinsics=CameraCfg.ExtrinsicsCfg(parent="robot/tool")
     )
@@ -2549,6 +2554,61 @@ def _make_camera_parent_asset(
     )
 
 
+def _make_unbound_camera_parent_asset(
+    num_envs: int, uid: str = "arm"
+) -> tuple[sim_manager_module.Articulation, list[object]]:
+    """Use the real facade so premature metadata access fails like Newton."""
+    asset = sim_manager_module.Articulation(
+        RobotCfg(uid=uid, fpath="robot.urdf"), device=torch.device("cpu")
+    )
+    asset._initialize_spawn_declaration(num_envs)
+    nodes = [object() for _ in range(num_envs)]
+    asset.get_link_render_nodes = MagicMock(return_value=nodes)
+    return asset, nodes
+
+
+def _bind_camera_parent_asset(
+    asset: sim_manager_module.Articulation, num_envs: int
+) -> None:
+    """Give the declared facade fake per-arena handles with known metadata."""
+    asset._entities = [
+        SimpleNamespace(get_link_names=lambda: ["wrist"]) for _ in range(num_envs)
+    ]
+
+
+def _make_camera_with_fake_views(
+    cfg: CameraCfg, num_envs: int
+) -> tuple[Camera, list[MagicMock]]:
+    """Exercise real camera pose and attachment logic with CPU-only views."""
+    stereo = isinstance(cfg, StereoCameraCfg)
+    camera_type = StereoCamera if stereo else Camera
+    camera = object.__new__(camera_type)
+    camera.cfg = cfg
+    camera.device = torch.device("cpu")
+    camera._num_instances = num_envs
+    camera._is_attached = False
+    native_views = []
+
+    def make_view() -> MagicMock:
+        view = MagicMock()
+        view.get_local_pose.return_value = np.eye(4, dtype=np.float32)
+        view.set_local_pose.side_effect = lambda pose: setattr(
+            view.get_local_pose, "return_value", pose.copy()
+        )
+        native_views.append(view)
+        return view
+
+    camera._entities = [
+        (
+            PairCameraView(make_view(), make_view(), cfg.left_to_right.numpy())
+            if stereo
+            else make_view()
+        )
+        for _ in range(num_envs)
+    ]
+    return camera, native_views
+
+
 def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
     sim = object.__new__(SimulationManager)
     sim.num_envs = num_envs
@@ -2558,10 +2618,163 @@ def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
     sim._sensors = {}
     sim._visualization_topology_revision = 0
     sim._arenas = [object() for _ in range(num_envs)]
-    sim._spawn_scene = SimpleNamespace(
-        builder=SimpleNamespace(result=object()),
+    result = SimpleNamespace(
+        topology_revision=3, needs_rebuild=False, get_arena=MagicMock()
     )
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(
+            result=result, is_finalized=True, has_pending_changes=False
+        ),
+        arena_names=[f"arena_{i}" for i in range(num_envs)],
+        commit=MagicMock(return_value=result),
+        prepare_runtime_config=MagicMock(),
+        bind=MagicMock(),
+    )
+    sim.physics = SimpleNamespace(
+        prepare_spawn_runtime=MagicMock(), sync_render_state=MagicMock()
+    )
+    sim._default_plane = object()
+    sim._ready_spawn_topology_revision = result.topology_revision
+    sim._prepared_spawn_topology_revision = result.topology_revision
+    sim._synced_spawn_render_topology_revision = result.topology_revision
+    sim._camera_attachment_topology_revision = result.topology_revision
     return sim
+
+
+@pytest.mark.parametrize("stereo", [False, True])
+@pytest.mark.parametrize("state", ["failed_bind", "pending_changes", "needs_rebuild"])
+def test_add_camera_waits_for_parent_readiness_and_next_prepare(
+    stereo: bool, state: str
+) -> None:
+    sim = _make_camera_attachment_manager()
+    scene = sim._spawn_scene
+    result = scene.builder.result
+    asset, nodes = _make_unbound_camera_parent_asset(sim.num_envs)
+    sim._robots["arm"] = asset
+    cfg_type = StereoCameraCfg if stereo else CameraCfg
+    camera_type = StereoCamera if stereo else Camera
+    cfg = cfg_type(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent="arm/wrist"))
+    camera = object.__new__(camera_type)
+    camera.cfg = cfg
+    camera._is_attached = False
+    camera.attach_to_parent_nodes = MagicMock(
+        side_effect=lambda _nodes: setattr(camera, "_is_attached", True)
+    )
+    camera._detach_from_parent_nodes = MagicMock()
+
+    existing_cfg = cfg_type(
+        uid="existing", extrinsics=CameraCfg.ExtrinsicsCfg(parent="existing_arm/wrist")
+    )
+    existing, native_views = _make_camera_with_fake_views(existing_cfg, sim.num_envs)
+    existing_asset, _ = _make_camera_parent_asset(sim.num_envs)
+    sim._robots["existing_arm"] = existing_asset
+
+    class CameraFactory(camera_type):
+        def __new__(cls, sensor_cfg, *_args, **_kwargs):
+            return existing if sensor_cfg.uid == "existing" else camera
+
+    sim.SUPPORTED_SENSOR_TYPES = {cfg.sensor_type: CameraFactory}
+    assert sim.add_sensor(existing_cfg) is existing
+    assert existing.is_attached
+    runtime_pose = torch.eye(4).unsqueeze(0).repeat(sim.num_envs, 1, 1)
+    runtime_pose[:, 0, 3] = 0.25
+    existing.set_local_pose(runtime_pose)
+    if state == "failed_bind":
+        scene.bind.side_effect = RuntimeError("bind failed")
+        with pytest.raises(RuntimeError, match="bind failed"):
+            sim.prepare()
+        scene.bind.side_effect = None
+    else:
+        # Existing handles can be stale while a rebuild or changes are pending.
+        _bind_camera_parent_asset(asset, sim.num_envs)
+        asset.get_link_render_nodes.return_value = [object() for _ in nodes]
+        if state == "pending_changes":
+            scene.builder.has_pending_changes = True
+        else:
+            result.needs_rebuild = True
+
+    # The scene result exists, but parent handles are unbound or may be stale.
+    assert sim.add_sensor(cfg) is camera
+    camera.attach_to_parent_nodes.assert_not_called()
+
+    def bind() -> None:
+        _bind_camera_parent_asset(asset, sim.num_envs)
+        asset.get_link_render_nodes.return_value = nodes
+
+    def commit() -> SimpleNamespace:
+        scene.builder.has_pending_changes = False
+        result.needs_rebuild = False
+        result.topology_revision += 1
+        return result
+
+    scene.bind.side_effect = bind
+    scene.commit.side_effect = commit
+    sim.prepare()
+
+    camera.attach_to_parent_nodes.assert_called_once_with(nodes)
+    assert camera.is_attached
+    assert existing.is_attached
+    if state == "failed_bind":
+        # A retry can succeed at the same revision as a previously attached camera.
+        scene.commit.assert_not_called()
+        assert result.topology_revision == 3
+        torch.testing.assert_close(
+            existing.get_local_pose(to_matrix=True), runtime_pose
+        )
+        for view in native_views:
+            view.attach_node.assert_called_once()
+    else:
+        for view in native_views:
+            assert view.attach_node.call_count == 2
+
+
+@pytest.mark.parametrize("stereo", [False, True])
+@pytest.mark.parametrize("qualified", [False, True])
+def test_eager_articulation_addition_revalidates_existing_camera_parent(
+    stereo: bool, qualified: bool
+) -> None:
+    sim = _make_camera_attachment_manager()
+    first_asset, _ = _make_camera_parent_asset(sim.num_envs)
+    sim._robots["first"] = first_asset
+    cfg_type = StereoCameraCfg if stereo else CameraCfg
+    camera_type = StereoCamera if stereo else Camera
+    parent = "first/wrist" if qualified else "wrist"
+    cfg = cfg_type(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent=parent))
+    camera, native_views = _make_camera_with_fake_views(cfg, sim.num_envs)
+
+    class CameraFactory(camera_type):
+        def __new__(cls, *_args, **_kwargs):
+            return camera
+
+    sim.SUPPORTED_SENSOR_TYPES = {cfg.sensor_type: CameraFactory}
+    assert sim.add_sensor(cfg) is camera
+    assert camera.is_attached
+    runtime_pose = torch.eye(4).unsqueeze(0).repeat(sim.num_envs, 1, 1)
+    runtime_pose[:, 0, 3] = 0.25
+    camera.set_local_pose(runtime_pose)
+
+    second_asset, _ = _make_camera_parent_asset(sim.num_envs)
+    result = sim._spawn_scene.builder.result
+
+    def declare(*_args) -> SimpleNamespace:
+        # Default eagerly adds the asset and advances the revision without rebuild.
+        result.topology_revision += 1
+        return second_asset
+
+    sim._declare_spawn_articulation = MagicMock(side_effect=declare)
+    second_cfg = ArticulationCfg(uid="second", fpath="robot.urdf")
+    if qualified:
+        assert sim.add_articulation(second_cfg) is second_asset
+    else:
+        with pytest.raises(ValueError, match="ambiguous"):
+            sim.add_articulation(second_cfg)
+
+    sim._spawn_scene.commit.assert_not_called()
+    assert result.topology_revision == 4
+    assert camera.is_attached
+    torch.testing.assert_close(camera.get_local_pose(to_matrix=True), runtime_pose)
+    for view in native_views:
+        view.attach_node.assert_called_once()
 
 
 @pytest.mark.parametrize("registry", ["_robots", "_articulations"])
@@ -2597,17 +2810,20 @@ def test_add_camera_attaches_resolved_nodes_only_when_parent_is_configured(
         asset.get_link_render_nodes.assert_called_once_with("wrist")
 
 
-def test_add_camera_validates_parent_before_allocating_views() -> None:
+@pytest.mark.parametrize("stereo", [False, True])
+def test_add_camera_validates_parent_before_allocating_views(stereo: bool) -> None:
     sim = _make_camera_attachment_manager()
     factory = MagicMock()
+    cfg_type = StereoCameraCfg if stereo else CameraCfg
+    camera_type = StereoCamera if stereo else Camera
 
-    class CameraFactory(Camera):
+    class CameraFactory(camera_type):
         def __new__(cls, *_args, **_kwargs):
             factory()
-            return object.__new__(Camera)
+            return object.__new__(camera_type)
 
-    sim.SUPPORTED_SENSOR_TYPES = {"Camera": CameraFactory}
-    cfg = CameraCfg(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent="missing"))
+    cfg = cfg_type(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent="missing"))
+    sim.SUPPORTED_SENSOR_TYPES = {cfg.sensor_type: CameraFactory}
 
     with pytest.raises(ValueError, match="was not found"):
         sim.add_sensor(cfg)

@@ -31,6 +31,7 @@ from ._artifacts import _RunArtifacts
 from .distributed import _DistributedContext
 from .learner import SupervisedLearner
 from .sources import SupervisedSource
+from .types import SupervisedTrainingState
 
 __all__ = ["SupervisedTrainerCfg", "SupervisedTrainer"]
 
@@ -70,6 +71,8 @@ class SupervisedTrainer:
         signature: Recipe semantics, including feature/action units, frames,
             model configuration and numerical policy where applicable.
         scheduler: Optional scheduler stepped after each successful update.
+        training_states: Ordered update/recovery participants. States commit
+            after optimizer success and are checkpointed separately per rank.
         evaluate: Optional callback receiving the committed learner. It owns
             validation metrics and must not select a model on a test split.
     """
@@ -83,6 +86,7 @@ class SupervisedTrainer:
         signature: Mapping[str, Any] | None = None,
         scheduler: Any = None,
         evaluate: Callable[[SupervisedLearner], Mapping[str, float]] | None = None,
+        training_states: Mapping[str, SupervisedTrainingState] | None = None,
     ) -> None:
         self.cfg = cfg or SupervisedTrainerCfg()
         self.cfg.validate()
@@ -101,6 +105,22 @@ class SupervisedTrainer:
             json.dumps(dict(signature or {}), sort_keys=True, allow_nan=False)
         )
         self.scheduler, self.evaluate = scheduler, evaluate
+        self.training_states = dict(training_states or {})
+        if any(not isinstance(name, str) or not name for name in self.training_states):
+            raise ValueError("Training state names must be nonempty strings")
+        for value in self.training_states.values():
+            if not all(
+                callable(getattr(value, name, None))
+                for name in (
+                    "on_update",
+                    "state_dict",
+                    "validate_state_dict",
+                    "load_state_dict",
+                )
+            ):
+                raise TypeError(
+                    "Training states must implement the supervised update/recovery protocol"
+                )
         self._context = _DistributedContext(self.cfg.device)
         self.sampler = torch.Generator(device="cpu").manual_seed(
             self.cfg.seed + self._context.rank
@@ -140,6 +160,11 @@ class SupervisedTrainer:
                 "max_grad_norm": self.learner.max_grad_norm,
                 "amp_dtype": str(self.learner.amp_dtype),
                 "find_unused_parameters": self.learner.ddp_find_unused_parameters,
+                "broadcast_buffers": self.learner.ddp_broadcast_buffers,
+                "training_state_types": [
+                    (name, f"{type(value).__module__}.{type(value).__qualname__}")
+                    for name, value in self.training_states.items()
+                ],
                 "scheduler_type": (
                     None
                     if self.scheduler is None
@@ -196,6 +221,11 @@ class SupervisedTrainer:
             )
             metrics = self.learner.update(batch)
             self.sampler.set_state(candidate.get_state())
+            for name, component in self.training_states.items():
+                self._context.run(
+                    lambda component=component: component.on_update(self.learner),
+                    f"training state update: {name}",
+                )
             if self.scheduler is not None:
                 self._context.run(self.scheduler.step, "scheduler")
             step = self.learner.num_updates
@@ -228,6 +258,7 @@ class SupervisedTrainer:
 
     def _local_rank_state(self) -> dict[str, Any]:
         return {
+            "training_states": self._training_state_dict(),
             "sampler": self.sampler.get_state(),
             "rng": self._rng_state(),
             "buffers": {
@@ -235,6 +266,30 @@ class SupervisedTrainer:
                 for name, buffer in self.learner.model.named_buffers()
             },
         }
+
+    def _training_state_dict(self) -> dict[str, Any]:
+        return {
+            name: {
+                "type": f"{type(value).__module__}.{type(value).__qualname__}",
+                "state": value.state_dict(),
+            }
+            for name, value in self.training_states.items()
+        }
+
+    def _validate_training_states(self, saved: Mapping[str, Any]) -> None:
+        if tuple(saved) != tuple(self.training_states):
+            raise ValueError("Supervised checkpoint training state names differ")
+        for name, value in self.training_states.items():
+            identity = f"{type(value).__module__}.{type(value).__qualname__}"
+            if saved[name].get("type") != identity:
+                raise ValueError(
+                    f"Supervised checkpoint training state type differs: {name}"
+                )
+            value.validate_state_dict(saved[name]["state"])
+
+    def _restore_training_states(self, saved: Mapping[str, Any]) -> None:
+        for name, value in self.training_states.items():
+            value.load_state_dict(saved[name]["state"])
 
     def _gather_rank_states(self) -> list[Any] | None:
         state = self._context.run(self._local_rank_state, "checkpoint rank state")
@@ -268,6 +323,7 @@ class SupervisedTrainer:
                     for name, value in self.learner.model.named_buffers():
                         value.copy_(buffers[name])
                 self.sampler.set_state(snapshot[0]["sampler"])
+                self._restore_training_states(snapshot[0]["training_states"])
                 self._restore_rng(rng)
                 self.learner.model.train(was_training)
 
@@ -315,13 +371,19 @@ class SupervisedTrainer:
         self._artifacts.claim()
         path.parent.mkdir(parents=True, exist_ok=True)
         state = {
-            "version": 2 if self._context.enabled else 1,
+            "version": self._checkpoint_version(),
             "run_id": self._artifacts.run_id,
             "learner": self.learner.state_dict(),
             "sampler": self.sampler.get_state(),
             "rng": self._rng_state(),
             "signature": self.signature,
             "source_id": self.source.source_id,
+            "ddp_broadcast_buffers": self.learner.ddp_broadcast_buffers,
+            "training_states": (
+                self._training_state_dict()
+                if rank_states is None
+                else rank_states[0]["training_states"]
+            ),
             "config": self.cfg.to_dict(),
             "scheduler_type": (
                 None
@@ -390,10 +452,18 @@ class SupervisedTrainer:
             else:
                 local = state
             self.sampler.set_state(local["sampler"])
+            self._restore_training_states(local.get("training_states", {}))
             self._restore_rng(local["rng"])
 
         self._context.run(restore, "checkpoint restore")
         self._artifacts.adopt_resume(run_id)
+
+    def _checkpoint_version(self) -> int:
+        # Older trainers must not silently discard required participant states
+        # or a nondefault DDP buffer policy. Default recipes keep formats 1/2.
+        return (2 if self._context.enabled else 1) + (
+            2 if self.training_states or self.learner.ddp_broadcast_buffers else 0
+        )
 
     def _validate_checkpoint(self, state: Mapping[str, Any]) -> None:
         # This preflight runs collectively before output admission, DDP setup,
@@ -402,13 +472,20 @@ class SupervisedTrainer:
         validate_source = getattr(self.source, "validate_resume", None)
         if validate_source is not None:
             validate_source()
+        if (
+            state.get("ddp_broadcast_buffers", False)
+            != self.learner.ddp_broadcast_buffers
+        ):
+            raise ValueError(
+                "Supervised checkpoint DDP buffer-broadcast policy differs"
+            )
         distributed = state.get("distributed", {})
         if distributed.get("world_size", 1) != self._context.world_size:
             raise ValueError(
                 "Supervised checkpoint world size differs; exact recovery requires the same world size"
             )
         if (
-            state.get("version") != (2 if self._context.enabled else 1)
+            state.get("version") != self._checkpoint_version()
             or state["signature"] != self.signature
             or state["source_id"] != self.source.source_id
         ):
@@ -430,6 +507,12 @@ class SupervisedTrainer:
         if state.get("scheduler_type") != scheduler_type:
             raise ValueError("Supervised checkpoint scheduler type differs")
         self.learner._validate_state_dict(state["learner"])
+        local_state = (
+            distributed["rank_states"][self._context.rank]
+            if self._context.enabled
+            else state
+        )
+        self._validate_training_states(local_state.get("training_states", {}))
         if self._context.enabled:
             rank_states = distributed["rank_states"]
             if len(rank_states) != self._context.world_size:

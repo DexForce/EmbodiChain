@@ -149,7 +149,7 @@ def test_measured_success_uses_configured_radius_and_table_bounds(monkeypatch):
     assert success.tolist() == [True, False, False, False]
     assert fail.tolist() == [False, False, True, False]
     torch.testing.assert_close(
-        metrics["goal_distance"], torch.tensor([0.099, 0.101, 0.01, 0.01])
+        metrics["distance_to_goal"], torch.tensor([0.099, 0.101, 0.01, 0.01])
     )
     assert torch.equal(task.is_task_success(), success)
     assert not task.check_truncated({}, {}).any()
@@ -200,6 +200,14 @@ def test_expert_fails_when_ik_rejects_a_waypoint(monkeypatch):
     torch.testing.assert_close(next(actions), torch.tensor([[0.25] * 7 + [-1.0]]))
     with pytest.raises(RuntimeError, match="IK failed"):
         next(actions)
+
+
+def test_expert_geometry_must_be_declared_in_configuration(monkeypatch):
+    _, cfg = _configuration("task.franka.visual.yaml")
+    del cfg.extensions["push_cube"]["expert"]["approach_height"]
+    monkeypatch.setattr(EmbodiedEnv, "__init__", lambda *args, **kwargs: None)
+    with pytest.raises(TypeError, match="approach_height"):
+        PushCubeEnv(cfg)
 
 
 def test_expert_segments_take_geometry_and_timing_from_configuration(monkeypatch):

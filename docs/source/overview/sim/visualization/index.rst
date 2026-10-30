@@ -1,13 +1,17 @@
-Interactive Simulation
-======================
+.. _interactive-simulation:
 
-Interactive Simulation covers the frontends and controls used to inspect or
-manipulate a running simulation. Task-specific commands such as asset preview,
+Visualization and Interaction
+=============================
+
+This section covers the visualization frontends and controls used to inspect
+or manipulate a running simulation. Task-specific commands such as asset preview,
 workspace visualization, and grasp annotation remain in their own guides or
 feature sections.
 
-Interaction Frontends
----------------------
+.. _interaction-frontends:
+
+Visualization Frontends
+-----------------------
 
 .. list-table::
    :header-rows: 1
@@ -23,7 +27,7 @@ Interaction Frontends
    * - Viser browser
      - Headless or remote scene inspection, camera previews, environment
        visibility, overlays, and trusted browser controls.
-     - :doc:`Viser browser visualization </overview/sim/viser_visualization>`
+     - :doc:`Viser browser visualization <viser>`
 
 The native window and Viser are mutually exclusive visualization frontends.
 Both can expose the same registered Gizmo targets.
@@ -50,4 +54,5 @@ Related Workflows
    :maxdepth: 2
 
    Native window interaction <window.md>
+   Viser browser visualization <viser.md>
    Interactive Gizmos <gizmo.md>

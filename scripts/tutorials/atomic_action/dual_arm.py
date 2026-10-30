@@ -90,6 +90,8 @@ def main() -> None:
             open=opened, grasp=closed
         )
     generator = create_parallel_jaw_grasp_pose_generator(
+        robot=robot,
+        arm_control_part="left_arm",
         n_sample=args.n_sample,
         force_refresh=args.force_reannotate,
         approach_direction_samples=getattr(args, "grasp_approach_samples", 4),

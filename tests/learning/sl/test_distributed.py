@@ -166,6 +166,30 @@ class _StochasticSource:
         return SupervisedBatch(batch.inputs + offset, batch.targets)
 
 
+class _RankUpdateState:
+    def __init__(self, rank: int) -> None:
+        self.rank, self.updates, self.total = rank, 0, torch.zeros(())
+
+    def on_update(self, learner: SupervisedLearner) -> None:
+        self.updates += 1
+        self.total += next(learner.model.parameters()).detach().sum() + self.rank
+
+    def state_dict(self) -> dict[str, Any]:
+        return {"rank": self.rank, "updates": self.updates, "total": self.total.clone()}
+
+    def validate_state_dict(self, state: dict[str, Any]) -> None:
+        if (
+            state["rank"] != self.rank
+            or type(state["updates"]) is not int
+            or state["updates"] < 0
+        ):
+            raise ValueError("Rank-local update state differs")
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        self.updates = state["updates"]
+        self.total.copy_(state["total"])
+
+
 def _build_recovery(path: Path, rank: int) -> SupervisedTrainer:
     random.seed(101 + rank)
     np.random.seed(201 + rank)
@@ -187,6 +211,7 @@ def _build_recovery(path: Path, rank: int) -> SupervisedTrainer:
         _StochasticSource(),
         cfg,
         signature={"regression": "rank-local recovery"},
+        training_states={"rank_update": _RankUpdateState(rank)},
     )
 
     def evaluate(current: SupervisedLearner) -> dict[str, float]:
@@ -197,6 +222,7 @@ def _build_recovery(path: Path, rank: int) -> SupervisedTrainer:
         np.random.random(3)
         torch.rand(5)
         torch.randint(10, (3,), generator=trainer.sampler)
+        trainer.training_states["rank_update"].updates += 100
         # BC-style checkpoint publication inside a rank-zero callback must not hang.
         trainer.save(path / "selected.pt")
         with (path.parent / f"{path.name}-validation-rank{rank}.jsonl").open(
@@ -213,6 +239,10 @@ def _snapshot(trainer: SupervisedTrainer) -> dict[str, Any]:
     return copy.deepcopy(
         {
             "learner": trainer.learner.state_dict(),
+            "training_states": {
+                name: value.state_dict()
+                for name, value in trainer.training_states.items()
+            },
             "sampler": trainer.sampler.get_state(),
             "rng": {
                 "python": random.getstate(),
@@ -419,15 +449,34 @@ def _source_resume_worker(rank: int, directory: Path) -> None:
         dist.barrier()
 
 
+def _chunked_checkpoint_worker(rank: int) -> None:
+    from embodichain.learning.sl.distributed import _DistributedContext
+
+    context = _DistributedContext("cpu")
+    # Slightly over 16 MiB, so this exercises multiple transfer chunks.
+    value = {"rank": rank, "tensor": torch.arange(4_194_307, dtype=torch.float32)}
+    states = context.gather(value)
+    if rank == 0:
+        assert states is not None
+        assert [state["rank"] for state in states] == list(range(dist.get_world_size()))
+        for state in states[1:]:
+            torch.testing.assert_close(state["tensor"], value["tensor"], rtol=0, atol=0)
+    else:
+        assert states is None
+
+    with pytest.raises(RuntimeError, match="checkpoint state serialization"):
+        context.gather((lambda: None) if rank == 1 else value)
+
+
 def _distributed_worker(
-    rank: int, group_file: str, directory: str, scenario: str
+    rank: int, group_file: str, directory: str, scenario: str, world_size: int
 ) -> None:
     torch.set_num_threads(1)
     dist.init_process_group(
         "gloo",
         init_method=f"file://{group_file}",
         rank=rank,
-        world_size=2,
+        world_size=world_size,
         timeout=timedelta(seconds=45),
     )
     try:
@@ -439,17 +488,24 @@ def _distributed_worker(
             _artifact_worker(rank, Path(directory))
         elif scenario == "source-resume":
             _source_resume_worker(rank, Path(directory))
+        elif scenario == "chunked-checkpoint":
+            _chunked_checkpoint_worker(rank)
         else:
             _recovery_worker(rank, Path(directory), scenario)
     finally:
         dist.destroy_process_group()
 
 
-def _spawn(scenario: str, directory: Path) -> None:
+def _spawn(scenario: str, directory: Path, world_size: int = 2) -> None:
     context = mp.spawn(
         _distributed_worker,
-        args=(str(directory / f"group-{scenario}"), str(directory), scenario),
-        nprocs=2,
+        args=(
+            str(directory / f"group-{scenario}"),
+            str(directory),
+            scenario,
+            world_size,
+        ),
+        nprocs=world_size,
         join=False,
     )
     deadline = time.monotonic() + 100
@@ -467,6 +523,10 @@ def _spawn(scenario: str, directory: Path) -> None:
 
 def test_unequal_weight_single_and_multistep_match_global_batch(tmp_path: Path) -> None:
     _spawn("weighted", tmp_path)
+
+
+def test_chunked_checkpoint_gathers_and_propagates_failures(tmp_path: Path) -> None:
+    _spawn("chunked-checkpoint", tmp_path, world_size=3)
 
 
 def test_restart_preserves_rank_rng_sampling_buffers_and_single_writer(

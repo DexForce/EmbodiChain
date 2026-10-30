@@ -47,36 +47,21 @@ def _positive_finite(value: float, *, field_name: str) -> float:
 
 @configclass
 class ParallelJawGripperModelCfg:
-    """Physical geometry shared by parallel-jaw grasp generators.
+    """Named antipodal contact-width limits, independent of collision geometry.
 
-    ``model_id`` names one concrete end-effector model or calibration. Product
-    names belong in that value (for example ``"dh_pgi_140_80"``), not in the
-    generator class hierarchy. Dimensions are in metres: the grasp frame's X
-    axis is the opening axis, Z is the approach axis, and Y is the remaining
-    finger-width axis. These scalar box dimensions do not encode a mounting
-    transform or the robot's complete collision geometry.
+    Opening width is the full distance between opposing object contacts. Actual
+    gripper surfaces, opening commands and contact/TCP transforms are mandatory
+    inputs to the concrete generator; scalar box dimensions are unsupported.
     """
 
     model_id: str = "parallel_jaw"
-    """Stable identifier for the concrete gripper geometry."""
+    """Identity of the physical hand whose contact-width limits are supplied."""
 
     min_opening_width: float = 0.001
-    """Minimum usable distance between the two fingers in metres."""
+    """Minimum usable full distance between antipodal contacts in metres."""
 
     max_opening_width: float = 0.1
-    """Maximum usable distance between the two fingers in metres."""
-
-    finger_length: float = 0.08
-    """Finger length along the grasp-frame approach axis in metres."""
-
-    finger_width: float = 0.03
-    """Finger extent perpendicular to its opening and approach axes."""
-
-    finger_thickness: float = 0.01
-    """Finger extent along the opening axis in metres."""
-
-    palm_depth: float = 0.08
-    """Palm/root extent along the grasp-frame approach axis in metres."""
+    """Maximum usable full distance between antipodal contacts in metres."""
 
     def __post_init__(self) -> None:
         if (
@@ -85,30 +70,16 @@ class ParallelJawGripperModelCfg:
             or self.model_id != self.model_id.strip()
         ):
             raise ValueError(
-                "ParallelJawGripperModelCfg.model_id must be a non-empty "
-                "string without outer whitespace."
+                "model_id must be a non-empty string without outer whitespace."
             )
         self.min_opening_width = _positive_finite(
-            self.min_opening_width,
-            field_name="min_opening_width",
+            self.min_opening_width, field_name="min_opening_width"
         )
         self.max_opening_width = _positive_finite(
-            self.max_opening_width,
-            field_name="max_opening_width",
+            self.max_opening_width, field_name="max_opening_width"
         )
         if self.min_opening_width >= self.max_opening_width:
             raise ValueError("min_opening_width must be less than max_opening_width.")
-        for field_name in (
-            "finger_length",
-            "finger_width",
-            "finger_thickness",
-            "palm_depth",
-        ):
-            setattr(
-                self,
-                field_name,
-                _positive_finite(getattr(self, field_name), field_name=field_name),
-            )
 
 
 _PARALLEL_JAW_GRIPPER_MODELS = MappingProxyType(
@@ -120,10 +91,6 @@ _PARALLEL_JAW_GRIPPER_MODELS = MappingProxyType(
                 "model_id": "pika_gripper",
                 "min_opening_width": 0.001,
                 "max_opening_width": 0.094,
-                "finger_length": 0.113,
-                "finger_width": 0.039,
-                "finger_thickness": 0.057,
-                "palm_depth": 0.085,
             }
         ),
         "dh_pgi_140_80": MappingProxyType(
@@ -131,10 +98,6 @@ _PARALLEL_JAW_GRIPPER_MODELS = MappingProxyType(
                 "model_id": "dh_pgi_140_80",
                 "min_opening_width": 0.005,
                 "max_opening_width": 0.1,
-                "finger_length": 0.12,
-                "finger_width": 0.04,
-                "finger_thickness": 0.01,
-                "palm_depth": 0.096,
             }
         ),
         # Geometry provenance and mesh-axis mapping: graspkit/README.md.
@@ -144,10 +107,6 @@ _PARALLEL_JAW_GRIPPER_MODELS = MappingProxyType(
                 "model_id": "franka_panda_hand",
                 "min_opening_width": 0.001,
                 "max_opening_width": 0.08,
-                "finger_length": 0.054,
-                "finger_width": 0.022,
-                "finger_thickness": 0.027,
-                "palm_depth": 0.092,
             }
         ),
         "cobotmagic_v100_gripper": MappingProxyType(
@@ -155,10 +114,6 @@ _PARALLEL_JAW_GRIPPER_MODELS = MappingProxyType(
                 "model_id": "cobotmagic_v100_gripper",
                 "min_opening_width": 0.001,
                 "max_opening_width": 0.1,
-                "finger_length": 0.077,
-                "finger_width": 0.056,
-                "finger_thickness": 0.025,
-                "palm_depth": 0.074,
             }
         ),
         "tianji_marvin_gripper": MappingProxyType(
@@ -166,10 +121,6 @@ _PARALLEL_JAW_GRIPPER_MODELS = MappingProxyType(
                 "model_id": "tianji_marvin_gripper",
                 "min_opening_width": 0.001,
                 "max_opening_width": 0.095,
-                "finger_length": 0.103,
-                "finger_width": 0.043,
-                "finger_thickness": 0.034,
-                "palm_depth": 0.082,
             }
         ),
     }
@@ -179,17 +130,17 @@ _PARALLEL_JAW_GRIPPER_MODELS = MappingProxyType(
 def get_parallel_jaw_gripper_model(model_id: str) -> ParallelJawGripperModelCfg:
     """Return a fresh configuration for a named parallel-jaw gripper model.
 
-    The built-in catalog contains grasp-planning geometry rather than URDF or
-    downloadable asset metadata. Callers with an unregistered calibration can
-    construct :class:`ParallelJawGripperModelCfg` directly.
+    This catalog provides antipodal contact-width limits. Actual collision
+    surfaces and TCP mappings are supplied separately through explicit geometry;
+    custom hands require both their own width limits and geometry.
 
     Built-in IDs are ``dh_pgi_140_80``, ``franka_panda_hand`` (the hand in the
     packaged Panda asset), ``cobotmagic_v100_gripper`` (the V100 fingers), and
     ``tianji_marvin_gripper`` (both hands in the asset with end effectors),
     and ``pika_gripper`` (the standalone Pika asset).
     The V100 preset is distinct from CobotMagic's V70 hardware variant. Source
-    archive checksums and dimension derivations are recorded in GraspKit's
-    ``README.md``. Sampling and collision policy remain generator settings.
+    archive checksums are recorded in GraspKit's ``README.md``. Algorithm and
+    target collision policy remain generator settings.
 
     Args:
         model_id: Stable identifier of a built-in gripper geometry.

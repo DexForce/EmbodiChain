@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -45,6 +47,7 @@ def run_benchmark(
     workers: int = 1,
     worker_threads: int = 1,
     quality_batch_size: int = 1,
+    quality_devices: Sequence[str] | None = None,
 ) -> BenchmarkRunResult:
     """Evaluate planners against a suite without modifying caller configuration.
 
@@ -81,6 +84,11 @@ def run_benchmark(
             quality replay. Original cases and standalone validation grids are
             retained. Shared batch timings are not per-case planner latency.
             Atomic, traditional baselines and performance replay require one.
+        quality_devices: Optional unique explicit ``cuda:N`` devices, indexed
+            within ``CUDA_VISIBLE_DEVICES``. Quality shards use these devices
+            round-robin; ``workers`` remains the total process count. One worker
+            uses the first device. Parallel input preparation retains ``device``.
+            Performance replay does not accept this option.
 
     Returns:
         Raw trial records, aggregate metrics and paths to persisted artifacts.
@@ -100,6 +108,18 @@ def run_benchmark(
         raise ValueError("workers must be a positive integer.")
     if type(worker_threads) is not int or worker_threads < 1:
         raise ValueError("worker_threads must be a positive integer.")
+    if quality_devices is not None:
+        import torch
+
+        from .parallel import resolve_quality_devices
+
+        quality_devices = resolve_quality_devices(quality_devices)
+        if case_manifest is not None and any(
+            row.get("case_parameters", {}).get("measurement_purpose")
+            == "performance_replay"
+            for row in json.loads(Path(case_manifest).read_text()).get("cases", [])
+        ):
+            raise ValueError("Performance replay does not accept quality_devices.")
     if workers > 1:
         from .parallel import run_parallel_benchmark
 
@@ -115,6 +135,7 @@ def run_benchmark(
             workers=workers,
             worker_threads=worker_threads,
             quality_batch_size=quality_batch_size,
+            quality_devices=quality_devices,
         )
     if isinstance(suite, (str, Path)):
         resolved = load_suite(suite)
@@ -144,23 +165,36 @@ def run_benchmark(
                 f"available adapters: {sorted(known_adapters)}."
             )
 
-    runner = BenchmarkRunner(
-        resolved,
-        selected,
-        adapters=adapters,
-        device=device,
-        headless=headless,
-        output_root=output_root,
-        video=video,
-        case_manifest=case_manifest,
-        quality_batch_size=quality_batch_size,
+    # Native planners may resolve CUDA from the process's current device.
+    # Restore the host device after serial quality execution, including failures.
+    device_scope = (
+        torch.cuda.device(quality_devices[0])
+        if quality_devices is not None
+        else nullcontext()
     )
-    if planners is not None:
-        runner.suite.planners = runner.planner_specs
-        for spec in runner.planner_specs:
-            spec.enabled = True
-    runner.suite.validate_benchmark()
-    return runner.run()
+    with device_scope:
+        runner = BenchmarkRunner(
+            resolved,
+            selected,
+            adapters=adapters,
+            device=quality_devices[0] if quality_devices is not None else device,
+            headless=headless,
+            output_root=output_root,
+            video=video,
+            case_manifest=case_manifest,
+            quality_batch_size=quality_batch_size,
+            **(
+                {"execution": {"quality_devices": quality_devices}}
+                if quality_devices
+                else {}
+            ),
+        )
+        if planners is not None:
+            runner.suite.planners = runner.planner_specs
+            for spec in runner.planner_specs:
+                spec.enabled = True
+        runner.suite.validate_benchmark()
+        return runner.run()
 
 
 def prepare_case_manifest(

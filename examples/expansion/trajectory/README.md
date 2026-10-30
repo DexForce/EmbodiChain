@@ -1,5 +1,52 @@
 # Trajectory augmentation showcases
 
+## Interactive pure-trajectory augmentation laboratory
+
+Build one self-contained browser page that compares all implemented trajectory
+augmentation routes against the same 7-DoF Franka Panda reference used by the
+official Atomic Action example:
+
+```bash
+python examples/expansion/trajectory/trajectory_augmentation_visualizer.py \
+  --output /tmp/embodichain-trajectory-lab/index.html \
+  --open
+```
+
+The main-branch documentation publishes the generated page at
+[dexforce.github.io/EmbodiChain/main/labs/trajectory-augmentation/](https://dexforce.github.io/EmbodiChain/main/labs/trajectory-augmentation/).
+Regenerate the Pages artifact after changing the visualizer or its production
+inputs:
+
+```bash
+python examples/expansion/trajectory/trajectory_augmentation_visualizer.py \
+  --output docs/source/labs/trajectory-augmentation/index.html
+```
+
+The interactive 3D view uses the official Panda serial-chain geometry and can
+be orbited or zoomed without loading a simulator. A fixed orange object and
+green placement target show the pick-and-place objective; they provide task
+context but never enter candidate generation. The page follows the documentation
+theme preference and offers light, dark, and system modes, including when opened
+as a standalone file. The tabs cover
+endpoint-preserving joint residuals, interior via points,
+Jacobian null-space residuals, manipulability-guided selection, task-space
+deformation with trajectory IK, temporal retiming, fixed-contact approach
+direction changes, and phase-aligned multi-demo stitching with explicit
+bridges. The strength slider and nine local seeds select candidates generated
+by the production APIs. Playback, phase navigation, tool-path and joint-curve
+views run entirely in the generated HTML; JavaScript does not reimplement an
+augmentation operator.
+
+![Interactive pure-trajectory augmentation laboratory](assets/trajectory_augmentation_lab.png)
+
+This laboratory is intentionally trajectory-only. It visualizes one fixed
+object/target pair but does not sample images, affordances, contact points,
+grasp poses, object layouts or scene appearance.
+The fixed-contact approach tab varies the pre-contact standoff while preserving
+the contact transform, and is therefore kept separate from affordance
+augmentation. Every candidate remains subject to host-owned collision,
+dynamics and task-success validation.
+
 ## Pure trajectory: task-space deformation and segment stitching
 
 Generate two CPU-only figures without constructing a simulator:

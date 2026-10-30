@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 import pytest
 import torch
+from types import SimpleNamespace
 
 from embodichain_benchmarks.motion_generation.config import (
     FreeSpaceTrackCfg,
@@ -31,6 +32,298 @@ from embodichain_benchmarks.motion_generation.metrics._constraints import (
 from embodichain_benchmarks.motion_generation.scenarios._free_space_sampling import (
     _project_constraints,
 )
+
+
+def _coupled_fk(qpos):
+    """Two bounded joints couple translation and rotation independently."""
+    poses = (
+        torch.eye(4, dtype=qpos.dtype, device=qpos.device)
+        .expand(*qpos.shape[:-1], 4, 4)
+        .clone()
+    )
+    poses[..., 0, 3] = qpos[..., 0] + qpos[..., 1]
+    angle = qpos[..., 1]
+    poses[..., 0, 0] = poses[..., 1, 1] = angle.cos()
+    poses[..., 0, 1], poses[..., 1, 0] = -angle.sin(), angle.sin()
+    return poses
+
+
+@pytest.mark.parametrize("modality", ["position", "orientation"])
+def test_masked_baseline_ik_ignores_unused_pose_components(modality):
+    from embodichain.compute.kinematics._masked_ik import _solve_masked_ik
+
+    target = _coupled_fk(torch.tensor([[0.4, 0.4]]))
+    if modality == "position":
+        target[:, :3, :3] = torch.nan
+    else:
+        target[:, :3, 3] = torch.nan
+    valid, qpos = _solve_masked_ik(
+        target,
+        torch.zeros(1, 2),
+        -torch.ones(1, 2),
+        torch.ones(1, 2),
+        _coupled_fk,
+        modality,
+    )
+    assert valid.tolist() == [True]
+    if modality == "position":
+        assert float(qpos.sum()) == pytest.approx(0.8, abs=0.005)
+        # A full-pose completion at the identity would unnecessarily fix q1.
+        assert float(qpos[0, 1]) > 0.1
+    else:
+        assert float(qpos[0, 1]) == pytest.approx(0.4, abs=0.05)
+
+
+def _masked_adapter(kind, *, enabled=True):
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+
+    robot = SimpleNamespace(
+        compute_batch_fk=lambda *, qpos, **_: _coupled_fk(qpos),
+        get_qpos_limits=lambda **_: torch.tensor([[[-1.0, 1.0], [-1.0, 1.0]]]),
+    )
+    return kind(
+        PlannerSpecCfg(
+            id="baseline",
+            adapter="test",
+            role="diagnostic_baseline",
+            config={"masked_constraints": enabled},
+        ),
+        PlannerContext(
+            robot=robot,
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=32,
+        ),
+    )
+
+
+@pytest.mark.parametrize("fail_joint", [False, True])
+def test_toppra_mixed_sequence_uses_requested_joint_payload_and_masked_ik(fail_joint):
+    from embodichain.lab.sim.motion.planners import PlanResult
+    from embodichain_benchmarks.motion_generation.models import BenchmarkCase
+    from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
+
+    adapter = _masked_adapter(ToppraAdapter)
+    adapter._motion_limits = {
+        "velocity": [1.0, 1.0],
+        "acceleration": [1.0, 1.0],
+        "jerk": None,
+    }
+
+    def generate(targets, options):
+        positions = torch.stack(
+            [options.start_qpos, *[target.qpos for target in targets]], dim=1
+        )
+        return PlanResult(
+            success=torch.ones(1, dtype=torch.bool),
+            positions=positions,
+            dt=torch.ones(1, positions.shape[1]),
+        )
+
+    adapter.motion_generator = SimpleNamespace(generate=generate)
+    goals = _coupled_fk(torch.tensor([[[0.4, 0.4], [0.0, -0.3], [0.0, 0.0]]]))
+    goals[:, 0, :3, :3] = torch.nan
+    goals[:, 1, :3, 3] = torch.nan
+    goals[:, 2] = torch.nan
+    joint_goals = torch.tensor(
+        [[[float("nan"), float("nan")], [float("nan"), float("nan")], [-0.2, 0.1]]]
+    )
+    case = BenchmarkCase(
+        "test",
+        "free",
+        "waypoint_path",
+        "mixed",
+        1,
+        1,
+        3,
+        "direct",
+        "nominal",
+        torch.zeros(1, 2),
+        goals,
+        joint_goals,
+        case_parameters={
+            "motion_validity": "ordered_constraint_waypoints",
+            "constraint_modalities": ["position", "orientation", "joint"],
+        },
+    )
+    if fail_joint:
+        joint_goals[:, -1] = 10.0
+    assert adapter.supports_case(case) == (True, None)
+    result = adapter.plan(case)
+    if fail_joint:
+        assert result.success.tolist() == [False]
+        torch.testing.assert_close(result.positions, torch.zeros_like(result.positions))
+        return
+    assert result.success.tolist() == [True]
+    qpos = result.positions[0]
+    assert float(qpos[1].sum()) == pytest.approx(0.8, abs=0.005)
+    assert float(qpos[2, 1]) == pytest.approx(-0.3, abs=0.05)
+    torch.testing.assert_close(qpos[3], torch.tensor([-0.2, 0.1]))
+    assert not _masked_adapter(ToppraAdapter, enabled=False).supports_case(case)[0]
+
+
+def test_masked_ik_failure_does_not_return_an_unreachable_witness():
+    from embodichain.compute.kinematics._masked_ik import _solve_masked_ik
+
+    goal = _coupled_fk(torch.tensor([[10.0, 0.0], [0.4, 0.4]]))
+    seed = torch.zeros(2, 2)
+    valid, qpos = _solve_masked_ik(
+        goal,
+        seed,
+        -torch.ones(1, 2),
+        torch.ones(1, 2),
+        _coupled_fk,
+        "position",
+        iterations=8,
+    )
+    assert valid.tolist() == [False, True]
+    torch.testing.assert_close(qpos[0], seed[0])
+    assert float(qpos[1].sum()) == pytest.approx(0.8, abs=0.005)
+
+
+def test_masked_ik_orientation_near_pi():
+    from embodichain.compute.kinematics._masked_ik import _solve_masked_ik
+
+    target_angle = math.pi - 0.01
+    goal = _coupled_fk(torch.tensor([[0.0, target_angle]]))
+    valid, qpos = _solve_masked_ik(
+        goal,
+        torch.zeros(1, 2),
+        -torch.full((1, 2), math.pi),
+        torch.full((1, 2), math.pi),
+        _coupled_fk,
+        "orientation",
+    )
+    assert valid.tolist() == [True]
+    difference = float(qpos[0, 1]) - target_angle
+    assert abs(math.atan2(math.sin(difference), math.cos(difference))) <= 0.05
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("backend", ["toppra", "curobo"])
+def test_franka_masked_baseline_runtime(backend):
+    """Actual FK, component IK/native TrajOpt, timing and independent scoring."""
+    from dataclasses import replace
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain_robots import FrankaPandaCfg
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.models import BenchmarkCase
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
+    from embodichain_benchmarks.motion_generation.planners.curobo import CuroboAdapter
+
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, sim_device="cuda", num_envs=1)
+    )
+    adapter = None
+    try:
+        robot = sim.add_robot(
+            cfg=FrankaPandaCfg.from_dict(
+                {"uid": "masked_baseline_franka", "robot_type": "panda"}
+            )
+        )
+        sim.prepare()
+        start = robot.get_qpos(name="arm").clone()
+        offsets = torch.tensor(
+            [
+                [0.05, 0.03, -0.04, 0.03, 0.04, -0.03, 0.05],
+                [-0.04, 0.04, 0.05, -0.04, -0.03, -0.04, 0.03],
+                [0.02, -0.03, -0.03, 0.04, 0.05, -0.05, -0.04],
+                [-0.03, 0.05, 0.04, 0.05, -0.04, -0.06, 0.04],
+            ],
+            device=start.device,
+        )
+        witness = start[:, None] + offsets[None]
+        poses = robot.compute_batch_fk(qpos=witness, name="arm", to_matrix=True)
+        case = BenchmarkCase(
+            "test",
+            "free",
+            "waypoint_path",
+            "mixed",
+            1,
+            1,
+            4,
+            "direct",
+            "nominal",
+            start,
+            poses.clone(),
+            witness.clone(),
+            case_parameters={
+                "motion_validity": "ordered_constraint_waypoints",
+                "constraint_modalities": ["position", "orientation", "joint", "pose"],
+            },
+        )
+        # Hide all Cartesian reference joints and inactive pose components.
+        case.reference_qpos[:, [0, 1, 3]] = torch.nan
+        case.target_waypoints[:, 0, :3, :3] = torch.nan
+        case.target_waypoints[:, 1, :3, 3] = torch.nan
+        case.target_waypoints[:, 2] = torch.nan
+        kind = ToppraAdapter if backend == "toppra" else CuroboAdapter
+        adapter = kind(
+            PlannerSpecCfg(
+                id=backend,
+                adapter=backend,
+                role="primary_baseline",
+                config={
+                    "masked_constraints": True,
+                    "use_cuda_graph": False,
+                    "warmup_iterations": 0,
+                },
+            ),
+            PlannerContext(
+                robot=robot,
+                control_part="arm",
+                device=start.device,
+                sample_interval=256,
+                joint_velocity_limit_rad_s=0.2,
+                joint_acceleration_limit_rad_s2=0.5,
+            ),
+        )
+        adapter.build()
+        adapter.prepare(case)
+        result = adapter.plan(case)
+        assert result.success.tolist() == [True]
+        achieved = robot.compute_batch_fk(
+            qpos=result.positions, name="arm", to_matrix=True
+        )
+        score = match_constraints(
+            result.positions[0],
+            achieved[0],
+            witness[0],
+            poses[0],
+            ["position", "orientation", "joint", "pose"],
+            position_threshold_m=0.01,
+            rotation_threshold_rad=0.1,
+            joint_threshold_rad=0.01,
+        )
+        assert score["ordered_waypoints_reached"], score
+        assert bool(torch.isfinite(result.positions).all())
+        if backend == "toppra":
+            impossible = torch.eye(4, device=start.device).reshape(1, 1, 4, 4)
+            impossible[:, :, 0, 3] = 10.0
+            failed = adapter.plan(
+                replace(
+                    case,
+                    num_waypoints=1,
+                    target_waypoints=impossible,
+                    reference_qpos=witness[:, :1],
+                    case_parameters={
+                        "motion_validity": "ordered_constraint_waypoints",
+                        "constraint_modalities": ["position"],
+                    },
+                )
+            )
+            assert failed.success.tolist() == [False]
+            torch.testing.assert_close(
+                failed.positions,
+                start.to(failed.positions)[:, None].expand_as(failed.positions),
+            )
+    finally:
+        if adapter is not None:
+            adapter.close()
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
 
 
 def _pose(x=0.0, angle=0.0):

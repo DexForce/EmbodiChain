@@ -84,6 +84,7 @@ def _cpu_chunk(
     sample_count: int | None,
     sample_dt: float | None,
     grid_size: int,
+    output_dtype: torch.dtype,
     grad_enabled: bool,
     inference_mode: bool,
 ) -> dict[str, torch.Tensor]:
@@ -97,6 +98,7 @@ def _cpu_chunk(
             sample_count=sample_count,
             sample_dt=sample_dt,
             grid_size=grid_size,
+            output_dtype=output_dtype,
         )
 
 
@@ -109,6 +111,7 @@ def _launch_cpu_parallel(
     sample_count: int | None,
     sample_dt: float | None,
     grid_size: int,
+    output_dtype: torch.dtype,
 ) -> dict[str, torch.Tensor]:
     """Compute independent row blocks and restore the global padding contract."""
     wp.init()
@@ -126,6 +129,7 @@ def _launch_cpu_parallel(
             sample_count,
             sample_dt,
             grid_size,
+            output_dtype,
             torch.is_grad_enabled(),
             torch.is_inference_mode_enabled(),
         )
@@ -171,6 +175,7 @@ class _ToppraAutograd(torch.autograd.Function):
         sample_count: int | None,
         sample_dt: float | None,
         grid_size: int,
+        output_dtype: torch.dtype,
     ) -> tuple[torch.Tensor, ...]:
         state: dict[str, Any] = {}
         result = _launch_toppra(
@@ -181,6 +186,7 @@ class _ToppraAutograd(torch.autograd.Function):
             sample_count=sample_count,
             sample_dt=sample_dt,
             grid_size=grid_size,
+            output_dtype=output_dtype,
             state=state,
         )
         ctx.state = state
@@ -226,7 +232,7 @@ class _ToppraAutograd(torch.autograd.Function):
                     state["inputs"], saved, ctx.needs_input_grad
                 )
             )
-        return *gradients, None, None, None, None
+        return *gradients, None, None, None, None, None
 
 
 def _retime_toppra_warp(
@@ -238,6 +244,7 @@ def _retime_toppra_warp(
     sample_count: int | None = None,
     sample_dt: float | None = None,
     grid_size: int = 100,
+    output_dtype: torch.dtype | None = None,
 ) -> dict[str, torch.Tensor]:
     """Retime (B, N, DOF) paths, isolating invalid/infeasible rows.
 
@@ -245,7 +252,10 @@ def _retime_toppra_warp(
     ``path_lengths`` can exclude rectangular tail padding independently for
     each row. Shorter successful outputs pad with their endpoint and zero
     derivatives/dt.
-    The floating outputs use the input dtype and device. Computation uses
+    The floating outputs use the input dtype unless ``output_dtype`` requests
+    float32 or float64. A float64 output avoids amplification of position
+    quantization when consumers differentiate densely sampled positions.
+    Input deduplication still uses the input precision. Computation uses
     float64 on both Warp CPU and CUDA, and honors the current Torch stream.
     CPU inference uses a shared, bounded thread pool for sufficiently large
     batches; small requests and all adjoint-recording calls stay inline.
@@ -264,6 +274,9 @@ def _retime_toppra_warp(
         raise ValueError("waypoints must have shape (B >= 1, N >= 2, DOF >= 1)")
     if waypoints.dtype not in (torch.float32, torch.float64):
         raise ValueError("waypoints must have float32 or float64 dtype")
+    output_dtype = waypoints.dtype if output_dtype is None else output_dtype
+    if output_dtype not in (torch.float32, torch.float64):
+        raise ValueError("output_dtype must be float32 or float64")
     velocity = _tensor_limits(velocity, waypoints.shape[2], waypoints.device)
     acceleration = _tensor_limits(acceleration, waypoints.shape[2], waypoints.device)
     path_lengths = _tensor_path_lengths(
@@ -280,6 +293,7 @@ def _retime_toppra_warp(
             sample_count,
             sample_dt,
             grid_size,
+            output_dtype,
         )
         return dict(
             zip(("success", "positions", "velocities", "accelerations", "dt"), values)
@@ -296,6 +310,7 @@ def _retime_toppra_warp(
                 sample_count,
                 sample_dt,
                 grid_size,
+                output_dtype,
             )
     return _launch_toppra(
         waypoints,
@@ -305,6 +320,7 @@ def _retime_toppra_warp(
         sample_count=sample_count,
         sample_dt=sample_dt,
         grid_size=grid_size,
+        output_dtype=output_dtype,
     )
 
 
@@ -366,6 +382,7 @@ def _launch_toppra(
     sample_count: int | None = None,
     sample_dt: float | None = None,
     grid_size: int = 100,
+    output_dtype: torch.dtype = torch.float64,
     state: dict[str, Any] | None = None,
 ) -> dict[str, torch.Tensor]:
     """Run the shared forward kernels, recording a tape only for autograd."""
@@ -577,7 +594,7 @@ def _launch_toppra(
             # CPU worker threads and an extra double-precision output buffer.
             sample_dtype = (
                 wp.float32
-                if cpu_sampling and waypoints.dtype == torch.float32
+                if cpu_sampling and output_dtype == torch.float32
                 else wp.float64
             )
             positions = wp.zeros(
@@ -624,8 +641,8 @@ def _launch_toppra(
             )
         return {
             "success": ok,
-            "positions": wp.to_torch(positions).to(waypoints.dtype),
-            "velocities": wp.to_torch(velocities).to(waypoints.dtype),
-            "accelerations": wp.to_torch(accelerations).to(waypoints.dtype),
-            "dt": wp.to_torch(dt).to(waypoints.dtype),
+            "positions": wp.to_torch(positions).to(output_dtype),
+            "velocities": wp.to_torch(velocities).to(output_dtype),
+            "accelerations": wp.to_torch(accelerations).to(output_dtype),
+            "dt": wp.to_torch(dt).to(output_dtype),
         }

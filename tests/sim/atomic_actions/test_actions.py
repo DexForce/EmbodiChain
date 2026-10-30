@@ -1051,8 +1051,31 @@ def test_joint_position_goal_rejects_invalid_tensor_shape(
         JointPositionGoal(target=target)
 
 
-def test_move_end_effector_returns_full_robot_timed_plan() -> None:
+@pytest.mark.parametrize("planner_dtype", [torch.float32, torch.float64])
+def test_move_end_effector_returns_full_robot_timed_plan(
+    planner_dtype: torch.dtype,
+) -> None:
     generator = _motion_generator()
+    generate = generator.generate
+    native_results: list[PlanResult] = []
+
+    def generate_with_dtype(*args, **kwargs) -> PlanResult:
+        result = generate(*args, **kwargs)
+        result = replace(
+            result,
+            **{
+                name: (
+                    None
+                    if getattr(result, name) is None
+                    else getattr(result, name).to(planner_dtype)
+                )
+                for name in ("positions", "velocities", "accelerations", "dt")
+            },
+        )
+        native_results.append(result)
+        return result
+
+    generator.generate = Mock(side_effect=generate_with_dtype)
     action = _bind_action(generator, MoveEndEffector())
     context = _context()
     plan = _plan_action(
@@ -1069,6 +1092,10 @@ def test_move_end_effector_returns_full_robot_timed_plan() -> None:
     assert plan.commands.frame_count == 10
     assert [target.target_id for target in plan.commands.targets] == ["arm"]
     assert _joint_trajectory(plan).duration.tolist() == pytest.approx([0.15, 0.15])
+    assert _joint_trajectory(plan).positions.dtype == context.robot.qpos.dtype
+    assert _joint_trajectory(plan).velocities.dtype == context.robot.qpos.dtype
+    for result in native_results:
+        assert result.positions.dtype == result.dt.dtype == planner_dtype
     assert plan.expected_effects.is_empty
 
 
@@ -5441,6 +5468,72 @@ def _handover_context(
     )
 
 
+def _mock_packed_arm_planning(
+    monkeypatch, generator, module, single_plan, *, packed=True
+):
+    """Exercise task grouping with the same deterministic per-arm plan fixture.
+
+    Real actor packing and numeric parity are covered by NeuralPlanner tests.
+    This spy isolates request dependencies, task order and failure propagation.
+    """
+    generator.planner.supports_multi_part = packed
+
+    def grouped(motion_generator, requests, motion_policy, interpolation_dt):
+        if not packed:
+            from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+                plan_named_arm_trajectories,
+            )
+
+            original_generate = motion_generator.generate
+
+            def generate(states, options):
+                with monkeypatch.context() as single:
+                    single.setattr(motion_generator, "generate", original_generate)
+                    success, positions = single_plan(
+                        motion_generator,
+                        options.control_part,
+                        options.start_qpos,
+                        torch.stack([state.xpos for state in states], dim=1),
+                        options.sample_count,
+                        motion_policy,
+                        interpolation_dt,
+                    )
+                dt = positions.new_full(positions.shape[:2], interpolation_dt)
+                dt[:, 0] = 0
+                return PlanResult(success=success, positions=positions, dt=dt)
+
+            # Exercise the real generate_multi_part fallback, rather than
+            # giving a classical backend a fictional packed capability.
+            with monkeypatch.context() as scoped:
+                scoped.setattr(motion_generator, "generate", generate)
+                return plan_named_arm_trajectories(
+                    motion_generator, requests, motion_policy, interpolation_dt
+                )
+        trajectories = {
+            part: single_plan(
+                motion_generator,
+                part,
+                start,
+                poses,
+                count,
+                motion_policy,
+                interpolation_dt,
+            )
+            for part, (start, poses, count) in requests.items()
+        }
+        return trajectories, {
+            "control_parts": list(requests),
+            "scene_batch_size": NUM_ENVS,
+            "control_part_count": len(requests),
+            "actor_batch_size": NUM_ENVS * len(requests),
+            "policy_forward_calls": 1,
+        }
+
+    spy = Mock(side_effect=grouped)
+    monkeypatch.setattr(module + ".plan_named_arm_trajectories", spy)
+    return spy
+
+
 @pytest.mark.no_sim
 def test_handover_midpoint_preserves_coincident_roots_per_row() -> None:
     """Torso-rooted arms retain their lifted pose in a mixed embodiment batch."""
@@ -5468,10 +5561,17 @@ def test_handover_midpoint_preserves_coincident_roots_per_row() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "planner_type,packed",
+    [("stub", False), ("curobo", False), ("stub", True), ("toppra", "sequential")],
+)
 def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     monkeypatch: pytest.MonkeyPatch,
+    planner_type: str,
+    packed: bool | str,
 ) -> None:
     generator = _dual_motion_generator()
+    generator.planner.cfg.planner_type = planner_type
     action = _bind_action(generator, HandOver())
     semantics, _ = _handover_semantics()
     object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
@@ -5533,11 +5633,24 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
         "plan_named_arm_trajectory",
         plan_from_start,
     )
+    grouped = (
+        _mock_packed_arm_planning(
+            monkeypatch,
+            generator,
+            "embodichain.lab.sim.atomic_actions.primitives.hand_over",
+            plan_from_start,
+            packed=packed is True,
+        )
+        if packed
+        else None
+    )
     invocation = ActionInvocation(
         skill_id="hand_over",
         goal=HandOverGoal(semantics, target_pose=final_pose),
         binding=_dual_binding(action, "source", "destination"),
-        motion_policy=MotionPolicy(sample_count=24),
+        motion_policy=MotionPolicy(
+            sample_count=24, strategy="motion_gen" if packed else "ik_interp"
+        ),
         skill_options=HandOverOptions(
             pre_grasp_distance=0.1,
             lift_height=0.2,
@@ -5642,6 +5755,21 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
         for candidate in plan.effect_candidates.held_object_updates.values()
     )
     assert context.task is original_task
+    if packed:
+        grouped.assert_called_once()
+        requests = grouped.call_args.args[1]
+        torch.testing.assert_close(
+            requests["left_arm"][0], torch.full((NUM_ENVS, ARM_DOF), 0.2)
+        )
+        torch.testing.assert_close(
+            requests["right_arm"][0], torch.zeros(NUM_ENVS, ARM_DOF)
+        )
+        if packed is True:
+            group = plan.diagnostics.metadata["packed_motion_groups"][0]
+            assert group["stages"] == ["pickup_transport", "receive_approach"]
+            assert group["actor_batch_size"] == 2 * NUM_ENVS
+        else:
+            assert "packed_motion_groups" not in plan.diagnostics.metadata
     assert plan.scene_dependencies == ("handover_object",)
     assert plan.scene_dependency_monitor_until == {
         "handover_object": plan.segment("pickup_close").start
@@ -5793,6 +5921,7 @@ def test_handover_mixed_directions_pad_each_phase_to_shared_lengths(
             receive_object_to_eef=pose,
             receive_grasp_xpos=pose,
             affordance_samples={},
+            policy_batching=None,
         )
 
     action._plan_direction = Mock(
@@ -5915,11 +6044,14 @@ def test_handover_can_end_with_receiving_resource_holding_object(
     assert torch.all(trajectory.positions[:, -1, DUAL_ARM_DOF + 2 :] == 1)
 
 
+@pytest.mark.parametrize("packed", [False, True, "sequential"])
 def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
     monkeypatch: pytest.MonkeyPatch,
+    packed: bool | str,
 ) -> None:
     """The receiver enters diagonally from its embodiment side."""
-    action = _bind_action(_dual_motion_generator(), HandOver())
+    generator = _dual_motion_generator()
+    action = _bind_action(generator, HandOver())
     semantics, _ = _handover_semantics()
     held = _held(semantics, env_mask=torch.ones(NUM_ENVS, dtype=torch.bool))
     task = TaskState(
@@ -5955,6 +6087,17 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
         "plan_named_arm_trajectory",
         plan_from_start,
     )
+    grouped = (
+        _mock_packed_arm_planning(
+            monkeypatch,
+            generator,
+            "embodichain.lab.sim.atomic_actions.primitives.hand_over",
+            plan_from_start,
+            packed=packed is True,
+        )
+        if packed
+        else None
+    )
     exchange = torch.eye(4)
     exchange[0, 3] = 0.6
     exchange[1, 3] = 0.4
@@ -5985,7 +6128,9 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
                 target_pose=SceneEntityPose("handover_target"),
             ),
             binding=_dual_binding(action, "source", "destination"),
-            motion_policy=MotionPolicy(sample_count=60),
+            motion_policy=MotionPolicy(
+                sample_count=60, strategy="motion_gen" if packed else "ik_interp"
+            ),
             skill_options=HandOverOptions(
                 release_at_target=False,
                 receive_pick_object_part="center",
@@ -5995,6 +6140,15 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
     )
 
     assert plan.plan_success.tolist() == [True, True]
+    if packed:
+        grouped.assert_called_once()
+        if packed is True:
+            assert plan.diagnostics.metadata["packed_motion_groups"][0]["stages"] == [
+                "transfer",
+                "approach",
+            ]
+        else:
+            assert "packed_motion_groups" not in plan.diagnostics.metadata
     grasp_call = action._resolve_grasp.call_args
     expected = torch.tensor([-math.sin(math.pi / 3), 0.0, -0.5]).expand(NUM_ENVS, -1)
     torch.testing.assert_close(grasp_call.args[2], expected)
@@ -6264,8 +6418,12 @@ def test_handover_reports_failed_semantic_waypoint(
     )
 
 
+@pytest.mark.parametrize("packed", [False, True])
+@pytest.mark.parametrize("failed_phase", [1, 3])
 def test_handover_reports_path_failure_between_reachable_waypoints(
     monkeypatch: pytest.MonkeyPatch,
+    packed: bool,
+    failed_phase: int,
 ) -> None:
     generator = _dual_motion_generator()
     action = _bind_action(generator, HandOver())
@@ -6294,9 +6452,9 @@ def test_handover_reports_path_failure_between_reachable_waypoints(
         )
         phase_call_count += 1
         success = torch.ones(NUM_ENVS, dtype=torch.bool)
-        if phase_call_count == 1:
+        if phase_call_count == failed_phase:
             success[0] = False
-        trajectory = start_qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
+        trajectory = (start_qpos + 0.1).unsqueeze(1).repeat(1, n_waypoints, 1)
         return success, trajectory
 
     warnings: list[str] = []
@@ -6304,6 +6462,16 @@ def test_handover_reports_path_failure_between_reachable_waypoints(
         "embodichain.lab.sim.atomic_actions.primitives.hand_over."
         "plan_named_arm_trajectory",
         plan_phase,
+    )
+    grouped = (
+        _mock_packed_arm_planning(
+            monkeypatch,
+            generator,
+            "embodichain.lab.sim.atomic_actions.primitives.hand_over",
+            plan_phase,
+        )
+        if packed
+        else None
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.atomic_actions.primitives.hand_over.logger.log_warning",
@@ -6313,16 +6481,28 @@ def test_handover_reports_path_failure_between_reachable_waypoints(
         skill_id="hand_over",
         goal=HandOverGoal(semantics, target_pose=torch.eye(4)),
         binding=_dual_binding(action, "source", "destination"),
-        motion_policy=MotionPolicy(sample_count=24),
+        motion_policy=MotionPolicy(
+            sample_count=24, strategy="motion_gen" if packed else "ik_interp"
+        ),
         skill_options=HandOverOptions(hand_interp_steps=2),
     )
 
     plan = _plan_action(action, invocation, _handover_context(object_pose))
 
     assert plan.plan_success.tolist() == [False, True]
+    if packed:
+        grouped.assert_called_once()
+    positions = _joint_trajectory(plan).positions
+    assert torch.count_nonzero(positions[0]) == 0
+    assert torch.count_nonzero(positions[1, :, ARM_DOF:DUAL_ARM_DOF]) > 0
+    phase_name, waypoint_name = (
+        ("pickup_approach", "pickup_pre_grasp")
+        if failed_phase == 1
+        else ("pickup_transport", "pickup_lift")
+    )
     assert any(
-        "phase 'pickup_approach' failed between waypoints" in warning
-        and "pickup_pre_grasp" in warning
+        f"phase '{phase_name}' failed between waypoints" in warning
+        and waypoint_name in warning
         and "env_ids=[0]" in warning
         for warning in warnings
     )
@@ -7304,12 +7484,49 @@ def test_coordinated_pick_fails_when_affordance_has_no_grasp() -> None:
         (True, 3, ("approach", "hold", "release", "retreat")),
     ),
 )
+@pytest.mark.parametrize(
+    "planner_type,packed",
+    [("stub", False), ("curobo", False), ("stub", True), ("toppra", "sequential")],
+)
 def test_coordinated_placement_projects_effects_and_omits_empty_segments(
     release: bool,
     hold_steps: int,
     expected_segments: tuple[str, ...],
+    planner_type: str,
+    packed: bool | str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     generator = _dual_motion_generator()
+    generator.planner.cfg.planner_type = planner_type
+    grouped = None
+    if packed:
+        from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+            plan_named_arm_trajectory,
+        )
+
+        def independent_plan(motion_generator, part, start, poses, count, policy, dt):
+            return plan_named_arm_trajectory(
+                motion_generator,
+                part,
+                start,
+                poses,
+                count,
+                replace(policy, strategy="ik_interp", plan_opts=None),
+                dt,
+            )
+
+        monkeypatch.setattr(
+            "embodichain.lab.sim.atomic_actions.primitives.coordinated_placement."
+            "plan_named_arm_trajectory",
+            independent_plan,
+        )
+        grouped = _mock_packed_arm_planning(
+            monkeypatch,
+            generator,
+            "embodichain.lab.sim.atomic_actions.primitives.coordinated_placement",
+            independent_plan,
+            packed=packed is True,
+        )
     action = _bind_action(
         generator,
         CoordinatedPlacement(
@@ -7352,7 +7569,9 @@ def test_coordinated_placement_projects_effects_and_omits_empty_segments(
             support_object_target_pose=torch.eye(4),
         ),
         binding=_dual_binding(action, "placing", "support"),
-        motion_policy=MotionPolicy(sample_count=30),
+        motion_policy=MotionPolicy(
+            sample_count=30, strategy="motion_gen" if packed else "ik_interp"
+        ),
     )
     context = _dual_context(task)
 
@@ -7384,6 +7603,17 @@ def test_coordinated_placement_projects_effects_and_omits_empty_segments(
         for previous, current in zip(plan.segments, plan.segments[1:])
     )
     assert plan.segments[-1].stop == plan.commands.frame_count
+    if packed:
+        grouped.assert_called_once()
+        requests = grouped.call_args.args[1]
+        assert requests["left_arm"][1].shape == (NUM_ENVS, 2, 4, 4)
+        assert requests["right_arm"][1].shape == (NUM_ENVS, 1, 4, 4)
+        if packed is True:
+            assert plan.diagnostics.metadata["packed_motion_groups"][0]["stages"] == [
+                "approach"
+            ]
+        else:
+            assert "packed_motion_groups" not in plan.diagnostics.metadata
 
 
 def test_coordinated_placement_rejects_one_object_held_by_both_arms() -> None:
@@ -7413,6 +7643,75 @@ def test_coordinated_placement_rejects_one_object_held_by_both_arms() -> None:
     assert plan.plan_success.tolist() == [False, False]
     assert _joint_trajectory(plan).waypoint_count == 0
     generator.robot.compute_ik.assert_not_called()
+
+
+@pytest.mark.parametrize("packed", [False, True])
+def test_failed_grouped_placing_arm_blocks_commands_and_retains_batch_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    packed: bool,
+) -> None:
+    generator = _dual_motion_generator()
+    generator.planner.supports_multi_part = packed
+    action = _bind_action(generator, CoordinatedPlacement())
+    placing = _semantics()
+    support = ObjectSemantics(
+        affordance=AntipodalAffordance(), geometry={}, entity_id="other", label="other"
+    )
+    context = _dual_context(
+        TaskState(
+            batch_size=NUM_ENVS,
+            device="cpu",
+            held_objects={"left_arm": _held(placing), "right_arm": _held(support)},
+        )
+    )
+    trace = {
+        "control_parts": ["left_arm", "right_arm"],
+        "scene_batch_size": NUM_ENVS,
+        "control_part_count": 2,
+        "actor_batch_size": 2 * NUM_ENVS,
+        "policy_forward_calls": 3,
+    }
+    monkeypatch.setattr(
+        "embodichain.lab.sim.atomic_actions.primitives.coordinated_placement."
+        "plan_named_arm_trajectories",
+        lambda *args: (
+            {
+                "left_arm": (
+                    torch.zeros(NUM_ENVS, dtype=torch.bool),
+                    torch.zeros(NUM_ENVS, 3, ARM_DOF),
+                ),
+                "right_arm": (
+                    torch.ones(NUM_ENVS, dtype=torch.bool),
+                    torch.ones(NUM_ENVS, 3, ARM_DOF),
+                ),
+            },
+            trace if packed else None,
+        ),
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.sim.atomic_actions.primitives.coordinated_placement."
+        "plan_named_arm_trajectory",
+        lambda *args: pytest.fail(
+            "dependent retreat planned after complete approach failure"
+        ),
+    )
+    invocation = ActionInvocation(
+        skill_id="coordinated_placement",
+        goal=CoordinatedPlacementGoal(torch.eye(4), torch.eye(4)),
+        binding=_dual_binding(action, "placing", "support"),
+        motion_policy=MotionPolicy(strategy="motion_gen", sample_count=40),
+    )
+
+    plan = _plan_action(action, invocation, context)
+
+    assert plan.plan_success.tolist() == [False, False]
+    assert plan.commands.frame_count == 0
+    if packed:
+        assert plan.diagnostics.metadata["packed_motion_groups"] == [
+            {"stages": ["approach"], **trace}
+        ]
+    else:
+        assert "packed_motion_groups" not in plan.diagnostics.metadata
 
 
 def test_coordinated_placement_holds_only_environment_with_ik_failure() -> None:
@@ -7498,7 +7797,7 @@ def test_coordinated_placement_holds_only_environment_with_ik_failure() -> None:
     assert still_placing.env_mask.tolist() == [False, True]
 
 
-def test_coordinated_actions_reject_curobo_motion_generation() -> None:
+def test_coordinated_pickment_rejects_curobo_motion_generation() -> None:
     generator = _dual_motion_generator()
     generator.planner.cfg.planner_type = "curobo"
     policy = MotionPolicy(strategy="motion_gen", sample_count=30)
@@ -7524,19 +7823,6 @@ def test_coordinated_actions_reject_curobo_motion_generation() -> None:
 
     with pytest.raises(ValueError, match="not supported"):
         _plan_action(pick, pick_invocation, _dual_context())
-
-    placement = _bind_action(
-        generator,
-        CoordinatedPlacement(),
-    )
-    placement_invocation = ActionInvocation(
-        skill_id="coordinated_placement",
-        goal=CoordinatedPlacementGoal(torch.eye(4), torch.eye(4)),
-        binding=_dual_binding(placement, "placing", "support"),
-        motion_policy=policy,
-    )
-    with pytest.raises(ValueError, match="not supported"):
-        _plan_action(placement, placement_invocation, _dual_context())
 
 
 @pytest.mark.parametrize("case_id", ["place", "move_held_object", "press"])

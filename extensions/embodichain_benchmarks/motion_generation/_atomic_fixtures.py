@@ -45,14 +45,18 @@ from embodichain.lab.sim.robots import build_dual_arm_cfg
 from embodichain.lab.sim.motion.solvers import FEPSolverCfg, PytorchSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
-from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+from embodichain.toolkits.graspkit import (
+    ParallelJawGraspPoseGenerator,
+    ParallelJawGripperModelCfg,
+)
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
     GraspAnnotationCfg,
+    get_parallel_jaw_collision_geometry,
     ParallelJawGraspCollisionCfg,
 )
-from embodichain_robots import URRobotCfg
+from embodichain_robots import FrankaPandaCfg, URRobotCfg
 
 from ._tcp_presets import ToolPoint, sample_tool_tcp
 
@@ -95,10 +99,6 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     model_id="dh_pgi_140_80",
     min_opening_width=0.003,
     max_opening_width=0.100,
-    finger_length=0.10,
-    finger_width=0.040,
-    finger_thickness=0.01,
-    palm_depth=0.096,
 )
 
 
@@ -147,35 +147,40 @@ def create_parallel_jaw_grasp_pose_generator(
     force_refresh: bool,
     max_candidates: int = 50,
     approach_alignment_angle: float | None = None,
-    opening_margin: float = 0.03,
     gripper_model: ParallelJawGripperModelCfg | None = None,
-) -> AntipodalGraspPoseGenerator:
+    root_from_tcp: Sequence[Sequence[float]] | None = None,
+) -> ParallelJawGraspPoseGenerator:
     """Create a standalone generator for the sample's mounted gripper.
 
     Args:
         n_sample: Number of antipodal contact-pair samples.
         force_refresh: Whether to regenerate cached object annotations.
         max_candidates: Maximum ranked grasp candidates returned per object.
-        approach_alignment_angle: Optional hard TCP-Z angle in radians before
+        approach_alignment_angle: Optional hard contact-Z angle before
             candidate deduplication and ranking; proposal cones are unchanged.
-        opening_margin: Additional clearance used for grasp collision checks.
         gripper_model: Explicit fixture geometry; omission uses the PGI sample.
+        root_from_tcp: Actual fixture TCP relative to the hand root, when it
+            differs from the model's default calibration.
 
     Returns:
-        A generator with an independently owned gripper model.
+        A generator with actual open hand collision surfaces and runtime TCP
+        poses. Finite surface checks do not establish continuous mesh or path
+        collision freedom.
     """
+    model = TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model
     return AntipodalGraspPoseGenerator(
-        TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model,
+        model,
+        collision_geometry=get_parallel_jaw_collision_geometry(
+            model.model_id,
+            point_spacing=0.012,
+            root_from_tcp=None if root_from_tcp is None else np.asarray(root_from_tcp),
+        ),
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=n_sample,
             max_candidates=max_candidates,
             approach_alignment_angle=approach_alignment_angle,
         ),
-        collision_cfg=ParallelJawGraspCollisionCfg(
-            opening_margin=opening_margin,
-            point_sample_density=0.012,
-            filter_ground_collision=False,
-        ),
+        collision_cfg=ParallelJawGraspCollisionCfg(filter_ground_collision=False),
         annotation_cfg=GraspAnnotationCfg(
             selection_mode="whole_mesh",
             viser_port=11801,
@@ -634,7 +639,7 @@ def create_dual_tutorial_robot_cfg(
     uid: str,
     urdf_name: str,
     tcp_z: float | None = None,
-    gripper: Literal["robotiq_2f_140"] | None = None,
+    gripper: Literal["robotiq_2f_140", "panda_hand"] | None = None,
     solver: Literal["ur", "pytorch"] = "ur",
     ur_ik_nearest_weight: Sequence[float] | None = None,
     pytorch_num_samples: int = 30,
@@ -652,7 +657,10 @@ def create_dual_tutorial_robot_cfg(
     ``solver="ur"`` selects the analytical solver for UR5 and UR10, while
     ``solver="pytorch"`` explicitly selects numerical IK for any preset.
     UR5 and Franka default to the PGI hand; Handover explicitly selects the
-    six-joint Robotiq 2F-140, which UR10 already uses. Its TCP includes the
+    six-joint Robotiq 2F-140, which UR10 already uses. ``panda_hand`` composes
+    two complete stock PandaWithHand assets, preserving their two finger
+    joints and native hand TCP instead of attaching a separate PGI hand.
+    The Robotiq TCP includes the
     mounting rotation and an independently calibrated tool offset. Control-part
     names and downstream action bindings stay identical across robot choices.
 
@@ -663,8 +671,9 @@ def create_dual_tutorial_robot_cfg(
         tcp_z: Optional explicit PGI local-Z override for Python callers.
             Omission selects the fixture's handover TCP; UR10/Robotiq uses
             its separate calibrated mounting transform.
-        gripper: Explicit Handover gripper selection. Robotiq uses its full
-            fixture TCP and does not consume the PGI ``tcp_z`` override.
+        gripper: Explicit mounted hand selection. Native ``panda_hand`` is
+            Franka-only and rejects ``tcp_z`` because its URDF owns the TCP.
+            Robotiq uses its full fixture TCP rather than the PGI override.
         solver: UR solver selection; Franka retains its preset unless
             ``"pytorch"`` is explicitly selected.
         ur_ik_nearest_weight: Optional nearest-solution weights for UR IK.
@@ -680,9 +689,19 @@ def create_dual_tutorial_robot_cfg(
     Returns:
         A dual-arm robot configuration with two matching grippers.
     """
-    if gripper not in (None, "robotiq_2f_140"):
+    if gripper not in (None, "robotiq_2f_140", "panda_hand"):
         raise ValueError(f"Unknown dual sample gripper {gripper!r}")
-    base_cfg = create_tutorial_robot_cfg(robot_type)
+    native_panda = gripper == "panda_hand"
+    if native_panda:
+        if robot_type != "franka":
+            raise ValueError("panda_hand requires robot_type='franka'.")
+        if tcp_z is not None:
+            raise ValueError("panda_hand uses its native URDF TCP; omit tcp_z.")
+        base_cfg = FrankaPandaCfg.from_dict(
+            {"init_rot": list(_FRANKA_TUTORIAL_BASE_ROTATION)}
+        )
+    else:
+        base_cfg = create_tutorial_robot_cfg(robot_type)
     if gripper == "robotiq_2f_140":
         old_hand_patterns = tuple(base_cfg.control_parts["eef"])
         hand_component = base_cfg.urdf_cfg.components["hand"]
@@ -702,13 +721,17 @@ def create_dual_tutorial_robot_cfg(
             if isinstance(rules, dict):
                 for pattern in old_hand_patterns:
                     rules.pop(pattern, None)
-    tcp = sample_tool_tcp(
-        robot_type,
-        point="handover",
-        tcp_z=tcp_z if robot_type != "ur10" and gripper is None else None,
-        gripper=gripper,
-    )
     base_solver = base_cfg.solver_cfg["arm"]
+    tcp = (
+        base_solver.tcp
+        if native_panda
+        else sample_tool_tcp(
+            robot_type,
+            point="handover",
+            tcp_z=tcp_z if robot_type != "ur10" and gripper is None else None,
+            gripper=gripper,
+        )
+    )
     if solver == "ur":
         base_solver.tcp = tcp
         if robot_type in {"ur5", "ur10"}:
@@ -723,13 +746,18 @@ def create_dual_tutorial_robot_cfg(
         )
         base_cfg.solver_cfg["arm"] = base_solver
 
-    hand_joint_pattern = base_cfg.control_parts["eef"][0]
+    hand_joint_patterns = (
+        ["fr3_finger_joint[1-2]"] if native_panda else base_cfg.control_parts["eef"]
+    )
     for property_name, value in (
         ("stiffness", hand_stiffness),
         ("damping", hand_damping),
         ("max_effort", hand_max_effort),
     ):
-        getattr(base_cfg.joint_drive_props, property_name)[hand_joint_pattern] = value
+        for hand_joint_pattern in hand_joint_patterns:
+            getattr(base_cfg.joint_drive_props, property_name)[
+                hand_joint_pattern
+            ] = value
 
     arm_facing_rotation = make_yaw_transform(
         (0.0, 0.0, 0.0),
@@ -745,14 +773,39 @@ def create_dual_tutorial_robot_cfg(
     # parts. Tutorial robots intentionally keep their gripper as a separate
     # URDF component, so mount one copy on each assembled arm as well.
     cfg.urdf_cfg.fname = urdf_name
-    hand_component = base_cfg.urdf_cfg.components["hand"]
-    for side in ("left", "right"):
-        cfg.urdf_cfg.add_component(
-            f"{side}_hand",
-            hand_component["urdf_path"],
-            hand_component["transform"],
-            **hand_component.get("params", {}),
+    if native_panda:
+        # No separate hand component is added in this branch; construct the
+        # named assembly so its derived output path also uses ``urdf_name``.
+        cfg.urdf_cfg = URDFCfg(
+            fname=urdf_name,
+            components=[
+                {
+                    "component_type": name,
+                    "urdf_path": component["urdf_path"],
+                    "transform": component["transform"],
+                    **component.get("params", {}),
+                }
+                for name, component in cfg.urdf_cfg.components.items()
+            ],
         )
+        cfg.link_attrs = {
+            "newton_gripper_contacts": _newton_gripper_contacts(
+                [
+                    f"{side}_fr3_{finger}finger"
+                    for side in ("left", "right")
+                    for finger in ("left", "right")
+                ]
+            )
+        }
+    else:
+        hand_component = base_cfg.urdf_cfg.components["hand"]
+        for side in ("left", "right"):
+            cfg.urdf_cfg.add_component(
+                f"{side}_hand",
+                hand_component["urdf_path"],
+                hand_component["transform"],
+                **hand_component.get("params", {}),
+            )
 
     arm_dof = len(base_cfg.control_parts["arm"])
     base_arm_home = list(base_cfg.init_qpos[:arm_dof])

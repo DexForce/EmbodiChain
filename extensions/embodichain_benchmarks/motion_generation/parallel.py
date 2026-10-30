@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from .runner import BenchmarkRunResult
     from .video import VideoRecordCfg
 
-__all__ = []
+__all__ = ["resolve_quality_devices"]
 
 
 def _worker_device(requested: str) -> str:
@@ -54,6 +54,48 @@ def _worker_device(requested: str) -> str:
     if device.type == "cuda" and device.index is None:
         device = torch.device("cuda", torch.cuda.current_device())
     return str(device)
+
+
+def resolve_quality_devices(requested: Sequence[str]) -> list[str]:
+    """Validate explicit visible CUDA ordinals before starting quality evaluation.
+
+    Args:
+        requested: Nonempty sequence of unique explicit ``cuda:N`` device names.
+            Indices refer to devices visible through ``CUDA_VISIBLE_DEVICES``.
+
+    Returns:
+        Canonical device names in the caller's order. This validation does not
+        create workers or simulators or change the current CUDA device.
+
+    Raises:
+        ValueError: If a device is implicit, unavailable, repeated, or malformed.
+    """
+    import torch
+
+    if isinstance(requested, (str, bytes)) or not requested:
+        raise ValueError(
+            "quality_devices must be a nonempty list of explicit cuda:N devices."
+        )
+    resolved = []
+    for value in requested:
+        if not isinstance(value, str):
+            raise ValueError("quality_devices must contain explicit cuda:N strings.")
+        try:
+            device = torch.device(value)
+        except (RuntimeError, ValueError) as error:
+            raise ValueError(
+                "quality_devices must contain explicit cuda:N devices."
+            ) from error
+        if device.type != "cuda" or device.index is None:
+            raise ValueError("quality_devices must contain explicit cuda:N devices.")
+        if not torch.cuda.is_available() or device.index >= torch.cuda.device_count():
+            raise ValueError(
+                f"quality device {device} is unavailable in CUDA_VISIBLE_DEVICES."
+            )
+        resolved.append(str(device))
+    if len(set(resolved)) != len(resolved):
+        raise ValueError("quality_devices must not repeat a device.")
+    return resolved
 
 
 def _partition_rows(rows: list[dict[str, Any]], workers: int) -> list[list[int]]:
@@ -304,6 +346,7 @@ def run_parallel_benchmark(
     workers: int,
     worker_threads: int,
     quality_batch_size: int = 1,
+    quality_devices: Sequence[str] | None = None,
 ) -> BenchmarkRunResult:
     """Freeze inputs, execute bounded independent processes, then aggregate."""
     import torch
@@ -355,6 +398,11 @@ def run_parallel_benchmark(
     if any(spec.adapter not in known for spec in selected):
         raise ValueError("Parallel evaluation requires installed planner adapters.")
     device = _worker_device(device)
+    devices = (
+        resolve_quality_devices(quality_devices)
+        if quality_devices is not None
+        else [device]
+    )
     resolution = resolve_embodiment(
         resolved.embodiment, resolved.robot, base_dir=Path.cwd()
     )
@@ -366,6 +414,7 @@ def run_parallel_benchmark(
         "quality_batch_size": quality_batch_size,
         "worker_threads": worker_threads,
         "device": device,
+        "quality_devices": devices,
         "timing_comparable": False,
         "start_method": "spawn",
         "solver_rng_contract": "backend_owned",
@@ -431,7 +480,7 @@ def run_parallel_benchmark(
                     "case_manifest": str(shard_path.resolve()),
                     "directory": str(directory.resolve()),
                     "index": index,
-                    "device": device,
+                    "device": devices[index % len(devices)],
                     "workers": len(shards),
                     "case_count": len(indices),
                     "quality_batch_size": quality_batch_size,

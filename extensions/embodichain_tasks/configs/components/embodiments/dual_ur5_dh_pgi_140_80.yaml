@@ -216,18 +216,26 @@ skill_profile:
         kind: antipodal_parallel_jaw
         sample_count: 10000
         approach_direction_samples: 1
-        opening_margin: 0.03
-        point_sample_density: 0.012
+        point_spacing: 0.012
         filter_ground_collision: false
         model: dh_pgi_140_80
+        root_from_tcp:
+          - [1.0, 0.0, 0.0, 0.0]
+          - [0.0, 1.0, 0.0, 0.0]
+          - [0.0, 0.0, 1.0, 0.155]
+          - [0.0, 0.0, 0.0, 1.0]
       right_eef:
         kind: antipodal_parallel_jaw
         sample_count: 10000
         approach_direction_samples: 1
-        opening_margin: 0.03
-        point_sample_density: 0.012
+        point_spacing: 0.012
         filter_ground_collision: false
         model: dh_pgi_140_80
+        root_from_tcp:
+          - [1.0, 0.0, 0.0, 0.0]
+          - [0.0, 1.0, 0.0, 0.0]
+          - [0.0, 0.0, 1.0, 0.155]
+          - [0.0, 0.0, 0.0, 1.0]
     control_part_evidence:
       kind: joint_position_constraint
       control_parts: [left_eef, right_eef]

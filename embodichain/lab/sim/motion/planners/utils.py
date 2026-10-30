@@ -236,6 +236,15 @@ class PlanResult:
     are padding and must not establish later constraint arrivals.
     """
 
+    policy_batching: dict[str, int] | None = None
+    """Optional shared-policy inference dimensions and call count.
+
+    ``scene_batch_size`` is the number of independent environments;
+    ``control_part_count`` is the number of packed manipulators. Their product
+    is ``actor_batch_size``. ``policy_forward_calls`` counts shared inference
+    calls for the group, not a separate latency or count for each result.
+    """
+
     def __post_init__(self) -> None:
         """Validate trajectory timing and optional original policy traces."""
         rollout, lengths = self.policy_rollout_positions, self.policy_rollout_lengths

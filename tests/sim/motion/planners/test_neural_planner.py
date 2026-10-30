@@ -76,9 +76,11 @@ class FakeOnnxPolicy:
         NUM_WAYPOINTS, NUM_ARM_JOINTS, True, True
     ).onnx_metadata
 
-    def __init__(self, path, providers=None):
+    def __init__(self, path, providers=None, *, cuda_use_tf32=None, device=None):
         self.path = path
         self.providers = providers
+        self.cuda_use_tf32 = cuda_use_tf32
+        self.device = device
         self.last_obs = None
 
     def __call__(self, obs: torch.Tensor) -> torch.Tensor:
@@ -644,7 +646,7 @@ def test_retime_joint_paths_promotes_half_precision_before_warp():
     )
 
     assert result.success.tolist() == [True, True]
-    assert result.positions.dtype == torch.float32
+    assert result.positions.dtype == torch.float64
 
 
 def test_retiming_samples_on_the_control_period_not_the_rollout_step_count(
@@ -1566,3 +1568,395 @@ def test_onnx_runtime_respects_host_thread_budget(monkeypatch, tmp_path):
     assert messages == ["NMG ONNX execution providers: CPUExecutionProvider"]
     assert received["options"].intra_op_num_threads == 3
     assert received["options"].inter_op_num_threads == 1
+
+
+@pytest.mark.parametrize("retime", [False, True])
+def test_shared_policy_uses_each_arms_frame_for_targets_and_rollout(
+    tmp_path, monkeypatch, retime
+):
+    """Equivalent local requests have identical policy inputs after arm switches."""
+    bases = {
+        "left_arm": torch.tensor(
+            [
+                [-1.0, 0.0, 0.0, 0.5],
+                [0.0, -1.0, 0.0, 0.3],
+                [0.0, 0.0, 1.0, 0.5],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+        "right_arm": torch.tensor(
+            [
+                [0.0, -1.0, 0.0, -0.4],
+                [1.0, 0.0, 0.0, -0.2],
+                [0.0, 0.0, 1.0, 0.8],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+    }
+    local_pose = torch.eye(4)
+    local_pose[:3, 3] = torch.tensor([0.3, 0.1, 0.2])
+
+    class MountedRobot(FakeRobot):
+        def compute_fk(self, qpos, name=None, to_matrix=False, **kwargs):
+            return (bases[name] @ local_pose).expand(qpos.shape[0], -1, -1).clone()
+
+        def compute_batch_fk(self, qpos, name=None, **kwargs):
+            return (bases[name] @ local_pose).expand(*qpos.shape[:2], -1, -1).clone()
+
+    manager = FakeSimulationManager()
+    manager.robot = MountedRobot()
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            num_waypoints=NUM_WAYPOINTS,
+            max_steps=1,
+            policy_frame_from_world_by_control_part={
+                part: torch.linalg.inv(base).tolist() for part, base in bases.items()
+            },
+            constraints={"velocity": 0.2, "acceleration": 0.5} if retime else None,
+        )
+    )
+    observations = []
+    for part in ("left_arm", "right_arm", "left_arm"):
+        target = (bases[part] @ local_pose).unsqueeze(0)
+        result = planner.plan(
+            [PlanState.from_xpos(target)],
+            NeuralPlanOptions(control_part=part, start_qpos=torch.zeros(1, 7)),
+        )
+        assert result.success.tolist() == [True]
+        torch.testing.assert_close(result.xpos_list[:, -1], target)
+        observations.append(planner._policy.last_obs)
+    torch.testing.assert_close(observations[0], observations[1], atol=1e-6, rtol=1e-6)
+    torch.testing.assert_close(observations[0], observations[2], atol=1e-6, rtol=1e-6)
+    # EEF translation is expressed in the original single-arm training frame.
+    torch.testing.assert_close(observations[0][0, 7:10], local_pose[:3, 3])
+
+    with pytest.raises(ValueError, match="No NMG policy-frame transform"):
+        planner.plan(
+            [PlanState.from_xpos(torch.eye(4).unsqueeze(0))],
+            NeuralPlanOptions(
+                control_part="unmapped_arm", start_qpos=torch.zeros(1, 7)
+            ),
+        )
+
+
+@pytest.mark.parametrize("retime", [False, True])
+def test_packed_arms_share_inference_and_match_independent_rollouts(
+    tmp_path, monkeypatch, retime
+):
+    """Two scene rows × two arms preserve different goals, budgets and failures."""
+    bases = {
+        "left_arm": torch.tensor(
+            [
+                [-1.0, 0.0, 0.0, 0.5],
+                [0.0, -1.0, 0.0, 0.3],
+                [0.0, 0.0, 1.0, 0.5],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+        "right_arm": torch.tensor(
+            [
+                [0.0, -1.0, 0.0, -0.4],
+                [1.0, 0.0, 0.0, -0.2],
+                [0.0, 0.0, 1.0, 0.8],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+    }
+
+    class StepPolicy(FakeOnnxPolicy):
+        fixed_batch_size = None
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.observations = []
+
+        def __call__(self, obs):
+            self.observations.append(obs.clone())
+            return torch.full((obs.shape[0], 7), 0.5)
+
+    class MountedRobot(FakeRobot):
+        num_instances = 2
+
+        def compute_fk(self, qpos, name=None, **kwargs):
+            # The simulator has two scene rows, not four packed actor rows.
+            assert qpos.shape == (2, 7)
+            local = torch.eye(4).repeat(2, 1, 1)
+            local[:, :3, 3] = qpos[:, :3]
+            return bases[name] @ local
+
+        def compute_batch_fk(self, qpos, name=None, **kwargs):
+            assert qpos.shape[0] == 2
+            local = torch.eye(4).repeat(*qpos.shape[:2], 1, 1)
+            local[..., :3, 3] = qpos[..., :3]
+            return bases[name] @ local
+
+    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", StepPolicy)
+    manager = FakeSimulationManager()
+    manager.robot = MountedRobot()
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            batch_control_parts=True,
+            num_waypoints=NUM_WAYPOINTS,
+            action_scale=0.2,
+            policy_frame_from_world_by_control_part={
+                part: torch.linalg.inv(base).tolist() for part, base in bases.items()
+            },
+            constraints={"velocity": 2.0, "acceleration": 4.0} if retime else None,
+        )
+    )
+    pose_goals = torch.eye(4).repeat(2, 1, 1)
+    pose_goals[:, :3, 3] = torch.tensor([[0.4, 0.4, 0.4], [0.6, 0.6, 0.6]])
+    targets = {
+        "left_arm": [PlanState.from_qpos(torch.tensor([[0.1] * 7, [0.3] * 7]))],
+        "right_arm": [
+            PlanState.from_qpos(torch.tensor([[0.2] * 7, [0.1] * 7])),
+            PlanState.from_xpos(bases["right_arm"] @ pose_goals),
+        ],
+    }
+    options = {
+        "left_arm": NeuralPlanOptions(
+            control_part="left_arm", start_qpos=torch.zeros(2, 7), max_steps=2
+        ),
+        "right_arm": NeuralPlanOptions(
+            control_part="right_arm", start_qpos=torch.zeros(2, 7), max_steps=4
+        ),
+    }
+    packed = planner.plan_multi_part(targets, options)
+    observed = planner._policy.observations
+    assert len(observed) == 4
+    assert all(obs.shape == (4, OBS_DIM) for obs in observed)
+    torch.testing.assert_close(
+        observed[0][:, 7:10], torch.zeros(4, 3), atol=1e-6, rtol=0
+    )
+    # The left arm's converged first row holds at .1; its exhausted second row
+    # holds at .2 while the right arm continues through its fourth policy step.
+    torch.testing.assert_close(
+        observed[-1][:, :7], torch.tensor([[0.1] * 7, [0.2] * 7, [0.3] * 7, [0.3] * 7])
+    )
+    for result in packed.values():
+        assert result.policy_batching == {
+            "scene_batch_size": 2,
+            "control_part_count": 2,
+            "actor_batch_size": 4,
+            "policy_forward_calls": 4,
+        }
+        assert result.success.tolist() == [True, False]
+    assert packed["left_arm"].policy_rollout_lengths.tolist() == [2, 3]
+    assert packed["right_arm"].policy_rollout_lengths.tolist() == [5, 5]
+    assert packed["left_arm"].policy_rollout_positions.shape == (2, 3, 7)
+    assert packed["right_arm"].policy_rollout_positions.shape == (2, 5, 7)
+
+    planner._policy.observations.clear()
+    separate = {part: planner.plan(targets[part], options[part]) for part in targets}
+    assert len(planner._policy.observations) == 6
+    for part in targets:
+        for name in (
+            "success",
+            "positions",
+            "velocities",
+            "accelerations",
+            "dt",
+            "xpos_list",
+            "policy_rollout_positions",
+            "policy_rollout_lengths",
+        ):
+            torch.testing.assert_close(
+                getattr(packed[part], name), getattr(separate[part], name)
+            )
+
+
+def test_packed_arms_reject_fixed_single_row_policy(tmp_path, monkeypatch):
+    manager = FakeSimulationManager()
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            batch_control_parts=True,
+        )
+    )
+    targets = {
+        part: [PlanState.from_qpos(torch.zeros(1, 7))]
+        for part in ("left_arm", "right_arm")
+    }
+    options = {
+        part: NeuralPlanOptions(start_qpos=torch.zeros(1, 7)) for part in targets
+    }
+    with pytest.raises(ValueError, match="Export a dynamic-batch policy"):
+        planner.plan_multi_part(targets, options)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "providers,use_tf32,device,expected_providers,expected_options",
+    [
+        (None, None, None, None, None),
+        (
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            None,
+            None,
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            None,
+        ),
+        (
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            False,
+            None,
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            [{"use_tf32": "0"}, {}],
+        ),
+        (
+            ["CPUExecutionProvider", "CUDAExecutionProvider"],
+            True,
+            None,
+            ["CPUExecutionProvider", "CUDAExecutionProvider"],
+            [{}, {"use_tf32": "1"}],
+        ),
+        (
+            ["CPUExecutionProvider"],
+            False,
+            None,
+            ["CPUExecutionProvider"],
+            [{}],
+        ),
+        (
+            None,
+            False,
+            None,
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            [{"use_tf32": "0"}, {}],
+        ),
+        (
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            False,
+            torch.device("cuda:0"),
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            [{"device_id": "0", "use_tf32": "0"}, {}],
+        ),
+        (
+            ["CPUExecutionProvider", "CUDAExecutionProvider"],
+            False,
+            torch.device("cuda:3"),
+            ["CPUExecutionProvider", "CUDAExecutionProvider"],
+            [{}, {"device_id": "3", "use_tf32": "0"}],
+        ),
+        (
+            None,
+            False,
+            torch.device("cuda:2"),
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            [{"device_id": "2", "use_tf32": "0"}, {}],
+        ),
+        (
+            None,
+            None,
+            torch.device("cuda:4"),
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            [{"device_id": "4"}, {}],
+        ),
+        (
+            ["CPUExecutionProvider"],
+            False,
+            torch.device("cuda:2"),
+            ["CPUExecutionProvider"],
+            [{}],
+        ),
+        (
+            None,
+            False,
+            torch.device("cuda"),
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            [{"device_id": "2", "use_tf32": "0"}, {}],
+        ),
+        (None, None, torch.device("cpu"), None, None),
+    ],
+)
+def test_onnx_precision_is_explicit_and_provider_scoped(
+    monkeypatch,
+    tmp_path,
+    providers,
+    use_tf32,
+    device,
+    expected_providers,
+    expected_options,
+):
+    """Freeze CUDA arithmetic without changing CPU options or historical defaults."""
+    import sys
+    from types import SimpleNamespace
+
+    session = SimpleNamespace(
+        get_inputs=lambda: [SimpleNamespace(name="obs", shape=[None, 32])],
+        get_outputs=lambda: [SimpleNamespace(name="action", shape=[None, 7])],
+        get_modelmeta=lambda: SimpleNamespace(custom_metadata_map={}),
+        get_providers=lambda: expected_providers or ["CPUExecutionProvider"],
+    )
+    received = {}
+
+    def create_session(path, **kwargs):
+        received.update(kwargs)
+        return session
+
+    monkeypatch.setitem(
+        sys.modules,
+        "onnxruntime",
+        SimpleNamespace(
+            SessionOptions=SimpleNamespace,
+            GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL="all"),
+            InferenceSession=create_session,
+            get_available_providers=lambda: [
+                "TensorrtExecutionProvider",
+                "CUDAExecutionProvider",
+                "CPUExecutionProvider",
+            ],
+        ),
+    )
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 2)
+    _REAL_ONNX_POLICY(
+        tmp_path / "policy.onnx", providers, cuda_use_tf32=use_tf32, device=device
+    )
+    assert received["providers"] == expected_providers
+    assert received.get("provider_options") == expected_options
+    if expected_options is None:
+        assert "provider_options" not in received
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("invalid", [0, 1, "false", 1.0])
+def test_onnx_precision_rejects_non_boolean_values(tmp_path, invalid):
+    with pytest.raises(TypeError, match="onnx_cuda_use_tf32 must be a bool or None"):
+        _REAL_ONNX_POLICY(tmp_path / "policy.onnx", cuda_use_tf32=invalid)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "device",
+    ["cpu", "cuda:0", "cuda:3"],
+    ids=["host", "default_device", "other_device"],
+)
+def test_neural_planner_forwards_explicit_precision_and_device(
+    tmp_path, monkeypatch, device
+):
+    manager = FakeSimulationManager()
+    manager.robot.device = torch.device(device)
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
+    # Device propagation needs no CUDA tensors; frame conversion is covered
+    # independently by the planner's CPU geometry tests.
+    monkeypatch.setattr(
+        NeuralPlanner, "_as_transform", lambda self, value, name: torch.eye(4)
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            control_part="main_arm",
+            onnx_cuda_use_tf32=False,
+        )
+    )
+    assert planner._policy.cuda_use_tf32 is False
+    assert planner._policy.device == torch.device(device)

@@ -146,6 +146,7 @@ def test_missing_curobo_is_actionable(monkeypatch):
         "curobo.collision_checking",
         "curobo.types",
         "curobo.scene",
+        "curobo._src.cost.tool_pose_criteria",
     ],
 )
 def test_curobo_import_preserves_caller_precision(
@@ -167,6 +168,7 @@ def test_curobo_import_preserves_caller_precision(
                 "Pose",
                 "GoalToolPose",
                 "DeviceCfg",
+                "ToolPoseCriteria",
                 "Scene",
             )
         }
@@ -360,6 +362,66 @@ def test_pose_planning_uses_direct_seed_before_graph_seed(
             "enable_graph_attempt": 1,
         }
     ]
+
+
+def test_partial_pose_native_costs_reset_and_unused_targets_are_sanitized(monkeypatch):
+    """Mixed Cartesian semantics reach cuRobo without hidden pose completion."""
+    criteria_calls, goals = [], []
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = SimpleNamespace(max_attempts=1, max_planning_time=None)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace(
+        ToolPoseCriteria=lambda **values: values, DeviceCfg=lambda **values: values
+    )
+    backend = SimpleNamespace(
+        planner=SimpleNamespace(
+            update_tool_pose_criteria=lambda values: criteria_calls.append(
+                values["tcp"]
+            ),
+            plan_pose=lambda *_args, **_kwargs: None,
+        ),
+        tool_frame="tcp",
+        profile=SimpleNamespace(tool_frame_to_tcp=None),
+        tool_to_frame_matrix=None,
+        use_cuda_graph=False,
+    )
+    monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(planner, "_to_curobo_joint_state", lambda *_: object())
+    monkeypatch.setattr(
+        planner, "_to_curobo_pose_goal", lambda pose, *_: goals.append(pose.clone())
+    )
+    position, orientation, full = (torch.eye(4)[None].clone() for _ in range(3))
+    position[:, :3, :3] = torch.nan
+    position[:, 0, 3] = 0.4
+    orientation[:, :3, 3] = torch.nan
+    planner._plan_segments(
+        [PlanState.from_xpos(pose) for pose in (position, orientation, full)],
+        torch.zeros(1, 7),
+        {MoveType.EEF_MOVE: backend},
+        CuroboPlanOptions(waypoint_modalities=["position", "orientation", "pose"]),
+    )
+    assert [item["terminal_pose_axes_weight_factor"] for item in criteria_calls] == [
+        [1, 1, 1, 0, 0, 0],
+        [0, 0, 0, 1, 1, 1],
+        [1] * 6,
+    ]
+    assert all(
+        item["non_terminal_pose_axes_weight_factor"] == [0] * 6
+        for item in criteria_calls
+    )
+    assert all(bool(torch.isfinite(pose).all()) for pose in goals)
+    assert float(goals[0][0, 0, 3]) == pytest.approx(0.4)
+    torch.testing.assert_close(goals[1][0, :3, 3], torch.zeros(3))
+
+
+def test_position_only_rejects_translated_tool_origin():
+    planner = object.__new__(CuroboPlanner)
+    planner._curobo_device = torch.device("cpu")
+    transform = torch.eye(4)
+    transform[2, 3] = 0.1
+    backend = SimpleNamespace(tool_to_frame_matrix=transform)
+    with pytest.raises(ValueError, match="coincident tool/TCP"):
+        planner._set_pose_modality(backend, "position")
 
 
 def test_extract_segment_uses_curobo_exclusive_last_tstep(monkeypatch):

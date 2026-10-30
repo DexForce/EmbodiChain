@@ -50,7 +50,11 @@ class RigidFormerCfg:
     max_batch_bytes: int = 512 * 1024 * 1024
 
     def reference_config(self) -> dict[str, Any]:
-        """Return an owned author configuration without opening data assets."""
+        """Return an owned author configuration without opening data assets.
+
+        Returns:
+            Complete author configuration, including explicit architecture overrides.
+        """
         self.validate()
         if self.preset not in ("movi_b", "movi_a", "movi_sphere"):
             raise ValueError("preset must be movi_b, movi_a, or movi_sphere")

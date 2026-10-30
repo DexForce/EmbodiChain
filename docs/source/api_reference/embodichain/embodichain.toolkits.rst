@@ -69,9 +69,10 @@ stages:
 .. currentmodule:: embodichain.toolkits.graspkit.pg_grasp
 
 The application-facing entry point is :class:`AntipodalGraspPoseGenerator`.
-Its configuration separates the physical gripper model, grasp algorithm,
-collision policy, and annotation/cache policy. Mesh-specific sampling and
-collision state remain private implementation details.
+It requires explicit collision geometry at the physical pre-grasp opening.
+Contact-aperture bounds, grasp algorithm, collision policy and annotation/cache
+policy have separate owners. Internal candidates use the canonical contact
+frame; public pose outputs use the geometry's declared runtime TCP.
 
 .. autosummary::
    :nosignatures:
@@ -83,6 +84,8 @@ collision state remain private implementation details.
    AntipodalGraspPoseGeneratorCfg
    ParallelJawGraspCollisionCfg
    GraspAnnotationCfg
+   FixedGripperCollisionGeometry
+   get_parallel_jaw_collision_geometry
    AntipodalSampler
    AntipodalSamplerCfg
    GripperCollisionChecker
@@ -113,6 +116,28 @@ ParallelJawGraspCollisionCfg
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
+
+FixedGripperCollisionGeometry
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This required geometry represents a declared pre-grasp joint state from actual
+URDF collision meshes. The loader preserves
+mesh origins and scales, applies the explicit canonical contact/TCP transform,
+and records asset hashes. It samples finite surfaces; it does not certify
+continuous intersections, closing contact, or full robot/path safety.
+
+.. autoclass:: FixedGripperCollisionGeometry
+   :members:
+
+get_parallel_jaw_collision_geometry
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Resolve a registered hand's actual meshes, open joints and calibrated TCP.
+Asymmetric hands require an explicit side; a TCP override preserves the
+physical geometry while changing returned poses. Custom hands supply their
+own :class:`FixedGripperCollisionGeometry`.
+
+.. autofunction:: get_parallel_jaw_collision_geometry
 
 GraspAnnotationCfg
 ~~~~~~~~~~~~~~~~~~

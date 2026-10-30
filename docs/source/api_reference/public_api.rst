@@ -2567,6 +2567,15 @@ embodichain.toolkits.graspkit.pg_grasp.collision_checker
    ConvexCollisionCheckerCfg
    ConvexCollisionChecker
 
+embodichain.toolkits.graspkit.pg_grasp.fixed_geometry
+---------------------------------------------------
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.fixed_geometry
+
+.. autosummary::
+
+   FixedGripperCollisionGeometry
+
 embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
 ----------------------------------------------------------------
 
@@ -2576,7 +2585,16 @@ embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
 
    GripperCollisionCfg
    GripperCollisionChecker
-   box_surface_grid
+
+embodichain.toolkits.graspkit.pg_grasp.model_geometry
+---------------------------------------------------
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.model_geometry
+
+.. autosummary::
+   :nosignatures:
+
+   get_parallel_jaw_collision_geometry
 
 embodichain.toolkits.graspkit.scripts.annotate_grasp
 ----------------------------------------------------

@@ -69,6 +69,7 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
     pad_trajectory_to_length,
     plan_named_arm_trajectory,
+    plan_named_arm_trajectories,
     repeat_qpos,
     require_shared_task_state_key,
     resolve_batched_pose,
@@ -194,6 +195,7 @@ class _DirectionalPlan:
     receive_object_to_eef: torch.Tensor
     receive_grasp_xpos: torch.Tensor
     affordance_samples: dict[str, dict[str, object]]
+    policy_batching: dict[str, object] | None = None
 
 
 class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
@@ -346,13 +348,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         goal = self.require_goal(request)
         options = request.skill_options
         resources = self._resolve_resources(request)
-        if (
-            request.motion_policy.strategy == "motion_gen"
-            and self.motion_generator.planner.cfg.planner_type == "curobo"
-        ):
-            raise ValueError(
-                "Coordinated dual-arm planning is not supported by the cuRobo backend."
-            )
+        # Each segment plans one explicitly named arm. The task layer merges
+        # their trajectories; this does not require a coupled dual-arm solver.
         if not isinstance(goal.semantics.affordance, AntipodalAffordance):
             raise ValueError("HandOver requires an AntipodalAffordance.")
         goal.semantics.affordance.require_whole_object_mesh()
@@ -437,6 +434,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             request.motion_policy.sample_count,
             options,
         )
+        packed_groups = []
         if first_is_handover.all():
             selected = self._plan_direction(
                 context,
@@ -460,6 +458,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             second_object_to_eef = selected.receive_object_to_eef
             second_grasp_xpos = selected.receive_grasp_xpos
             affordance_samples = selected.affordance_samples
+            if selected.policy_batching is not None:
+                packed_groups.append(selected.policy_batching)
         elif (~first_is_handover).all():
             selected = self._plan_direction(
                 context,
@@ -483,6 +483,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             second_object_to_eef = selected.handover_object_to_eef
             second_grasp_xpos = selected.handover_grasp_xpos
             affordance_samples = selected.affordance_samples
+            if selected.policy_batching is not None:
+                packed_groups.append(selected.policy_batching)
         else:
             first_to_second = self._plan_direction(
                 context,
@@ -511,6 +513,11 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 resources.first,
                 dict(segment_lengths),
                 ~first_is_handover & eligible,
+            )
+            packed_groups.extend(
+                plan.policy_batching
+                for plan in (first_to_second, second_to_first)
+                if plan.policy_batching is not None
             )
             if tuple(first_to_second.segment_lengths) != tuple(
                 second_to_first.segment_lengths
@@ -640,7 +647,12 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             ),
             diagnostics=PlannerDiagnostics(
                 backend=self.planning_services.planner_name,
-                metadata={"affordance_sample": affordance_samples},
+                metadata={
+                    "affordance_sample": affordance_samples,
+                    **(
+                        {"packed_motion_groups": packed_groups} if packed_groups else {}
+                    ),
+                },
             ),
             segment_lengths=segment_lengths,
             # The object may move from contact as soon as the pickup gripper
@@ -855,15 +867,44 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             "no finite receiving grasp was found",
         )
 
-        phase_success, source_transfer = plan_named_arm_trajectory(
-            self.motion_generator,
-            resources.first.arm.control_part,
-            source_start_qpos,
-            source_exchange_eef.unsqueeze(1),
-            lengths["transfer"],
-            request.motion_policy,
-            context.control_dt,
+        paired_transfer = None
+        policy_batching = None
+        destination_targets = torch.stack(
+            (destination_pre_grasp, destination_grasp), dim=1
         )
+        if request.motion_policy.strategy == "motion_gen":
+            # The requests are independent even for a backend that executes
+            # them sequentially through the multi-part facade.
+            paired_transfer, policy_batching = plan_named_arm_trajectories(
+                self.motion_generator,
+                {
+                    resources.first.arm.control_part: (
+                        source_start_qpos,
+                        source_exchange_eef.unsqueeze(1),
+                        lengths["transfer"],
+                    ),
+                    resources.second.arm.control_part: (
+                        destination_start_qpos,
+                        destination_targets,
+                        lengths["approach"],
+                    ),
+                },
+                request.motion_policy,
+                context.control_dt,
+            )
+            phase_success, source_transfer = paired_transfer[
+                resources.first.arm.control_part
+            ]
+        else:
+            phase_success, source_transfer = plan_named_arm_trajectory(
+                self.motion_generator,
+                resources.first.arm.control_part,
+                source_start_qpos,
+                source_exchange_eef.unsqueeze(1),
+                lengths["transfer"],
+                request.motion_policy,
+                context.control_dt,
+            )
         success &= normalize_success_mask(
             phase_success,
             num_envs=self.num_envs,
@@ -872,15 +913,20 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         lengths["transfer"] = source_transfer.shape[1]
         source_hold_qpos = source_transfer[:, -1]
-        phase_success, destination_approach = plan_named_arm_trajectory(
-            self.motion_generator,
-            resources.second.arm.control_part,
-            destination_start_qpos,
-            torch.stack((destination_pre_grasp, destination_grasp), dim=1),
-            lengths["approach"],
-            request.motion_policy,
-            context.control_dt,
-        )
+        if paired_transfer is not None:
+            phase_success, destination_approach = paired_transfer[
+                resources.second.arm.control_part
+            ]
+        else:
+            phase_success, destination_approach = plan_named_arm_trajectory(
+                self.motion_generator,
+                resources.second.arm.control_part,
+                destination_start_qpos,
+                destination_targets,
+                lengths["approach"],
+                request.motion_policy,
+                context.control_dt,
+            )
         success &= normalize_success_mask(
             phase_success,
             num_envs=self.num_envs,
@@ -1049,7 +1095,16 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                             "control_parts": [resources.second.arm.control_part]
                             * self.num_envs,
                         }
-                    }
+                    },
+                    **(
+                        {
+                            "packed_motion_groups": [
+                                {"stages": ["transfer", "approach"], **policy_batching}
+                            ]
+                        }
+                        if policy_batching is not None
+                        else {}
+                    ),
                 },
             ),
             segment_lengths={name: value.shape[1] for name, value in segment_values},
@@ -1442,15 +1497,43 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         pickup_transport_targets = torch.stack(
             [handover_lift_eef, handover_middle_eef], dim=1
         )
-        phase_success, pickup_transport = plan_named_arm_trajectory(
-            self.motion_generator,
-            handover.arm.control_part,
-            handover_grasp_qpos,
-            pickup_transport_targets,
-            segment_lengths["pickup_transport"],
-            request.motion_policy,
-            context.control_dt,
+        receive_approach_targets = torch.stack(
+            [receive_pre_grasp, receive_grasp], dim=1
         )
+        paired_transfer = None
+        policy_batching = None
+        if request.motion_policy.strategy == "motion_gen":
+            # Both requests are ready: the receiving target is derived from the
+            # requested exchange pose, not the source planner's output. Their
+            # execution stages below remain ordered transfer then approach.
+            paired_transfer, policy_batching = plan_named_arm_trajectories(
+                self.motion_generator,
+                {
+                    handover.arm.control_part: (
+                        handover_grasp_qpos,
+                        pickup_transport_targets,
+                        segment_lengths["pickup_transport"],
+                    ),
+                    receive.arm.control_part: (
+                        receive_start_qpos,
+                        receive_approach_targets,
+                        segment_lengths["receive_approach"],
+                    ),
+                },
+                request.motion_policy,
+                context.control_dt,
+            )
+            phase_success, pickup_transport = paired_transfer[handover.arm.control_part]
+        else:
+            phase_success, pickup_transport = plan_named_arm_trajectory(
+                self.motion_generator,
+                handover.arm.control_part,
+                handover_grasp_qpos,
+                pickup_transport_targets,
+                segment_lengths["pickup_transport"],
+                request.motion_policy,
+                context.control_dt,
+            )
         pickup_transport_success = normalize_success_mask(
             phase_success,
             num_envs=self.num_envs,
@@ -1470,18 +1553,18 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         segment_lengths["pickup_transport"] = pickup_transport.shape[1]
         handover_middle_qpos = pickup_transport[:, -1]
 
-        receive_approach_targets = torch.stack(
-            [receive_pre_grasp, receive_grasp], dim=1
-        )
-        phase_success, receive_approach = plan_named_arm_trajectory(
-            self.motion_generator,
-            receive.arm.control_part,
-            receive_start_qpos,
-            receive_approach_targets,
-            segment_lengths["receive_approach"],
-            request.motion_policy,
-            context.control_dt,
-        )
+        if paired_transfer is not None:
+            phase_success, receive_approach = paired_transfer[receive.arm.control_part]
+        else:
+            phase_success, receive_approach = plan_named_arm_trajectory(
+                self.motion_generator,
+                receive.arm.control_part,
+                receive_start_qpos,
+                receive_approach_targets,
+                segment_lengths["receive_approach"],
+                request.motion_policy,
+                context.control_dt,
+            )
         receive_approach_success = normalize_success_mask(
             phase_success,
             num_envs=self.num_envs,
@@ -1768,6 +1851,11 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     "control_parts": [receive.arm.control_part] * self.num_envs,
                 },
             },
+            policy_batching=(
+                {"stages": ["pickup_transport", "receive_approach"], **policy_batching}
+                if policy_batching is not None
+                else None
+            ),
         )
 
     @staticmethod

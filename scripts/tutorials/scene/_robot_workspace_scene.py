@@ -214,18 +214,19 @@ def _choose_grasp(
     robot: Any, workspace: RobotSceneWorkspace, seed: int
 ) -> torch.Tensor:
     import trimesh
-    from embodichain.toolkits.graspkit.pose_generator import (
-        get_parallel_jaw_gripper_model,
-    )
     from embodichain.toolkits.graspkit.pg_grasp.pose_generator import (
         AntipodalGraspPoseGenerator,
         AntipodalGraspPoseGeneratorCfg,
         ParallelJawGraspCollisionCfg,
     )
 
+    from examples.sim.atomic_action.gripper_geometry import mounted_gripper_geometry
+
+    model, geometry = mounted_gripper_geometry(robot.cfg)
     mesh = trimesh.creation.box(extents=[CUBE_SIZE] * 3)
     generator = AntipodalGraspPoseGenerator(
-        get_parallel_jaw_gripper_model("dh_pgi_140_80"),
+        model,
+        collision_geometry=geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=1000,
             max_candidates=32,

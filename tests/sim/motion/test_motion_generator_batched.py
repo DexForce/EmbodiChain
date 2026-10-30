@@ -364,6 +364,94 @@ class _DirectCartesianPlanner:
         )
 
 
+@pytest.mark.parametrize("pack", [False, True])
+def test_multi_part_facade_preserves_independent_rows_timing_and_options(pack: bool):
+    """Dispatch and normalization must agree with independent single-part calls."""
+
+    class Planner(_DirectCartesianPlanner):
+        supports_multi_part = pack
+
+        def __init__(self):
+            self.calls = []
+
+        def with_motion_context(self, options, *, start_qpos, control_part):
+            return SimpleNamespace(start_qpos=start_qpos, control_part=control_part)
+
+        def raw(self, options):
+            start = options.start_qpos
+            left = options.control_part == "left_arm"
+            result = _timed_result(
+                torch.stack([start, start + (0.1 if left else 0.2)], dim=1),
+                success=torch.tensor([True, False] if left else [False, True]),
+                step_dt=0.03 if left else 0.07,
+            )
+            return result
+
+        def plan(self, target_states, options):
+            self.calls.append(options.control_part)
+            return self.raw(options)
+
+        def plan_multi_part(self, target_states, options):
+            self.calls.append(tuple(target_states))
+            results = {part: self.raw(opts) for part, opts in options.items()}
+            for result in results.values():
+                result.policy_batching = {
+                    "scene_batch_size": 2,
+                    "control_part_count": 2,
+                    "actor_batch_size": 4,
+                    "policy_forward_calls": 1,
+                }
+            return results
+
+    generator = object.__new__(MotionGenerator)
+    generator.planner = Planner()
+    generator.device = torch.device("cpu")
+    targets = {
+        part: [PlanState.from_xpos(torch.eye(4).repeat(2, 1, 1))]
+        for part in ("left_arm", "right_arm")
+    }
+    options = {
+        part: MotionGenOptions(start_qpos=torch.full((2, 3), float(index)))
+        for index, part in enumerate(targets)
+    }
+    expected = {
+        part: generator.generate(
+            states,
+            MotionGenOptions(start_qpos=options[part].start_qpos, control_part=part),
+        )
+        for part, states in targets.items()
+    }
+    generator.planner.calls.clear()
+
+    actual = generator.generate_multi_part(targets, options)
+
+    assert generator.planner.calls == (
+        [("left_arm", "right_arm")] if pack else ["left_arm", "right_arm"]
+    )
+    for part, result in actual.items():
+        assert options[part].control_part is None
+        assert options[part].plan_opts is None
+        for field in ("success", "positions", "velocities", "dt"):
+            torch.testing.assert_close(
+                getattr(result, field), getattr(expected[part], field)
+            )
+        if pack:
+            assert result.policy_batching["actor_batch_size"] == 4
+            assert result.policy_batching["scene_batch_size"] == 2
+        else:
+            assert result.policy_batching is None
+
+
+def test_multi_part_facade_rejects_mismatched_control_part():
+    generator = object.__new__(MotionGenerator)
+    generator.planner = _DirectCartesianPlanner()
+    targets = {"left_arm": [PlanState.from_xpos(torch.eye(4)[None])]}
+    with pytest.raises(ValueError, match="control_part must match"):
+        generator.generate_multi_part(
+            targets, {"left_arm": MotionGenOptions(control_part="right_arm")}
+        )
+
+
 def test_direct_cartesian_planner_skips_preinterpolation_without_mutating_options():
     planner = _DirectCartesianPlanner()
     generator = object.__new__(MotionGenerator)

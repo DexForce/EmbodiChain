@@ -141,7 +141,7 @@ def _rollouts(
             elapsed.append(time.perf_counter() - before)
             obs, _, terminated, truncated, info = env.step(action)
             success = bool(info["success"][0])
-            distance = float(info["metrics"]["goal_distance"][0])
+            distance = float(info["metrics"]["distance_to_goal"][0])
             strict = distance < 0.03 and success
             if bool(torch.as_tensor(terminated).reshape(-1)[0]) or bool(
                 torch.as_tensor(truncated).reshape(-1)[0]

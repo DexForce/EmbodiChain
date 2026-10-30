@@ -326,7 +326,7 @@ uses this step-synchronized mode by default when neither the configuration nor
 
 Keep `viser_server.host` on loopback for remote workers and use SSH port
 forwarding unless the service is behind an authenticated gateway. See
-[Browser visualization with Viser](../overview/sim/viser_visualization.md) for
+[Browser visualization with Viser](../overview/sim/visualization/viser.md) for
 the full schema, supported scene content, and deformable-object behavior.
 
 ### Reusable Physical Environments and Runnable Deployments
@@ -563,6 +563,6 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
 
 - [Custom Functors Guide](custom_functors.md) — How to write observation, reward, event, and action functors
 - [Embodied Environments](../overview/gym/env.md) — Full environment configuration reference
-- [Browser Visualization](../overview/sim/viser_visualization.md) — Viser configuration and runtime behavior
+- [Browser Visualization](../overview/sim/visualization/viser.md) — Viser configuration and runtime behavior
 - [Tutorial: Modular Environment](../tutorial/modular_env.rst) — Complete example using config-driven setup
 - [Tutorial: RL Training](../tutorial/rl.rst) — RL training configuration walkthrough

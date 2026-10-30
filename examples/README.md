@@ -8,6 +8,7 @@ embodichain run-example sim/motion/planners/curobo_planner --help
 embodichain run-example ods/simple_bc_demo/train --help
 embodichain run-example learning/nerd --help
 embodichain run-example learning/rwm --help
+embodichain run-example learning/rigidformer demo --help
 embodichain run-example sim/atomic_action --skill place --variants 8
 embodichain run-example sim/atomic_action/coordinated_pickment --help
 ```
@@ -43,6 +44,11 @@ The [SL data-source example](learning/sl_data_source/README.md) connects residen
 causal windows to explicit action or state-transition encoders, and describes
 caller-owned online sampling and the limits of exact recovery.
 
+The [differentiable FK example](learning/differentiable_fk/README.md) trains a local
+Franka joint predictor through fixed FK using TCP pose supervision and the shared
+SL trainer. Its browser preview compares initialized and trained predictions on
+held-out targets, with frozen inference for interactive target edits.
+
 The [RWM fitting example](learning/rwm/README.md) qualifies controlled supervised
 state-transition fitting and state/action gradients. Its generated recipes use
 the installable `embodichain_models.dynamics.rwm` model family and shared SL
@@ -51,6 +57,11 @@ trainer; its corpus generation and acceptance helpers remain private to the exam
 The [visual ACT example](learning/act/README.md) collects Franka PushCube
 demonstrations, trains an RGB and proprioception action-chunking policy, and
 evaluates checkpoints on independently seeded simulator scenes.
+
+The [RigidFormer showcase](learning/rigidformer/README.md) prepares official
+weights and geometry, trains and evaluates the model, and runs an engine demo
+with Newton spheres beside a free model rollout. The demo opens a native window
+or records an engine-camera video with `--headless`.
 
 The [Atomic Skill example catalog](sim/atomic_action/README.md) owns all per-skill,
 coordinated-manipulation and recovery demonstrations. The two source-checkout

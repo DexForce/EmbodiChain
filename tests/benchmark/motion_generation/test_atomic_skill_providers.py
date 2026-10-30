@@ -995,12 +995,19 @@ def test_backend_plan_options_fill_only_unset_motion_generation_policies() -> No
 
     filled = with_plan_options(invocation(MotionPolicy(strategy="motion_gen")), options)
     kept = with_plan_options(
-        invocation(MotionPolicy(strategy="motion_gen", plan_opts=explicit)), options
+        invocation(
+            MotionPolicy(
+                strategy="motion_gen", plan_opts=explicit, acceleration_limit=0.7
+            )
+        ),
+        options,
     )
     interpolated = with_plan_options(invocation(MotionPolicy()), options)
 
     assert filled.motion_policy.plan_opts.sample_interval == 40
+    assert filled.motion_policy.acceleration_limit is None
     assert kept.motion_policy.plan_opts.sample_interval == 10
+    assert kept.motion_policy.acceleration_limit == 0.7
     assert interpolated.motion_policy.plan_opts is None
 
 
@@ -1351,6 +1358,18 @@ def test_object_rotation_providers_screen_every_pose_row(
         return success, qpos_seed + 0.01
 
     robot = SimpleNamespace(
+        cfg=SimpleNamespace(
+            solver_cfg={
+                "arm": SimpleNamespace(
+                    tcp=[
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.15],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ]
+                )
+            }
+        ),
         device=CPU,
         _all_indices=torch.arange(batch_size),
         _solvers={"arm": SimpleNamespace(root_link_name="base", get_ik=solve)},
@@ -1447,6 +1466,8 @@ def test_object_rotation_providers_screen_every_pose_row(
     for index, call in enumerate(references):
         torch.testing.assert_close(call[2], case.start_qpos + index * 0.01)
     generator_factory.assert_called_once_with(
+        gripper_model=None,
+        root_from_tcp=robot.cfg.solver_cfg["arm"].tcp,
         n_sample=321,
         force_refresh=False,
         max_candidates=2,

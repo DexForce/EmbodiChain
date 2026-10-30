@@ -41,6 +41,11 @@ from embodichain.toolkits.graspkit import (
     ParallelJawGripperModelCfg,
     get_parallel_jaw_gripper_model,
 )
+from embodichain.toolkits.graspkit.pg_grasp import FixedGripperCollisionGeometry
+from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+    get_parallel_jaw_collision_geometry,
+)
+from .gripper_geometry import geometry_from_asset
 from embodichain.utils import configclass, logger
 from embodichain_robots import (
     ARX5Cfg,
@@ -68,6 +73,7 @@ class EmbodimentCfg:
     robot_cfg: RobotCfg = MISSING
     binding: dict[str, dict[str, str]] = {}
     models: dict[str, ParallelJawGripperModelCfg] = {}
+    collision_geometries: dict[str, FixedGripperCollisionGeometry] = {}
     commands: dict[str, dict[str, tuple[float, ...]]] = {}
     object_size: tuple[float, float, float] = (0.04, 0.04, 0.04)
     # Per-robot task-frame placement, shared by both mounted-gripper choices.
@@ -156,10 +162,6 @@ def _mounted_gripper(
             ParallelJawGripperModelCfg(
                 model_id="tutorial_pika",
                 max_opening_width=0.1,
-                finger_length=0.055,
-                finger_width=0.025,
-                finger_thickness=0.012,
-                palm_depth=0.08,
             ),
         )
     tcp = np.eye(4)
@@ -182,10 +184,6 @@ def _mounted_gripper(
         ParallelJawGripperModelCfg(
             model_id="tutorial_dh_ag95",
             max_opening_width=0.095,
-            finger_length=0.055,
-            finger_width=0.025,
-            finger_thickness=0.012,
-            palm_depth=0.14,
         ),
     )
 
@@ -246,6 +244,17 @@ def _mount_grippers(args: argparse.Namespace, cfg: EmbodimentCfg) -> None:
         )
         cfg.commands = {f"{side}_eef": commands for side in ("left", "right")}
         cfg.models = {f"{side}_eef": model for side in ("left", "right")}
+    geometry = (
+        get_parallel_jaw_collision_geometry("pika_gripper", root_from_tcp=tcp)
+        if args.gripper == "pika"
+        else geometry_from_asset(
+            asset,
+            root_from_tcp=tcp,
+            root_from_grasp=tcp,
+            joint_positions=dict(zip(joints, commands["open"], strict=True)),
+        )
+    )
+    cfg.collision_geometries = {part: geometry for part in cfg.models}
     cfg.robot_cfg.urdf_cfg.fpath = str(
         Path(EMBODICHAIN_DEFAULT_DATA_ROOT)
         / "assembled"
@@ -292,10 +301,6 @@ def create_embodiment(args: argparse.Namespace) -> EmbodimentCfg:
             "eef": ParallelJawGripperModelCfg(
                 model_id="tutorial_arx5",
                 max_opening_width=0.088,
-                finger_length=0.05,
-                finger_width=0.025,
-                finger_thickness=0.01,
-                palm_depth=0.065,
             )
         }
         cfg.commands = {"eef": {"open": (0.044, 0.044), "grasp": (0.0, 0.0)}}
@@ -363,6 +368,47 @@ def create_embodiment(args: argparse.Namespace) -> EmbodimentCfg:
             f"{s}_eef": {"open": (0.0, 0.0), "grasp": (-0.05, -0.05)}
             for s in ("left", "right")
         }
+    if args.robot == "arx5":
+        geometry = FixedGripperCollisionGeometry.from_urdf(
+            get_data_path("ARX5/X5A.urdf"),
+            root_link="link6",
+            tcp_link="ee_link",
+            collision_links=("link6", "link7", "link8"),
+            joint_positions={"joint7": 0.044, "joint8": 0.044},
+            link_from_tcp=np.asarray(cfg.robot_cfg.solver_cfg["arm"].tcp),
+            grasp_from_tcp=np.eye(4),
+            point_spacing=0.012,
+        )
+        cfg.collision_geometries = {"eef": geometry}
+    elif args.robot not in ("ur5", "w1_030"):
+        cfg.collision_geometries = {}
+        for part, model in cfg.models.items():
+            side = part.removesuffix("_eef")
+            root_from_tcp = None
+            if args.robot == "cobotmagic":
+                # The source gripper_base is fixed identically to link6. This
+                # example overrides the preset's TCP rotation explicitly.
+                root_from_tcp = np.asarray(cfg.robot_cfg.solver_cfg[f"{side}_arm"].tcp)
+            elif args.robot == "tianji":
+                import xml.etree.ElementTree as ET
+                from scipy.spatial.transform import Rotation
+
+                origin = ET.parse(
+                    get_data_path("TianjiMarvin/robot_with_ee_acd.urdf")
+                ).find(f"./joint[@name='{side.upper()}_HAND_TOOL']/origin")
+                root_from_tool = np.eye(4)
+                root_from_tool[:3, :3] = Rotation.from_euler(
+                    "xyz", np.fromstring(origin.attrib["rpy"], sep=" ")
+                ).as_matrix()
+                root_from_tool[:3, 3] = np.fromstring(origin.attrib["xyz"], sep=" ")
+                root_from_tcp = root_from_tool @ np.asarray(
+                    cfg.robot_cfg.solver_cfg[f"{side}_arm"].tcp
+                )
+            cfg.collision_geometries[part] = get_parallel_jaw_collision_geometry(
+                model.model_id,
+                side=side if args.robot == "tianji" else None,
+                root_from_tcp=root_from_tcp,
+            )
     if args.task == "pick_place":
         cfg.binding = {"primary": {"motion": "arm", "grasp": "eef"}}
     else:

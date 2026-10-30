@@ -415,6 +415,8 @@ def run_coordinated_pickment_demo(
         middle_empty_ratio=0.7,
     )
     grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
+        robot=robot,
+        arm_control_part="left_arm",
         n_sample=args.n_sample,
         force_refresh=args.force_reannotate,
     )

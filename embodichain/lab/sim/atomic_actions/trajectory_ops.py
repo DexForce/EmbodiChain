@@ -337,7 +337,12 @@ def to_full_robot_trajectory(
     env_ids: torch.Tensor,
     control_dt: float,
 ) -> tuple[torch.Tensor, TimedTrajectory]:
-    """Retime and embed a controlled-joint plan into a full-robot trajectory."""
+    """Compile a controlled-joint plan onto the full-robot control grid.
+
+    Sampling retains the native planner precision. Only the resulting control
+    positions and velocities adopt ``base_qpos``'s dtype and device; the input
+    :class:`PlanResult` is unchanged.
+    """
     positions = result.positions
     if positions is None or positions.dim() != 3:
         raise ValueError("PlanResult.positions must have shape (B, N, control_dof).")
@@ -353,13 +358,13 @@ def to_full_robot_trajectory(
         control_dt,
     )
     full_positions = base_qpos.unsqueeze(1).expand(-1, positions.shape[1], -1).clone()
-    full_positions[:, :, joint_ids] = positions
+    full_positions[:, :, joint_ids] = positions.to(full_positions)
 
     def embed_derivative(value: torch.Tensor | None) -> torch.Tensor | None:
         if value is None:
             return None
         full = torch.zeros_like(full_positions)
-        full[:, :, joint_ids] = value
+        full[:, :, joint_ids] = value.to(full)
         return full
 
     timed = TimedTrajectory.from_positions(

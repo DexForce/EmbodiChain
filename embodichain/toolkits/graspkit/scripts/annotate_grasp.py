@@ -22,8 +22,7 @@ point pairs to the grasp-annotator cache.
 
 Usage examples::
 
-    embodichain annotate-grasp --mesh_path /path/to/object.ply
-    embodichain annotate-grasp --mesh_path mug.obj
+    embodichain annotate-grasp --mesh_path mug.obj --gripper-model franka_panda_hand
 """
 
 from __future__ import annotations
@@ -66,16 +65,26 @@ def cli(argv: Sequence[str] | None = None) -> None:
         help="Number of surface points to sample (default: 20000).",
     )
     parser.add_argument(
+        "--gripper-model",
+        required=True,
+        help="Explicit built-in gripper identity; supplies the actual URDF collision geometry.",
+    )
+    parser.add_argument(
         "--max_length",
         type=float,
-        default=0.1,
-        help="Maximum distance between antipodal pairs in metres (default: 0.1).",
+        default=None,
+        help="Maximum antipodal contact distance in metres (default: selected model).",
     )
     parser.add_argument(
         "--min_length",
         type=float,
-        default=0.001,
-        help="Minimum distance between antipodal pairs in metres (default: 0.001).",
+        default=None,
+        help="Minimum antipodal contact distance in metres (default: selected model).",
+    )
+    parser.add_argument(
+        "--gripper-side",
+        choices=("left", "right"),
+        help="Explicit side for the asymmetric Marvin built-in model.",
     )
     parser.add_argument(
         "--device",
@@ -89,14 +98,38 @@ def cli(argv: Sequence[str] | None = None) -> None:
     import torch
     import trimesh
 
-    from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+    from embodichain.toolkits.graspkit import (
+        ParallelJawGripperModelCfg,
+        get_parallel_jaw_gripper_model,
+    )
     from embodichain.toolkits.graspkit.pg_grasp import (
         AntipodalGraspPoseGenerator,
         AntipodalGraspPoseGeneratorCfg,
         GraspAnnotationCfg,
-        ParallelJawGraspCollisionCfg,
+    )
+    from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+        get_parallel_jaw_collision_geometry,
     )
     from embodichain.utils.logger import log_info
+
+    selected_model = get_parallel_jaw_gripper_model(args.gripper_model)
+    # Retain the existing contact-pair filters; they never synthesize geometry.
+    model = ParallelJawGripperModelCfg(
+        model_id=selected_model.model_id,
+        min_opening_width=(
+            selected_model.min_opening_width
+            if args.min_length is None
+            else args.min_length
+        ),
+        max_opening_width=(
+            selected_model.max_opening_width
+            if args.max_length is None
+            else args.max_length
+        ),
+    )
+    geometry = get_parallel_jaw_collision_geometry(
+        args.gripper_model, side=args.gripper_side
+    )
 
     # Load mesh via trimesh
     log_info(f"Loading mesh from {args.mesh_path}", color="green")
@@ -105,13 +138,9 @@ def cli(argv: Sequence[str] | None = None) -> None:
     triangles = torch.tensor(mesh.faces, dtype=torch.int64, device=args.device)
 
     generator = AntipodalGraspPoseGenerator(
-        ParallelJawGripperModelCfg(
-            model_id="annotation_parallel_jaw",
-            min_opening_width=args.min_length,
-            max_opening_width=args.max_length,
-        ),
+        model,
+        collision_geometry=geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=args.n_sample),
-        collision_cfg=ParallelJawGraspCollisionCfg(opening_margin=0.0),
         annotation_cfg=GraspAnnotationCfg(
             selection_mode="interactive",
             viser_port=args.viser_port,

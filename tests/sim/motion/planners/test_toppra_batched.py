@@ -43,6 +43,37 @@ class _UnboundedRobot:
 
 
 @pytest.mark.no_sim
+@pytest.mark.parametrize("stopped", [False, True])
+def test_planner_preserves_double_samples_from_float32_waypoints(stopped: bool) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    planner = object.__new__(ToppraPlanner)
+    planner.robot = _UnboundedRobot()
+    planner.device = torch.device("cpu")
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused")
+    result = planner.plan(
+        [PlanState.from_qpos(torch.tensor([[q]])) for q in (2.8, 2.81)],
+        ToppraPlanOptions(
+            constraints={"velocity": 2.0, "acceleration": 4.0},
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=0.001,
+            stop_at_waypoints=stopped,
+        ),
+    )
+    assert result.success.tolist() == [True]
+    assert result.positions.dtype == result.dt.dtype == torch.float64
+    velocity = result.positions.diff(dim=1) / result.dt[:, 1:, None]
+    acceleration = velocity.diff(dim=1) / result.dt[:, 2:, None]
+    assert acceleration.abs().max() <= 4.0 + 1e-7
+    assert result.dt.max() <= 0.001
+
+
+@pytest.mark.no_sim
 def test_planner_defaults_use_time_sampling_without_a_sample_count() -> None:
     from embodichain.lab.sim.motion.planners.toppra_planner import (
         ToppraPlanner,
@@ -335,10 +366,10 @@ def test_cuda_planner_keeps_plan_on_device(
     assert result.success.tolist() == [True, True, False]
     assert result.positions.is_cuda and result.dt.is_cuda
     assert result.positions.shape == (3, 128, 1)
-    assert result.positions.dtype == result.dt.dtype == torch.float32
+    assert result.positions.dtype == result.dt.dtype == torch.float64
     assert result.duration[0] > 0
     assert result.duration[1:].count_nonzero() == 0
-    torch.testing.assert_close(result.positions[0, -1], points[0, -1].float())
+    torch.testing.assert_close(result.positions[0, -1], points[0, -1].double())
 
 
 @pytest.mark.no_sim
@@ -346,7 +377,7 @@ def test_cuda_planner_keeps_plan_on_device(
     "dtype", [torch.float16, torch.float32, torch.float64, torch.int64]
 )
 @pytest.mark.parametrize("quantity", [20, 20.0, 20.9])
-def test_legacy_planner_output_dtype_and_quantity_coercion(
+def test_planner_double_output_and_quantity_coercion(
     dtype: torch.dtype, quantity: float | int
 ) -> None:
     from embodichain.lab.sim.motion.planners.toppra_planner import (
@@ -377,7 +408,7 @@ def test_legacy_planner_output_dtype_and_quantity_coercion(
         result.accelerations,
         result.dt,
     ):
-        assert values.dtype == torch.float32
+        assert values.dtype == torch.float64
 
 
 @pytest.mark.no_sim
@@ -411,7 +442,7 @@ def test_planner_preserves_waypoint_gradients_and_duration_contract(
         ),
     )
     assert result.success.all()
-    assert result.positions.dtype == torch.float32
+    assert result.positions.dtype == torch.float64
     assert result.positions.requires_grad and result.duration.requires_grad
     result.duration.sum().backward()
     expected = result.duration.detach().to(dtype) / (2 * parameter.detach().flatten())
@@ -450,7 +481,7 @@ def test_planner_autograd_routes_trainable_limits_without_trainable_waypoints(
         ),
     )
     assert result.success.all() and result.duration.requires_grad
-    assert result.positions.dtype == torch.float32
+    assert result.positions.dtype == torch.float64
     result.duration.sum().backward()
     torch.testing.assert_close(
         parameter.grad, -result.duration.sum().detach().double() / 2
@@ -580,7 +611,9 @@ def test_cuda_time_planner_backward_preserves_input_gradients(
     assert result.success.all() and dq.is_cuda and da.is_cuda
     expected_dq = duration.detach().double() / (2 * distance.detach().double())
     torch.testing.assert_close(dq, expected_dq.to(dtype))
-    torch.testing.assert_close(da, -duration.detach() / (2 * acceleration.detach()))
+    torch.testing.assert_close(
+        da, (-duration.detach() / (2 * acceleration.detach())).to(da.dtype)
+    )
 
 
 @pytest.mark.no_sim
@@ -612,7 +645,9 @@ def test_cpu_planner_never_starts_process_workers(monkeypatch) -> None:
             sample_interval=17,
         ),
     )
-    reference = _retime_toppra_warp(points, 1.0, 2.0, sample_count=17)
+    reference = _retime_toppra_warp(
+        points, 1.0, 2.0, sample_count=17, output_dtype=torch.float64
+    )
     for key, value in reference.items():
         torch.testing.assert_close(getattr(actual, key), value, rtol=0, atol=0)
     planner.close()
@@ -637,8 +672,7 @@ def test_shared_cpu_retimer_preserves_cleanup_across_batch_sizes(dtype, grad) ->
         points.repeat(2, 1, 1), constraints=limits, sample_interval=17
     )
     assert single.success.all() and batch.success.all()
-    expected_dtype = dtype if dtype in (torch.float32, torch.float64) else torch.float32
-    assert single.positions.dtype == batch.positions.dtype == expected_dtype
+    assert single.positions.dtype == batch.positions.dtype == torch.float64
     for key in ("positions", "velocities", "accelerations", "dt"):
         torch.testing.assert_close(
             getattr(single, key)[0], getattr(batch, key)[0], rtol=0, atol=0
@@ -703,7 +737,7 @@ def test_planner_limit_gradients_survive_runtime_speed_caps(
 @pytest.mark.parametrize(
     "dtype", [torch.float16, torch.bfloat16, torch.float32, torch.float64]
 )
-def test_shared_retimer_failure_preserves_promoted_dtype(dtype: torch.dtype) -> None:
+def test_shared_retimer_failure_uses_double_output(dtype: torch.dtype) -> None:
     from embodichain.lab.sim.motion.planners.toppra_planner import retime_joint_paths
 
     result = retime_joint_paths(
@@ -712,10 +746,9 @@ def test_shared_retimer_failure_preserves_promoted_dtype(dtype: torch.dtype) -> 
         sample_interval=17,
     )
     assert not result.success.any()
-    expected = dtype if dtype in (torch.float32, torch.float64) else torch.float32
     for key in ("positions", "velocities", "accelerations", "dt"):
         value = getattr(result, key)
-        assert value.dtype == expected and value.count_nonzero() == 0
+        assert value.dtype == torch.float64 and value.count_nonzero() == 0
 
 
 @pytest.mark.no_sim

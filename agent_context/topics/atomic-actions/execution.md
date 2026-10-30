@@ -172,6 +172,10 @@ a semantic effect boundary.
 scalar budgets to `MotionGenOptions` for both strategies. Omitted velocity
 preserves Robot caps; the default acceleration budget is 0.5. Typed `plan_opts`
 require `motion_gen`; each backend owns how they consume scalar budgets.
+For `motion_gen`, an explicit `acceleration_limit=None` preserves the backend's
+configured budget; `ik_interp` still requires a positive scalar. The benchmark
+uses this delegation when injecting selected-planner options so task defaults
+do not replace the suite's per-joint limits or invalidate prepared backends.
 Configured execution policies expose the same fields under `motion`, and
 requested budgets are retained in execution metadata. Use these fields when a
 physically qualified task needs a lower speed than the selected robot's limits.
@@ -197,3 +201,11 @@ of choosing the maximum. Simulation control periods and sleeps must be integer
 multiples of `physics_dt`; the adapter never rounds a motion-command request
 upward. Passive runner polling, including physical-effect waits, rounds the
 configured minimum cycle up to an advertised clock quantum before sleeping.
+
+## Benchmark physical replay evidence
+
+The benchmark extension's `scenarios/_replay_diagnostics.py` and
+`atomic_replay.py` collect optional Atomic replay evidence without changing
+stage scoring or controller commands. The
+[benchmark README](../../../extensions/embodichain_benchmarks/motion_generation/README.md#physical-replay-diagnostics)
+owns the configuration, recorded fields and timing interpretation.
