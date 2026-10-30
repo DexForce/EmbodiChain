@@ -216,7 +216,8 @@ def test_absent_objective_preserves_info_keys():
     env.episode_context = EpisodeContext(2)
     env.sim = SimpleNamespace(device=torch.device("cpu"))
     env._elapsed_steps = torch.zeros(2, dtype=torch.int32)
-    assert EmbodiedEnvCfg().objective is None
+    env.cfg = EmbodiedEnvCfg()
+    assert env.cfg.objective is None
     assert set(env.get_info()) == {
         "success",
         "fail",
@@ -278,6 +279,7 @@ class _LifecycleEnv(EmbodiedEnv):
         self.max_episode_steps = 100
         self.cfg = SimpleNamespace(
             objective=_runtime().cfg,
+            episode_context_in_info=True,
             sim_steps_per_control=1,
             ignore_terminations=False,
             events=True,
@@ -366,8 +368,12 @@ def test_control_step_samples_after_interval_events_and_info_is_pure():
     assert not info["success"].any()
 
 
-def test_reset_preserves_terminal_snapshot_and_resets_after_recorder_consumption():
+@pytest.mark.parametrize("include_context", [True, False])
+def test_reset_preserves_terminal_snapshot_and_resets_after_recorder_consumption(
+    include_context: bool,
+):
     env = _LifecycleEnv()
+    env.cfg.episode_context_in_info = include_context
     for x in [0.0, 0.0, 1.0, 1.0, 0.0, 0.0]:
         env.interval_x = x
         env.step(None)
@@ -379,6 +385,7 @@ def test_reset_preserves_terminal_snapshot_and_resets_after_recorder_consumption
         apply=lambda **kwargs: saved.append(env.physical_objective.snapshot_row(0)),
     )
     _, info = env.reset(options={"reset_ids": torch.tensor([0])})
+    assert ("episode_context" in info) is include_context
     assert saved[0]["success"] is True
     assert env.reset_snapshot["success"].tolist() == [True, True]
     assert info["physical_objective"]["progress"].tolist() == [0, 3]

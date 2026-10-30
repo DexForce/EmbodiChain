@@ -22,7 +22,7 @@ import pytest
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import ArticulationCfg, physics_cfg_for_backend
+from embodichain.lab.sim.cfg import ArticulationCfg, RenderCfg, physics_cfg_for_backend
 from embodichain.utils.math import matrix_from_quat
 
 pytestmark = [pytest.mark.gpu, pytest.mark.requires_sim]
@@ -53,6 +53,7 @@ def test_live_inertia_frames_and_partial_reset(tmp_path: Path, backend: str) -> 
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            render_cfg=RenderCfg(renderer="no-render"),
             device="cuda:0",
             num_envs=3,
             physics_cfg=physics_cfg_for_backend(backend),
@@ -61,7 +62,12 @@ def test_live_inertia_frames_and_partial_reset(tmp_path: Path, backend: str) -> 
     art = None
     try:
         art = sim.add_articulation(
-            ArticulationCfg(uid="inertial", fpath=str(source), init_pos=(0, 0, 1))
+            ArticulationCfg(
+                uid="inertial",
+                fpath=str(source),
+                init_pos=(0, 0, 1),
+                build_pk_chain=False,
+            )
         )
         sim.prepare()
         data = art.body_data
@@ -128,6 +134,14 @@ def test_live_inertia_frames_and_partial_reset(tmp_path: Path, backend: str) -> 
             _tensor(observed[1][0], observed[2][0]),
             atol=1e-5,
             rtol=1e-4,
+        )
+        # Empty and repeated selections preserve the scalar API behavior.
+        art.set_mass(torch.empty((1, 0), device=art.device), [], [2])
+        art.set_inertia(torch.empty((1, 0, 3), device=art.device), [], [2])
+        art.set_com_pose(torch.empty((1, 0, 7), device=art.device), [], [2])
+        art.set_mass(torch.tensor([[3.0], [4.0]], device=art.device), names, [2, 2])
+        torch.testing.assert_close(
+            art.get_mass(names, [2]), torch.tensor([[4.0]], device=art.device)
         )
         sim.update()
         assert torch.isfinite(art.root_state).all()

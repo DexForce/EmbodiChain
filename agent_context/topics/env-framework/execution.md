@@ -304,3 +304,11 @@ All normal output selections also intersect context eligibility. Explicit
 and are never dataset commits. Closing only drains committed writes and discards
 live buffers. Camera recordings use independent row buffers and files, with owned
 context sidecars; asynchronous jobs do not wait for another row or a mosaic.
+
+## Recording cost during RL rollouts
+
+`EmbodiedEnv` allocates raw/controller action histories on the first recording
+sample. Demo provenance is created when recording metadata is requested;
+episode initialization refreshes it once it has been used. Ordinary RL resets
+do not enumerate empty recording histories on the host. Metadata snapshots
+retain deep-copy and episode-context ownership.
