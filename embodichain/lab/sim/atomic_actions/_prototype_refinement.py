@@ -86,6 +86,13 @@ def _pick_refinement_anchor(
         vertices.astype("<f8").tobytes() + triangles.astype("<i8").tobytes()
     )
     digest.update(json.dumps(model.to_dict(), sort_keys=True).encode())
+    calibration = (
+        request.skill_options.grasp_frame_to_eef.detach()
+        .cpu()
+        .numpy()
+        .astype(np.float64)
+    )
+    digest.update(calibration.astype("<f8").tobytes())
     if goal.grasp_xpos is not None:
         candidates = _world_goal(goal.grasp_xpos, context, "grasp_xpos")[None]
         origin = "explicit_goal"
@@ -127,6 +134,13 @@ def _pick_refinement_anchor(
         origin = "affordance_mesh"
     if not len(candidates):
         raise ValueError("refinement found no legal grasp candidates")
+    # Geometry generators return canonical grasp poses, while explicit/fixed
+    # goals and the source anchor already refer to the robot end effector.
+    if origin == "affordance_mesh":
+        canonical_candidates = candidates
+        candidates = canonical_candidates @ calibration
+    else:
+        canonical_candidates = candidates @ np.linalg.inv(calibration)
     translation = np.linalg.norm(candidates[:, :3, 3] - source_anchor[:3, 3], axis=1)
     angular = Rotation.from_matrix(
         candidates[:, :3, :3] @ source_anchor[:3, :3].T
@@ -140,7 +154,7 @@ def _pick_refinement_anchor(
     for index in order[valid[order]][: cfg.max_candidates]:
         tested += 1
         candidate = candidates[index]
-        local = np.linalg.inv(candidate) @ object_pose
+        local = np.linalg.inv(canonical_candidates[index]) @ object_pose
         points = vertices @ local[:3, :3].T + local[:3, 3]
         width = float(np.ptp(points[:, 0]))
         # This is a necessary jaw-envelope check. Exact hand/self/scene mesh

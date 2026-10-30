@@ -35,6 +35,9 @@ from .contracts import (
 
 __all__ = ["normalize_trajectory"]
 
+_DEFAULT_MAX_SAMPLES = 1_000_000
+_DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024 * 1024
+
 
 def _rigid(value: np.ndarray, name: str) -> np.ndarray:
     matrix = np.asarray(value, dtype=np.float64)
@@ -139,6 +142,8 @@ def normalize_trajectory(
     control_dt: float,
     event_tolerance_s: float = 1e-6,
     mimic_tolerance: float = 1e-6,
+    max_samples: int = _DEFAULT_MAX_SAMPLES,
+    max_output_bytes: int = _DEFAULT_MAX_OUTPUT_BYTES,
 ) -> NormalizedReal2SimUnit:
     """Convert a labeled motion to canonical joints, frames and control time.
 
@@ -153,6 +158,10 @@ def normalize_trajectory(
         control_dt: Destination command period in seconds.
         event_tolerance_s: Maximum time displacement of a hard event.
         mimic_tolerance: Canonical-unit tolerance for redundant mimic evidence.
+        max_samples: Maximum generated control-grid sample count.
+        max_output_bytes: Budget for a conservative estimate of generated numeric
+            arrays and working buffers, excluding the already loaded source.
+            This is not a process-RSS or third-party allocator peak bound.
 
     Returns:
         Canonical unit with an auditable source-to-grid mapping.
@@ -176,7 +185,45 @@ def normalize_trajectory(
             raise ValueError(
                 f"{name} must be finite and {'positive' if positive else 'nonnegative'}"
             )
+    for value, name, minimum in (
+        (max_samples, "max_samples", 2),
+        (max_output_bytes, "max_output_bytes", 1),
+    ):
+        if type(value) is not int or value < minimum:
+            raise ValueError(f"{name} must be an integer of at least {minimum}")
     joints = tuple(joints)
+    times = np.asarray(source.timestamps) * (0.001 if source.time_unit == "ms" else 1.0)
+    with np.errstate(over="ignore", invalid="ignore"):
+        times = times - times[0]
+    if not np.isfinite(times).all():
+        raise ValueError("normalized source duration must be finite")
+    if np.any(np.diff(times) < 0):
+        raise ValueError("source timestamps must not move backwards")
+    # Reject output expansion before any integer cast or control-grid allocation.
+    # A finite timestamp divided by a tiny positive dt may overflow to infinity.
+    with np.errstate(over="ignore", invalid="ignore"):
+        last_event = np.rint(times[-1] / control_dt)
+    if (
+        not np.isfinite(last_event)
+        or last_event >= max_samples
+        or last_event >= np.iinfo(np.int64).max
+    ):
+        raise ValueError("normalized control grid exceeds max_samples budget")
+    count = int(last_event) + 1
+    # Joint interpolation can retain indexed inputs, weighted products and an
+    # owned normalized copy. Pose interpolation additionally retains rotations,
+    # transforms and source/event maps. Account for source-joint conversion too.
+    joint_count = len(joints)
+    per_sample_values = 8 * joint_count + (96 if source.eef_poses is not None else 16)
+    source_values = len(times) * (
+        3 * joint_count + (16 if source.eef_poses is not None else 0)
+    )
+    estimated_bytes = 8 * (count * per_sample_values + source_values)
+    if estimated_bytes > max_output_bytes:
+        raise ValueError(
+            f"normalized arrays require an estimated {estimated_bytes} bytes, "
+            f"exceeding max_output_bytes budget {max_output_bytes}"
+        )
     qpos, indices, correction_tuple = _joint_columns(source, joints, mimic_tolerance)
     corrections = list(correction_tuple)
     if source.initial_observed_qpos is not None:
@@ -192,10 +239,6 @@ def normalize_trajectory(
             else "reference_assumption"
         )
     corrections.append(f"initial state source: {initial_state_origin}")
-    times = np.asarray(source.timestamps) * (0.001 if source.time_unit == "ms" else 1.0)
-    times = times - times[0]
-    if np.any(np.diff(times) < 0):
-        raise ValueError("source timestamps must not move backwards")
     events = np.array(
         [phase.start for phase in source.phases] + [len(times) - 1], dtype=np.int64
     )
@@ -228,7 +271,6 @@ def normalize_trajectory(
         raise ValueError("hard event does not lie on the control grid")
     if np.any(np.diff(event_grid) <= 0):
         raise ValueError("control grid erases a phase or hard event")
-    count = int(event_grid[-1]) + 1
     grid = np.arange(count, dtype=np.float64) * control_dt
     if grid[-1] > source_times[-1] + event_tolerance_s:
         raise ValueError("control grid extends past the source trajectory")

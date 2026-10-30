@@ -558,6 +558,342 @@ def test_real2sim_run_task_preserves_failed_write_without_rerunning(
     assert submit.call_args_list[1].args[2].commit_id == episode.commit_id
 
 
+def _real2sim_owner_case(monkeypatch, tmp_path, *, episode=None, session=None):
+    """Build a real staging owner with fake capture/write ports, without rollout."""
+    from embodichain.lab.gym.envs.managers import real2sim_collection
+    from embodichain.lab.gym.envs.managers.real2sim_collection import (
+        Real2SimCaptureRequest,
+        Real2SimRunTaskOwner,
+    )
+    from embodichain.lab.gym.envs.managers.real2sim_sink import (
+        Real2SimLeRobotEpisodeSink,
+    )
+    from embodichain.lab.sim.motion.expansion import (
+        CandidateIdentity,
+        CommitReceipt,
+        ExpertEpisode,
+        ValidationCheck,
+        ValidationResult,
+    )
+
+    env = _ResetTrackingEnv()
+    sink = object.__new__(Real2SimLeRobotEpisodeSink)
+    sink._recorder = SimpleNamespace(_env=env, dataset_full_path=tmp_path)
+    if episode is None:
+        episode = ExpertEpisode(
+            identity=CandidateIdentity(
+                "scene", "initial", "candidate", "geometry", "source", "1", "unit"
+            ),
+            observations={"qpos": torch.tensor([[0.0], [1.0]])},
+            actions=torch.tensor([[1.0]]),
+            timestamps=torch.tensor([0.0, 0.1]),
+            action_representation="joint_position",
+            validation=ValidationResult((ValidationCheck("task", "passed"),)),
+            episode_id="episode",
+            commit_id="commit",
+        )
+    current = SimpleNamespace(episode=episode)
+
+    def capture_request(*_):
+        item = current.episode
+        return Real2SimCaptureRequest(
+            item.identity,
+            item.validation,
+            item.episode_id,
+            item.commit_id,
+            {name: ("robot", name) for name in item.observations},
+            item.action_representation,
+            {},
+        )
+
+    def receipt(item, submission_id=0, confirmed=True):
+        return CommitReceipt(
+            episode_id=item.episode_id,
+            candidate_id=item.identity.candidate_id,
+            attempt_id=item.identity.attempt_id,
+            storage_id="store",
+            commit_id=item.commit_id,
+            scene_case_id=item.identity.scene_case_id,
+            confirmed=confirmed,
+            error="" if confirmed else "injected final write failure",
+            submission_id=submission_id,
+        )
+
+    capture = MagicMock(side_effect=lambda *a, **k: current.episode)
+    submit = MagicMock(side_effect=lambda *a, **k: receipt(a[2], k["submission_id"]))
+    monkeypatch.setattr(real2sim_collection, "capture_real2sim_episode", capture)
+    monkeypatch.setattr(
+        real2sim_collection, "submit_and_discard_real2sim_episode", submit
+    )
+    prepare = MagicMock(return_value=())
+    owner = Real2SimRunTaskOwner(
+        sink, prepare_attempt=prepare, capture_request=capture_request, session=session
+    )
+    return SimpleNamespace(
+        owner=owner,
+        env=env,
+        current=current,
+        capture=capture,
+        submit=submit,
+        prepare=prepare,
+        receipt=receipt,
+        result=_episode_result(success=True, reason="success", length=1),
+    )
+
+
+def _real2sim_running_session():
+    """Use public session transitions to reserve one measured two-joint rollout."""
+    from embodichain.lab.sim.motion.expansion import (
+        CandidateTrajectoryBatch,
+        ExpansionSession,
+        ExpertEpisode,
+        SceneCase,
+        TrajectoryExpansionJobCfg,
+        ValidationCheck,
+        ValidationResult,
+    )
+
+    session = ExpansionSession(TrajectoryExpansionJobCfg())
+    names = ("joint_a", "joint_b")
+    session.register_case(
+        SceneCase("scene", "initial", "v1", "pick", "robot"),
+        torch.tensor([[-1.0, 1.0], [-1.0, 1.0]]),
+        joint_names=names,
+    )
+    identity, _ = session.propose(
+        "scene",
+        "initial",
+        source_id="source",
+        source_revision="1",
+        template_id="unit",
+        operator_id="nominal",
+        geometry_family_id="geometry",
+    )
+    validation = ValidationResult(
+        (
+            ValidationCheck("path_collision", "passed"),
+            ValidationCheck("task_success", "passed"),
+        )
+    )
+    session.add_planned(
+        CandidateTrajectoryBatch(
+            torch.zeros(1, 2, 2),
+            torch.tensor([[0.0, 1.0]]),
+            torch.tensor([2]),
+            (identity,),
+            names,
+        ),
+        validation,
+    )
+    session.take_ready("scene", "initial", episode_byte_budget=10000)
+    session.mark_rollout_started(identity)
+    episode_id, commit_id = session.episode_ids(identity)
+    episode = ExpertEpisode(
+        identity=identity,
+        observations={"joint_positions": torch.zeros(2, 2)},
+        actions=torch.zeros(1, 2),
+        timestamps=torch.tensor([0.0, 1.0]),
+        action_representation="qpos",
+        validation=validation,
+        episode_id=episode_id,
+        commit_id=commit_id,
+    )
+    return session, episode
+
+
+@pytest.mark.parametrize("after_success", [False, True])
+@pytest.mark.parametrize("failure_point", ["stage", "submit"])
+def test_real2sim_owner_recovers_receiptless_write_of_the_correct_episode(
+    monkeypatch, tmp_path, after_success, failure_point
+) -> None:
+    from dataclasses import replace
+
+    case = _real2sim_owner_case(monkeypatch, tmp_path)
+    if after_success:
+        assert case.owner.commit(case.env, case.result).confirmed
+        item = case.current.episode
+        case.current.episode = replace(
+            item,
+            identity=replace(item.identity, candidate_id="next-candidate"),
+            episode_id="next-episode",
+            commit_id="next-commit",
+        )
+    previous_resets = len(case.env.reset_options)
+    capture_count = case.capture.call_count
+    target = case.current.episode
+    stage = case.owner._stage
+    attempts = 0
+
+    def interrupted(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("injected receiptless failure")
+        if failure_point == "stage":
+            return stage(*args, **kwargs)
+        return case.receipt(args[2], kwargs["submission_id"])
+
+    if failure_point == "stage":
+        monkeypatch.setattr(case.owner, "_stage", interrupted)
+    else:
+        case.submit.side_effect = interrupted
+    with pytest.raises(OSError, match="receiptless"):
+        case.owner.commit(case.env, case.result)
+    assert case.owner.pending_episode.commit_id == target.commit_id
+    assert case.owner.last_receipt is None
+    assert len(case.env.reset_options) == previous_resets
+    receipt = case.owner.retry_write(case.env, submission_id=0)
+    assert receipt.confirmed and receipt.commit_id == target.commit_id
+    assert case.capture.call_count == capture_count + 1
+    case.prepare.assert_not_called()
+    assert len(case.env.reset_options) == previous_resets + 1
+    assert case.owner.pending_episode is None and case.owner.staged_path is None
+
+
+@pytest.mark.parametrize("directory", ["pending", "receipts"])
+def test_real2sim_owner_retries_directory_sync_after_existing_link(
+    monkeypatch, tmp_path, directory
+) -> None:
+    from embodichain.lab.gym.envs.managers import real2sim_collection
+
+    case = _real2sim_owner_case(monkeypatch, tmp_path)
+    sync = real2sim_collection._sync_directory
+    calls = 0
+    syncs_before_submit = []
+
+    def submit(*args, **kwargs):
+        syncs_before_submit.append(calls)
+        return case.receipt(args[2], kwargs["submission_id"])
+
+    case.submit.side_effect = submit
+
+    def interrupted(path):
+        nonlocal calls
+        if path.name == directory:
+            calls += 1
+            if calls == 1:
+                raise OSError("injected directory sync failure")
+        return sync(path)
+
+    monkeypatch.setattr(real2sim_collection, "_sync_directory", interrupted)
+    with pytest.raises(OSError, match="directory sync"):
+        case.owner.commit(case.env, case.result)
+    assert len(list((tmp_path / "meta" / "real2sim" / directory).iterdir())) == 1
+    assert not case.env.reset_options
+    assert case.owner.retry_write(case.env).confirmed
+    assert calls >= 2
+    assert case.capture.call_count == case.submit.call_count == 1
+    assert syncs_before_submit == ([2] if directory == "pending" else [0])
+
+
+def test_real2sim_owner_session_preserves_outstanding_ids_and_completion_progress(
+    monkeypatch, tmp_path
+) -> None:
+    from embodichain.lab.gym.envs.managers import real2sim_collection
+
+    session, episode = _real2sim_running_session()
+    case = _real2sim_owner_case(monkeypatch, tmp_path, episode=episode, session=session)
+    accept = MagicMock(wraps=session.accept_episode)
+    reserve = MagicMock(wraps=session.retry_write)
+    apply = MagicMock(wraps=session.apply_receipt)
+    monkeypatch.setattr(session, "accept_episode", accept)
+    monkeypatch.setattr(session, "retry_write", reserve)
+    monkeypatch.setattr(session, "apply_receipt", apply)
+    case.submit.side_effect = [
+        OSError("initial submit interrupted"),
+        case.receipt(episode, 0, False),
+        OSError("retry interrupted"),
+        case.receipt(episode, 1),
+    ]
+    with pytest.raises(OSError, match="initial submit"):
+        case.owner.commit(case.env, case.result)
+    before = session.snapshot()
+    with pytest.raises(ValueError, match="submission ID"):
+        case.owner.retry_write(case.env, submission_id=1)
+    assert session.snapshot() == before
+    assert not case.owner.retry_write(case.env, submission_id=0).confirmed
+    before = session.snapshot()
+    with pytest.raises(ValueError, match="submission ID"):
+        case.owner.retry_write(case.env, submission_id=2)
+    assert session.snapshot() == before
+    with pytest.raises(OSError, match="retry interrupted"):
+        case.owner.retry_write(case.env, submission_id=1)
+    reset = case.env.reset
+    resets = 0
+
+    def interrupted_reset(*args, **kwargs):
+        nonlocal resets
+        resets += 1
+        if resets == 1:
+            raise OSError("reset interrupted")
+        return reset(*args, **kwargs)
+
+    monkeypatch.setattr(case.env, "reset", interrupted_reset)
+    with pytest.raises(OSError, match="reset interrupted"):
+        case.owner.retry_write(case.env, submission_id=1)
+    sync = real2sim_collection._sync_directory
+    cleanup_failures = 0
+
+    def interrupted_cleanup(path):
+        nonlocal cleanup_failures
+        if path.name == "pending" and cleanup_failures == 0:
+            cleanup_failures += 1
+            raise OSError("cleanup interrupted")
+        return sync(path)
+
+    monkeypatch.setattr(real2sim_collection, "_sync_directory", interrupted_cleanup)
+    with pytest.raises(OSError, match="cleanup interrupted"):
+        case.owner.retry_write(case.env)
+    assert case.owner.retry_write(case.env).confirmed
+    assert [call.kwargs["submission_id"] for call in case.submit.call_args_list] == [
+        0,
+        0,
+        1,
+        1,
+    ]
+    assert case.capture.call_count == accept.call_count == reserve.call_count == 1
+    assert apply.call_count == 2  # One final failure and one confirmation.
+    assert resets == 2 and len(case.env.reset_options) == 1
+    counts = session.snapshot()["counts"]
+    assert (
+        counts["rollout_attempted"]
+        == counts["validated_accepted"]
+        == counts["committed"]
+        == 1
+    )
+
+
+def test_real2sim_owner_does_not_retry_session_rejection_after_cleanup_error(
+    monkeypatch, tmp_path
+) -> None:
+    from dataclasses import replace
+    from embodichain.lab.gym.envs.managers import real2sim_collection
+    from embodichain.lab.sim.motion.expansion import ValidationResult
+
+    session, episode = _real2sim_running_session()
+    episode = replace(
+        episode, validation=ValidationResult((episode.validation.checks[0],))
+    )
+    case = _real2sim_owner_case(monkeypatch, tmp_path, episode=episode, session=session)
+    sync = real2sim_collection._sync_directory
+    calls = 0
+
+    def interrupted_cleanup(path):
+        nonlocal calls
+        if path.name == "pending":
+            calls += 1
+            if calls == 2:
+                raise OSError("rejected payload cleanup interrupted")
+        return sync(path)
+
+    monkeypatch.setattr(real2sim_collection, "_sync_directory", interrupted_cleanup)
+    with pytest.raises(OSError, match="rejected payload"):
+        case.owner.commit(case.env, case.result)
+    assert case.owner.pending_episode is None and case.owner.staged_path is None
+    case.submit.assert_not_called()
+    assert case.owner.prepare(case.env, episode_index=1, attempt_id=0) == ()
+
+
 def test_close_preserves_staged_real2sim_submission_without_reset() -> None:
     env = _LifecycleTrackingEnv()
     owner = SimpleNamespace(pending_episode=object(), finalize=MagicMock())

@@ -2,6 +2,13 @@
 
 `data_pipeline.real2sim` owns source units, explicit joint/frame/time conversion,
 event maps, frozen reference prototypes and hash-checked JSON/NPZ bundles.
+
+Normalization preflights output sample count and estimated numeric working
+memory before allocating its grid or casting event indices. Preparation,
+prototype readers and CLI accept caller-owned budgets; bundle metadata cannot
+raise the reader's limits. These estimates exclude the already loaded source
+and do not claim a process-RSS peak bound.
+
 `embodichain real2sim prepare|validate` operates offline. qpos-only prototypes
 can be prepared without TCP data; object-relative transfer needs TCP poses and
 frozen object/target references. FK-derived poses are not independent measured

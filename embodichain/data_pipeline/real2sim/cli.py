@@ -25,6 +25,7 @@ from pathlib import Path
 
 from .contracts import JointSpec
 from .io import load_prototype, load_trajectory, prepare_prototype
+from .normalize import _DEFAULT_MAX_OUTPUT_BYTES, _DEFAULT_MAX_SAMPLES
 
 __all__: list[str] = []
 
@@ -53,6 +54,19 @@ def main(argv: Sequence[str] | None = None) -> None:
         "validate", help="Verify an existing source or prototype bundle."
     )
     validate.add_argument("manifest", type=Path)
+    for command in (prepare, validate):
+        command.add_argument(
+            "--max-samples",
+            type=int,
+            default=_DEFAULT_MAX_SAMPLES,
+            help="Maximum normalized control-grid sample count.",
+        )
+        command.add_argument(
+            "--max-output-bytes",
+            type=int,
+            default=_DEFAULT_MAX_OUTPUT_BYTES,
+            help="Estimated normalization array and work-buffer budget.",
+        )
     args = parser.parse_args(argv)
     try:
         if args.operation == "prepare":
@@ -65,11 +79,21 @@ def main(argv: Sequence[str] | None = None) -> None:
                 joints=joints,
                 control_dt=args.control_dt,
                 directory=args.output,
+                max_samples=args.max_samples,
+                max_output_bytes=args.max_output_bytes,
             )
-            prototype = load_prototype(path)
+            prototype = load_prototype(
+                path,
+                max_samples=args.max_samples,
+                max_output_bytes=args.max_output_bytes,
+            )
         elif args.manifest.name == "prototype.json":
             path = args.manifest
-            prototype = load_prototype(path)
+            prototype = load_prototype(
+                path,
+                max_samples=args.max_samples,
+                max_output_bytes=args.max_output_bytes,
+            )
         else:
             source = load_trajectory(args.manifest)
             print(

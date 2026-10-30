@@ -29,7 +29,11 @@ from pathlib import Path
 import numpy as np
 
 from .contracts import JointSpec, PhaseAnnotation, Real2SimTrajectory
-from .normalize import normalize_trajectory
+from .normalize import (
+    _DEFAULT_MAX_OUTPUT_BYTES,
+    _DEFAULT_MAX_SAMPLES,
+    normalize_trajectory,
+)
 from .prototype import SkillMotionPrototype, build_motion_prototype
 
 __all__ = ["load_trajectory", "save_trajectory", "prepare_prototype", "load_prototype"]
@@ -203,6 +207,8 @@ def prepare_prototype(
     directory: str | Path,
     event_tolerance_s: float = 1e-6,
     mimic_tolerance: float = 1e-6,
+    max_samples: int = _DEFAULT_MAX_SAMPLES,
+    max_output_bytes: int = _DEFAULT_MAX_OUTPUT_BYTES,
 ) -> Path:
     """Normalize, freeze and publish a portable prototype bundle.
 
@@ -217,6 +223,8 @@ def prepare_prototype(
         directory: New or empty output directory.
         event_tolerance_s: Maximum hard-event clock error.
         mimic_tolerance: Tolerance for redundant mimic values.
+        max_samples: Maximum normalized sample count before publishing files.
+        max_output_bytes: Estimated normalization array/work-buffer budget.
 
     Returns:
         The prepared prototype manifest path.
@@ -227,6 +235,8 @@ def prepare_prototype(
         control_dt=control_dt,
         event_tolerance_s=event_tolerance_s,
         mimic_tolerance=mimic_tolerance,
+        max_samples=max_samples,
+        max_output_bytes=max_output_bytes,
     )
     prototype = build_motion_prototype(unit)
     root = Path(directory)
@@ -295,11 +305,19 @@ def prepare_prototype(
             manifest_tmp.unlink(missing_ok=True)
 
 
-def load_prototype(manifest: str | Path) -> SkillMotionPrototype:
+def load_prototype(
+    manifest: str | Path,
+    *,
+    max_samples: int = _DEFAULT_MAX_SAMPLES,
+    max_output_bytes: int = _DEFAULT_MAX_OUTPUT_BYTES,
+) -> SkillMotionPrototype:
     """Verify a portable prototype and reconstruct its canonical contract.
 
     Args:
         manifest: Path to the prepared prototype manifest.
+        max_samples: Reader-owned normalized sample budget; the manifest cannot
+            enlarge it.
+        max_output_bytes: Reader-owned estimated normalization memory budget.
 
     Returns:
         An independently owned skill motion prototype.
@@ -357,6 +375,8 @@ def load_prototype(manifest: str | Path) -> SkillMotionPrototype:
             control_dt=payload["control_dt"],
             event_tolerance_s=payload["event_tolerance_s"],
             mimic_tolerance=payload["mimic_tolerance"],
+            max_samples=max_samples,
+            max_output_bytes=max_output_bytes,
         )
         prototype = build_motion_prototype(unit)
         with zipfile.ZipFile(normalized_path) as archive:

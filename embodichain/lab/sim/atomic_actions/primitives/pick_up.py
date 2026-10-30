@@ -687,6 +687,16 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         self._validate_nominal_anchor(
             motion.trajectory, index=grasp_index, endpoint=endpoint, target=grasp_xpos
         )
+        lift_xpos = translate_pose_world(
+            grasp_xpos,
+            grasp_xpos.new_tensor([0, 0, request.skill_options.lift_height]),
+        )
+        self._validate_nominal_anchor(
+            motion.trajectory,
+            index=motion.trajectory.waypoint_count - 1,
+            endpoint=endpoint,
+            target=lift_xpos,
+        )
         return self._assemble_pick_plan(
             request,
             context,

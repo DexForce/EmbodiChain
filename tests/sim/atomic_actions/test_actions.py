@@ -1243,6 +1243,9 @@ def test_external_pick_transport_place_assemble_without_native_planning() -> Non
             semantics=_semantics(entity_id="target"), grasp_xpos=torch.eye(4)
         ),
         binding=_binding(pick),
+        skill_options=PickUpOptions(
+            lift_height=0.0
+        ),  # This fixture tests assembly with stationary FK.
         recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
     )
     pick_plan = _ACTION_ENGINES[id(pick)].plan(
@@ -1288,6 +1291,188 @@ def test_external_pick_transport_place_assemble_without_native_planning() -> Non
         is None
     )
     generator.generate.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "endpoint,accepted",
+    [
+        ((0.0, 0.0, 0.2), True),
+        ((0.0, 0.0, 0.0), False),
+        ((0.0, 0.0, 0.1), False),
+        ((0.0, -0.2, 0.0), False),  # Local tool Z is not world-up for this grasp.
+    ],
+)
+def test_external_pick_enforces_requested_world_vertical_lift(
+    endpoint, accepted
+) -> None:
+    from embodichain.lab.sim.atomic_actions import (
+        InstantiatedSkillMotion,
+        RecoveryPolicy,
+    )
+
+    generator = _motion_generator()
+    generator.robot.num_instances = 1
+    get_qpos = generator.robot.get_qpos.side_effect
+    generator.robot.get_qpos.side_effect = lambda name=None: get_qpos(name)[:1]
+    generator.robot.get_qpos_limits.return_value = torch.tensor([-2.0, 2.0]).repeat(
+        1, ARM_DOF, 1
+    )
+    generator.robot.get_qvel_limits.side_effect = None
+    generator.robot.get_qvel_limits.return_value = torch.full((1, ARM_DOF), 100.0)
+    generator.generate = Mock(
+        side_effect=AssertionError("external lift must not use native planning")
+    )
+    grasp = torch.tensor(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+
+    def fk(qpos, **kwargs):
+        pose = grasp[None].repeat(qpos.shape[0], 1, 1)
+        pose[:, :3, 3] = qpos[:, :3]
+        return pose
+
+    generator.robot.compute_fk.side_effect = fk
+    action = _bind_action(generator, PickUp())
+    qpos = torch.zeros(1, ROBOT_DOF)
+    context = PlanningContext(
+        robot=RobotObservation(timestamp=0, qpos=qpos, qvel=qpos.clone()),
+        task=TaskState.empty(batch_size=1, device="cpu"),
+        scene=SceneSnapshot(
+            timestamp=0, version=0, entities={"target": EntityState(torch.eye(4))}
+        ),
+        env_ids=torch.tensor([0]),
+        control_dt=CONTROL_DT,
+    )
+
+    class Source:
+        def instantiate(self, request, current):
+            positions = torch.zeros(1, 6, ROBOT_DOF)
+            positions[0, -1, :3] = torch.tensor(endpoint)
+            positions[:, :, ARM_DOF:] = torch.tensor([0, 0, 0, 1, 1, 1])[None, :, None]
+            return InstantiatedSkillMotion(
+                trajectory=TimedTrajectory.from_uniform_step(
+                    positions, env_ids=current.env_ids, step_dt=CONTROL_DT
+                ),
+                success=torch.tensor([True]),
+                segment_lengths={"approach": 2, "close": 2, "lift": 2},
+                initial_qpos=current.robot.qpos,
+                source_id="lift_fixture",
+                source_revision="1",
+                unit_id="pick",
+                origin="synthetic_reference",
+                grasp_pose=grasp[None],
+                joint_names=tuple(generator.robot.joint_names),
+            )
+
+    invocation = ActionInvocation(
+        skill_id="pick_up",
+        goal=GraspGoal(semantics=_semantics(entity_id="target"), grasp_xpos=grasp),
+        binding=_binding(action),
+        skill_options=PickUpOptions(lift_height=0.2),
+        motion_policy=MotionPolicy(
+            acceleration_limit=1000.0
+        ),  # Six-sample Cartesian gantry fixture.
+        recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
+    )
+    if accepted:
+        plan = _ACTION_ENGINES[id(action)].plan(
+            invocation, context, nominal_source=Source()
+        )
+        assert plan.plan_success.item()
+    else:
+        with pytest.raises(ValueError, match="required TCP anchor"):
+            _ACTION_ENGINES[id(action)].plan(
+                invocation, context, nominal_source=Source()
+            )
+    generator.generate.assert_not_called()
+
+
+@pytest.mark.parametrize("origin", ["sampled", "explicit", "fixed"])
+def test_refined_grasp_calibration_preserves_eef_and_canonical_geometry(origin) -> None:
+    import numpy as np
+    from embodichain.lab.sim.atomic_actions._prototype_refinement import (
+        _pick_refinement_anchor,
+    )
+    from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
+
+    generator = _motion_generator()
+    generator.robot.num_instances = 1
+    generator.robot.compute_ik = Mock(
+        return_value=(torch.ones(1, dtype=torch.bool), torch.zeros(1, ARM_DOF))
+    )
+    action = _bind_action(generator, PickUp())
+    calibration = torch.tensor(
+        [
+            [0.0, -1.0, 0.0, 0.06],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.01],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    vertices = torch.tensor(
+        [[x, y, z] for x in (-0.02, 0.02) for y in (-0.04, 0.04) for z in (-0.01, 0.01)]
+    )
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(
+            mesh_vertices=vertices, mesh_triangles=torch.tensor([[0, 1, 2], [5, 6, 7]])
+        ),
+        geometry={},
+        entity_id="target",
+    )
+
+    class NarrowGripper(_StubGraspPoseGenerator):
+        def __init__(self):
+            ParallelJawGraspPoseGenerator.__init__(
+                self,
+                ParallelJawGripperModelCfg(
+                    model_id="calibrated_fixture", max_opening_width=0.05
+                ),
+            )
+
+    options = PickUpOptions(
+        grasp_frame_to_eef=calibration,
+        fixed_object_to_eef=calibration if origin == "fixed" else None,
+    )
+    invocation = ActionInvocation(
+        skill_id="pick_up",
+        goal=GraspGoal(
+            semantics=semantics,
+            grasp_xpos=calibration if origin == "explicit" else None,
+        ),
+        binding=_binding(action),
+        skill_options=options,
+    )
+    request = _ACTION_ENGINES[id(action)].resolve(invocation)
+    qpos = torch.zeros(1, ROBOT_DOF)
+    context = PlanningContext(
+        robot=RobotObservation(timestamp=0, qpos=qpos, qvel=qpos.clone()),
+        task=TaskState.empty(batch_size=1, device="cpu"),
+        scene=SceneSnapshot(
+            timestamp=0, version=0, entities={"target": EntityState(torch.eye(4))}
+        ),
+        env_ids=torch.tensor([0]),
+        control_dt=CONTROL_DT,
+    )
+    anchor, _, evidence = _pick_refinement_anchor(
+        request,
+        context,
+        np.eye(4),
+        calibration.numpy(),
+        MotionRefinementCfg(max_translation_m=0.001, max_rotation_rad=0.01),
+        {"hand": NarrowGripper()},
+        generator,
+    )
+    np.testing.assert_allclose(anchor, calibration.numpy(), atol=1e-8)
+    torch.testing.assert_close(
+        generator.robot.compute_ik.call_args.args[0], calibration[None]
+    )
+    assert evidence["object_opening_extent_m"] == pytest.approx(0.04)
+    assert evidence["source_grasp_translation_error_m"] < 1e-8
 
 
 def test_pick_uses_normalized_prototype_and_rejects_moved_fixed_scene() -> None:
@@ -1371,6 +1556,9 @@ def test_pick_uses_normalized_prototype_and_rejects_moved_fixed_scene() -> None:
             semantics=_semantics(entity_id="target"), grasp_xpos=torch.eye(4)
         ),
         binding=_binding(action),
+        skill_options=PickUpOptions(
+            lift_height=0.0
+        ),  # Fixed-scene/source mapping fixture.
         recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
     )
     plan = _ACTION_ENGINES[id(action)].plan(
@@ -1447,6 +1635,7 @@ def test_pick_uses_normalized_prototype_and_rejects_moved_fixed_scene() -> None:
             grasp_xpos=SceneEntityPose("target"),
         ),
         binding=_binding(action),
+        skill_options=PickUpOptions(lift_height=0.0),
         motion_policy=MotionPolicy(acceleration_limit=100.0),
         recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
     )

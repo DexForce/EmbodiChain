@@ -104,6 +104,104 @@ def test_initial_observation_is_not_replaced_by_reference_command() -> None:
     assert result.report.initial_state_origin == "observed"
 
 
+@pytest.mark.parametrize("control_dt", [1e-9, 1e-320])
+def test_normalization_rejects_oversized_grid_before_allocation(
+    monkeypatch, control_dt
+) -> None:
+    source = _source()
+    joints = (JointSpec("arm", "revolute"), JointSpec("finger", "prismatic"))
+    monkeypatch.setattr(
+        "embodichain.data_pipeline.real2sim.normalize.np.arange",
+        lambda *a, **k: pytest.fail(
+            "oversized normalization allocated its output grid"
+        ),
+    )
+    with pytest.raises(ValueError, match="max_samples"):
+        normalize_trajectory(source, joints=joints, control_dt=control_dt)
+
+
+def test_normalization_enforces_byte_budget_and_exact_sample_boundary(
+    monkeypatch,
+) -> None:
+    source = _source()
+    joints = (JointSpec("arm", "revolute"), JointSpec("finger", "prismatic"))
+    with monkeypatch.context() as guarded:
+        guarded.setattr(
+            "embodichain.data_pipeline.real2sim.normalize.np.arange",
+            lambda *a, **k: pytest.fail(
+                "byte-budget rejection allocated an output grid"
+            ),
+        )
+        with pytest.raises(ValueError, match="max_output_bytes"):
+            normalize_trajectory(
+                source, joints=joints, control_dt=0.02, max_output_bytes=64
+            )
+    unit = normalize_trajectory(source, joints=joints, control_dt=0.02, max_samples=6)
+    assert len(unit.timestamps) == 6
+    with pytest.raises(ValueError, match="max_samples"):
+        normalize_trajectory(source, joints=joints, control_dt=0.02, max_samples=5)
+
+
+def test_prepare_and_load_apply_reader_owned_normalization_budgets(tmp_path) -> None:
+    source = _source()
+    joints = (JointSpec("arm", "revolute"), JointSpec("finger", "prismatic"))
+    destination = tmp_path / "oversized"
+    with pytest.raises(ValueError, match="max_samples"):
+        prepare_prototype(
+            source, joints=joints, control_dt=0.02, directory=destination, max_samples=5
+        )
+    assert not destination.exists()
+    manifest = prepare_prototype(
+        source, joints=joints, control_dt=0.02, directory=tmp_path / "valid"
+    )
+    with pytest.raises(ValueError, match="max_samples"):
+        load_prototype(manifest, max_samples=5)
+    with pytest.raises(ValueError, match="max_output_bytes"):
+        load_prototype(manifest, max_output_bytes=64)
+    assert len(load_prototype(manifest, max_samples=6).unit.timestamps) == 6
+
+
+def test_real2sim_cli_reports_budget_rejection_before_publishing(
+    tmp_path, capsys
+) -> None:
+    import json
+    from dataclasses import asdict
+    from embodichain.data_pipeline.real2sim.cli import main
+
+    source = save_trajectory(_source(), tmp_path / "source")
+    layout = tmp_path / "joints.json"
+    layout.write_text(
+        json.dumps(
+            [
+                asdict(JointSpec("arm", "revolute")),
+                asdict(JointSpec("finger", "prismatic")),
+            ]
+        )
+    )
+    output = tmp_path / "prepared"
+    args = [
+        "prepare",
+        str(source),
+        "--joints",
+        str(layout),
+        "--control-dt",
+        "0.02",
+        "--output",
+        str(output),
+    ]
+    with pytest.raises(SystemExit) as failure:
+        main([*args, "--max-samples", "5"])
+    assert failure.value.code == 2
+    assert "max_samples" in capsys.readouterr().err
+    assert not output.exists()
+    main([*args, "--max-samples", "6"])
+    assert json.loads(capsys.readouterr().out)["status"] == "valid_prototype"
+    with pytest.raises(SystemExit) as failure:
+        main(["validate", str(output / "prototype.json"), "--max-output-bytes", "64"])
+    assert failure.value.code == 2
+    assert "max_output_bytes" in capsys.readouterr().err
+
+
 def test_rejects_missing_mimic_conflict_and_unrepresentable_event() -> None:
     source = _source()
     with pytest.raises(ValueError, match="missing independent"):

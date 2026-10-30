@@ -157,6 +157,17 @@ class Real2SimCaptureRequest:
     phases: tuple[TrajectoryPhase, ...] = ()
 
 
+@dataclass
+class _PendingWriteState:
+    """Write progress belonging only to the owner's current retained payload."""
+
+    submission_id: int = 0
+    session_accepted: bool = False
+    receipt: CommitReceipt | None = None
+    receipt_applied: bool = False
+    reset_completed: bool = False
+
+
 class Real2SimRunTaskOwner:
     """Own one B=1 source-backed attempt and its persistence transaction.
 
@@ -195,6 +206,7 @@ class Real2SimRunTaskOwner:
         self._session = session
         self._pending: ExpertEpisode | None = None
         self._last_receipt: CommitReceipt | None = None
+        self._write_state: _PendingWriteState | None = None
         self._staged_path: Path | None = None
         self._confirmed_receipts: list[CommitReceipt] = []
 
@@ -269,7 +281,6 @@ class Real2SimRunTaskOwner:
                 os.fsync(stream.fileno())
             try:
                 os.link(temporary, destination)
-                _sync_directory(destination.parent)
             except FileExistsError:
                 with np.load(destination, allow_pickle=False) as existing:
                     if set(existing.files) != set(arrays) or any(
@@ -279,6 +290,7 @@ class Real2SimRunTaskOwner:
                         raise ValueError(
                             "pending commit already exists with different payload"
                         )
+            _sync_directory(destination.parent)
             return destination
         finally:
             if temporary is not None:
@@ -297,7 +309,8 @@ class Real2SimRunTaskOwner:
 
     def _publish_receipt(self, receipt: CommitReceipt) -> None:
         """Durably publish the matching confirmed receipt without replacement."""
-        if not receipt.confirmed or self._pending is None:
+        self._validate_pending_receipt(receipt)
+        if not receipt.confirmed or self._write_state.receipt != receipt:
             raise ValueError("only a confirmed pending episode has a receipt")
         root = Path(self._sink._recorder.dataset_full_path)
         directory = root / "meta" / "real2sim" / "receipts"
@@ -315,21 +328,24 @@ class Real2SimRunTaskOwner:
                 os.fsync(stream.fileno())
             try:
                 os.link(temporary, destination)
-                _sync_directory(destination.parent)
             except FileExistsError:
                 if destination.read_bytes() != content:
                     raise ValueError("existing receipt differs from this confirmation")
             if destination.read_bytes() != content:
                 raise RuntimeError("published receipt could not be verified")
+            _sync_directory(destination.parent)
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
 
     def _complete_confirmed(self, target: object, receipt: CommitReceipt) -> None:
         self._publish_receipt(receipt)
-        if self._session is not None:
-            self._session.apply_receipt(receipt)
-        target.reset(options={"save_data": False})
+        state = self._write_state
+        assert state is not None
+        self._apply_pending_receipt()
+        if not state.reset_completed:
+            target.reset(options={"save_data": False})
+            state.reset_completed = True
         if self._staged_path is not None:
             self._staged_path.unlink(missing_ok=True)
             _sync_directory(self._staged_path.parent)
@@ -337,6 +353,97 @@ class Real2SimRunTaskOwner:
         if receipt not in self._confirmed_receipts:
             self._confirmed_receipts.append(receipt)
         self._pending = None
+        self._write_state = None
+
+    def _validate_pending_receipt(self, receipt: CommitReceipt) -> None:
+        episode, state = self._pending, self._write_state
+        if (
+            episode is None
+            or state is None
+            or not isinstance(receipt, CommitReceipt)
+            or (
+                receipt.episode_id,
+                receipt.candidate_id,
+                receipt.attempt_id,
+                receipt.commit_id,
+                receipt.scene_case_id,
+                receipt.submission_id,
+            )
+            != (
+                episode.episode_id,
+                episode.identity.candidate_id,
+                episode.identity.attempt_id,
+                episode.commit_id,
+                episode.identity.scene_case_id,
+                state.submission_id,
+            )
+        ):
+            raise ValueError("Real2Sim receipt does not match the pending episode")
+
+    def _apply_pending_receipt(self) -> None:
+        state = self._write_state
+        assert state is not None and state.receipt is not None
+        self._validate_pending_receipt(state.receipt)
+        if not state.receipt_applied:
+            if self._session is not None:
+                self._session.apply_receipt(state.receipt)
+            state.receipt_applied = True
+
+    def _resume_write(self, target: object, submission_id: int | None) -> CommitReceipt:
+        episode, state = self._pending, self._write_state
+        if episode is None or state is None:
+            raise ValueError("there is no failed Real2Sim write to retry")
+        if submission_id is not None and type(submission_id) is not int:
+            raise ValueError("submission ID must be an integer")
+        if state.receipt is not None and state.receipt.confirmed:
+            if submission_id is not None:
+                raise ValueError(
+                    "receipt publication does not create another submission"
+                )
+            receipt = state.receipt
+            self._complete_confirmed(target, receipt)
+            return receipt
+        next_id = state.submission_id + (state.receipt is not None)
+        if submission_id is not None and submission_id != next_id:
+            raise ValueError("submission ID must match the outstanding or next write")
+        if state.receipt is not None:
+            self._apply_pending_receipt()
+            if self._session is not None:
+                _, reserved_id = self._session.retry_write(episode.commit_id)
+                if reserved_id != next_id:
+                    raise ValueError(
+                        "session retry returned an unexpected submission ID"
+                    )
+            state.submission_id = next_id
+            state.receipt = None
+            state.receipt_applied = False
+            self._last_receipt = None
+        if self._staged_path is None:
+            self._staged_path = self._stage(episode)
+        if self._session is not None and not state.session_accepted:
+            if not self._session.accept_episode(episode):
+                rejected_path = self._staged_path
+                self._pending = None
+                self._write_state = None
+                self._staged_path = None
+                rejected_path.unlink(missing_ok=True)
+                _sync_directory(rejected_path.parent)
+                raise ValueError("Real2Sim expansion session rejected the episode")
+            state.session_accepted = True
+        receipt = submit_and_discard_real2sim_episode(
+            target,
+            self._sink,
+            episode,
+            submission_id=state.submission_id,
+            reset_on_confirmed=False,
+        )
+        self._validate_pending_receipt(receipt)
+        state.receipt = self._last_receipt = receipt
+        if receipt.confirmed:
+            self._complete_confirmed(target, receipt)
+        else:
+            self._apply_pending_receipt()
+        return receipt
 
     def write_collection_report(self, *, expected_episodes: int) -> Path:
         """Verify durable receipts, journal entries and attachments for a run."""
@@ -495,22 +602,10 @@ class Real2SimRunTaskOwner:
             phases=request.phases,
         )
         self._pending = episode
-        self._staged_path = self._stage(episode)
-        if self._session is not None and not self._session.accept_episode(episode):
-            self._pending = None
-            self._staged_path.unlink(missing_ok=True)
-            _sync_directory(self._staged_path.parent)
-            self._staged_path = None
-            raise ValueError("Real2Sim expansion session rejected the episode")
-        receipt = submit_and_discard_real2sim_episode(
-            target, self._sink, episode, submission_id=0, reset_on_confirmed=False
-        )
-        self._last_receipt = receipt
-        if receipt.confirmed:
-            self._complete_confirmed(target, receipt)
-        elif self._session is not None:
-            self._session.apply_receipt(receipt)
-        return receipt
+        self._staged_path = None
+        self._last_receipt = None
+        self._write_state = _PendingWriteState()
+        return self._resume_write(target, None)
 
     def record_failure(
         self, env: object, result: DemoEpisodeResult, *, error: str | None = None
@@ -523,35 +618,19 @@ class Real2SimRunTaskOwner:
     def retry_write(
         self, env: object, *, submission_id: int | None = None
     ) -> CommitReceipt:
-        """Retry a failed write using the same retained episode, without execution."""
+        """Resume the retained write, including exceptions without a receipt.
+
+        Args:
+            env: Environment originally captured by this owner.
+            submission_id: Optional expected outstanding/next submission ID.
+                An interrupted call reuses its ID; a final failed receipt advances
+                it. Omit this argument when only publishing a confirmed receipt.
+
+        Returns:
+            The receipt for this exact pending episode, without another rollout.
+        """
         target = self._target(env)
-        if self._pending is None or self._last_receipt is None:
-            raise ValueError("there is no failed Real2Sim write to retry")
-        if self._last_receipt.confirmed:
-            if submission_id is not None:
-                raise ValueError(
-                    "receipt publication does not create another submission"
-                )
-            self._complete_confirmed(target, self._last_receipt)
-            return self._last_receipt
-        if self._session is not None:
-            episode, next_id = self._session.retry_write(self._pending.commit_id)
-            if submission_id is not None and submission_id != next_id:
-                raise ValueError("submission ID must match the session retry")
-        else:
-            next_id = self._last_receipt.submission_id + 1
-            if submission_id is not None and submission_id != next_id:
-                raise ValueError("submission ID must advance by one")
-            episode = self._pending
-        receipt = submit_and_discard_real2sim_episode(
-            target, self._sink, episode, submission_id=next_id, reset_on_confirmed=False
-        )
-        self._last_receipt = receipt
-        if receipt.confirmed:
-            self._complete_confirmed(target, receipt)
-        elif self._session is not None:
-            self._session.apply_receipt(receipt)
-        return receipt
+        return self._resume_write(target, submission_id)
 
     def finalize(self) -> None:
         """Finalize the owned synchronous recorder without executing again."""
