@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import gc
 import numpy as np
 import pytest
 import torch
@@ -267,6 +268,7 @@ def test_native_parameter_material_identity_reset_and_rebuild(physics, source):
         )
     )
     obj = runtime = other = child = extra = selected = alias = None
+    live_instances = None
     try:
         # Inline first, then runtime creation borrows the exact current handle.
         obj = sim.add_rigid_object(
@@ -305,11 +307,18 @@ def test_native_parameter_material_identity_reset_and_rebuild(physics, source):
             assert child.mat.get_transmission() is None
         else:
             assert child.mat.get_transmission() == pytest.approx(0.75)
+        gc.collect()
         count = runtime.mat.inst_count()
+        live_instances = (runtime.inst, other.inst, child)
+        live_ids = tuple(inst.mat.get_material_id() for inst in live_instances)
         for _ in range(1025):
             assert runtime.create_instance("other_brick") is child
             assert sim.create_visual_material(cfg) is runtime
-        assert runtime.mat.inst_count() == count
+        gc.collect()
+        # Native cleanup may reclaim unused instances of the shared template.
+        # Reuse must not grow capacity or change any retained live instance.
+        assert runtime.mat.inst_count() <= count
+        assert tuple(inst.mat.get_material_id() for inst in live_instances) == live_ids
         with pytest.raises(ValueError, match="Conflicting visual material"):
             sim.create_visual_material(cfg.replace(ior=1.7))
         # Runtime first, then a Spawn declaration binds that exact child.
@@ -353,4 +362,5 @@ def test_native_parameter_material_identity_reset_and_rebuild(physics, source):
     finally:
         sim.destroy(exit_process=False)
         del obj, runtime, other, child, extra, selected, alias
+        del live_instances
         SimulationManager.flush_cleanup_queue()
