@@ -1,0 +1,276 @@
+{
+  "created_at": "2026-10-14T14:41:06.656705+08:00",
+  "scope": "P-01 passive single-DOF pendulum iteration investigation",
+  "baseline": "Existing 30 pendulum main trajectories; unchanged.",
+  "hypotheses": [
+    "H1: Fewer position iterations improve energy retention across initial states, rather than only one initial state.",
+    "H2: With external forces every iteration, one full step behaves as v_next=v+h*a(q), q_next=q+h*v+c*h*h*a(q), c=(N+1)/(2*N). No fitted coefficients in the prediction.",
+    "H3: Internal position iterations do not recompute generalized gravity from updated angle, so external physical substeps are not equivalent.",
+    "H4: Velocity iterations, CPU/GPU, body coordinate-frame choice and energy readout can be ruled in or out as alternate causes.",
+    "H5: Small-angle model det(A)=1+(1-c)*k*h*h predicts mean energy growth scale; nonlinear model and long/large-angle tests check limits."
+  ],
+  "metrics": "Existing period <=1% and max energy drift <=2% gates retained for 10 s; also angle RMSE, energy growth rate, per-step update residuals, body-velocity energy, COM constraint error, and held-out recurrence predictions.",
+  "policy": "All new runs use unique IDs; no performance claims; do not overwrite main data or PDF/HTML. Force-on/off is diagnostic, not a blanket recommendation.",
+  "runs": [
+    {
+      "id": "tgs_dt010_p1_v1",
+      "group": "matrix",
+      "dt": 0.01,
+      "position_iterations": 1,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt010_p2_v1",
+      "group": "matrix",
+      "dt": 0.01,
+      "position_iterations": 2,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt010_p8_v1",
+      "group": "matrix",
+      "dt": 0.01,
+      "position_iterations": 8,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt010_p16_v1",
+      "group": "matrix",
+      "dt": 0.01,
+      "position_iterations": 16,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt005_p1_v1",
+      "group": "matrix",
+      "dt": 0.005,
+      "position_iterations": 1,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt005_p2_v1",
+      "group": "matrix",
+      "dt": 0.005,
+      "position_iterations": 2,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt005_p8_v1",
+      "group": "matrix",
+      "dt": 0.005,
+      "position_iterations": 8,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt005_p16_v1",
+      "group": "matrix",
+      "dt": 0.005,
+      "position_iterations": 16,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt0025_p1_v1",
+      "group": "matrix",
+      "dt": 0.0025,
+      "position_iterations": 1,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt0025_p2_v1",
+      "group": "matrix",
+      "dt": 0.0025,
+      "position_iterations": 2,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt0025_p8_v1",
+      "group": "matrix",
+      "dt": 0.0025,
+      "position_iterations": 8,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt0025_p16_v1",
+      "group": "matrix",
+      "dt": 0.0025,
+      "position_iterations": 16,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt005_p4_v0",
+      "group": "velocity",
+      "dt": 0.005,
+      "position_iterations": 4,
+      "velocity_iterations": 0,
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p4_v4",
+      "group": "velocity",
+      "dt": 0.005,
+      "position_iterations": 4,
+      "velocity_iterations": 4,
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p4_v16",
+      "group": "velocity",
+      "dt": 0.005,
+      "position_iterations": 4,
+      "velocity_iterations": 16,
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p1_force_once",
+      "group": "forces",
+      "dt": 0.005,
+      "position_iterations": 1,
+      "external_forces_every_iteration": false,
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p4_force_once",
+      "group": "forces",
+      "dt": 0.005,
+      "position_iterations": 4,
+      "external_forces_every_iteration": false,
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p16_force_once",
+      "group": "forces",
+      "dt": 0.005,
+      "position_iterations": 16,
+      "external_forces_every_iteration": false,
+      "count": 1
+    },
+    {
+      "id": "pgs_dt005_p1",
+      "group": "solver",
+      "dt": 0.005,
+      "position_iterations": 1,
+      "solver": "PGS",
+      "count": 1
+    },
+    {
+      "id": "pgs_dt005_p4",
+      "group": "solver",
+      "dt": 0.005,
+      "position_iterations": 4,
+      "solver": "PGS",
+      "count": 1
+    },
+    {
+      "id": "pgs_dt005_p16",
+      "group": "solver",
+      "dt": 0.005,
+      "position_iterations": 16,
+      "solver": "PGS",
+      "count": 1
+    },
+    {
+      "id": "cpu_tgs_dt005_p1",
+      "group": "device",
+      "dt": 0.005,
+      "position_iterations": 1,
+      "device": "cpu",
+      "count": 1
+    },
+    {
+      "id": "cpu_tgs_dt005_p4",
+      "group": "device",
+      "dt": 0.005,
+      "position_iterations": 4,
+      "device": "cpu",
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p4_com_frame",
+      "group": "model",
+      "dt": 0.005,
+      "position_iterations": 4,
+      "body_frame": "com",
+      "count": 1
+    },
+    {
+      "id": "tgs_dt00125_p1",
+      "group": "substep",
+      "dt": 0.00125,
+      "position_iterations": 1,
+      "count": 10
+    },
+    {
+      "id": "tgs_dt005_p1_60s",
+      "group": "duration",
+      "dt": 0.005,
+      "position_iterations": 1,
+      "duration": 60,
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p4_60s",
+      "group": "duration",
+      "dt": 0.005,
+      "position_iterations": 4,
+      "duration": 60,
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p1_angle1_r2",
+      "group": "amplitude",
+      "dt": 0.005,
+      "position_iterations": 1,
+      "theta_deg": 1,
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p4_angle1_r2",
+      "group": "amplitude",
+      "dt": 0.005,
+      "position_iterations": 4,
+      "theta_deg": 1,
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p1_angle45_r2",
+      "group": "amplitude",
+      "dt": 0.005,
+      "position_iterations": 1,
+      "theta_deg": 45,
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p4_angle45_r2",
+      "group": "amplitude",
+      "dt": 0.005,
+      "position_iterations": 4,
+      "theta_deg": 45,
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p1_angle90_r2",
+      "group": "amplitude",
+      "dt": 0.005,
+      "position_iterations": 1,
+      "theta_deg": 90,
+      "count": 1
+    },
+    {
+      "id": "tgs_dt005_p4_angle90_r2",
+      "group": "amplitude",
+      "dt": 0.005,
+      "position_iterations": 4,
+      "theta_deg": 90,
+      "count": 1
+    }
+  ],
+  "retry_note": "Six amplitude runs failed before the first physics step: NumPy float64 initial angle produced a tensor dtype incompatible with the float32 Warp API. Explicit float32 input added; preserve failed runs and retry under _r2 IDs.",
+  "failed_attempts": [
+    "20261014_study_tgs_dt005_p1_angle1",
+    "20261014_study_tgs_dt005_p4_angle1",
+    "20261014_study_tgs_dt005_p1_angle45",
+    "20261014_study_tgs_dt005_p4_angle45",
+    "20261014_study_tgs_dt005_p1_angle90",
+    "20261014_study_tgs_dt005_p4_angle90"
+  ]
+}

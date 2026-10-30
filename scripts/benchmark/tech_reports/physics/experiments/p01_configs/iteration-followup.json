@@ -1,0 +1,10 @@
+{
+  "reason": "Adaptive follow-up: the N=1 pendulum result may change free-fall integration error because TGS position iterations also subdivide force application. Verify a common P-01 configuration before recommending it.",
+  "date": "2026-10-14",
+  "runs": [
+    {"id":"freefall_dt0025_p1", "case":"freefall", "dt":0.0025, "position_iterations":1, "count":10},
+    {"id":"freefall_dt001_p1", "case":"freefall", "dt":0.001, "position_iterations":1, "count":10},
+    {"id":"pendulum_dt001_p1", "case":"pendulum", "dt":0.001, "position_iterations":1, "count":10},
+    {"id":"freefall_dt005_p4_force_once", "case":"freefall", "dt":0.005, "position_iterations":4, "count":1, "external_forces_every_iteration":false}
+  ]
+}

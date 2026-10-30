@@ -1,0 +1,1105 @@
+{
+  "note": "Original source SHA256 before headers, formatting and data-root adaptation. These are not new measurements.",
+  "files": [
+    {
+      "local_source": "assets/P-01/README.md",
+      "source_sha256": "80f7008cf1a97d15714e651f3411ecfd871cdc6d4c710b3d010fdbe754b8b85f",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-01/README.md"
+    },
+    {
+      "local_source": "assets/P-01/common-view.json",
+      "source_sha256": "6767e35e4c1024fdf7ae34b869cfcdd8a9e84e96bee6a0e9288f31f21070ea02",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-01/common-view.json"
+    },
+    {
+      "local_source": "assets/P-01/initial-states.json",
+      "source_sha256": "3726a34b0cb28f298d6804b4c3005655e3a26e172597fcc3952df6605aa1d736",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-01/initial-states.json"
+    },
+    {
+      "local_source": "assets/P-01/pendulum-display.urdf",
+      "source_sha256": "e6601b1f33c8b1d904d847a9d18800a74f17f789458f8496771f6f65048663eb",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-01/pendulum-display.urdf"
+    },
+    {
+      "local_source": "assets/P-01/pendulum.urdf",
+      "source_sha256": "a25b1e1cd43f71afd9904d7ad59fd2d142a60731b5e62ce3bb2d09f1aeff8be8",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-01/pendulum.urdf"
+    },
+    {
+      "local_source": "code/analysis/p01_analysis.py",
+      "source_sha256": "c72c0a4fa479447949dae68112ebe6e3d6e9ef9c3f5f37e89e4942cba72a7ff9",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p01_analysis.py"
+    },
+    {
+      "local_source": "code/analysis/p01_common_view_batch.py",
+      "source_sha256": "48664aaeb824d9f1ab815be465747fc52d30e8ce2093937b7e24cbd09336da80",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_common_view_batch.py"
+    },
+    {
+      "local_source": "code/analysis/p01_common_view_media.py",
+      "source_sha256": "3a34da05424da6b09d943c7e3374704ce291f4ebd95277d0c13adddfa4ac87ff",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p01_common_view_media.py"
+    },
+    {
+      "local_source": "code/analysis/p01_comparison.py",
+      "source_sha256": "0f3799171bbf354656ffea76cfba343d166f5149dd70537ec58ba07c4f73e28f",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p01_comparison.py"
+    },
+    {
+      "local_source": "code/analysis/p01_descriptive_comparison.py",
+      "source_sha256": "a4afa6c1005ac578e8f7d8fd133bd8e9f2e1f381b5ef30e3e20c630000e27606",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p01_descriptive_comparison.py"
+    },
+    {
+      "local_source": "code/analysis/p01_dexuni_analysis.py",
+      "source_sha256": "9fcb7906f09ba20bd3fc250b96eec304d0b8fe1b78fa3d4522e5a20ab55342ea",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p01_dexuni_analysis.py"
+    },
+    {
+      "local_source": "code/analysis/p01_dexuni_media.py",
+      "source_sha256": "c7c8a6eccbeeeb2e8fa2697696e3c355693f92da28d4e31222209ae9179853cd",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p01_dexuni_media.py"
+    },
+    {
+      "local_source": "code/analysis/p01_iteration_analysis.py",
+      "source_sha256": "2ba21e6f5423a79d0170386b266ad2603a4167298a6f6972e3b48e7436355234",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p01_iteration_analysis.py"
+    },
+    {
+      "local_source": "code/analysis/p01_native_media.py",
+      "source_sha256": "faf78eb249790cfa32f66824bfb59178d7069ff4b04944e90b79e531d22a4767",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p01_native_media.py"
+    },
+    {
+      "local_source": "code/analysis/p01_pgs_baseline.py",
+      "source_sha256": "8a26653a54aac43d33b95355d74b3168d9fa74fcfda8b9dda38e562c77f64d75",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p01_pgs_baseline.py"
+    },
+    {
+      "local_source": "code/analysis/p01_publication.py",
+      "source_sha256": "a1e0767c74f131419ca360bb8f7c7d099f272e941c11a7ae3836f1b4c4435653",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p01_publication.py"
+    },
+    {
+      "local_source": "code/analysis/p01_publication_assets.py",
+      "source_sha256": "a9465663ed1141c346ed8a31a3fae071747c21633afa8f87797324fc075fc300",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p01_publication_assets.py"
+    },
+    {
+      "local_source": "code/analysis/test_p01_analysis.py",
+      "source_sha256": "d07e2c0eb49dcbcd9a522b43812333fc727cb63a59106aaa0ff59dfd1805be3a",
+      "repository_path": "tests/benchmark/tech_reports/reporting/test_p01_analysis.py"
+    },
+    {
+      "local_source": "code/embodichain/p01_batch.py",
+      "source_sha256": "cc0611a9f31f622cd00ce71b55120c10c93bbe32583ab005a55ee45b4ddfd536",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_batch.py"
+    },
+    {
+      "local_source": "code/embodichain/p01_common_capture.py",
+      "source_sha256": "9a0f31474392284764953f1dc4e7ed8da47f8903e19dfba23245e584ff2c2855",
+      "repository_path": "scripts/benchmark/tech_reports/physics/platforms/embodichain/p01_common_capture.py"
+    },
+    {
+      "local_source": "code/embodichain/p01_dynamics.py",
+      "source_sha256": "9d905e2aa75a7ccf34b292a8b33c85c45603c27e54bddc3b44aec5e5cff881a4",
+      "repository_path": "scripts/benchmark/tech_reports/physics/platforms/embodichain/p01_dynamics.py"
+    },
+    {
+      "local_source": "code/isaaclab/p01_capture.py",
+      "source_sha256": "70678ff75db4c8a696105932a45955bf4b2b354ce3fa4d50acb87ce1bef91213",
+      "repository_path": "scripts/benchmark/tech_reports/physics/platforms/isaaclab/p01_capture.py"
+    },
+    {
+      "local_source": "code/isaaclab/p01_dynamics.py",
+      "source_sha256": "a8fad86bc8b7d65fd42432aca203a6fba4757b1b3f0e6c5ed0e1415b460d0244",
+      "repository_path": "scripts/benchmark/tech_reports/physics/platforms/isaaclab/p01_dynamics.py"
+    },
+    {
+      "local_source": "code/isaaclab/p01_iteration_followup.py",
+      "source_sha256": "a3cc09b6122b7258c5f3da7a3ae23f13d60582c6a3a2acc1bddcd91ac056ae19",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_iteration_followup.py"
+    },
+    {
+      "local_source": "code/isaaclab/p01_iteration_study.py",
+      "source_sha256": "7f1fc347cc563c7772cc4a5f89534088ce541f399f698fa21b7033deca97d4e3",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_iteration_study.py"
+    },
+    {
+      "local_source": "configs/P-01/common-view-runs.json",
+      "source_sha256": "625001d34c580016e498f281ac88b555caea2921dcd219ea5399020268e30c53",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/common-view-runs.json"
+    },
+    {
+      "local_source": "configs/P-01/common-view-v2-runs.json",
+      "source_sha256": "df962fcee77138010997d2fbc09f587b51e9255df43e61723b2cf0e45cc51e11",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/common-view-v2-runs.json"
+    },
+    {
+      "local_source": "configs/P-01/common-view-v3-runs.json",
+      "source_sha256": "a4be7d863fe03e31d3f603c452d1285c7bfc7941e6de46b0b0d090e3e3688863",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/common-view-v3-runs.json"
+    },
+    {
+      "local_source": "configs/P-01/dexuni-precision-baseline.json",
+      "source_sha256": "cdbc159879203cafcdd32c4b3c39d1448b430a35f8b87c15c27b0c774d9b55e3",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/dexuni-precision-baseline.json"
+    },
+    {
+      "local_source": "configs/P-01/embodichain-dexuni-capture.json",
+      "source_sha256": "e464a482c2d83dd92b4fc7994eeffc445d2093dcf9d9e7ce4ec564b10e1f6c5f",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/embodichain-dexuni-capture.json"
+    },
+    {
+      "local_source": "configs/P-01/embodichain-dexuni-pendulum-pilot.json",
+      "source_sha256": "490992e88661be49f58077cf46dc192ceab4b39521133ecbcac58563a0d070a2",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/embodichain-dexuni-pendulum-pilot.json"
+    },
+    {
+      "local_source": "configs/P-01/embodichain-dexuni-pilot-retry.json",
+      "source_sha256": "d05c75d388b7d25e82dc9cca31cfdcc5a0e9f1ace4981bd0271adea637b89202",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/embodichain-dexuni-pilot-retry.json"
+    },
+    {
+      "local_source": "configs/P-01/embodichain-dexuni-pilots.json",
+      "source_sha256": "84bb3186cb028a3d6f923e4b5efb486ba56347f95770bc91f976f90b1bf7f3b4",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/embodichain-dexuni-pilots.json"
+    },
+    {
+      "local_source": "configs/P-01/embodichain-dexuni-runs.json",
+      "source_sha256": "ac318410aa6de25f17085bf609173952677bf7b71c3a46fc86c6890fe0748d68",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/embodichain-dexuni-runs.json"
+    },
+    {
+      "local_source": "configs/P-01/embodichain-dexuni.json",
+      "source_sha256": "712d03f520906e3ed4ce586955231f79ea3dfb9260de149323ae28a98749de8e",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/embodichain-dexuni.json"
+    },
+    {
+      "local_source": "configs/P-01/isaaclab.json",
+      "source_sha256": "399dbb26a444cee6bbc5d6b08fdaf8535a684886f65322fe7b4aceafad899715",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/isaaclab.json"
+    },
+    {
+      "local_source": "configs/P-01/iteration-followup.json",
+      "source_sha256": "31226260a415fb00d03a964fb677a9b1350c3e6ce55ae18e34392b787a4334e6",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/iteration-followup.json"
+    },
+    {
+      "local_source": "configs/P-01/iteration-study.json",
+      "source_sha256": "2ce31a9d0c99a7a3d81eee32a57e72054ed812462feba3a626908241f6c61a5b",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/iteration-study.json"
+    },
+    {
+      "local_source": "configs/P-01/pgs-baseline.json",
+      "source_sha256": "193bd0650f3ea5743d08ba2e42345ddd8d78f54c56b5343ec12679210b259e8d",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p01_configs/pgs-baseline.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/loading/L-02/protocol-v1.json",
+      "source_sha256": "5cc60cf95e256b4bb70ad647712d358415959af4e80b33ad64dcd5e5b1b5c257",
+      "repository_path": "scripts/benchmark/tech_reports/assets/loading/L-02/protocol-v1.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/loading/L-02/protocol-v2.json",
+      "source_sha256": "9a8049e603884e669b04f36983d1e117be4650e71154b349a3aed8a8abf2aa89",
+      "repository_path": "scripts/benchmark/tech_reports/assets/loading/L-02/protocol-v2.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/loading/L-02/protocol-v3-multi-arena.json",
+      "source_sha256": "bd9289bb2d52ced875b2358bca98521280feacd46c827315a407162d8f8fbcfe",
+      "repository_path": "scripts/benchmark/tech_reports/assets/loading/L-02/protocol-v3-multi-arena.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-02/README.md",
+      "source_sha256": "7da3c27a6c8dfbc97146331ed935435f3f28ea76b2cafe57c46b1f9b88415762",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-02/README.md"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-02/initial-states.json",
+      "source_sha256": "99ca1cd9fd26fe1a2548806a4c954860af90a98c25997217c2f33bcc2275aa08",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-02/initial-states.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-02/input-manifest.json",
+      "source_sha256": "3074d79b936f8b73723ca9775104410c872fbbab6702ad89be99bc80451990d8",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-02/input-manifest.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-02/protocol.json",
+      "source_sha256": "318da67abeb5983a1e06570ca9893ecd8abe45a7658b6d2a7360d545a19fbf81",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-02/protocol.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-02/stack-limit-10s-sleep.json",
+      "source_sha256": "a0866e107477e68ef8000724632a1373a282755f68236ab07cb5ce584b992221",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-02/stack-limit-10s-sleep.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-02/stack-limit-initials.json",
+      "source_sha256": "c8e590f5a11ca6ca924e12953080e1e2f1fd5b17b14c7678fe4095b3bf98d717",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-02/stack-limit-initials.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-02/stack-limit-native.json",
+      "source_sha256": "1be83d7d268181943246f05fc19b41ef15049ddd37310de6c112a1b0c4873bc7",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-02/stack-limit-native.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-02/stack-limit.json",
+      "source_sha256": "61e56259060a52e6760bcb7c0bcd13984c15778811a71c3d5e9995e5b19a805d",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-02/stack-limit.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-03/protocol-v1.json",
+      "source_sha256": "c8710c217eb01e9e156ba1e84a8110cd583c08aba2e6536a0d2a3d4f948675b8",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-03/protocol-v1.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-03/protocol-v2.json",
+      "source_sha256": "f659f0a5d683354fa1f7c082449574e744cd01a59e1700df49508eafa79d2925",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-03/protocol-v2.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-03/protocol-v3.json",
+      "source_sha256": "e9bffd85809578baebfe12b3b228d5ea9339148a24849f0fd012ec1bf8ad7de2",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-03/protocol-v3.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-03/protocol-v4.json",
+      "source_sha256": "f0612216991208ded5d8f7483750311946adc1aea6faf0dd0d86dd8e58ffe3c4",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-03/protocol-v4.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-03/shapes-v1/cube.usda",
+      "source_sha256": "26782246446b559a5a714605b328fc4b798f89f7316f5c15dba2a5e27db95f43",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-03/shapes-v1/cube.usda"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-03/shapes-v1/cylinder.usda",
+      "source_sha256": "a067fd0741865a98be71e6839c2dab339193798431cbb975c0359400d40cd55a",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-03/shapes-v1/cylinder.usda"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-03/shapes-v1/shapes.json",
+      "source_sha256": "c246a15fe8c35400de7728dd7c891c1ec9dbbaa64897d695fd710503476743f1",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-03/shapes-v1/shapes.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-03/shapes-v2/cube.usda",
+      "source_sha256": "26782246446b559a5a714605b328fc4b798f89f7316f5c15dba2a5e27db95f43",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-03/shapes-v2/cube.usda"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-03/shapes-v2/cylinder.usda",
+      "source_sha256": "0a6f59866e4b46430c6bb90587830d4f556bd0fd33ecb1287f27427c9c655f61",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-03/shapes-v2/cylinder.usda"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/assets/physics/P-03/shapes-v2/shapes.json",
+      "source_sha256": "3d41b951d4cb8110c694c934a013842fd84ce1e69c16693d10c06a16c1a7de37",
+      "repository_path": "scripts/benchmark/tech_reports/assets/physics/P-03/shapes-v2/shapes.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l02_batch.py",
+      "source_sha256": "59217fe1fff8e479f52d42cf8355af60fbf4814a6b78d7a03c5eb9f6be5c9770",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l02_batch.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l02_multi_batch.py",
+      "source_sha256": "74cd65b706f4abfdad87d2168efd47329aa346c3c8c2984a5c2ae7e89fe32e2f",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l02_multi_batch.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l02_multi_run.py",
+      "source_sha256": "8e6c9d526984a3fae666481e959f2341c27f6e90b708c1381c4fd702b5bdabc2",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l02_multi_run.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l02_prepare.py",
+      "source_sha256": "0421dfaf0b7a0878561c489d1f7582e01aaccd77e391a59ec0fb2fcb802adffd",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l02_prepare.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l02_profile.py",
+      "source_sha256": "881a917a05283acdbaf99b72c33b3331f51a9a485b7971b5fd8e8a3033940691",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l02_profile.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l02_run.py",
+      "source_sha256": "8ea980d6b5e764407c76402bc3495897761adf5c7ea50494416ff0502ba292f5",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l02_run.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l03_asset_probe.py",
+      "source_sha256": "d0a3b42869ca7c4071e771a7e0c2eacd8c04f6524965f65c7d8b3bbfb0ac6e3e",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l03_asset_probe.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l03_batch.py",
+      "source_sha256": "a645a9db17be601e20f71b6aa6ac27c4d6fa5955e538f226f3ec90b022217910",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l03_batch.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l03_convert_g1.py",
+      "source_sha256": "338c0f9dbf3b3199899d352ea0c6123ee3e2eb076904c3ac8d06607a502200e2",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l03_convert_g1.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l03_preflight_batch.py",
+      "source_sha256": "6b9fd12c7ba790b320c712fc7eac7f07f4d4a36911f94999dcdb24df2b20a43e",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l03_preflight_batch.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l03_prepare.py",
+      "source_sha256": "ab19ccec8a5ee051da901ffe1070e43cab3efe50acc1a67954f9824a781f0c70",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l03_prepare.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l03_run.py",
+      "source_sha256": "f0c2f7c77072adb00d6952d563ce598612be07f47dbc2247c1e2bfbdb0dc243a",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l03_run.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/experiments/l04_convert_drawer.py",
+      "source_sha256": "01b26fb3f995afa6f9256471b96c42d31562ee4211b5a90c2138de53b362332f",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/l04_convert_drawer.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/platforms/embodichain/l02_loading.py",
+      "source_sha256": "cd376cf1a8ff512834c166b824fcaa22a3156dd262f93715c181acef4a43ebf8",
+      "repository_path": "scripts/benchmark/tech_reports/loading/platforms/embodichain/l02_loading.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/platforms/embodichain/l02_multi_loading.py",
+      "source_sha256": "cb33d932fd2046d31a4cced32b75a143576328e1be15032c2a8b5e6738577711",
+      "repository_path": "scripts/benchmark/tech_reports/loading/platforms/embodichain/l02_multi_loading.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/platforms/embodichain/l03_loading.py",
+      "source_sha256": "8e59c736168c9792a8f11849912e957379a7ff3862df6d59679ac7f66766e4da",
+      "repository_path": "scripts/benchmark/tech_reports/loading/platforms/embodichain/l03_loading.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/platforms/isaaclab/l02_loading.py",
+      "source_sha256": "751200af33b43462bd4dbb81264f881b481da76852ee5bbf1442532131f6f375",
+      "repository_path": "scripts/benchmark/tech_reports/loading/platforms/isaaclab/l02_loading.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/platforms/isaaclab/l02_multi_loading.py",
+      "source_sha256": "498120fedd5ad2a2188b92dbcbf94efb2c36103b1019bc34b889356c695504dc",
+      "repository_path": "scripts/benchmark/tech_reports/loading/platforms/isaaclab/l02_multi_loading.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/loading/platforms/isaaclab/l03_loading.py",
+      "source_sha256": "dad3019a1019c93dac75db65f994cd3eb22f07033c301f3f53802fe077c3ff76",
+      "repository_path": "scripts/benchmark/tech_reports/loading/platforms/isaaclab/l03_loading.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/experiments/p02_batch.py",
+      "source_sha256": "372cd2e5153a0e470bcd3aa32e61173fed592217d318d0cf51d4e16cbc467580",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p02_batch.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/experiments/p02_media_inputs.py",
+      "source_sha256": "af90d5bf525e28c3846c819735d293a1a9c26a5ae1590c335bcfbf49e49b8912",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p02_media_inputs.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/experiments/p02_protocol.py",
+      "source_sha256": "8520512ad1fd9fef911e14d1c03da416aef189d8518178538e61dfc6a49a58eb",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p02_protocol.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/experiments/p02_stack_capture.py",
+      "source_sha256": "564db5e3f253819b17a2e3c09c3b5060389b8a03504536c207921f77560ba255",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p02_stack_capture.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/experiments/p02_stack_repeat.py",
+      "source_sha256": "3ab69736c104b4c11fcd4dc95eae13534cf85f56363fc5cf22e59bf0f53a62c1",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p02_stack_repeat.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/experiments/p02_stack_sweep.py",
+      "source_sha256": "0de1fe81366e966eb9f0b0c703fad0d443a024dd9470dca633ddd66b4e1bfc87",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p02_stack_sweep.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/experiments/p03_asset_probe.py",
+      "source_sha256": "d6594c35dba5a965c900303092fa1ad575b02eea0aadfbaf7d73cb70d3076d7b",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p03_asset_probe.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/experiments/p03_batch.py",
+      "source_sha256": "18716e7850ab4b2cf5b7d3bc270dafe71266a541dd380696e9e1798d04b86df5",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p03_batch.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/experiments/p03_prepare.py",
+      "source_sha256": "854a6b5da039ca87defad1dbf6febf2e482833ffcfca1943e83c79d46e383283",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p03_prepare.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/experiments/p03_run.py",
+      "source_sha256": "926a74ebd5e7de47060c463f2fee3f547d5f423f7e1aac5af4392af58fbb34ad",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p03_run.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/experiments/p03_shapes.py",
+      "source_sha256": "17bba74a3b423f958af7e5eff16c311e4dfb4d5b50855569697d726c4c710ae9",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p03_shapes.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/platforms/embodichain/p02_capture.py",
+      "source_sha256": "1f218ebaa3e3e89302801e80ac6bbbdfea23986f4c3949f3e553670922c324f9",
+      "repository_path": "scripts/benchmark/tech_reports/physics/platforms/embodichain/p02_capture.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/platforms/embodichain/p02_contact.py",
+      "source_sha256": "e59cc65e7fcd751a53fbcfaad9fe0fed6d23682113038c5a9493a3cd27d0e944",
+      "repository_path": "scripts/benchmark/tech_reports/physics/platforms/embodichain/p02_contact.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/platforms/embodichain/p03_grasp.py",
+      "source_sha256": "9267c22a542df01d204847e9060b5be379a64252e80ac59176a52cc2cd0ed007",
+      "repository_path": "scripts/benchmark/tech_reports/physics/platforms/embodichain/p03_grasp.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/platforms/isaaclab/p02_capture.py",
+      "source_sha256": "e1d1f53d445b1665f591746a46e3ee80de019c6b13d19ed0dbd5ef4537570ca4",
+      "repository_path": "scripts/benchmark/tech_reports/physics/platforms/isaaclab/p02_capture.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/platforms/isaaclab/p02_contact.py",
+      "source_sha256": "2d5afd370d38ec4415326f1edc73597bd2f7c78dc7e810af80890aebc045b60a",
+      "repository_path": "scripts/benchmark/tech_reports/physics/platforms/isaaclab/p02_contact.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/physics/platforms/isaaclab/p03_grasp.py",
+      "source_sha256": "13ddb0ea5603e1304c59de36f8c42ebf359d706d87c9d11376e9889525c6d94f",
+      "repository_path": "scripts/benchmark/tech_reports/physics/platforms/isaaclab/p03_grasp.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l02_media_review.py",
+      "source_sha256": "cde7f6999026f23fc1b06cc7a648da7d340f67b1a3f4ec80af30bdb66effc903",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l02_media_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l02_multi_media.py",
+      "source_sha256": "e560058d0954b3202c1e5247404761b59df1e1c7904419feb95adb45808c48ac",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l02_multi_media.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l02_multi_report.py",
+      "source_sha256": "c16da21bd1148f0651f72def87439177aef59bcbda6bc0eeebe6b55fc285f25e",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l02_multi_report.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l02_report.py",
+      "source_sha256": "89bae9b053dbf24b4122b198423cbd1e7b00042f20a09bfb4b5a0b85972d097d",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l02_report.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l02_review.py",
+      "source_sha256": "9430cbcaa52194d8a4cd2fe80d1e46a411cb09695c7e8c05421ea0e2c3062ea9",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l02_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l02_sleep_off_report.py",
+      "source_sha256": "fa3b72e8b274c3175415b13c0a9c3c6197791830a443b522cc09fe4bb15e08b2",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l02_sleep_off_report.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l02_sleep_review.py",
+      "source_sha256": "d3dfde51819b26586041d1525ef350c2a2e4ae64acb192f7be2c3a751fdcea5d",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l02_sleep_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l02_validate.py",
+      "source_sha256": "5ccd95c72746753fd2fd5d66b78c978a3e5007b28ef0a26a91d5d36502e66e7f",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l02_validate.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l03_collision_review.py",
+      "source_sha256": "206132c9ca9f855b1cebb5457f1cf2917f110fdb0cba3526388828e1697368a2",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l03_collision_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l03_figures.py",
+      "source_sha256": "3b510abcc85da4ab52bd11c13333b8f5b91aa31862aaf0afda348d1f60bef880",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l03_figures.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l03_initialization_review.py",
+      "source_sha256": "75e5930b1317dc1a01947be52492ecdb05228238914274fb43d59bf5c69460cf",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l03_initialization_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l03_media.py",
+      "source_sha256": "b2888205e1a226bf7b84154fef8a2aeaf21971f5c9e09b326b5df191d9fd565e",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l03_media.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l03_preflight_review.py",
+      "source_sha256": "36b09f94369b5d82b492572ad1ae387647c23c3877e924f3444c918180c48991",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l03_preflight_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l03_report.py",
+      "source_sha256": "e1479707d157f762711f767effdbf08b515794d36ff86ab4bde1e1423ba640f1",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l03_report.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l03_validate.py",
+      "source_sha256": "ab07420e54d265493dfb86a1730a24289cb1500bf59143d0abce37744b6f7619",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l03_validate.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/l04_asset_review.py",
+      "source_sha256": "ea0280ba8432305038baa2928a9921c979b35eb7b4623d81b099e734e487b7d8",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/l04_asset_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p02_analysis.py",
+      "source_sha256": "e4ac65f5075a15225cf015a3e35cab06e45b7934beb9e721ae971fa6ce0a22d1",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p02_analysis.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p02_benchmark_summary.py",
+      "source_sha256": "0ecfdf510005b627704a66a259da5125dbc8294cceb62f0e41aabd7135ce0214",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p02_benchmark_summary.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p02_evidence_index.py",
+      "source_sha256": "d78598eaf1110651c09eb59e9cedcb17ccaf01181e0cab745531e7cbb098cd6b",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p02_evidence_index.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p02_figures.py",
+      "source_sha256": "f83552f3114040626a38af9265f2ddfaf9a514cb3b260c3b4ae5ea9e83622ccb",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p02_figures.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p02_friction_review.py",
+      "source_sha256": "3ce5ef3d1554d7fd4c1891798991217a7014b99e249335fe279e2cea27981fb1",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p02_friction_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p02_media_review.py",
+      "source_sha256": "1edfb64b52d5dddfd33188880d0c3631df388fdd78dd4560099cc48c4e11897c",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p02_media_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p02_report.py",
+      "source_sha256": "85051ab9187c544f5d160520690de90390e175dc18935b0133677ab1ef11d763",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p02_report.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p02_stack_metrics.py",
+      "source_sha256": "ac70ea407fd6cdbdbd446c5793341f73bd07c0dfceafbfbdeadf474011795bbc",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p02_stack_metrics.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p02_stack_repeat_review.py",
+      "source_sha256": "9291c0e7d4a0c6895ca3ad4a15129b769cabd6d38db85e83c8ca7873a0ad18de",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p02_stack_repeat_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p02_stack_report.py",
+      "source_sha256": "fe7e228b6fcff0820bce62e00e24db9cababd68e191ff2da69995074dba18382",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p02_stack_report.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p03_media_review.py",
+      "source_sha256": "d7dcbe2f89260e76c5c0e32a4d1503f83d3c4847b816be6f7e93a904bd68c982",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p03_media_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p03_metrics.py",
+      "source_sha256": "4015c4ed8a15a8d730b99fc56a84a51c7cc1cfd4f4a141f3de52a27de9e40563",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p03_metrics.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p03_mimic_review.py",
+      "source_sha256": "485887d9a76208879a04f6148fc9567b391f2e950a6719559cf24aa44a949f0c",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p03_mimic_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p03_preflight_report.py",
+      "source_sha256": "86e98f8817fa5214b8d4a6f00638f89e23474fef00ca1478122dfadd0196efef",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p03_preflight_report.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p03_report.py",
+      "source_sha256": "a17d5e183d7fd43f72a6505077240ed240aac37f6a0acfb236d58809dd8936a3",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p03_report.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p03_review.py",
+      "source_sha256": "a33ac89ecb1685d6491959fabe6d2781efaa2b310a705a2dfae2f5ad23602c1a",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p03_review.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/p03_validate.py",
+      "source_sha256": "6d0d7754f52f7888b6da638ca8c88807c910f3578e03e1c86492037b8393d75c",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/p03_validate.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/README.md",
+      "source_sha256": "bb64c2b43e197a68b9c052648ce2e1a149b107782617f6b5ad71e3c8db8d0bd1",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/README.md"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/build.py",
+      "source_sha256": "cdd673fd2c7d4ac17dc43cc1273d92a2ca38a52e9408524628dd508370869275",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/build.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/catalog.json",
+      "source_sha256": "75d77b7141a3bdaa8d40cbfe780ade94a4a1b890f425c1190c42b7fddbb7fec4",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/catalog.json"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/check.py",
+      "source_sha256": "a3adec2f37aec6f33497ed94cdd385db051f199e5d4409f35cc64e5d17432cba",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/check.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/requirements.txt",
+      "source_sha256": "0a832bcd19f185c7e8122458b7ebe919cd4bcba9a90de83a3081e0f5d58f3f76",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/requirements.txt"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/serve.py",
+      "source_sha256": "f085c6b83535ca7d0764204301985958c20be0e9c15e1c3784e315b7b777ae9a",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/serve.py"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/favicon.svg",
+      "source_sha256": "971f5d1702fc1d61986a7431020af3271e24a9c99d93db29af2d906727310d72",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/favicon.svg"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/site.css",
+      "source_sha256": "f52827ca601916e433a68f653fa419843ff4da75801aa3dfaad75e6a7adebd75",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/site.css"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/site.js",
+      "source_sha256": "703a5bdb06545311431082f9059674392d0aa512b404c93a2b6d22fb88747070",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/site.js"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/README.md",
+      "source_sha256": "a981d35ea0ead2db6ec438e21c8ac09638c1502b58ddc387877686884cc69a2f",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/README.md"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/LICENSE",
+      "source_sha256": "766ccc1f306c885aa45542a9846bbd0a505b27a0374f146778171c2254ce18e3",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/LICENSE"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_AMS-Regular.ttf",
+      "source_sha256": "68534840bcfdd2bffb6f0e8deb48684dd01e7f04ea2813267577afb906de1d13",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_AMS-Regular.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_AMS-Regular.woff",
+      "source_sha256": "30da91e84c893f875e252689faebdc590b2871145e8adc7f9a9d4dbd8ce0b251",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_AMS-Regular.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_AMS-Regular.woff2",
+      "source_sha256": "0cdd387c9590a1a9f9794560022dbb59654a7d86f187aa0c81495ad42d3a7308",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_AMS-Regular.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Caligraphic-Bold.ttf",
+      "source_sha256": "07d8e303ce4fc12b4bb54f1004170dd190a1f3db45d400fe68060df3e0897268",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Caligraphic-Bold.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Caligraphic-Bold.woff",
+      "source_sha256": "1ae6bd7475590e97e7f145a89e09ccde322f7a6bc0b91607b1c8b8ee28290fed",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Caligraphic-Bold.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Caligraphic-Bold.woff2",
+      "source_sha256": "de7701e42cf1f4cf0b766c03fb27977207eee2f4fd5d76fa82188406da43ea4c",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Caligraphic-Bold.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Caligraphic-Regular.ttf",
+      "source_sha256": "ed0b74372feefcbb9c0666b2e210da37b7e49fa7fbbf3eeb11db5f693dacfbb7",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Caligraphic-Regular.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Caligraphic-Regular.woff",
+      "source_sha256": "3398dd02302557a793f2863f88e02d96ce10df2abffa07c8e9fa90775116e65c",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Caligraphic-Regular.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Caligraphic-Regular.woff2",
+      "source_sha256": "5d53e70ad607c2352162dec9e0923fb54ecdafaccbf604cd8dcf7d00facb989b",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Caligraphic-Regular.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Fraktur-Bold.ttf",
+      "source_sha256": "9163df9c7122432e6495b4229fa9071cf9ae86a758ae5efc4924ec2e1a6dbce1",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Fraktur-Bold.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Fraktur-Bold.woff",
+      "source_sha256": "9be7ceb88004ab8ad124082246fbfcca4091e36385d4ec6ed1df67375dad50fb",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Fraktur-Bold.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Fraktur-Bold.woff2",
+      "source_sha256": "74444efd593c005e3f4573b44524704c0af0a937fe911cca9e94068d0d140d3f",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Fraktur-Bold.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Fraktur-Regular.ttf",
+      "source_sha256": "1e6f9579e90e2cac37f8f60a597c436e075c114385652b7cbeb0dec0421291b3",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Fraktur-Regular.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Fraktur-Regular.woff",
+      "source_sha256": "5e28753be717dac97f559f49bc10be9cf3c124ddcabda6659d11cb68febc6463",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Fraktur-Regular.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Fraktur-Regular.woff2",
+      "source_sha256": "51814d270d06ff0255dba0799994fa4d8c84d11f09951d47595f4abb1f3602dc",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Fraktur-Regular.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Bold.ttf",
+      "source_sha256": "138ac28d1663b3037e9c5f52371fa5c63d8324f4a38d22cd573e6ea3a3fd0cf8",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Bold.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Bold.woff",
+      "source_sha256": "c76c5d696297d51b9cb1639c7da4334f0e7dec81b42b11213b5e25ef671bb822",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Bold.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Bold.woff2",
+      "source_sha256": "0f60d1b897938ec918c8ce073092411baf9438f6739465693ff18b0f9d20b021",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Bold.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-BoldItalic.ttf",
+      "source_sha256": "70ee1f64a20f2048c21940ef46d0144fd215baa953ca69afd1e31e98544f708f",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-BoldItalic.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-BoldItalic.woff",
+      "source_sha256": "a6f7ec0d846ac7ad975adb8959c37ed49b94acbc4ae436db9ce9e20287e4a64c",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-BoldItalic.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-BoldItalic.woff2",
+      "source_sha256": "99cd42a3c072d918f2f44984a807cf7aa16e13545fd0875fc07c6c65f99e715b",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-BoldItalic.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Italic.ttf",
+      "source_sha256": "0d85ae7cc30f23790a7f1a58c4a112fdca8aae769b6ba11429af1d98b1b6cb3a",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Italic.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Italic.woff",
+      "source_sha256": "f1d6ef86f3b11a528bd5185199bd2443ecb2b0dead96d88674b5a2c12be24bdf",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Italic.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Italic.woff2",
+      "source_sha256": "97479ca6cce906abc961ecac96faa5f9ca2e61b8e7670d475826bcdee9a7c267",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Italic.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Regular.ttf",
+      "source_sha256": "d0332f52868370fd83ae7fa46470f90c8f2eab2fcf12bc4f88080b340c95a830",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Regular.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Regular.woff",
+      "source_sha256": "c6368d87e8a1a3a5d337623d83d8dc4b868f242a9ad476237d6f8d1e0f168cdc",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Regular.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Regular.woff2",
+      "source_sha256": "c2342cd8b869e01752a9321dc17213fc40d4d04c79688c1d43f2cf316abd7866",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Main-Regular.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Math-BoldItalic.ttf",
+      "source_sha256": "f9377ab0271cda59af24bcffbd46a4d0c8a3572ffafdbb38de2ad5ea7b0d5ee5",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Math-BoldItalic.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Math-BoldItalic.woff",
+      "source_sha256": "850c0af5c2238497febaf5e461d880bf458c341f42f4f330f1b1ab5698b1998e",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Math-BoldItalic.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Math-BoldItalic.woff2",
+      "source_sha256": "dc47344dbb6cb5b655c8460d561f4df5f501b90c804ad3c6cec65fe322351ab1",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Math-BoldItalic.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Math-Italic.ttf",
+      "source_sha256": "08ce98e51b04d58945a301e639e02b6998af29fdfd61a7b8afdd07bbfc479d4a",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Math-Italic.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Math-Italic.woff",
+      "source_sha256": "8a8d244581371912b8f3f5a23e2437cb2a59cd9bcaebb0346e722c05737a2571",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Math-Italic.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Math-Italic.woff2",
+      "source_sha256": "7af58c5ec8f132a2ddde9027c6d7814decce4d3b822a11192a42a20e2e973264",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Math-Italic.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Bold.ttf",
+      "source_sha256": "1ece03f79f95277d57dc7f6b435a74e1379b0d46104a8530286b60ff49369ea0",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Bold.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Bold.woff",
+      "source_sha256": "ece03cfd83e22c212cdef66feb8442d25a083beb988db3f1883f3f9738d750ba",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Bold.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Bold.woff2",
+      "source_sha256": "e99ae51144bf1232efcc1bfe5add36262c6866b0faab24fa75740e1b98577a62",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Bold.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Italic.ttf",
+      "source_sha256": "3931dd81faed86ba021bb2bbdc36f5bed9a38d6b4f4077aca59b265aa1b02083",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Italic.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Italic.woff",
+      "source_sha256": "91ee67500cc0129aa0ace3ac5c61ff1692102f0f31d02b69347fba35dcb75bf2",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Italic.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Italic.woff2",
+      "source_sha256": "00b26ac825e2095056396e0553b8ac26d3f8ad158c3826e28b4c45b385c4714a",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Italic.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Regular.ttf",
+      "source_sha256": "f36ea897e19f4a2e571d1e900e4e3710e438deb05a842486045ba0a3e616a4ad",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Regular.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Regular.woff",
+      "source_sha256": "11e4dc8a6471ff6d6ee561d53d10fde8f7489e798257ff449c5d37c197435605",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Regular.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Regular.woff2",
+      "source_sha256": "68e8c73ef42afd3ccec58bf0fba302cce448938e7fc020a5e31f8a952eee1342",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_SansSerif-Regular.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Script-Regular.ttf",
+      "source_sha256": "1c67f068fea8bb09bf099c088b1cf64bd27516a6e07f4684344873564bb66a67",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Script-Regular.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Script-Regular.woff",
+      "source_sha256": "d96cdf2b3bdd4d64a8fd5f74a4c467f123a8a73931cd435889f08ffaf9bf947a",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Script-Regular.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Script-Regular.woff2",
+      "source_sha256": "036d4e95149b69ff9bcc0cd55771efeb25ffa3947293e69acd78d5ac328c684b",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Script-Regular.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size1-Regular.ttf",
+      "source_sha256": "95b6d2f1a50173bfedb8c63e1d1c99b10427d0a4df4201cb44513b226951a22b",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size1-Regular.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size1-Regular.woff",
+      "source_sha256": "c943cc986384f59e86bea5fd7dc50a9c4dfe567a7c05eb40d6790720dead97c9",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size1-Regular.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size1-Regular.woff2",
+      "source_sha256": "6b47c40166b6dbe21a5dfca7718413f2147fd2399be1ba605d8ad39cedf25dfe",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size1-Regular.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size2-Regular.ttf",
+      "source_sha256": "a6b2099fb555c60e3a0db3a08842ebf1d732c6eb4e4bf44913613bed4fc4e39b",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size2-Regular.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size2-Regular.woff",
+      "source_sha256": "2014c523c3210bcc166648c4d4cc57f05b747df07a24277bf71c51e67dc79e3d",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size2-Regular.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size2-Regular.woff2",
+      "source_sha256": "d04c54219f9eaec6d4d4fd42dfb28785975a4794d6b2fc71e566b9cd6db842dd",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size2-Regular.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size3-Regular.ttf",
+      "source_sha256": "500e04d54f0d51666332c9d2089aa803be22aa878eca539e59fa53c6e522b082",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size3-Regular.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size3-Regular.woff",
+      "source_sha256": "6ab6b62e9b62dae2c00dd90f791bd10950be0ecc3490d7d6045f51c2e8fe0949",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size3-Regular.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size3-Regular.woff2",
+      "source_sha256": "73d591271b1604960cb10bb90fee021670af7297017e0e98480b332d11f51995",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size3-Regular.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size4-Regular.ttf",
+      "source_sha256": "c647367d1dd4e162468717d020e1fc0f1dc5c26ebfdffbe55261713bf88c5877",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size4-Regular.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size4-Regular.woff",
+      "source_sha256": "99f9c6750b489c9462bf04900bd3f939df9b829339daaaaa99ef5495cdddea58",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size4-Regular.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size4-Regular.woff2",
+      "source_sha256": "a4af7d414440a1c1790825cfb700cf9cf43b0f2c4b04f0ebc523011ad9853ec0",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Size4-Regular.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Typewriter-Regular.ttf",
+      "source_sha256": "f01f3e87d9c6a61c0c081ceb577abd864eb00a612f7ac1620dd6915fad2ef5aa",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Typewriter-Regular.ttf"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Typewriter-Regular.woff",
+      "source_sha256": "e14fed02b1aba7ce9f5afd5844b5d0321b22351febc720e0de8b8723527609f7",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Typewriter-Regular.woff"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Typewriter-Regular.woff2",
+      "source_sha256": "71d517d67827787cfabdf186914cc3358eda539e37931941f2b2fd4a21f68c0b",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/fonts/KaTeX_Typewriter-Regular.woff2"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/katex.min.css",
+      "source_sha256": "19095127357ed6d29fe0a63a6b000c913a89f7f1963b765dd3715e97c9852e75",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/katex.min.css"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/katex.min.js",
+      "source_sha256": "e8d885505949f3a5f4abdd5dd0d53696bd1371ad26ffbf4f310dcd77c8cdae89",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/static/vendor/katex/katex.min.js"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/templates/base.html",
+      "source_sha256": "bedddff40cb5ed9c33fa5aa1e5fe320fdb9b9ae9984f6c14ceb581f57e0676cf",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/templates/base.html"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/templates/directory.html",
+      "source_sha256": "6dba319969b0bdad71e6b2c2ac742da3aeb0e27395dce8754f80d10e7d744d79",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/templates/directory.html"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/templates/document.html",
+      "source_sha256": "a63652d8185c87c7e4178042e290d7a6b7b2661f355b07026d4927247481e8bc",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/templates/document.html"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/templates/experiment.html",
+      "source_sha256": "c7a548f0a0848e5be4d115cd2489478d44ba81ce62997d4e541c56e6f188aa19",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/templates/experiment.html"
+    },
+    {
+      "local_source": "scripts/benchmark/tech_reports/reporting/site/templates/index.html",
+      "source_sha256": "07c47ebc941eb756041dac5fe5bddd6d147c6a2c32ebcfde9f18c4142f7a6337",
+      "repository_path": "scripts/benchmark/tech_reports/reporting/site/templates/index.html"
+    },
+    {
+      "local_source": "specs/contact-demo-spec.md",
+      "source_sha256": "5d4458b316853c587f446bd248e902830c6ea840a89c6714521760125ef3e97f",
+      "repository_path": "scripts/benchmark/tech_reports/demonstrations/experiments/contact-demo-spec.md"
+    },
+    {
+      "local_source": "specs/loading-experiments-spec.md",
+      "source_sha256": "652af4df4b3212f954d0e3295e8a72db6840ced781f759a21dd1b158451c317b",
+      "repository_path": "scripts/benchmark/tech_reports/loading/experiments/loading-experiments-spec.md"
+    },
+    {
+      "local_source": "specs/p-01-dynamics-spec.md",
+      "source_sha256": "2f145b488106c29add89a8aa818cc3de53e915a992de3be6ca79f06b4afe7b91",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p-01-dynamics-spec.md"
+    },
+    {
+      "local_source": "specs/p-02-contact-stability-spec.md",
+      "source_sha256": "4b550fa3da33de7f71922bf470604dfe1f2f4f46aeef1f7bf27ca8d14f78c780",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p-02-contact-stability-spec.md"
+    },
+    {
+      "local_source": "specs/p-03-grasp-spec.md",
+      "source_sha256": "8b0edf00823770d59b53f1458d6d818d3077d35918d38df0cf79fcd73668461e",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p-03-grasp-spec.md"
+    },
+    {
+      "local_source": "specs/p-04-clutter-spec.md",
+      "source_sha256": "51e93153e5a8501cba8b92ecc44379e4ee1b3e626e5da56d7df0a559c3a90f07",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p-04-clutter-spec.md"
+    },
+    {
+      "local_source": "specs/p-05-stacking-spec.md",
+      "source_sha256": "5d3834e9bfff2e199f31efbb03452346c8e4416244137bcda43d78bcc36b15d1",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p-05-stacking-spec.md"
+    },
+    {
+      "local_source": "specs/p-06-drawer-spec.md",
+      "source_sha256": "aa8dd0a79b6aab94660df88568183684b0b7f0c2dd3e953ceddf76f94662ae5d",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p-06-drawer-spec.md"
+    },
+    {
+      "local_source": "specs/p-07-insertion-spec.md",
+      "source_sha256": "471d568c169104e3534d98cbaf1a180f9bf91f2835efdc255387b9cb498c082f",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/p-07-insertion-spec.md"
+    },
+    {
+      "local_source": "specs/physics-experiments-spec.md",
+      "source_sha256": "b89f1727db0c72e993eea7a5474a35f5f67a1bd507af88ccc9a8d15b06a612b2",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/physics-experiments-spec.md"
+    },
+    {
+      "local_source": "specs/render-quality-spec.md",
+      "source_sha256": "d66696980b4894502198cda2da60a6c1b1254c02a33119e9dbb5d13c16f57902",
+      "repository_path": "scripts/benchmark/tech_reports/rendering/experiments/render-quality-spec.md"
+    },
+    {
+      "local_source": "specs/simulation-report-spec.md",
+      "source_sha256": "d37589ff98c610c776c535948ad3f177baea2bf171d7e5f6b1fa0359b9fa0b31",
+      "repository_path": "scripts/benchmark/tech_reports/physics/experiments/simulation-report-spec.md"
+    },
+    {
+      "local_source": "tests/benchmark/tech_reports/reporting/test_p02_analysis.py",
+      "source_sha256": "fb7fb596eb6248600cfefbb1a6bb22b806b221b43882be5ffe9c7e9ab88931d7",
+      "repository_path": "tests/benchmark/tech_reports/reporting/test_p02_analysis.py"
+    }
+  ]
+}

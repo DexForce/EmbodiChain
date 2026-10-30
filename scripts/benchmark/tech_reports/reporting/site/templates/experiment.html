@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="breadcrumb"><a href="/">总览</a><span>/</span>{{ item.category }}<span>/</span>{{ item.id }}</div>
+<header class="page-header"><div class="eyebrow">{{ item.id }} · {{ item.category }}</div><h1>{{ item.title }}</h1><div class="page-meta"><span class="badge {{ item.status }}">{{ item.status_label }}</span>{% if item.date %}<span>实验材料更新 {{ item.date }}</span><span>{{ item.scope }}</span>{% endif %}</div></header>
+{% if item.status == 'pending' %}
+<section class="empty-state"><span class="empty-mark" aria-hidden="true">—</span><h2>内容待补充</h2><p>该实验尚未开展，暂未发布结果与素材。</p><a class="button secondary" href="/#directory-heading">返回实验目录</a></section>
+{% else %}
+<nav class="section-tabs" aria-label="本页阅读入口"><a href="#findings">关键结论</a><a href="#media">实验视频</a><a href="#report">详细报告</a><a href="#sources">数据与补充材料</a></nav>
+<section id="findings" class="findings"><p class="takeaway">{{ item.takeaway }}</p><div class="metrics">{% for metric in item.metrics %}<div><p>{{ metric.label }}</p><strong>{{ metric.value }}</strong><small>{{ metric.detail }}</small></div>{% endfor %}</div><aside class="issue-callout"><h2>{{ item.issue.title }}</h2><p>{{ item.issue.text }}</p><a href="{{ item.issue.url }}{% if item.issue.url == item.url %}#report{% endif %}">查看证据与详细说明 →</a></aside></section>
+<section id="media" class="media-section"><div class="section-heading"><h2>实验视频</h2><span>仿真运行原生采集</span></div><p class="section-note">{{ item.media_note }}</p>
+<div class="video-grid">{% for video in item.videos %}<figure class="video-card{% if video.wide %} wide{% endif %}"><h3>{{ video.title }}</h3><video controls playsinline preload="none" poster="{{ video.poster_url }}" aria-label="{{ video.title }}"><source src="{{ video.url }}" type="video/mp4">浏览器无法播放，请下载 MP4。</video><figcaption><span>{{ video.caption }}</span><a href="{{ video.url }}" download>下载 MP4 ↓</a></figcaption></figure>{% endfor %}</div></section>
+<section id="report" class="report-section"><div class="section-heading"><h2>详细报告</h2><a href="{{ doc.download }}" download>下载 Markdown 原稿 ↓</a></div><p class="section-note">{{ item.get('report_note', '以下保留合并初稿的对比结论与两平台详细分析。图表可点击查看原图，宽表格可横向滚动。') }}</p><div class="reading-layout"><article class="prose">{{ doc.body | safe }}</article><aside class="toc-panel"><details open><summary>正文目录</summary>{{ doc.toc | safe }}</details></aside></div></section>
+<section id="sources" class="sources-section"><div class="section-heading"><h2>数据与补充材料</h2><span>可追溯、可下载</span></div><div class="resource-grid">{% for resource in item.resources %}<a href="{{ resource.url }}"><span>{{ resource.label }}</span><span>↗</span></a>{% endfor %}</div><p class="source-path">正文来源 <code>{{ item.source }}</code></p><p class="section-note">原始数值、配置、日志与失败记录以相应数据索引为准。HTML 是阅读副本，不改写实验原文件。历史稿中的旧判定口径不替代当前合并稿。</p></section>
+{% endif %}
+{% endblock %}

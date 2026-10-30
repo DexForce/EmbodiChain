@@ -1,0 +1,566 @@
+{
+  "date": "2026-10-28",
+  "scope": "用户授权清理无效及重复媒体；原始数值、日志、失败记录保留",
+  "retired_rules": [
+    {
+      "directory": "results/P-01/20261014_capture_freefall_dt0025_01/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧视角、试录或初版画面；由统一视角 v2/v3 原生录像替代"
+    },
+    {
+      "directory": "results/P-01/20261014_capture_pendulum_dt005_01/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧视角、试录或初版画面；由统一视角 v2/v3 原生录像替代"
+    },
+    {
+      "directory": "results/P-01/20261014_capture_pilot_pendulum_02/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧视角、试录或初版画面；由统一视角 v2/v3 原生录像替代"
+    },
+    {
+      "directory": "results/P-01/20261014_capture_pilot_pendulum_03/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧视角、试录或初版画面；由统一视角 v2/v3 原生录像替代"
+    },
+    {
+      "directory": "results/P-01/20261014_capture_pilot_pendulum_04/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧视角、试录或初版画面；由统一视角 v2/v3 原生录像替代"
+    },
+    {
+      "directory": "results/P-01/20261014_pgs_baseline_capture_pendulum_dt005/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧视角、试录或初版画面；由统一视角 v2/v3 原生录像替代"
+    },
+    {
+      "directory": "results/P-01/20261021_181257_embodichain_dexuni_capture_freefall_dt005_N1/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧视角、试录或初版画面；由统一视角 v2/v3 原生录像替代"
+    },
+    {
+      "directory": "results/P-01/20261021_181310_embodichain_dexuni_capture_pendulum_dt005_N1/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧视角、试录或初版画面；由统一视角 v2/v3 原生录像替代"
+    },
+    {
+      "directory": "results/P-01/20261021_190935_common_view_embodichain_dexuni_freefall_dt005_N1/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧视角、试录或初版画面；由统一视角 v2/v3 原生录像替代"
+    },
+    {
+      "directory": "results/P-01/20261021_190956_common_view_embodichain_dexuni_pendulum_dt005_N1/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧视角、试录或初版画面；由统一视角 v2/v3 原生录像替代"
+    },
+    {
+      "directory": "outputs/benchmarks/P-03/runs/20261023_120450_contact_audit_embodichain_cube_n0001_r00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧试录或仅地面无机器人画面；保留有效 cube/cylinder 四段原片"
+    },
+    {
+      "directory": "outputs/benchmarks/P-03/runs/20261023_120535_contact_audit_isaaclab_cube_n0001_r00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧试录或仅地面无机器人画面；保留有效 cube/cylinder 四段原片"
+    },
+    {
+      "directory": "outputs/benchmarks/P-03/runs/20261023_122515_native_v4_isaaclab_cube_physics_n0001_r00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧试录或仅地面无机器人画面；保留有效 cube/cylinder 四段原片"
+    },
+    {
+      "directory": "outputs/benchmarks/P-03/runs/20261023_122652_native_v4_isaaclab_cylinder_physics_n0001_r00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧试录或仅地面无机器人画面；保留有效 cube/cylinder 四段原片"
+    },
+    {
+      "directory": "outputs/benchmarks/L-02/multi-arena-v1/runs/20261027_111028_multi_media_v1_embodichain_cube_S_00016_H_media_00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧单环境多物体或已替代的录制；保留当前 N=16 两平台 cube/sphere 原片"
+    },
+    {
+      "directory": "outputs/benchmarks/L-02/multi-arena-v1/runs/20261027_111050_multi_media_v1_embodichain_sphere_S_00016_H_media_00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧单环境多物体或已替代的录制；保留当前 N=16 两平台 cube/sphere 原片"
+    },
+    {
+      "directory": "outputs/benchmarks/L-02/multi-arena-v1/runs/20261027_111616_multi_media_v4_isaaclab_cube_S_00016_H_media_00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧单环境多物体或已替代的录制；保留当前 N=16 两平台 cube/sphere 原片"
+    },
+    {
+      "directory": "outputs/benchmarks/L-02/multi-arena-v1/runs/20261027_111726_multi_media_sphere_v4_isaaclab_sphere_S_00016_H_media_00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧单环境多物体或已替代的录制；保留当前 N=16 两平台 cube/sphere 原片"
+    },
+    {
+      "directory": "outputs/benchmarks/L-02/runs/20261023_171125_native_v2_embodichain_cube_S_01000_H_media_00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧单环境多物体或已替代的录制；保留当前 N=16 两平台 cube/sphere 原片"
+    },
+    {
+      "directory": "outputs/benchmarks/L-02/runs/20261023_171214_native_v2_isaaclab_cube_S_01000_H_media_00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧单环境多物体或已替代的录制；保留当前 N=16 两平台 cube/sphere 原片"
+    },
+    {
+      "directory": "outputs/benchmarks/L-02/runs/20261023_171315_native_v2_embodichain_sphere_S_01000_H_media_00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧单环境多物体或已替代的录制；保留当前 N=16 两平台 cube/sphere 原片"
+    },
+    {
+      "directory": "outputs/benchmarks/L-02/runs/20261023_171402_native_v2_isaaclab_sphere_S_01000_H_media_00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧单环境多物体或已替代的录制；保留当前 N=16 两平台 cube/sphere 原片"
+    },
+    {
+      "directory": "outputs/benchmarks/L-02/runs/20261023_171512_native_aa_v3_isaaclab_cube_S_01000_H_media_00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧单环境多物体或已替代的录制；保留当前 N=16 两平台 cube/sphere 原片"
+    },
+    {
+      "directory": "outputs/benchmarks/L-02/runs/20261023_171530_native_aa_v3_isaaclab_sphere_S_01000_H_media_00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "旧单环境多物体或已替代的录制；保留当前 N=16 两平台 cube/sphere 原片"
+    },
+    {
+      "directory": "outputs/benchmarks/P-02/runs/20261022_124032_media_smoke_capture_embodichain_stack_05_dt0.005/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "重复参数/试录；保留代表性滑动、静摩擦差异、10 层及堆叠边界录像"
+    },
+    {
+      "directory": "outputs/benchmarks/P-02/runs/20261022_124032_media_smoke_capture_isaaclab_stack_05_dt0.005/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "重复参数/试录；保留代表性滑动、静摩擦差异、10 层及堆叠边界录像"
+    },
+    {
+      "directory": "outputs/benchmarks/P-02/runs/20261022_125931_native_capture_embodichain_slope_15_mu54_dt0.005_initial00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "重复参数/试录；保留代表性滑动、静摩擦差异、10 层及堆叠边界录像"
+    },
+    {
+      "directory": "outputs/benchmarks/P-02/runs/20261022_125931_native_capture_embodichain_slope_30_mu32_dt0.005_initial00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "重复参数/试录；保留代表性滑动、静摩擦差异、10 层及堆叠边界录像"
+    },
+    {
+      "directory": "outputs/benchmarks/P-02/runs/20261022_125931_native_capture_embodichain_slope_45_mu54_dt0.005_initial00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "重复参数/试录；保留代表性滑动、静摩擦差异、10 层及堆叠边界录像"
+    },
+    {
+      "directory": "outputs/benchmarks/P-02/runs/20261022_125931_native_capture_embodichain_stack_01_dt0.005_initial00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "重复参数/试录；保留代表性滑动、静摩擦差异、10 层及堆叠边界录像"
+    },
+    {
+      "directory": "outputs/benchmarks/P-02/runs/20261022_125931_native_capture_embodichain_stack_05_dt0.005_initial00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "重复参数/试录；保留代表性滑动、静摩擦差异、10 层及堆叠边界录像"
+    },
+    {
+      "directory": "outputs/benchmarks/P-02/runs/20261022_125931_native_capture_isaaclab_slope_15_mu54_dt0.005_initial00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "重复参数/试录；保留代表性滑动、静摩擦差异、10 层及堆叠边界录像"
+    },
+    {
+      "directory": "outputs/benchmarks/P-02/runs/20261022_125931_native_capture_isaaclab_slope_30_mu32_dt0.005_initial00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "重复参数/试录；保留代表性滑动、静摩擦差异、10 层及堆叠边界录像"
+    },
+    {
+      "directory": "outputs/benchmarks/P-02/runs/20261022_125931_native_capture_isaaclab_slope_45_mu54_dt0.005_initial00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "重复参数/试录；保留代表性滑动、静摩擦差异、10 层及堆叠边界录像"
+    },
+    {
+      "directory": "outputs/benchmarks/P-02/runs/20261022_125931_native_capture_isaaclab_stack_01_dt0.005_initial00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "重复参数/试录；保留代表性滑动、静摩擦差异、10 层及堆叠边界录像"
+    },
+    {
+      "directory": "outputs/benchmarks/P-02/runs/20261022_125931_native_capture_isaaclab_stack_05_dt0.005_initial00/native_camera",
+      "suffixes": [
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mp4",
+        ".png",
+        ".webm"
+      ],
+      "reason": "重复参数/试录；保留代表性滑动、静摩擦差异、10 层及堆叠边界录像"
+    },
+    {
+      "path": "reports/P-01/dexuni/native/freefall.mp4",
+      "reason": "旧视角或轨迹重建动画；当前统一视角原生录像已保留"
+    },
+    {
+      "path": "reports/P-01/dexuni/native/pendulum.mp4",
+      "reason": "旧视角或轨迹重建动画；当前统一视角原生录像已保留"
+    },
+    {
+      "path": "reports/P-01/native/freefall_1x.mp4",
+      "reason": "旧视角或轨迹重建动画；当前统一视角原生录像已保留"
+    },
+    {
+      "path": "reports/P-01/native/freefall_quarter_speed.gif",
+      "reason": "旧视角或轨迹重建动画；当前统一视角原生录像已保留"
+    },
+    {
+      "path": "reports/P-01/native/pendulum_1x.gif",
+      "reason": "旧视角或轨迹重建动画；当前统一视角原生录像已保留"
+    },
+    {
+      "path": "reports/P-01/native/pendulum_1x.mp4",
+      "reason": "旧视角或轨迹重建动画；当前统一视角原生录像已保留"
+    },
+    {
+      "path": "reports/P-01/pgs/pendulum_pgs_1x.gif",
+      "reason": "旧视角或轨迹重建动画；当前统一视角原生录像已保留"
+    },
+    {
+      "path": "reports/P-01/pgs/pendulum_pgs_1x.mp4",
+      "reason": "旧视角或轨迹重建动画；当前统一视角原生录像已保留"
+    },
+    {
+      "path": "reports/P-01/publication/freefall_replay.gif",
+      "reason": "旧视角或轨迹重建动画；当前统一视角原生录像已保留"
+    },
+    {
+      "path": "reports/P-01/publication/freefall_replay.mp4",
+      "reason": "旧视角或轨迹重建动画；当前统一视角原生录像已保留"
+    },
+    {
+      "path": "reports/P-01/publication/pendulum_replay.gif",
+      "reason": "旧视角或轨迹重建动画；当前统一视角原生录像已保留"
+    },
+    {
+      "path": "reports/P-01/publication/pendulum_replay.mp4",
+      "reason": "旧视角或轨迹重建动画；当前统一视角原生录像已保留"
+    },
+    {
+      "path": "outputs/benchmarks/P-02/videos/slope_15_mu54_paired_1x.mp4",
+      "reason": "对应的重复参数原片已清理；数值结果仍全部保留"
+    },
+    {
+      "path": "outputs/benchmarks/P-02/videos/slope_30_mu32_paired_1x.mp4",
+      "reason": "对应的重复参数原片已清理；数值结果仍全部保留"
+    },
+    {
+      "path": "outputs/benchmarks/P-02/videos/slope_45_mu54_paired_1x.mp4",
+      "reason": "对应的重复参数原片已清理；数值结果仍全部保留"
+    },
+    {
+      "path": "outputs/benchmarks/P-02/videos/stack_01_paired_1x.mp4",
+      "reason": "对应的重复参数原片已清理；数值结果仍全部保留"
+    },
+    {
+      "path": "outputs/benchmarks/P-02/videos/stack_05_paired_1x.mp4",
+      "reason": "对应的重复参数原片已清理；数值结果仍全部保留"
+    }
+  ],
+  "redirects": [
+    {
+      "path": "results/P-01/20261021_191447_common_view_v3_isaaclab_pgs_freefall_dt005_N1/native_camera/native_1x.mp4",
+      "replacement": "reports/P-01/common-view/isaaclab_pgs_freefall.mp4",
+      "note": "完全相同的 MP4 副本已去重，链接指向保留的原片"
+    },
+    {
+      "path": "results/P-01/20261021_191646_common_view_v3_isaaclab_tgs_freefall_dt005_N1/native_camera/native_1x.mp4",
+      "replacement": "reports/P-01/common-view/isaaclab_tgs_freefall.mp4",
+      "note": "完全相同的 MP4 副本已去重，链接指向保留的原片"
+    },
+    {
+      "path": "results/P-01/20261021_191509_common_view_v3_isaaclab_pgs_pendulum_dt005_N1/native_camera/native_1x.mp4",
+      "replacement": "reports/P-01/common-view/isaaclab_pgs_pendulum.mp4",
+      "note": "完全相同的 MP4 副本已去重，链接指向保留的原片"
+    },
+    {
+      "path": "results/P-01/20261021_191700_common_view_v3_isaaclab_tgs_pendulum_dt005_N1/native_camera/native_1x.mp4",
+      "replacement": "reports/P-01/common-view/isaaclab_tgs_pendulum.mp4",
+      "note": "完全相同的 MP4 副本已去重，链接指向保留的原片"
+    }
+  ],
+  "compressed_files": [
+    {
+      "path": "outputs/benchmarks/P-03/runs/20261023_122102_scaling_probe_isaaclab_cube_physics_n0064_r00/scene.usda",
+      "bytes": 1261898820,
+      "sha256": "0628b48bd8c7135b1bcc0085b82cb894e2e51ddccd5b0af9d67ba21be57f426d",
+      "archive": "outputs/benchmarks/P-03/runs/20261023_122102_scaling_probe_isaaclab_cube_physics_n0064_r00/scene.usda.gz",
+      "archive_bytes": 221823877,
+      "archive_sha256": "df2b63414d0b5deb2bb4d0e645e431adb01e55bee1aa2a7f77be8e0c912cffd6",
+      "verified_lossless": true
+    },
+    {
+      "path": "outputs/benchmarks/P-03/runs/20261023_122156_scaling_probe_isaaclab_cylinder_physics_n0064_r00/scene.usda",
+      "bytes": 1262452740,
+      "sha256": "27e1107b379be8bd51f473bf27618095b566c22ea7b7be86cca3ca0deba010e1",
+      "archive": "outputs/benchmarks/P-03/runs/20261023_122156_scaling_probe_isaaclab_cylinder_physics_n0064_r00/scene.usda.gz",
+      "archive_bytes": 221942870,
+      "archive_sha256": "72bc751504c211b83da411764c9b7bc8ca266ae087e008704d9aafacf66549fa",
+      "verified_lossless": true
+    },
+    {
+      "path": "outputs/benchmarks/P-03/runs/20261023_122251_scaling_probe_isaaclab_cube_env_n0064_r00/scene.usda",
+      "bytes": 1261898820,
+      "sha256": "0628b48bd8c7135b1bcc0085b82cb894e2e51ddccd5b0af9d67ba21be57f426d",
+      "archive": "outputs/benchmarks/P-03/runs/20261023_122251_scaling_probe_isaaclab_cube_env_n0064_r00/scene.usda.gz",
+      "archive_bytes": 221823877,
+      "archive_sha256": "df2b63414d0b5deb2bb4d0e645e431adb01e55bee1aa2a7f77be8e0c912cffd6",
+      "verified_lossless": true
+    },
+    {
+      "path": "outputs/benchmarks/P-03/runs/20261023_122345_scaling_probe_isaaclab_cylinder_env_n0064_r00/scene.usda",
+      "bytes": 1262452740,
+      "sha256": "27e1107b379be8bd51f473bf27618095b566c22ea7b7be86cca3ca0deba010e1",
+      "archive": "outputs/benchmarks/P-03/runs/20261023_122345_scaling_probe_isaaclab_cylinder_env_n0064_r00/scene.usda.gz",
+      "archive_bytes": 221942870,
+      "archive_sha256": "72bc751504c211b83da411764c9b7bc8ca266ae087e008704d9aafacf66549fa",
+      "verified_lossless": true
+    }
+  ]
+}

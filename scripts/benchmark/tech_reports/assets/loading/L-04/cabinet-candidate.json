@@ -1,0 +1,15 @@
+{
+  "status": "candidate-not-benchmarked",
+  "repo_id": "ForgeCAD/simready-assets",
+  "repo_type": "dataset",
+  "revision": "0573053fa2c9174ca2a4678a462ec4dfd3035d59",
+  "allow_patterns": [
+    "kitchen_base_cabinet/*"
+  ],
+  "entrypoint": "kitchen_base_cabinet/simready_usd/kitchen_base_cabinet.usda",
+  "approximate_download_bytes": 17663584,
+  "license_declared_in_packaging": "CC-BY-4.0",
+  "publisher": "ForgeCAD",
+  "discovery": "NVIDIA SimReady Central",
+  "next_step": "Verify revision bytes and license; check both platforms at N=1 and N=4; freeze workstation layout before timing. Do not reuse old SlidingBoxDrawer placement without recalibration."
+}

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "common_view_embodichain_dexuni_freefall_dt005_N1",
+    "platform": "embodichain",
+    "solver": "DexUni",
+    "case": "freefall"
+  },
+  {
+    "id": "common_view_embodichain_dexuni_pendulum_dt005_N1",
+    "platform": "embodichain",
+    "solver": "DexUni",
+    "case": "pendulum"
+  },
+  {
+    "id": "common_view_isaaclab_pgs_freefall_dt005_N1",
+    "platform": "isaaclab",
+    "solver": "PGS",
+    "case": "freefall"
+  },
+  {
+    "id": "common_view_isaaclab_pgs_pendulum_dt005_N1",
+    "platform": "isaaclab",
+    "solver": "PGS",
+    "case": "pendulum"
+  },
+  {
+    "id": "common_view_isaaclab_tgs_freefall_dt005_N1",
+    "platform": "isaaclab",
+    "solver": "TGS",
+    "case": "freefall"
+  },
+  {
+    "id": "common_view_isaaclab_tgs_pendulum_dt005_N1",
+    "platform": "isaaclab",
+    "solver": "TGS",
+    "case": "pendulum"
+  }
+]

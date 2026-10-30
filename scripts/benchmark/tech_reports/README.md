@@ -1,15 +1,18 @@
 # EmbodiChain technical report benchmarks
 
-This directory groups technical-report assets, comparison experiment scaffolds,
+This directory groups technical-report assets, comparison experiments,
 and shared execution/reporting designs. For existing runnable benchmarks and
 CLI usage, start with the [benchmark guide](../README.md).
 
 ## Technical report comparison layout
 
 The L/R/P/G/D families follow
-[issue #679](https://github.com/DexForce/EmbodiChain/issues/679). This change
-creates their directory scaffold and ownership notes. The common framework,
-new experiments, and cross-platform adapters are not implemented yet.
+[issue #679](https://github.com/DexForce/EmbodiChain/issues/679). The common framework remains a design. This draft additionally imports the
+existing L-02/L-03/L-04 and P-01/P-02/P-03 experiment sources, offline analysis,
+HTML builder and planned-experiment specifications. See the
+[current report snapshot](reporting/releases/simulation-report-2026-10-28/README.md)
+for completion states, evidence locations, unresolved issues and validation.
+Report data/media upload is deferred; no dataset revision is claimed.
 
 ```text
 scripts/benchmark/tech_reports/
@@ -59,9 +62,9 @@ and explicit comparison conditions.
 
 The planned [core](core/README.md) owns shared run/measurement contracts; the
 planned [reporting](reporting/README.md) owns simulator-free result rebuilding.
-Start with the R-04 and G-03 end-to-end slices. Other experiment folders are
-reserved for incremental implementation. Empty directories are tracked with
-`.gitkeep`; they contain no runnable placeholder scripts or invented results.
+The shared-framework plan prioritizes R-04 and G-03. The imported local report
+suite retains its own L/P experiment IDs and current completion states. Remaining
+empty directories use `.gitkeep`; no measurements are invented for pending items.
 
 Existing `../motion_generation/`, `../atomic_action/`, `../rl/`,
 `../task_program/`, [offscreen rendering](../rendering/README.md), and other
