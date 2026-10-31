@@ -148,6 +148,8 @@ def _limits(state: Snapshot) -> go.Figure:
 
 def sample_index(row: dict, physical_time: float) -> int:
     """Hold the latest native sample, without interpolating a new trajectory."""
+    if row["length"] and physical_time >= row["duration"]:
+        return row["length"] - 1
     return int(
         np.clip(
             np.searchsorted(row["dt"].cumsum(), physical_time, side="right") - 1,
@@ -599,7 +601,7 @@ def serve(
                     active_id, active_action = job[:2]
                     future = executor.submit(worker, job)
                     busy = True
-            buttons.disabled = mode.value == "retime"
+            buttons.visible = mode.value != "retime"
             detached.disabled = mode.value == "retime"
             check.disabled = busy or current is None or current.gradient is None
             export.disabled = busy or current is None
@@ -626,17 +628,29 @@ def serve(
                         and current.after["duration"]
                         < 0.95 * current.before["duration"]
                     )
+                    initial, _ = robot.initial("detour")
+                    row = robot.row(
+                        initial, robot.velocity * 0.25, robot.acceleration * 0.5
+                    )
+                    assert sample_index(row, row["duration"]) == row["length"] - 1
                     request("continue", 100)
                     smoke_phase = 1
                 elif smoke_phase == 2 and current.cfg.detach_duration:
                     assert current.gradient is None and current.iteration == 0
                     np.testing.assert_array_equal(current.initial, current.current)
+                    mode.value = "retime"
+                    smoke_phase = 3
+                elif smoke_phase == 3 and current.cfg.mode == "retime":
+                    assert not buttons.visible
+                    np.testing.assert_array_equal(current.current, current.initial)
+                    mode.value = "optimize"
                     case.value = "stationary"
                     detached.value = False
-                    smoke_phase = 3
+                    smoke_phase = 4
                 elif (
-                    smoke_phase == 3
+                    smoke_phase == 4
                     and current.cfg.case == "stationary"
+                    and current.cfg.mode == "optimize"
                     and not current.cfg.detach_duration
                 ):
                     assert (

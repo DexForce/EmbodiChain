@@ -77,7 +77,8 @@ def retime_joint_paths(
             scalar, ``(J,)`` magnitudes, or signed ``(J, 2)`` bounds containing
             zero. One set is shared by the batch; no robot caps are implicit.
         path_lengths: Integer valid input prefix lengths ``(B,)``, in ``[2,N]``.
-            Padding is ignored; explicit repeated points in the prefix remain.
+            Padding is ignored. Existing point filtering applies inside the
+            prefix; an explicit repeated final node retains its final-knot geometry.
         sample_count: Output quantity for moving successful rows. Defaults to
             ``N`` when neither sampling argument is supplied.
         sample_dt: Positive upper bound on time spacing in seconds. Samples
