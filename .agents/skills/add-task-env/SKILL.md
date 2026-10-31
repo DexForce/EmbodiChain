@@ -135,9 +135,9 @@ route requires import-owned behavior or registration:
 - simulator RL registration, even when managers/config own its behavior; or
 - a lightweight learning environment.
 
-A supported configuration-defined Task Program is the exception: it normally
-omits the task module and dynamically registers the common `EmbodiedEnv` while
-loading its runnable deployment.
+Supported configuration-defined deployments omit the task module: Task Programs
+register the common `EmbodiedEnv`; manipulation RL configs with `rl_task` register
+`ConfiguredRLEnv`. The RL route below owns the condition and registration contract.
 
 Keep `@register_env` or `@register_learning_env` in the task-named module. Task
 discovery recursively imports these modules, so category `__init__.py` files do

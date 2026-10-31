@@ -36,6 +36,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
+from embodichain.lab.gym.envs.objectives.conditions import evaluate_near_target
 from embodichain.lab.gym.envs.settling import (
     DynamicSettleMonitor,
     DynamicSettleMonitorCfg,
@@ -467,10 +468,14 @@ class SimulationSegmentPolicyPort:
             raise ValueError(
                 "Validator target batch must be unbatched or match simulator rows."
             )
-        error = torch.linalg.vector_norm(current_position - target_position, dim=1)
-        accepted = torch.isfinite(error) & (
-            error <= float(validator.cfg.position_tolerance)
+        measured = evaluate_near_target(
+            current_position,
+            target_position,
+            float(validator.cfg.position_tolerance),
+            inclusive=True,
         )
+        error = measured.metrics["distance"]
+        accepted = measured.satisfied
         self._validator_results[id(validator)] = {
             "kind": validator.cfg.kind,
             "object_id": entity_id,

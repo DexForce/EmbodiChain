@@ -23,6 +23,7 @@ Lightweight RL environments have a separate owner in
 | Optional measured physical objectives | `embodichain/lab/gym/envs/objectives/`; Gym owns observation/reset hooks independently of expert acceptance |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
 | Demo segment execution / outcomes | `embodichain/lab/gym/envs/demo.py` |
+| Configuration-owned RL host and outcomes | `embodichain/lab/gym/envs/configured_rl_env.py`, `managers/outcome_manager.py` |
 | Configured Task Program registration | `embodichain/lab/gym/envs/task_program/registration.py` |
 | Timing instrumentation | `embodichain/lab/gym/utils/profiler.py` |
 

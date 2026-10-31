@@ -4149,9 +4149,9 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "config_to_cfg",
-          "start_line": 489,
-          "end_line": 489,
-          "excerpt": "    env_cfg = EmbodiedEnvCfg()"
+          "start_line": 556,
+          "end_line": 556,
+          "excerpt": "        env_cfg = EmbodiedEnvCfg()"
         },
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",

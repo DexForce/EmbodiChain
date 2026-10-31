@@ -14,7 +14,7 @@ manager resolves every ``func`` reference, validates argument signatures against
 groups functors by mode. The config attribute name becomes the functor's unique
 identifier within its manager.
 
-The five manager types are :class:`ObservationManager` (``compute(obs)``),
+The standard manager types are :class:`ObservationManager` (``compute(obs)``),
 :class:`RewardManager` (``compute(obs, action, info)``),
 :class:`EventManager` (``apply(mode, env_ids)``, the home of all randomization
 functors), :class:`ActionManager` (``process_action(action)`` then
@@ -32,6 +32,9 @@ functors), :class:`ActionManager` (``process_action(action)`` then
    .. autosummary::
 
       FunctorCfg
+      ConditionCfg
+      RLTaskCfg
+      OutcomeManager
       SceneEntityCfg
       EventCfg
       ObservationCfg
@@ -309,3 +312,17 @@ Randomization
 
     .. automodule:: embodichain.lab.gym.envs.managers.randomization.geometry
          :members:
+
+Configured RL conditions
+------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers
+
+.. autoclass:: ConditionCfg
+    :members:
+
+.. autoclass:: RLTaskCfg
+    :members:
+
+.. autoclass:: OutcomeManager
+    :members:

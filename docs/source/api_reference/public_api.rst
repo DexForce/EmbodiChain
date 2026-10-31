@@ -786,6 +786,9 @@ per environment. Stable region occupancy does not establish gripper detachment.
 
 .. autosummary::
 
+   ConditionResult
+   evaluate_near_target
+   evaluate_below_height
    GoalRegionCfg
    OrderedPlacementObjectiveCfg
    MeasuredRigidObjectState
@@ -2852,3 +2855,123 @@ Asset generalization contracts
    :maxdepth: 2
 
    asset_generalization
+
+
+embodichain.lab.gym.envs.configured_rl_env
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.configured_rl_env
+
+Configuration-defined manipulation tasks share one simulator host. Outcome queries are cached; final acceptance rejects failure and time limits before recording.
+
+.. autosummary::
+
+   ConfiguredRLEnv
+   ConfiguredRLEnvCfg
+
+.. autoclass:: ConfiguredRLEnv
+   :members:
+
+.. autoclass:: ConfiguredRLEnvCfg
+   :members: rl_task
+   :no-autosummary:
+
+
+embodichain.lab.gym.envs.managers.cfg
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.cfg
+
+Manager configuration binds named functors and explicit scene entities. RL condition groups aggregate success with conjunction, failure and truncation with disjunction.
+
+.. autosummary::
+
+   FunctorCfg
+   ConditionCfg
+   RLTaskCfg
+   EventCfg
+   ObservationCfg
+   SceneEntityCfg
+   RewardCfg
+   ActionTermCfg
+   DatasetFunctorCfg
+
+.. autoclass:: FunctorCfg
+   :members:
+
+.. autoclass:: ConditionCfg
+   :members:
+
+.. autoclass:: RLTaskCfg
+   :members:
+
+.. autoclass:: EventCfg
+   :members:
+
+.. autoclass:: ObservationCfg
+   :members:
+
+.. autoclass:: SceneEntityCfg
+   :members:
+
+.. autoclass:: RewardCfg
+   :members:
+
+.. autoclass:: ActionTermCfg
+   :members:
+
+.. autoclass:: DatasetFunctorCfg
+   :members:
+
+
+embodichain.lab.gym.envs.managers.conditions
+--------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.conditions
+
+Measured manipulation conditions read live bound objects and reset-owned virtual targets. Missing target contexts fail explicitly.
+
+.. autosummary::
+
+   object_near_target
+   object_below_height
+
+.. autofunction:: object_near_target
+
+.. autofunction:: object_below_height
+
+
+embodichain.lab.gym.envs.managers.outcome_manager
+-------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.outcome_manager
+
+The outcome manager samples once per control transition, resets selected rows and publishes owned snapshots without resampling.
+
+.. autosummary::
+
+   OutcomeManager
+
+.. autoclass:: OutcomeManager
+   :members:
+
+
+embodichain.lab.gym.envs.objectives.conditions
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.objectives.conditions
+
+Typed physical predicates provide shared distance and height measurements for RL and Task Program adapters. Invalid evidence never satisfies a condition.
+
+.. autosummary::
+
+   ConditionResult
+   evaluate_near_target
+   evaluate_below_height
+
+.. autoclass:: ConditionResult
+   :members:
+
+.. autofunction:: evaluate_near_target
+
+.. autofunction:: evaluate_below_height

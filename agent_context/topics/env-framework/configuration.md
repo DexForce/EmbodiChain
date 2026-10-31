@@ -186,6 +186,25 @@ allowlisted implementation and decoder entry; never serialize dotted imports
 or arbitrary callables into this config boundary. The official Task Program
 examples use this path and have no task environment subclass.
 
+### Configuration-owned manipulation RL
+
+A runnable deployment with root `rl_task` uses `ConfiguredRLEnv` and needs no
+Python task registration module. `config_to_cfg` decodes `RLTaskCfg`, reuses the
+ordinary manager and physical-component configuration, and registers the common
+host with explicit RL capability. Conditions are grouped as success, failure
+and truncation; their `func`/`params` use the manager registry and entity binding.
+The same deployment cannot select both `rl_task` and `task_program`.
+
+The registration signature preserves manager ordering, measured conditions,
+physical declarations and episode limits while excluding runtime device, batch
+size and seed. Identical loads are idempotent; a conflicting ID fails without
+overriding an existing task. Load the configuration before `gym.make(id)`.
+
+The lifecycle and recorded target restoration are owned by
+[environment execution](execution.md#configured-manipulation-rl-outcomes).
+See the [configuration guide](../../../docs/source/guides/configured_manipulation_rl.md)
+and the PushCube `env.configured_rl.yaml` deployment for authoring examples.
+
 ### Instantiation
 
 ```python
@@ -253,7 +272,9 @@ Use the `/add-task-env` skill. It first selects one of two registration paths:
 1. Import-backed handwritten or RL tasks add a task-named module at
    `extensions/embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`, keep
    `@register_env("<GymId>")` and `__all__` there, and add a runnable config.
-2. Supported configuration-defined Task Programs omit the Python module. They
+2. Supported configuration-defined manipulation RL deployments omit the Python
+   module and declare `rl_task`; see the configuration-owned RL contract above.
+3. Supported configuration-defined Task Programs omit the Python module. They
    add a reusable physical `env.yaml`, one or more runnable
    `task.<embodiment>.yaml` deployments, and
    `task_program/{program,integration}.yaml`; semantic scene bindings are

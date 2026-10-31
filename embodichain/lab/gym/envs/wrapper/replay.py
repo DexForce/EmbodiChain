@@ -83,9 +83,21 @@ class ReplayWrapper(gym.Wrapper):
         self._trajectory = load_trajectory(trajectory)
         meta = self._trajectory["meta"]
         self._controller_spec = None
-        self._objective_replay = (
-            mode == "dynamic" and getattr(env, "physical_objective", None) is not None
+        self._task_outcome_replay = mode == "dynamic" and callable(
+            getattr(env, "restore_task_initial_state", None)
         )
+        self._objective_replay = mode == "dynamic" and (
+            getattr(env, "physical_objective", None) is not None
+            or self._task_outcome_replay
+        )
+        self._task_initial_state = None
+        if self._task_outcome_replay:
+            episodes = meta.get("demo_episodes", [])
+            if len(episodes) != 1 or not episodes[0].get("task_initial_state"):
+                raise ValueError(
+                    "Dynamic task replay requires task_initial_state metadata."
+                )
+            self._task_initial_state = episodes[0]["task_initial_state"]
         if self._objective_replay and env.num_envs != 1:
             raise ValueError("Physical-objective replay requires a single environment.")
         if mode == "dynamic":
@@ -199,10 +211,14 @@ class ReplayWrapper(gym.Wrapper):
         if self._mode == "dynamic":
             self.env.sim.enable_physics(True)
             self.env._replay_no_auto_reset = True
+        if self._task_outcome_replay:
+            self.env.restore_task_initial_state(self._task_initial_state)
         self._replay_steps = torch.zeros(
             self.env.num_envs, dtype=torch.long, device=self.env.device
         )
         obs = self.env.get_obs()
+        if self._task_outcome_replay:
+            info = self.env.get_info()
 
         # If the wrapped environment also records this replay, replace the
         # default-reset pending state with the state restored from the file.

@@ -18,6 +18,7 @@ Scaffold a new functor following EmbodiChain's Functor/FunctorCfg pattern.
 | Functor Type | Config Class | Module File | Manager | Signature |
 |-------------|-------------|-------------|---------|-----------|
 | Observation | `ObservationCfg` (extends `FunctorCfg`) | `managers/observations.py` | `ObservationManager` | `(env, obs, entity_cfg, ...) -> Tensor` |
+| Condition | `ConditionCfg` | `managers/conditions.py` | `OutcomeManager` | `(env, ...) -> ConditionResult` |
 | Reward | `RewardCfg` (extends `FunctorCfg`) | `managers/rewards.py` | `RewardManager` | `(env, obs, action, info, ...) -> Tensor` |
 | Event | `EventCfg` (extends `FunctorCfg`) | `managers/events.py` | `EventManager` | `(env, env_ids, ...) -> None` |
 | Action | `ActionTermCfg` (extends `FunctorCfg`) | `managers/actions.py` | `ActionManager` | Varies |
@@ -115,6 +116,11 @@ Key rules:
 - For observation functors: add `shape` key to `FunctorCfg.extra` dict
 - For randomization functors: second arg is `env_ids: torch.Tensor | list[int]`
 - For reward functors: return shape must be `(num_envs,)`
+- For condition functors: return `ConditionResult` with owned boolean
+  `satisfied`/`valid` vectors and batch-aligned metric tensors on the environment
+  device. Bind entities with `SceneEntityCfg`, keep metric schemas stable, and
+  advance history only during the manager update; `reset(env_ids)` clears only
+  selected rows. Reuse measured predicates from `envs/objectives` when applicable.
 
 ### 4. Update `__all__`
 

@@ -17,10 +17,19 @@ Do not use a simulator Gym config for APG. Differentiable algorithms require a
 
 ## Simulator Gym RL
 
-Use the normal task-first simulator layout and a flat task module that owns
-`@register_env`. The subclass may stay thin when manager configuration owns
-all task behavior, but the unique simulator task ID still needs import-time
-registration.
+Use the normal task-first simulator layout. A manipulation deployment with a
+root `rl_task` mapping dynamically registers `ConfiguredRLEnv` and needs no task
+Python module. Reuse existing action/observation/reward/event managers; declare
+measured success, failure and optional truncation condition functors. The ID
+must be free or match an identical configuration-owned declaration.
+
+Virtual target poses are reset-owned and recorded for single-environment dynamic
+replay. Keep `rl_task` and `task_program` in separate deployments. See the owning
+[configuration contract](../../../../agent_context/topics/env-framework/configuration.md#configuration-owned-manipulation-rl)
+and [user guide](../../../../docs/source/guides/configured_manipulation_rl.md).
+
+For tasks requiring custom environment behavior, keep a flat task module with
+import-owned `@register_env` registration instead.
 
 Register a Python-owned simulator task with explicit RL capability:
 

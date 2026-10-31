@@ -10,6 +10,7 @@
 | Reward manager + built-in functors | `managers/reward_manager.py`, `managers/rewards.py` |
 | Event manager + built-in functors | `managers/event_manager.py`, `managers/events.py` |
 | Action manager + built-in terms | `managers/action_manager.py`, `managers/actions.py` |
+| RL outcome manager + condition functors | `managers/outcome_manager.py`, `managers/conditions.py` |
 | Dataset manager + built-in recorders | `managers/dataset_manager.py`, `managers/datasets.py`, `managers/async_datasets.py` |
 | Randomization functors (event sub-type) | `managers/randomization/` (spatial, visual, physics, geometry) |
 
@@ -35,6 +36,7 @@ At init, the manager resolves every `FunctorCfg.func` (string → callable or cl
 | `RewardManager` | `RewardCfg` | `add`, `replace` | `compute(obs, action, info) → (reward, info_dict)` |
 | `EventManager` | `EventCfg` | `startup`, `reset`, `interval`, user-defined | `apply(mode, env_ids)` |
 | `ActionManager` | `ActionTermCfg` | Ordered flat slices | `process_action(action)`, then `apply_action()` |
+| `OutcomeManager` | `ConditionCfg` in `RLTaskCfg` | success/failure/truncation groups | `update()` then cached snapshots |
 | `DatasetManager` | `DatasetFunctorCfg` | `save` | `apply(mode, env_ids)` |
 
 ---
@@ -98,6 +100,12 @@ application, physics, event `interval`, observation, and reward in that order.
 `ControllerAction` bypasses the manager and uses the direct controller boundary;
 the full loop and reset ordering are owned by
 [environment execution](../env-framework/execution.md).
+
+Condition functors receive `env, **params` and return a `ConditionResult` from
+`envs/objectives`. Stateful conditions use `Functor.reset(env_ids)` like other
+manager terms. Metrics retain their schema; snapshots do not invoke functors.
+The host's termination and replay rules belong to
+[configured RL execution](../env-framework/execution.md#configured-manipulation-rl-outcomes).
 
 `DatasetManager.apply("save", env_ids)` runs from episode initialization/reset,
 not as a `step(obs, action, done, info)` method. Recorder queues, explicit commit

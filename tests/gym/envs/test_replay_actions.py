@@ -349,3 +349,62 @@ def test_policy_recording_preserves_raw_delta_before_controller_transform():
     torch.testing.assert_close(
         env._traj_buffer["actions"][0, 0], torch.tensor([11.0, 12.0])
     )
+
+
+class _TaskReplayEnv(_ReplayEnv):
+    """Replay protocol with a virtual target independent of physical state."""
+
+    def __init__(self, num_envs=1):
+        super().__init__(num_envs)
+        self.goal_pose = torch.zeros(num_envs, 3)
+        self.sim = SimpleNamespace(enable_physics=lambda value: None)
+        self.restored = False
+
+    def reset(self, *, seed=None, options=None):
+        self.goal_pose.fill_(99)
+        return {}, {}
+
+    def restore_task_initial_state(self, state):
+        self.goal_pose.copy_(torch.tensor(state["targets"]["goal_pose"]))
+        self.restored = True
+
+    def get_obs(self):
+        return {"goal": self.goal_pose.clone()}
+
+    def get_info(self):
+        return {"restored": self.restored}
+
+
+def test_dynamic_replay_restores_virtual_goal_before_first_observation(monkeypatch):
+    monkeypatch.setattr(
+        "embodichain.lab.gym.envs.wrapper.replay.restore_trajectory_state",
+        lambda *args: None,
+    )
+    trajectory = _trajectory(kind="raw_policy")
+    trajectory["meta"]["demo_episodes"] = [
+        {
+            "task_initial_state": {
+                "schema_version": 1,
+                "targets": {"goal_pose": [[1.0, 2.0, 3.0]]},
+            }
+        }
+    ]
+    env = _TaskReplayEnv()
+    replay = ReplayWrapper(env, trajectory)
+    obs, info = replay.reset()
+    torch.testing.assert_close(obs["goal"], torch.tensor([[1.0, 2.0, 3.0]]))
+    assert info["restored"] is True
+    with pytest.raises(ValueError, match="reset_ids"):
+        replay.reset(options={"reset_ids": [0]})
+
+
+def test_dynamic_task_replay_requires_recorded_context():
+    with pytest.raises(ValueError, match="task_initial_state"):
+        ReplayWrapper(_TaskReplayEnv(), _trajectory(kind="raw_policy"))
+
+
+def test_kinematic_task_replay_does_not_claim_measured_goal_acceptance():
+    replay = ReplayWrapper(
+        _TaskReplayEnv(), _trajectory(kind="raw_policy"), mode="kinematic"
+    )
+    assert replay._task_outcome_replay is False

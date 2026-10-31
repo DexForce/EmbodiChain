@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from .cfg import (
     FunctorCfg,
+    ConditionCfg,
+    RLTaskCfg,
     SceneEntityCfg,
     EventCfg,
     ObservationCfg,
@@ -31,6 +33,7 @@ from .cfg import (
     DatasetFunctorCfg,
 )
 from .manager_base import Functor, ManagerBase
+from .outcome_manager import OutcomeManager
 from .event_manager import EventManager
 from .observation_manager import ObservationManager
 from .reward_manager import RewardManager
@@ -43,6 +46,9 @@ from .async_datasets import AsyncLeRobotRecorder
 
 __all__ = [
     "FunctorCfg",
+    "ConditionCfg",
+    "RLTaskCfg",
+    "OutcomeManager",
     "SceneEntityCfg",
     "EventCfg",
     "ObservationCfg",

@@ -50,7 +50,7 @@ topics:
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
     task_instruction, resolve_demo_instruction,
-    show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标]
+    show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, ConfiguredRLEnv, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
   - embodichain/cli/main.py
@@ -61,6 +61,8 @@ topics:
   - embodichain/cli/_example_runner.py
   - examples/README.md
   - embodichain/lab/gym/envs/objectives/
+  - embodichain/lab/gym/envs/configured_rl_env.py
+  - embodichain/lab/gym/utils/_configured_rl.py
   - embodichain/lab/scripts/evaluate_task_objective.py
   - embodichain/lab/scripts/run_task.py
   - embodichain/lab/gym/utils/gym_utils.py
@@ -86,7 +88,7 @@ topics:
       manager, dataset manager, 管理器]
   keywords: [FunctorCfg, ObservationCfg, RewardCfg, ActionTermCfg, ObservationManager, RewardManager,
     EventManager, ActionManager, ActionDescriptor, ActionTermDescriptor, ParallelGripperAction,
-    DatasetManager, SceneEntityCfg]
+    DatasetManager, SceneEntityCfg, OutcomeManager, ConditionResult]
   paths: [topics/manager-functor/manager-functor.md]
   source_of_truth:
   - embodichain/lab/gym/envs/managers/action_manager.py

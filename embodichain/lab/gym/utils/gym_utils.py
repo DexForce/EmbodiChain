@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 # Default manager modules for config parsing
 DEFAULT_MANAGER_MODULES = [
     "embodichain.lab.gym.envs.managers.actions",
+    "embodichain.lab.gym.envs.managers.conditions",
     "embodichain.lab.gym.envs.managers.datasets",
     "embodichain.lab.gym.envs.managers.async_datasets",
     "embodichain.lab.gym.envs.managers.randomization",
@@ -545,7 +546,14 @@ def config_to_cfg(
 
         pass
 
-    env_cfg = EmbodiedEnvCfg()
+    if "rl_task" in config:
+        if "task_program" in config or task_program_path_override is not None:
+            raise ValueError("rl_task and task_program cannot share one deployment.")
+        from embodichain.lab.gym.envs.configured_rl_env import ConfiguredRLEnvCfg
+
+        env_cfg = ConfiguredRLEnvCfg()
+    else:
+        env_cfg = EmbodiedEnvCfg()
 
     removed_task_program_fields = sorted(
         field
@@ -1038,6 +1046,30 @@ def config_to_cfg(
                 contract=term_contract,
             )
             setattr(env_cfg.actions, term_name, action_term)
+
+    if "rl_task" in config:
+        from embodichain.lab.gym.utils._configured_rl import (
+            _decode_rl_task,
+            _register_configured_rl,
+        )
+
+        env_cfg.rl_task = _decode_rl_task(config["rl_task"], manager_modules)
+        target_keys = {
+            cfg.params["target_pose_key"]
+            for group in ("success", "failure", "truncation")
+            for cfg in getattr(env_cfg.rl_task, group).values()
+            if "target_pose_key" in cfg.params
+        }
+        for event in config["env"].get("events", {}).values():
+            if (
+                event.get("params", {}).get("store_key", "target_pose") in target_keys
+                and event.get("func") == "randomize_target_pose"
+                and event.get("mode") != "reset"
+            ):
+                raise ValueError(
+                    "Configured RL virtual targets must be sampled in reset mode."
+                )
+        _register_configured_rl(config, env_cfg.max_episode_steps)
 
     if configured_task_program_integration is not None:
         from embodichain.lab.gym.envs.task_program.registration import (
