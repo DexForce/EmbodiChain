@@ -520,6 +520,12 @@ def serve(
         check.disabled = state.gradient is None
         if disconnected:
             derivative.content = "`duration.requires_grad = False` · no autograd update. This is not a claim that the mathematical derivative is zero."
+        elif state.cfg.mode == "retime":
+            derivative.content = (
+                "Forward timing only · no autograd objective in this mode."
+            )
+        else:
+            derivative.content = "Derivative not checked for the displayed path. Compare autograd with centered finite differences."
         maximum = max(t0 or 0.0, t1 or 0.0)
         clock.max = maximum if maximum > 0 else 1.0
         clock.disabled = maximum == 0
