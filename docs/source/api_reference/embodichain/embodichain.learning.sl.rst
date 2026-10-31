@@ -1,10 +1,13 @@
-Supervised learning (SL)
-========================
+Supervised learning
+===================
 
 The SL layer composes objective-owned losses with a common optimizer update and
 offline run lifecycle. Batches retain their tensor-tree structure and causal
 masks; source adapters, objectives and downstream execution define their semantics.
 Importing this package does not initialize simulation or reinforcement learning.
+
+Start with the :doc:`Supervised Learning overview </overview/learning/supervised_learning>`
+for the component data flow, a first training recipe and source-selection guidance.
 
 Single-node launch
 ------------------
