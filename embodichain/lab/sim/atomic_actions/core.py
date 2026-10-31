@@ -23,6 +23,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import cached_property
+import math
 from typing import Any, ClassVar, Generic, TYPE_CHECKING
 
 import torch
@@ -70,6 +71,8 @@ if TYPE_CHECKING:
 
     from .runtime import ActionPlanningServices
     from .state import PlanningContext
+    from .nominal import NominalMotionSource
+    from .nominal import InstantiatedSkillMotion
 
 
 def resolve_runtime_device(device: torch.device | str) -> torch.device:
@@ -398,6 +401,8 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         self,
         request: ResolvedActionRequest[GoalT, OptionsT],
         context: PlanningContext,
+        *,
+        nominal_source: NominalMotionSource | None = None,
     ) -> ActionPlan:
         """Bind the current collision scene and invoke the skill planner.
 
@@ -410,13 +415,248 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         """
         self.require_goal(request)
         prepared = self._prepare_request(request, context)
-        plan = self._plan(prepared, context)
+        plan = (
+            self._plan(prepared, context)
+            if nominal_source is None
+            else self._plan_from_nominal(prepared, context, nominal_source)
+        )
         if not isinstance(plan, ActionPlan):
             raise TypeError("AtomicAction._plan() must return an ActionPlan.")
         return replace(
             plan,
             commands=self._authorize_command_targets(prepared, plan.commands),
         )
+
+    def _plan_from_nominal(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        nominal_source: NominalMotionSource,
+    ) -> ActionPlan:
+        """Reject external motion unless the concrete skill opts in."""
+        raise ValueError(
+            f"Skill {self.skill_id!r} does not support external nominal motion."
+        )
+
+    def _validate_nominal_motion(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        source: NominalMotionSource,
+        *,
+        segments: tuple[str, ...],
+    ) -> InstantiatedSkillMotion:
+        """Validate a single-slot external reference before skill assembly."""
+        from .nominal import InstantiatedSkillMotion
+
+        if context.batch_size != 1:
+            raise ValueError("external nominal motion currently requires B=1")
+        if (
+            request.recovery_policy.max_replans
+            or request.recovery_policy.max_action_retries
+        ):
+            raise ValueError(
+                "external nominal motion requires zero replans and action retries"
+            )
+        source_generator = getattr(source, "motion_generator", None)
+        if (
+            source_generator is not None
+            and source_generator is not self.motion_generator
+        ):
+            raise ValueError(
+                "external source must use the engine-owned motion generator"
+            )
+        motion = source.instantiate(request, context)
+        if not isinstance(motion, InstantiatedSkillMotion):
+            raise TypeError("nominal source must return a InstantiatedSkillMotion")
+        timed = motion.trajectory
+        if tuple(motion.segment_lengths) != segments:
+            raise ValueError(f"external motion requires ordered segments {segments}")
+        if tuple(self.robot.joint_names) != motion.joint_names:
+            raise ValueError("external motion joint layout does not match the robot")
+        if (
+            timed.batch_size != 1
+            or timed.robot_dof != context.robot.robot_dof
+            or not torch.equal(timed.env_ids, context.env_ids)
+        ):
+            raise ValueError(
+                "external motion must match the active environment and robot"
+            )
+        if not torch.allclose(
+            motion.initial_qpos, context.robot.qpos, atol=1e-4, rtol=0
+        ):
+            raise ValueError(
+                "external motion start does not match the observed robot state"
+            )
+        hand = request.binding.endpoint("primary", "grasp").require_target(
+            JointPositionTarget
+        )
+        arm = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        hand_ids = set(hand.joint_ids)
+        owned = hand_ids | set(arm.joint_ids)
+        mimic_ids = tuple(getattr(self.robot, "mimic_ids", ()))
+        if mimic_ids:
+            parents = tuple(self.robot.mimic_parents)
+            multipliers = tuple(self.robot.mimic_multipliers)
+            offsets = tuple(self.robot.mimic_offsets)
+            if not (len(mimic_ids) == len(parents) == len(multipliers) == len(offsets)):
+                raise ValueError("robot mimic metadata is inconsistent")
+            pending = list(zip(mimic_ids, parents, multipliers, offsets))
+            while pending:
+                previous = len(pending)
+                for item in tuple(pending):
+                    child, parent, multiplier, offset = item
+                    if parent not in owned:
+                        continue
+                    if (
+                        type(child) is not int
+                        or type(parent) is not int
+                        or not 0 <= child < timed.robot_dof
+                        or not 0 <= parent < timed.robot_dof
+                    ):
+                        raise ValueError("robot mimic metadata indexes invalid joints")
+                    expected = timed.positions[:, :, parent] * multiplier + offset
+                    if not torch.allclose(
+                        timed.positions[:, :, child], expected, atol=1e-5, rtol=0
+                    ):
+                        raise ValueError(
+                            "external motion violates robot mimic constraints"
+                        )
+                    owned.add(child)
+                    pending.remove(item)
+                if len(pending) == previous:
+                    break
+        unowned = [index for index in range(timed.robot_dof) if index not in owned]
+        if unowned and not torch.allclose(
+            timed.positions[:, :, unowned],
+            context.robot.qpos[:, None, unowned].expand(-1, timed.waypoint_count, -1),
+            atol=1e-6,
+            rtol=0,
+        ):
+            raise ValueError("external motion cannot command unowned joints")
+        other_ids = [
+            index
+            for index in range(timed.robot_dof)
+            if index not in hand_ids | set(mimic_ids)
+        ]
+        if not torch.allclose(
+            timed.positions[:, 0, other_ids],
+            context.robot.qpos[:, other_ids],
+            atol=1e-4,
+            rtol=0,
+        ):
+            raise ValueError(
+                "external motion begins with a discontinuous non-gripper target"
+            )
+        if timed.waypoint_count < 2 or not torch.allclose(
+            timed.dt[:, 0], torch.zeros_like(timed.dt[:, 0]), atol=1e-7, rtol=0
+        ):
+            raise ValueError(
+                "external motion requires at least two samples and zero initial dt"
+            )
+        if not torch.allclose(
+            timed.dt[:, 1:],
+            torch.full_like(timed.dt[:, 1:], context.require_control_dt()),
+            atol=1e-6,
+            rtol=0,
+        ):
+            raise ValueError("external motion must use the environment control grid")
+        arm_ids = list(arm.joint_ids)
+        limits = self.robot.get_qpos_limits(name=arm.control_part)
+        speeds = self.robot.get_qvel_limits(name=arm.control_part)
+        if (
+            not isinstance(limits, torch.Tensor)
+            or limits.shape != (1, len(arm_ids), 2)
+            or bool(torch.isnan(limits).any())
+            or not bool((limits[:, :, 0] <= limits[:, :, 1]).all())
+        ):
+            raise ValueError("external motion requires ordered robot joint limits")
+        if (
+            not isinstance(speeds, torch.Tensor)
+            or speeds.shape != (1, len(arm_ids))
+            or bool(torch.isnan(speeds).any())
+            or not bool((speeds > 0).all())
+        ):
+            raise ValueError("external motion requires positive robot speed limits")
+        arm_path = timed.positions[:, :, arm_ids]
+        if bool(
+            (
+                (arm_path < limits[:, None, :, 0] - 1e-5)
+                | (arm_path > limits[:, None, :, 1] + 1e-5)
+            ).any()
+        ):
+            raise ValueError("external motion exceeds robot joint limits")
+        velocity = (arm_path[:, 1:] - arm_path[:, :-1]) / timed.dt[:, 1:, None]
+        if request.motion_policy.velocity_limit is not None:
+            speeds = torch.minimum(
+                speeds, torch.full_like(speeds, request.motion_policy.velocity_limit)
+            )
+        if bool((velocity.abs() > speeds[:, None] + 1e-5).any()):
+            raise ValueError("external motion exceeds robot speed limits")
+        if (
+            request.motion_policy.acceleration_limit is not None
+            and velocity.shape[1] > 1
+        ):
+            acceleration = (velocity[:, 1:] - velocity[:, :-1]) / timed.dt[:, 2:, None]
+            if bool(
+                (
+                    acceleration.abs() > request.motion_policy.acceleration_limit + 1e-5
+                ).any()
+            ):
+                magnitude = acceleration.abs()
+                flat_index = int(magnitude.reshape(-1).argmax())
+                sample_index = flat_index // len(arm_ids) + 2
+                joint_index = arm_ids[flat_index % len(arm_ids)]
+                start = 0
+                phase = "unknown"
+                for phase_name, length in motion.segment_lengths.items():
+                    if start <= sample_index < start + length:
+                        phase = phase_name
+                        break
+                    start += length
+                raise ValueError(
+                    "external motion exceeds the configured acceleration limit: "
+                    f"sample={sample_index}, phase={phase}, joint={self.robot.joint_names[joint_index]}, "
+                    f"acceleration={float(magnitude.reshape(-1)[flat_index]):.6g}, "
+                    f"limit={request.motion_policy.acceleration_limit:.6g}"
+                )
+        return motion
+
+    def _validate_nominal_anchor(
+        self,
+        trajectory: TimedTrajectory,
+        *,
+        index: int,
+        endpoint: JointPositionTarget,
+        target: torch.Tensor,
+    ) -> None:
+        """Verify an external reference against a skill-owned TCP target."""
+        if not 0 <= index < trajectory.waypoint_count:
+            raise ValueError("external motion anchor index is out of range")
+        qpos = trajectory.positions[:, index, list(endpoint.joint_ids)]
+        actual = self.robot.compute_fk(
+            qpos=qpos, name=endpoint.control_part, to_matrix=True
+        )
+        if (
+            not isinstance(actual, torch.Tensor)
+            or actual.shape != target.shape
+            or not bool(torch.isfinite(actual).all())
+        ):
+            raise ValueError("external motion anchor FK is unavailable")
+        position_error = torch.linalg.vector_norm(
+            actual[:, :3, 3] - target[:, :3, 3], dim=-1
+        )
+        relative = actual[:, :3, :3].transpose(-1, -2) @ target[:, :3, :3]
+        cosine = ((relative.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2).clamp(-1, 1)
+        rotation_error = torch.acos(cosine)
+        if bool(((position_error > 0.002) | (rotation_error > math.radians(2))).any()):
+            raise ValueError(
+                "external motion does not reach its required TCP anchor: "
+                f"position_error_m={float(position_error.max()):.6g}, "
+                f"rotation_error_deg={math.degrees(float(rotation_error.max())):.6g}"
+            )
 
     def _prepare_request(
         self,

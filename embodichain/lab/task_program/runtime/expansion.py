@@ -24,11 +24,16 @@ from typing import Protocol, runtime_checkable
 from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AtomicActionEngine,
+    NominalMotionSource,
     PlanTransform,
 )
 from embodichain.lab.task_program.semantics.calls import SemanticCallSpec
 
-__all__ = ["TaskProgramPlanRequest", "TaskProgramPlanTransformFactory"]
+__all__ = [
+    "TaskProgramPlanRequest",
+    "TaskProgramPlanTransformFactory",
+    "TaskProgramNominalSourceFactory",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,3 +80,16 @@ class TaskProgramPlanTransformFactory(Protocol):
         engine: AtomicActionEngine,
     ) -> PlanTransform | None:
         """Return one session-scoped transform or ``None`` for no change."""
+
+
+@runtime_checkable
+class TaskProgramNominalSourceFactory(Protocol):
+    """Select an external motion source for one specific grounded call."""
+
+    def create_nominal_source(
+        self,
+        request: TaskProgramPlanRequest,
+        *,
+        engine: AtomicActionEngine,
+    ) -> NominalMotionSource | None:
+        """Return one call-scoped source or ``None`` for the native route."""

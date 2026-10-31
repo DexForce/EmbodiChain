@@ -2024,3 +2024,143 @@ def test_motion_limits_reach_explicit_blended_planner_options(
     )
     assert TrapezoidalPlanOptions().constraints["velocity"] is None
     assert TrapezoidalPlanOptions().constraints["acceleration"] is None
+
+
+def test_configured_nominal_source_preflights_content_and_revision(tmp_path):
+    import hashlib
+    import numpy as np
+
+    from embodichain.data_pipeline.real2sim import (
+        JointSpec,
+        PhaseAnnotation,
+        Real2SimTrajectory,
+        prepare_prototype,
+    )
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_runtime_services,
+    )
+
+    source = Real2SimTrajectory(
+        source_id="synthetic",
+        source_revision="1",
+        unit_id="pick",
+        skill_id="pick_up",
+        origin="synthetic_reference",
+        joint_names=("arm",),
+        joint_units=("rad",),
+        qpos=np.zeros((6, 1)),
+        timestamps=np.arange(6) * 0.02,
+        time_unit="s",
+        phases=(
+            PhaseAnnotation("approach", 0, 2, "free", "object"),
+            PhaseAnnotation("close", 2, 4, "contact", "object"),
+            PhaseAnnotation("lift", 4, 6, "hold", "gravity"),
+        ),
+        object_pose=np.eye(4),
+    )
+    manifest = prepare_prototype(
+        source,
+        joints=(JointSpec("arm", "revolute"),),
+        control_dt=0.02,
+        directory=tmp_path / "prototype",
+    )
+    declaration = {
+        "call_index": 0,
+        "program_fingerprint": "a" * 64,
+        "provider_id": "real2sim.prototype",
+        "revision": "1",
+        "prototype_manifest": str(manifest),
+        "prototype_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        "object_entity_id": "cube",
+    }
+    services = _decode_runtime_services({"nominal_motion_sources": [declaration]})
+    assert services.nominal_motion_sources[0].call_index == 0
+    refined = _decode_runtime_services(
+        {
+            "nominal_motion_sources": [
+                {
+                    **declaration,
+                    "authority": "eef_pose",
+                    "refinement": {"max_translation_m": 0.015},
+                }
+            ]
+        }
+    )
+    assert refined.nominal_motion_sources[0].refinement.max_translation_m == 0.015
+    with pytest.raises(ValueError, match="eef_pose authority"):
+        _decode_runtime_services(
+            {"nominal_motion_sources": [{**declaration, "refinement": {}}]}
+        )
+    with pytest.raises(ValueError, match="unknown|unexpected|unsupported"):
+        _decode_runtime_services(
+            {
+                "nominal_motion_sources": [
+                    {
+                        **declaration,
+                        "authority": "eef_pose",
+                        "refinement": {"silently_change_time": True},
+                    }
+                ]
+            }
+        )
+    with pytest.raises(ValueError, match="unknown provider or revision"):
+        _decode_runtime_services(
+            {"nominal_motion_sources": [{**declaration, "revision": "2"}]}
+        )
+    with pytest.raises(ValueError, match="changed"):
+        _decode_runtime_services(
+            {"nominal_motion_sources": [{**declaration, "prototype_sha256": "b" * 64}]}
+        )
+
+
+def test_real2sim_collection_profile_rejects_ambiguous_limits_and_recipes(tmp_path):
+    import yaml
+    from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
+        load_real2sim_tabletop_profile,
+    )
+
+    payload = {
+        "kind": "tabletop_box_v1",
+        "scene_revision": "scene-v1",
+        "object_uid": "cube",
+        "target_uid": "platform",
+        "object_entity_id": "cube",
+        "target_entity_id": "platform",
+        "base_link": "base",
+        "finger_links": ["finger"],
+        "finger_joints": ["finger_joint"],
+        "closing_directions": [1],
+        "velocity_limits": [1.0, 2.0],
+        "velocity_limit_origin": "simulated",
+        "acceleration_limits": [1.0, 2.0],
+        "acceleration_limit_origin": "simulated",
+        "layouts": [
+            {"id": "baseline", "object_xyyaw": [0, 0, 0], "target_xyyaw": [0, 0, 0]}
+        ],
+        "recipes": ["nominal", "time_130"],
+    }
+    path = tmp_path / "profile.yaml"
+    path.write_text(yaml.safe_dump(payload))
+    profile = load_real2sim_tabletop_profile(path)
+    assert profile.recipes == ("nominal", "time_130")
+    assert profile.layouts[0]["object_xyyaw"] == (0.0, 0.0, 0.0)
+    assert profile.motion_headroom_fraction is None
+
+    path.write_text(yaml.safe_dump({**payload, "motion_headroom_fraction": 0.95}))
+    assert load_real2sim_tabletop_profile(path).motion_headroom_fraction == 0.95
+    for invalid in (True, 0, 1):
+        path.write_text(
+            yaml.safe_dump({**payload, "motion_headroom_fraction": invalid})
+        )
+        with pytest.raises(ValueError, match="motion_headroom_fraction"):
+            load_real2sim_tabletop_profile(path)
+
+    path.write_text(yaml.safe_dump({**payload, "acceleration_limits": [True, 2.0]}))
+    with pytest.raises(ValueError, match="cannot be booleans"):
+        load_real2sim_tabletop_profile(path)
+    path.write_text(yaml.safe_dump({**payload, "recipes": ["nominal", "nominal"]}))
+    with pytest.raises(ValueError, match="duplicate"):
+        load_real2sim_tabletop_profile(path)
+    path.write_text(yaml.safe_dump({**payload, "unexpected": 1}))
+    with pytest.raises(ValueError, match="unknown Real2Sim profile field"):
+        load_real2sim_tabletop_profile(path)

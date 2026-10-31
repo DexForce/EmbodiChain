@@ -1320,7 +1320,7 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     if getattr(args, "disable_sensor", False):
         merged_config["enable_sensor"] = False
     dataset_dir = getattr(args, "expansion_dataset_dir", None)
-    if dataset_dir is not None:
+    if dataset_dir is not None and getattr(args, "real2sim_profile", None) is None:
         if type(dataset_dir) is not str or not dataset_dir.strip():
             raise ValueError("--dataset-dir must be a nonempty path")
         env_config = merged_config.get("env")

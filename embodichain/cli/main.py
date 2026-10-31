@@ -118,6 +118,11 @@ COMMANDS = (
         help="Validate, split, and recover recorded expert datasets.",
     ),
     Command(
+        name="real2sim",
+        target="embodichain.data_pipeline.real2sim.cli:main",
+        help="Prepare and validate annotated real-to-simulation motion prototypes.",
+    ),
+    Command(
         name="preview_lerobot_data",
         target="embodichain.lab.scripts.preview_lerobot_data:cli",
         help="Print and validate a recorded LeRobot dataset episode.",

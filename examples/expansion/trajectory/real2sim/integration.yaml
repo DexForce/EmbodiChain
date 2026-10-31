@@ -1,0 +1,70 @@
+integration_id: real2sim_synthetic_pick_move_place_v1
+program_id: real2sim_synthetic_pick_move_place
+requires:
+  scene_contract: real2sim_synthetic_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: real2sim_synthetic_scene_v1
+  registry_id: real2sim_synthetic_scene
+  rigid_objects:
+    - entity_id: cube
+      simulation_uid: cube
+      dynamics: dynamic
+      semantic_type: cube
+      affordances:
+        - entity_id: cube_grasp
+          kind: antipodal_grasp
+    - entity_id: platform
+      simulation_uid: platform
+      dynamics: static
+      semantic_type: platform
+      affordances:
+        - kind: support_surface
+          entity_id: platform_top
+          native_name: top
+          object_target_frame: parent
+          # Allow the released cube to fall 22 mm before the verified
+          # release gate permits gripper retraction.
+          object_target_pose: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.067, 0.0, 0.0, 0.0, 1.0]
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    move_held_object:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+    simulation.move_held_object:
+      kind: move_held_object
+    place:
+      kind: place
+      hand_interp_steps: 20
+      release_settle_steps: 60
+      preserve_current_object_orientation: true
+  effect_monitors:
+    pick:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 5
+    place:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 5
+        attached_translation_threshold: 0.01
+        detached_translation_threshold: 0.015
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: move_held_object
+      target_id: above_platform
+      reference_entity_id: platform
+      relative_pose: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.18, 0.0, 0.0, 0.0, 1.0]
+  control_part_evidence:
+    kind: joint_position_constraint
+    control_parts: [eef]
+    open_qpos: [0.0]
+    minimum_displacement: 0.004

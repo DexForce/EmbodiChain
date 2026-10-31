@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -31,6 +31,8 @@ from embodichain.lab.sim.motion.expansion import (
     SourceContext,
     TemplateSourceAdapter,
     TrajectoryExpansionCfg,
+    TrajectoryTemplate,
+    validate_motion_limits,
 )
 from ._expansion_phases import FREE_PHASES
 from .plans import ActionPlan, TimedTrajectory
@@ -54,6 +56,14 @@ class _PlanExpansionSpec:
     requested_index: int
     count: int
     metadata: Mapping[str, object]
+    kinematics_factory: Callable[[TrajectoryTemplate], Callable] | None = None
+    protect_derivative_stencils: bool = False
+    geometry_family_id: str | None = None
+    velocity_limits: torch.Tensor | None = None
+    acceleration_limits: torch.Tensor | None = None
+    label_proposal_ordinal: bool = False
+    max_generation_attempts: int | None = None
+    editable_joint_indices: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -131,7 +141,24 @@ def _expand_plan(
             record["status"] = "planning_failed"
             results.append(_PlanExpansionResult(row, record, ()))
             continue
-        operators = tuple(spec.cfg.augmentation.factors.spatial.method)
+        factors = spec.cfg.augmentation.factors
+        operators = (
+            tuple(factors.spatial.method) if factors.spatial.enabled else ()
+        ) + (("task_space_residual",) if factors.task_space.enabled else ())
+        if not operators and spec.requested_index:
+            raise ValueError(
+                f"variant {record.get('variant_id', record.get('recipe_index', row))} "
+                f"requests trajectory variant {spec.requested_index}, but only 1 survived "
+                f"for {plan.skill_id}"
+            )
+        source_permissions = plan.diagnostics.metadata.get(
+            "prototype_phase_permissions"
+        )
+        if source_permissions is not None and (
+            not isinstance(source_permissions, Mapping)
+            or (source_permissions and set(source_permissions) != names)
+        ):
+            raise ValueError("prototype phase permissions must match the action plan")
         permissions = {
             name: (
                 tuple(
@@ -142,6 +169,10 @@ def _expand_plan(
                         else operators
                     )
                     if operator in operators
+                    and (
+                        source_permissions is None
+                        or operator in source_permissions.get(name, ())
+                    )
                 )
                 if name in default_free
                 and (phase_kinds is None or phase_kinds[name] == "free")
@@ -150,30 +181,79 @@ def _expand_plan(
             for name in names
         }
         kinds = {name: "free" if permissions[name] else "contact" for name in names}
+        selected_joint_ids = (
+            motion_ids
+            if spec.editable_joint_indices is None
+            else spec.editable_joint_indices
+        )
+        if (
+            not selected_joint_ids
+            or len(set(selected_joint_ids)) != len(selected_joint_ids)
+            or set(selected_joint_ids) - set(motion_ids)
+        ):
+            raise ValueError(
+                "editable joint indices must be a nonempty subset of the motion endpoint"
+            )
         adapter = ActionPlanTemplateAdapter(
             joint_names=joint_names,
             phase_permissions=permissions,
             phase_kinds=kinds,
-            controlled_joint_indices=motion_ids,
+            controlled_joint_indices=selected_joint_ids,
         )
         template = adapter.export_template(
             plan, context=spec.source_context, row_index=row
         )
+        if spec.protect_derivative_stencils:
+            phases = tuple(
+                (
+                    replace(
+                        phase,
+                        start_index=phase.start_index + 1,
+                        stop_index=phase.stop_index - 1,
+                    )
+                    if phase.allowed_operators
+                    and phase.stop_index - phase.start_index >= 5
+                    else replace(phase, allowed_operators=())
+                )
+                for phase in template.phases
+            )
+            template = replace(
+                template,
+                phases=phases,
+                allowed_operators=tuple(
+                    dict.fromkeys(
+                        operator
+                        for phase in phases
+                        for operator in phase.allowed_operators
+                    )
+                ),
+            )
         if len(template.dt) < 2:
             record["status"] = "protected"
             results.append(_PlanExpansionResult(row, record, ()))
             continue
         editable = any(phase.allowed_operators for phase in template.phases)
+        if source_permissions is not None and spec.requested_index and not editable:
+            raise ValueError(
+                "prototype does not authorize the requested trajectory expansion"
+            )
         requested = spec.requested_index if editable else 0
         count = spec.count if editable else 1
         cfg = spec.cfg
         if not editable or set(operators) != set(template.allowed_operators):
             payload = cfg.to_dict()
             spatial = payload["augmentation"]["factors"]["spatial"]
-            if not editable:
+            selected_spatial = [
+                operator
+                for operator in template.allowed_operators
+                if operator in factors.spatial.method
+            ]
+            if not editable or not selected_spatial:
                 spatial["enabled"] = False
             else:
-                spatial["method"] = list(template.allowed_operators)
+                spatial["method"] = selected_spatial
+            if "task_space_residual" not in template.allowed_operators:
+                payload["augmentation"]["factors"]["task_space"]["enabled"] = False
             cfg = TrajectoryExpansionCfg.from_mapping(payload)
         row_limits = limits[0 if limits.shape[0] == 1 else row].detach().cpu()
         session = ExpansionSession(cfg)
@@ -187,13 +267,35 @@ def _expand_plan(
             source_context=spec.source_context,
             joint_limits=row_limits,
             backend_id=plan.diagnostics.backend,
+            kinematics=(
+                None
+                if spec.kinematics_factory is None
+                else spec.kinematics_factory(template)
+            ),
+            geometry_family_id=spec.geometry_family_id,
+            velocity_limits=spec.velocity_limits,
+            acceleration_limits=spec.acceleration_limits,
+            label_proposal_ordinal=spec.label_proposal_ordinal,
+            max_generation_attempts=spec.max_generation_attempts,
         )
         items = coordinator.enqueue_source(template, count=count)
+        statistics = coordinator.last_generation_statistics
         if requested >= len(items):
+            baseline = ""
+            if (
+                spec.velocity_limits is not None
+                and spec.acceleration_limits is not None
+            ):
+                check = validate_motion_limits(
+                    template,
+                    velocity_limits=spec.velocity_limits,
+                    acceleration_limits=spec.acceleration_limits,
+                ).checks[0]
+                baseline = f"; nominal_motion_limits={check.status}, ratios={dict(check.metrics)}"
             raise ValueError(
                 f"variant {record.get('variant_id', record.get('recipe_index', row))} "
                 f"requests trajectory variant {requested}, but only {len(items)} survived "
-                f"for {plan.skill_id}"
+                f"for {plan.skill_id}; generation={statistics}{baseline}"
             )
         selected = items[requested]
         if requested:
@@ -210,9 +312,17 @@ def _expand_plan(
                 else []
             ),
             fallback_count=0,
+            generation=statistics,
         )
         results.append(_PlanExpansionResult(row, record, items))
     metadata = dict(plan.diagnostics.metadata)
+    if any(result.metadata.get("trajectory_selected", 0) for result in results):
+        # Source-path evidence does not certify newly perturbed samples.
+        metadata["source_collision_evidence"] = metadata.get(
+            "collision_evidence", "unverified"
+        )
+        metadata["collision_evidence"] = "unverified"
+        metadata["collision_scope"] = "not_checked"
     metadata["expansion"] = {
         "rows": [dict(result.metadata) for result in results if result.items]
     }

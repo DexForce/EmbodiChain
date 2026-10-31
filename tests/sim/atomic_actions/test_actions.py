@@ -1212,6 +1212,682 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
     assert placed_task.get_held_object("arm") is None
 
 
+def test_external_pick_transport_place_assemble_without_native_planning() -> None:
+    from embodichain.lab.sim.atomic_actions import InstantiatedSkillMotion
+    from embodichain.lab.sim.atomic_actions import RecoveryPolicy
+
+    generator = _motion_generator()
+    generator.robot.num_instances = 1
+    get_qpos = generator.robot.get_qpos.side_effect
+    generator.robot.get_qpos.side_effect = lambda name=None: get_qpos(name)[:1]
+    generator.robot.get_qpos_limits.return_value = torch.tensor([-2.0, 2.0]).repeat(
+        1, ARM_DOF, 1
+    )
+    generator.robot.get_qvel_limits.side_effect = None
+    generator.robot.get_qvel_limits.return_value = torch.full((1, ARM_DOF), 10.0)
+    generator.generate = Mock(side_effect=AssertionError("native planner must not run"))
+    qpos = torch.zeros(1, ROBOT_DOF)
+    context = PlanningContext(
+        robot=RobotObservation(timestamp=0.0, qpos=qpos, qvel=torch.zeros_like(qpos)),
+        task=TaskState.empty(batch_size=1, device="cpu"),
+        scene=SceneSnapshot(
+            timestamp=0.0, version=0, entities={"target": EntityState(torch.eye(4))}
+        ),
+        env_ids=torch.tensor([0]),
+        control_dt=CONTROL_DT,
+    )
+
+    class Source:
+        def __init__(
+            self, segments: dict[str, int], hand: list[float], grasp: bool = False
+        ):
+            self.segments = segments
+            self.hand = hand
+            self.grasp = grasp
+
+        def instantiate(self, request, current):
+            positions = torch.zeros(1, len(self.hand), ROBOT_DOF)
+            positions[:, :, ARM_DOF:] = torch.tensor(self.hand)[None, :, None]
+            return InstantiatedSkillMotion(
+                trajectory=TimedTrajectory.from_uniform_step(
+                    positions, env_ids=current.env_ids, step_dt=CONTROL_DT
+                ),
+                success=torch.ones(1, dtype=torch.bool),
+                segment_lengths=self.segments,
+                initial_qpos=current.robot.qpos,
+                source_id="synthetic",
+                source_revision="1",
+                unit_id=request.skill_id,
+                origin="synthetic_reference",
+                grasp_pose=torch.eye(4)[None] if self.grasp else None,
+                joint_names=tuple(generator.robot.joint_names),
+            )
+
+    pick = _bind_action(generator, PickUp())
+    pick_invocation = ActionInvocation(
+        skill_id="pick_up",
+        goal=GraspGoal(
+            semantics=_semantics(entity_id="target"), grasp_xpos=torch.eye(4)
+        ),
+        binding=_binding(pick),
+        skill_options=PickUpOptions(
+            lift_height=0.0
+        ),  # This fixture tests assembly with stationary FK.
+        recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
+    )
+    pick_plan = _ACTION_ENGINES[id(pick)].plan(
+        pick_invocation,
+        context,
+        nominal_source=Source(
+            {"approach": 2, "close": 2, "lift": 2}, [0, 0, 0, 1, 1, 1], True
+        ),
+    )
+    assert pick_plan.plan_success.item()
+    assert not pick_plan.replannable
+    task = pick_plan.expected_effects.apply(context.task, pick_plan.plan_success)
+    held_context = replace(context, task=task)
+
+    move = _bind_action(generator, MoveHeldObject())
+    move_plan = _ACTION_ENGINES[id(move)].plan(
+        replace(
+            _invocation(move, HeldObjectPoseGoal(torch.eye(4))),
+            recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
+        ),
+        held_context,
+        nominal_source=Source({"transport": 4}, [1, 1, 1, 1]),
+    )
+    assert move_plan.plan_success.item()
+    assert not move_plan.replannable
+
+    place = _bind_action(generator, Place())
+    place_plan = _ACTION_ENGINES[id(place)].plan(
+        replace(
+            _invocation(place, PlaceGoal(torch.eye(4))),
+            recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
+        ),
+        held_context,
+        nominal_source=Source(
+            {"approach": 2, "release": 2, "retract": 2}, [1, 1, 1, 0, 0, 0]
+        ),
+    )
+    assert place_plan.plan_success.item()
+    assert (
+        place_plan.expected_effects.apply(
+            task, place_plan.plan_success
+        ).get_held_object("arm")
+        is None
+    )
+    generator.generate.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "endpoint,accepted",
+    [
+        ((0.0, 0.0, 0.2), True),
+        ((0.0, 0.0, 0.0), False),
+        ((0.0, 0.0, 0.1), False),
+        ((0.0, -0.2, 0.0), False),  # Local tool Z is not world-up for this grasp.
+    ],
+)
+def test_external_pick_enforces_requested_world_vertical_lift(
+    endpoint, accepted
+) -> None:
+    from embodichain.lab.sim.atomic_actions import (
+        InstantiatedSkillMotion,
+        RecoveryPolicy,
+    )
+
+    generator = _motion_generator()
+    generator.robot.num_instances = 1
+    get_qpos = generator.robot.get_qpos.side_effect
+    generator.robot.get_qpos.side_effect = lambda name=None: get_qpos(name)[:1]
+    generator.robot.get_qpos_limits.return_value = torch.tensor([-2.0, 2.0]).repeat(
+        1, ARM_DOF, 1
+    )
+    generator.robot.get_qvel_limits.side_effect = None
+    generator.robot.get_qvel_limits.return_value = torch.full((1, ARM_DOF), 100.0)
+    generator.generate = Mock(
+        side_effect=AssertionError("external lift must not use native planning")
+    )
+    grasp = torch.tensor(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+
+    def fk(qpos, **kwargs):
+        pose = grasp[None].repeat(qpos.shape[0], 1, 1)
+        pose[:, :3, 3] = qpos[:, :3]
+        return pose
+
+    generator.robot.compute_fk.side_effect = fk
+    action = _bind_action(generator, PickUp())
+    qpos = torch.zeros(1, ROBOT_DOF)
+    context = PlanningContext(
+        robot=RobotObservation(timestamp=0, qpos=qpos, qvel=qpos.clone()),
+        task=TaskState.empty(batch_size=1, device="cpu"),
+        scene=SceneSnapshot(
+            timestamp=0, version=0, entities={"target": EntityState(torch.eye(4))}
+        ),
+        env_ids=torch.tensor([0]),
+        control_dt=CONTROL_DT,
+    )
+
+    class Source:
+        def instantiate(self, request, current):
+            positions = torch.zeros(1, 6, ROBOT_DOF)
+            positions[0, -1, :3] = torch.tensor(endpoint)
+            positions[:, :, ARM_DOF:] = torch.tensor([0, 0, 0, 1, 1, 1])[None, :, None]
+            return InstantiatedSkillMotion(
+                trajectory=TimedTrajectory.from_uniform_step(
+                    positions, env_ids=current.env_ids, step_dt=CONTROL_DT
+                ),
+                success=torch.tensor([True]),
+                segment_lengths={"approach": 2, "close": 2, "lift": 2},
+                initial_qpos=current.robot.qpos,
+                source_id="lift_fixture",
+                source_revision="1",
+                unit_id="pick",
+                origin="synthetic_reference",
+                grasp_pose=grasp[None],
+                joint_names=tuple(generator.robot.joint_names),
+            )
+
+    invocation = ActionInvocation(
+        skill_id="pick_up",
+        goal=GraspGoal(semantics=_semantics(entity_id="target"), grasp_xpos=grasp),
+        binding=_binding(action),
+        skill_options=PickUpOptions(lift_height=0.2),
+        motion_policy=MotionPolicy(
+            acceleration_limit=1000.0
+        ),  # Six-sample Cartesian gantry fixture.
+        recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
+    )
+    if accepted:
+        plan = _ACTION_ENGINES[id(action)].plan(
+            invocation, context, nominal_source=Source()
+        )
+        assert plan.plan_success.item()
+    else:
+        with pytest.raises(ValueError, match="required TCP anchor"):
+            _ACTION_ENGINES[id(action)].plan(
+                invocation, context, nominal_source=Source()
+            )
+    generator.generate.assert_not_called()
+
+
+@pytest.mark.parametrize("origin", ["sampled", "explicit", "fixed"])
+def test_refined_grasp_calibration_preserves_eef_and_canonical_geometry(origin) -> None:
+    import numpy as np
+    from embodichain.lab.sim.atomic_actions._prototype_refinement import (
+        _pick_refinement_anchor,
+    )
+    from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
+
+    generator = _motion_generator()
+    generator.robot.num_instances = 1
+    generator.robot.compute_ik = Mock(
+        return_value=(torch.ones(1, dtype=torch.bool), torch.zeros(1, ARM_DOF))
+    )
+    action = _bind_action(generator, PickUp())
+    calibration = torch.tensor(
+        [
+            [0.0, -1.0, 0.0, 0.06],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.01],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    vertices = torch.tensor(
+        [[x, y, z] for x in (-0.02, 0.02) for y in (-0.04, 0.04) for z in (-0.01, 0.01)]
+    )
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(
+            mesh_vertices=vertices, mesh_triangles=torch.tensor([[0, 1, 2], [5, 6, 7]])
+        ),
+        geometry={},
+        entity_id="target",
+    )
+
+    class NarrowGripper(_StubGraspPoseGenerator):
+        def __init__(self):
+            ParallelJawGraspPoseGenerator.__init__(
+                self,
+                ParallelJawGripperModelCfg(
+                    model_id="calibrated_fixture", max_opening_width=0.05
+                ),
+            )
+
+    options = PickUpOptions(
+        grasp_frame_to_eef=calibration,
+        fixed_object_to_eef=calibration if origin == "fixed" else None,
+    )
+    invocation = ActionInvocation(
+        skill_id="pick_up",
+        goal=GraspGoal(
+            semantics=semantics,
+            grasp_xpos=calibration if origin == "explicit" else None,
+        ),
+        binding=_binding(action),
+        skill_options=options,
+    )
+    request = _ACTION_ENGINES[id(action)].resolve(invocation)
+    qpos = torch.zeros(1, ROBOT_DOF)
+    context = PlanningContext(
+        robot=RobotObservation(timestamp=0, qpos=qpos, qvel=qpos.clone()),
+        task=TaskState.empty(batch_size=1, device="cpu"),
+        scene=SceneSnapshot(
+            timestamp=0, version=0, entities={"target": EntityState(torch.eye(4))}
+        ),
+        env_ids=torch.tensor([0]),
+        control_dt=CONTROL_DT,
+    )
+    anchor, _, evidence = _pick_refinement_anchor(
+        request,
+        context,
+        np.eye(4),
+        calibration.numpy(),
+        MotionRefinementCfg(max_translation_m=0.001, max_rotation_rad=0.01),
+        {"hand": NarrowGripper()},
+        generator,
+    )
+    np.testing.assert_allclose(anchor, calibration.numpy(), atol=1e-8)
+    torch.testing.assert_close(
+        generator.robot.compute_ik.call_args.args[0], calibration[None]
+    )
+    assert evidence["object_opening_extent_m"] == pytest.approx(0.04)
+    assert evidence["source_grasp_translation_error_m"] < 1e-8
+
+
+def test_pick_uses_normalized_prototype_and_rejects_moved_fixed_scene() -> None:
+    import numpy as np
+    from embodichain.data_pipeline.real2sim import (
+        JointSpec,
+        PhaseAnnotation,
+        Real2SimTrajectory,
+        build_motion_prototype,
+        normalize_trajectory,
+    )
+    from embodichain.lab.sim.atomic_actions import (
+        PrototypeMotionProvider,
+        RecoveryPolicy,
+    )
+
+    generator = _motion_generator()
+    generator.robot.num_instances = 1
+    get_qpos = generator.robot.get_qpos.side_effect
+    generator.robot.get_qpos.side_effect = lambda name=None: get_qpos(name)[:1]
+    generator.robot.get_qpos_limits.return_value = torch.tensor([-2.0, 2.0]).repeat(
+        1, ARM_DOF, 1
+    )
+    generator.robot.get_qvel_limits.side_effect = None
+    generator.robot.get_qvel_limits.return_value = torch.full((1, ARM_DOF), 10.0)
+    generator.generate = Mock(side_effect=AssertionError("native planner must not run"))
+    names = tuple(generator.robot.joint_names)
+    source = Real2SimTrajectory(
+        source_id="synthetic",
+        source_revision="1",
+        unit_id="pick",
+        skill_id="pick_up",
+        origin="synthetic_reference",
+        joint_names=names,
+        joint_units=("rad",) * len(names),
+        qpos=np.zeros((6, len(names))),
+        timestamps=np.arange(6) * CONTROL_DT,
+        time_unit="s",
+        phases=(
+            PhaseAnnotation("approach", 0, 2, "free", "object"),
+            PhaseAnnotation("close", 2, 4, "contact", "object"),
+            PhaseAnnotation("lift", 4, 6, "hold", "gravity"),
+        ),
+        eef_poses=np.tile([0, 0, 0, 0, 0, 0, 1], (6, 1)),
+        world_from_pose_frame=np.eye(4),
+        observed_link_to_tcp=np.eye(4),
+        object_pose=np.eye(4),
+        pose_origin="fk_derived",
+        pose_length_unit="m",
+        quaternion_order="xyzw",
+    )
+    prototype = build_motion_prototype(
+        normalize_trajectory(
+            source,
+            joints=tuple(JointSpec(name, "revolute") for name in names),
+            control_dt=CONTROL_DT,
+        )
+    )
+    with pytest.raises(ValueError, match="collision validation requires"):
+        PrototypeMotionProvider(prototype, object_entity_id="target")
+    provider = PrototypeMotionProvider(
+        prototype,
+        object_entity_id="target",
+        gripper_mode="semantic",
+        require_collision_validation=False,
+    )
+    qpos = torch.zeros(1, ROBOT_DOF)
+    context = PlanningContext(
+        robot=RobotObservation(timestamp=0, qpos=qpos, qvel=torch.zeros_like(qpos)),
+        task=TaskState.empty(batch_size=1, device="cpu"),
+        scene=SceneSnapshot(
+            timestamp=0, version=0, entities={"target": EntityState(torch.eye(4))}
+        ),
+        env_ids=torch.tensor([0]),
+        control_dt=CONTROL_DT,
+    )
+    action = _bind_action(generator, PickUp())
+    invocation = ActionInvocation(
+        skill_id="pick_up",
+        goal=GraspGoal(
+            semantics=_semantics(entity_id="target"), grasp_xpos=torch.eye(4)
+        ),
+        binding=_binding(action),
+        skill_options=PickUpOptions(
+            lift_height=0.0
+        ),  # Fixed-scene/source mapping fixture.
+        recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
+    )
+    plan = _ACTION_ENGINES[id(action)].plan(
+        invocation, context, nominal_source=provider
+    )
+    assert plan.plan_success.item()
+    assert plan.diagnostics.metadata["origin"] == "synthetic_reference"
+    assert plan.diagnostics.metadata["qpos_semantics"] == "design_reference"
+    assert plan.diagnostics.metadata["collision_evidence"] == "unverified"
+    generator.generate.assert_not_called()
+    moved = torch.eye(4)
+    moved[0, 3] = 0.03
+    changed = replace(
+        context,
+        scene=SceneSnapshot(
+            timestamp=0, version=1, entities={"target": EntityState(moved)}
+        ),
+    )
+    with pytest.raises(ValueError, match="Cartesian replanning"):
+        _ACTION_ENGINES[id(action)].plan(invocation, changed, nominal_source=provider)
+
+    def fk(qpos, name=None, to_matrix=True):
+        pose = torch.eye(4).repeat(qpos.shape[0], 1, 1)
+        pose[:, 0, 3] = qpos[:, 0]
+        return pose
+
+    def batch_fk(qpos, name=None, to_matrix=True):
+        pose = torch.eye(4).repeat(qpos.shape[0], qpos.shape[1], 1, 1)
+        pose[:, :, 0, 3] = qpos[:, :, 0]
+        return pose
+
+    def ik(pose, joint_seed, name=None, env_ids=None):
+        result = joint_seed.clone()
+        result[:, 0] = pose[:, 0, 3]
+        return torch.ones(1, dtype=torch.bool), result
+
+    generator.robot.compute_fk.side_effect = fk
+    generator.robot.compute_batch_fk.side_effect = batch_fk
+    generator.robot.compute_ik.side_effect = ik
+
+    def batch_ik(pose, name, joint_seed, **kwargs):
+        del name, kwargs
+        result = joint_seed.clone()
+        result[:, :, 0] = pose[:, :, 0, 3]
+        return torch.ones(result.shape[:2], dtype=torch.bool), result
+
+    generator.robot.compute_batch_ik.side_effect = batch_ik
+    generator.robot.get_qpos_limits.return_value = torch.tensor([-1.0, 1.0]).repeat(
+        1, ARM_DOF, 1
+    )
+    generator.robot.get_qvel_limits.side_effect = None
+    generator.robot.get_qvel_limits.return_value = torch.full((1, ARM_DOF), 10.0)
+    connection = torch.zeros(1, 3, ARM_DOF)
+    connection[0, :, 0] = torch.tensor([0.0, 0.015, 0.03])
+    generator.generate = Mock(
+        return_value=PlanResult(
+            success=torch.ones(1, dtype=torch.bool),
+            positions=connection,
+            dt=torch.tensor([[0, CONTROL_DT, CONTROL_DT]]),
+        )
+    )
+    spatial = PrototypeMotionProvider(
+        prototype,
+        object_entity_id="target",
+        gripper_mode="semantic",
+        authority="eef_pose",
+        motion_generator=generator,
+        require_collision_validation=False,
+    )
+    shifted_invocation = ActionInvocation(
+        skill_id="pick_up",
+        goal=GraspGoal(
+            semantics=_semantics(entity_id="target"),
+            grasp_xpos=SceneEntityPose("target"),
+        ),
+        binding=_binding(action),
+        skill_options=PickUpOptions(lift_height=0.0),
+        motion_policy=MotionPolicy(acceleration_limit=100.0),
+        recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
+    )
+    shifted_plan = _ACTION_ENGINES[id(action)].plan(
+        shifted_invocation, changed, nominal_source=spatial
+    )
+    assert shifted_plan.plan_success.item()
+    assert shifted_plan.segment("approach").waypoint_count == 4
+    assert shifted_plan.diagnostics.metadata["unit_id"] == "pick"
+    assert shifted_plan.diagnostics.metadata["source_sample_offset"] == 2
+    assert shifted_plan.diagnostics.metadata["fk_position_error_m"] == pytest.approx(
+        0.0
+    )
+    generator.robot.compute_batch_fk.side_effect = lambda qpos, **kwargs: torch.full(
+        (qpos.shape[0], qpos.shape[1], 4, 4), torch.nan
+    )
+    with pytest.raises(ValueError, match="FK validation is unavailable"):
+        _ACTION_ENGINES[id(action)].plan(
+            shifted_invocation, changed, nominal_source=spatial
+        )
+    generator.robot.compute_batch_fk.side_effect = batch_fk
+    locked_source = replace(
+        source, phases=(replace(source.phases[0], kind="hold"), *source.phases[1:])
+    )
+    locked_prototype = build_motion_prototype(
+        normalize_trajectory(
+            locked_source,
+            joints=tuple(JointSpec(name, "revolute") for name in names),
+            control_dt=CONTROL_DT,
+        )
+    )
+    locked_provider = replace(spatial, prototype=locked_prototype)
+    with pytest.raises(
+        ValueError, match="connection requires an explicitly free first phase"
+    ):
+        _ACTION_ENGINES[id(action)].plan(
+            shifted_invocation, changed, nominal_source=locked_provider
+        )
+
+    with pytest.raises(ValueError, match="explicit authority"):
+        PrototypeMotionProvider(
+            prototype,
+            object_entity_id="target",
+            authority="hybrid",
+            motion_generator=generator,
+        )
+    hybrid_source = replace(
+        source,
+        phases=tuple(
+            replace(phase, authority="qpos" if phase.name == "approach" else "eef_pose")
+            for phase in source.phases
+        ),
+    )
+    hybrid_prototype = build_motion_prototype(
+        normalize_trajectory(
+            hybrid_source,
+            joints=tuple(JointSpec(name, "revolute") for name in names),
+            control_dt=CONTROL_DT,
+        )
+    )
+    hybrid = PrototypeMotionProvider(
+        hybrid_prototype,
+        object_entity_id="target",
+        gripper_mode="semantic",
+        authority="hybrid",
+        motion_generator=generator,
+        require_collision_validation=False,
+    )
+    with pytest.raises(ValueError, match="does not satisfy the TCP targets"):
+        _ACTION_ENGINES[id(action)].plan(
+            shifted_invocation, changed, nominal_source=hybrid
+        )
+
+    from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
+
+    noisy_poses = np.array(source.eef_poses, copy=True)
+    noisy_poses[:, 0] = 0.008
+    noisy_prototype = build_motion_prototype(
+        normalize_trajectory(
+            replace(source, eef_poses=noisy_poses),
+            joints=tuple(JointSpec(name, "revolute") for name in names),
+            control_dt=CONTROL_DT,
+        )
+    )
+    vertices = torch.tensor(
+        [[x, y, z] for x in (-0.01, 0.01) for y in (-0.01, 0.01) for z in (-0.01, 0.01)]
+    )
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(
+            mesh_vertices=vertices, mesh_triangles=torch.tensor([[0, 1, 2], [5, 6, 7]])
+        ),
+        geometry={},
+        entity_id="target",
+    )
+    refined_invocation = replace(
+        shifted_invocation, goal=replace(shifted_invocation.goal, semantics=semantics)
+    )
+    refined_provider = replace(
+        spatial,
+        prototype=noisy_prototype,
+        refinement=MotionRefinementCfg(smoothing_weight=0),
+        grasp_pose_generators=_ACTION_ENGINES[id(action)].grasp_pose_generators,
+    )
+    repaired = _ACTION_ENGINES[id(action)].plan(
+        refined_invocation, changed, nominal_source=refined_provider
+    )
+    assert repaired.diagnostics.metadata["refinement"][
+        "max_translation_m"
+    ] == pytest.approx(0.008, abs=1e-6)
+    np.testing.assert_allclose(noisy_prototype.unit.world_tcp[:, 0, 3], 0.008)
+    confirmed = repaired.expected_effects.apply(
+        changed.task, repaired.plan_success
+    ).get_held_object("arm")
+    torch.testing.assert_close(
+        confirmed.object_to_eef, torch.eye(4)[None], atol=1e-5, rtol=0
+    )
+    sampled_generator = _StubGraspPoseGenerator()
+
+    def geometry_candidates(*, obj_poses, **kwargs):
+        del kwargs
+        torch.rand(3)  # Legacy candidate generators may consume their torch RNG.
+        invalid = obj_poses.clone()
+        invalid[:, 0, 3] += 0.008
+        return [(torch.cat((invalid, obj_poses)), torch.tensor([float("inf"), 0.0]))]
+
+    sampled_generator.get_valid_grasp_poses = geometry_candidates
+    sampling_provider = replace(
+        refined_provider,
+        grasp_pose_generators={
+            key: sampled_generator for key in refined_provider.grasp_pose_generators
+        },
+    )
+    rng = torch.get_rng_state().clone()
+    sampled = _ACTION_ENGINES[id(action)].plan(
+        replace(
+            refined_invocation, goal=replace(refined_invocation.goal, grasp_xpos=None)
+        ),
+        changed,
+        nominal_source=sampling_provider,
+    )
+    assert (
+        sampled.diagnostics.metadata["refinement"]["anchor_origin"] == "affordance_mesh"
+    )
+    assert sampled.diagnostics.metadata["refinement"][
+        "source_grasp_translation_error_m"
+    ] == pytest.approx(0.008, abs=1e-6)
+    assert torch.equal(torch.get_rng_state(), rng)
+    generator.generate.reset_mock()
+    with pytest.raises(ValueError, match="correction budgets"):
+        _ACTION_ENGINES[id(action)].plan(
+            refined_invocation,
+            changed,
+            nominal_source=replace(
+                refined_provider,
+                refinement=MotionRefinementCfg(max_translation_m=0.001),
+            ),
+        )
+    generator.generate.assert_not_called()
+
+
+def test_place_release_alignment_preserves_world_vertical_motion() -> None:
+    import numpy as np
+    from embodichain.lab.sim.atomic_actions.prototype_source import (
+        _align_release_anchor,
+    )
+
+    poses = np.repeat(np.eye(4)[None], 3, axis=0)
+    poses[:, 2, 3] = [0.1, 0.0, 0.2]
+    angle = np.deg2rad(10.0)
+    goal = np.eye(4)
+    goal[:3, :3] = [
+        [1, 0, 0],
+        [0, np.cos(angle), -np.sin(angle)],
+        [0, np.sin(angle), np.cos(angle)],
+    ]
+    goal[:3, 3] = [0.03, 0.02, 0.07]
+    aligned, position, rotation = _align_release_anchor(poses, 1, goal)
+    np.testing.assert_allclose(aligned[1], goal, atol=1e-12)
+    np.testing.assert_allclose(aligned[2, :3, 3] - aligned[1, :3, 3], [0, 0, 0.2])
+    assert position == pytest.approx(np.linalg.norm(goal[:3, 3]))
+    assert rotation == pytest.approx(angle)
+    goal[0, 0] = -1
+    with pytest.raises(ValueError, match="proper rigid"):
+        _align_release_anchor(poses, 1, goal)
+
+
+def test_ik_smoothing_preserves_contact_and_phase_event_derivatives() -> None:
+    from embodichain.data_pipeline.real2sim import PhaseAnnotation
+    from embodichain.lab.sim.atomic_actions.prototype_source import (
+        _smooth_ik_phase_interiors,
+    )
+
+    phases = (
+        PhaseAnnotation("approach", 0, 12, "free", "object"),
+        PhaseAnnotation("close", 12, 18, "contact", "object"),
+        PhaseAnnotation("lift", 18, 30, "hold", "gravity"),
+    )
+    path = torch.zeros(1, 30, 1)
+    path[0, 5, 0] = 0.001
+    path[0, 23, 0] = 0.001
+    smoothed = _smooth_ik_phase_interiors(path, phases)
+    for phase in phases:
+        assert torch.equal(
+            smoothed[:, phase.start : phase.start + 2],
+            path[:, phase.start : phase.start + 2],
+        )
+        assert torch.equal(
+            smoothed[:, phase.stop - 2 : phase.stop],
+            path[:, phase.stop - 2 : phase.stop],
+        )
+    assert torch.equal(smoothed[:, 12:18], path[:, 12:18])
+    assert torch.equal(smoothed[:, 18:30], path[:, 18:30])
+    assert torch.equal(
+        _smooth_ik_phase_interiors(path, phases, allowed_phases=frozenset()), path
+    )
+    feasible = _smooth_ik_phase_interiors(path, phases, allow_hold_for_feasibility=True)
+    assert not torch.equal(feasible[:, 18:30], path[:, 18:30])
+    assert torch.equal(feasible[:, 12:18], path[:, 12:18])
+    assert torch.equal(feasible[:, 18:20], path[:, 18:20])
+    assert torch.equal(feasible[:, 28:30], path[:, 28:30])
+    before = (path[:, 2:12] - 2 * path[:, 1:11] + path[:, :10]).abs().max()
+    after = (smoothed[:, 2:12] - 2 * smoothed[:, 1:11] + smoothed[:, :10]).abs().max()
+    assert after < before
+
+
 def test_place_holds_fully_open_before_retracting_when_configured() -> None:
     generator = _motion_generator()
     generator.generate = Mock(wraps=generator.generate)

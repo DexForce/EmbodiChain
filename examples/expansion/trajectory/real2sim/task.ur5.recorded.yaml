@@ -1,0 +1,16 @@
+id: Real2SimSyntheticPickMovePlace-v0
+environment:
+  component: ../../asset_generalization/configs/cube_platform_pick_place/env.yaml
+task_program:
+  program: program.yaml
+  integration: integration.recorded.yaml
+  execution_policy: execution_policy.yaml
+embodiment:
+  component: extensions/embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_qpos: [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0]
+headless: true
+renderer: no-render
+enable_sensor: false
+collection:
+  target_episodes: 1

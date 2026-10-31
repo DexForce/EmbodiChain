@@ -51,6 +51,7 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
+from embodichain.lab.sim.atomic_actions.nominal import NominalMotionSource
 from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
     PlannerDiagnostics,
@@ -363,10 +364,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         full[:, back_start:, arm_joint_ids] = back_arm
         full[:, back_start:, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
 
-        coordinated_updates = {
-            key: None for key in state.coordinated_held_objects if task_state_key in key
-        }
-        return self.build_plan(
+        return self._assemble_place_plan(
             request,
             context,
             success=success,
@@ -375,23 +373,143 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
                 env_ids=context.env_ids,
                 step_dt=context.require_control_dt(),
             ),
-            expected_effects=StateDelta(
-                held_object_updates={task_state_key: None},
-                coordinated_held_object_updates=coordinated_updates,
-            ),
-            diagnostics=PlannerDiagnostics(
-                backend=self.planning_services.planner_name,
-                metadata=(
-                    {}
-                    if affordance_sample is None
-                    else {"affordance_sample": {"assembly": affordance_sample.metadata}}
-                ),
-            ),
             segment_lengths={
                 "approach": n_down,
                 "release": n_open + n_settle,
                 "retract": n_back,
             },
+            affordance_sample=affordance_sample,
+            replannable=True,
+            provenance=None,
+        )
+
+    def _plan_from_nominal(
+        self,
+        request: ResolvedActionRequest[PlaceGoal | AssembleGoal, PlaceOptions],
+        context: PlanningContext,
+        nominal_source: NominalMotionSource,
+    ) -> ActionPlan:
+        """Assemble external placement without replanning the source path."""
+        target = self.require_goal(request)
+        if not isinstance(target, PlaceGoal):
+            raise ValueError("external placement currently requires a direct PlaceGoal")
+        motion = self._validate_nominal_motion(
+            request,
+            context,
+            nominal_source,
+            segments=("approach", "release", "retract"),
+        )
+        if not motion.success.any():
+            return self.failed_plan(
+                request, context, message="External Place motion failed."
+            )
+        arm = request.binding.endpoint("primary", "motion")
+        hand = request.binding.endpoint("primary", "grasp")
+        endpoint = arm.require_target(JointPositionTarget)
+        hand_target = hand.require_target(JointPositionTarget)
+        key = require_shared_task_state_key(
+            arm, hand, participant="Place primary participant"
+        )
+        if (
+            context.get_held_object(key) is None
+            or not context.task.exclusive_held_object_mask(key).all()
+        ):
+            raise ValueError("external Place requires an exclusively held object")
+        place_xpos, sample = self._resolve_place_xpos(
+            target, context, key, request=request
+        )
+        if place_xpos.ndim == 4:
+            place_xpos = place_xpos[:, -1]
+        release_index = motion.segment_lengths["approach"]
+        self._validate_nominal_anchor(
+            motion.trajectory, index=release_index, endpoint=endpoint, target=place_xpos
+        )
+        closed = hand.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        opened = hand.joint_positions(
+            OPEN_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        path = motion.trajectory.positions[:, :, list(hand_target.joint_ids)]
+        if not torch.allclose(
+            path[:, :release_index],
+            closed[:, None].expand_as(path[:, :release_index]),
+            atol=1e-5,
+            rtol=0,
+        ) or not torch.allclose(path[:, -1], opened, atol=1e-5, rtol=0):
+            raise ValueError(
+                "external Place must preserve grasp and finish with the open command"
+            )
+        return self._assemble_place_plan(
+            request,
+            context,
+            success=motion.success,
+            trajectory=motion.trajectory,
+            segment_lengths=dict(motion.segment_lengths),
+            affordance_sample=sample,
+            replannable=False,
+            provenance=motion.provenance(),
+        )
+
+    def _assemble_place_plan(
+        self,
+        request: ResolvedActionRequest[PlaceGoal | AssembleGoal, PlaceOptions],
+        context: PlanningContext,
+        *,
+        success: torch.Tensor,
+        trajectory: TimedTrajectory,
+        segment_lengths: dict[str, int],
+        affordance_sample: AffordanceSample | None,
+        replannable: bool,
+        provenance: dict[str, object] | None,
+    ) -> ActionPlan:
+        """Assemble the release semantics shared by both motion sources."""
+        arm = request.binding.endpoint("primary", "motion")
+        hand = request.binding.endpoint("primary", "grasp")
+        task_state_key = require_shared_task_state_key(
+            arm, hand, participant="Place primary participant"
+        )
+        state = context
+        coordinated_updates = {
+            key: None for key in state.coordinated_held_objects if task_state_key in key
+        }
+        return self.build_plan(
+            request,
+            context,
+            success=success,
+            trajectory=trajectory,
+            replannable=replannable,
+            expected_effects=StateDelta(
+                held_object_updates={task_state_key: None},
+                coordinated_held_object_updates=coordinated_updates,
+            ),
+            diagnostics=PlannerDiagnostics(
+                backend=(
+                    self.planning_services.planner_name
+                    if provenance is None
+                    else "external_nominal"
+                ),
+                metadata=(
+                    provenance
+                    if provenance is not None
+                    else (
+                        {}
+                        if affordance_sample is None
+                        else {
+                            "affordance_sample": {
+                                "assembly": affordance_sample.metadata
+                            }
+                        }
+                    )
+                ),
+            ),
+            segment_lengths=segment_lengths,
         )
 
     def _resolve_place_xpos(

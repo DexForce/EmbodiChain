@@ -1,0 +1,55 @@
+program_id: real2sim_synthetic_repeated
+instruction: Pick, transport and place the cube twice.
+targets:
+  above_platform:
+    kind: cyclic_pose
+    values:
+    - position:
+      - -0.42
+      - 0.3
+      - 0.205
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+program:
+  kind: repeat
+  count: 2
+  body:
+    kind: sequence
+    items:
+    - kind: segment
+      name: pick
+      steps:
+        kind: invoke
+        call:
+          kind: pick
+          object: cube
+      validators:
+      - kind: object_lifted
+        object: cube
+        minimum_lift: 0.03
+    - kind: segment
+      name: transport
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.move_held_object
+          arguments:
+            target: above_platform
+    - kind: segment
+      name: place
+      steps:
+        kind: invoke
+        call:
+          kind: place
+          object: cube
+          'on': platform_top
+      post:
+      - kind: wait_stable
+        entity: cube
+      validators:
+      - kind: object_upright
+        object: cube

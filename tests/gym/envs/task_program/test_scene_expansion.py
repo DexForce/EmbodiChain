@@ -521,6 +521,21 @@ def test_batch_and_legacy_expert_inputs_fail_before_scene_preparation() -> None:
     assert env.bridge_initial_positions == []
 
 
+def test_conflicting_episode_expansion_owners_fail_before_scene_preparation() -> None:
+    env = _CandidateEnv()
+    prepare = Mock(side_effect=env.prepare)
+    with pytest.raises(ValueError, match="only one expansion owner"):
+        execute_scene_variant(
+            env,
+            _variant(),
+            prepare_scene=prepare,
+            measured_validator=env.measure,
+            expansion_profile=object(),
+            plan_transform_factory=object(),
+        )
+    prepare.assert_not_called()
+
+
 def test_episode_program_override_uses_the_same_task_program_path() -> None:
     env = _CandidateEnv()
     env.cfg.task_program = None

@@ -1,0 +1,53 @@
+# Synthetic simulation budgets; this schedule contains one baseline episode.
+kind: tabletop_box_v1
+scene_revision: synthetic_ur5_geometry_v2
+object_uid: cube
+target_uid: platform
+object_entity_id: cube
+target_entity_id: platform
+base_link: arm_base_link
+finger_links:
+- gripper_finger1_link_1
+- gripper_finger2_link_1
+finger_joints:
+- gripper_finger1_joint_1
+- gripper_finger2_joint_1
+closing_directions:
+- 1
+- 1
+contact_depth_m: 0.002
+base_ground_depth_m: 0.0035
+velocity_limits:
+- 3.15
+- 3.15
+- 3.15
+- 3.2
+- 3.2
+- 3.2
+- 0.057
+- 0.057
+velocity_limit_origin: urdf_arm_and_synthetic_gripper_budget
+acceleration_limits:
+- 5.0
+- 5.0
+- 5.0
+- 5.0
+- 5.0
+- 5.0
+- 5.0
+- 5.0
+acceleration_limit_origin: synthetic_simulation_assumption
+motion_headroom_fraction: 0.95
+seed: 0
+layouts:
+- id: baseline
+  object_xyyaw:
+  - 0
+  - 0
+  - 0
+  target_xyyaw:
+  - 0
+  - 0
+  - 0
+recipes:
+- nominal

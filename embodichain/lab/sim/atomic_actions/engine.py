@@ -28,6 +28,7 @@ from .bindings import ActionBinding
 from .core import AtomicAction, SkillDescriptor
 from .control import ActionControlOverrides, ControlPartCommandProfile
 from .invocation import ActionInvocation, GoalT, OptionsT, ResolvedActionRequest
+from .nominal import NominalMotionSource
 from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
@@ -39,6 +40,10 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
     from embodichain.toolkits.graspkit import GraspPoseGenerator
+    from embodichain.lab.sim.motion.expansion import (
+        MappedRetimeResult,
+        TrajectoryTemplate,
+    )
 
     from .execution import ExecutionSession
 
@@ -324,6 +329,7 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
@@ -340,6 +346,7 @@ class AtomicActionEngine:
             request,
             context,
             plan_transform=plan_transform,
+            nominal_source=nominal_source,
         )
 
     def _resolve(
@@ -374,6 +381,7 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
@@ -397,7 +405,15 @@ class AtomicActionEngine:
             )
         current = self.initial_context() if context is None else context
         self._validate_context(current)
-        plan = action.plan(request, current)
+        if nominal_source is not None and not isinstance(
+            nominal_source, NominalMotionSource
+        ):
+            raise TypeError("nominal_source must implement NominalMotionSource.")
+        plan = (
+            action.plan(request, current)
+            if nominal_source is None
+            else action.plan(request, current, nominal_source=nominal_source)
+        )
         self._validate_plan(plan, current, request)
         if plan_transform is not None:
             if not callable(plan_transform):
@@ -416,6 +432,7 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
     ) -> ActionPlan:
         """Plan one registered invocation through the engine-owned backend.
 
@@ -431,7 +448,12 @@ class AtomicActionEngine:
         """
         current = self.initial_context() if context is None else context
         request = self._resolve(invocation)
-        return self._plan_request(request, current, plan_transform=plan_transform)
+        return self._plan_request(
+            request,
+            current,
+            plan_transform=plan_transform,
+            nominal_source=nominal_source,
+        )
 
     def initial_context(
         self,
@@ -577,6 +599,7 @@ class AtomicActionEngine:
         *,
         eligible_mask: torch.Tensor | None = None,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
     ) -> ExecutionSession:
         """Start incremental execution for a grounded invocation sequence.
 
@@ -602,6 +625,7 @@ class AtomicActionEngine:
             initial,
             eligible_mask=eligible_mask,
             plan_transform=plan_transform,
+            nominal_source=nominal_source,
         )
 
     def _validate_context(self, context: PlanningContext) -> None:
@@ -741,6 +765,269 @@ class AtomicActionEngine:
             scene_dependency_end_segment=owned_plan.scene_dependency_end_segment,
         )
         self._validate_plan(rebuilt, context, request)
+        return rebuilt
+
+    def rebuild_plan_from_mapped_trajectory(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+        plan: ActionPlan,
+        reference: TrajectoryTemplate,
+        result: MappedRetimeResult,
+        *,
+        joint_limits: torch.Tensor,
+        velocity_limits: torch.Tensor,
+        acceleration_limits: torch.Tensor,
+    ) -> ActionPlan:
+        """Rebuild a B=1 plan after explicit, protected control-grid retiming.
+
+        The mapping must retain every protected phase sample and scene
+        dependency boundary. Skills' declared free phases remain authoritative;
+        a reference can narrow but never broaden those permissions. Commands,
+        tracking and effect information are rebuilt together. This does not
+        certify collision freedom or physical task success.
+
+        Args:
+            request: Resolved request used for the original plan.
+            context: Original planning context.
+            plan: Original validated action plan.
+            reference: Its exact full-joint expansion template.
+            result: Retimed trajectory with source brackets and hard events.
+            joint_limits: Full-layout joint limits with shape ``(D, 2)``.
+            velocity_limits: Positive full-layout joint speed limits ``(D,)``.
+            acceleration_limits: Positive full-layout acceleration limits ``(D,)``.
+
+        Returns:
+            A validated complete plan on the new control grid.
+
+        Raises:
+            ValueError: Mapping, phase permissions or protected samples differ.
+        """
+        from embodichain.lab.sim.motion.expansion import (
+            MappedRetimeResult,
+            TrajectoryTemplate,
+            validate_motion_limits,
+        )
+        from ._expansion_phases import FREE_PHASES
+
+        if not isinstance(reference, TrajectoryTemplate) or not isinstance(
+            result, MappedRetimeResult
+        ):
+            raise TypeError("reference and result must be mapped trajectory values")
+        self._validate_context(context)
+        owned = plan.snapshot()
+        self._validate_plan(owned, context, request)
+        original = owned.joint_trajectory
+        if context.batch_size != 1 or original is None:
+            raise ValueError("mapped plan rebuilding requires a B=1 joint trajectory")
+        if tuple(self.robot.joint_names) != reference.joint_names:
+            raise ValueError("reference joint names do not match the robot")
+        if not torch.equal(
+            reference.positions.to(original.positions), original.positions[0]
+        ) or not torch.equal(reference.dt.to(original.dt), original.dt[0]):
+            raise ValueError("reference must exactly match the original plan grid")
+        segments = tuple(owned.segments)
+        if tuple(
+            (phase.phase_id, phase.start_index, phase.stop_index)
+            for phase in reference.phases
+        ) != tuple((segment.name, segment.start, segment.stop) for segment in segments):
+            raise ValueError("reference phases must exactly match the original plan")
+        allowed = FREE_PHASES.get(request.skill_id)
+        selected = {
+            phase.phase_id
+            for phase in reference.phases
+            if "retime" in phase.allowed_operators
+        }
+        if allowed is None or not selected or not selected.issubset(allowed):
+            raise ValueError(
+                "retiming phases exceed the skill's free-phase permissions"
+            )
+        source_permissions = owned.diagnostics.metadata.get(
+            "prototype_phase_permissions"
+        )
+        if source_permissions is not None and (
+            not isinstance(source_permissions, Mapping)
+            or any(
+                "retime" not in source_permissions.get(name, ()) for name in selected
+            )
+        ):
+            raise ValueError("retiming phases exceed the source prototype permissions")
+        motion_ids = {
+            index
+            for endpoint in request.binding.endpoints
+            if endpoint.endpoint_id == "motion"
+            for index in endpoint.joint_ids
+        }
+        if not set(reference.controlled_joint_indices).issubset(motion_ids):
+            raise ValueError(
+                "retiming cannot control joints outside the motion binding"
+            )
+        candidate = result.template
+        mapping = result.time_map
+        if (
+            candidate.joint_names != reference.joint_names
+            or candidate.source_id != reference.source_id
+            or candidate.source_revision != reference.source_revision
+            or candidate.template_id != reference.template_id
+            or candidate.controlled_joint_indices != reference.controlled_joint_indices
+            or candidate.allowed_operators != reference.allowed_operators
+            or candidate.positions.shape[0] != len(mapping.left)
+        ):
+            raise ValueError("mapped trajectory does not match the original layout")
+        count = original.waypoint_count
+        if (
+            max(mapping.right, default=-1) >= count
+            or max(mapping.source_event_indices, default=-1) >= count
+            or max(mapping.execution_event_indices, default=-1)
+            >= candidate.positions.shape[0]
+        ):
+            raise ValueError("retiming map addresses samples outside its trajectories")
+        device, dtype = original.positions.device, original.positions.dtype
+        candidate_positions = candidate.positions.to(device=device, dtype=dtype)
+        candidate_dt = candidate.dt.to(original.dt)
+        if not torch.allclose(
+            candidate_dt[1:],
+            torch.full_like(candidate_dt[1:], context.require_control_dt()),
+            atol=1e-6,
+            rtol=0,
+        ):
+            raise ValueError("retimed trajectory must use the environment control grid")
+        limits = (
+            joint_limits.to(device=device, dtype=dtype)
+            if isinstance(joint_limits, torch.Tensor)
+            else None
+        )
+        if (
+            limits is None
+            or limits.shape != (original.robot_dof, 2)
+            or not bool(torch.isfinite(limits).all())
+            or not bool((limits[:, 0] <= limits[:, 1]).all())
+        ):
+            raise ValueError(
+                "joint_limits must contain finite ordered bounds for every joint"
+            )
+        controlled = list(reference.controlled_joint_indices)
+        if not controlled or bool(
+            (
+                (candidate_positions[:, controlled] < limits[controlled, 0])
+                | (candidate_positions[:, controlled] > limits[controlled, 1])
+            ).any()
+        ):
+            raise ValueError("retimed trajectory violates controlled joint limits")
+        if not validate_motion_limits(
+            candidate,
+            velocity_limits=velocity_limits,
+            acceleration_limits=acceleration_limits,
+        ).accepted:
+            raise ValueError("retimed trajectory violates sampled motion limits")
+        left = torch.as_tensor(mapping.left.copy(), device=device, dtype=torch.long)
+        right = torch.as_tensor(mapping.right.copy(), device=device, dtype=torch.long)
+        weight = torch.as_tensor(mapping.weight.copy(), device=device, dtype=dtype)
+        expected = torch.lerp(
+            original.positions[0, left], original.positions[0, right], weight[:, None]
+        )
+        if not torch.allclose(candidate_positions, expected, atol=1e-7, rtol=0):
+            raise ValueError("mapped positions do not match their source brackets")
+        event_map = dict(
+            zip(
+                mapping.source_event_indices.tolist(),
+                mapping.execution_event_indices.tolist(),
+            )
+        )
+        editable = set()
+        for phase in reference.phases:
+            if phase.phase_id in selected:
+                editable.update(range(phase.start_index + 1, phase.stop_index - 1))
+        hard = set(range(count)) - editable
+        for phase in reference.phases:
+            hard.update((phase.start_index, phase.stop_index - 1))
+        hard.update(
+            index
+            for index in owned.scene_dependency_monitor_until.values()
+            if index < count
+        )
+        protected = {
+            near
+            for index in hard
+            for near in (index - 1, index, index + 1)
+            if 0 <= near < count
+        }
+        if not protected.issubset(event_map):
+            raise ValueError("retiming map does not preserve all protected events")
+        for index in protected:
+            destination = event_map[index]
+            if (
+                mapping.left[destination] != index
+                or mapping.right[destination] != index
+                or mapping.weight[destination] != 0
+            ):
+                raise ValueError("protected events require exact source-index mappings")
+            if not torch.equal(
+                candidate_positions[event_map[index]], original.positions[0, index]
+            ):
+                raise ValueError("retiming modified a protected sample")
+        new_lengths = {}
+        previous_stop = 0
+        for segment in segments:
+            start = event_map[segment.start]
+            stop = event_map[segment.stop - 1] + 1
+            if start != previous_stop or stop <= start:
+                raise ValueError("retimed segments must remain contiguous and nonempty")
+            new_lengths[segment.name] = stop - start
+            previous_stop = stop
+        if previous_stop != candidate.positions.shape[0]:
+            raise ValueError("retimed segments do not cover the complete trajectory")
+        monitor_until = {
+            entity: candidate.positions.shape[0] if index == count else event_map[index]
+            for entity, index in owned.scene_dependency_monitor_until.items()
+        }
+        trajectory = TimedTrajectory.from_positions(
+            candidate_positions.unsqueeze(0),
+            env_ids=context.env_ids,
+            dt=candidate_dt.unsqueeze(0),
+        )
+        if (
+            float(trajectory.dt.sum()) + float(trajectory.dt[0, -1])
+            > owned.recovery_policy.action_timeout
+        ):
+            raise ValueError("retimed trajectory exceeds the action timeout")
+        action = self._actions[request.skill_id]
+        rebuilt = action.build_plan(
+            request,
+            context,
+            success=owned.plan_success,
+            trajectory=trajectory,
+            expected_effects=owned.expected_effects,
+            effect_candidates=owned.effect_candidates,
+            effect_verification=owned.effect_verification,
+            replannable=owned.replannable,
+            diagnostics=owned.diagnostics,
+            segment_lengths=new_lengths,
+            scene_dependency_monitor_until=monitor_until,
+            scene_dependency_end_segment=owned.scene_dependency_end_segment,
+        )
+        self._validate_plan(rebuilt, context, request)
+        if (
+            original.velocities is None
+            or rebuilt.joint_trajectory is None
+            or rebuilt.joint_trajectory.velocities is None
+        ):
+            raise ValueError(
+                "retiming requires original and rebuilt velocity references"
+            )
+        old_ids = torch.tensor(sorted(hard), dtype=torch.long, device=device)
+        new_ids = torch.tensor(
+            [event_map[index] for index in sorted(hard)],
+            dtype=torch.long,
+            device=device,
+        )
+        if not torch.allclose(
+            original.velocities[0, old_ids],
+            rebuilt.joint_trajectory.velocities[0, new_ids],
+            atol=1e-5,
+            rtol=0,
+        ):
+            raise ValueError("retiming changed a protected derivative boundary")
         return rebuilt
 
 

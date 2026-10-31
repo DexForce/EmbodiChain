@@ -1,0 +1,449 @@
+{
+  "schema": "real2sim-sequential-acceptance-summary/v1",
+  "source_code_commit": "d531e68b87d0ef6ba620eb019ba9e5fc5a5a6b79",
+  "origin": "synthetic_reference",
+  "execution": "one B=1 dataset; two Pick, transport, Place cycles per episode",
+  "expected_cases": 3,
+  "validated_cases": 3,
+  "failure_count": 0,
+  "failed_attempt_count": 0,
+  "cases": [
+    {
+      "layout": "baseline",
+      "recipe": "joint_7",
+      "candidate_id": "candidate:37ce0ecb2d9412089584be4d6c2ff5237be0ecc3a825f95c5df14be1f54c824c",
+      "calls": [
+        {
+          "call_index": 0,
+          "source_unit_id": "call_0_pick_up",
+          "prototype_sha256": "0c967257993dd06a44e03c2ffc52fd7c06991178f00b298e75da4358e2db7d9b",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 1,
+          "source_unit_id": "call_1_move_held_object",
+          "prototype_sha256": "3138fb0f71f3007eba0567de55453652450a17dea2361aa6035c78fc06f61c09",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 2,
+          "source_unit_id": "call_2_place",
+          "prototype_sha256": "2da8137bdbe37f571fdf3ba3b83e54d2f11583fe2cdc37d6462f5282130a47fc",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 3,
+          "source_unit_id": "call_0_pick_up",
+          "prototype_sha256": "0c967257993dd06a44e03c2ffc52fd7c06991178f00b298e75da4358e2db7d9b",
+          "authority": "eef_pose",
+          "object_supported_regrasp": true,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 4,
+          "source_unit_id": "call_1_move_held_object",
+          "prototype_sha256": "3138fb0f71f3007eba0567de55453652450a17dea2361aa6035c78fc06f61c09",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 5,
+          "source_unit_id": "call_2_place",
+          "prototype_sha256": "2da8137bdbe37f571fdf3ba3b83e54d2f11583fe2cdc37d6462f5282130a47fc",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        }
+      ],
+      "task_call_validation": [
+        {
+          "call_index": 0,
+          "skill_id": "pick_up",
+          "start_step": 0,
+          "end_step": 188,
+          "passed": true,
+          "lift_m": 0.100492924451828
+        },
+        {
+          "call_index": 1,
+          "skill_id": "move_held_object",
+          "start_step": 188,
+          "end_step": 347,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "skill_id": "place",
+          "start_step": 347,
+          "end_step": 628,
+          "passed": true,
+          "expected_object_xy": [
+            -0.41999997859144467,
+            0.2999999190829405
+          ],
+          "placement_xy_error_m": 0.002700579263985191,
+          "height_error_m": 2.2425465484310347e-06,
+          "support_overhang_m": 0.0,
+          "stability_start_step": 609,
+          "drift_m": 0.0
+        },
+        {
+          "call_index": 3,
+          "skill_id": "pick_up",
+          "start_step": 628,
+          "end_step": 895,
+          "passed": true,
+          "lift_m": 0.0992886871099472
+        },
+        {
+          "call_index": 4,
+          "skill_id": "move_held_object",
+          "start_step": 895,
+          "end_step": 1054,
+          "passed": true
+        },
+        {
+          "call_index": 5,
+          "skill_id": "place",
+          "start_step": 1054,
+          "end_step": 1335,
+          "passed": true,
+          "expected_object_xy": [
+            -0.42000007918076127,
+            0.30000006955148206
+          ],
+          "placement_xy_error_m": 0.0025548623402314235,
+          "height_error_m": 2.2701936773922293e-06,
+          "support_overhang_m": 0.0,
+          "stability_start_step": 1316,
+          "drift_m": 0.0
+        }
+      ],
+      "held_interval_validation": [
+        {
+          "first_call_index": 0,
+          "last_call_index": 2,
+          "start_step": 139,
+          "end_step": 486,
+          "held_translation_drift_m": 0.001448640302953847,
+          "held_rotation_drift_deg": 1.1736641438297268,
+          "passed": true
+        },
+        {
+          "first_call_index": 3,
+          "last_call_index": 5,
+          "start_step": 846,
+          "end_step": 1193,
+          "held_translation_drift_m": 0.0015516631271462213,
+          "held_rotation_drift_deg": 1.3312926668632135,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "baseline",
+      "recipe": "task_space",
+      "candidate_id": "candidate:91079366771b0f7ac3aabea706c146f2e701e8cbae8f283f172bf7f358e76867",
+      "calls": [
+        {
+          "call_index": 0,
+          "source_unit_id": "call_0_pick_up",
+          "prototype_sha256": "0c967257993dd06a44e03c2ffc52fd7c06991178f00b298e75da4358e2db7d9b",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 1,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 1,
+          "source_unit_id": "call_1_move_held_object",
+          "prototype_sha256": "3138fb0f71f3007eba0567de55453652450a17dea2361aa6035c78fc06f61c09",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 2,
+          "source_unit_id": "call_2_place",
+          "prototype_sha256": "2da8137bdbe37f571fdf3ba3b83e54d2f11583fe2cdc37d6462f5282130a47fc",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 2,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 3,
+          "source_unit_id": "call_0_pick_up",
+          "prototype_sha256": "0c967257993dd06a44e03c2ffc52fd7c06991178f00b298e75da4358e2db7d9b",
+          "authority": "eef_pose",
+          "object_supported_regrasp": true,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 4,
+          "source_unit_id": "call_1_move_held_object",
+          "prototype_sha256": "3138fb0f71f3007eba0567de55453652450a17dea2361aa6035c78fc06f61c09",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 5,
+          "source_unit_id": "call_2_place",
+          "prototype_sha256": "2da8137bdbe37f571fdf3ba3b83e54d2f11583fe2cdc37d6462f5282130a47fc",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 2,
+          "ik_hold_smoothing_iterations": 0
+        }
+      ],
+      "task_call_validation": [
+        {
+          "call_index": 0,
+          "skill_id": "pick_up",
+          "start_step": 0,
+          "end_step": 188,
+          "passed": true,
+          "lift_m": 0.1003781259059906
+        },
+        {
+          "call_index": 1,
+          "skill_id": "move_held_object",
+          "start_step": 188,
+          "end_step": 347,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "skill_id": "place",
+          "start_step": 347,
+          "end_step": 628,
+          "passed": true,
+          "expected_object_xy": [
+            -0.4199999775019085,
+            0.299999875595002
+          ],
+          "placement_xy_error_m": 0.0024147238973009594,
+          "height_error_m": 2.3007424993816417e-06,
+          "support_overhang_m": 0.0,
+          "stability_start_step": 609,
+          "drift_m": 0.0
+        },
+        {
+          "call_index": 3,
+          "skill_id": "pick_up",
+          "start_step": 628,
+          "end_step": 895,
+          "passed": true,
+          "lift_m": 0.09896842390298843
+        },
+        {
+          "call_index": 4,
+          "skill_id": "move_held_object",
+          "start_step": 895,
+          "end_step": 1054,
+          "passed": true
+        },
+        {
+          "call_index": 5,
+          "skill_id": "place",
+          "start_step": 1054,
+          "end_step": 1335,
+          "passed": true,
+          "expected_object_xy": [
+            -0.4199999581641092,
+            0.30000007712476634
+          ],
+          "placement_xy_error_m": 0.0020580969387822023,
+          "height_error_m": 2.3527688129201807e-06,
+          "support_overhang_m": 0.0,
+          "stability_start_step": 1316,
+          "drift_m": 0.0
+        }
+      ],
+      "held_interval_validation": [
+        {
+          "first_call_index": 0,
+          "last_call_index": 2,
+          "start_step": 139,
+          "end_step": 486,
+          "held_translation_drift_m": 0.0014702872257839283,
+          "held_rotation_drift_deg": 1.0269479141979745,
+          "passed": true
+        },
+        {
+          "first_call_index": 3,
+          "last_call_index": 5,
+          "start_step": 846,
+          "end_step": 1193,
+          "held_translation_drift_m": 0.0012796776536572695,
+          "held_rotation_drift_deg": 0.30200303419760227,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "layout": "baseline",
+      "recipe": "time_130",
+      "candidate_id": "candidate:59abe7ae56b924f40a8e199ec66533dc83edfa8d2b600a7ca651c7971ec5e117",
+      "calls": [
+        {
+          "call_index": 0,
+          "source_unit_id": "call_0_pick_up",
+          "prototype_sha256": "0c967257993dd06a44e03c2ffc52fd7c06991178f00b298e75da4358e2db7d9b",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 1,
+          "source_unit_id": "call_1_move_held_object",
+          "prototype_sha256": "3138fb0f71f3007eba0567de55453652450a17dea2361aa6035c78fc06f61c09",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 2,
+          "source_unit_id": "call_2_place",
+          "prototype_sha256": "2da8137bdbe37f571fdf3ba3b83e54d2f11583fe2cdc37d6462f5282130a47fc",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 3,
+          "source_unit_id": "call_0_pick_up",
+          "prototype_sha256": "0c967257993dd06a44e03c2ffc52fd7c06991178f00b298e75da4358e2db7d9b",
+          "authority": "eef_pose",
+          "object_supported_regrasp": true,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 4,
+          "source_unit_id": "call_1_move_held_object",
+          "prototype_sha256": "3138fb0f71f3007eba0567de55453652450a17dea2361aa6035c78fc06f61c09",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        },
+        {
+          "call_index": 5,
+          "source_unit_id": "call_2_place",
+          "prototype_sha256": "2da8137bdbe37f571fdf3ba3b83e54d2f11583fe2cdc37d6462f5282130a47fc",
+          "authority": "eef_pose",
+          "object_supported_regrasp": false,
+          "ik_smoothing_iterations": 0,
+          "ik_hold_smoothing_iterations": 0
+        }
+      ],
+      "task_call_validation": [
+        {
+          "call_index": 0,
+          "skill_id": "pick_up",
+          "start_step": 0,
+          "end_step": 223,
+          "passed": true,
+          "lift_m": 0.10049332678318024
+        },
+        {
+          "call_index": 1,
+          "skill_id": "move_held_object",
+          "start_step": 223,
+          "end_step": 430,
+          "passed": true
+        },
+        {
+          "call_index": 2,
+          "skill_id": "place",
+          "start_step": 430,
+          "end_step": 766,
+          "passed": true,
+          "expected_object_xy": [
+            -0.4199999730562469,
+            0.29999996641731774
+          ],
+          "placement_xy_error_m": 0.0028179325118067207,
+          "height_error_m": 2.2652351169688556e-06,
+          "support_overhang_m": 0.0,
+          "stability_start_step": 747,
+          "drift_m": 0.0
+        },
+        {
+          "call_index": 3,
+          "skill_id": "pick_up",
+          "start_step": 766,
+          "end_step": 1091,
+          "passed": true,
+          "lift_m": 0.09927775710821152
+        },
+        {
+          "call_index": 4,
+          "skill_id": "move_held_object",
+          "start_step": 1091,
+          "end_step": 1298,
+          "passed": true
+        },
+        {
+          "call_index": 5,
+          "skill_id": "place",
+          "start_step": 1298,
+          "end_step": 1634,
+          "passed": true,
+          "expected_object_xy": [
+            -0.419999997913625,
+            0.29999999382510556
+          ],
+          "placement_xy_error_m": 0.0028829238529443696,
+          "height_error_m": 2.308092731339445e-06,
+          "support_overhang_m": 0.0,
+          "stability_start_step": 1615,
+          "drift_m": 0.0
+        }
+      ],
+      "held_interval_validation": [
+        {
+          "first_call_index": 0,
+          "last_call_index": 2,
+          "start_step": 174,
+          "end_step": 611,
+          "held_translation_drift_m": 0.001466982473275559,
+          "held_rotation_drift_deg": 1.368106377432404,
+          "passed": true
+        },
+        {
+          "first_call_index": 3,
+          "last_call_index": 5,
+          "start_step": 1042,
+          "end_step": 1479,
+          "held_translation_drift_m": 0.0013701427159183283,
+          "held_rotation_drift_deg": 1.03887636344265,
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "full_local_report_sha256": "a97e24f59491c0ccb103596b157b230a05254db8c27679cea91aa2437b23633c",
+  "artifact_note": "Detailed audit, receipts and dataset are generated locally and are not packaged in the repository."
+}
