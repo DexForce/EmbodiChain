@@ -568,16 +568,30 @@ def serve(
                                 render(result, True)
                             elif active_action == "check":
                                 passed = result.get("passed")
-                                badge = "PASS" if passed else "NOT VERIFIED"
+                                badge = (
+                                    "SKIPPED"
+                                    if passed is None
+                                    else "PASS" if passed else "NOT VERIFIED"
+                                )
                                 status.content = (
                                     f"**CHECKED** · local derivative {badge}"
                                 )
+                                ag, fd = result.get("autograd"), result.get(
+                                    "finite_difference"
+                                )
+                                ag_text = "not evaluated" if ag is None else f"{ag:.6f}"
+                                fd_text = "not evaluated" if fd is None else f"{fd:.6f}"
+                                rel = result.get("relative_error")
+                                detail = result.get(
+                                    "reason", "Current local branch only"
+                                )
+                                if rel is not None:
+                                    detail += f" · relative error {rel:.2e}"
                                 derivative.content = (
                                     f"**Local derivative: {badge}**\n\n"
                                     f"| Method | s/rad |\n|---|---:|\n"
-                                    f"| Autograd gᵀd | {result.get('autograd',0.):.6f} |\n"
-                                    f"| Centered difference | {result.get('finite_difference',0.):.6f} |\n\n"
-                                    f"Relative error: {result.get('relative_error',0.):.2e}. Current local branch only."
+                                    f"| Autograd gᵀd | {ag_text} |\n"
+                                    f"| Centered difference | {fd_text} |\n\n{detail}."
                                 )
                             else:
                                 status.content = "**EXPORTED** · current result saved"

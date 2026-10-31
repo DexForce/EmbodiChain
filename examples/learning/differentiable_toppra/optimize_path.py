@@ -389,10 +389,12 @@ def check_gradient(robot: ShowcaseRobot, state: Snapshot) -> dict:
     g = torch.autograd.grad(value, free)[0]
     if g.abs().max() < 1e-8:
         return {
-            "status": "stationary",
-            "passed": True,
-            "autograd": 0.0,
-            "finite_difference": 0.0,
+            "status": "no_direction",
+            "passed": None,
+            "autograd": None,
+            "finite_difference": None,
+            "gradient_norm": float(g.norm().detach()),
+            "reason": "Zero/small autograd gradient: no descent direction; difference check skipped",
         }
     d = -g.detach() / g.detach().abs().max()
     with torch.no_grad():
@@ -561,7 +563,14 @@ def smoke(robot: ShowcaseRobot, output: Path) -> None:
     for case in CASES:
         cfg = ShowcaseCfg(case=case)
         initial = optimize(robot, ShowcaseCfg(case=case, steps=0))
-        assert check_gradient(robot, initial)["passed"]
+        initial_check = check_gradient(robot, initial)
+        if case == "stationary":
+            assert (
+                initial_check["passed"] is None
+                and initial_check["status"] == "no_direction"
+            )
+        else:
+            assert initial_check["passed"]
         state = optimize(robot, cfg)
         assert state.after["valid"] and np.array_equal(
             state.initial[state.fixed], state.current[state.fixed]

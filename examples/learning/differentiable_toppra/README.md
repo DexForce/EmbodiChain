@@ -78,7 +78,9 @@ Display trajectories have 128 samples; validation uses 512, with `grid_size=100`
 for both. Actual solver grids also depend on path length. A zero/small gradient,
 failed solve, exhausted backtracking or update budget has its own visible status.
 Gradients are local to the current filtering/grid/active-constraint branch;
-finite-difference disagreement is reported rather than hidden. The procedure
+finite-difference disagreement is reported rather than hidden. Static or
+zero-gradient states skip the directional check; they are not labelled as
+finite-difference verification successes. The procedure
 uses no higher-order derivatives and does not differentiate optimizer updates.
 
 This is a kinematic preview with sampled checks, not a collision, jerk, hardware
