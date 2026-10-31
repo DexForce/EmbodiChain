@@ -34,7 +34,6 @@ import numpy as np
 import torch
 
 from embodichain.compute.kinematics import SerialChainKinematics
-from embodichain.compute.trajectory import JointPathTimingResult
 from embodichain.learning.layers import (
     DifferentiableFKLayer,
     DifferentiableRetimingLayer,
@@ -108,20 +107,8 @@ class ShowcaseRobot:
             [min(limits[n], 1.0) for n in self.names], dtype=torch.float64
         )
         self.acceleration = torch.full((7,), 2.0, dtype=torch.float64)
-        self.layer = (
-            DifferentiableRetimingLayer(
-                self.velocity, self.acceleration, sample_count=128
-            )
-            .double()
-            .eval()
-        )
-        self.checker = (
-            DifferentiableRetimingLayer(
-                self.velocity, self.acceleration, sample_count=512
-            )
-            .double()
-            .eval()
-        )
+        self.layer = DifferentiableRetimingLayer(sample_count=128).eval()
+        self.checker = DifferentiableRetimingLayer(sample_count=512).eval()
         self.sha256 = hashlib.sha256(self.urdf.read_bytes()).hexdigest()
 
     def budgets(self, cfg: ShowcaseCfg) -> tuple[torch.Tensor, torch.Tensor]:
@@ -154,28 +141,37 @@ class ShowcaseRobot:
         acceleration: torch.Tensor,
         *,
         dense: bool = False,
-    ) -> JointPathTimingResult:
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
         """Call the public layer without rewriting its timing or derivatives."""
         layer = self.checker if dense else self.layer
-        return layer(
-            points[None], velocity_limits=velocity, acceleration_limits=acceleration
-        )
+        return layer(points[None], velocity, acceleration)
 
     def valid(
         self,
-        result: JointPathTimingResult,
+        result: tuple[
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+        ],
         velocity: torch.Tensor,
         acceleration: torch.Tensor,
     ) -> bool:
-        """Check the native samples; this is not continuous collision certification."""
-        if not result.success.item():
+        """Check native samples; this is not continuous collision certification."""
+        positions, velocities, accelerations, _, success, lengths = result
+        if not success.item():
             return False
-        n = int(result.sample_lengths.item())
-        q, v, a = (
-            result.positions[0, :n],
-            result.velocities[0, :n],
-            result.accelerations[0, :n],
-        )
+        n = int(lengths.item())
+        q, v, a = positions[0, :n], velocities[0, :n], accelerations[0, :n]
         return bool(
             (q >= self.fk.lower - 1e-8).all()
             and (q <= self.fk.upper + 1e-8).all()
@@ -187,25 +183,23 @@ class ShowcaseRobot:
     def row(
         self, points: torch.Tensor, velocity: torch.Tensor, acceleration: torch.Tensor
     ) -> dict:
-        """Make an owned, graph-free display snapshot from actual solver output."""
-        result = self.solve(points, velocity, acceleration)
+        """Own graph-free display data separately from the tensor operator API."""
+        positions, velocities, accelerations, dt, success, lengths = self.solve(
+            points, velocity, acceleration
+        )
         dense = self.solve(points, velocity, acceleration, dense=True)
-        n = int(result.sample_lengths.item())
+        n = int(lengths.item())
         copy = lambda x: x.detach().cpu().numpy().copy()
         return {
-            "duration": float(result.duration[0]) if result.success.item() else None,
-            "success": bool(result.success.item()),
+            "duration": float(dt.sum()) if success.item() else None,
+            "success": bool(success.item()),
             "valid": self.valid(dense, velocity, acceleration),
             "length": n,
-            "positions": copy(result.positions[0, :n]),
-            "velocities": copy(result.velocities[0, :n]),
-            "accelerations": copy(result.accelerations[0, :n]),
-            "dt": copy(result.dt[0, :n]),
-            "tcp": (
-                copy(self.fk(result.positions[0, :n])[:, :3, 3])
-                if n
-                else np.empty((0, 3))
-            ),
+            "positions": copy(positions[0, :n]),
+            "velocities": copy(velocities[0, :n]),
+            "accelerations": copy(accelerations[0, :n]),
+            "dt": copy(dt[0, :n]),
+            "tcp": copy(self.fk(positions[0, :n])[:, :3, 3]) if n else np.empty((0, 3)),
             "nodes_tcp": copy(self.fk(points)[:, :3, 3]),
             "velocity": copy(velocity),
             "acceleration": copy(acceleration),
@@ -306,10 +300,10 @@ def optimize(
             return snapshot(None, "cancelled", "Last accepted path retained")
         free = q[ids].detach().clone().requires_grad_(True)
         points = initial.index_copy(0, ids, free)
-        timed = robot.solve(points, velocity, acceleration)
-        if not timed.success.item() or not before["valid"]:
+        _, _, _, dt, success, _ = robot.solve(points, velocity, acceleration)
+        if not success.item() or not before["valid"]:
             return snapshot(None, "failed", "Initial path could not be validated")
-        duration = timed.duration[0]
+        duration = dt.sum(dim=-1)[0]
         if cfg.detach_duration:
             duration = duration.detach()
         if not duration.requires_grad:
@@ -351,7 +345,7 @@ def optimize(
             if (
                 slope < 0
                 and robot.valid(check, velocity, acceleration)
-                and check.duration.item() <= duration.item() + 1e-4 * slope
+                and check[3].sum().item() <= duration.item() + 1e-4 * slope
             ):
                 q = candidate.detach()
                 accepted += 1
@@ -383,7 +377,7 @@ def check_gradient(robot: ShowcaseRobot, state: Snapshot) -> dict:
     v, a = robot.budgets(state.cfg)
 
     def duration(x: torch.Tensor) -> torch.Tensor:
-        return robot.solve(q.index_copy(0, ids, x), v, a).duration[0]
+        return robot.solve(q.index_copy(0, ids, x), v, a)[3].sum(dim=-1)[0]
 
     value = duration(free)
     g = torch.autograd.grad(value, free)[0]

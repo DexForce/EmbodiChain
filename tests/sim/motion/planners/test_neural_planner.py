@@ -619,17 +619,17 @@ def test_retime_joint_paths_solves_a_cpu_batch_in_one_call(monkeypatch):
     rows = [retime_joint_paths(paths[i : i + 1], constraints=limits) for i in range(3)]
 
     calls = []
-    original = toppra_module._retime_joint_paths
+    original = toppra_module._retime_toppra_warp
     monkeypatch.setattr(
         toppra_module,
-        "_retime_joint_paths",
+        "_retime_toppra_warp",
         lambda *args, **kwargs: calls.append(args[0].shape)
         or original(*args, **kwargs),
     )
     batched = retime_joint_paths(paths, constraints=limits)
 
-    # The public compute boundary receives the whole batch; internal CPU
-    # partitioning belongs to compute rather than the planner adapter.
+    # The compute backend receives the whole batch, without allocating the
+    # fixed-width learning output in this native planner adapter.
     assert calls == [paths.shape]
     assert bool(batched.success.all())
     for index, row in enumerate(rows):

@@ -56,11 +56,14 @@ state, optimizers, and detach boundaries.
 .. automodule:: embodichain.learning.layers.ik
    :members:
 
-``DifferentiableRetimingLayer`` maps joint paths to fixed-width timed trajectories
-through the compute TOPPRA API. It checkpoints fixed motion-limit buffers and
-sampling settings. Request overrides are shared by a batch; physical robot caps
-and geometric validation belong to the caller. Only first-order gradients on the
-current discrete solver branch are supported.
+``DifferentiableRetimingLayer`` is a stateless Torch module with numerical
+hyperparameters in its constructor and positions/motion limits in ``forward``.
+It returns ``(q, qd, qdd, dt, success, lengths)`` as ordinary tensors. Compute
+owns fixed-width quantity padding. The layer has no parameters, limit buffers,
+custom device migration or extra checkpoint state; callers reconstruct settings
+and can store fixed robot limits as buffers on their own model. ``eval()`` keeps
+gradients, and duration remains the tensor expression ``dt.sum(-1)``.
+Only first-order derivatives on the current discrete branch are supported.
 
 .. automodule:: embodichain.learning.layers.toppra
    :members:

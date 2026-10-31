@@ -14,14 +14,16 @@ returns TCP poses and geometric Jacobians from one FK pass, retaining dJ/dq.
 poses through a pure FK path; `evaluate` also returns geometric Jacobians from
 one FK pass. `DifferentiableIKLayer` composes this FK layer with fixed-step DLS.
 IK keeps its `kinematics` child name for checkpoint compatibility.
-`learning/layers/toppra.py` owns `DifferentiableRetimingLayer`, composing the
-simulation-independent public `compute.trajectory.retime_joint_paths()` API.
-It checkpoints fixed motion-limit buffers and numerical settings, pads quantity
-outputs to a fixed width and loads on demand so FK/IK imports do not load Warp.
-`JointPathTimingResult.sample_lengths` distinguishes failed rows (zero) from
-stationary successes (two). Callers resolve robot caps, preserve input graphs
-and own geometric validation. Gradients are first-order and local to fixed
-filtering, sampling topology and active constraints.
+`learning/layers/toppra.py` owns the stateless `DifferentiableRetimingLayer`.
+Its constructor contains only sampling/grid hyperparameters; forward receives
+positions and explicit velocity/acceleration tensors and delegates to
+`compute.trajectory.retime_joint_paths()`. Both return the ordinary tensor tuple
+`(q, qd, qdd, dt, success, lengths)`; compute owns quantity padding. Duration is
+`dt.sum(-1)`, failed lengths are zero and stationary lengths are two. Fixed limits
+belong in caller-model buffers; retiming has no parameters, buffers or custom
+checkpoint/device protocol. It loads on demand so FK/IK imports do not load Warp.
+Callers resolve robot caps and own geometric validation. Gradients are first-order
+and local to fixed filtering, sampling topology and active constraints.
 `learning/models/` owns general MLPs, feature normalization
 and configuration-driven MLP construction. These shared components do not import
 RL, TensorDict or simulation. Concrete NeRD models, codecs and the shared-SL
@@ -56,7 +58,7 @@ Hard limits have piecewise gradients; disabling projection does not disable the
 physical-limit success check. The shortest rotation residual has a pi branch cut.
 Only first-order input gradients are part of the public contract.
 
-Layers own fixed TCP/limit buffers, copy geometry, and explicitly migrate PK
+FK/IK layers own fixed TCP/limit buffers, copy geometry, and explicitly migrate PK
 internals during `.to()`. Checkpoints verify fixed-model identity and restore
 numerical settings and buffers; construct the same geometry before loading.
 `load_state_dict(assign=True)` also migrates fixed PK geometry to the loaded

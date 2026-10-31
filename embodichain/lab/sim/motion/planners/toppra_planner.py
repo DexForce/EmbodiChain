@@ -23,7 +23,6 @@ from dataclasses import field
 import torch
 
 from embodichain.compute.trajectory._toppra_common import _validate_grid_size
-from embodichain.compute.trajectory import retime_joint_paths as _retime_joint_paths
 from embodichain.compute.trajectory._toppra_warp import (
     _retime_toppra_warp,
     _tensor_path_lengths,
@@ -145,9 +144,10 @@ def retime_joint_paths(
         else positions.float()
     )
     try:
-        result = _retime_joint_paths(
+        result = _retime_toppra_warp(
             waypoints,
-            constraints=constraints,
+            constraints["velocity"],
+            constraints["acceleration"],
             path_lengths=path_lengths,
             sample_count=int(resolved_interval) if quantity else None,
             sample_dt=None if quantity else float(resolved_interval),
@@ -157,10 +157,7 @@ def retime_joint_paths(
     except (ValueError, FloatingPointError, OverflowError):
         return _failed_result(batch, dofs, resolved_device, torch.float64)
     return PlanResult(
-        **{
-            key: getattr(result, key).to(resolved_device)
-            for key in ("success", "positions", "velocities", "accelerations", "dt")
-        }
+        **{key: value.to(resolved_device) for key, value in result.items()}
     )
 
 

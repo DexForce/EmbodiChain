@@ -22,9 +22,15 @@ local path-optimization results, not neural-policy training gains.
 ```python
 free = initial[free_indices].clone().requires_grad_(True)
 path = initial.index_copy(0, free_indices, free)
-result = layer(path.unsqueeze(0))
-gradient = torch.autograd.grad(result.duration.sum(), free)[0]
+q, qd, qdd, dt, success, lengths = layer(path.unsqueeze(0), velocity, acceleration)
+gradient = torch.autograd.grad(dt.sum(), free)[0]
 ```
+
+`layer = DifferentiableRetimingLayer(sample_count=128)` stores only numerical
+hyperparameters. Limits are explicit forward inputs; a host model can register
+fixed limits as its own buffers. The layer has an empty `state_dict`, like other
+stateless Torch operators. Save its construction settings with the caller's
+configuration rather than expecting weight loading to change output width.
 
 The derivative passes through spline fitting and the timing solver. A heatmap
 shows the **current free-node** gradient in seconds/radian. `Check local
