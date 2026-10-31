@@ -49,16 +49,19 @@ dependencies = [
   "black==26.10.1",
   "fvcore",
   "h5py",
-  # Keep the tested 0.13 baseline; 0.15+ requires a newer torch stack.
-  "tensordict>=0.13,<0.15",
+  "tensordict>=0.13,<0.15; python_version < '3.12'",
+  "tensordict>=0.15.3,<0.16; python_version >= '3.12'",
   "viser==1.0.21",
   "lerobot==0.4.4; python_version < '3.12'",
   "lerobot[training]==0.6.1; python_version >= '3.12'",
-  # Both SDK versions support this stack. Keep TorchCodec's ABI paired with
-  # torch; newer torch/TensorDict qualification is tracked separately in #883.
-  "torch>=2.7,<2.8",
-  "torchvision>=0.22,<0.23",
-  "torchcodec>=0.5,<0.6"
+  # TorchCodec's binary interface follows torch, not the LeRobot SDK version.
+  # Keep each Python profile's torch/torchvision/TorchCodec versions paired.
+  "torch>=2.7,<2.8; python_version < '3.12'",
+  "torchvision>=0.22,<0.23; python_version < '3.12'",
+  "torchcodec>=0.5,<0.6; python_version < '3.12'",
+  "torch>=2.11,<2.12; python_version >= '3.12'",
+  "torchvision>=0.26,<0.27; python_version >= '3.12'",
+  "torchcodec>=0.11.1,<0.12; python_version >= '3.12'"
 ]
 
 [project.optional-dependencies]

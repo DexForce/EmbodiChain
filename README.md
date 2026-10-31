@@ -50,16 +50,28 @@ To get started with EmbodiChain, follow these steps:
 
 Installation selects the LeRobot SDK by Python version:
 
-| Python | LeRobot | Hugging Face Hub | Shared Torch stack |
-| --- | --- | --- | --- |
-| 3.10 / 3.11 | 0.4.4 | >=0.35.3, <0.36 | torch 2.7.x, torchvision 0.22.x, TorchCodec 0.5.x |
-| 3.12 | 0.6.1, including training/dataset dependencies | >=1.6, <2 | Same |
+| Python | LeRobot | Hugging Face Hub | Torch / torchvision / TorchCodec | TensorDict |
+| --- | --- | --- | --- | --- |
+| 3.10 / 3.11 | 0.4.4 | >=0.35.3, <0.36 | 2.7.x / 0.22.x / 0.5.x | >=0.13, <0.15 |
+| 3.12 | 0.6.1, including training/dataset dependencies | >=1.6, <2 | 2.11.x / 0.26.x / >=0.11.1, <0.12 | >=0.15.3, <0.16 |
 
-TensorDict remains >=0.13, <0.15. The newer Torch/TensorDict migration is
-tracked separately in [#883](https://github.com/DexForce/EmbodiChain/issues/883).
-Select matching CPU or CUDA wheels when installing the Torch stack; the SDK
-matrix CI checks a clean CPU installation, recording/loading, and an official
-ACT update/checkpoint/reset. GPU simulation and full policy learning acceptance
+Torch remains a direct dependency because the framework uses it independently
+of LeRobot. TorchCodec must match the Torch binary interface; LeRobot's wider
+dependency ranges alone do not enforce that pairing. CI pins exact patch
+versions within each supported profile; package metadata allows patch updates
+within those version lines. Further qualification is tracked in
+[#883](https://github.com/DexForce/EmbodiChain/issues/883).
+Select matching CPU or CUDA wheels when installing the Torch stack. For the
+Python 3.12 GPU profile, select the CUDA 12.8 wheels explicitly when using the
+existing CUDA 12.8 runtime; PyPI's default Torch wheel may select CUDA 13:
+
+```bash
+python -m pip install torch==2.11.0 torchvision==0.26.0 torchcodec==0.11.1 \
+  --index-url https://download.pytorch.org/whl/cu128
+```
+
+The SDK matrix CI checks a clean CPU installation, recording/loading, video
+decoding, and an official ACT update/checkpoint/reset. GPU simulation and full policy learning acceptance
 are separate checks. Python versions above 3.12 select the newer SDK but are not
 part of this validation matrix.
 

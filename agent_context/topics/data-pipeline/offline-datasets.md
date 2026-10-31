@@ -6,8 +6,11 @@ identity, and cross-version conversion boundaries.
 ## Runtime ownership
 
 The main SDK selects LeRobot 0.4.4 on Python 3.10/3.11 and 0.6.1 on Python
-3.12+, with the shared Torch 2.7/TorchCodec 0.5 stack declared in `pyproject.toml`.
-Both recording routes retain task/subtask tables and depth sidecars. Its `data_pipeline` and
+3.12+. `pyproject.toml` pairs Torch 2.7 / TorchCodec 0.5 / TensorDict <0.15 on
+the legacy route and Torch 2.11 / TorchCodec 0.11 / TensorDict 0.15 on the new
+route. The root README owns the dependency matrix and CUDA installation notes;
+CI pins exact qualification versions. Both recording routes retain task/subtask
+tables and depth sidecars. Its `data_pipeline` and
 `datasets` packages load online/simulation components lazily; offline inspection
 and journal recovery do not import the simulator or PyTorch.
 

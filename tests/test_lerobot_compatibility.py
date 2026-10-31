@@ -29,14 +29,57 @@ import torch
 def test_python_selects_supported_lerobot_stack() -> None:
     expected = "0.4.4" if sys.version_info < (3, 12) else "0.6.1"
     assert version("lerobot") == expected
-    assert Version(version("torch")).release[:2] == (2, 7)
-    assert Version(version("torchvision")).release[:2] == (0, 22)
-    assert Version(version("torchcodec")).release[:2] == (0, 5)
     hub = Version(version("huggingface-hub"))
     if expected == "0.4.4":
+        assert Version(version("torch")).release[:2] == (2, 7)
+        assert Version(version("torchvision")).release[:2] == (0, 22)
+        assert Version(version("torchcodec")).release[:2] == (0, 5)
+        assert Version("0.13") <= Version(version("tensordict")) < Version("0.15")
         assert Version("0.35.3") <= hub < Version("0.36")
     else:
+        assert Version(version("torch")).release[:2] == (2, 11)
+        assert Version(version("torchvision")).release[:2] == (0, 26)
+        assert Version(version("torchcodec")).release[:2] == (0, 11)
+        assert Version("0.15.3") <= Version(version("tensordict")) < Version("0.16")
         assert Version("1.6") <= hub < Version("2")
+
+
+def test_torchcodec_decodes_video_with_selected_torch(tmp_path: Path) -> None:
+    """Loading and decoding media exercises the Torch/FFmpeg binary pairing."""
+    import av
+    import numpy as np
+    from torchcodec.decoders import VideoDecoder
+
+    path = tmp_path / "codec.mp4"
+    colors = [20, 80, 140]
+    with av.open(str(path), mode="w") as output:
+        stream = output.add_stream("libx264", rate=10)
+        stream.width, stream.height = 32, 32
+        stream.pix_fmt = "yuv420p"
+        for value in colors:
+            frame = av.VideoFrame.from_ndarray(
+                np.full((32, 32, 3), value, dtype=np.uint8), format="rgb24"
+            )
+            for packet in stream.encode(frame):
+                output.mux(packet)
+        for packet in stream.encode():
+            output.mux(packet)
+
+    decoder = VideoDecoder(str(path), device="cpu")
+    assert len(decoder) == len(colors)
+    frames = decoder.get_frames_at(indices=list(range(len(colors))))
+    assert frames.data.shape == (3, 3, 32, 32)
+    assert frames.data.dtype == torch.uint8
+    # Allow the small rounding error from RGB/YUV conversion in H.264.
+    torch.testing.assert_close(
+        frames.data.float().mean((1, 2, 3)),
+        torch.tensor(colors, dtype=torch.float32),
+        atol=3,
+        rtol=0,
+    )
+    torch.testing.assert_close(
+        frames.pts_seconds, torch.tensor([0.0, 0.1, 0.2], dtype=torch.float64)
+    )
 
 
 def test_official_visual_act_update_reload_and_reset(tmp_path: Path) -> None:

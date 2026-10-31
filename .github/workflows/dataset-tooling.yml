@@ -57,7 +57,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.10', '3.11', '3.12']
+        include:
+          - python: '3.10'
+            torch: '2.7.0'
+            torchvision: '0.22.0'
+            torchcodec: '0.5.0'
+            tensordict: '0.13.0'
+          - python: '3.11'
+            torch: '2.7.0'
+            torchvision: '0.22.0'
+            torchcodec: '0.5.0'
+            tensordict: '0.13.0'
+          - python: '3.12'
+            torch: '2.11.0'
+            torchvision: '0.26.0'
+            torchcodec: '0.11.1'
+            tensordict: '0.15.3'
     container:
       image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3-py311
       volumes:
@@ -78,7 +93,11 @@ jobs:
             --torch-backend cpu --index-strategy unsafe-best-match \
             --index-url https://pypi.org/simple \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
-            -e . pytest
+            -e . pytest \
+            'torch==${{ matrix.torch }}' \
+            'torchvision==${{ matrix.torchvision }}' \
+            'torchcodec==${{ matrix.torchcodec }}' \
+            'tensordict==${{ matrix.tensordict }}'
           uv pip check --python /tmp/lerobot-compat/bin/python
       - name: Check recording, reading, preview and official ACT
         shell: bash -l {0}
