@@ -233,6 +233,9 @@ class MockArena:
     def __init__(self, fail_indices=None):
         self.created = []  # list of (name, actor0, actor1, frame_a, frame_b)
         self.removed = []  # list of names
+        self.linear_drives = []
+        self.point_anchor_calls = []
+        self.point_anchor_queries = 0
         self.fail_indices = set(fail_indices or [])
 
     def create_fixed_constraint(self, name, actor0, actor1, local_frame0, local_frame1):
@@ -243,7 +246,27 @@ class MockArena:
         h.get_name.return_value = name
         h.is_valid.return_value = True
         h.get_relative_transform.return_value = np.eye(4, dtype=np.float32)
+        h.set_motion.return_value = 0
         return h
+
+    def create_d6_constraint_bodies(self, name, actor0, actor1, frame0, frame1):
+        return self.create_fixed_constraint(name, actor0, actor1, frame0, frame1)
+
+    def configure_d6_linear_drive(self, name, stiffness, damping, acceleration):
+        self.linear_drives.append((name, stiffness, damping, acceleration))
+        return True
+
+    def set_d6_linear_drive_velocity(self, name, velocity):
+        self.velocity_target = (name, np.asarray(velocity).copy())
+        return True
+
+    def supports_d6_linear_drive_point_anchors(self):
+        self.point_anchor_queries += 1
+        return True
+
+    def set_d6_linear_drive_point_anchors(self, name, enabled):
+        self.point_anchor_calls.append((name, enabled))
+        return True
 
     def remove_constraint(self, name):
         self.removed.append(name)
@@ -331,6 +354,292 @@ def test_create_rigid_constraint_resolves_both_objects_all_envs():
         assert arena.created[0][0] == f"weld_{i}"
         assert arena.created[0][1] is sim._rigid_objects["cube"]._entities[i]
         assert arena.created[0][2] is sim._rigid_objects["block"]._entities[i]
+
+
+@pytest.mark.parametrize(
+    "compliant,point_anchors", [(False, False), (True, False), (True, True)]
+)
+def test_point_constraint_uses_physical_links_and_preserves_subset_frames(
+    monkeypatch, compliant: bool, point_anchors: bool
+):
+    from dexsim.engine import D6Axis
+    from dexsim.types import MotionLimit
+    from dexsim.spawn.adapters import dexsim_adapter
+
+    monkeypatch.setattr(
+        dexsim_adapter,
+        "rigid_constraint_endpoint",
+        lambda handle, link: handle.get_physical_body(link),
+        raising=False,
+    )
+
+    sim = _RigidConstraintTestSim(num_envs=2)
+    robot = MagicMock()
+    robot.num_instances = 2
+    robot.link_names = ["follower", "coupler"]
+    robot._entities = [MagicMock(), MagicMock()]
+    follower, coupler = object(), object()
+    robot._entities[1].get_physical_body.side_effect = {
+        "follower": follower,
+        "coupler": coupler,
+    }.__getitem__
+    sim._robots["robot"] = robot
+    first, second = np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)
+    first[0, 3], second[2, 3] = 0.01, 0.02
+    constraint = sim.create_rigid_constraint(
+        RigidConstraintCfg(
+            name="loop",
+            rigid_object_a_uid="robot",
+            rigid_object_b_uid="robot",
+            articulation_link_a="follower",
+            articulation_link_b="coupler",
+            local_frame_a=first,
+            local_frame_b=second,
+            constraint_type="spherical",
+            linear_drive_stiffness=100 if compliant else None,
+            linear_drive_damping=20 if compliant else None,
+            linear_drive_acceleration=compliant,
+            linear_drive_velocity=(0, 0.1, 0) if compliant else None,
+            **({"linear_drive_point_anchors": True} if point_anchors else {}),
+        ),
+        env_ids=[1],
+    )
+    assert constraint.constraint_handles[0] is None
+    assert sim._arenas[0].linear_drives == []
+    assert sim._arenas[0].point_anchor_queries == 0
+    assert sim._arenas[1].point_anchor_queries == int(point_anchors)
+    assert sim._arenas[1].point_anchor_calls == (
+        [("loop_1", True)] if point_anchors else []
+    )
+    assert sim._arenas[1].linear_drives == (
+        [("loop_1", 100, 20, True)] if compliant else []
+    )
+    if compliant:
+        assert sim._arenas[1].velocity_target[0] == "loop_1"
+        np.testing.assert_array_equal(
+            sim._arenas[1].velocity_target[1], np.array([0, 0.1, 0], dtype=np.float32)
+        )
+    _, body_a, body_b, frame_a, frame_b = sim._arenas[1].created[0]
+    assert body_a is follower and body_b is coupler
+    np.testing.assert_array_equal(frame_a, first)
+    np.testing.assert_array_equal(frame_b, second)
+    handle = constraint.constraint_handles[1]
+    assert {call.args for call in handle.set_motion.call_args_list} == {
+        (axis, MotionLimit.FREE)
+        for axis in (D6Axis.TWIST, D6Axis.SWING1, D6Axis.SWING2)
+    }
+
+
+@pytest.mark.parametrize("failure", ["axis", "drive", "velocity", "anchors"])
+def test_point_constraint_axis_failure_releases_created_handle(failure: str):
+    sim = _RigidConstraintTestSim(num_envs=1)
+    _register_object(sim, "a", 1)
+    _register_object(sim, "b", 1)
+    original = sim._env.create_d6_constraint_bodies
+
+    def fail_axis(*args):
+        handle = original(*args)
+        handle.set_motion.return_value = -1 if failure == "axis" else 0
+        return handle
+
+    sim._env.create_d6_constraint_bodies = fail_axis
+    if failure == "drive":
+        sim._env.configure_d6_linear_drive = lambda *args: False
+    elif failure == "velocity":
+        sim._env.set_d6_linear_drive_velocity = lambda *args: False
+    elif failure == "anchors":
+        sim._env.set_d6_linear_drive_point_anchors = lambda *args: False
+    with pytest.raises(
+        RuntimeError, match="angular axis|compliant point|velocity target|point anchors"
+    ):
+        sim.create_rigid_constraint(
+            RigidConstraintCfg(
+                name="point",
+                rigid_object_a_uid="a",
+                rigid_object_b_uid="b",
+                local_frame_b=np.eye(4),
+                constraint_type="spherical",
+                linear_drive_stiffness=(
+                    100 if failure in {"drive", "velocity", "anchors"} else None
+                ),
+                linear_drive_damping=(
+                    20 if failure in {"drive", "velocity", "anchors"} else None
+                ),
+                linear_drive_velocity=(0, 0.1, 0) if failure == "velocity" else None,
+                **(
+                    {"linear_drive_point_anchors": True} if failure == "anchors" else {}
+                ),
+            )
+        )
+    assert sim._env.removed == ["point"]
+    assert not sim._constraints
+
+
+@pytest.mark.parametrize("value,compliant", [(True, False), (1, True)])
+def test_point_anchor_validation_precedes_creation(value, compliant):
+    sim = _RigidConstraintTestSim(num_envs=1)
+    with pytest.raises(ValueError, match="point anchors"):
+        sim.create_rigid_constraint(
+            RigidConstraintCfg(
+                name="invalid",
+                rigid_object_a_uid="missing_a",
+                rigid_object_b_uid="missing_b",
+                constraint_type="spherical",
+                linear_drive_stiffness=100 if compliant else None,
+                linear_drive_damping=20 if compliant else None,
+                linear_drive_point_anchors=value,
+            )
+        )
+    assert not sim._env.created
+
+
+@pytest.mark.parametrize("capability", [None, False])
+def test_point_anchors_require_native_capability_before_creation(capability):
+    sim = _RigidConstraintTestSim(num_envs=1)
+    _register_object(sim, "a", 1)
+    _register_object(sim, "b", 1)
+    sim._env.supports_d6_linear_drive_point_anchors = (
+        None if capability is None else lambda: False
+    )
+    with pytest.raises(NotImplementedError, match="point anchors"):
+        sim.create_rigid_constraint(
+            RigidConstraintCfg(
+                name="unsupported",
+                rigid_object_a_uid="a",
+                rigid_object_b_uid="b",
+                constraint_type="spherical",
+                linear_drive_stiffness=100,
+                linear_drive_damping=20,
+                linear_drive_point_anchors=True,
+            )
+        )
+    assert not sim._env.created
+    assert not sim._constraints
+
+
+@pytest.mark.parametrize(
+    "velocity,compliant",
+    [([0, 0.1], True), ([0, np.nan, 0], True), ([0, 0.1, 0], False)],
+)
+def test_point_velocity_validation_precedes_creation(velocity, compliant):
+    sim = _RigidConstraintTestSim(num_envs=1)
+    with pytest.raises(ValueError, match="three finite components"):
+        sim.create_rigid_constraint(
+            RigidConstraintCfg(
+                name="invalid",
+                rigid_object_a_uid="unused_a",
+                rigid_object_b_uid="unused_b",
+                constraint_type="spherical",
+                linear_drive_stiffness=100 if compliant else None,
+                linear_drive_damping=20 if compliant else None,
+                linear_drive_velocity=velocity,
+            )
+        )
+    assert sim._env.created == []
+
+
+def test_point_velocity_requires_sdk_capability_and_cleans_creation():
+    sim = _RigidConstraintTestSim(num_envs=1)
+    _register_object(sim, "a", 1)
+    _register_object(sim, "b", 1)
+    sim._env.set_d6_linear_drive_velocity = None
+    with pytest.raises(NotImplementedError, match="lacks D6 linear velocity targets"):
+        sim.create_rigid_constraint(
+            RigidConstraintCfg(
+                name="point",
+                rigid_object_a_uid="a",
+                rigid_object_b_uid="b",
+                constraint_type="spherical",
+                linear_drive_stiffness=100,
+                linear_drive_damping=20,
+                linear_drive_velocity=[0, 0.1, 0],
+            )
+        )
+    assert sim._env.removed == ["point"]
+    assert not sim._constraints
+
+
+def test_point_drive_runtime_update_selects_rows_and_preserves_creation_cfg():
+    sim = _RigidConstraintTestSim(num_envs=3)
+    with pytest.raises(KeyError, match="not found"):
+        SimulationManager.update_rigid_constraint_linear_drive(sim, "missing", 100, 20)
+    _register_object(sim, "a", 3)
+    _register_object(sim, "b", 3)
+    cfg = RigidConstraintCfg(
+        name="point",
+        rigid_object_a_uid="a",
+        rigid_object_b_uid="b",
+        constraint_type="spherical",
+        linear_drive_stiffness=100,
+        linear_drive_damping=20,
+    )
+    sim.create_rigid_constraint(cfg)
+    before = [len(arena.linear_drives) for arena in sim._arenas]
+    count = SimulationManager.update_rigid_constraint_linear_drive(
+        sim, "point", [200, 300], [30, 40], [[0, 0.1, 0], [0, -0.2, 0]], env_ids=[2, 0]
+    )
+    assert count == 2
+    assert len(sim._arenas[1].linear_drives) == before[1]
+    assert sim._arenas[2].linear_drives[-1] == ("point_2", 200.0, 30.0, False)
+    assert sim._arenas[0].linear_drives[-1] == ("point_0", 300.0, 40.0, False)
+    assert cfg.linear_drive_stiffness == 100
+    assert cfg.linear_drive_velocity is None
+    np.testing.assert_allclose(sim._arenas[2].velocity_target[1], [0, 0.1, 0])
+    calls = [len(arena.linear_drives) for arena in sim._arenas]
+    with pytest.raises(ValueError, match="positive finite"):
+        SimulationManager.update_rigid_constraint_linear_drive(
+            sim, "point", [200, -1, 300], 20, [0, 0.1, 0]
+        )
+    assert calls == [len(arena.linear_drives) for arena in sim._arenas]
+    sim._arenas[2].set_d6_linear_drive_velocity = None
+    with pytest.raises(NotImplementedError, match="velocity targets"):
+        SimulationManager.update_rigid_constraint_linear_drive(
+            sim, "point", 100, 20, [0, 0.1, 0]
+        )
+    assert calls == [len(arena.linear_drives) for arena in sim._arenas]
+
+
+def test_point_constraint_requires_sdk_body_factory():
+    sim = _RigidConstraintTestSim(num_envs=1)
+    _register_object(sim, "a", 1)
+    _register_object(sim, "b", 1)
+    sim._env.create_d6_constraint_bodies = None
+    with pytest.raises(NotImplementedError, match="create_d6_constraint_bodies"):
+        sim.create_rigid_constraint(
+            RigidConstraintCfg(
+                name="point",
+                rigid_object_a_uid="a",
+                rigid_object_b_uid="b",
+                constraint_type="spherical",
+            )
+        )
+    assert not sim._constraints
+
+
+def test_removing_endpoint_releases_constraints_before_spawn_removal():
+    from types import SimpleNamespace
+
+    sim = _RigidConstraintTestSim(num_envs=1)
+    _register_object(sim, "a", 1)
+    _register_object(sim, "b", 1)
+    sim.create_rigid_constraint(
+        RigidConstraintCfg(name="weld", rigid_object_a_uid="a", rigid_object_b_uid="b")
+    )
+
+    class Scene:
+        builder = SimpleNamespace(is_finalized=False)
+
+        def __contains__(self, uid):
+            return uid == "a"
+
+        def remove(self, uid):
+            assert uid == "a"
+            assert sim._env.removed == ["weld"]
+            assert not sim._constraints
+
+    sim._spawn_scene = Scene()
+    sim.notify_visualization_topology_changed = lambda: None
+    assert SimulationManager.remove_asset(sim, "a")
 
 
 def test_create_rigid_constraint_resolves_spawned_native_actors():

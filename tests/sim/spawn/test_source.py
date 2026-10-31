@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from dexsim.spawn import ArticulationDesc, LinkDesc
+from dexsim.spawn import ArticulationDesc, CollisionDesc, DexsimCollisionDesc, LinkDesc
 
 from embodichain.lab.sim.spawn.source import (
     _apply_dexsim_source_overlay,
@@ -172,6 +172,44 @@ def test_default_overlay_writes_only_explicitly_marked_link_physics() -> None:
     np.testing.assert_array_equal(raw.inertia, (1.0, 2.0, 3.0))
     np.testing.assert_allclose(raw.com_position, (0.1, 0.2, 0.3))
     assert handle.articulation_desc.get_link_desc("skipped").rigid_body is not None
+
+
+@pytest.mark.parametrize("mode", ["named", "combine", "compliant"])
+def test_default_source_overlay_applies_contact_fields_after_link_properties(
+    mode: str,
+) -> None:
+    link = _link("base")
+    link.rigid_body = _physical_body(inertia=np.eye(3), com_position=np.zeros(3))
+    if mode == "named":
+        link.urdf_collision_overrides["pad"] = DexsimCollisionDesc(dynamic_friction=0.7)
+    elif mode == "combine":
+        link.collisions = [
+            CollisionDesc(dexsim=DexsimCollisionDesc(friction_combine_mode=1))
+        ]
+    else:
+        link.collisions = [
+            CollisionDesc(
+                dexsim=DexsimCollisionDesc(
+                    compliant_contact_stiffness=8000.0, compliant_contact_damping=40.0
+                )
+            )
+        ]
+    events = []
+    raw = _RawBody()
+    handle = SimpleNamespace(
+        _physics_binding=SimpleNamespace(
+            get_physical_body=lambda name: raw,
+            set_physical_attr=lambda *args: events.append("link"),
+        ),
+        articulation_desc=ArticulationDesc(name="robot"),
+        _desc_shared=True,
+        apply_dexsim_contact_properties=lambda: events.append("contacts"),
+    )
+    _apply_dexsim_source_overlay(handle, ArticulationDesc(name="robot", links=[link]))
+    assert events == ["link", "contacts"]
+    assert bool(handle.articulation_desc.links[0].urdf_collision_overrides) == (
+        mode == "named"
+    )
 
 
 class _RawBody:

@@ -424,6 +424,21 @@ class ArticulationViewBase(ABC):
         """Fetch link velocities into ``data`` using provided scratch buffers."""
         ...
 
+    def fetch_link_acceleration(
+        self,
+        data: torch.Tensor,
+        linear_data: torch.Tensor,
+        angular_data: torch.Tensor,
+    ) -> torch.Tensor:
+        """Fetch world-frame COM linear and angular acceleration when supported."""
+        raise NotImplementedError("link acceleration is unavailable for this backend")
+
+    def fetch_link_incoming_joint_force(self, data: torch.Tensor) -> torch.Tensor:
+        """Fetch child-joint-frame force then torque when supported."""
+        raise NotImplementedError(
+            "incoming joint wrench is unavailable for this backend"
+        )
+
     @abstractmethod
     def apply_root_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | torch.Tensor

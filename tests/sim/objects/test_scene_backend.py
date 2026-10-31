@@ -21,6 +21,8 @@ import inspect
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import numpy as np
+
 import pytest
 import torch
 from dexsim.scene import ArticulationBatch, RigidBodyBatch, Scene
@@ -553,6 +555,65 @@ def test_articulation_data_uses_scene_view(backend: str) -> None:
     assert isinstance(data.articulation_view, SceneArticulationView)
     assert data.is_newton_backend is (backend == "newton")
     assert scene.articulation_batch_objects == entities
+
+
+def test_link_dynamics_buffers_are_float32_borrowed_and_refreshed() -> None:
+    scene = _Scene("dexsim")
+    data = ArticulationData([_ArticulationEntity()] * 2, scene, torch.device("cpu"))
+    shape = (data.num_instances, data.num_links, 6)
+    acceleration = torch.arange(
+        torch.tensor(shape).prod().item(), dtype=torch.float32
+    ).reshape(shape)
+    incoming = acceleration + 100
+
+    def read(out: torch.Tensor, values: torch.Tensor) -> int:
+        out.copy_(values)
+        return len(values)
+
+    batch = scene.articulation_batch
+    batch.fetch_link_linear_acceleration = lambda out: read(out, acceleration[..., :3])
+    batch.fetch_link_angular_acceleration = lambda out: read(out, acceleration[..., 3:])
+    batch.fetch_link_incoming_joint_force = lambda out: read(out, incoming)
+    previous_dtype = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(torch.float64)
+        actual_acceleration = data.body_link_acceleration
+        actual_incoming = data.body_link_incoming_joint_force
+    finally:
+        torch.set_default_dtype(previous_dtype)
+    assert actual_acceleration.dtype == actual_incoming.dtype == torch.float32
+    torch.testing.assert_close(actual_acceleration, acceleration)
+    torch.testing.assert_close(actual_incoming, incoming)
+    acceleration.add_(10)
+    incoming.add_(20)
+    assert data.body_link_acceleration.data_ptr() == actual_acceleration.data_ptr()
+    assert data.body_link_incoming_joint_force.data_ptr() == actual_incoming.data_ptr()
+    torch.testing.assert_close(actual_acceleration, acceleration)
+    torch.testing.assert_close(actual_incoming, incoming)
+
+
+def test_incoming_joint_frames_follow_public_link_order_and_are_copies() -> None:
+    scene = _Scene("dexsim")
+    scene.articulation_batch.link_counts = (2, 2)
+    scene.articulation_batch.link_names_per_articulation = (("root", "tip"),) * 2
+    scene.articulation_batch.link_width = 2
+    entities = [_ArticulationEntity()] * 2
+    data = ArticulationData(entities, scene, torch.device("cpu"))
+    target = np.eye(4, dtype=np.float32)
+    target[:3, :3] = [[1, 0, 0], [0, 0, -1], [0, 1, 0]]
+    target[:3, 3] = [0.1, 0.2, 0.3]
+    for entity in entities:
+        entity.articulation_desc = SimpleNamespace(
+            joints=[
+                SimpleNamespace(child_link_name=data.link_names[-1], target_pose=target)
+            ]
+        )
+    actual = data.body_link_incoming_joint_frames
+    assert actual.shape == (2, data.num_links, 4, 4)
+    torch.testing.assert_close(actual[:, -1], torch.from_numpy(target).expand(2, 4, 4))
+    torch.testing.assert_close(actual[:, 0], torch.eye(4).expand(2, 4, 4))
+    actual[:, -1, :3, 3] = 0
+    np.testing.assert_allclose(target[:3, 3], [0.1, 0.2, 0.3], atol=1e-8)
 
 
 @pytest.mark.parametrize("backend", ["dexsim", "newton"])

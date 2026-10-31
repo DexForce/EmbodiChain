@@ -61,6 +61,7 @@ lewm = [
   "transformers>=4.53,<4.54",
   "einops>=0.8,<0.9",
   "torchvision>=0.22,<0.23",
+  "hdf5plugin>=6.0,<7",
 ]
 policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.

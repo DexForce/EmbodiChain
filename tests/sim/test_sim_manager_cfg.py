@@ -35,6 +35,56 @@ from embodichain.lab.sim.physics import newton as newton_physics
 from embodichain.lab.sim import sim_manager
 
 
+@pytest.mark.no_sim
+@pytest.mark.parametrize("enable_tgs", [True, False])
+def test_default_scene_settings_are_available_when_world_captures_them(
+    monkeypatch: pytest.MonkeyPatch,
+    enable_tgs: bool,
+) -> None:
+    native_settings = {
+        "gravity": [0.0, 0.0, -9.81],
+        "bounce_threshold": 2.0,
+        "enable_ccd": False,
+        "enable_tgs": True,
+    }
+    monkeypatch.setattr(
+        sim_manager.dexsim,
+        "set_physics_config",
+        lambda **settings: native_settings.update(settings),
+    )
+    monkeypatch.setattr(
+        sim_manager.dexsim, "set_physics_gpu_memory_config", lambda **_settings: None
+    )
+    cfg = SimulationManagerCfg(
+        physics_cfg=DefaultPhysicsCfg(
+            gravity=(0, 0, -3),
+            bounce_threshold=0.42,
+            enable_ccd=True,
+            enable_tgs=enable_tgs,
+        )
+    )
+    backend = DefaultPhysicsBackend(SimpleNamespace(device=torch.device("cpu")))
+
+    backend.configure_world(SimpleNamespace(), cfg)
+    # PhysX captures these settings during native World construction.
+    captured_scene = {name: native_settings[name] for name in native_settings}
+    backend.activate(cfg)
+
+    assert captured_scene["gravity"] == [0.0, 0.0, -3.0]
+    assert captured_scene["bounce_threshold"] == 0.42
+    assert captured_scene["enable_ccd"] is True
+    assert captured_scene["enable_tgs"] is enable_tgs
+
+
+@pytest.mark.no_sim
+def test_default_ccd_capability_is_validated_before_world_creation() -> None:
+    cfg = SimulationManagerCfg(physics_cfg=DefaultPhysicsCfg(enable_ccd=True))
+    backend = DefaultPhysicsBackend(SimpleNamespace(device=torch.device("cuda:0")))
+
+    with pytest.raises(ValueError, match="Direct GPU.*enable_ccd"):
+        backend.configure_world(SimpleNamespace(), cfg)
+
+
 def test_simulation_manager_cfg_uses_default_physics_cfg() -> None:
     cfg = SimulationManagerCfg()
 

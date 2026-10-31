@@ -1,0 +1,74 @@
+diff --git a/physx/source/gpuarticulation/src/CUDA/internalConstraints2.cu b/physx/source/gpuarticulation/src/CUDA/internalConstraints2.cu
+index 4110b3a..4deb232 100644
+--- a/physx/source/gpuarticulation/src/CUDA/internalConstraints2.cu
++++ b/physx/source/gpuarticulation/src/CUDA/internalConstraints2.cu
+@@ -634,6 +634,7 @@ static  __device__ void setupInternalMimicJointConstraints
+ 		const PxU32 dofB = artiLinks[linkB].mInvDofIds[axisB][threadIndexInWarp];
+ 		mimicJoints[i].mInternalData.mDofA[threadIndexInWarp] = dofA;
+ 		mimicJoints[i].mInternalData.mDofB[threadIndexInWarp] = dofB;
++		mimicJoints[i].mInternalData.accumulatedImpulse[threadIndexInWarp] = 0.0f;
+ 
+ 		//Compute all 4 response terms.	
+ 		const PxReal rAA = computeMimicJointSelfResponse(linkA, dofA, artiLinks, artiDofs, threadIndexInWarp);
+@@ -2576,7 +2577,7 @@ static __device__ void solveInternalMimicJointConstraints(
+ 	
+ 	for (PxU32 i = 0; i < numMimicJoints; ++i)
+ 	{
+-		const PxgArticulationBlockMimicJointData& mimicJointData = artiMmicJoints[i];
++		PxgArticulationBlockMimicJointData& mimicJointData = artiMmicJoints[i];
+ 		const PxU32 linkA = mimicJointData.mLinkA[threadIndexInWarp];
+ 		const PxU32 linkB = mimicJointData.mLinkB[threadIndexInWarp];
+ 		const PxU32 dofA = mimicJointData.mInternalData.mDofA[threadIndexInWarp];
+@@ -2614,12 +2615,14 @@ static __device__ void solveInternalMimicJointConstraints(
+ 		{
+ 			PxReal jointImpDofA = 0.0f;
+ 			PxReal jointImpDofB = 0.0f;
++			PxReal accumulatedImpulse = isTGS ? 0.0f : mimicJointData.mInternalData.accumulatedImpulse[threadIndexInWarp];
+ 			computeMimicJointImpulses(
+ 				biasCoefficient, dt, recipDt, 
+ 				qA, qB, qADot, qBDot, 
+ 				gearRatio, offset, naturalFrequency, dampingRatio, mimicJointRecipEffectiveInertia, 
+ 				isVelocityIteration,
+-				jointImpDofA, jointImpDofB);
++				jointImpDofA, jointImpDofB, isTGS ? NULL : &accumulatedImpulse);
++			if (!isTGS) mimicJointData.mInternalData.accumulatedImpulse[threadIndexInWarp] = accumulatedImpulse;
+ 			jointImpulseA[dofA] = jointImpDofA;
+ 			jointImpulseB[dofB] = jointImpDofB;
+ 		}
+diff --git a/physx/source/gpusimulationcontroller/include/PxgArticulation.h b/physx/source/gpusimulationcontroller/include/PxgArticulation.h
+index a578e30..d08a657 100644
+--- a/physx/source/gpusimulationcontroller/include/PxgArticulation.h
++++ b/physx/source/gpusimulationcontroller/include/PxgArticulation.h
+@@ -628,6 +628,7 @@ namespace physx
+ 		//Impulse = [1, gearRatio]^T * [-b + J*v] /[J * M^-1 * J^T + cfm]
+ 		//Impulse = [1, gearRatio]^T * [-b + J*v] / [recipEffectiveInertia + cfm];
+ 		PxReal recipEffectiveInertia[32];
++		PxReal accumulatedImpulse[32];
+ 	};
+ 
+ 	struct PxgArticulationBlockMimicJointData
+diff --git a/physx/source/lowleveldynamics/shared/DyCpuGpuArticulation.h b/physx/source/lowleveldynamics/shared/DyCpuGpuArticulation.h
+index d7ecfd2..cdd9c57 100644
+--- a/physx/source/lowleveldynamics/shared/DyCpuGpuArticulation.h
++++ b/physx/source/lowleveldynamics/shared/DyCpuGpuArticulation.h
+@@ -498,7 +498,8 @@ PX_CUDA_CALLABLE PX_FORCE_INLINE void computeMimicJointImpulses
+  const PxReal naturalFrequency, const PxReal dampingRatio,
+  const PxReal r,
+  const bool isVelocityIteration,
+- PxReal& jointImpA, PxReal& jointImpB)
++ PxReal& jointImpA, PxReal& jointImpB,
++ PxReal* accumulatedImpulse = NULL)
+ {
+ 	//For velocity iterations we have erp = 0.
+ 	//But erp = dt*kp/(dt*kp + kd). If it is 0
+@@ -577,7 +578,9 @@ PX_CUDA_CALLABLE PX_FORCE_INLINE void computeMimicJointImpulses
+ 	const PxReal b = erp * C * invDt;
+ 	const PxReal Jv = qADot + gearRatio * qBDot;
+ 	const PxReal effectiveInertia = 1.0f / (r + cfm);
+-	const PxReal lambda = -(b + Jv) * effectiveInertia;
++	const PxReal previousImpulse = accumulatedImpulse ? *accumulatedImpulse : 0.0f;
++	const PxReal lambda = -(b + Jv + cfm * previousImpulse) * effectiveInertia;
++	if (accumulatedImpulse) *accumulatedImpulse += lambda;
+ 	jointImpA = lambda;
+ 	jointImpB = gearRatio * lambda;
+ }

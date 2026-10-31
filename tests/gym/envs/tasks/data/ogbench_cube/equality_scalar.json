@@ -1,0 +1,27 @@
+{
+  "source": "MuJoCo compiled independent two-joint equality, no contacts or actuators",
+  "mujoco_version": "3.11.0",
+  "solref": [
+    0.005,
+    1.0
+  ],
+  "solimp": [
+    0.95,
+    0.99,
+    0.001,
+    0.5,
+    2.0
+  ],
+  "inverse_effective_inertia": 20.0,
+  "KBIP": [
+    40812.162024283236,
+    404.040404040404,
+    0.95,
+    0.0
+  ],
+  "regularizer": 1.0526315789473695,
+  "force_stiffness": 36832.976226915576,
+  "force_damping": 383.8383838383834,
+  "applied_opposing_torque": 0.1,
+  "relative_position_at_0_5_s": 2.714923171679667e-06
+}

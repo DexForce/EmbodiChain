@@ -140,12 +140,21 @@ class DefaultPhysicsCfg(PhysicsBackendCfg):
     Enable this for large batches to avoid exhausting the native material table.
     """
 
+    enable_tgs: bool = True
+    """Use native Temporal Gauss-Seidel; ``False`` selects Projected Gauss-Seidel.
+
+    This is a scene-creation choice. Configure it before constructing the
+    simulation manager; changing global defaults does not switch a live scene.
+    """
+
     bounce_threshold: float = 2.0
     """Relative normal-speed threshold below which contacts do not bounce [m/s]."""
 
     enable_ccd: bool = False
     """Whether to enable scene-level continuous collision detection (CCD).
 
+    Default supports this on CPU. Its CUDA path uses the PhysX Direct GPU API,
+    which rejects CCD; that combination raises before native World creation.
     A rigid body must also set :attr:`DefaultRigidBodyPropertiesCfg.enable_ccd`
     for CCD to be used on that body.
     """
@@ -185,6 +194,7 @@ class DefaultPhysicsCfg(PhysicsBackendCfg):
             "gravity": _gravity_vector(self.gravity),
             "bounce_threshold": self.bounce_threshold,
             "enable_ccd": self.enable_ccd,
+            "enable_tgs": self.enable_tgs,
             "enable_enhanced_determinism": False,
             "enable_friction_every_iteration": True,
         }

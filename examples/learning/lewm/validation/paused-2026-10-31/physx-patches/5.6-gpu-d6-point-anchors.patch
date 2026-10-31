@@ -1,0 +1,59 @@
+diff --git a/physx/source/gpusolver/include/PxgD6Joint.h b/physx/source/gpusolver/include/PxgD6Joint.h
+index 213d19c..861afe5 100644
+--- a/physx/source/gpusolver/include/PxgD6Joint.h
++++ b/physx/source/gpusolver/include/PxgD6Joint.h
+@@ -85,7 +85,9 @@ namespace physx
+ 			//            to the PhysXExtensions library only)
+ 
+ 			eACCELERATION	= (1 << 0),	//!< drive spring is for the acceleration at the joint (rather than the force) 
+-			eOUTPUT_FORCE	= (1 << 1)	// see PxD6JointDriveFlag::eOUTPUT_FORCE
++			eOUTPUT_FORCE	= (1 << 1),	// see PxD6JointDriveFlag::eOUTPUT_FORCE
++			// Optional DexSim GPU extension. The existing descriptor layout is unchanged.
++			eSEPARATE_ANCHORS = (1 << 2)
+ 		};
+ 	};
+ 	typedef PxFlags<PxgD6JointDriveFlag::Enum, PxU32> PxgD6JointDriveFlags;
+@@ -144,4 +146,4 @@ namespace physx
+ 	};
+ }
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/physx/source/gpusolver/src/CUDA/constraintBlockPrePrep.cu b/physx/source/gpusolver/src/CUDA/constraintBlockPrePrep.cu
+index 6a023d2..7ccca90 100644
+--- a/physx/source/gpusolver/src/CUDA/constraintBlockPrePrep.cu
++++ b/physx/source/gpusolver/src/CUDA/constraintBlockPrePrep.cu
+@@ -535,7 +535,13 @@ static __device__ PxU32 D6JointSolverPrep(Px1DConstraint* constraints, const Pxg
+ 		{
+ 			// -driveVelocity because velTarget is child (body1) - parent (body0) and Jacobian is 1 for body0 and -1 for parent
+ 			if(driving & (1<<(PxgD6Drive::eX+i)))
+-				g.linear(&constraints[constraintCount++], cA2w_m[i], -data.driveLinearVelocity[i], posErr[i], drives[PxgD6Drive::eX+i]); 
++			{
++				Px1DConstraint* row = &constraints[constraintCount++];
++				const PxgD6JointDrive& drive = drives[PxgD6Drive::eX+i];
++				g.linear(row, cA2w_m[i], -data.driveLinearVelocity[i], posErr[i], drive);
++				if(drive.flags & PxgD6JointDriveFlag::eSEPARATE_ANCHORS)
++					row->angular0 = (cA2w.p - bA2w.p).cross(cA2w_m[i]);
++			}
+ 		}
+ 	}
+ 
+diff --git a/physx/source/physxgpu/src/PxgPhysXGpu.cpp b/physx/source/physxgpu/src/PxgPhysXGpu.cpp
+index a438106..0f7881e 100644
+--- a/physx/source/physxgpu/src/PxgPhysXGpu.cpp
++++ b/physx/source/physxgpu/src/PxgPhysXGpu.cpp
+@@ -250,6 +250,13 @@ Dy::Context* PxgPhysXGpu::createGpuDynamicsContext(Cm::FlushPool& taskPool, PxsK
+ // Implementation of exported functions
+ //----------------------------------------------------------------------------//
+ 
++// Scalar capability query for the matching optional D6 GPU drive extension.
++// It adds no fields or virtual methods to PhysX's existing public interfaces.
++PX_C_EXPORT PX_PHYSX_GPU_API PxU32 PX_CALL_CONV PxGetDexSimGpuConstraintCapabilities()
++{
++	return 1u;
++}
++
+ PxPhysXGpu* PxCreatePhysXGpu()
+ {
+ 	createPxgBroadphase();

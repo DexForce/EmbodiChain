@@ -27,6 +27,18 @@ and readiness for each committed topology revision. DexSim `SceneBuilder` and
 and backend handles. `add_*()` returns a declared facade; `prepare()` binds
 that same object in place. UIDs identify resources in the manager registry.
 
+Tasks that own their ground can disable manager-owned plane creation with
+`SimulationManagerCfg.enable_default_plane`. Rigid constraints are manager-owned
+resources and are removed before either endpoint. Default point connections use
+D6 joints with free rotation; endpoints can name physical articulation links.
+Optional compliant linear drives require the corresponding SDK capability and
+fail explicitly when unavailable. Creation and runtime drive updates stay in
+the manager; frame and update semantics are in
+[physics configuration](physics-configuration.md). SDK-native link access stays in its adapter.
+Spawn replication replaces arena/isolation filter words while preserving
+body-specific category/exclusion masks. Static filters must be authored before
+materialization; applying only arena defaults discards task collision semantics.
+
 `VisualObject` owns render-only root poses, visibility and material assignments,
 with no rigid-body buffers or collision API. Its config lives in
 `cfg/visual_object.py`; mesh files use `MeshCfg.fpath`, as for rigid objects.

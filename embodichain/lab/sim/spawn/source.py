@@ -436,6 +436,31 @@ def _apply_dexsim_source_overlay(
     if effective.joints:
         _apply_dexsim_joint_properties(binding, effective.joints)
 
+    has_contact_overrides = any(
+        getattr(link, "urdf_collision_overrides", None)
+        or any(
+            collision.dexsim is not None
+            and any(
+                getattr(collision.dexsim, name, None) is not None
+                for name in (
+                    "friction_combine_mode",
+                    "restitution_combine_mode",
+                    "compliant_contact_stiffness",
+                    "compliant_contact_damping",
+                )
+            )
+            for collision in link.collisions
+        )
+        for link in effective.links
+    )
+    if has_contact_overrides:
+        apply_contacts = getattr(handle, "apply_dexsim_contact_properties", None)
+        if apply_contacts is None:
+            raise RuntimeError(
+                "Default contact overrides require SDK contact-property support"
+            )
+        apply_contacts()
+
 
 def _restore_dexsim_mass_override(rigid_body: Any, link: Any) -> None:
     """Correct Default's non-replacing source-mass behavior.

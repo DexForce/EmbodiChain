@@ -2034,13 +2034,19 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
         SimulationManager.flush_cleanup_queue()
 
 
-def test_default_plane_authors_repeated_uv_before_spawn() -> None:
+@pytest.mark.parametrize("enabled", [True, False])
+def test_default_plane_authors_repeated_uv_before_spawn(enabled: bool) -> None:
     sim = object.__new__(SimulationManager)
     sim._spawn_scene = MagicMock()
     sim._spawn_scene.handles.return_value = []
     sim._spawn_default_plane_material = object()
+    sim.sim_config = SimulationManagerCfg(enable_default_plane=enabled)
 
     sim._declare_spawn_default_plane()
+
+    if not enabled:
+        sim._spawn_scene.declare.assert_not_called()
+        return
 
     descriptor = sim._spawn_scene.declare.call_args.args[2]
     expected_repeat = 500.0  # One two-metre texture tile across a 1000 m plane.

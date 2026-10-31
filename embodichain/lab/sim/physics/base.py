@@ -76,11 +76,12 @@ class PhysicsBackend(ABC):
         world_config: "dexsim.WorldConfig",
         sim_config: "SimulationManagerCfg",
     ) -> None:
-        """Apply backend-specific fields to the dexsim ``WorldConfig``.
+        """Prepare backend settings and the native ``WorldConfig`` before creation.
 
         Called from :meth:`SimulationManager._convert_sim_config` after the
         shared world-config fields and the resolved device have been set, so
-        implementations may read ``self._manager.device``.
+        implementations may read ``self._manager.device``. Default also submits
+        native scene globals here, before World captures its scene descriptor.
 
         Args:
             world_config: The dexsim world config to mutate in place.
@@ -91,9 +92,10 @@ class PhysicsBackend(ABC):
     def activate(self, sim_config: "SimulationManagerCfg") -> None:
         """Perform backend setup immediately after the dexsim World is created.
 
-        Default configures the native DexSim globals. Newton is already
-        registered from ``WorldConfig.newton_cfg`` and therefore has no
-        additional activation work.
+        Scene-creation settings belong in :meth:`configure_world`, before
+        World captures them. Default submits its native globals there; Newton
+        registers from ``WorldConfig.newton_cfg``. Neither needs an additional
+        activation step after construction.
         """
 
     def prepare_spawn_runtime(self, result: "dexsim.scene.Scene") -> None:

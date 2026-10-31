@@ -1,0 +1,78 @@
+{
+  "source": "independently compiled MuJoCo3.11 KBIP/R at zero point residual, official solref/solimp",
+  "mujoco_version": "3.11.0",
+  "cases": [
+    {
+      "name": "two_sliders",
+      "solref": [
+        0.005,
+        1.0
+      ],
+      "solimp": [
+        0.95,
+        0.99,
+        0.001,
+        0.5,
+        2.0
+      ],
+      "approximate_inverse_weight": 1.5,
+      "force_stiffness": 491106.3496922077,
+      "force_damping": 5117.845117845112,
+      "source_KBIP": [
+        40812.162024283236,
+        404.040404040404,
+        0.95,
+        0.0
+      ],
+      "source_R": 0.07894736842105271
+    },
+    {
+      "name": "official_connect_0",
+      "solref": [
+        0.005,
+        1.0
+      ],
+      "solimp": [
+        0.95,
+        0.99,
+        0.001,
+        0.5,
+        2.0
+      ],
+      "approximate_inverse_weight": 2.1296269295510344,
+      "force_stiffness": 345910.12834985775,
+      "force_damping": 3604.747653330096,
+      "source_KBIP": [
+        40812.162024283236,
+        404.040404040404,
+        0.95,
+        8.88178419700126e-12
+      ],
+      "source_R": 0.11208562787110717
+    },
+    {
+      "name": "official_connect_1",
+      "solref": [
+        0.005,
+        1.0
+      ],
+      "solimp": [
+        0.95,
+        0.99,
+        0.001,
+        0.5,
+        2.0
+      ],
+      "approximate_inverse_weight": 2.1965907068206123,
+      "force_stiffness": 335364.9463465894,
+      "force_damping": 3494.8557566644586,
+      "source_KBIP": [
+        40812.162024283236,
+        404.040404040404,
+        0.95,
+        8.88178419700126e-12
+      ],
+      "source_R": 0.11561003720108497
+    }
+  ]
+}

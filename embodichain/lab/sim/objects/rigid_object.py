@@ -723,7 +723,8 @@ class RigidObject(BatchEntity):
             filter_data (torch.Tensor): [N, 4] of int.
                 First element of each object is arena id.
                 If 2nd element is 0, the object will collision with all other objects in world.
-                3rd and 4th elements are not used currently.
+                The 3rd word is a category mask and the 4th excludes categories.
+                A category/exclusion intersection rejects that contact pair.
 
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used. Defaults to None.
         """

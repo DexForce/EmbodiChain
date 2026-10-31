@@ -1,0 +1,39 @@
+diff --git a/physx/source/gpuarticulation/src/CUDA/articulationImpulseResponse.cuh b/physx/source/gpuarticulation/src/CUDA/articulationImpulseResponse.cuh
+index 8cb1b4d..9c2c523 100644
+--- a/physx/source/gpuarticulation/src/CUDA/articulationImpulseResponse.cuh
++++ b/physx/source/gpuarticulation/src/CUDA/articulationImpulseResponse.cuh
+@@ -354,6 +354,7 @@ static __device__ void averageLinkImpulsesAndPropagate2(uint2* PX_RESTRICT isSla
+ 
+ 				const Cm::UnAlignedSpatialVector Z = loadSpatialVector(linkData.mScratchImpulse, threadIndexInWarp);
+ 				const Cm::UnAlignedSpatialVector parentScratchImpulse = loadSpatialVector(artiLinks[parent].mScratchImpulse, threadIndexInWarp);
++				addSpatialVector(linkData.mSolverSpatialImpulse, Z, threadIndexInWarp);
+ 
+ 				const Cm::UnAlignedSpatialVector propagatedZ = propagateImpulseW_0(PxVec3(child2Parentx, child2Parenty, child2Parentz),
+ 					dofData, Z,
+@@ -380,4 +381,4 @@ static __device__ void averageLinkImpulsesAndPropagate2(uint2* PX_RESTRICT isSla
+ 	articulationBlock.mLinkWithDeferredImpulse[threadIndexInWarp] = commonNode;
+ }
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/physx/source/gpuarticulation/src/CUDA/forwardDynamic2.cu b/physx/source/gpuarticulation/src/CUDA/forwardDynamic2.cu
+index 4bc28ec..ffb5727 100644
+--- a/physx/source/gpuarticulation/src/CUDA/forwardDynamic2.cu
++++ b/physx/source/gpuarticulation/src/CUDA/forwardDynamic2.cu
+@@ -4019,6 +4019,7 @@ static void __device__ PxcFsFlushVelocity(PxgArticulationBlockData& articulation
+ 
+ 		//store back vel to block velocity data
+ 		storeSpatialVector(artiLinks[0].mMotionVelocity, vel, threadIndexInWarp);
++		addSpatialVector(artiLinks[0].mSolverSpatialDeltaVel, deltaV, threadIndexInWarp);
+ 
+ 		storeSpatialVector(articulation.mRootDeferredZ, Cm::UnAlignedSpatialVector::Zero(), threadIndexInWarp);
+ 	}
+@@ -4055,6 +4056,7 @@ static void __device__ PxcFsFlushVelocity(PxgArticulationBlockData& articulation
+ 				deltaV = loadSpatialVector(artiLinks[parent].mScratchDeltaV, threadIndexInWarp);
+ 
+ 			deltaV = propagateAccelerationW(tLink, dofs, nbDofs, deltaV, threadIndexInWarp);
++			addSpatialVector(tLink.mSolverSpatialDeltaVel, deltaV, threadIndexInWarp);
+ 
+ 			//zeroing mDeferredQstZ
+ 			for (PxU32 ind = 0; ind < nbDofs; ++ind)

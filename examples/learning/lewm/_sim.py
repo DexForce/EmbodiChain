@@ -30,14 +30,14 @@ CONFIG = Path(__file__).parent / "configs/push_cube_visual.json"
 SPLIT_SEEDS = {"train": 100_000, "validation": 200_000, "test": 300_000}
 
 
-def make_env(device: str, render_mode: str = "legacy") -> tuple[Any, dict[str, Any]]:
+def make_env(device: str, render_mode: str = "default") -> tuple[Any, dict[str, Any]]:
     import gymnasium as gym
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
     from embodichain.lab.gym.utils.registration import discover_task_packages
 
     config = json.loads(CONFIG.read_text())
-    if render_mode not in {"legacy", "stable"}:
-        raise ValueError("render_mode must be legacy or stable")
+    if render_mode not in {"default", "legacy", "stable"}:
+        raise ValueError("render_mode must be default, legacy, or stable")
     if render_mode == "stable":
         config["render_cfg"] = {"denoising": {"window": "off", "offscreen": "off"}}
     config.update(
@@ -52,12 +52,28 @@ def make_env(device: str, render_mode: str = "legacy") -> tuple[Any, dict[str, A
     return env, config
 
 
-def render_contract(config: dict[str, Any]) -> dict[str, str]:
-    """Resolve the offscreen rendering settings recorded with image data."""
-    denoising = config.get("render_cfg", {}).get("denoising", {})
+def render_contract(env: Any) -> dict[str, str]:
+    """Record the simulator's resolved offscreen rendering settings."""
+    render = env.unwrapped.sim.sim_config.render_cfg
     return {
-        "renderer": config.get("renderer", "hybrid"),
-        "offscreen_denoising": denoising.get("offscreen", "dlss"),
+        "renderer": render.renderer,
+        "offscreen_denoising": render.denoising.offscreen,
+    }
+
+
+def environment_contract(env: Any, config: dict[str, Any]) -> dict[str, Any]:
+    """Describe raw observations and controls independently of model blocking."""
+    raw = env.unwrapped
+    return {
+        "action_dim": raw.single_action_space.shape[0],
+        "action_semantics": "joint_position.relative@1",
+        "step_dt": raw.step_dt,
+        "action_scale": 0.1,
+        "action_clip": 1.0,
+        "camera": config["sensor"][0],
+        "environment": "PushCubeRL",
+        "physics": config["physics"],
+        "render": render_contract(env),
     }
 
 
@@ -84,10 +100,17 @@ def reset(env: Any, seed: int) -> tuple[Any, np.random.Generator]:
     return obs, rng
 
 
-def goal_image(env: Any) -> np.ndarray:
-    """Render the target cube pose, then restore the complete B=1 scene state."""
+def goal_image(env: Any, render_frames: int = 32) -> np.ndarray:
+    """Render a settled visual goal and wash its history out after restoration.
+
+    Rendering advances the denoiser history without stepping physics. The caller
+    renders its next observation after this function, completing the same number
+    of restored-scene frames. ``render_frames=1`` retains the original protocol.
+    """
     from embodichain.lab.sim.scene import SceneView, capture_state, restore_state
 
+    if type(render_frames) is not int or render_frames < 1:
+        raise ValueError("render_frames must be a positive integer")
     raw = env.unwrapped
     view = SceneView(raw.sim)
     before = capture_state(view)
@@ -97,10 +120,14 @@ def goal_image(env: Any) -> np.ndarray:
     try:
         cube.set_local_pose(pose)
         view.sync_render_state()
-        with raw.sim.render_frame():
-            target = frame(raw.get_obs())
+        for _ in range(render_frames):
+            with raw.sim.render_frame():
+                target = frame(raw.get_obs())
     finally:
         restore_state(view, before, qpos_tolerance=1e-4)
+    for _ in range(render_frames - 1):
+        with raw.sim.render_frame():
+            raw.get_obs()
     after = capture_state(view)
     for initial, restored in zip(before.batches[0], after.batches[0]):
         for name in (
@@ -159,7 +186,7 @@ def collect(
     split: str,
     episodes: int,
     device: str,
-    render_mode: str = "legacy",
+    render_mode: str = "default",
     start_index: int = 0,
 ) -> dict[str, Any]:
     """Collect complete episodes to a split-owned, chunked HDF5 file."""
@@ -183,7 +210,7 @@ def collect(
         "camera": config["sensor"][0],
         "environment": "PushCubeRL",
         "physics": "default",
-        "render": render_contract(config),
+        "render": render_contract(env),
     }
     successes = 0
     ik_failures = 0

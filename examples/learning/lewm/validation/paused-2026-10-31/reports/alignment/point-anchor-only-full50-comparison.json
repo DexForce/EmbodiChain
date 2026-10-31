@@ -1,0 +1,20 @@
+{
+  "scope": "only authored point moment arms enabled; accepted controls/gains/mimic/iteration policy unchanged",
+  "successes": 35,
+  "agreement": 47,
+  "source_only": [
+    7
+  ],
+  "native_only": [
+    12,
+    41
+  ],
+  "post_step_cube_median_p95_max_m": [
+    0.003400315828282499,
+    0.05382643820835925,
+    0.12941718275266692
+  ],
+  "actions_nan_exact": true,
+  "elapsed_seconds": 92.07985500991344,
+  "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-point-anchor-only-point-source-replay/report.json"
+}

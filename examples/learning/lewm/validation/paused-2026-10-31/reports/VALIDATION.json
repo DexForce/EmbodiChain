@@ -1,0 +1,1211 @@
+{
+  "stage": "point_anchor_capability_verified_integrated_candidate_rejected",
+  "created_utc": "2026-10-31T07:18:07.565455+00:00",
+  "goal_complete": false,
+  "dexsim_physics_alignment_verified": false,
+  "queries_sha256": "7d2d66317ab10644173308fb9a3a8eaf9a9edc32889047c89d22e54a1f9f8b8f",
+  "initially_near_goals": 16,
+  "all_initially_near_queries_succeed": true,
+  "reference": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment-point-response-pgs",
+  "runs": {
+    "mujoco": {
+      "successes": 34,
+      "queries": 50,
+      "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/mujoco/report.json"
+    },
+    "dexsim_upstream": {
+      "successes": 33,
+      "queries": 50,
+      "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-reference-planner-point-pgs-compliant/report.json",
+      "paired": {
+        "same_outcome": 49,
+        "source_only": [
+          7
+        ],
+        "native_only": [],
+        "first_raw_plan_bit_identical": true,
+        "first_raw_plan_max_abs_error": 0.0,
+        "first25_controls_common_finite_max_error": 0.0,
+        "reference_plan_space": "standardized",
+        "native_plan_space": "raw",
+        "inverse_transform": "actual sklearn StandardScaler.inverse_transform"
+      },
+      "elapsed_seconds": 94.95121389999986,
+      "frozen_runtime_engine_sha256": "80c085fb6737e7e3cf3a1fb346bf76027aff2d02129284324c68f5a82c40852d",
+      "scope_note": "frozen planner campaign; not rerun for unused additive API; fresh full50 baseline trace matches old provider exactly"
+    },
+    "dexsim_migrated": {
+      "successes": 35,
+      "queries": 50,
+      "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-prototype-point-pgs-compliant/report.json",
+      "paired": {
+        "same_outcome": 49,
+        "source_only": [],
+        "native_only": [
+          12
+        ],
+        "first_raw_plan_bit_identical": false,
+        "first_raw_plan_max_abs_error": 5.379195213317871,
+        "first25_controls_common_finite_max_error": 5.379195213317871,
+        "reference_plan_space": "standardized",
+        "native_plan_space": "raw",
+        "inverse_transform": "actual sklearn StandardScaler.inverse_transform"
+      },
+      "elapsed_seconds": 80.02276865812019,
+      "frozen_runtime_engine_sha256": "80c085fb6737e7e3cf3a1fb346bf76027aff2d02129284324c68f5a82c40852d",
+      "scope_note": "frozen planner campaign; not rerun for unused additive API; fresh full50 baseline trace matches old provider exactly"
+    },
+    "dexsim_source_replay": {
+      "successes": 32,
+      "queries": 50,
+      "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-point-anchor-default-baseline-source-replay/report.json",
+      "paired": {
+        "same_outcome": 48,
+        "source_only": [
+          5,
+          7
+        ],
+        "native_only": [],
+        "raw_actions_and_nan_masks_exact": true,
+        "cube_error_median_m": 0.0030505417224045307,
+        "cube_error_p95_m": 0.04145623825548287,
+        "cube_error_max_m": 0.07855468031330225,
+        "first_step_median_m": 0.0005158916345646717,
+        "first_step_max_m": 0.009968814884469886
+      },
+      "elapsed_seconds": 93.48792774276808,
+      "previous_report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-source-action-replay-point-pgs-compliant/report.json",
+      "runtime_engine_sha256": "57dcde3308c4c49d9aaccf93d0d2ee04dbb42b9c88b3019cf87a7cf545230f22",
+      "previous_reports": [
+        "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-point-impulse-baseline-source-replay/report.json"
+      ]
+    }
+  },
+  "native_recipe": {
+    "physics_backend": "Default PhysX",
+    "native_solver": "PGS",
+    "friction_every_iteration": true,
+    "source_sleep_disabled": true,
+    "source_gravity_required": true,
+    "point_drive_units": "force spring/damping from source KBIP/R and compiled body_invweight0",
+    "mimic_frequency": 858.2887186362825,
+    "mimic_damping_ratio": 4.472135954999577,
+    "physical_bodies": 21,
+    "source_frames": 25,
+    "robot_mass_kg": 22.04750833884274,
+    "native_engine_sha256": "57dcde3308c4c49d9aaccf93d0d2ee04dbb42b9c88b3019cf87a7cf545230f22",
+    "native_gpu_sha256": "d499a135a2e37a328f349ae39df9bf1c5d4d932c987862759e6c11d84c8b36db",
+    "requires_both_vendor_patches": true,
+    "cpu_pgs_mimic_certified": false,
+    "point_drive_anchor_mode": "ordinary D6, optional point-anchor feature off",
+    "optional_point_anchor_patch_required_when_enabled": true
+  },
+  "mimic_scalar_validation": {
+    "scope": "independent two-hinge opposing torque, positions only; velocity iteration remains native policy",
+    "source_steady_rad": 2.714923171679667e-06,
+    "native_steady_rad": 2.714959691729746e-06,
+    "max_transient_position_error_rad": 2.583735234604265e-07,
+    "first10_source": [
+      0.0,
+      3.999999999999993e-07,
+      8.339964228407737e-07,
+      1.2119491138878114e-06,
+      1.5211965130315864e-06,
+      1.7689194737906044e-06,
+      1.965850806987519e-06,
+      2.1219672756653327e-06,
+      2.2456001131238197e-06,
+      2.3434708025820047e-06,
+      2.420936551178667e-06
+    ],
+    "first10_native": [
+      0.0,
+      4.145043419612193e-07,
+      7.657245646441879e-07,
+      1.0633225429046433e-06,
+      1.3154849511920474e-06,
+      1.529148676127079e-06,
+      1.710191440906783e-06,
+      1.8635937522049062e-06,
+      1.9935753243771615e-06,
+      2.1037121769040823e-06,
+      2.19703406401095e-06
+    ]
+  },
+  "expert_45_controls": {
+    "scope": "45 same source commands; not an isolated contact-law ablation",
+    "metrics": {
+      "MuJoCo 3.11": {
+        "max_height_m": 0.19167805864101947,
+        "peak_force_N": 49.52322743677256,
+        "mean_force_steps20_35_N": 47.535025506552145
+      },
+      "Prior TGS": {
+        "max_height_m": 0.23174221813678741,
+        "peak_force_N": 114.43511133988206,
+        "mean_force_steps20_35_N": 56.86509551022223
+      },
+      "PGS + source compliance": {
+        "max_height_m": 0.18915170431137085,
+        "peak_force_N": 130.85709042729778,
+        "mean_force_steps20_35_N": 47.82938873204615
+      }
+    }
+  },
+  "verification": {
+    "context_gate_passed": 42,
+    "sdk_regressions_passed": 110,
+    "black_version": "26.10.1",
+    "black_files": 1733,
+    "api_exports_documented": 3285,
+    "source_export_mass_gravity_fk_cases": 100,
+    "native_kinematics_inertial_audit": "pass",
+    "runtime_manifest": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/native-restored-pgs-runtime.json",
+    "benchmark_cases_passed": 4,
+    "prior_pgs_scope": {
+      "root_default_scope_passed": 560,
+      "root_default_scope_skipped": 2,
+      "root_scope_deselected": 75,
+      "context_gate_passed": 42,
+      "context_gate_overlaps_root_selection": true,
+      "sdk_regressions_passed": 93,
+      "optional_other_shape_cases_deselected": 3,
+      "black_version": "26.10.1",
+      "black_files": 1733,
+      "api_exports_documented": 3285,
+      "source_export_mass_gravity_fk_cases": 100,
+      "native_kinematics_inertial_audit": "pass",
+      "runtime_hash_checks": 78,
+      "runtime_manifest": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/native-point-pgs-runtime.json",
+      "benchmark_cases_passed": 4,
+      "benchmark_scope": "independent collisionless chains in one Arena, completed blocks, includes force writes; no before/after speedup claim"
+    },
+    "root_contact_schema_source_tests_passed": 195,
+    "root_additive_task_model_state_cfg_tests_passed": 120,
+    "root_additive_optional_gpu_skipped": 1,
+    "root_additive_newton_deselected": 39,
+    "sdk_broad_scope_note": "includes old duplicate default-iteration mimic test, not a4/100 sweep",
+    "sdk_final_articulation_scope_passed": 30,
+    "sdk_final_articulation_scope_overlaps_broad": true,
+    "benchmark_scope": "2 default-iteration mimic sizes plus2 compliant-contact/query sizes; not an iteration sweep; no speedup claim",
+    "initial_additive_root_abort": "missing SDL_VIDEODRIVER=dummy at renderer engine initialization; same exact selection passed after environment correction; original log retained",
+    "historical_formal_runtime_manifest": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/native-point-pgs-runtime.json",
+    "historical_formal_runtime_hash_checks": 78,
+    "current_source_runtime_hashes": 51,
+    "restored_task_focused_passed": 24,
+    "restored_related_passed": 521,
+    "restored_related_skipped": 2,
+    "restored_related_deselected": 75,
+    "restored_black_files": 1733,
+    "restored_api_exports": 3285
+  },
+  "benchmark": [
+    {
+      "_timestamp": "2026-10-31T05:04:14.851592",
+      "name": "pgs_mimic_compliance_25",
+      "params": {
+        "measure_steps": 100,
+        "num_envs": 25
+      },
+      "metrics": {
+        "status": "PASS",
+        "arena_count": 1,
+        "setup_mode": "independent_collisionless_chains",
+        "num_envs": 25,
+        "solver_iterations": "backend_default",
+        "solver": "PGS",
+        "warmup_steps": 250,
+        "measure_steps_per_block": 100,
+        "blocks": 5,
+        "completed_step_mean_ms": 1.4432999528944492,
+        "completed_step_median_ms": 1.435506441630423,
+        "env_steps_per_second": 17321.416764314334,
+        "equilibrium_max_relative_error": 2.9103830456733704e-07,
+        "wall_time_s": 6.713357448577881,
+        "steps": 600
+      }
+    },
+    {
+      "_timestamp": "2026-10-31T05:04:25.579534",
+      "name": "pgs_mimic_compliance_256",
+      "params": {
+        "measure_steps": 100,
+        "num_envs": 256
+      },
+      "metrics": {
+        "status": "PASS",
+        "arena_count": 1,
+        "setup_mode": "independent_collisionless_chains",
+        "num_envs": 256,
+        "solver_iterations": "backend_default",
+        "solver": "PGS",
+        "warmup_steps": 250,
+        "measure_steps_per_block": 100,
+        "blocks": 5,
+        "completed_step_mean_ms": 1.5591789837926626,
+        "completed_step_median_ms": 1.5676104929298162,
+        "env_steps_per_second": 164188.97551920987,
+        "equilibrium_max_relative_error": 2.9103830456733704e-07,
+        "wall_time_s": 7.962621688842773,
+        "steps": 600
+      }
+    },
+    {
+      "_timestamp": "2026-10-31T05:05:00.456549",
+      "name": "scene_contact_query_compliant_25",
+      "params": {
+        "backend": "dexsim_direct_gpu",
+        "num_envs": 1,
+        "num_queries": 1,
+        "contacts_per_env": 25,
+        "capacity_per_env": 100,
+        "settle_steps": 100,
+        "warmup_steps": 10,
+        "baseline_steps": 10,
+        "compliant_contact_stiffness": 8000.0,
+        "compliant_contact_damping": 40.0,
+        "device": "cuda:0"
+      },
+      "metrics": {
+        "backend": "dexsim_direct_gpu",
+        "num_envs": 1,
+        "num_queries": 1,
+        "contacts_per_env": 25,
+        "capacity_per_env": 100,
+        "settle_steps": 100,
+        "warmup_steps": 10,
+        "measure_steps": 50,
+        "query_create_ms": 82.7771108597517,
+        "query_noop_refresh_ms": 0.006489921361207962,
+        "mean_baseline_update_ms": 1.4068497344851494,
+        "mean_query_update_overhead_ms": 0.33320995047688484,
+        "contacts_per_second": 265718.93822185,
+        "dropped_rows": 0,
+        "counts_consistent": true,
+        "cuda_memory_growth_bytes": 0,
+        "max_cuda_temporary_bytes": 1024,
+        "mean_cuda_allocation_events_per_step": 2.0,
+        "mean_update_ms": 1.7400596849620342,
+        "p50_update_ms": 1.6736474353820086,
+        "p95_update_ms": 2.606108738109469,
+        "p99_update_ms": 2.8285105014219876,
+        "mean_first_fetch_ms": 0.37222440354526043,
+        "p50_first_fetch_ms": 0.36039669066667557,
+        "p95_first_fetch_ms": 0.4282609792426228,
+        "p99_first_fetch_ms": 0.4500627890229225,
+        "mean_cached_fetch_ms": 0.19041421823203564,
+        "p50_cached_fetch_ms": 0.18818257376551628,
+        "p95_cached_fetch_ms": 0.20044574048370123,
+        "p99_cached_fetch_ms": 0.22589080967009065,
+        "mean_total_fetch_ms": 0.37633749656379223,
+        "p50_total_fetch_ms": 0.36446237936615944,
+        "p95_total_fetch_ms": 0.43243882246315474,
+        "p99_total_fetch_ms": 0.4547072248533368,
+        "compliant_contact_stiffness": 8000.0,
+        "compliant_contact_damping": 40.0,
+        "solver": "PGS",
+        "renderer": "no-render",
+        "wall_time_s": 8.130974054336548,
+        "steps": 60
+      }
+    },
+    {
+      "_timestamp": "2026-10-31T05:05:12.519775",
+      "name": "scene_contact_query_compliant_256",
+      "params": {
+        "backend": "dexsim_direct_gpu",
+        "num_envs": 1,
+        "num_queries": 1,
+        "contacts_per_env": 256,
+        "capacity_per_env": 1024,
+        "settle_steps": 100,
+        "warmup_steps": 10,
+        "baseline_steps": 10,
+        "compliant_contact_stiffness": 8000.0,
+        "compliant_contact_damping": 40.0,
+        "device": "cuda:0"
+      },
+      "metrics": {
+        "backend": "dexsim_direct_gpu",
+        "num_envs": 1,
+        "num_queries": 1,
+        "contacts_per_env": 256,
+        "capacity_per_env": 1024,
+        "settle_steps": 100,
+        "warmup_steps": 10,
+        "measure_steps": 50,
+        "query_create_ms": 77.37341709434986,
+        "query_noop_refresh_ms": 0.006509944796562195,
+        "mean_baseline_update_ms": 1.3910305220633745,
+        "mean_query_update_overhead_ms": 0.2527454774826765,
+        "contacts_per_second": 2730427.4569378025,
+        "dropped_rows": 0,
+        "counts_consistent": true,
+        "cuda_memory_growth_bytes": 0,
+        "max_cuda_temporary_bytes": 1024,
+        "mean_cuda_allocation_events_per_step": 2.0,
+        "mean_update_ms": 1.643775999546051,
+        "p50_update_ms": 1.6188484150916338,
+        "p95_update_ms": 2.2464315639808774,
+        "p99_update_ms": 2.544974344782531,
+        "mean_first_fetch_ms": 0.37092920392751694,
+        "p50_first_fetch_ms": 0.3631259314715862,
+        "p95_first_fetch_ms": 0.4074894357472658,
+        "p99_first_fetch_ms": 0.4352017026394605,
+        "mean_cached_fetch_ms": 0.18944386392831802,
+        "p50_cached_fetch_ms": 0.18881447613239288,
+        "p95_cached_fetch_ms": 0.19703959114849567,
+        "p99_cached_fetch_ms": 0.20573571324348447,
+        "mean_total_fetch_ms": 0.37503285333514214,
+        "p50_total_fetch_ms": 0.3672374878078699,
+        "p95_total_fetch_ms": 0.4120616242289543,
+        "p99_total_fetch_ms": 0.439373729750514,
+        "compliant_contact_stiffness": 8000.0,
+        "compliant_contact_damping": 40.0,
+        "solver": "PGS",
+        "renderer": "no-render",
+        "wall_time_s": 8.222214221954346,
+        "steps": 60
+      }
+    }
+  ],
+  "configuration_timing_audit": {
+    "scene_creation_settings_submitted_before_world": true,
+    "solver_selection_verified_in_actual_scene_and_response": true,
+    "unsupported_ccd_with_direct_gpu_rejected_early": true,
+    "gravity_claim_correction": "Old and new code both produce vz=-0.299999982 after0.1s at requestedg=-3; old creation snapshot was stale, no gravity physics improvement claimed"
+  },
+  "preexisting_dependency_gap": {
+    "paired_sdk_missing_api": "AutoSolverCfg",
+    "root_newton_config_failures": 18,
+    "old_backend_reproduces_same_failures": true,
+    "checks_waived": false,
+    "outside_selected_Default_backend_scope": true
+  },
+  "previous_checkpoint": "/root/sources/EmbodiChain/outputs/lewm/official-cube/VALIDATION-point-pgs-compliant.json",
+  "remaining": [
+    "Source nonlinear normal impedance, friction regularization and contact discretization remain unmatched; base force springs not accepted as parity",
+    "Force-limit/saturation timing and coupled implicit arm servo remain unmatched; gain-only correction not adopted",
+    "Native public root solver/sleep setters are unsupported; do not treat prior requested4/100 labels as applied; task pre-GPU native root configuration separate",
+    "Point/mimic nonlinear impedance and complete transients, soft limits and reset-force semantics remain unresolved",
+    "Migrated initial raw plan still differs5.379; first changed elite/preprocessing and rendering/latent measurements pending",
+    "Paired zero/random controls and original training recipe remain pending"
+  ],
+  "scope_notes": [
+    "New recipe is a combined solver/configuration/force-mapping/provider correction; no single-factor task-score attribution",
+    "CPU PGS mimic remains unchanged; GPU recipe verified",
+    "Installed SDK/shared dependency prefix untouched; no commit/push/PR update/publication",
+    "This continuation adds material declaration capability and independent physical oracles, without task contact/servo changes",
+    "45 fixed expert commands produce bit-identical qpos/qvel/cube pose/external wrench before and after additive capability",
+    "Old benchmark iteration sweep is explicitly withdrawn; benchmark/readback labels are not physical proof",
+    "Initial source-servo production code is frozen/unaccepted after fullpaired regression; no single45 gain is treatedas fullpass"
+  ],
+  "latest_formal_scores_scope": "Current restored code exactly matches lastacceptedPGS code: source34/original33/migrated35/replay32 with49/49/48agreement; rejected source-servo32/33/33 campaign is separate",
+  "constant_contact_material_capability": {
+    "root_schema": "DefaultRigidBodyMaterialCfg.compliant_contact_stiffness/compliant_contact_damping",
+    "native_schema": "DexsimCollisionDesc keyword-only fields",
+    "implementation": "reuse existing atomic shape material setter; no C++ or solver binary change",
+    "source_recipe_adopted": false,
+    "tests": "CPU/GPU known load F/k and independent backward-Euler contact transient; named URDF replication/reapplication; sparse merge and input validation"
+  },
+  "normal_contact_characterization": {
+    "cases": 12,
+    "source_mass_kg": 0.07936,
+    "dt_s": 0.002,
+    "scope": "independent sphere/box press and impact, flattened static pad1 and floor; source mixed solref/solimp/priority; not articulated pad inertia",
+    "source_floor_box_selfweight_compression_um": 39.27483925333583,
+    "native_base_force_floor_box_selfweight_compression_um": 39.337,
+    "source_floor_box_20N_compression_um": 623.4252103689622,
+    "native_base_force_floor_box_20N_compression_um": 1050.204,
+    "source_pad_box_impact_peak_N": 26.744471923425472,
+    "native_base_force_pad_box_impact_peak_N": 20.404611587524414,
+    "full_contact_alignment": false,
+    "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/normal-contact-source-native-comparison.json"
+  },
+  "implicit_pd_characterization": {
+    "source_cases": 12,
+    "native_mappings_per_case": 2,
+    "force_limits_verified_by_momentum": true,
+    "task_urdf_force_limit_flag_already_enabled": true,
+    "unsaturated_subtract_k_dt_max_qpos_error_rad": 3.0536546414324656e-10,
+    "saturated_subtract_k_dt_max_qpos_error_rad": 0.007000483393669134,
+    "gain_only_correction_adopted": false,
+    "full_control_alignment": false,
+    "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/implicit-pd-comparison.json"
+  },
+  "additive_noop_replay": {
+    "scope": "45 fixed expert commands before/after additive material schema with all compliance fields unset",
+    "full_50_query_re_evaluation": false,
+    "comparisons": [
+      {
+        "quantity": "qpos",
+        "bit_equal": true,
+        "max_abs_error": 0.0
+      },
+      {
+        "quantity": "qvel",
+        "bit_equal": true,
+        "max_abs_error": 0.0
+      },
+      {
+        "quantity": "cube_pose",
+        "bit_equal": true,
+        "max_abs_error": 0.0
+      },
+      {
+        "quantity": "wrench_source_order",
+        "bit_equal": true,
+        "max_abs_error": 0.0
+      }
+    ]
+  },
+  "superseded_benchmark": {
+    "previous": [
+      {
+        "name": "pgs_mimic_compliance_25_4",
+        "metrics": {
+          "status": "PASS",
+          "arena_count": 1,
+          "setup_mode": "independent_collisionless_chains",
+          "num_envs": 25,
+          "position_iterations": 4,
+          "solver": "PGS",
+          "warmup_steps": 250,
+          "measure_steps_per_block": 100,
+          "blocks": 5,
+          "completed_step_mean_ms": 1.396315990947187,
+          "completed_step_median_ms": 1.3818638399243355,
+          "env_steps_per_second": 17904.256745667808,
+          "equilibrium_max_relative_error": 2.9103830456733704e-07,
+          "wall_time_s": 8.109771966934204,
+          "steps": 600
+        }
+      },
+      {
+        "name": "pgs_mimic_compliance_25_100",
+        "metrics": {
+          "status": "PASS",
+          "arena_count": 1,
+          "setup_mode": "independent_collisionless_chains",
+          "num_envs": 25,
+          "position_iterations": 100,
+          "solver": "PGS",
+          "warmup_steps": 250,
+          "measure_steps_per_block": 100,
+          "blocks": 5,
+          "completed_step_mean_ms": 1.4977334178984165,
+          "completed_step_median_ms": 1.5053188521414995,
+          "env_steps_per_second": 16691.889024603188,
+          "equilibrium_max_relative_error": 2.9103830456733704e-07,
+          "wall_time_s": 7.368844747543335,
+          "steps": 600
+        }
+      },
+      {
+        "name": "pgs_mimic_compliance_256_4",
+        "metrics": {
+          "status": "PASS",
+          "arena_count": 1,
+          "setup_mode": "independent_collisionless_chains",
+          "num_envs": 256,
+          "position_iterations": 4,
+          "solver": "PGS",
+          "warmup_steps": 250,
+          "measure_steps_per_block": 100,
+          "blocks": 5,
+          "completed_step_mean_ms": 1.599713247269392,
+          "completed_step_median_ms": 1.6040454991161823,
+          "env_steps_per_second": 160028.68041317756,
+          "equilibrium_max_relative_error": 2.9103830456733704e-07,
+          "wall_time_s": 8.469403982162476,
+          "steps": 600
+        }
+      },
+      {
+        "name": "pgs_mimic_compliance_256_100",
+        "metrics": {
+          "status": "PASS",
+          "arena_count": 1,
+          "setup_mode": "independent_collisionless_chains",
+          "num_envs": 256,
+          "position_iterations": 100,
+          "solver": "PGS",
+          "warmup_steps": 250,
+          "measure_steps_per_block": 100,
+          "blocks": 5,
+          "completed_step_mean_ms": 1.5037492653355002,
+          "completed_step_median_ms": 1.5019993670284748,
+          "env_steps_per_second": 170241.14717880447,
+          "equilibrium_max_relative_error": 2.9103830456733704e-07,
+          "wall_time_s": 7.6257922649383545,
+          "steps": 600
+        }
+      }
+    ],
+    "iteration_sweep_valid": false,
+    "reason": "warning-only unsupported public solver/sleep setters ignored requested4/100; old sweep claims withdrawn; original logs retained"
+  },
+  "source_servo_initial_campaign": {
+    "accepted_physical_alignment": false,
+    "stage": "initial final-velocity integration; regression under diagnosis",
+    "rows": [
+      {
+        "name": "dexsim-source-action-replay-source-servo",
+        "success": 32,
+        "agreement": 46,
+        "source_only": [
+          5,
+          32,
+          34
+        ],
+        "native_only": [
+          41
+        ]
+      },
+      {
+        "name": "dexsim-reference-planner-source-servo",
+        "success": 33,
+        "agreement": 47,
+        "source_only": [
+          32,
+          34
+        ],
+        "native_only": [
+          41
+        ]
+      },
+      {
+        "name": "dexsim-prototype-source-servo",
+        "success": 33,
+        "agreement": 47,
+        "source_only": [
+          32,
+          34
+        ],
+        "native_only": [
+          12
+        ]
+      }
+    ]
+  },
+  "current_runtime_manifest": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/native-point-anchor-final-runtime.json",
+  "source_servo_component_evidence": {
+    "mass_force_derivative": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/source-split-model/native-report.json",
+    "production_expert": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/source-servo-production-expert-comparison.json",
+    "source_task_tests_passed": 32,
+    "related_root_tests_passed": 529,
+    "related_skips": 2,
+    "related_deselected": 75,
+    "numerics_benchmark": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/source-servo-numerics-benchmark.json"
+  },
+  "source_servo_acceptance": false,
+  "source_servo_regression": {
+    "source_replay_success": 32,
+    "outcome_agreement": 46,
+    "source_only": [
+      5,
+      32,
+      34
+    ],
+    "native_only": [
+      41
+    ],
+    "cube_error_median_p95_max_m": [
+      0.0032734549523219464,
+      0.0475011293471661,
+      0.23573122636463512
+    ],
+    "cause_under_audit": "PGS final velocity removes positional stabilization retained in motion; source post-step overwrites it",
+    "private_a_b_outcomes": "same6 queries baseline/preserve/motion all3of6agreement; they restoredriver precision but not missing successes; not retained",
+    "next_live_probe": null,
+    "zero_velocity_pass_45": {
+      "scope": "private task velocity-iterations-zero hypothesis",
+      "max_cube_path_error_m": 0.005353647801170566,
+      "height_m": 0.1938832700252533,
+      "arm_error_rad": 0.003997986947391841,
+      "driver_eq_error_rad": 0.00016325712203979492,
+      "motion_final_velocity_diff_rad_s": 5.9604644775390625e-05,
+      "pad_peak_N": 120.87573265869537
+    },
+    "zero_velocity_pass_6": {
+      "scope": "private6-query diagnosis, same raw-source actions; not formal50 evaluation",
+      "mode": "no_velocity_pass",
+      "indices": [
+        5,
+        7,
+        12,
+        32,
+        34,
+        41
+      ],
+      "success": [
+        true,
+        false,
+        false,
+        false,
+        false,
+        true
+      ],
+      "first_success_step": [
+        9,
+        -1,
+        -1,
+        -1,
+        -1,
+        10
+      ],
+      "source_success": [
+        true,
+        true,
+        false,
+        true,
+        true,
+        false
+      ],
+      "outcome_agreement": 2,
+      "cube_error_median_p95_max": [
+        0.0861655963494309,
+        0.3065521571754333,
+        0.3065521571754333
+      ],
+      "driver_error_median_max": [
+        4.410743713378906e-06,
+        0.0010295510292053223
+      ]
+    },
+    "next_action": "One-step point-constraint impulse oracle for source R/KBIP versus native D6, including old-state velocity target; no whole-task integrator retry before this passes"
+  },
+  "source_servo_rollback": {
+    "restored": true,
+    "snapshot": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/before-source-split-production",
+    "rejected_code": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/rejected-source-servo-production",
+    "runtime_hashes_match_lastaccepted": true,
+    "related_modified_runtime_files": [
+      "task",
+      "test",
+      "evaluator"
+    ],
+    "newphasefiles_removed": [
+      "compute/dynamics",
+      "benchmark_ogbench_dynamics.py",
+      "dynamics.json"
+    ]
+  },
+  "updated_utc": "2026-10-31T10:52:15.333312+00:00",
+  "d6_velocity_target_phase": {
+    "retained": "additive native D6 velocity API, Root optional creation target and selected runtime drive update; task recipe unchanged",
+    "production_task_unchanged": true,
+    "native_api_cpu_gpu_test_cases": 2,
+    "native_affected_regressions_passed": 99,
+    "root_focused_constraint_tests_passed": 42,
+    "root_related_passed": 293,
+    "root_related_skipped": 1,
+    "root_related_deselected": 52,
+    "root_related_selection": "not Newton and not newton; existing AutoSolverCfg failures remain quarantined",
+    "context_tests_passed": 42,
+    "black_version": "26.10.1",
+    "black_files": 1734,
+    "api_exports_documented": 3285,
+    "scalar_single_step_cases": 18,
+    "scalar_velocity_max_error_m_s": 9.94261e-09,
+    "scalar_impulse_max_error_N_s": 7.45058e-09,
+    "scalar_live_trajectory_cases": 4,
+    "scalar_live_trajectory_steps": 500,
+    "scalar_live_max_position_error_m": 1.21079e-07,
+    "scalar_live_max_velocity_error_m_s": 6.41901e-08,
+    "rotating_free_body_cases": 8,
+    "coincident_identity_moving_velocity_max_error": 1.1481367745425075e-08,
+    "separated_anchor_max_velocity_component_error": 0.00014417776107833458,
+    "native_12d_analytic_max_velocity_error": 8.14298725748154e-07,
+    "real_robot_kinematics_rows": 100,
+    "real_robot_kinematics_report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/point-step-response/robot-kinematics-source.json",
+    "real_robot_kinematics_max_errors": {
+      "position_error": 2.220446049250313e-16,
+      "velocity_error": 1.942890293094024e-16,
+      "Jdotv_error": 8.534839501805891e-16
+    },
+    "noop_45_records_exact": true,
+    "noop_full50_arrays_exact": true,
+    "noop_full50_report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/d6-velocity-capability-neutrality-full50.json",
+    "point_task_adapter_decision": "REJECTED as default; remains private diagnostic",
+    "point_task_adapter_production_enabled": false,
+    "full50_baseline": {
+      "success_count": 32,
+      "outcome_agreement": 48,
+      "source_only": [
+        5,
+        7
+      ],
+      "native_only": [],
+      "cube_median_p95_max_m": [
+        0.0030505417224045307,
+        0.04145623825548287,
+        0.07855468031330225
+      ],
+      "first25_cube_median_p95_max_m": [
+        0.0028925462000679468,
+        0.04145623825548287,
+        0.07855468031330225
+      ],
+      "raw_actions_and_nan_masks_exact": true,
+      "elapsed_s": 92.99967258702964,
+      "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-point-impulse-baseline-source-replay/report.json",
+      "cube_metric_scope": "2500 frozen post-step states, excludes initial 50 states; same historical formal replay metric",
+      "common_live_count": 973,
+      "common_live_cube_median_p95_max_m": [
+        0.0041654575341618285,
+        0.03926889051874534,
+        0.06584076696103736
+      ],
+      "common_live_scope": "identical sample mask for both runs, through earliest success across source and both native runs, inclusive; supplementary scope"
+    },
+    "full50_private_trial": {
+      "success_count": 34,
+      "outcome_agreement": 48,
+      "source_only": [
+        7
+      ],
+      "native_only": [
+        12
+      ],
+      "cube_median_p95_max_m": [
+        0.003647424372302979,
+        0.06271650843627044,
+        0.12057788056332047
+      ],
+      "first25_cube_median_p95_max_m": [
+        0.003226837565454793,
+        0.05524495596501944,
+        0.12057788056332047
+      ],
+      "raw_actions_and_nan_masks_exact": true,
+      "elapsed_s": 145.62903773924336,
+      "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-point-impulse-point-source-replay/report.json",
+      "cube_metric_scope": "2500 frozen post-step states, excludes initial 50 states; same historical formal replay metric",
+      "common_live_count": 973,
+      "common_live_cube_median_p95_max_m": [
+        0.007162357303823475,
+        0.06308731592415485,
+        0.10244127357861131
+      ],
+      "common_live_scope": "identical sample mask for both runs, through earliest success across source and both native runs, inclusive; supplementary scope"
+    },
+    "grasp_45_comparison": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/point-impulse-grasp-comparison.json",
+    "reports": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/point-impulse-full50-comparison.json",
+    "benchmark_reports": [
+      "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/d6-point-drive-benchmark-1.json",
+      "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/d6-point-drive-benchmark-25.json"
+    ],
+    "preexisting_failure": {
+      "trigger": "all collision shapes disabled, standalone rigid-body GPU pose writes after initialization, next step",
+      "first_fault": "markUpdatedPairsLaunch global write to address 0, broadphase.cu:440",
+      "before_api_no_constraint_log": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/point-rotating-before-api-no-constraint-sanitizer.log",
+      "current_log": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/point-rotating-baseline-sanitizer.log",
+      "fixed": false,
+      "scope": "independent pre-existing boundary; real task has enabled collision shapes"
+    },
+    "next_gate": "real14 coupled point/mimic oracle: distinguish pre-implicit constraint acceleration, post-implicit velocity, PGS motion/final velocity; establish source anchor Jacobians before another task change",
+    "shared_sdk_modified": false
+  },
+  "point_anchor_phase": {
+    "source_cases": 72,
+    "source_dense_acceleration_max_error": 6.286682385949659e-11,
+    "source_implicit_velocity_max_error": 3.0371246989266606e-12,
+    "link_bias": {
+      "position_error": 6.106226635438361e-16,
+      "velocity_error": 1.7208456881689926e-15,
+      "bias_error": 9.43689570931383e-16
+    },
+    "native": {
+      "native-none-base-v1.json": {
+        "pre_implicit_final_error": 5.577550419855193e-07,
+        "final_corrected_error": 5.274743155592176e-07,
+        "motion_final_difference": 5.7131052017211914e-05,
+        "position_error": 0.0006043003449645035
+      },
+      "native-point-discrete-v0.json": {
+        "pre_implicit_final_error": 0.021141365477295615,
+        "final_corrected_error": 0.021141365477296947,
+        "motion_final_difference": 5.9604644775390625e-05,
+        "position_error": 0.0006044214295677364
+      },
+      "native-point-discrete_bias-v0.json": {
+        "pre_implicit_final_error": 0.0028420249330618486,
+        "final_corrected_error": 0.0028421109562687397,
+        "motion_final_difference": 5.888938903808594e-05,
+        "position_error": 0.0006044214295677364
+      },
+      "native-point-point_exact-v0.json": {
+        "pre_implicit_final_error": 0.00012141736348375565,
+        "final_corrected_error": 0.0001214477237665712,
+        "motion_final_difference": 5.888938903808594e-05,
+        "position_error": 0.0006044214295677364
+      },
+      "native-mimic-base-v1.json": {
+        "pre_implicit_final_error": 0.03851561210318659,
+        "final_corrected_error": 0.038497229970056855,
+        "motion_final_difference": 0.03683924116194248,
+        "position_error": 0.0006043005627800468
+      },
+      "native-mimic-base-velocitymimic-v0.json": {
+        "pre_implicit_final_error": 5.599113815923928e-07,
+        "final_corrected_error": 5.270442776650341e-07,
+        "motion_final_difference": 5.733966827392578e-05,
+        "position_error": 0.0006043005627800468
+      },
+      "native-both-point_exact-velocitymimic-v0.json": {
+        "pre_implicit_final_error": 0.00012093207384311633,
+        "final_corrected_error": 0.00012095481910251449,
+        "motion_final_difference": 5.91278076171875e-05,
+        "position_error": 0.0006044230426138775
+      }
+    },
+    "benchmarks": {
+      "default-1": {
+        "mean_update_host_ms": 0.017694447189569473,
+        "completed_step_median_ms": 1.942670182324946,
+        "equilibrium_max_error_m": 7.450580596923828e-08
+      },
+      "point-1": {
+        "mean_update_host_ms": 0.021174628287553787,
+        "completed_step_median_ms": 1.9631930999457836,
+        "equilibrium_max_error_m": 7.450580596923828e-08
+      },
+      "default-25": {
+        "mean_update_host_ms": 0.18375719152390957,
+        "completed_step_median_ms": 2.1470700902864337,
+        "equilibrium_max_error_m": 4.104524850845337e-05
+      },
+      "point-25": {
+        "mean_update_host_ms": 0.17610207200050354,
+        "completed_step_median_ms": 2.137924190610647,
+        "equilibrium_max_error_m": 4.104524850845337e-05
+      }
+    },
+    "full50": {
+      "dexsim-point-anchor-default-baseline-source-replay": {
+        "success_count": 32,
+        "agreement": 48,
+        "source_only": [
+          5,
+          7
+        ],
+        "native_only": [],
+        "post_step_cube_median_p95_max_m": [
+          0.0030505417224045307,
+          0.04145623825548287,
+          0.07855468031330225
+        ],
+        "actions_and_nan_exact": true,
+        "elapsed_s": 93.48792774276808,
+        "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-point-anchor-default-baseline-source-replay/report.json",
+        "common_live_count": 977,
+        "common_live_median_p95_max_m": [
+          0.004165457536437725,
+          0.055351125857258154,
+          0.07855468031330225
+        ]
+      },
+      "dexsim-coupled-source-stage-source-replay": {
+        "success_count": 32,
+        "agreement": 46,
+        "source_only": [
+          7,
+          32,
+          34
+        ],
+        "native_only": [
+          41
+        ],
+        "post_step_cube_median_p95_max_m": [
+          0.004902671376172689,
+          0.08369467269880204,
+          0.2538087231421599
+        ],
+        "actions_and_nan_exact": true,
+        "elapsed_s": 269.34551845211536,
+        "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-coupled-source-stage-source-replay/report.json",
+        "common_live_count": 977,
+        "common_live_median_p95_max_m": [
+          0.0075104488002597355,
+          0.08736693399469096,
+          0.2538087231421599
+        ]
+      }
+    },
+    "task_candidate_accepted": false,
+    "physics_alignment_verified": false,
+    "utc": "2026-10-31T10:39:33.079406+00:00",
+    "native_engine_sha256": "57dcde3308c4c49d9aaccf93d0d2ee04dbb42b9c88b3019cf87a7cf545230f22",
+    "native_gpu_sha256": "d499a135a2e37a328f349ae39df9bf1c5d4d932c987862759e6c11d84c8b36db",
+    "sdk_regressions": 102,
+    "root_constraints": 48,
+    "root_related": 299,
+    "root_skip": 1,
+    "root_newton_deselected": 52,
+    "context_tests": 42,
+    "black_files": 1734,
+    "api_exports": 3285,
+    "default_full50_exact": {
+      "scope": "fresh 50-query paired source-action replay, default point-anchor flag off, new SDK and GPU versus prior accepted provider",
+      "arrays": {
+        "qpos": {
+          "exact": true,
+          "max_abs": 0.0
+        },
+        "qvel": {
+          "exact": true,
+          "max_abs": 0.0
+        },
+        "actions": {
+          "exact": true,
+          "max_abs": 0.0
+        },
+        "goals": {
+          "exact": true,
+          "max_abs": 0.0
+        }
+      }
+    },
+    "cube_velocity1_diagnostic": {
+      "scope": "same qualified coupled source adapter, robot velocity iterations0, cube velocity iterations1",
+      "height": 0.19222010672092438,
+      "mean_cube_error_m": 0.001194972407672676,
+      "max_cube_error_m": 0.003147938179446599,
+      "mean_force20_35_N": 51.177898863055226,
+      "peak_force_N": 108.72642595274438,
+      "trial": {
+        "substeps": 1125,
+        "max_point_residual_m": 0.0004529374823557721,
+        "max_mimic_velocity_force_Nm": 0.22853784347074485,
+        "max_native_motion_final_difference_rad_s": 0.2640823721885681
+      }
+    },
+    "parameter_export": {
+      "previous_fields_exact": true,
+      "added_fields": [
+        "dof_frictionloss",
+        "dof_invweight0",
+        "dof_solimp",
+        "dof_solref",
+        "jnt_dofadr",
+        "jnt_limited",
+        "jnt_margin",
+        "jnt_qposadr",
+        "jnt_range",
+        "jnt_solimp",
+        "jnt_solref",
+        "jnt_type"
+      ],
+      "added_geom_fields": [
+        "solmix",
+        "margin",
+        "gap"
+      ],
+      "joint_count": 15,
+      "jnt_solref_robot": [
+        [
+          0.02,
+          1.0
+        ],
+        [
+          0.02,
+          1.0
+        ],
+        [
+          0.02,
+          1.0
+        ],
+        [
+          0.02,
+          1.0
+        ],
+        [
+          0.02,
+          1.0
+        ],
+        [
+          0.02,
+          1.0
+        ],
+        [
+          0.005,
+          1.0
+        ],
+        [
+          0.005,
+          1.0
+        ],
+        [
+          0.02,
+          1.0
+        ],
+        [
+          0.005,
+          1.0
+        ],
+        [
+          0.005,
+          1.0
+        ],
+        [
+          0.005,
+          1.0
+        ],
+        [
+          0.02,
+          1.0
+        ],
+        [
+          0.005,
+          1.0
+        ]
+      ],
+      "jnt_solimp_robot": [
+        [
+          0.9,
+          0.95,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.9,
+          0.95,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.9,
+          0.95,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.9,
+          0.95,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.9,
+          0.95,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.9,
+          0.95,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.95,
+          0.99,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.95,
+          0.99,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.9,
+          0.95,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.95,
+          0.99,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.95,
+          0.99,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.95,
+          0.99,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.9,
+          0.95,
+          0.001,
+          0.5,
+          2.0
+        ],
+        [
+          0.95,
+          0.99,
+          0.001,
+          0.5,
+          2.0
+        ]
+      ],
+      "mimic_approx_inverse_weight": 397.6325562367748
+    },
+    "farbody_velocity_policy": {
+      "scope": "robot min velocity iterations0 with one distant, noncontacting dynamic cube requesting1; no contact or parameter change on robot",
+      "max_pre_implicit_velocity_error": 0.03855068928510006,
+      "max_motion_final_velocity_difference": 0.038553185760974884
+    },
+    "anchor_only_full50": {
+      "scope": "only authored point moment arms enabled; accepted controls/gains/mimic/iteration policy unchanged",
+      "successes": 35,
+      "agreement": 47,
+      "source_only": [
+        7
+      ],
+      "native_only": [
+        12,
+        41
+      ],
+      "post_step_cube_median_p95_max_m": [
+        0.003400315828282499,
+        0.05382643820835925,
+        0.12941718275266692
+      ],
+      "actions_nan_exact": true,
+      "elapsed_seconds": 92.07985500991344,
+      "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-point-anchor-only-point-source-replay/report.json"
+    },
+    "anchor_only_default_admission": false,
+    "production_task_unchanged": true,
+    "shared_sdk_modified": false,
+    "newton_failures": "existing 18 AutoSolverCfg failures remain quarantined; no Newton success claim",
+    "next_gate": "explicit per-articulation soft mimic velocity policy; a distant noncontacting body requesting a velocity pass hardens every mimic, invalidating robot0 as a policy; then source soft limits/contact law"
+  },
+  "goal_status": "paused",
+  "latest_wip_at_pause": "optional per-articulation PGS soft mimic velocity policy; C++/CUDA builds completed, post-build physical and full-task validation pending",
+  "paused_staged_runtime": {
+    "libengine.so": "65e4786af03483aa66dc9a7af531fdfc4da29e14ea6738bde315806bdf80fcac",
+    "libPhysXGpu_64.so": "978a4fdbb9c8657833ee4bf59b6e751e9946f3f344dc878e7764135377ceff54",
+    "qualified": false
+  },
+  "publish_checks": {
+    "root_focused_cases_passed": 129,
+    "black_version": "26.10.1",
+    "black_formatted_files": 1775,
+    "api_exports_documented": 3285,
+    "agent_context_map": "passed"
+  }
+}

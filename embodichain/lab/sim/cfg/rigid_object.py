@@ -22,7 +22,7 @@ from collections.abc import Mapping
 from dataclasses import MISSING, field
 import os
 import warnings
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, Sequence
 
 from dexsim.types import ActorType
 
@@ -57,6 +57,16 @@ class RigidObjectCfg(ObjectBaseCfg):
     """
 
     body_type: Literal["dynamic", "kinematic", "static"] = "dynamic"
+
+    collision_filter_data: Sequence[int] | None = None
+    """Optional four-word Default collision filter authored before spawning.
+
+    This also supports static objects without runtime state buffers. The first
+    two words select Arena isolation; isolated replication replaces those words
+    with its own arena selection. The last two encode category/exclusion masks
+    and are preserved across replicas.
+    Newton does not consume these Default-native filter words.
+    """
 
     body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""

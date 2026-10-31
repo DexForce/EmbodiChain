@@ -6,8 +6,9 @@ Return to the [simulation overview](simulation-system.md) for lifecycle entry.
 ## Backend, solver and device resolution
 
 `SimulationManagerCfg.physics_cfg` selects the backend by config type.
-`cfg/simulation.py` owns `PhysicsBackendCfg`, `DefaultPhysicsCfg` and
-`NewtonPhysicsCfg`; do not add another backend string to the manager config.
+`cfg/physics.py` owns `PhysicsBackendCfg`, `DefaultPhysicsCfg` and
+`NewtonPhysicsCfg`; `cfg/simulation.py` remains a compatibility facade. Do not
+add another backend string to the manager config.
 Gym's file-owned selector and composition rules belong to
 [environment configuration](../env-framework/configuration.md).
 
@@ -20,6 +21,14 @@ device, not a separate environment tensor device.
 `SimulationManagerCfg.scene_node_capacity` sets World capacity before creation;
 `None` retains the native default. Gym accepts the former in `physics_config`
 and the latter at the top level through `config_to_cfg()`.
+
+Default scene settings and GPU capacities are submitted by
+`DefaultPhysicsBackend.configure_world()` before native World construction.
+World captures `PxSceneDesc` during construction; changing only the global
+defaults afterwards does not update that descriptor. The post-World
+`activate()` hook does no additional Default setup. `enable_tgs=False` selects
+native PGS; the ordinary default remains TGS. Default CUDA uses Direct GPU,
+which rejects scene CCD; that unsupported combination fails before allocation.
 
 Newton `solver_cfg=None` preserves DexSim's scene-aware `AutoSolverCfg`.
 The concrete solver is resolved from the complete Spawn scene, then exposed
@@ -42,6 +51,21 @@ Capability checks remain explicit: Default owns native rigid constraints and
 Newton deformables are separate. Contact support is rechecked after Newton
 solver resolution; DexUni and MuJoCo-Warp on CPU do not expose the supported
 ContactQuery path. See `physics/` and [sensors](../sensor-system/sensor-system.md).
+
+Default compliant point constraints are configured by `RigidConstraintCfg` in
+`cfg/scene.py` and owned by `SimulationManager`. Optional linear velocity targets
+use endpoint B relative to A, in A's joint axes, with units m/s. Creation without
+a target keeps the zero-target behavior and requires no new SDK method.
+`linear_drive_point_anchors` selects each endpoint's own force moment arm for
+the linear springs. It requires the matching GPU capability, checked against
+the already-loaded solver; CPU and older GPU libraries reject the selection.
+The default retains ordinary D6 geometry. Runtime gain updates retain the
+explicit anchor selection.
+`update_rigid_constraint_linear_drive()` changes active selected arenas between
+explicit physics steps; it leaves the creation config unchanged and resets the
+target to zero when omitted. Inputs and SDK capabilities are checked before
+writes, but a native rejection can leave earlier rows updated. Use the manager
+API rather than borrowing native joints or introducing another constraint owner.
 
 ## Sparse source physics
 
@@ -86,6 +110,15 @@ preserve mode, without replacing explicit zero, margins or materials. Inspect
 `spawn/descriptors.py` for these application defaults rather than altering
 DexSim global defaults.
 
+`DefaultRigidBodyMaterialCfg` owns native combine rules and constant compliant
+normal-contact springs. Its coefficients keep force units through Spawn;
+positive stiffness replaces restitution, and zero restores rigid contact.
+Sparse damping can inherit a compliant source material. This implicit spring
+does not encode a position-dependent impedance law. Compilation rejects an
+SDK missing the capability; CUDA shape overrides also require material caching
+before scene creation. Source articulation overlays restore these fields through
+the SDK contact-only replay after uniform link-property writes.
+
 Newton `condim` belongs in collision descriptors before preparation; friction
 coefficients belong in material properties. Use per-link overlays for contact
 intent, not finalized solver-array mutations. `has_particle_collision` is
@@ -110,5 +143,7 @@ and [robot context](../robot-system/robot-system.md).
 Focused coverage: `tests/sim/test_rigid_physics_cfg.py`,
 `tests/sim/test_sim_manager_cfg.py`, `tests/sim/test_cfg.py`,
 `tests/sim/spawn/test_descriptors.py`, `tests/sim/spawn/test_source.py`, and
-`tests/sim/objects/test_backend_physics_helpers.py`. Select tests for the affected
+`tests/sim/objects/test_backend_physics_helpers.py`. Constraint creation, selected
+updates and rollback use `tests/sim/objects/test_rigid_constraint.py`.
+Select tests for the affected
 property, particularly sparse overlays, inertia fallback and backend rejection.

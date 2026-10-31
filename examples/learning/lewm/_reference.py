@@ -27,7 +27,7 @@ import urllib.request
 import numpy as np
 import torch
 
-from embodichain_models.dynamics.lewm import LeWM, preprocess_rgb
+from embodichain_models.dynamics.lewm import LeWM, LeWMCfg, preprocess_rgb
 
 HF_REV = "22b330c28c27ead4bfd1888615af1340e3fe9052"
 SWM_REV = "21446f1ede6d5284e981bd7b47f432b994e6d812"
@@ -99,16 +99,15 @@ def _import_file(path: Path, name: str):
     return module
 
 
-def compare(root: str | Path) -> dict:
-    """Compare fixed FP32 inputs and official weights against upstream code."""
+def _load_reference_model(
+    model_source: Path, blocks_source: Path, weights: Path, action_dim: int
+) -> torch.nn.Module:
+    """Instantiate the checked upstream architecture without package side effects."""
     from transformers import ViTConfig, ViTModel
-    from torchvision.transforms import v2
 
-    root = Path(root)
-    identity = prepare(root, local_files_only=True)
-    blocks = _import_file(root / "reference_module.py", "lewm_reference_blocks")
-    upstream = _import_file(root / "reference_lewm.py", "lewm_reference_model")
-    cfg = ViTConfig(
+    blocks = _import_file(blocks_source, "lewm_reference_blocks")
+    upstream = _import_file(model_source, "lewm_reference_model")
+    vision = ViTConfig(
         image_size=224,
         patch_size=14,
         hidden_size=192,
@@ -116,8 +115,8 @@ def compare(root: str | Path) -> dict:
         num_attention_heads=3,
         intermediate_size=768,
     )
-    reference = upstream.LeWM(
-        encoder=ViTModel(cfg, add_pooling_layer=False, use_mask_token=False),
+    model = upstream.LeWM(
+        encoder=ViTModel(vision, add_pooling_layer=False, use_mask_token=False),
         predictor=blocks.Predictor(
             num_frames=3,
             depth=6,
@@ -129,16 +128,65 @@ def compare(root: str | Path) -> dict:
             dim_head=64,
             dropout=0.1,
         ),
-        action_encoder=blocks.Embedder(input_dim=10, emb_dim=192),
+        action_encoder=blocks.Embedder(input_dim=action_dim, emb_dim=192),
         projector=blocks.MLP(192, 2048, 192, norm_fn=torch.nn.BatchNorm1d),
         pred_proj=blocks.MLP(192, 2048, 192, norm_fn=torch.nn.BatchNorm1d),
     ).eval()
-    state = torch.load(root / "weights.pt", map_location="cpu", weights_only=True)
-    reference.load_state_dict(state, strict=True)
-    model = LeWM().eval()
+    model.load_state_dict(torch.load(weights, map_location="cpu", weights_only=True))
+    return model
+
+
+def compare(
+    root: str | Path,
+    *,
+    cube_weights: str | Path | None = None,
+    cube_swm_root: str | Path | None = None,
+) -> dict:
+    """Compare fixed FP32 inputs and official weights against upstream code."""
+    from torchvision.transforms import v2
+
+    root = Path(root)
+    action_dim, action_block = 10, 1
+    history_len = 3
+    model_source = root / "reference_lewm.py"
+    blocks_source = root / "reference_module.py"
+    if cube_swm_root is not None and cube_weights is None:
+        raise ValueError("the original Cube reference requires Cube weights")
+    if cube_weights is not None and cube_swm_root is None:
+        raise ValueError("Cube comparison requires the pinned cube_swm_root checkout")
+    weights_path = root / "weights.pt"
+    if cube_weights is None:
+        identity = prepare(root, local_files_only=True)
+    else:
+        weights_path = Path(cube_weights)
+        expected = "2839a907362f403f9136383016e91774373a295d958ae75121791f22a9fddf89"
+        if _sha(weights_path) != expected:
+            raise ValueError("official Cube checkpoint checksum mismatch")
+        from ._official_cube import CUBE_SWM_REV, _revision
+
+        source_root = Path(cube_swm_root)
+        _revision(source_root, CUBE_SWM_REV)
+        model_source = source_root / "stable_worldmodel/wm/lewm/lewm.py"
+        blocks_source = source_root / "stable_worldmodel/wm/lewm/module.py"
+        sources = {path.name: _sha(path) for path in (model_source, blocks_source)}
+        # PlanConfig's history_len defaults to one in the original eval.
+        history_len = 1
+        identity = {
+            "task": "ogbench_cube_single",
+            "weights_revision": "b0747c5002e86d2ce8f3cd8178004b97524c587d",
+            "stable_worldmodel_revision": CUBE_SWM_REV,
+            "lewm_revision": LEWM_REV,
+            "sha256": {**sources, "weights.pt": expected},
+        }
+        action_dim, action_block = 25, 5
+    reference = _load_reference_model(
+        model_source, blocks_source, weights_path, action_dim
+    )
+    state = torch.load(weights_path, map_location="cpu", weights_only=True)
+    model = LeWM(LeWMCfg(action_dim=action_dim, action_block=action_block)).eval()
     model.load_reference_weights(state)
     torch.manual_seed(42)
-    raw = torch.randint(0, 256, (1, 3, 224, 224, 3), dtype=torch.uint8)
+    raw = torch.randint(0, 256, (1, history_len, 224, 224, 3), dtype=torch.uint8)
     transform = v2.Compose(
         [
             v2.ToImage(),
@@ -149,9 +197,9 @@ def compare(root: str | Path) -> dict:
     )
     reference_pixels = torch.stack([transform(x.numpy()) for x in raw[0]])[None]
     pixels = preprocess_rgb(raw)
-    actions = torch.randn(1, 3, 10)
-    candidates = torch.randn(1, 2, 5, 10)
-    past = actions[:, :2]
+    actions = torch.randn(1, history_len, action_dim)
+    candidates = torch.randn(1, 2, 5, action_dim)
+    past = actions[:, : history_len - 1]
     with torch.no_grad():
         embedding = model.encode(pixels)
         ref_embedding = reference.encode({"pixels": reference_pixels})["emb"]
@@ -164,7 +212,9 @@ def compare(root: str | Path) -> dict:
             "pixels": reference_pixels[:, None].expand(-1, 2, -1, -1, -1, -1).clone(),
             "action_history": past[:, None].expand(-1, 2, -1, -1).clone(),
         }
-        ref_future = reference.rollout(info, candidates)["predicted_emb"][:, :, 3:]
+        ref_future = reference.rollout(info, candidates)["predicted_emb"][
+            :, :, history_len:
+        ]
         goal = ref_embedding[:, -1]
         cost = model.goal_cost(future, goal)
         ref_cost = (ref_future[:, :, -1] - goal[:, None]).square().sum(-1)
@@ -187,5 +237,6 @@ def compare(root: str | Path) -> dict:
         "rtol": 1e-4,
         "torch": torch.__version__,
         "device": "cpu",
+        "observed_history_len": history_len,
         "resources": identity,
     }

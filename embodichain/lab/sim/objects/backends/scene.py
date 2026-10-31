@@ -717,6 +717,22 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
         data[..., 3:6] = angular_data
         return data
 
+    def fetch_link_acceleration(
+        self,
+        data: torch.Tensor,
+        linear_data: torch.Tensor,
+        angular_data: torch.Tensor,
+    ) -> torch.Tensor:
+        _checked_batch_call(self.batch, "fetch_link_linear_acceleration", linear_data)
+        _checked_batch_call(self.batch, "fetch_link_angular_acceleration", angular_data)
+        data[..., :3] = linear_data
+        data[..., 3:] = angular_data
+        return data
+
+    def fetch_link_incoming_joint_force(self, data: torch.Tensor) -> torch.Tensor:
+        _checked_batch_call(self.batch, "fetch_link_incoming_joint_force", data)
+        return data
+
     def apply_root_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | torch.Tensor
     ) -> None:

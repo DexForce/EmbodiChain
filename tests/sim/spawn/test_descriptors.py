@@ -54,6 +54,7 @@ from embodichain.lab.sim.cfg import (
     SurfaceDeformablePhysicsCfg,
     CollisionPropertiesCfg,
     DefaultCollisionPropertiesCfg,
+    DefaultRigidBodyMaterialCfg,
     DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
@@ -553,6 +554,32 @@ def test_static_rigid_descriptor_omits_mass_properties() -> None:
     assert descriptor.physics.density is None
     assert descriptor.physics.inertia is None
     assert descriptor.physics.com_position is None
+
+
+def test_static_collision_masks_are_authored_and_owned_by_the_descriptor() -> None:
+    words = np.array([0, 1, 2, 1], dtype=np.uint32)
+    cfg = RigidObjectCfg(
+        uid="wall",
+        body_type="static",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+        collision_filter_data=words,
+    )
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+    words[2] = 8
+    np.testing.assert_array_equal(
+        descriptor.physics.collision_filter_data, [0, 1, 2, 1]
+    )
+    with pytest.raises(NotImplementedError, match="Default"):
+        rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+
+
+@pytest.mark.parametrize("words", [[0, 1, 2], [0, 1, -1, 0], [0, 1, 0.5, 0]])
+def test_collision_masks_reject_invalid_native_words(words) -> None:
+    cfg = RigidObjectCfg(
+        uid="wall", shape=CubeCfg(size=(0.1, 0.1, 0.1)), collision_filter_data=words
+    )
+    with pytest.raises(ValueError, match="four uint32"):
+        rigid_desc_from_cfg(cfg)
 
 
 def test_kinematic_rigid_descriptor_honors_mass_priority() -> None:
@@ -1223,10 +1250,14 @@ def test_flat_articulation_physics_is_rejected_at_config_boundary() -> None:
         )
 
 
-def test_articulation_root_properties_compile_to_common_descriptor() -> None:
+@pytest.mark.parametrize("override_material", [False, True])
+def test_articulation_root_properties_compile_to_common_descriptor(
+    override_material: bool,
+) -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",
+        urdf_override_material=override_material,
         root_props=ArticulationRootPropertiesCfg(
             fixed_base=False,
             self_collision_enabled=True,
@@ -1238,6 +1269,7 @@ def test_articulation_root_properties_compile_to_common_descriptor() -> None:
     assert descriptor.fixed_base is False
     assert descriptor.urdf_fix_root_link is False
     assert descriptor.enable_self_collision is True
+    assert descriptor.urdf_override_material is override_material
 
 
 def test_articulation_root_defaults_are_resolved_at_import_boundary() -> None:
@@ -1756,6 +1788,138 @@ def test_grouped_link_physics_overrides_compose_after_source_resolution() -> Non
     assert finger.rigid_body.mass == 2.0
     assert finger.collisions[0].newton.mu == 0.8
     assert finger.rigid_body.inertia is None
+
+
+def test_named_collision_materials_preserve_source_link_properties() -> None:
+    descriptor = _resolved_articulation_desc()
+    descriptor.urdf_path = "robot.urdf"
+    finger = descriptor.get_link_desc("finger_left")
+    original_mass = finger.rigid_body.mass
+    original_inertia = finger.rigid_body.inertia.copy()
+    original_collision = finger.collisions[0]
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        link_attrs={
+            "pads": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                collision_materials={
+                    "pad_a": DefaultRigidBodyMaterialCfg(
+                        dynamic_friction=0.7,
+                        friction_combine_mode="min",
+                        compliant_contact_stiffness=8000.0,
+                        compliant_contact_damping=40.0,
+                    ),
+                    "pad_b": RigidBodyMaterialCfg(dynamic_friction=0.6),
+                    "untouched": RigidBodyMaterialCfg(),
+                },
+            )
+        },
+    )
+
+    configure_articulation_desc(descriptor, cfg)
+
+    assert finger.rigid_body.mass == original_mass
+    np.testing.assert_array_equal(finger.rigid_body.inertia, original_inertia)
+    assert finger.collisions[0] is original_collision
+    assert descriptor.get_link_desc("base").urdf_collision_overrides == {}
+    assert set(finger.urdf_collision_overrides) == {"pad_a", "pad_b"}
+    assert finger.urdf_collision_overrides["pad_a"].dynamic_friction == 0.7
+    assert finger.urdf_collision_overrides["pad_a"].static_friction is None
+    assert finger.urdf_collision_overrides["pad_a"].friction_combine_mode == 1
+    assert (
+        finger.urdf_collision_overrides["pad_a"].compliant_contact_stiffness == 8000.0
+    )
+    assert finger.urdf_collision_overrides["pad_a"].compliant_contact_damping == 40.0
+    assert finger.urdf_collision_overrides["pad_b"].dynamic_friction == 0.6
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["unknown_mode", "invalid_stiffness", "null_material", "empty_name", "newton"],
+)
+def test_named_material_validation_keeps_descriptor_unchanged(failure: str) -> None:
+    descriptor = _resolved_articulation_desc()
+    descriptor.urdf_path = "robot.urdf"
+    original = copy.deepcopy(descriptor)
+    materials = {"pad_a": DefaultRigidBodyMaterialCfg(dynamic_friction=0.7)}
+    error = ValueError
+    solver_type = None
+    if failure == "unknown_mode":
+        materials["pad_b"] = DefaultRigidBodyMaterialCfg(
+            friction_combine_mode="unsupported"
+        )
+    elif failure == "invalid_stiffness":
+        materials["pad_b"] = DefaultRigidBodyMaterialCfg(
+            compliant_contact_stiffness=-1.0
+        )
+    elif failure == "null_material":
+        materials["pad_b"] = None
+        error = TypeError
+    elif failure == "empty_name":
+        materials[""] = RigidBodyMaterialCfg(dynamic_friction=0.6)
+    else:
+        solver_type = "auto"
+        error = NotImplementedError
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        link_attrs={
+            "pads": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_left"], collision_materials=materials
+            )
+        },
+    )
+    with pytest.raises(error):
+        configure_articulation_desc(descriptor, cfg, newton_solver_type=solver_type)
+    _assert_property_tree_equal(descriptor, original)
+
+
+@pytest.mark.parametrize(
+    "mode, native", [("average", 0), ("min", 1), ("multiply", 2), ("max", 3)]
+)
+def test_native_material_combine_modes_compile_for_rigid_objects(
+    mode: str, native: int
+) -> None:
+    cfg = RigidObjectCfg(
+        uid="box",
+        shape=CubeCfg(),
+        attrs=RigidBodyPhysicsCfg(
+            material_props=DefaultRigidBodyMaterialCfg(
+                friction_combine_mode=mode,
+                restitution_combine_mode=mode,
+                compliant_contact_stiffness=8000.0,
+                compliant_contact_damping=40.0,
+            )
+        ),
+    )
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+    collision = descriptor.collisions[0].dexsim
+    assert collision.friction_combine_mode == native
+    assert collision.restitution_combine_mode == native
+    assert collision.compliant_contact_stiffness == 8000.0
+    assert collision.compliant_contact_damping == 40.0
+
+
+def test_compliant_material_reports_missing_sdk_capability(monkeypatch) -> None:
+    from dexsim.spawn import DexsimCollisionDesc
+
+    monkeypatch.delitem(
+        DexsimCollisionDesc.__dataclass_fields__, "compliant_contact_stiffness"
+    )
+    cfg = RigidObjectCfg(
+        uid="box",
+        shape=CubeCfg(),
+        attrs=RigidBodyPhysicsCfg(
+            material_props=DefaultRigidBodyMaterialCfg(
+                compliant_contact_stiffness=8000.0
+            )
+        ),
+    )
+    with pytest.raises(RuntimeError, match="require SDK material support"):
+        rigid_desc_from_cfg(cfg)
 
 
 def test_global_articulation_mass_properties_can_recompute_inertia() -> None:

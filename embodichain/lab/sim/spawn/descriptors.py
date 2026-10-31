@@ -67,6 +67,7 @@ from dexsim.types import ActorType, DriveType, LoadOption as DexsimLoadOption
 
 from embodichain.lab.sim._inertia import _principal_inertia_matrix
 from embodichain.lab.sim.cfg import (
+    DefaultRigidBodyMaterialCfg,
     _normalize_joint_target_mode,
     ArticulationCfg,
     CollisionPropertiesCfg,
@@ -115,6 +116,7 @@ class _RigidPhysicsSpec:
     default_collision_props: dict[str, object] = field(default_factory=dict)
     newton_collision_props: dict[str, object] = field(default_factory=dict)
     material_props: dict[str, object] = field(default_factory=dict)
+    default_material_props: dict[str, object] = field(default_factory=dict)
     newton_material_props: dict[str, object] = field(default_factory=dict)
 
     def merged(self, override: _RigidPhysicsSpec) -> _RigidPhysicsSpec:
@@ -129,6 +131,7 @@ class _RigidPhysicsSpec:
             default_collision_props=dict(self.default_collision_props),
             newton_collision_props=dict(self.newton_collision_props),
             material_props=dict(self.material_props),
+            default_material_props=dict(self.default_material_props),
             newton_material_props=dict(self.newton_material_props),
         )
         for name in (
@@ -137,6 +140,7 @@ class _RigidPhysicsSpec:
             "default_collision_props",
             "newton_collision_props",
             "material_props",
+            "default_material_props",
             "newton_material_props",
         ):
             getattr(result, name).update(getattr(override, name))
@@ -236,7 +240,34 @@ def _resolve_rigid_physics(
             )
 
         material_props = cfg.material_props
-        if isinstance(material_props, NewtonRigidBodyMaterialCfg):
+        if isinstance(material_props, DefaultRigidBodyMaterialCfg):
+            values = _configured_values(material_props)
+            for name in ("static_friction", "dynamic_friction", "restitution"):
+                values.pop(name, None)
+            if values and newton_solver_type is not None:
+                raise NotImplementedError(
+                    "Newton does not support Default-native contact material properties"
+                )
+            mode_values = {"average": 0, "min": 1, "multiply": 2, "max": 3}
+            for name in ("friction_combine_mode", "restitution_combine_mode"):
+                value = values.pop(name, None)
+                if value is None:
+                    continue
+                if value not in mode_values:
+                    raise ValueError(f"invalid {name}: {value!r}")
+                spec.default_material_props[name] = mode_values[value]
+            for name, value in values.items():
+                if not math.isfinite(value) or value < 0:
+                    raise ValueError(f"{name} must be finite and non-negative")
+            if (
+                values.get("compliant_contact_stiffness") == 0
+                and values.get("compliant_contact_damping", 0) > 0
+            ):
+                raise ValueError(
+                    "compliant contact damping requires positive stiffness"
+                )
+            spec.default_material_props.update(values)
+        elif isinstance(material_props, NewtonRigidBodyMaterialCfg):
             values = _configured_values(material_props)
             for name in ("static_friction", "dynamic_friction", "restitution"):
                 values.pop(name, None)
@@ -396,6 +427,20 @@ def rigid_desc_from_cfg(
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),
     )
+    if cfg.collision_filter_data is not None:
+        if newton_solver_type is not None:
+            raise NotImplementedError(
+                "collision_filter_data requires the Default backend"
+            )
+        words = np.asarray(cfg.collision_filter_data)
+        if (
+            words.shape != (4,)
+            or words.dtype.kind not in "iu"
+            or np.any(words < 0)
+            or np.any(words > np.iinfo(np.uint32).max)
+        ):
+            raise ValueError("collision_filter_data must contain four uint32 words")
+        descriptor.physics.collision_filter_data = words.astype(np.uint32, copy=True)
     materials = {} if material_entry is None else {material_entry[0]: material_entry[1]}
     return descriptor, materials
 
@@ -683,11 +728,13 @@ def articulation_desc_from_cfg(
         urdf_path=str(path),
         fixed_base=fixed_base,
         enable_self_collision=self_collision_enabled,
+        filtered_link_pairs=[tuple(pair) for pair in cfg.filtered_link_pairs],
         urdf_fix_root_link=fixed_base,
         # EmbodiChain's preserve/overlay policy starts from source-authored
         # inertia. MassPropertiesCfg can request geometry-based recomputation
         # after exact source names are available.
         urdf_read_inertia=True,
+        urdf_override_material=cfg.urdf_override_material,
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),
     )
@@ -823,6 +870,7 @@ def configure_articulation_desc(
     link_properties = {link.name: default_link_properties for link in desc.links}
 
     claimed_links: dict[str, str] = {}
+    collision_materials: dict[str, dict[str, DexsimCollisionDesc]] = {}
     link_names = [link.name for link in desc.links]
     for group_name, group in (cfg.link_attrs or {}).items():
         _, matched_names = resolve_matching_names(
@@ -848,6 +896,33 @@ def configure_articulation_desc(
                 )
             claimed_links[link_name] = group_name
             link_properties[link_name] = group_properties
+            if group.collision_materials:
+                if newton_solver_type is not None or desc.urdf_path is None:
+                    raise NotImplementedError(
+                        "named collision materials require a Default URDF articulation"
+                    )
+                materials = {}
+                for name, material in group.collision_materials.items():
+                    if not isinstance(name, str) or not name:
+                        raise ValueError(
+                            "URDF collision names must be nonempty strings"
+                        )
+                    if not isinstance(material, RigidBodyMaterialCfg):
+                        raise TypeError(
+                            "collision_materials values must be RigidBodyMaterialCfg"
+                        )
+                    if isinstance(material, NewtonRigidBodyMaterialCfg):
+                        raise NotImplementedError(
+                            "named collision materials require Default material properties"
+                        )
+                    compiled = _compile_default_collision(
+                        _resolve_rigid_physics(
+                            RigidBodyPhysicsCfg(material_props=material)
+                        )
+                    )
+                    if compiled is not None:
+                        materials[name] = compiled
+                collision_materials[link_name] = materials
 
     (
         joint_properties,
@@ -862,6 +937,9 @@ def configure_articulation_desc(
 
     # Commit only after every regex, value, and limit has been validated. Each
     # source-resolved item receives one exact-name update.
+    for link in desc.links:
+        if link.name in collision_materials:
+            link.urdf_collision_overrides.update(collision_materials[link.name])
     for link_name, (
         rigid_body,
         collision,
@@ -1551,6 +1629,7 @@ def _compile_default_collision(
     physics: _RigidPhysicsSpec,
 ) -> DexsimCollisionDesc | None:
     values = dict(physics.material_props)
+    values.update(physics.default_material_props)
     contact_offset, rest_offset = _common_collision_envelope(physics)
     if contact_offset is not None:
         values["contact_offset"] = contact_offset
@@ -1560,6 +1639,12 @@ def _compile_default_collision(
     if not values:
         return None
     configured = {item.name: None for item in fields(DexsimCollisionDesc)}
+    if any(
+        name not in configured
+        for name in physics.default_material_props
+        if name.startswith("compliant_contact_")
+    ):
+        raise RuntimeError("Default compliant contacts require SDK material support")
     configured.update(values)
     return DexsimCollisionDesc(**configured)
 

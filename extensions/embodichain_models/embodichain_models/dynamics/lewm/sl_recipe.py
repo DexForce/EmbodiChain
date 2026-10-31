@@ -44,6 +44,8 @@ def build_lewm_trainer(config: Mapping[str, Any]) -> SupervisedTrainer:
         config: Mapping containing model, data, objective, optimizer and
             trainer sections. ``data.train_path`` and ``data.validation_path``
             must reference disjoint LeWM HDF5 splits with matching contracts.
+            Optional ``cache_device`` and ``cache_max_bytes`` in ``data`` enable
+            a bounded immutable cache per corpus without changing its identity.
 
     Returns:
         Shared supervised trainer with train-only action normalization.
@@ -60,9 +62,23 @@ def build_lewm_trainer(config: Mapping[str, Any]) -> SupervisedTrainer:
     model_cfg = LeWMCfg(**dict(config.get("model", {})))
     model = LeWM(model_cfg)
     data = config["data"]
-    train = LeWMSequenceSource(data["train_path"], "train", model_cfg.history_size)
+    cache_options = {
+        "cache_device": data.get("cache_device"),
+        "cache_max_bytes": data.get("cache_max_bytes", 0),
+    }
+    train = LeWMSequenceSource(
+        data["train_path"],
+        "train",
+        model_cfg.history_size,
+        action_block=model_cfg.action_block,
+        **cache_options,
+    )
     validation = LeWMSequenceSource(
-        data["validation_path"], "validation", model_cfg.history_size
+        data["validation_path"],
+        "validation",
+        model_cfg.history_size,
+        action_block=model_cfg.action_block,
+        **cache_options,
     )
     for key in (
         "action_dim",
@@ -79,7 +95,7 @@ def build_lewm_trainer(config: Mapping[str, Any]) -> SupervisedTrainer:
             raise ValueError(f"training and validation {key} differ")
     if train.seeds & validation.seeds:
         raise ValueError("training and validation episode seeds overlap")
-    if train.metadata["action_dim"] != model_cfg.action_dim:
+    if train.model_action_dim != model_cfg.action_dim:
         raise ValueError("corpus action width differs from the model")
     model.set_action_statistics(*train.action_statistics())
     model.to(trainer_cfg.device)
@@ -118,6 +134,10 @@ def build_lewm_trainer(config: Mapping[str, Any]) -> SupervisedTrainer:
                 count += result.weight
         return {key: value / count for key, value in totals.items()}
 
+    model_signature = model_cfg.to_dict()
+    if model_cfg.action_block == 1:
+        # Keep existing single-step checkpoint signatures resumable.
+        model_signature.pop("action_block")
     return SupervisedTrainer(
         learner,
         train,
@@ -126,7 +146,7 @@ def build_lewm_trainer(config: Mapping[str, Any]) -> SupervisedTrainer:
         evaluate=evaluate,
         signature={
             "recipe": "lewm-v1",
-            "model": model_cfg.to_dict(),
+            "model": model_signature,
             "data_contract": train.metadata,
             "validation_source": validation.source_id,
             "train_seeds": sorted(train.seeds),

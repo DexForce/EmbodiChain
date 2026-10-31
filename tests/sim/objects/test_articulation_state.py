@@ -27,7 +27,63 @@ from embodichain.lab.sim.objects.articulation import Articulation
 pytestmark = pytest.mark.no_sim
 
 
-def test_combined_state_clamps_both_positions_before_one_write() -> None:
+def _mimic_policy_articulation():
+    art = object.__new__(Articulation)
+    art._data = SimpleNamespace(is_newton_backend=False)
+    art._entities = [
+        SimpleNamespace(
+            supports_mimic_soft_velocity=Mock(return_value=True),
+            set_mimic_soft_velocity=Mock(return_value=True),
+        )
+        for _ in range(3)
+    ]
+    art._resolve_env_ids = Mock(return_value=torch.tensor([2, 0]))
+    return art
+
+
+def test_mimic_soft_velocity_selects_only_requested_rows():
+    art = _mimic_policy_articulation()
+    art.set_mimic_soft_velocity(True, env_ids=[2, 0])
+    for i in [2, 0]:
+        art._entities[i].set_mimic_soft_velocity.assert_called_once_with(True)
+    art._entities[1].set_mimic_soft_velocity.assert_not_called()
+    art._entities[2].supports_mimic_soft_velocity.return_value = False
+    art.set_mimic_soft_velocity(False, env_ids=[2, 0])
+    for i in [2, 0]:
+        assert art._entities[i].set_mimic_soft_velocity.call_args.args == (False,)
+
+
+def test_mimic_soft_velocity_preflights_capabilities_before_writes():
+    art = _mimic_policy_articulation()
+    art._entities[0].supports_mimic_soft_velocity.return_value = False
+    with pytest.raises(NotImplementedError, match="soft mimic velocity"):
+        art.set_mimic_soft_velocity(True)
+    for entity in art._entities:
+        entity.set_mimic_soft_velocity.assert_not_called()
+    art._entities[0].supports_mimic_soft_velocity.return_value = True
+    art._entities[0].set_mimic_soft_velocity = None
+    with pytest.raises(NotImplementedError, match="soft mimic velocity"):
+        art.set_mimic_soft_velocity(False)
+    art._entities[2].set_mimic_soft_velocity.assert_not_called()
+
+
+def test_mimic_soft_velocity_validates_type_backend_and_native_rejection():
+    art = _mimic_policy_articulation()
+    with pytest.raises(ValueError, match="boolean"):
+        art.set_mimic_soft_velocity(1)
+    art._data.is_newton_backend = True
+    with pytest.raises(NotImplementedError, match="Default"):
+        art.set_mimic_soft_velocity(True)
+    art._data.is_newton_backend = False
+    art._entities[2].set_mimic_soft_velocity.return_value = False
+    with pytest.raises(RuntimeError, match="soft mimic velocity"):
+        art.set_mimic_soft_velocity(True)
+
+
+@pytest.mark.parametrize("clamp_qpos", [True, False])
+def test_combined_state_clamps_both_positions_before_one_write(
+    clamp_qpos: bool,
+) -> None:
     art = object.__new__(Articulation)
     art.device = torch.device("cpu")
     art._entities = [object()] * 3
@@ -45,6 +101,7 @@ def test_combined_state_clamps_both_positions_before_one_write() -> None:
         qpos=torch.tensor([[5.0, -3.0], [-5.0, 3.0]]),
         target_qpos=torch.tensor([[-4.0, 4.0], [4.0, -4.0]]),
         clear_dynamics=True,
+        clamp_qpos=clamp_qpos,
     )
     call = art._data.articulation_view.apply_state
     call.assert_called_once()
@@ -53,7 +110,12 @@ def test_combined_state_clamps_both_positions_before_one_write() -> None:
     assert torch.as_tensor(rows).tolist() == [2, 0]
     assert torch.as_tensor(columns).tolist() == [1, 0]
     torch.testing.assert_close(
-        call.call_args.kwargs["qpos"], torch.tensor([[2.0, -1.0], [-2.0, 1.0]])
+        call.call_args.kwargs["qpos"],
+        (
+            torch.tensor([[2.0, -1.0], [-2.0, 1.0]])
+            if clamp_qpos
+            else torch.tensor([[5.0, -3.0], [-5.0, 3.0]])
+        ),
     )
     torch.testing.assert_close(
         call.call_args.kwargs["target_qpos"], torch.tensor([[-2.0, 1.0], [2.0, -1.0]])

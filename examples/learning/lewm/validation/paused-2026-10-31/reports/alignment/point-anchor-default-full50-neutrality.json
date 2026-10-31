@@ -1,0 +1,21 @@
+{
+  "scope": "fresh 50-query paired source-action replay, default point-anchor flag off, new SDK and GPU versus prior accepted provider",
+  "arrays": {
+    "qpos": {
+      "exact": true,
+      "max_abs": 0.0
+    },
+    "qvel": {
+      "exact": true,
+      "max_abs": 0.0
+    },
+    "actions": {
+      "exact": true,
+      "max_abs": 0.0
+    },
+    "goals": {
+      "exact": true,
+      "max_abs": 0.0
+    }
+  }
+}

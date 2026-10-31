@@ -28,12 +28,34 @@ velocity clears position gain. Newton rejects active acceleration drives;
 non-MuJoCo position mode is gain-based emulation with zero velocity target.
 Exact field options and defaults remain in `cfg/articulation.py`.
 
+Exact physical-link self-collision exclusions enter the articulation descriptor
+before native initialization. URDF rendering can explicitly select XML colors
+with `urdf_override_material`; otherwise file-mesh materials retain precedence.
+This appearance choice is independent of the source-physics overlay policy.
+
+`LinkPhysicsOverrideCfg.collision_materials` authors sparse contact material
+overrides by exact URDF collision name. Default currently supports uniquely
+matched boxes and spheres; source geometry and body inertia remain unchanged.
+The SDK matches local geometry/frames because cooked meshes can reorder shapes.
+After the sparse source overlay, call its public contact-only replay to restore
+these materials and native combine/compliance settings; see
+[contact policy](physics-configuration.md#geometry-and-contact-policy). Newton rejects
+named collider overrides. PhysX 5.6 GPU shape overrides require material caching
+before scene creation; uncached GPU overrides raise instead of silently using
+stale GPU material mappings. Body property setters preserve other per-shape
+material fields; full physical-attribute writes remain uniform replacements.
+
 ## State order and batched writes
 
 Public `joint_names` follows finalized Scene qpos/qvel order, which may differ
 from source traversal. Map initial state, control groups, limits and mimic
 metadata by joint name into that order. Source-name queries serve topology
 resolution, not state indexing.
+
+`Articulation.set_state()` clamps physical and target joint positions by default.
+Literal states from solvers with compliant limits can explicitly disable physical
+position clamping with `clamp_qpos=False`; target positions remain bounded.
+This option does not change runtime joint limits or drive settings.
 
 `objects/backends/scene.py` owns `SceneRigidBodyView.from_entities()` and
 `SceneArticulationView.from_entities()`, the object layer's batch factories.
@@ -48,6 +70,16 @@ pose/velocities together into existing data buffers. The Scene view reuses
 DexSim's batch fetch and converts the root-pose layout once. Returned tensors
 are borrowed buffers, not snapshots; clone values that must survive later
 reads. Fetch after reset or direct writes rather than caching across them.
+
+`ArticulationData.body_link_acceleration` exposes world-frame COM linear/angular
+acceleration through Scene batches after a completed Default Direct GPU step.
+`body_link_incoming_joint_force` uses force/torque order in each link's incoming
+child-joint frame; the root is zero. These float32 tensors are borrowed buffers.
+`body_link_incoming_joint_frames` copies configured child-joint transforms into
+public link order. Unsupported backends raise explicitly. A transmitted joint
+wrench is not an external/contact wrench: consumers must account for inertia,
+gravity, child reactions and the requested torque origin. The SDK dependency's
+measurement implementation must also be validated under actual contact loads.
 
 `Articulation.set_root_velocity()` writes selected world-frame linear and
 angular velocities as `(N, 6)` rows. The Scene adapter validates the complete

@@ -1,0 +1,14 @@
+{
+  "scope": "same qualified coupled source adapter, robot velocity iterations0, cube velocity iterations1",
+  "height": 0.19222010672092438,
+  "mean_cube_error_m": 0.001194972407672676,
+  "max_cube_error_m": 0.003147938179446599,
+  "mean_force20_35_N": 51.177898863055226,
+  "peak_force_N": 108.72642595274438,
+  "trial": {
+    "substeps": 1125,
+    "max_point_residual_m": 0.0004529374823557721,
+    "max_mimic_velocity_force_Nm": 0.22853784347074485,
+    "max_native_motion_final_difference_rad_s": 0.2640823721885681
+  }
+}

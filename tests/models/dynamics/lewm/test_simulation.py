@@ -24,7 +24,14 @@ import numpy as np
 import pytest
 
 from embodichain.lab.sim.scene import SceneView, capture_state
-from examples.learning.lewm._sim import close_env, frame, goal_image, make_env, reset
+from examples.learning.lewm._sim import (
+    close_env,
+    frame,
+    goal_image,
+    make_env,
+    render_contract,
+    reset,
+)
 
 
 @pytest.mark.gpu
@@ -32,6 +39,7 @@ from examples.learning.lewm._sim import close_env, frame, goal_image, make_env, 
 def test_goal_image_restores_scene_without_advancing_time() -> None:
     env, _ = make_env(os.environ.get("LEWM_TEST_DEVICE", "cuda:0"))
     try:
+        assert render_contract(env)["offscreen_denoising"] == "dlss"
         obs, _ = reset(env, 200_000)
         raw = env.unwrapped
         before_image = frame(obs)

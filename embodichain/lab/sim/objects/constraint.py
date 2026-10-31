@@ -28,13 +28,14 @@ import torch
 if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import RigidConstraintCfg
     from embodichain.lab.sim.objects.rigid_object import RigidObject
+    from embodichain.lab.sim.objects.articulation import Articulation
 
 __all__ = ["RigidConstraint"]
 
 
 @dataclass
 class RigidConstraint:
-    """Batch of fixed constraints linking two :class:`RigidObject` instances.
+    """Batch of fixed or spherical constraints between rigid endpoints.
 
     Each entry binds ``rigid_object_a._entities[i]`` to
     ``rigid_object_b._entities[i]`` within arena ``i`` via a dexsim
@@ -52,8 +53,8 @@ class RigidConstraint:
 
     cfg: RigidConstraintCfg
     constraint_handles: list[Any] = field(default_factory=list)
-    rigid_object_a: RigidObject | None = None
-    rigid_object_b: RigidObject | None = None
+    rigid_object_a: RigidObject | Articulation | None = None
+    rigid_object_b: RigidObject | Articulation | None = None
     device: torch.device = field(default_factory=torch.device("cpu"))
 
     @property

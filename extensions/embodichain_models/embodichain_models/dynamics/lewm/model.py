@@ -34,11 +34,13 @@ class LeWMCfg:
     """Configure the reference-compatible visual encoder and predictor.
 
     Args:
-        action_dim: Number of scalar controls in one model step.
+        action_dim: Number of scalar controls in one model step, including all
+            concatenated raw controls when ``action_block`` is greater than one.
         image_size: Square encoder input size.
         patch_size: ViT patch size.
         embed_dim: Latent and transformer width.
-        history_size: Maximum number of observed frames used by the predictor.
+        history_size: Maximum number of observed frames used by the predictor,
+            sampled ``action_block`` raw timesteps apart.
         vision_depth: Number of ViT blocks.
         vision_heads: Number of ViT attention heads.
         predictor_depth: Number of causal predictor blocks.
@@ -46,6 +48,8 @@ class LeWMCfg:
         predictor_head_dim: Width per predictor attention head.
         mlp_dim: Width of predictor and projector hidden layers.
         dropout: Predictor dropout probability.
+        action_block: Number of consecutive raw controls concatenated into one
+            model action. ``action_dim`` must be divisible by this number.
     """
 
     action_dim: int = 10
@@ -60,6 +64,7 @@ class LeWMCfg:
     predictor_head_dim: int = 64
     mlp_dim: int = 2048
     dropout: float = 0.1
+    action_block: int = 1
 
 
 def preprocess_rgb(images: torch.Tensor, image_size: int = 224) -> torch.Tensor:
@@ -121,11 +126,13 @@ class LeWM(nn.Module):
             c.predictor_heads,
             c.predictor_head_dim,
             c.mlp_dim,
+            c.action_block,
         )
         if any(type(value) is not int or value < 1 for value in sizes):
             raise ValueError("LeWM dimensions must be positive integers")
         if (
             c.image_size % c.patch_size
+            or c.action_dim % c.action_block
             or c.embed_dim % c.vision_heads
             or not 0 <= c.dropout < 1
         ):

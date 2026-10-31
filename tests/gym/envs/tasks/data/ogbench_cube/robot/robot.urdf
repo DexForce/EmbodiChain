@@ -1,0 +1,64 @@
+<robot name="ogbench_ur5e_robotiq">
+  <link name="ur5e/base">
+    </link>
+  <link name="ur5e/shoulder_link">
+    </link>
+  <link name="ur5e/upper_arm_link">
+    </link>
+  <link name="ur5e/forearm_link">
+    </link>
+  <link name="ur5e/wrist_1_link">
+    </link>
+  <link name="ur5e/wrist_2_link">
+    </link>
+  <link name="ur5e/wrist_3_link">
+    </link>
+  <joint name="ur5e/shoulder_pan_joint" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="-6.2831900000000003" upper="6.2831900000000003" effort="150" velocity="1e30" />
+    <dynamics damping="0" friction="0" />
+    <parent link="ur5e/base" />
+    <child link="ur5e/shoulder_link" />
+    <origin xyz="0 0 0.16300000000000001" rpy="0 0 0" />
+  </joint>
+  <joint name="ur5e/shoulder_lift_joint" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit lower="-6.2831900000000003" upper="6.2831900000000003" effort="150" velocity="1e30" />
+    <dynamics damping="0" friction="0" />
+    <parent link="ur5e/shoulder_link" />
+    <child link="ur5e/upper_arm_link" />
+    <origin xyz="0 0.13800000000000001 0" rpy="-0 1.5707963267948966 0" />
+  </joint>
+  <joint name="ur5e/elbow_joint" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit lower="-3.1415000000000002" upper="3.1415000000000002" effort="150" velocity="1e30" />
+    <dynamics damping="0" friction="0" />
+    <parent link="ur5e/upper_arm_link" />
+    <child link="ur5e/forearm_link" />
+    <origin xyz="0 -0.13100000000000001 0.42499999999999999" rpy="0 0 0" />
+  </joint>
+  <joint name="ur5e/wrist_1_joint" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit lower="-6.2831900000000003" upper="6.2831900000000003" effort="28" velocity="1e30" />
+    <dynamics damping="0" friction="0" />
+    <parent link="ur5e/forearm_link" />
+    <child link="ur5e/wrist_1_link" />
+    <origin xyz="2.7755575615628914e-17 0 0.3919999999999999" rpy="-0 1.5707963267948966 0" />
+  </joint>
+  <joint name="ur5e/wrist_2_joint" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="-6.2831900000000003" upper="6.2831900000000003" effort="28" velocity="1e30" />
+    <dynamics damping="0" friction="0" />
+    <parent link="ur5e/wrist_1_link" />
+    <child link="ur5e/wrist_2_link" />
+    <origin xyz="0 0.12700000000000003 0" rpy="0 0 0" />
+  </joint>
+  <joint name="ur5e/wrist_3_joint" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit lower="-6.2831900000000003" upper="6.2831900000000003" effort="28" velocity="1e30" />
+    <dynamics damping="0" friction="0" />
+    <parent link="ur5e/wrist_2_link" />
+    <child link="ur5e/wrist_3_link" />
+    <origin xyz="1.1102230246251565e-16 0 0.10000000000000001" rpy="0 0 0" />
+  </joint>
+</robot>
