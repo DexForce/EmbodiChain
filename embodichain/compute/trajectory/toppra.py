@@ -30,7 +30,7 @@ __all__ = ["JointPathTimingResult", "retime_joint_paths"]
 
 @dataclass(frozen=True)
 class JointPathTimingResult:
-    """A batch of timed paths, in the input joint order, precision and device.
+    """A batch of timed paths, in the input joint order, device and selected precision.
 
     Args:
         positions: Sampled joint positions, shape ``(B, M, J)``.
@@ -67,6 +67,7 @@ def retime_joint_paths(
     sample_count: int | None = None,
     sample_dt: float | None = None,
     grid_size: int = 100,
+    output_dtype: torch.dtype | None = None,
 ) -> JointPathTimingResult:
     """Fit and time joint paths with the shared CPU/CUDA Warp TOPPRA solver.
 
@@ -82,6 +83,9 @@ def retime_joint_paths(
         sample_dt: Positive upper bound on time spacing in seconds. Samples
             are uniform over each solved duration. Mutually exclusive with
             ``sample_count``; this does not define a fixed controller clock.
+        output_dtype: Optional float32/float64 output precision. Defaults to the
+            input dtype; float64 avoids position quantization when densely
+            sampled outputs are differentiated. Input filtering is unchanged.
         grid_size: Minimum timing grid size, at least three. Actual work also
             depends on the number of path nodes.
 
@@ -115,6 +119,7 @@ def retime_joint_paths(
         sample_count=sample_count,
         sample_dt=sample_dt,
         grid_size=grid_size,
+        output_dtype=output_dtype,
     )
     # The native sampler emits strictly positive intervals for moving samples,
     # a leading zero, then zero padding. Stationary successes retain two points.

@@ -192,3 +192,16 @@ def test_uint8_lengths_on_paths_longer_than_255_nodes():
         sample_count=2,
     )
     assert result.success.item() and result.sample_lengths.item() == 2
+
+
+def test_public_output_precision_keeps_gradient_to_float32_input():
+    points = torch.tensor([[[0.0], [0.2], [0.5]]], requires_grad=True)
+    result = retime_joint_paths(
+        points,
+        constraints={"velocity": 1.0, "acceleration": 2.0},
+        output_dtype=torch.float64,
+    )
+    assert result.positions.dtype == result.dt.dtype == torch.float64
+    result.duration.sum().backward()
+    assert points.grad is not None and points.grad.dtype == torch.float32
+    assert torch.isfinite(points.grad).all() and points.grad.norm() > 0
