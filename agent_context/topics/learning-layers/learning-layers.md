@@ -14,6 +14,14 @@ returns TCP poses and geometric Jacobians from one FK pass, retaining dJ/dq.
 poses through a pure FK path; `evaluate` also returns geometric Jacobians from
 one FK pass. `DifferentiableIKLayer` composes this FK layer with fixed-step DLS.
 IK keeps its `kinematics` child name for checkpoint compatibility.
+`learning/layers/toppra.py` owns `DifferentiableRetimingLayer`, composing the
+simulation-independent public `compute.trajectory.retime_joint_paths()` API.
+It checkpoints fixed motion-limit buffers and numerical settings, pads quantity
+outputs to a fixed width and loads on demand so FK/IK imports do not load Warp.
+`JointPathTimingResult.sample_lengths` distinguishes failed rows (zero) from
+stationary successes (two). Callers resolve robot caps, preserve input graphs
+and own geometric validation. Gradients are first-order and local to fixed
+filtering, sampling topology and active constraints.
 `learning/models/` owns general MLPs, feature normalization
 and configuration-driven MLP construction. These shared components do not import
 RL, TensorDict or simulation. Concrete NeRD models, codecs and the shared-SL
@@ -79,6 +87,12 @@ stale asynchronous results after target edits. Numerical reference baselines are
 part of the training/evaluation entry point. The demo does not execute physical
 motion; keep task predictors out of production policy registries until a reusable
 contract exists.
+
+`examples/learning/differentiable_toppra/optimize_path.py` optimizes free Franka
+path nodes through physical duration with fixed joint targets. Its Viser viewer
+compares connected and detached objectives and shares the native physical clock.
+The example owns projected first-order updates, sampled checks and artifact
+replay; it does not train a network or imply policy-quality improvements.
 
 Tests live under `tests/compute/kinematics/` and `tests/learning/layers/`.
 Validate FK, dJ/dq, full IK and recurrent-state gradients separately; include

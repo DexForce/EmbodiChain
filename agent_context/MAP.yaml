@@ -292,8 +292,8 @@ topics:
   status: active
 - id: learning-layers
   title: Differentiable Learning Layers
-  aliases: [learning layers, differentiable FK layer, differentiable IK layer, 可微 FK, 可微 IK, 训练层, 学习模块分层]
-  keywords: [DifferentiableFKLayer, DifferentiableIKLayer, SerialChainKinematics, DifferentiableIKCfg,
+  aliases: [learning layers, differentiable retiming layer, 可微重定时, differentiable FK layer, differentiable IK layer, 可微 FK, 可微 IK, 训练层, 学习模块分层]
+  keywords: [DifferentiableFKLayer, DifferentiableIKLayer, DifferentiableRetimingLayer, JointPathTimingResult, SerialChainKinematics, DifferentiableIKCfg,
     solve_dls_ik, damped_least_squares_step, Jacobian gradient, dJ/dq, learn_grasp_yaw, learn_pose_reaching, grasp yaw, 抓取角度优化, 抓取姿态学习]
   paths: [topics/learning-layers/learning-layers.md]
   source_of_truth:
@@ -308,10 +308,12 @@ topics:
   - examples/learning/differentiable_ik/view_learned_yaw.py
   - examples/learning/differentiable_fk/learn_pose_reaching.py
   - examples/learning/differentiable_fk/view_pose_reaching.py
+  - examples/learning/differentiable_toppra/optimize_path.py
+  - examples/learning/differentiable_toppra/view_path_optimization.py
   watch_paths: [embodichain/compute/kinematics/, embodichain/learning/layers/,
     embodichain/learning/models/, embodichain/learning/__init__.py,
     tests/compute/kinematics/, tests/learning/layers/, examples/learning/differentiable_ik/,
-    examples/learning/differentiable_fk/]
+    examples/learning/differentiable_fk/, examples/learning/differentiable_toppra/]
   related_topics: [ik-solvers, rl-learning, supervised-learning]
   status: active
 - id: rl-learning

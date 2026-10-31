@@ -48,11 +48,21 @@ state, optimizers, and detach boundaries.
 
    DifferentiableFKLayer
    DifferentiableIKLayer
+   DifferentiableRetimingLayer
 
 .. automodule:: embodichain.learning.layers.fk
    :members:
 
 .. automodule:: embodichain.learning.layers.ik
+   :members:
+
+``DifferentiableRetimingLayer`` maps joint paths to fixed-width timed trajectories
+through the compute TOPPRA API. It checkpoints fixed motion-limit buffers and
+sampling settings. Request overrides are shared by a batch; physical robot caps
+and geometric validation belong to the caller. Only first-order gradients on the
+current discrete solver branch are supported.
+
+.. automodule:: embodichain.learning.layers.toppra
    :members:
 
 Shared trainable models

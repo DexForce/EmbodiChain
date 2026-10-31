@@ -286,7 +286,12 @@ mixed order and real Franka adapter calls in
 
 ## Retiming and playback
 
-`toppra_planner.py::retime_joint_paths()` is the shared entry point for
+`compute.trajectory.retime_joint_paths()` is the simulation-independent public
+entry point, returning `JointPathTimingResult` with native output lengths and
+physical arrival intervals. It accepts numeric `sample_count`/`sample_dt`.
+The planner's `toppra_planner.py::retime_joint_paths()` delegates to it while
+preserving its enum signature and `PlanResult`. Both validate lengths before
+integer narrowing. They are used for
 re-parameterizing an already-planned joint path under velocity and acceleration
 limits, used by planners that emit geometry without executable timing. It is
 the planner's own time parameterization. All CPU/CUDA rows run on Warp,

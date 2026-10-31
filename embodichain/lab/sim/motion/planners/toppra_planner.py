@@ -23,7 +23,11 @@ from dataclasses import field
 import torch
 
 from embodichain.compute.trajectory._toppra_common import _validate_grid_size
-from embodichain.compute.trajectory._toppra_warp import _retime_toppra_warp
+from embodichain.compute.trajectory import retime_joint_paths as _retime_joint_paths
+from embodichain.compute.trajectory._toppra_warp import (
+    _retime_toppra_warp,
+    _tensor_path_lengths,
+)
 from embodichain.compute.trajectory._toppra_stopped import _retime_toppra_stopped
 from embodichain.utils import logger, configclass
 from .base_planner import (
@@ -131,23 +135,8 @@ def retime_joint_paths(
         )
     resolved_device = positions.device if device is None else device
     batch, count, dofs = positions.shape
-    if path_lengths is not None:
-        if not isinstance(path_lengths, torch.Tensor) or path_lengths.shape != (batch,):
-            raise ValueError(f"path_lengths must have shape ({batch},)")
-        if path_lengths.dtype not in (
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-        ):
-            raise ValueError("path_lengths must contain integers")
-        path_lengths = path_lengths.to(device=positions.device, dtype=torch.int32)
-        if bool(((path_lengths < 2) | (path_lengths > count)).any().item()):
-            raise ValueError(f"path_lengths must be between 2 and {count}")
-        path_lengths = path_lengths.contiguous()
+    path_lengths = _tensor_path_lengths(path_lengths, batch, count, positions.device)
     resolved_interval = count if sample_interval is None else sample_interval
-    velocity, acceleration = constraints["velocity"], constraints["acceleration"]
 
     quantity = sample_method == TrajectorySampleMethod.QUANTITY
     waypoints = (
@@ -156,10 +145,9 @@ def retime_joint_paths(
         else positions.float()
     )
     try:
-        result = _retime_toppra_warp(
+        result = _retime_joint_paths(
             waypoints,
-            velocity,
-            acceleration,
+            constraints=constraints,
             path_lengths=path_lengths,
             sample_count=int(resolved_interval) if quantity else None,
             sample_dt=None if quantity else float(resolved_interval),
@@ -169,7 +157,10 @@ def retime_joint_paths(
     except (ValueError, FloatingPointError, OverflowError):
         return _failed_result(batch, dofs, resolved_device, torch.float64)
     return PlanResult(
-        **{key: value.to(resolved_device) for key, value in result.items()}
+        **{
+            key: getattr(result, key).to(resolved_device)
+            for key in ("success", "positions", "velocities", "accelerations", "dt")
+        }
     )
 
 

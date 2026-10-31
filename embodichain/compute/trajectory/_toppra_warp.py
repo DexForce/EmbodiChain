@@ -343,10 +343,12 @@ def _tensor_path_lengths(
         torch.int64,
     ):
         raise ValueError("path_lengths must contain integers")
-    lengths = value.to(device=device, dtype=torch.int32).contiguous()
-    if bool(((lengths < 2) | (lengths > count)).any().item()):
+    # Widen before comparison too: a Python count >255 wraps when compared
+    # directly with a uint8 tensor. No integer input value is narrowed here.
+    checked = value.to(device=device, dtype=torch.int64)
+    if bool(((checked < 2) | (checked > count)).any().item()):
         raise ValueError(f"path_lengths must be between 2 and {count}")
-    return lengths
+    return checked.to(dtype=torch.int32).contiguous()
 
 
 def _tensor_limits(value: object, dofs: int, device: torch.device) -> torch.Tensor:
