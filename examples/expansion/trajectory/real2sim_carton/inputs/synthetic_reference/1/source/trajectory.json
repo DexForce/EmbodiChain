@@ -1,0 +1,58 @@
+{
+  "array_file": "trajectory.npz",
+  "metadata": {
+    "annotation_revision": "carton-bias-drift-v1",
+    "calibration_revision": "synthetic_panda_robotiq85_carton_v1",
+    "command_alignment": "sample_aligned_reference",
+    "command_representation": "joint_position_reference",
+    "joint_names": [
+      "Joint1",
+      "Joint2",
+      "Joint3",
+      "Joint4",
+      "Joint5",
+      "Joint6",
+      "Joint7",
+      "finger_joint"
+    ],
+    "joint_units": [
+      "rad",
+      "rad",
+      "rad",
+      "rad",
+      "rad",
+      "rad",
+      "rad",
+      "rad"
+    ],
+    "object_geometry_sha256": "9b38e6f3c8dd59eb2123e4bf74017468548aa545991a34108fce77cf024c74ef",
+    "origin": "synthetic_reference",
+    "phases": [
+      {
+        "allowed_operators": [
+          "joint_residual",
+          "task_space_residual",
+          "retime"
+        ],
+        "authority": null,
+        "kind": "free",
+        "name": "transport",
+        "reference": "target",
+        "start": 0,
+        "stop": 100
+      }
+    ],
+    "pose_length_unit": "m",
+    "pose_origin": "transformed",
+    "quaternion_order": "xyzw",
+    "robot_geometry_sha256": "6b08aff1b8de77edfd1deab3da3f139d2ecfb20838bd21cf2d6207058c0d4d82",
+    "skill_id": "move_held_object",
+    "source_id": "synthetic_panda_carton_controlled_error",
+    "source_revision": "53c7e9600ecfa63377a539d1c80ba94bf537c70f12c36de1a51f5bea17005ad0",
+    "target_geometry_sha256": "0a80a01e374568cffc70cb08871d1b95c15ef8a1c82d9e584b28f97375a7b9a4",
+    "time_unit": "s",
+    "unit_id": "call_1_move_held_object"
+  },
+  "schema_version": 1,
+  "sha256": "c5edbf1604740da55160890c1317efac5aa5b158c7a78f82f359c2c22b401e45"
+}

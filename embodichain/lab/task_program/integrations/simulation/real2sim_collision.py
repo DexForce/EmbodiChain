@@ -35,6 +35,10 @@ from embodichain.lab.sim.motion.expansion.real2sim_collision import (
     SampledRobotCollisionChecker,
 )
 from embodichain.lab.sim.motion.expansion.operators import validate_motion_samples
+from embodichain.lab.sim.motion.expansion.gripper_contact import (
+    GripperContactProjectionCfg,
+    GripperContactProjector,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
@@ -80,6 +84,39 @@ def _support_errors(
     return height, overhang
 
 
+def _semantic_release_pose(
+    request: ResolvedActionRequest, context: PlanningContext
+) -> np.ndarray:
+    """Resolve the requested object pose independently of approximate IK/FK."""
+    from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
+    from embodichain.lab.sim.atomic_actions.primitives.place import PlaceGoal
+    from embodichain.lab.sim.atomic_actions.trajectory_ops import resolve_pose_target
+
+    if not isinstance(request.goal, PlaceGoal):
+        raise ValueError("source-backed tabletop Place requires a direct PlaceGoal")
+    endpoint = request.binding.endpoint("primary", "motion")
+    held = context.get_held_object(endpoint.task_state_key)
+    if held is None:
+        raise ValueError("semantic Place target requires a verified held relation")
+    target = resolve_pose_target(
+        resolve_pose_goal(request.goal.xpos, context, name="xpos"),
+        num_envs=1,
+        device=context.robot.qpos.device,
+    )
+    if target.ndim == 4:
+        target = target[:, -1]
+    relation = held.object_to_eef
+    if relation.ndim == 2:
+        relation = relation.unsqueeze(0)
+    return (
+        (target @ torch.linalg.inv(relation.to(target)))[0]
+        .detach()
+        .cpu()
+        .numpy()
+        .copy()
+    )
+
+
 class TabletopPrototypeCollisionValidator:
     """Check one source-backed Pick, transport or Place plan at every sample.
 
@@ -107,6 +144,7 @@ class TabletopPrototypeCollisionValidator:
         base_link: str,
         contact_depth_m: float,
         base_ground_depth_m: float,
+        gripper_contact: GripperContactProjectionCfg | None = None,
     ) -> None:
         if not isinstance(checker, SampledRobotCollisionChecker):
             raise TypeError("checker must be a SampledRobotCollisionChecker")
@@ -155,7 +193,7 @@ class TabletopPrototypeCollisionValidator:
         directions = tuple(closing_directions)
         robot_names = tuple(getattr(robot, "joint_names", ()))
         if (
-            len(joints) != len(fingers)
+            not joints
             or len(set(joints)) != len(joints)
             or any(name not in robot_names for name in joints)
             or len(directions) != len(joints)
@@ -167,8 +205,15 @@ class TabletopPrototypeCollisionValidator:
             raise ValueError(
                 "every finger link needs an explicit joint and closing direction"
             )
-        for link, joint in zip(fingers, joints):
-            checker.validate_prismatic_link(link, joint)
+        projector = GripperContactProjector(
+            gripper_contact or GripperContactProjectionCfg(),
+            checker,
+            urdf_path=getattr(getattr(robot, "cfg", None), "fpath", None),
+            joint_names=robot_names,
+            finger_links=fingers,
+            finger_joints=joints,
+            closing_directions=directions,
+        )
         if not isinstance(base_link, str) or not base_link:
             raise ValueError("base_link must be a URDF link name")
         for value in (contact_depth_m, base_ground_depth_m):
@@ -200,8 +245,7 @@ class TabletopPrototypeCollisionValidator:
             ground_uid,
         )
         self._fingers, self._base_link = fingers, base_link
-        self._finger_indices = tuple(robot_names.index(name) for name in joints)
-        self._closing_directions = directions
+        self._gripper_projector = projector
         self._contact_depth = float(contact_depth_m)
         self._base_ground_depth = float(base_ground_depth_m)
         self._reports: list[tuple[str, SampledCollisionReport]] = []
@@ -253,6 +297,7 @@ class TabletopPrototypeCollisionValidator:
                 "body:" + self._ground_uid,
             ): self._base_ground_depth,
         }
+        allowed.update(self._gripper_projector.mechanism_contacts)
         if skill_id == "pick_up":
             allowed[("body:" + self._object_uid, "body:" + self._ground_uid)] = (
                 self._contact_depth
@@ -486,57 +531,20 @@ class TabletopPrototypeCollisionValidator:
         # contact-limited geometric path, and require measured effect and
         # collision evidence separately after execution.
         collision_positions = positions[0].detach().cpu().numpy().astype(np.float64)
-        collision_positions = np.array(collision_positions, copy=True)
         if plan.skill_id == "pick_up":
             close = plan.segments[1]
-            start = collision_positions[close.start].copy()
-            end = collision_positions[close.stop - 1].copy()
-            non_fingers = [
-                index
-                for index in range(collision_positions.shape[1])
-                if index not in self._finger_indices
-            ]
-            if not np.allclose(
-                collision_positions[close.start : close.stop, non_fingers],
-                start[non_fingers],
-                atol=1e-5,
-                rtol=0,
-            ):
-                raise ValueError(
-                    "gripper contact projection requires a stationary close phase"
-                )
-            for link, index, direction in zip(
-                self._fingers, self._finger_indices, self._closing_directions
-            ):
-                if direction * (end[index] - start[index]) <= 0:
-                    raise ValueError(
-                        "gripper command does not follow its declared closing direction"
-                    )
-                sweep_end = start.copy()
-                sweep_end[index] = end[index]
-                fraction = self._checker.first_link_body_contact(
-                    start,
-                    sweep_end,
-                    link=link,
-                    body_uid=self._object_uid,
-                    body_pose=object_pose,
-                )
-                contact = start[index] + fraction * (end[index] - start[index])
-                samples = collision_positions[close.start :, index]
-                collision_positions[close.start :, index] = (
-                    np.minimum(samples, contact)
-                    if direction == 1
-                    else np.maximum(samples, contact)
-                )
+            collision_positions = self._gripper_projector.project_close(
+                collision_positions,
+                start=close.start,
+                stop=close.stop,
+                object_uid=self._object_uid,
+                object_pose=object_pose,
+            )
         else:
             current = context.robot.qpos[0].detach().cpu().numpy()
-            for index, direction in zip(self._finger_indices, self._closing_directions):
-                samples = collision_positions[:, index]
-                collision_positions[:, index] = (
-                    np.minimum(samples, current[index])
-                    if direction == 1
-                    else np.maximum(samples, current[index])
-                )
+            collision_positions = self._gripper_projector.project_held(
+                collision_positions, current
+            )
         scene_poses = {
             self._object_uid: object_poses,
             self._target_uid: np.broadcast_to(target_pose, (count, 4, 4)),
@@ -626,6 +634,16 @@ class TabletopCollisionGuardFactory:
         self._motion_metrics: dict[int, dict[str, float]] = {}
         self._phase_samples: dict[int, tuple[tuple[str, int, int], ...]] = {}
         self._release_targets: dict[int, np.ndarray] = {}
+        self._semantic_release_targets: dict[int, np.ndarray] = {}
+
+    @property
+    def nominal_joint_acceleration_limits(self) -> tuple[float, ...] | None:
+        """Return full-layout nominal feasibility bounds without changing them."""
+        return (
+            None
+            if self._acceleration_limits is None
+            else tuple(self._acceleration_limits.tolist())
+        )
 
     @property
     def segments(self) -> Mapping[int, tuple[tuple[str, int, int], ...]]:
@@ -643,11 +661,23 @@ class TabletopCollisionGuardFactory:
 
     @property
     def release_targets(self) -> Mapping[int, np.ndarray]:
-        """Return owned world-frame object release targets by Place occurrence."""
+        """Return FK-predicted object release poses for collision diagnostics."""
         from types import MappingProxyType
 
         return MappingProxyType(
             {index: value.copy() for index, value in self._release_targets.items()}
+        )
+
+    @property
+    def semantic_release_targets(self) -> Mapping[int, np.ndarray]:
+        """Return requested world object poses, including all IK/FK goal error."""
+        from types import MappingProxyType
+
+        return MappingProxyType(
+            {
+                index: value.copy()
+                for index, value in self._semantic_release_targets.items()
+            }
         )
 
     @property
@@ -727,8 +757,30 @@ class TabletopCollisionGuardFactory:
                 )
                 motion_metrics = dict(check.checks[0].metrics)
                 if not check.accepted:
+                    intervals = trajectory.dt[0].double()
+                    speeds = (q[1:].double() - q[:-1].double()) / intervals[1:, None]
+                    accelerations = (speeds[1:] - speeds[:-1]) / (
+                        (intervals[2:] + intervals[1:-1])[:, None] / 2
+                    )
+                    detail = ""
+                    if accelerations.numel():
+                        peak = (
+                            accelerations.abs() / acceleration.to(accelerations)
+                        ).argmax()
+                        sample, column = np.unravel_index(
+                            int(peak), tuple(accelerations.shape)
+                        )
+                        phase = next(
+                            (
+                                item.name
+                                for item in plan.segments
+                                if item.start <= sample + 2 < item.stop
+                            ),
+                            "boundary",
+                        )
+                        detail = f"; sample={sample+2}, phase={phase}, joint={engine.robot.joint_names[column]}, acceleration={float(accelerations[sample, column]):.6g}"
                     raise ValueError(
-                        f"source plan exceeds sampled motion limits: {motion_metrics}"
+                        f"source plan exceeds sampled motion limits: {motion_metrics}{detail}"
                     )
             report = self.validator.validate(resolved, context, plan)
             if not report.accepted:
@@ -779,6 +831,9 @@ class TabletopCollisionGuardFactory:
                     raise ValueError("validated Place has no object release target")
                 self._release_targets[request.analysis_call_index] = (
                     self.validator._last_release_target.copy()
+                )
+                self._semantic_release_targets[request.analysis_call_index] = (
+                    _semantic_release_pose(resolved, context)
                 )
             metrics = final.diagnostics.metadata.get("sampled_motion_limits")
             if metrics is not None:

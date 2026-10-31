@@ -32,6 +32,7 @@ _CONFIG_CLASSES = {
     "TianjiMarvin": "embodichain_robots.tianji.marvin:TianjiMarvinCfg",
     "DexforceW1": "embodichain_robots.dexforce.w1:DexforceW1Cfg",
     "CobotMagic": "embodichain_robots.agilex.cobotmagic:CobotMagicCfg",
+    "FrankaPandaRobotiq85": "embodichain_robots.franka.panda_robotiq_85:FrankaPandaRobotiq85Cfg",
     "FrankaPanda": "embodichain_robots.franka.panda:FrankaPandaCfg",
     "FlexivRizon4S": "embodichain_robots.flexiv.rizon4s:FlexivRizon4SCfg",
     "URRobot": "embodichain_robots.universal_robots.ur_robot:URRobotCfg",
@@ -87,6 +88,7 @@ _DEFAULT_CONTROL_INFO = {
             "right_eef": 2,
         },
     },
+    "FrankaPandaRobotiq85": {"dof": 8, "control_parts": {"arm": 7, "eef": 6}},
     "FrankaPanda": {
         "dof": 8,
         "control_parts": {"arm": 7, "eef": 2},
@@ -112,6 +114,16 @@ _MIMIC_JOINTS = {
         "right_joint8": "right_joint7",
     },
     "FrankaPanda": {"fr3_finger_joint2": "fr3_finger_joint1"},
+    "FrankaPandaRobotiq85": {
+        name: "finger_joint"
+        for name in (
+            "left_inner_knuckle_joint",
+            "left_inner_finger_joint",
+            "right_outer_knuckle_joint",
+            "right_inner_knuckle_joint",
+            "right_inner_finger_joint",
+        )
+    },
     "URRobot": {},
 }
 _CONTROL_PART_MIMICS = {
@@ -121,6 +133,15 @@ _CONTROL_PART_MIMICS = {
     },
     "CobotMagic": {"left_eef": ("left_joint8",), "right_eef": ("right_joint8",)},
     "FrankaPanda": {"eef": ("fr3_finger_joint2",)},
+    "FrankaPandaRobotiq85": {
+        "eef": (
+            "left_inner_knuckle_joint",
+            "left_inner_finger_joint",
+            "right_outer_knuckle_joint",
+            "right_inner_knuckle_joint",
+            "right_inner_finger_joint",
+        )
+    },
 }
 
 _CLASSIFICATION = {
@@ -135,6 +156,7 @@ _CLASSIFICATION = {
     "TianjiMarvin": ("tianji", "fixed_manipulator", 2),
     "DexforceW1": ("dexforce", "wheeled_humanoid", 2),
     "CobotMagic": ("agilex", "fixed_manipulator", 2),
+    "FrankaPandaRobotiq85": ("franka", "fixed_manipulator", 1),
     "FrankaPanda": ("franka", "fixed_manipulator", 1),
     "FlexivRizon4S": ("flexiv", "fixed_manipulator", 1),
     "URRobot": ("universal_robots", "fixed_manipulator", 1),

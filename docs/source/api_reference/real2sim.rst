@@ -32,6 +32,23 @@ prototype generated from a synthetic reference remains marked synthetic.
    :members:
    :no-index:
 
+Original DROID recordings retain measured joint states, optional measured
+velocities, submitted commands and both acquisition clocks as separate streams.
+The adapter requires explicit manual phases and base/flange/TCP calibration.
+Its reported Cartesian poses are FK-derived, not independent TCP measurements.
+Typed evidence archives the original streams alongside the self-contained HDF5;
+missing velocities are not reconstructed as observations.
+
+.. automodule:: embodichain.data_pipeline.real2sim.droid
+   :members:
+
+Read-only replay export verifies each episode's matching complete recorder
+journal, receipt identities, source bundles and attachment digests. It retains
+failed attempts and creates no new collection or submission identities.
+
+.. automodule:: embodichain.data_pipeline.real2sim.replay
+   :members:
+
 Nominal motion is selected before native planning. The corresponding atomic
 skill owns effect and command construction. Sampled collision evidence is
 separate from a physical outcome; an unverified collision check cannot certify
@@ -96,6 +113,15 @@ these interfaces do not establish continuous-time or hardware feasibility.
    :members:
    :no-index:
 
+Gripper contact projection is explicitly selected by the host. Independent
+prismatic fingers retain their existing projection. Coupled mimic grippers
+advance one driver and all followers together until the first contact of any
+declared finger link. Measured coupling tolerances never relax command coupling.
+Internal mechanism collision pairs and their depth bounds must be named.
+
+.. automodule:: embodichain.lab.sim.motion.expansion.gripper_contact
+   :members:
+
 .. automodule:: embodichain.lab.task_program.integrations.simulation.real2sim_collision
    :members:
    :no-index:
@@ -119,6 +145,10 @@ held interval and Place. A Pick from an observed support permits a change in
 height and at most two degrees of tilt only after checking the support
 footprint; lift remains gravity-aligned. Cartesian Place aligns its release
 anchor to the semantic target and reports the applied correction.
+An optional directed yaw tolerance checks observed object +X against the
+requested object pose, including solver error. The default remains disabled.
+``retime_phase_allowlist`` can narrow source and skill time permissions; a short
+protected free phase can retain its original grid while other phases stretch.
 
 .. automodule:: embodichain.lab.task_program.integrations.simulation.real2sim_collection
    :members:

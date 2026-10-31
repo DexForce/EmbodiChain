@@ -85,6 +85,7 @@ def _smooth_ik_phase_interiors(
     *,
     allowed_phases: frozenset[str] | None = None,
     allow_hold_for_feasibility: bool = False,
+    relax_short_free_entry: bool = False,
 ) -> torch.Tensor:
     """Reduce numerical IK jitter while retaining event derivative stencils."""
     result = path.clone()
@@ -99,7 +100,15 @@ def _smooth_ik_phase_interiors(
             or (allowed_phases is not None and phase.name not in allowed_phases)
         ):
             continue
-        start, stop = phase.start + 2, phase.stop - 2
+        if (
+            relax_short_free_entry
+            and phase.kind == "free"
+            and phase.start > 0
+            and phase.stop - phase.start < 8
+        ):
+            start, stop = phase.start, phase.stop - 1
+        else:
+            start, stop = phase.start + 2, phase.stop - 2
         result[:, start:stop] = (
             path[:, start - 1 : stop - 1]
             + 2 * path[:, start:stop]
@@ -164,6 +173,9 @@ class PrototypeMotionProvider:
         ik_smoothing_trigger_fraction: Optional fraction of the motion policy's
             acceleration limit at which to seek a lower-acceleration nominal
             path without changing protected samples or the TCP error tube.
+        joint_acceleration_limits: Optional full-robot joint limits supplied by
+            the host. Nominal feasibility uses the tighter of these limits and
+            the motion policy; final plan and observed-effect checks still run.
         refinement: Optional bounded Cartesian interaction repair before the
             expansion baseline. Only explicit ``eef_pose`` authority supports it.
         grasp_pose_generators: Existing runtime gripper services keyed by the
@@ -189,6 +201,7 @@ class PrototypeMotionProvider:
     prototype_sha256: str | None = None
     object_support_validator: Callable[[PlanningContext], bool] | None = None
     ik_smoothing_trigger_fraction: float | None = None
+    joint_acceleration_limits: tuple[float, ...] | None = None
     refinement: MotionRefinementCfg | None = None
     grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None
     refinement_release_validator: (
@@ -199,6 +212,20 @@ class PrototypeMotionProvider:
     ) = None
 
     def __post_init__(self) -> None:
+        if self.joint_acceleration_limits is not None:
+            values = tuple(self.joint_acceleration_limits)
+            if not values or any(
+                type(value) not in (int, float) or not np.isfinite(value) or value <= 0
+                for value in values
+            ):
+                raise ValueError(
+                    "joint acceleration limits must be positive finite values"
+                )
+            object.__setattr__(
+                self,
+                "joint_acceleration_limits",
+                tuple(float(value) for value in values),
+            )
         if self.refinement is not None:
             if not isinstance(self.refinement, MotionRefinementCfg):
                 raise TypeError("refinement must be MotionRefinementCfg or None")
@@ -540,7 +567,16 @@ class PrototypeMotionProvider:
                 refinement_result = KinematicMotionRefiner(cfg).refine(
                     target_tcp,
                     InteractionConstraintSet(
-                        request.skill_id, unit.phases, index, anchor, geometry_id
+                        request.skill_id,
+                        unit.phases,
+                        index,
+                        anchor,
+                        geometry_id,
+                        lift_height_m=(
+                            float(request.skill_options.lift_height)
+                            if request.skill_id == "pick_up" and cfg.project_pick_lift
+                            else None
+                        ),
                     ),
                 )
                 refinement_report = {**refinement_result.report, **evidence}
@@ -635,12 +671,40 @@ class PrototypeMotionProvider:
                 )
                 prefix = prefix[:, : int(count[0])]
                 start_qpos = prefix[:, -1]
-            valid, path = generator._solve_cartesian_waypoints(
-                target_tcp,
-                start_qpos,
-                arm.control_part,
-                known_start=torch.ones(1, dtype=torch.bool, device=positions.device),
-            )
+            # Solve phases against the preceding accepted joint posture. A
+            # redundant arm may produce different null-space postures for an
+            # identical TCP when seeded over the entire call. Contact phases
+            # must retain one exact full-arm configuration during closure.
+            parts = []
+            valid = torch.ones(1, dtype=torch.bool, device=positions.device)
+            phase_seed = start_qpos
+            for phase in unit.phases:
+                targets = target_tcp[:, phase.start : phase.stop]
+                stationary = torch.allclose(
+                    targets, targets[:, :1].expand_as(targets), atol=1e-7, rtol=0
+                )
+                current = robot.compute_fk(
+                    qpos=phase_seed, name=arm.control_part, to_matrix=True
+                )
+                known = (
+                    torch.isclose(current, targets[:, 0], atol=1e-5, rtol=0)
+                    .all(dim=-1)
+                    .all(dim=-1)
+                )
+                phase_valid, part = generator._solve_cartesian_waypoints(
+                    targets[:, :1] if stationary else targets,
+                    phase_seed,
+                    arm.control_part,
+                    known_start=known,
+                )
+                if stationary:
+                    part = part.expand(-1, targets.shape[1], -1).clone()
+                if self.authority == "hybrid" and phase.authority == "qpos":
+                    part = positions[:, phase.start : phase.stop, arm_ids].clone()
+                parts.append(part)
+                valid &= phase_valid
+                phase_seed = part[:, -1]
+            path = torch.cat(parts, dim=1)
             if (
                 not bool(valid.all())
                 or path.shape != (1, target_tcp.shape[1], len(arm_ids))
@@ -703,7 +767,17 @@ class PrototypeMotionProvider:
                     > velocity_limits[:, None] * context.require_control_dt() + 1e-5
                 ).any()
             ):
-                raise ValueError("prototype IK exceeds a joint velocity limit")
+                speeds = (
+                    path[:, 1:] - path[:, :-1]
+                ).abs() / context.require_control_dt()
+                ratios = speeds / velocity_limits[:, None]
+                sample, column = np.unravel_index(
+                    int(ratios[0].argmax()), tuple(ratios.shape[1:])
+                )
+                joint = robot.joint_names[arm_ids[column]]
+                raise ValueError(
+                    f"prototype IK exceeds a joint velocity limit: sample={sample+1}, joint={joint}, speed={float(speeds[0, sample, column]):.6g}, limit={float(velocity_limits[0, column]):.6g}"
+                )
             positions[:, :, arm_ids] = path
             if prefix is not None and prefix.shape[1] > 1:
                 prefix_full = (
@@ -723,22 +797,47 @@ class PrototypeMotionProvider:
             # stay fixed. Hold interiors may be adjusted only when necessary
             # for nominal IK feasibility, never for voluntary headroom.
             acceleration_limit = request.motion_policy.acceleration_limit
-            if acceleration_limit is not None and positions.shape[1] > 2:
+            if (
+                acceleration_limit is not None
+                or self.joint_acceleration_limits is not None
+            ) and positions.shape[1] > 2:
                 dt = context.require_control_dt()
+                acceleration_limits = torch.full(
+                    (len(arm_ids),),
+                    float("inf") if acceleration_limit is None else acceleration_limit,
+                    dtype=positions.dtype,
+                    device=positions.device,
+                )
+                if self.joint_acceleration_limits is not None:
+                    if len(self.joint_acceleration_limits) != positions.shape[-1]:
+                        raise ValueError(
+                            "joint acceleration limits must cover the full robot layout"
+                        )
+                    declared = torch.tensor(
+                        self.joint_acceleration_limits,
+                        dtype=positions.dtype,
+                        device=positions.device,
+                    )
+                    acceleration_limits = torch.minimum(
+                        acceleration_limits, declared[arm_ids]
+                    )
 
                 def peak_acceleration(value: torch.Tensor) -> float:
                     velocity = (value[:, 1:] - value[:, :-1]) / dt
                     return float(
-                        ((velocity[:, 1:] - velocity[:, :-1]) / dt).abs().max()
+                        (
+                            ((velocity[:, 1:] - velocity[:, :-1]) / dt).abs()
+                            / acceleration_limits
+                        ).max()
                     )
 
                 original_arm = positions[:, :, arm_ids]
                 original_peak = peak_acceleration(original_arm)
-                requires_feasibility = original_peak > acceleration_limit + 1e-5
+                requires_feasibility = original_peak > 1 + 1e-5
                 trigger = (
-                    acceleration_limit + 1e-5
+                    1 + 1e-5
                     if self.ik_smoothing_trigger_fraction is None
-                    else acceleration_limit * self.ik_smoothing_trigger_fraction
+                    else self.ik_smoothing_trigger_fraction
                 )
                 if original_peak > trigger:
                     candidate_path = path
@@ -763,13 +862,18 @@ class PrototypeMotionProvider:
                             unit.phases,
                             allowed_phases=smoothing_phases,
                             allow_hold_for_feasibility=requires_feasibility,
+                            relax_short_free_entry=(
+                                requires_feasibility
+                                and self.refinement is not None
+                                and self.refinement.project_free_boundaries
+                            ),
                         )
                         candidate_arm = torch.cat(
                             (original_arm[:, :offset], candidate_path), dim=1
                         )
                         candidate_peak = peak_acceleration(candidate_arm)
                         if (
-                            candidate_peak > acceleration_limit + 1e-5
+                            candidate_peak > 1 + 1e-5
                             or candidate_peak >= best_peak - 1e-7
                             or bool(
                                 (

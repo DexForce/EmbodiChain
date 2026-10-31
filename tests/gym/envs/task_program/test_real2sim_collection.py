@@ -23,6 +23,7 @@ import pytest
 
 from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
     _held_pose_errors,
+    _placement_heading_check,
     _observed_program_phases,
 )
 
@@ -78,3 +79,75 @@ def test_held_pose_evidence_detects_translation_and_rotation_slip() -> None:
     translation, rotation = _held_pose_errors(objects, tcp)
     assert translation == pytest.approx(0.02)
     assert rotation == pytest.approx(10.0)
+
+
+@pytest.mark.parametrize(
+    "actual,expected,tolerance,accepted,error",
+    [
+        (-179.0, 179.0, 3.0, True, 2.0),
+        (50.0, 45.0, 3.0, False, 5.0),
+        (180.0, 0.0, 3.0, False, 180.0),
+        (15.0, 15.0, 0.0, True, 0.0),
+    ],
+)
+def test_directed_package_heading_acceptance(
+    actual, expected, tolerance, accepted, error
+) -> None:
+    def yaw(degrees):
+        angle = np.deg2rad(degrees)
+        pose = np.eye(4)
+        pose[:3, :3] = [
+            [np.cos(angle), -np.sin(angle), 0],
+            [np.sin(angle), np.cos(angle), 0],
+            [0, 0, 1],
+        ]
+        return pose
+
+    passed, metrics = _placement_heading_check(yaw(actual), yaw(expected), tolerance)
+    assert passed is accepted
+    assert metrics["placement_yaw_error_deg"] == pytest.approx(error, abs=1e-10)
+    # Rebase both poses by the same world yaw: requested relative heading is fixed.
+    passed_rebased, rebased = _placement_heading_check(
+        yaw(37.0) @ yaw(actual), yaw(37.0) @ yaw(expected), tolerance
+    )
+    assert passed_rebased is accepted
+    assert rebased == pytest.approx(metrics, abs=1e-10)
+
+
+def test_heading_check_keeps_legacy_profiles_and_rejects_vertical_heading() -> None:
+    assert _placement_heading_check(np.eye(4), np.eye(4), None) == (True, {})
+    tipped = np.eye(4)
+    tipped[:3, :3] = [[0, 0, 1], [0, 1, 0], [-1, 0, 0]]
+    with pytest.raises(ValueError, match="horizontal projection"):
+        _placement_heading_check(tipped, np.eye(4), 3.0)
+
+
+def test_semantic_release_target_includes_solver_error_in_yaw_acceptance() -> None:
+    from types import SimpleNamespace
+    import torch
+    from embodichain.lab.sim.atomic_actions.primitives.place import PlaceGoal
+    from embodichain.lab.task_program.integrations.simulation.real2sim_collision import (
+        _semantic_release_pose,
+    )
+
+    relation = torch.eye(4, dtype=torch.float64)[None]
+    relation[0, 0, 3] = 0.05
+    requested = relation.clone()
+    request = SimpleNamespace(
+        goal=PlaceGoal(requested),
+        binding=SimpleNamespace(
+            endpoint=lambda *args: SimpleNamespace(task_state_key="hand")
+        ),
+    )
+    context = SimpleNamespace(
+        robot=SimpleNamespace(qpos=torch.zeros(1, 1)),
+        get_held_object=lambda key: SimpleNamespace(object_to_eef=relation),
+    )
+    semantic = _semantic_release_pose(request, context)
+    np.testing.assert_allclose(semantic, np.eye(4), atol=1e-8)
+    observed = np.eye(4)
+    angle = np.deg2rad(4.8)
+    observed[:2, :2] = [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+    accepted, metrics = _placement_heading_check(observed, semantic, 3.0)
+    assert not accepted
+    assert metrics["placement_yaw_error_deg"] == pytest.approx(4.8)

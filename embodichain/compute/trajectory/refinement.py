@@ -196,7 +196,14 @@ def refine_pose_trajectory(
             )
             > bounds[dimension] + 1e-8
         ):
-            raise ValueError("interaction anchor exceeds the refinement budget")
+            errors = np.abs(
+                anchor_coordinates[:, dimension]
+                - source_coordinates[indices, dimension]
+            )
+            peak = int(np.argmax(errors))
+            raise ValueError(
+                f"interaction anchor exceeds the refinement budget: sample={indices[peak]}, dimension={dimension}, correction={errors[peak]:.6g}, limit={bounds[dimension]:.6g}"
+            )
         linear = -weight * reference_coordinates[:, dimension]
         if dimension == 0:
             solver.setup(

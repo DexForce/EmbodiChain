@@ -51,7 +51,11 @@ def _artifact(root: Path, item: dict[str, object]) -> Path:
 
 
 def _check_case(
-    root: Path, row: dict[str, object], profile: object
+    root: Path,
+    row: dict[str, object],
+    profile: object,
+    *,
+    expected_origin: str = "synthetic_reference",
 ) -> dict[str, object]:
     receipt_path = (
         root
@@ -197,6 +201,37 @@ def _check_case(
                         "Place target, support or stability evidence failed"
                     )
                 placements.append(error)
+                if profile.placement_yaw_tolerance_deg is not None:
+                    heading = Rotation.from_quat(objects[stop, 3:]).as_matrix()[:2, 0]
+                    expected_heading = np.asarray(
+                        item["expected_object_heading_xy"], dtype=np.float64
+                    )
+                    if (
+                        expected_heading.shape != (2,)
+                        or min(
+                            np.linalg.norm(heading), np.linalg.norm(expected_heading)
+                        )
+                        <= 1e-8
+                    ):
+                        raise ValueError("Place directed heading is undefined")
+                    angle = abs(
+                        float(
+                            np.degrees(
+                                np.arctan2(heading[1], heading[0])
+                                - np.arctan2(expected_heading[1], expected_heading[0])
+                            )
+                            + 180
+                        )
+                        % 360
+                        - 180
+                    )
+                    if (
+                        abs(angle - item["placement_yaw_error_deg"]) > 1e-5
+                        or angle > profile.placement_yaw_tolerance_deg
+                    ):
+                        raise ValueError(
+                            "Place yaw differs from measured directed heading"
+                        )
         held_checks = row.get("held_interval_validation")
         if not held_checks:
             raise ValueError("measured held intervals are missing")
@@ -261,6 +296,13 @@ def _check_case(
             scale is not None
             and phase["phase"] in FREE_PHASES[prototype.unit.source.skill_id]
             and "retime" in source_phase.allowed_operators
+            and (
+                profile.retime_phase_allowlist is None
+                or phase["phase"]
+                in profile.retime_phase_allowlist.get(
+                    prototype.unit.source.skill_id, ()
+                )
+            )
         )
         expected = (
             math.ceil((phase["source_samples"] - 1) * scale - 1e-9) + 1
@@ -433,8 +475,19 @@ def _check_case(
                     raise ValueError(
                         "refinement identity, correction budget or clock changed"
                     )
-            if prototype.unit.source.origin != "synthetic_reference":
+            if prototype.unit.source.origin != expected_origin:
                 raise ValueError("unexpected source origin")
+            if expected_origin == "measured":
+                from embodichain.data_pipeline.real2sim.droid import (
+                    verify_droid_unit_evidence,
+                )
+
+                bundle = row["real2sim_artifacts"][call["source_bundle"]]
+                verify_droid_unit_evidence(
+                    _artifact(root, bundle["source_evidence"]),
+                    _artifact(root, bundle["original_recording"]),
+                    prototype.unit.source,
+                )
             source = prototype.unit.source
             if (
                 source.source_id != call.get("source_id", row["source_id"])

@@ -447,14 +447,20 @@ class Real2SimLeRobotEpisodeSink:
             "source_manifest",
             "source_arrays",
         }
+        optional = {"original_recording", "source_evidence"}
         if not isinstance(metadata, Mapping) or not metadata:
             raise ValueError("episode must declare Real2Sim source artifacts")
-        bundles = {"default": metadata} if set(metadata) == required else dict(metadata)
+        bundles = (
+            {"default": metadata}
+            if required <= set(metadata) <= required | optional
+            else dict(metadata)
+        )
         if any(
             not isinstance(name, str)
             or not name.strip()
             or not isinstance(bundle, Mapping)
-            or set(bundle) != required
+            or not required <= set(bundle) <= required | optional
+            or (bool(set(bundle) & optional) and not optional <= set(bundle))
             for name, bundle in bundles.items()
         ):
             raise ValueError(
@@ -490,7 +496,27 @@ class Real2SimLeRobotEpisodeSink:
             or paths["source_arrays"] != prototype.parent / "source" / "trajectory.npz"
         ):
             raise ValueError("source artifacts do not describe one prototype bundle")
-        load_prototype(prototype)
+        source_unit = load_prototype(prototype).unit.source
+        droid = (
+            source_unit.command_representation
+            == "droid_arm_position_rad_and_gripper_closed_fraction"
+        )
+        if droid and not {"original_recording", "source_evidence"} <= set(paths):
+            raise ValueError(
+                "DROID collection requires its original recording and typed evidence"
+            )
+        if "source_evidence" in paths:
+            if not droid:
+                raise ValueError(
+                    "original recording/evidence roles currently require DROID sources"
+                )
+            from embodichain.data_pipeline.real2sim.droid import (
+                verify_droid_unit_evidence,
+            )
+
+            verify_droid_unit_evidence(
+                paths["source_evidence"], paths["original_recording"], source_unit
+            )
         assets = (
             root
             / "meta"
@@ -503,6 +529,8 @@ class Real2SimLeRobotEpisodeSink:
             "normalized_arrays": "normalized.npz",
             "source_manifest": "source/trajectory.json",
             "source_arrays": "source/trajectory.npz",
+            "original_recording": "source/original.h5",
+            "source_evidence": "source/evidence.npz",
         }
         copied = {}
         for role, source in paths.items():
@@ -537,6 +565,12 @@ class Real2SimLeRobotEpisodeSink:
                 "sha256": digest,
             }
         load_prototype(assets / "prototype.json")
+        if droid:
+            verify_droid_unit_evidence(
+                assets / "source/evidence.npz",
+                assets / "source/original.h5",
+                source_unit,
+            )
         return copied
 
     def _episode_artifact(

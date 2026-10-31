@@ -15,6 +15,12 @@ frozen object/target references. FK-derived poses are not independent measured
 pose evidence. Source commands retain explicit alignment and are not silently
 substituted for qpos.
 
+`real2sim.droid` adapts selected original HDF5 streams with explicit observed
+gripper calibration and manual phases. It rejects external or virtual storage;
+raw state/command clocks and optional measured arm velocities remain distinct.
+The qualified sink requires both the original recording and typed evidence for
+DROID sources, verifies their imported crop, and archives them with the prototype.
+
 `sim.motion.expansion.Real2SimSourceAdapter` exports fixed-scene qpos templates.
 `atomic_actions.PrototypeMotionProvider` supplies qpos, EEF or explicitly
 phase-bound hybrid nominal motion. Cartesian transfer is limited to B=1,
@@ -36,6 +42,8 @@ feasibility pass can adjust hold-phase IK samples inside the declared TCP
 error tube before the geometric baseline is frozen; it records those passes.
 Input source permissions can only narrow a skill's free-phase permissions.
 Pick lift must be declared contact/hold and cannot authorize deformation.
+Phasewise IK carries the preceding solution forward; stationary contact poses
+repeat the same arm configuration instead of drifting in a redundant nullspace.
 
 Configured source bindings may opt into `MotionRefinementCfg` with explicit
 `eef_pose` authority. `motion.refinement.KinematicMotionRefiner` repairs a
@@ -56,6 +64,10 @@ typed trace attachments, whose digests and correction budgets are checked before
 receipt confirmation. Episode recipe identity includes the refinement profile;
 realized floating-point pose hashes remain call-level evidence rather than
 renaming the recipe after a small physical variation.
+Explicit projection options can repair approach entry, gravity-aligned lift
+and free-phase boundary stops inside the same correction budget before freezing
+the baseline. Box-side grasp regions are grounded by
+`toolkits.graspkit.box_region`; they do not replace gripper, IK or collision checks.
 See `examples/expansion/trajectory/real2sim/REFINEMENT.md` for reproducible
 error-injection fixtures and the analytic/ablation/simulation verification ladder.
 
@@ -70,6 +82,8 @@ rechecked by digest. Parallel calls are unsupported for this source path.
 explicit B=1 timing route with protected samples, derivative stencils, limits,
 scene dependency boundaries and timeout checks. Each authorized phase's total
 duration is rounded up to the control grid; protected intervals remain fixed.
+The tabletop profile may narrow retiming by skill and phase with
+`retime_phase_allowlist`; a protected short phase then retains its original grid.
 The configured combined Expansion Profile does not select these timing variants.
 The separate `run-task --real2sim-profile` tabletop owner selects nominal,
 same-grid and mapped-time recipes once per B=1 episode. Programmatic
@@ -89,6 +103,9 @@ gripper for planned trajectories, and separately checks actual recorded robot
 and object poses. These are sampled geometric checks, not continuous collision
 or hardware qualification. Velocity and acceleration limits are explicit
 profile inputs with recorded provenance rather than inferred simulator limits.
+`motion.expansion.gripper_contact` selects independent prismatic or single-driver
+mimic projection. Coupled closure advances every follower together until the
+first declared finger contact; measured coupling tolerances never relax commands.
 The same-grid factory's geometry family and initial
 state stream IDs are supplied by the episode owner, not derived from a moving
 robot state. The synchronous
@@ -114,6 +131,12 @@ distinct call indices even when they share a prototype. Per-Pick lift,
 continuous held intervals and each Place's target, support footprint and
 stability are measured separately. Other scene topologies and unbound calls
 fail closed. Gym still owns reset and stepping.
+Optional directed yaw acceptance compares observed object +X to the requested
+semantic object pose, not approximate FK release; solver error consumes the same
+task tolerance. `real2sim.replay.export_real2sim_replay_manifest` exports existing
+identities read-only after joining every episode to its complete recording
+journal and confirmed receipt. Failed attempts retain available actual T+1
+partial rollouts without becoming successful episodes.
 
 Focused coverage: `tests/data_pipeline/test_real2sim_normalize.py`,
 `tests/sim/motion/expansion/test_mapped_timing.py`, and matching Atomic Action

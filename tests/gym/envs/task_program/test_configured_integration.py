@@ -2034,12 +2034,16 @@ def test_configured_nominal_source_preflights_content_and_revision(tmp_path):
                 {
                     **declaration,
                     "authority": "eef_pose",
-                    "refinement": {"max_translation_m": 0.015},
+                    "refinement": {
+                        "max_translation_m": 0.015,
+                        "project_pick_lift": True,
+                    },
                 }
             ]
         }
     )
     assert refined.nominal_motion_sources[0].refinement.max_translation_m == 0.015
+    assert refined.nominal_motion_sources[0].refinement.project_pick_lift is True
     with pytest.raises(ValueError, match="eef_pose authority"):
         _decode_runtime_services(
             {"nominal_motion_sources": [{**declaration, "refinement": {}}]}
@@ -2098,6 +2102,33 @@ def test_real2sim_collection_profile_rejects_ambiguous_limits_and_recipes(tmp_pa
     assert profile.recipes == ("nominal", "time_130")
     assert profile.layouts[0]["object_xyyaw"] == (0.0, 0.0, 0.0)
     assert profile.motion_headroom_fraction is None
+
+    artifacts = {
+        "original_recording": {"path": "original.h5", "sha256": "a" * 64},
+        "source_evidence": {"path": "source.npz", "sha256": "b" * 64},
+    }
+    json_path = tmp_path / "profile.json"
+    import json
+
+    json_path.write_text(
+        json.dumps(
+            {
+                **payload,
+                "source_artifacts": {0: artifacts},
+                "retime_phase_allowlist": {"place": ["approach"]},
+            }
+        )
+    )
+    decoded = load_real2sim_tabletop_profile(json_path)
+    assert list(decoded.source_artifacts) == [0]
+    assert decoded.source_artifacts[0]["original_recording"]["path"] == str(
+        tmp_path / "original.h5"
+    )
+    assert decoded.retime_phase_allowlist == {"place": ("approach",)}
+    for keys in ({"00": artifacts}, {0: artifacts, "0": artifacts}, {True: artifacts}):
+        path.write_text(yaml.safe_dump({**payload, "source_artifacts": keys}))
+        with pytest.raises(ValueError, match="call indices"):
+            load_real2sim_tabletop_profile(path)
 
     path.write_text(yaml.safe_dump({**payload, "motion_headroom_fraction": 0.95}))
     assert load_real2sim_tabletop_profile(path).motion_headroom_fraction == 0.95

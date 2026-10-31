@@ -106,3 +106,107 @@ def test_transport_goal_repair_keeps_sample_count_and_endpoints() -> None:
     assert result.fit.poses.shape == poses.shape
     np.testing.assert_allclose(result.fit.poses[:, 0, 3], poses[:, 0, 3], atol=1e-9)
     np.testing.assert_allclose(result.fit.poses[:, 1, 3], 0.006, atol=1e-9)
+
+
+def test_opt_in_pick_projection_consumes_budget_and_preserves_source() -> None:
+    poses, phases = _pick()
+    progress = np.linspace(0, 1, 40)
+    poses[60:, 0, 3] = 0.012 * progress
+    poses[60:, :3, :3] = Rotation.from_euler(
+        "z", 15 * progress, degrees=True
+    ).as_matrix()
+    before = poses.copy()
+    cfg = MotionRefinementCfg(
+        project_pick_lift=True, max_rotation_rad=np.deg2rad(20), smoothing_weight=0
+    )
+    constraints = InteractionConstraintSet(
+        "pick_up", phases, 60, np.eye(4), "box-side-faces", lift_height_m=0.1
+    )
+    result = KinematicMotionRefiner(cfg).refine(poses, constraints)
+    expected = np.eye(4)
+    expected[2, 3] = 0.1
+    np.testing.assert_allclose(
+        result.fit.poses[-2:], np.repeat(expected[None], 2, axis=0), atol=1e-10
+    )
+    np.testing.assert_allclose(
+        result.fit.poses[60:62], np.repeat(np.eye(4)[None], 2, axis=0), atol=1e-10
+    )
+    np.testing.assert_array_equal(poses, before)
+    assert result.report["pick_lift_projected"] is True
+    assert result.fit.max_translation_m <= 0.02
+    assert result.fit.max_rotation_rad <= np.deg2rad(20)
+    legacy = KinematicMotionRefiner(
+        MotionRefinementCfg(max_rotation_rad=np.deg2rad(20), smoothing_weight=0)
+    ).refine(poses, constraints)
+    np.testing.assert_allclose(legacy.fit.poses[-1], poses[-1], atol=1e-10)
+    assert legacy.report["pick_lift_projected"] is False
+    with pytest.raises(ValueError, match="budget"):
+        KinematicMotionRefiner(replace(cfg, max_translation_m=0.005)).refine(
+            poses, constraints
+        )
+    with pytest.raises(ValueError, match="explicit goal height"):
+        KinematicMotionRefiner(cfg).refine(
+            poses, replace(constraints, lift_height_m=None)
+        )
+
+
+def test_local_pick_approach_repairs_heading_without_rotating_distant_entry() -> None:
+    poses, phases = _pick()
+    poses[:40, 0, 3] = np.linspace(-0.25, 0, 40)
+    goal = np.eye(4)
+    goal[:3, :3] = Rotation.from_euler("z", 40, degrees=True).as_matrix()
+    cfg = MotionRefinementCfg(
+        project_pick_approach=True,
+        pick_entry_projection_samples=24,
+        max_translation_m=0.05,
+        max_rotation_rad=np.deg2rad(50),
+        smoothing_weight=0,
+    )
+    constraints = InteractionConstraintSet(
+        "pick_up", phases, 60, goal, "directed-side-faces"
+    )
+    result = KinematicMotionRefiner(cfg).refine(poses, constraints)
+    np.testing.assert_allclose(
+        result.fit.poses[:2], np.repeat(poses[:1], 2, axis=0), atol=1e-10
+    )
+    np.testing.assert_allclose(
+        result.fit.poses[38:60], np.repeat(goal[None], 22, axis=0), atol=1e-10
+    )
+    assert result.report["pick_approach_projected"] is True
+    assert result.fit.max_translation_m < 0.05
+    assert result.fit.max_rotation_rad <= np.deg2rad(50)
+    # A full rigid yaw warp would move the far free entry by > 15 cm.
+    with pytest.raises(ValueError, match="budget"):
+        KinematicMotionRefiner(
+            replace(cfg, project_pick_approach=False, pick_entry_projection_samples=0)
+        ).refine(poses, constraints)
+
+
+def test_free_boundaries_preserve_release_and_express_a_short_retract() -> None:
+    poses = np.repeat(np.eye(4)[None], 35, axis=0)
+    poses[:24, 0, 3] = np.linspace(0.05, 0.0, 24)
+    poses[30:, 2, 3] = np.linspace(0.0, 0.03, 5)
+    before = poses.copy()
+    phases = (
+        PhaseAnnotation("approach", 0, 24, "free", "target"),
+        PhaseAnnotation("release", 24, 30, "contact", "target"),
+        PhaseAnnotation("retract", 30, 35, "free", "target"),
+    )
+    result = KinematicMotionRefiner(
+        MotionRefinementCfg(project_free_boundaries=True, smoothing_weight=0)
+    ).refine(
+        poses, InteractionConstraintSet("place", phases, 24, np.eye(4), "box-support")
+    )
+    assert len(result.fit.poses) == 35
+    np.testing.assert_allclose(
+        result.fit.poses[:2], np.repeat(poses[:1], 2, axis=0), atol=1e-10
+    )
+    np.testing.assert_allclose(
+        result.fit.poses[22:31], np.repeat(np.eye(4)[None], 9, axis=0), atol=1e-10
+    )
+    np.testing.assert_allclose(
+        result.fit.poses[30:, 2, 3], [0.0, 0.001875, 0.0075, 0.016875, 0.03], atol=1e-10
+    )
+    np.testing.assert_array_equal(poses, before)
+    assert result.report["time_grid_changed"] is False
+    assert result.fit.max_translation_m <= 0.02

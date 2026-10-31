@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from collections.abc import Mapping
-from dataclasses import asdict, replace
+from dataclasses import asdict, field, replace
 import hashlib
 import json
 import math
@@ -53,6 +53,9 @@ from embodichain.lab.sim.motion.expansion.real2sim_collision import (
     BoxCollisionBody,
     PlaneCollisionBody,
     SampledRobotCollisionChecker,
+)
+from embodichain.lab.sim.motion.expansion.gripper_contact import (
+    GripperContactProjectionCfg,
 )
 from embodichain.lab.sim.scene.expansion import ScenePoseChange, SceneVariant
 from embodichain.lab.task_program.integrations.expansion import (
@@ -97,6 +100,11 @@ class Real2SimTabletopCollectionCfg:
     finger_links: tuple[str, ...] = ()
     finger_joints: tuple[str, ...] = ()
     closing_directions: tuple[int, ...] = ()
+    gripper_contact: GripperContactProjectionCfg = field(
+        default_factory=GripperContactProjectionCfg
+    )
+    source_artifacts: dict[int, dict[str, dict[str, str]]] = field(default_factory=dict)
+    """Call-scoped original DROID recording and typed source evidence references."""
     contact_depth_m: float = 0.002
     base_ground_depth_m: float = 0.0035
     velocity_limits: tuple[float, ...] = ()
@@ -104,11 +112,15 @@ class Real2SimTabletopCollectionCfg:
     acceleration_limits: tuple[float, ...] = ()
     acceleration_limit_origin: str = ""
     motion_headroom_fraction: float | None = None
+    retime_phase_allowlist: dict[str, tuple[str, ...]] | None = None
+    """Optional per-skill time permissions, intersected with source/skill phases."""
     layouts: tuple[dict[str, object], ...] = ()
     recipes: tuple[str, ...] = ("nominal",)
     seed: int = 0
     placement_xy_tolerance_m: float = 0.025
     placement_height_tolerance_m: float = 0.01
+    placement_yaw_tolerance_deg: float | None = None
+    """Optional directed object-heading tolerance against each Place target."""
     minimum_lift_m: float = 0.03
     maximum_drift_m: float = 0.003
     held_translation_tolerance_m: float = 0.015
@@ -143,10 +155,44 @@ class Real2SimTabletopCollectionCfg:
         self.finger_links = tuple(self.finger_links)
         self.finger_joints = tuple(self.finger_joints)
         self.closing_directions = tuple(self.closing_directions)
+        if isinstance(self.gripper_contact, dict):
+            self.gripper_contact = GripperContactProjectionCfg(**self.gripper_contact)
+        if not isinstance(self.gripper_contact, GripperContactProjectionCfg):
+            raise TypeError("gripper_contact must be a typed contact projection config")
+        self.gripper_contact.validate()
+        if not isinstance(self.source_artifacts, dict):
+            raise ValueError("source_artifacts must map compiled call indices")
+        for index, artifacts in self.source_artifacts.items():
+            if (
+                type(index) is not int
+                or index < 0
+                or not isinstance(artifacts, dict)
+                or set(artifacts) != {"original_recording", "source_evidence"}
+            ):
+                raise ValueError(
+                    "DROID source artifacts require both original and typed evidence"
+                )
+            for item in artifacts.values():
+                if (
+                    not isinstance(item, dict)
+                    or set(item) != {"path", "sha256"}
+                    or not isinstance(item["path"], str)
+                    or not item["path"]
+                    or not isinstance(item["sha256"], str)
+                    or len(item["sha256"]) != 64
+                    or any(c not in "0123456789abcdef" for c in item["sha256"])
+                ):
+                    raise ValueError(
+                        "source artifact requires a local path and SHA-256"
+                    )
         if (
             not self.finger_links
-            or len(self.finger_links) != len(self.finger_joints)
-            or len(self.finger_links) != len(self.closing_directions)
+            or not self.finger_joints
+            or len(self.finger_joints) != len(self.closing_directions)
+            or (
+                self.gripper_contact.kind == "independent_prismatic"
+                and len(self.finger_links) != len(self.finger_joints)
+            )
         ):
             raise ValueError("finger links, joints and directions must align")
         if len(set(self.finger_links)) != len(self.finger_links) or len(
@@ -186,6 +232,12 @@ class Real2SimTabletopCollectionCfg:
                 raise ValueError(f"{name} must be finite and nonnegative")
         if type(self.seed) is not int or self.seed < 0:
             raise ValueError("seed must be a nonnegative integer")
+        if self.placement_yaw_tolerance_deg is not None and (
+            type(self.placement_yaw_tolerance_deg) not in (int, float)
+            or not math.isfinite(self.placement_yaw_tolerance_deg)
+            or not 0 <= self.placement_yaw_tolerance_deg <= 180
+        ):
+            raise ValueError("placement_yaw_tolerance_deg must be within [0, 180]")
         if self.motion_headroom_fraction is not None and (
             isinstance(self.motion_headroom_fraction, bool)
             or not isinstance(self.motion_headroom_fraction, (int, float))
@@ -202,6 +254,29 @@ class Real2SimTabletopCollectionCfg:
             "time_130",
         }
         self.recipes = tuple(self.recipes)
+        if self.retime_phase_allowlist is not None:
+            allowed_phases = {
+                "pick_up": {"approach"},
+                "move_held_object": {"transport"},
+                "place": {"approach", "retract"},
+            }
+            if not isinstance(self.retime_phase_allowlist, dict) or set(
+                self.retime_phase_allowlist
+            ) - set(allowed_phases):
+                raise ValueError("retime phase allowlist requires supported skill IDs")
+            narrowed = {}
+            for skill, names in self.retime_phase_allowlist.items():
+                if (
+                    not isinstance(names, (list, tuple))
+                    or any(not isinstance(name, str) for name in names)
+                    or len(set(names)) != len(names)
+                    or set(names) - allowed_phases[skill]
+                ):
+                    raise ValueError(
+                        "retime phase allowlist must narrow supported free phases"
+                    )
+                narrowed[skill] = tuple(names)
+            self.retime_phase_allowlist = narrowed
         if not self.recipes or any(type(recipe) is not str for recipe in self.recipes):
             raise ValueError("recipes must contain named profile values")
         if len(set(self.recipes)) != len(self.recipes) or set(self.recipes) - allowed:
@@ -236,11 +311,32 @@ def load_real2sim_tabletop_profile(path: str | Path) -> Real2SimTabletopCollecti
     payload = load_config(Path(path))
     if not isinstance(payload, dict):
         raise ValueError("Real2Sim profile must be a mapping")
+    artifacts = payload.get("source_artifacts", {})
+    if isinstance(artifacts, dict):
+        normalized = {}
+        for index, value in artifacts.items():
+            if (
+                isinstance(index, str)
+                and index.isascii()
+                and index.isdecimal()
+                and str(int(index)) == index
+            ):
+                index = int(index)
+            if type(index) is not int or index < 0 or index in normalized:
+                raise ValueError(
+                    "source_artifacts requires unique canonical nonnegative call indices"
+                )
+            normalized[index] = value
+        payload["source_artifacts"] = normalized
     try:
         result = Real2SimTabletopCollectionCfg(**payload)
     except TypeError as error:
         raise ValueError("unknown Real2Sim profile field") from error
     result.validate()
+    for artifacts in result.source_artifacts.values():
+        for item in artifacts.values():
+            value = Path(item["path"])
+            item["path"] = str((Path(path).resolve().parent / value).resolve())
     return result
 
 
@@ -337,6 +433,41 @@ def _held_pose_errors(objects: np.ndarray, tcp: np.ndarray) -> tuple[float, floa
         ).max()
     )
     return translation, angle
+
+
+def _placement_heading_check(
+    object_pose: np.ndarray,
+    expected_pose: np.ndarray,
+    tolerance_deg: float | None,
+) -> tuple[bool, dict[str, float]]:
+    """Check directed +X headings projected into the gravity-horizontal plane.
+
+    Heading is not reduced modulo a rectangular object's 180-degree geometric
+    symmetry: a package front must face the requested direction. Disabled legacy
+    profiles add no new metrics or acceptance condition.
+    """
+    if tolerance_deg is None:
+        return True, {}
+    headings = []
+    for pose in (object_pose, expected_pose):
+        matrix = np.asarray(pose, dtype=np.float64)
+        if matrix.shape != (4, 4) or not np.isfinite(matrix).all():
+            raise ValueError("placement heading requires finite object/target poses")
+        direction = matrix[:2, 0]
+        length = float(np.linalg.norm(direction))
+        if length < 1e-6:
+            raise ValueError("placement object heading has no horizontal projection")
+        headings.append(direction / length)
+    observed, expected = headings
+    angle = abs(
+        math.degrees(
+            math.atan2(
+                expected[0] * observed[1] - expected[1] * observed[0],
+                float(expected @ observed),
+            )
+        )
+    )
+    return angle <= tolerance_deg + 1e-9, {"placement_yaw_error_deg": angle}
 
 
 def install_real2sim_tabletop_owner(
@@ -440,6 +571,8 @@ def install_real2sim_tabletop_owner(
     }
     unique_prototypes = {}
     identities = {}
+    if set(profile.source_artifacts) - set(call_indices):
+        raise ValueError("source evidence refers to an unbound compiled call")
     for item in declarations:
         prototype = prototypes[item.call_index]
         source = prototype.unit.source
@@ -448,6 +581,31 @@ def install_real2sim_tabletop_owner(
             raise ValueError("a source unit revision cannot name different prototypes")
         identities[key] = item.prototype_sha256
         unique_prototypes[key] = prototype
+        if (
+            source.command_representation
+            == "droid_arm_position_rad_and_gripper_closed_fraction"
+        ):
+            artifacts = profile.source_artifacts.get(item.call_index)
+            if artifacts is None:
+                raise ValueError(
+                    "DROID collection requires original recording and typed evidence"
+                )
+            for reference in artifacts.values():
+                path = Path(reference["path"])
+                if (
+                    not path.is_file()
+                    or _artifact(path)["sha256"] != reference["sha256"]
+                ):
+                    raise ValueError("DROID source evidence is missing or changed")
+            from embodichain.data_pipeline.real2sim.droid import (
+                verify_droid_unit_evidence,
+            )
+
+            verify_droid_unit_evidence(
+                artifacts["source_evidence"]["path"],
+                artifacts["original_recording"]["path"],
+                source,
+            )
     recorder = LeRobotRecorder(
         DatasetFunctorCfg(
             func=LeRobotRecorder,
@@ -554,6 +712,7 @@ def install_real2sim_tabletop_owner(
             finger_links=profile.finger_links,
             finger_joints=profile.finger_joints,
             closing_directions=profile.closing_directions,
+            gripper_contact=profile.gripper_contact,
             base_link=profile.base_link,
             contact_depth_m=profile.contact_depth_m,
             base_ground_depth_m=profile.base_ground_depth_m,
@@ -567,7 +726,9 @@ def install_real2sim_tabletop_owner(
         }
         if recipe.startswith("time_"):
             delegate = TaskProgramMappedRetimeFactory(
-                duration_scale=1.15 if recipe == "time_115" else 1.30, **common
+                duration_scale=1.15 if recipe == "time_115" else 1.30,
+                phase_allowlist=profile.retime_phase_allowlist,
+                **common,
             )
         elif recipe != "nominal":
 
@@ -744,7 +905,7 @@ def install_real2sim_tabletop_owner(
                     held_intervals.append(
                         (held_start, release, held_endpoint, held_call, index)
                     )
-                    release_target = guard.release_targets.get(index)
+                    release_target = guard.semantic_release_targets.get(index)
                     if release_target is None:
                         raise ValueError("Place is missing its verified release target")
                     xy_error = float(
@@ -752,6 +913,11 @@ def install_real2sim_tabletop_owner(
                     )
                     height_error, overhang = _support_errors(
                         matrices[stop], target_pose, object_body, target_body
+                    )
+                    heading_ok, heading_metrics = _placement_heading_check(
+                        matrices[stop],
+                        release_target,
+                        profile.placement_yaw_tolerance_deg,
                     )
                     stable_start = max(phase_starts[index, "retract"], stop - 19)
                     drift = float(
@@ -764,13 +930,19 @@ def install_real2sim_tabletop_owner(
                         support_overhang_m=overhang,
                         stability_start_step=stable_start,
                         drift_m=drift,
+                        **heading_metrics,
                         passed=(
                             xy_error <= profile.placement_xy_tolerance_m
                             and height_error <= profile.placement_height_tolerance_m
                             and overhang <= profile.contact_depth_m
                             and drift <= profile.maximum_drift_m
+                            and heading_ok
                         ),
                     )
+                    if profile.placement_yaw_tolerance_deg is not None:
+                        outcome["expected_object_heading_xy"] = release_target[
+                            :2, 0
+                        ].tolist()
                     held_start = held_endpoint = held_call = None
                 elif skill != "move_held_object":
                     raise ValueError("unsupported source-backed tabletop skill")
@@ -816,6 +988,7 @@ def install_real2sim_tabletop_owner(
             ("height_error_m", max),
             ("support_overhang_m", max),
             ("drift_m", max),
+            ("placement_yaw_error_deg", max),
         ):
             values = [item[name] for item in outcomes if name in item]
             if values:
@@ -868,7 +1041,15 @@ def install_real2sim_tabletop_owner(
                 for item in prototypes[index].unit.phases
             }
             for name, source_count, final_count in samples:
-                retimed = is_retime and "retime" in permissions.get(name, ())
+                skill = prototypes[index].unit.source.skill_id
+                retimed = (
+                    is_retime
+                    and "retime" in permissions.get(name, ())
+                    and (
+                        profile.retime_phase_allowlist is None
+                        or name in profile.retime_phase_allowlist.get(skill, ())
+                    )
+                )
                 expected_count = (
                     math.ceil((source_count - 1) * duration_scale - 1e-9) + 1
                     if retimed
@@ -945,6 +1126,8 @@ def install_real2sim_tabletop_owner(
                 None if item.refinement is None else item.refinement.fingerprint
                 for item in declarations
             ]
+        if profile.retime_phase_allowlist is not None:
+            payload["retime_phase_allowlist"] = profile.retime_phase_allowlist
         candidate = (
             "candidate:"
             + hashlib.sha256(
@@ -998,6 +1181,7 @@ def install_real2sim_tabletop_owner(
                 "source_manifest": _artifact(root / "source" / "trajectory.json"),
                 "source_arrays": _artifact(root / "source" / "trajectory.npz"),
             }
+            bundles[str(index)].update(profile.source_artifacts.get(index, {}))
             call = {
                 "call_index": index,
                 "source_bundle": str(index),
@@ -1063,6 +1247,8 @@ def install_real2sim_tabletop_owner(
             "joint_position",
             {
                 "origin": first.origin if len(origins) == 1 else "mixed",
+                "gripper_contact": profile.gripper_contact.to_dict(),
+                "retime_phase_allowlist": profile.retime_phase_allowlist,
                 "acceleration_limit_origin": profile.acceleration_limit_origin,
                 "acceleration_limits": profile.acceleration_limits,
                 "velocity_limit_origin": profile.velocity_limit_origin,
@@ -1121,6 +1307,42 @@ def install_real2sim_tabletop_owner(
                 for unit, check in state["validator"].reports
             ],
         }
+        # A failed physical attempt is diagnostic evidence, never a committed
+        # episode. Retain actual T+1 samples before the host resets; do not
+        # manufacture a terminal observation when the buffer is full.
+        count = int(environment._traj_steps[0].item())
+        buffer = environment._traj_buffer
+        if count > 0 and buffer is not None and buffer.shape[1] > count:
+            values = buffer["states"]
+            partial = path.with_suffix(".npz")
+            with partial.open("xb") as stream:
+                np.savez_compressed(
+                    stream,
+                    qpos=values["robot", "qpos"][0, : count + 1].detach().cpu().numpy(),
+                    qvel=values["robot", "qvel"][0, : count + 1].detach().cpu().numpy(),
+                    object_pose=values["rigid_objects", profile.object_uid, "pose"][
+                        0, : count + 1
+                    ]
+                    .detach()
+                    .cpu()
+                    .numpy(),
+                    actions=buffer["actions"][0, :count].detach().cpu().numpy(),
+                    timestamps=np.arange(count + 1, dtype=np.float64)
+                    * environment.step_dt,
+                )
+                stream.flush()
+                os.fsync(stream.fileno())
+            evidence["partial_rollout"] = {
+                "path": str(partial.relative_to(Path(recorder.dataset_full_path))),
+                "sha256": hashlib.sha256(partial.read_bytes()).hexdigest(),
+            }
+            evidence["partial_rollout_scope"] = (
+                "actual failed T+1 rollout; no receipt or collection credit"
+            )
+        elif count > 0:
+            evidence["partial_rollout_unavailable"] = (
+                "terminal observation is unavailable; no synthetic terminal frame was appended"
+            )
         with path.open("x", encoding="utf-8") as stream:
             json.dump(evidence, stream, indent=2, allow_nan=False)
 

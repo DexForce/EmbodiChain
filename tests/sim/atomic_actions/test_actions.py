@@ -1649,6 +1649,25 @@ def test_pick_uses_normalized_prototype_and_rejects_moved_fixed_scene() -> None:
     assert shifted_plan.diagnostics.metadata["fk_position_error_m"] == pytest.approx(
         0.0
     )
+
+    def redundant_batch_ik(pose, name, joint_seed, **kwargs):
+        valid, result = batch_ik(pose, name, joint_seed, **kwargs)
+        # Coordinate 1 is an analytic null space of this fixture's TCP FK.
+        result[:, :, 1] += torch.arange(result.shape[1]) * 0.005
+        return valid, result
+
+    generator.robot.compute_batch_ik.side_effect = redundant_batch_ik
+    redundant = _ACTION_ENGINES[id(action)].plan(
+        shifted_invocation, changed, nominal_source=spatial
+    )
+    close = redundant.segment("close")
+    positions = redundant.joint_trajectory.positions[
+        :, close.start : close.stop, :ARM_DOF
+    ]
+    torch.testing.assert_close(
+        positions, positions[:, :1].expand_as(positions), atol=0, rtol=0
+    )
+    generator.robot.compute_batch_ik.side_effect = batch_ik
     generator.robot.compute_batch_fk.side_effect = lambda qpos, **kwargs: torch.full(
         (qpos.shape[0], qpos.shape[1], 4, 4), torch.nan
     )

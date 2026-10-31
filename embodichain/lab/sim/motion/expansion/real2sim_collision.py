@@ -389,16 +389,18 @@ class SampledRobotCollisionChecker:
         start: object,
         end: object,
         *,
-        link: str,
+        link: str | Sequence[str],
         body_uid: str,
         body_pose: object,
         iterations: int = 24,
     ) -> float:
-        """Locate the first sampled contact along a joint sweep.
+        """Locate the first sampled contact of any declared link along a sweep.
 
         This is a geometric estimate for a grasp command, not evidence that a
         physical controller will attain or maintain contact. The caller must
-        Search uses 64 coarse intervals followed by bisection. Contacts
+        A sequence of links shares one full-joint sweep and stops at the first
+        contact of any member. This preserves a coupled gripper's single drive
+        coordinate. Search uses 64 coarse intervals followed by bisection. Contacts
         entering and leaving between coarse samples may not be detected.
 
         Returns:
@@ -417,15 +419,22 @@ class SampledRobotCollisionChecker:
             values.append(array)
         if type(iterations) is not int or not 1 <= iterations <= 32:
             raise ValueError("contact sweep iterations must be between 1 and 32")
-        link_id = "robot:" + link
+        links = (link,) if isinstance(link, str) else tuple(link)
+        if (
+            not links
+            or len(set(links)) != len(links)
+            or any(not isinstance(name, str) or not name for name in links)
+        ):
+            raise ValueError("contact sweep requires unique collision link names")
+        link_ids = {"robot:" + name for name in links}
         link_indices = [
-            index for index, name in enumerate(self._links) if name == link_id
+            index for index, name in enumerate(self._links) if name in link_ids
         ]
         body_index = next(
             (index for index, body in enumerate(self._bodies) if body.uid == body_uid),
             None,
         )
-        if not link_indices or body_index is None:
+        if not link_ids <= set(self._links) or body_index is None:
             raise ValueError("contact sweep references an unknown link or body")
         matrix = (
             _pose(body_pose, "contact body pose") @ self._bodies[body_index].local_pose
@@ -549,8 +558,16 @@ class SampledRobotCollisionChecker:
                 raise ValueError(
                     "collision phases must cover samples without gaps or overlaps"
                 )
-            if any(set(pair) - self._entity_ids for pair in phase.allowed_contacts):
-                raise ValueError("collision exemption names an unknown entity")
+            unknown = {
+                entity
+                for pair in phase.allowed_contacts
+                for entity in pair
+                if entity not in self._entity_ids
+            }
+            if unknown:
+                raise ValueError(
+                    f"collision exemption names an unknown entity: {sorted(unknown)}"
+                )
             previous = phase.stop
         if previous != count:
             raise ValueError("collision phases must cover every sample")

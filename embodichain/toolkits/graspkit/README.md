@@ -62,6 +62,19 @@ the host integration's responsibility.
 | `cobotmagic_v100_gripper` | 0.001 | 0.100 | 0.077 | 0.056 | 0.025 | 0.074 |
 | `tianji_marvin_gripper` | 0.001 | 0.095 | 0.103 | 0.043 | 0.034 | 0.082 |
 | `pika_gripper` | 0.001 | 0.094 | 0.113 | 0.039 | 0.057 | 0.085 |
+| `robotiq_2f85` | 0.001 | 0.085 | 0.050 | 0.022 | 0.012 | 0.070 |
+
+The Robotiq preset uses the nominal 85 mm aperture and conservative scalar
+planning extents from `Robotiq_V2.zip` (MD5
+`9bcbf92946b200c903938d59323e7b2c`). Curved linkage and coupled closure require
+the host's full URDF contact projector; this planning envelope cannot predict
+individual finger stops. Model and inertial provenance are documented in
+`extensions/embodichain_robots/franka/README.md`.
+
+`box_region.project_box_side_grasp()` is a separate object-affordance operation.
+It projects an input anchor onto opposed box-Y faces with explicit longitudinal
+inset and height, choosing the nearest jaw-symmetric orientation. It does not
+sample a hidden reference trajectory or establish physical grasp success.
 
 ## Versioned geometry sources
 

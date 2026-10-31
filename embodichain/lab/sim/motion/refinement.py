@@ -27,6 +27,7 @@ import math
 from types import MappingProxyType
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from embodichain.compute.trajectory.refinement import (
     PoseRefinementResult,
@@ -62,8 +63,37 @@ class MotionRefinementCfg:
     support_margin_m: float = 0.002
     max_release_gap_m: float = 0.04
     max_iterations: int = 4000
+    project_pick_lift: bool = False
+    """Explicitly repair a Pick lift endpoint before protecting its baseline."""
+    project_pick_approach: bool = False
+    """Repair the Pick approach endpoint locally while preserving its free entry."""
+    project_free_boundaries: bool = False
+    """Stop at free-phase boundaries and join adjacent contact anchors exactly."""
+    pick_entry_projection_samples: int = 0
+    """Explicit free-entry transition width; zero preserves an already paced entry."""
 
     def __post_init__(self) -> None:
+        if any(
+            type(value) is not bool
+            for value in (
+                self.project_pick_lift,
+                self.project_pick_approach,
+                self.project_free_boundaries,
+            )
+        ):
+            raise ValueError("Pick projection permissions must be boolean")
+        if (
+            type(self.pick_entry_projection_samples) is not int
+            or self.pick_entry_projection_samples not in (0,)
+            and not 4 <= self.pick_entry_projection_samples <= 4096
+        ):
+            raise ValueError(
+                "Pick entry projection width must be zero or within [4, 4096]"
+            )
+        if self.pick_entry_projection_samples and not self.project_pick_approach:
+            raise ValueError(
+                "Pick entry projection requires approach projection permission"
+            )
         for name in (
             "max_translation_m",
             "max_rotation_rad",
@@ -95,8 +125,18 @@ class MotionRefinementCfg:
     @property
     def fingerprint(self) -> str:
         """Return the content identity of all permissions and solver settings."""
+        payload = asdict(self)
+        # Disabled projection has the same semantics/identity as older profiles.
+        if not self.project_pick_lift:
+            payload.pop("project_pick_lift")
+        if not self.project_pick_approach:
+            payload.pop("project_pick_approach")
+        if not self.project_free_boundaries:
+            payload.pop("project_free_boundaries")
+        if not self.pick_entry_projection_samples:
+            payload.pop("pick_entry_projection_samples")
         return hashlib.sha256(
-            json.dumps(asdict(self), sort_keys=True, allow_nan=False).encode()
+            json.dumps(payload, sort_keys=True, allow_nan=False).encode()
         ).hexdigest()
 
 
@@ -110,6 +150,7 @@ class InteractionConstraintSet:
         anchor_index: Grasp/lift entry, transport endpoint or release sample.
         anchor_pose: World TCP target derived from the task and geometry.
         geometry_id: Geometry/affordance evidence identity, never a category name.
+        lift_height_m: Explicit requested world-Z lift for opt-in Pick repair.
     """
 
     skill_id: str
@@ -117,10 +158,18 @@ class InteractionConstraintSet:
     anchor_index: int
     anchor_pose: np.ndarray
     geometry_id: str
+    lift_height_m: float | None = None
 
     def __post_init__(self) -> None:
         if self.skill_id not in {"pick_up", "move_held_object", "place"}:
             raise ValueError("unsupported refinement skill")
+        if self.lift_height_m is not None and (
+            self.skill_id != "pick_up"
+            or type(self.lift_height_m) not in (int, float)
+            or not math.isfinite(self.lift_height_m)
+            or self.lift_height_m < 0
+        ):
+            raise ValueError("lift_height_m requires a nonnegative finite Pick goal")
         if not self.geometry_id or not isinstance(self.geometry_id, str):
             raise ValueError("refinement requires geometry evidence identity")
         phases = tuple(self.phases)
@@ -212,7 +261,10 @@ class KinematicMotionRefiner:
 
         A gravity-preserving anchor warp supplies the initial reference. Contact
         phases are exact stationary TCP constraints; hold phases retain the
-        warped reference, with world-up displacement preserved. Free interiors
+        warped reference, with world-up displacement preserved. Explicit Pick
+        endpoint projection repairs a lift's entry/exit before freezing that
+        reference; all resulting changes consume the same correction budget.
+        Free interiors
         are fitted by a sparse QP. Two samples at each phase edge remain at the
         corrected reference so later expansion can protect derivative stencils.
 
@@ -248,6 +300,134 @@ class KinematicMotionRefiner:
         reference[:, :3, 3] = (
             goal[:3, 3] + (original[:, :3, 3] - anchor[:3, 3]) @ rotation.T
         )
+        projected_lift = (
+            self.cfg.project_pick_lift and constraints.skill_id == "pick_up"
+        )
+        projected_approach = (
+            self.cfg.project_pick_approach and constraints.skill_id == "pick_up"
+        )
+        if projected_approach:
+            phase = constraints.phases[0]
+            count = phase.stop - phase.start
+            if count < 4:
+                raise ValueError("Pick approach projection needs four boundary samples")
+            part = original[phase.start : phase.stop].copy()
+            progress = np.clip((np.arange(count) - 1) / (count - 3), 0, 1)
+            blend = progress**3 * (10 - 15 * progress + 6 * progress**2)
+            part[:, :3, 3] += blend[:, None] * (goal[:3, 3] - part[-1, :3, 3])
+            correction = Rotation.from_matrix(
+                part[-1, :3, :3].T @ goal[:3, :3]
+            ).as_rotvec()
+            part[:, :3, :3] = (
+                part[:, :3, :3]
+                @ Rotation.from_rotvec(blend[:, None] * correction).as_matrix()
+            )
+            # A newly planned entry connection ends at rest. Blend the first
+            # free samples from that rest pose instead of introducing the
+            # recording's nonzero entry velocity at one control boundary.
+            entry_moving = self.cfg.pick_entry_projection_samples > 0
+            entry_count = (
+                min(self.cfg.pick_entry_projection_samples, count - 2)
+                if entry_moving
+                else 0
+            )
+            entry_progress = np.clip(
+                (np.arange(count) - 1) / max(1, entry_count - 2), 0, 1
+            )
+            entry_blend = (
+                entry_progress**3 * (10 - 15 * entry_progress + 6 * entry_progress**2)
+                if entry_moving
+                else np.ones(count)
+            )
+            part[:, :3, 3] = part[0, :3, 3] + entry_blend[:, None] * (
+                part[:, :3, 3] - part[0, :3, 3]
+            )
+            entry_rotation = Rotation.from_matrix(
+                part[0, :3, :3].T @ part[:, :3, :3]
+            ).as_rotvec()
+            part[:, :3, :3] = (
+                part[0, :3, :3]
+                @ Rotation.from_rotvec(
+                    entry_blend[:, None] * entry_rotation
+                ).as_matrix()
+            )
+            exit_moving = (
+                np.linalg.norm(part[-2, :3, 3] - goal[:3, 3]) > 1e-4
+                or Rotation.from_matrix(part[-2, :3, :3].T @ goal[:3, :3]).magnitude()
+                > 1e-3
+            )
+            exit_count = min(12, count - 2) if exit_moving else 0
+            exit_progress = np.clip(
+                (np.arange(count) - (count - exit_count)) / max(1, exit_count - 3), 0, 1
+            )
+            exit_blend = (
+                exit_progress**3 * (10 - 15 * exit_progress + 6 * exit_progress**2)
+                if exit_moving
+                else np.zeros(count)
+            )
+            part[:, :3, 3] += exit_blend[:, None] * (goal[:3, 3] - part[:, :3, 3])
+            exit_rotation = Rotation.from_matrix(
+                part[:, :3, :3].transpose(0, 2, 1) @ goal[:3, :3]
+            ).as_rotvec()
+            part[:, :3, :3] = (
+                part[:, :3, :3]
+                @ Rotation.from_rotvec(exit_blend[:, None] * exit_rotation).as_matrix()
+            )
+            part[:2] = part[0]
+            part[-2:] = goal
+            reference[phase.start : phase.stop] = part
+        if projected_lift:
+            if constraints.lift_height_m is None:
+                raise ValueError(
+                    "Pick lift projection requires its explicit goal height"
+                )
+            phase = constraints.phases[2]
+            count = phase.stop - phase.start
+            if count < 4:
+                raise ValueError("Pick lift projection needs four boundary samples")
+            target = goal.copy()
+            target[2, 3] += constraints.lift_height_m
+            progress = np.clip((np.arange(count) - 1) / (count - 3), 0, 1)
+            blend = progress**3 * (10 - 15 * progress + 6 * progress**2)
+            part = np.repeat(goal[None], count, axis=0)
+            part[:, 2, 3] += blend * constraints.lift_height_m
+            # The skill's entry/exit stencil is stationary. Source time and
+            # gripper events are unchanged; the fitter still checks the full
+            # source-to-result translation/rotation correction budgets.
+            part[:2] = goal
+            part[-2:] = target
+            reference[phase.start : phase.stop] = part
+        if self.cfg.project_free_boundaries and constraints.skill_id != "pick_up":
+            for i, phase in enumerate(constraints.phases):
+                if phase.kind != "free":
+                    continue
+                if phase.stop - phase.start < 4:
+                    raise ValueError("free boundary projection needs four samples")
+                first = reference[phase.start].copy()
+                last = reference[phase.stop - 1].copy()
+                if i and constraints.phases[i - 1].kind == "contact":
+                    first = goal
+                if (
+                    i + 1 < len(constraints.phases)
+                    and constraints.phases[i + 1].kind == "contact"
+                ):
+                    last = goal
+                if phase.name == "retract" and phase.stop - phase.start < 8:
+                    count = phase.stop - phase.start
+                    progress = np.linspace(0, 1, count) ** 2
+                    part = np.repeat(first[None], count, axis=0)
+                    part[:, :3, 3] += progress[:, None] * (last[:3, 3] - first[:3, 3])
+                    angular = Rotation.from_matrix(
+                        first[:3, :3].T @ last[:3, :3]
+                    ).as_rotvec()
+                    part[:, :3, :3] = (
+                        first[:3, :3]
+                        @ Rotation.from_rotvec(progress[:, None] * angular).as_matrix()
+                    )
+                    reference[phase.start : phase.stop] = part
+                boundary_width = 1 if phase.stop - phase.start < 8 else 2
+                reference[phase.start : phase.start + boundary_width] = first
+                reference[phase.stop - boundary_width : phase.stop] = last
         anchors: dict[int, np.ndarray] = {constraints.anchor_index: goal}
         for phase in constraints.phases:
             if phase.name in {"close", "release"}:
@@ -256,13 +436,17 @@ class KinematicMotionRefiner:
             elif phase.kind in {"hold", "contact"}:
                 indices = range(phase.start, phase.stop)
             else:
-                indices = sorted(
-                    {
-                        phase.start,
-                        min(phase.start + 1, phase.stop - 1),
-                        max(phase.start, phase.stop - 2),
-                        phase.stop - 1,
-                    }
+                indices = (
+                    (phase.start, phase.stop - 1)
+                    if self.cfg.project_free_boundaries and phase.stop - phase.start < 8
+                    else sorted(
+                        {
+                            phase.start,
+                            min(phase.start + 1, phase.stop - 1),
+                            max(phase.start, phase.stop - 2),
+                            phase.stop - 1,
+                        }
+                    )
                 )
             anchors.update({int(index): reference[index] for index in indices})
         anchors[constraints.anchor_index] = goal
@@ -293,6 +477,10 @@ class KinematicMotionRefiner:
             "translation_budget_m": self.cfg.max_translation_m,
             "rotation_budget_rad": self.cfg.max_rotation_rad,
             "hard_sample_count": len(anchors),
+            "pick_lift_projected": projected_lift,
+            "pick_approach_projected": projected_approach,
+            "pick_entry_projection_samples": entry_count if projected_approach else 0,
+            "free_boundaries_projected": self.cfg.project_free_boundaries,
             "samples": len(original),
             "iterations": fit.iterations,
             "time_grid_changed": False,

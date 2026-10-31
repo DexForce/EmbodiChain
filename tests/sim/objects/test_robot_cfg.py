@@ -106,6 +106,68 @@ def test_generic_robot_assembly_json_roundtrip_preserves_output(
 
 
 @pytest.mark.no_sim
+def test_original_panda_robotiq_tcp_linkage_limits_and_model_isolation(
+    monkeypatch,
+) -> None:
+    from embodichain_robots.franka import panda_robotiq_85 as panda
+    import pinocchio as pin
+
+    fixtures = Path(__file__).parents[2] / "fixtures/kinematics"
+    requested = []
+
+    def source(name):
+        requested.append(name)
+        return str(
+            fixtures
+            / (
+                "panda_original.urdf"
+                if name.startswith("FrankaPandaArm/")
+                else "robotiq85_linkage.urdf"
+            )
+        )
+
+    monkeypatch.setattr(panda, "get_data_path", source)
+    cfg = panda.FrankaPandaRobotiq85Cfg.from_dict({"gripper_mount_z_m": 0.018})
+    restored = panda.FrankaPandaRobotiq85Cfg.from_dict(cfg.to_dict())
+    assert any(name == "FrankaPandaArm/Panda/PandaExactV1.urdf" for name in requested)
+    assert restored.control_parts == cfg.control_parts
+    chain = restored.build_pk_serial_chain()["arm"]
+    assert chain.get_joint_parameter_names() == [f"Joint{i}" for i in range(1, 8)]
+    flange = chain.forward_kinematics(torch.zeros(1, 7)).get_matrix()
+    torch.testing.assert_close(
+        flange[0, :3, 3], torch.tensor([0.088, 0.0, 0.926]), atol=1e-6, rtol=0
+    )
+    tcp = flange @ torch.tensor(cfg.solver_cfg["arm"].tcp, dtype=flange.dtype)
+    torch.testing.assert_close(
+        tcp[0, :3, 3], torch.tensor([0.088, 0.0, 0.758]), atol=1e-6, rtol=0
+    )
+    variant = panda.FrankaPandaRobotiq85Cfg.from_dict(
+        {"gripper_mount_z_m": 0.025, "gripper_mount_yaw_rad": 0.1}
+    )
+    assert variant.urdf_cfg.fname != cfg.urdf_cfg.fname
+    for name, bounds in cfg.qpos_limits.items():
+        assert bounds == ([-0.8, 0.0] if "inner_finger_joint" in name else [0.0, 0.8])
+
+    model = pin.buildModelFromUrdf(str(fixtures / "robotiq85_linkage.urdf"))
+    data = model.createData()
+    for fraction in [0.0, 0.25, 0.5, 0.75, 1.0]:
+        hand = panda.robotiq85_joint_positions(np.array(fraction))
+        values = dict(zip(cfg.control_parts["eef"], hand))
+        pin.forwardKinematics(
+            model, data, np.array([values[name] for name in model.names[1:]])
+        )
+        pin.updateFramePlacements(model, data)
+        pads = [
+            data.oMf[model.getFrameId(name)].translation[1]
+            for name in ("left_inner_finger_pad", "right_inner_finger_pad")
+        ]
+        gap = abs(pads[0] - pads[1]) - 0.00635
+        # Independent CAD origins and pad thickness bound the aperture mapping.
+        assert gap == pytest.approx(0.085 * (1 - fraction), abs=0.002)
+        assert np.allclose(hand, hand[0] * np.array([1, 1, -1, 1, 1, -1]))
+
+
+@pytest.mark.no_sim
 def test_arx5_source_chain_commands_and_ik_roundtrip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -264,6 +264,11 @@ class _ConfiguredTaskProgramNominalSources:
                 if self._host_collision_guard is None
                 else self._host_collision_guard.ik_smoothing_trigger_fraction
             ),
+            joint_acceleration_limits=(
+                None
+                if self._host_collision_guard is None
+                else self._host_collision_guard.nominal_joint_acceleration_limits
+            ),
             refinement=declaration.refinement,
             grasp_pose_generators=engine.grasp_pose_generators,
             refinement_release_validator=(

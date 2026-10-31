@@ -385,3 +385,97 @@ def test_plan_guard_rejects_nominal_velocity_before_collision_check() -> None:
     plan = Plan(trajectory, (), Diagnostics({}))
     with pytest.raises(ValueError, match="exceeds sampled motion limits"):
         guard.create_plan_transform(request, engine=engine)(resolved, None, plan)
+
+
+_COUPLED_URDF = """\
+<robot name="coupled_two_finger_fixture">
+  <link name="base"/>
+  <link name="left_tip"><collision><origin xyz="0.1 0 0"/><geometry><box size="0.2 0.02 0.02"/></geometry></collision></link>
+  <link name="right_tip"><collision><origin xyz="-0.1 0 0"/><geometry><box size="0.2 0.02 0.02"/></geometry></collision></link>
+  <joint name="drive" type="revolute"><parent link="base"/><child link="left_tip"/><origin xyz="-0.2 0 0"/><axis xyz="0 0 1"/><limit lower="0" upper="1.6" effort="10" velocity="2"/></joint>
+  <joint name="follower" type="revolute"><parent link="base"/><child link="right_tip"/><origin xyz="0.2 0 0"/><axis xyz="0 0 1"/><limit lower="-1.6" upper="0" effort="10" velocity="2"/><mimic joint="drive" multiplier="-1"/></joint>
+</robot>
+"""
+
+
+def test_coupled_revolute_projection_stops_both_fingers_at_first_contact(
+    tmp_path: Path,
+) -> None:
+    from embodichain.lab.sim.motion.expansion.gripper_contact import (
+        GripperContactProjectionCfg,
+        GripperContactProjector,
+    )
+
+    path = tmp_path / "coupled.urdf"
+    path.write_text(_COUPLED_URDF)
+    checker = SampledRobotCollisionChecker(
+        path,
+        joint_names=("drive", "follower"),
+        bodies=(BoxCollisionBody("object", (0.05, 0.1, 0.05), np.eye(4)),),
+        world_from_base=np.eye(4),
+    )
+    projector = GripperContactProjector(
+        GripperContactProjectionCfg(kind="coupled_mimic", driver_joint="drive"),
+        checker,
+        urdf_path=path,
+        joint_names=("drive", "follower"),
+        finger_links=("left_tip", "right_tip"),
+        finger_joints=("drive", "follower"),
+        closing_directions=(-1, 1),
+    )
+    # Off-centre object: right finger contacts first. The left finger cannot
+    # continue independently because both are constrained to the same drive.
+    pose = np.eye(4)
+    pose[:3, 3] = [0.02, 0.1, 0]
+    original = np.array([[np.pi / 2, -np.pi / 2], [0.0, 0.0], [0.0, 0.0]])
+    before = original.copy()
+    projected = projector.project_close(
+        original, start=0, stop=2, object_uid="object", object_pose=pose
+    )
+    # Right inner corner: .2 - .2*cos(theta) - .01*sin(theta) = .07.
+    expected_angle = np.arccos(0.13 / np.hypot(0.2, 0.01)) + np.arctan2(0.01, 0.2)
+    # Coal contact tolerance is micrometric; this lever maps it to < 10 urad.
+    np.testing.assert_allclose(projected[1:, 0], expected_angle, atol=1e-5)
+    np.testing.assert_allclose(projected[:, 1], -projected[:, 0], atol=1e-12)
+    np.testing.assert_array_equal(original, before)
+    commands = np.array([[0.0, 0.0], [1.2, -1.2]])
+    held = projector.project_held(commands, projected[-1])
+    np.testing.assert_allclose(held[0], [expected_angle, -expected_angle], atol=1e-5)
+    np.testing.assert_array_equal(held[1], commands[1])
+    broken = original.copy()
+    broken[1, 1] = 0.01
+    with pytest.raises(ValueError, match="coupling"):
+        projector.project_close(
+            broken, start=0, stop=2, object_uid="object", object_pose=pose
+        )
+    with pytest.raises(ValueError, match="complete URDF mimic drive"):
+        GripperContactProjector(
+            GripperContactProjectionCfg(kind="coupled_mimic", driver_joint="drive"),
+            checker,
+            urdf_path=path,
+            joint_names=("drive", "follower"),
+            finger_links=("left_tip", "right_tip"),
+            finger_joints=("drive",),
+            closing_directions=(-1,),
+        )
+    tolerant = GripperContactProjector(
+        GripperContactProjectionCfg(
+            kind="coupled_mimic",
+            driver_joint="drive",
+            measured_coupling_tolerance=0.001,
+        ),
+        checker,
+        urdf_path=path,
+        joint_names=("drive", "follower"),
+        finger_links=("left_tip", "right_tip"),
+        finger_joints=("drive", "follower"),
+        closing_directions=(-1, 1),
+    )
+    measured = projected[-1] + [0, 0.0004]
+    before_measured = measured.copy()
+    tolerant.project_held(commands, measured)
+    np.testing.assert_array_equal(measured, before_measured)
+    with pytest.raises(ValueError, match="coupling"):
+        projector.project_held(commands, measured)
+    with pytest.raises(ValueError, match="coupling"):
+        tolerant.project_held(commands + [0, 0.0004], measured)
