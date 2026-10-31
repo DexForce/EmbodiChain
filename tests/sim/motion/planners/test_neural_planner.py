@@ -623,12 +623,14 @@ def test_retime_joint_paths_solves_a_cpu_batch_in_one_call(monkeypatch):
     monkeypatch.setattr(
         toppra_module,
         "_retime_toppra_warp",
-        lambda *args, **kwargs: calls.append(1) or original(*args, **kwargs),
+        lambda *args, **kwargs: calls.append(args[0].shape)
+        or original(*args, **kwargs),
     )
     batched = retime_joint_paths(paths, constraints=limits)
 
-    # Rows are no longer solved one after another on the CPU.
-    assert len(calls) == 1
+    # The compute backend receives the whole batch, without allocating the
+    # fixed-width learning output in this native planner adapter.
+    assert calls == [paths.shape]
     assert bool(batched.success.all())
     for index, row in enumerate(rows):
         assert float(batched.dt[index].sum()) == pytest.approx(

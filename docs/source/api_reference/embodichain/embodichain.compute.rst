@@ -49,6 +49,7 @@ stationary paths and repeated endpoints remain valid inputs.
 
 .. autosummary::
 
+   retime_joint_paths
    differentiate_positions
    resample_in_time
    interpolate_with_distance
@@ -69,8 +70,17 @@ or motion limits. ``resample_in_time`` preserves endpoints and total duration
 while sampling the original time profile; callers must recompute derivatives
 after changing samples or timing.
 
+``retime_joint_paths`` fits and times a joint path with explicit shared velocity
+and acceleration budgets. Its plain tensor tuple retains gradients
+and explicit validity/length tensors. Duration is the sum of arrival intervals;
+solver success does not certify geometric task success.
+
 Implementation modules
 ----------------------
+
+.. automodule:: embodichain.compute.trajectory.toppra
+   :members:
+
 
 .. automodule:: embodichain.compute.trajectory.interpolation
    :members:
