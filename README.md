@@ -46,6 +46,30 @@ To get started with EmbodiChain, follow these steps:
 - [Quick Start Tutorial](https://dexforce.github.io/EmbodiChain/main/tutorial/index.html)
 - [API Reference](https://dexforce.github.io/EmbodiChain/main/api_reference/index.html)
 
+### Python and LeRobot dependencies
+
+Installation selects the LeRobot SDK by Python version:
+
+| Python | LeRobot | Hugging Face Hub | Shared Torch stack |
+| --- | --- | --- | --- |
+| 3.10 / 3.11 | 0.4.4 | >=0.35.3, <0.36 | torch 2.7.x, torchvision 0.22.x, TorchCodec 0.5.x |
+| 3.12 | 0.6.1, including training/dataset dependencies | >=1.6, <2 | Same |
+
+TensorDict remains >=0.13, <0.15. The newer Torch/TensorDict migration is
+tracked separately in [#883](https://github.com/DexForce/EmbodiChain/issues/883).
+Select matching CPU or CUDA wheels when installing the Torch stack; the SDK
+matrix CI checks a clean CPU installation, recording/loading, and an official
+ACT update/checkpoint/reset. GPU simulation and full policy learning acceptance
+are separate checks. Python versions above 3.12 select the newer SDK but are not
+part of this validation matrix.
+
+Recordings retain the existing task/subtask table and depth-sidecar schema on
+both routes. LeRobot 0.6.1 exposes `subtask_index` but does not automatically
+resolve `meta/subtasks.parquet`; the EmbodiChain preview resolves it explicitly.
+Use the [standalone exporter](tools/lerobot_export/README.md) for native 0.6.1
+persistent-language annotations and depth features. The SDK dependency upgrade
+does not replace the existing EmbodiChain ACT model or migrate its checkpoints.
+
 ### Task Environments
 
 Official task environments are included in the main `embodichain` installation.

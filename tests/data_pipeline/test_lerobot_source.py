@@ -88,9 +88,10 @@ def official_dataset(tmp_path: Path) -> Path:
             )
         # LeRobot 0.4.x declares shape-(1,) fields as Arrow scalars. Normalize
         # its pending scalar buffers for NumPy 2's strict scalar conversion.
+        writer = dataset if hasattr(dataset, "episode_buffer") else dataset.writer
         for key in ("action", "source.continuity", "source.subtask"):
-            dataset.episode_buffer[key] = [
-                value.item() for value in dataset.episode_buffer[key]
+            writer.episode_buffer[key] = [
+                value.item() for value in writer.episode_buffer[key]
             ]
         dataset.save_episode()
     dataset.finalize()

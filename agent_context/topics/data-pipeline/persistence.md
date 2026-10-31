@@ -70,6 +70,13 @@
     replaced as one atomic file. A JSONL append failure is therefore a surfaced post-commit
     failure, not a rollback point. Journal completion follows the sidecar append.
 
+LeRobot 0.4.4 owns episode buffers and image writers on the dataset; 0.6.1
+delegates them to `DatasetWriter`. The recorder's private writer resolver and
+per-instance image-compression hook handle this difference. Do not identify the
+new API by the presence of `dataset.writer` alone: 0.4.4 uses that name for its
+Parquet writer. Keep format conversion separate from SDK version selection;
+see [offline tools](offline-datasets.md).
+
 ### Common failures and recommended change sites
 
 | Symptom | Likely cause / change site |

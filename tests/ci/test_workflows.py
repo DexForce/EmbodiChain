@@ -137,6 +137,7 @@ def test_release_tag_preserves_distribution_build() -> None:
 def test_dataset_tools_can_still_run_manually() -> None:
     assert _eligible_jobs("dataset-tooling.yml", "workflow_dispatch") == {
         "offline-tools",
+        "lerobot-sdk",
         "lerobot-export",
     }
 

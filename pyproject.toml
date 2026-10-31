@@ -29,7 +29,8 @@ dependencies = [
   "shapely>=2.0",
   "setuptools>=78.1.1",
   "gymnasium>=0.29.1",
-  "huggingface_hub>=0.35.3,<1.0",
+  "huggingface_hub>=0.35.3,<0.36; python_version < '3.12'",
+  "huggingface_hub>=1.6,<2; python_version >= '3.12'",
   "langchain",
   "langchain-openai",
   "scipy",
@@ -51,8 +52,12 @@ dependencies = [
   # Keep the tested 0.13 baseline; 0.15+ requires a newer torch stack.
   "tensordict>=0.13,<0.15",
   "viser==1.0.21",
-  "lerobot>=0.4.4,<0.5",
-  # torch 2.7 compatibility; newer TorchCodec releases target newer torch ABIs.
+  "lerobot==0.4.4; python_version < '3.12'",
+  "lerobot[training]==0.6.1; python_version >= '3.12'",
+  # Both SDK versions support this stack. Keep TorchCodec's ABI paired with
+  # torch; newer torch/TensorDict qualification is tracked separately in #883.
+  "torch>=2.7,<2.8",
+  "torchvision>=0.22,<0.23",
   "torchcodec>=0.5,<0.6"
 ]
 

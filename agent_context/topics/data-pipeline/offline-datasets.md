@@ -5,16 +5,21 @@ identity, and cross-version conversion boundaries.
 
 ## Runtime ownership
 
-The main SDK retains Python >=3.10 and LeRobot 0.4.x. Its `data_pipeline` and
+The main SDK selects LeRobot 0.4.4 on Python 3.10/3.11 and 0.6.1 on Python
+3.12+, with the shared Torch 2.7/TorchCodec 0.5 stack declared in `pyproject.toml`.
+Both recording routes retain task/subtask tables and depth sidecars. Its `data_pipeline` and
 `datasets` packages load online/simulation components lazily; offline inspection
 and journal recovery do not import the simulator or PyTorch.
 
 `tools/lerobot_export/` is a separately installable Python >=3.12 tool pinned to
 LeRobot 0.6.1. It reads files and must not import/install the main SDK. The
-converter and its official reader/recipe tests use an isolated environment;
-changing main-package dependency markers is not a compatibility strategy.
+converter and its official reader/recipe tests use an isolated environment.
+The main SDK matrix validates dependency resolution, recording/loading and
+official ACT APIs separately from this file-format conversion.
 
 LeRobot 0.6.1's reader does not automatically resolve the old subtask table.
+The main SDK preview resolves it explicitly; numeric sources use the stored
+indices through their declared field mapping.
 Conversion preserves the overall task and exports segment descriptions through
 its official persistent-language timeline. The source recording is unchanged,
 and a staged destination is published only after validation succeeds. Native
