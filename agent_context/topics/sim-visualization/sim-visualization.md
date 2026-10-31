@@ -2,7 +2,7 @@
 
 > Topic: Simulation visualization — `SimulationManager` lifecycle,
 > backend-neutral scene snapshots, the Viser backend, cameras, deformables,
-> interactive Gizmos, and launcher integration.
+> interactive Gizmos, render-only marker groups, and launcher integration.
 
 ---
 
@@ -18,6 +18,7 @@
 | `embodichain/lab/visualization/runtime.py` | Background worker, latest-frame queues, rate limiting, health, and telemetry |
 | `embodichain/lab/visualization/backends/base.py` | Visualization backend contract |
 | `embodichain/lab/visualization/backends/viser.py` | Viser server, scene handles, GUI controls, and browser publishing |
+| `embodichain/lab/visualization/markers/` | Marker prototype/group configuration, geometry generation, validation, and lifecycle |
 | `embodichain/lab/gym/utils/gym_utils.py` | Gym config parsing, common launcher arguments, and CLI overrides |
 | `embodichain/lab/gym/envs/base_env.py` | Environment scene setup, post-setup start, and forced reset capture |
 | `embodichain/lab/scripts/preview_asset.py` | Standalone rigid-object and articulation browser preview |
@@ -55,6 +56,41 @@ The simulation owns physics and assets. Scene export is read-only. When
 `allow_commands=True`, Viser Gizmo callbacks enqueue pose commands that
 `SimulationManager` later applies on the simulation thread.
 
+`SimulationManager.add_marker_group()` owns named render-only marker groups.
+`MarkerPrototypeCfg` supplies box, sphere, cylinder, capsule, cone, arrow,
+frame, or caller-provided mesh geometry; `MarkerGroup.update()` publishes
+batched pose, scale, prototype, color, and visibility arrays without stepping
+physics. Groups default to all sub-environments; `env_ids` selects mutations,
+while `scope="world"` creates one global batch. Attach/detach follows prepared
+registered roots or links through public pose reads on the simulation thread.
+During `SimulationManager.update()`, attachment refresh follows the optional
+`after_substep` observer and precedes recording and visualization capture, so
+captures include pose changes made by that observer.
+Native markers use Scene-owned pure visual objects. Creation, cloning, batched
+transforms and removal go through the existing scene facade. Failed updates
+preserve previously published marker state. Marker operations do not prepare or
+step physics; handles are invalidated when the owning scene closes. Browser
+rendering carries detached mesh snapshots in `SceneOverlays`.
+
+`VisualizationMarkers` adapts flat Isaac-style arrays (xyzw) with explicit
+`environment_ids`. It defaults to world coordinates and environment 0.
+`RobotMarkers` reads URDF/USD visuals and composes externally supplied link poses
+with visual origins. URDF FK accepts all `joint_names`, including caller-resolved
+mimic joints. Multiple poses can be displayed in one environment. Tasks own
+motion loading, sampling and alignment.
+
+`RobotMarkersAppearanceCfg` selects source appearance or a base-color override,
+with adjustable opacity. Source textures and material parameters are preserved;
+opaque visuals use scene lighting. Transparent shading may differ by renderer.
+`unlit=True` selects a uniform color. Offscreen cameras exclude visuals until
+explicitly enabled. File-backed and extracted texture resources remain available
+until removal.
+
+Batch updates read each selected environment's count directly. Viser combines
+ordinary scene and marker environment IDs when creating visibility controls;
+removing the last ordinary object preserves the environment's hidden state
+while markers remain. The controls are rebuilt only when membership changes.
+
 `SimulationManager` may start the Viser server during its own construction,
 before a standalone caller has declared any assets. That empty visualization
 startup must not call `prepare()` or finalize the Spawn scene. The caller's
@@ -62,7 +98,7 @@ first asset-bearing `prepare()` remains the initial topology commit; the next
 capture observes the topology revision and republishes the manifest.
 
 All DexSim and Torch reads happen in `SceneExporter` on the simulation thread.
-Protocol objects make detached CPU copies before crossing into the runtime.
+Protocol objects detach mutable poses and retain shared immutable marker geometry before crossing into the runtime.
 Viser creation and every Viser handle mutation must happen on the single
 visualization worker thread; `ViserBackend._assert_update_thread()` enforces
 this invariant.
@@ -79,7 +115,7 @@ this invariant.
 - Gizmo commands mutate targets only after simulation-thread validation.
 - Simulation/DexSim reads stay on the simulation thread.
 - Viser server and handle operations stay on one private worker thread.
-- Cross-thread snapshots own detached contiguous CPU arrays.
+- Cross-thread snapshots detach mutable state; marker geometry arrays may share validated read-only storage.
 - A frame is accepted only when `run_id`, `scene_revision`, node IDs, and
   dynamic vertex shapes match the published manifest.
 - Topology changes require a new manifest; pose-only changes require only a
@@ -90,6 +126,9 @@ this invariant.
   and offsets face indices into the concatenated vertex array. Links without
   render meshes export empty geometry without querying mesh zero.
 - Sampling rates are wall-clock limits, not simulation-time guarantees.
+- Marker mutation never prepares or synchronizes an unprepared scene. When
+  topology is dirty, browser publication waits for the next explicit host
+  capture or `SimulationManager.update()`.
 - Bind to loopback by default. Viser has no EmbodiChain authentication layer;
   use SSH forwarding or an authenticated gateway for remote access.
 
@@ -100,6 +139,7 @@ this invariant.
 | `Visualization env_ids ... outside simulation range` | Selected IDs do not exist in the configured arenas. Validate them against `SimulationManager.num_envs`. |
 | Startup timeout or address-in-use error | The Viser worker did not become ready or the configured port is occupied. Select another port and inspect `visualization_health.worker_error`. |
 | Asset added after startup is missing | Step once, call `refresh_visualization()`, or mark topology dirty if the change bypassed manager APIs. |
+| Native marker creation reports missing render-actor support | Use a DexSim build exposing Scene render-only mesh lifecycle and generic RenderBody/MaterialInst overlay properties, or run with `--viser`. Overlay routing supports Hybrid, FastRT and OfflineRT. |
 | Newton Viser shows only the grid after declaring a robot | Check that Viser startup did not finalize an empty Spawn scene before asset declaration and that link poses remain finite after the first update. |
 | A Newton articulation link is missing geometry or emits `mesh_id 0 out of range` | Export all render-body mesh segments and treat a zero-mesh link as empty geometry. Do not use the single-mesh articulation helper for Newton render bodies. |
 | Browser stops updating after an exporter/backend exception | `capture_visualization_safely()` latches the first error to protect simulation. Inspect health/logs, then stop and restart after fixing the cause. |
@@ -120,8 +160,22 @@ Relevant tests:
 - `tests/visualization/test_scene_exporter.py`
 - `tests/visualization/test_runtime.py`
 - `tests/visualization/test_viser_backend.py`
+- `tests/visualization/test_markers.py`
+- `tests/visualization/test_native_markers.py`
 - `tests/sim/test_sim_manager.py`
+- `tests/sim/test_marker_rendering.py`
 - `tests/gym/utils/test_gym_utils.py`
 - `tests/lab/scripts/test_preview_asset.py`
 - `tests/lab/scripts/test_preview_robot.py`
 - `tests/lab/scripts/test_preview_joint_control.py`
+
+
+Recorded task visualization uses `examples/sim/reference_trajectory.py`: named
+world link poses have axes `(T,K,L,7)`, while task objects use `VisualObject`
+and paths/targets use `VisualizationMarkers`. Offset layouts translate the
+robot, object, target and path together. Policy execution stays task-owned.
+`RobotMarkersCfg.source` accepts the same `UsdSourceCfg` selector as scene
+assets. USD singleton selection and USDZ texture extraction are shared through
+`sim/spawn/_usd_assets.py`; ghost-owned extraction directories survive until
+removal. Scaled marker transforms use the Scene visual batch, while rigid
+VisualObject poses use the World tensor batch.

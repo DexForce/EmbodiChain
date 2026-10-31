@@ -37,6 +37,7 @@ from ..protocol import (
     JointControlSpec,
     JointControlState,
     MeshGeometry,
+    MeshMarkerOverlay,
     PickCommand,
     PointCloudOverlay,
     SceneFrame,
@@ -79,6 +80,20 @@ class _GizmoHandle:
 class _JointControlHandle:
     handle: object
     spec: JointControlSpec
+
+
+@dataclass
+class _MeshOverlayHandle:
+    handle: object
+    vertices: np.ndarray
+    faces: np.ndarray
+    scale: np.ndarray
+    env_id: int | None
+    uv_coords: np.ndarray | None = None
+    texture: np.ndarray | None = None
+    color: tuple = ()
+    texture_wrap: tuple[str, str] = ("repeat", "repeat")
+    unlit: bool = True
 
 
 @dataclass(frozen=True)
@@ -172,8 +187,11 @@ class ViserBackend(VisualizationBackend):
         self._camera_preview_group_folders: dict[str, object] = {}
         self._camera_image_handles: dict[str, object] = {}
         self._overlay_handles: dict[tuple[str, str], object] = {}
+        self._mesh_overlay_handles: dict[tuple[str, str], _MeshOverlayHandle] = {}
         self._overlay_base_visibility: dict[tuple[str, str], bool] = {}
         self._env_visibility: dict[int, bool] = {}
+        self._manifest: SceneManifest | None = None
+        self._marker_env_ids: set[int] = set()
         self._show_all_envs = True
         self._selected_scene_env: int | None = None
         self._overlay_visibility: dict[str, bool] = {
@@ -181,6 +199,7 @@ class ViserBackend(VisualizationBackend):
             "trajectories": True,
             "targets": True,
             "point_clouds": True,
+            "markers": True,
         }
         self._gui_events: queue.SimpleQueue[_GuiEvent] = queue.SimpleQueue()
         self._gizmo_events: queue.SimpleQueue[_GizmoEvent] = queue.SimpleQueue()
@@ -259,6 +278,15 @@ class ViserBackend(VisualizationBackend):
             self._server.scene.remove_pointer_callback()
             self._pointer_handler = None
 
+    def _environment_ids(self, manifest: SceneManifest) -> set[int]:
+        return (
+            {node.env_id for node in manifest.nodes}
+            | {camera.env_id for camera in manifest.cameras}
+            | {gizmo.env_id for gizmo in manifest.gizmos}
+            | {control.env_id for control in manifest.joint_controls}
+            | self._marker_env_ids
+        )
+
     def _register_visibility_controls(self, manifest: SceneManifest) -> None:
         previous_env_visibility = self._env_visibility
         while True:
@@ -283,12 +311,7 @@ class ViserBackend(VisualizationBackend):
                 "may mutate the simulation."
             )
         self._register_replay_control()
-        env_ids = sorted(
-            {node.env_id for node in manifest.nodes}
-            | {camera.env_id for camera in manifest.cameras}
-            | {gizmo.env_id for gizmo in manifest.gizmos}
-            | {control.env_id for control in manifest.joint_controls}
-        )
+        env_ids = sorted(self._environment_ids(manifest))
         if self._selected_scene_env not in env_ids:
             self._selected_scene_env = env_ids[0] if env_ids else None
         if len(env_ids) > self._INDIVIDUAL_ENV_CONTROL_LIMIT:
@@ -356,6 +379,7 @@ class ViserBackend(VisualizationBackend):
                 ("trajectories", "Trajectories"),
                 ("targets", "Targets"),
                 ("point_clouds", "Point clouds"),
+                ("markers", "Markers"),
             ):
                 checkbox = self._server.gui.add_checkbox(
                     label, initial_value=self._overlay_visibility[category]
@@ -1130,6 +1154,7 @@ class ViserBackend(VisualizationBackend):
         for handle in self._overlay_handles.values():
             handle.remove()
         self._overlay_handles.clear()
+        self._mesh_overlay_handles.clear()
         self._overlay_base_visibility.clear()
         geometry_by_id = {
             geometry.geometry_id: geometry for geometry in manifest.geometries
@@ -1277,6 +1302,7 @@ class ViserBackend(VisualizationBackend):
 
         self._run_id = manifest.run_id
         self._scene_revision = manifest.scene_revision
+        self._manifest = manifest
         self._register_visibility_controls(manifest)
         for batch in self._mesh_batches.values():
             self._apply_mesh_visibility(batch)
@@ -1368,9 +1394,7 @@ class ViserBackend(VisualizationBackend):
         for dynamic_mesh in self._dynamic_meshes.values():
             self._apply_dynamic_mesh_visibility(dynamic_mesh)
         for key, handle in self._overlay_handles.items():
-            handle.visible = self._overlay_base_visibility.get(
-                key, True
-            ) and self._overlay_visibility.get(key[0], True)
+            self._apply_overlay_visibility(key, handle)
         self._apply_camera_visibility()
         self._apply_gizmo_visibility()
         if camera_previews_changed:
@@ -1511,6 +1535,147 @@ class ViserBackend(VisualizationBackend):
             handle.point_size = overlay.point_size
         handle.visible = overlay.visible and self._overlay_visibility[category]
 
+    def _apply_overlay_visibility(self, key: tuple[str, str], handle: object) -> None:
+        mesh = self._mesh_overlay_handles.get(key)
+        env_visible = (
+            True
+            if mesh is None or mesh.env_id is None
+            else self._env_visibility.get(mesh.env_id, True)
+        )
+        handle.visible = (
+            self._overlay_base_visibility.get(key, True)
+            and self._overlay_visibility.get(key[0], True)
+            and env_visible
+        )
+
+    @staticmethod
+    def _mesh_marker_color(
+        color: tuple[float, float, float, float],
+    ) -> tuple[int, int, int]:
+        return tuple(int(component * 255.0) for component in color[:3])
+
+    def _update_mesh_marker(
+        self, overlay: MeshMarkerOverlay, active: set[tuple[str, str]]
+    ) -> None:
+        category = "markers"
+        key = (category, overlay.overlay_id)
+        active.add(key)
+        self._overlay_base_visibility[key] = overlay.visible
+        mesh = self._mesh_overlay_handles.get(key)
+        geometry_changed = mesh is None or not (
+            (
+                mesh.vertices is overlay.vertices
+                or np.array_equal(mesh.vertices, overlay.vertices)
+            )
+            and (
+                mesh.faces is overlay.faces or np.array_equal(mesh.faces, overlay.faces)
+            )
+            and np.array_equal(mesh.scale, overlay.scale)
+            and (
+                mesh.uv_coords is overlay.uv_coords
+                or np.array_equal(mesh.uv_coords, overlay.uv_coords)
+            )
+            and (
+                mesh.texture is overlay.texture
+                or np.array_equal(mesh.texture, overlay.texture)
+            )
+            and (overlay.texture is None or mesh.color == overlay.color)
+            and mesh.texture_wrap == overlay.texture_wrap
+            and mesh.unlit == overlay.unlit
+        )
+        if geometry_changed:
+            if mesh is not None:
+                mesh.handle.remove()
+            path_component = safe_path_component(overlay.overlay_id)
+            if overlay.texture is not None:
+                import trimesh
+                from PIL import Image
+
+                factor = np.array(overlay.color)
+                factor[:3] = np.where(
+                    factor[:3] <= 0.04045,
+                    factor[:3] / 12.92,
+                    ((factor[:3] + 0.055) / 1.055) ** 2.4,
+                )
+                material = trimesh.visual.material.PBRMaterial(
+                    baseColorFactor=np.round(factor * 255).astype(np.uint8),
+                    baseColorTexture=Image.fromarray(overlay.texture),
+                    metallicFactor=0.0,
+                    roughnessFactor=1.0,
+                    alphaMode="BLEND",
+                    doubleSided=True,
+                )
+                triangle_mesh = trimesh.Trimesh(
+                    vertices=overlay.vertices * overlay.scale,
+                    faces=overlay.faces,
+                    process=False,
+                    visual=trimesh.visual.TextureVisuals(
+                        uv=overlay.uv_coords, material=material
+                    ),
+                )
+
+                def configure_material(tree: dict) -> None:
+                    if overlay.unlit:
+                        tree.setdefault("extensionsUsed", []).append(
+                            "KHR_materials_unlit"
+                        )
+                        for item in tree.get("materials", []):
+                            item.setdefault("extensions", {})[
+                                "KHR_materials_unlit"
+                            ] = {}
+                    wraps = {"repeat": 10497, "clamp": 33071, "mirror": 33648}
+                    tree["samplers"] = [
+                        {
+                            "wrapS": wraps[overlay.texture_wrap[0]],
+                            "wrapT": wraps[overlay.texture_wrap[1]],
+                        }
+                    ]
+                    for texture in tree.get("textures", []):
+                        texture["sampler"] = 0
+
+                data = trimesh.exchange.gltf.export_glb(
+                    triangle_mesh, tree_postprocessor=configure_material
+                )
+                handle = self._server.scene.add_glb(
+                    f"/overlays/{category}/{path_component}",
+                    data,
+                    cast_shadow=False,
+                    receive_shadow=False,
+                )
+            else:
+                handle = self._server.scene.add_mesh_simple(
+                    f"/overlays/{category}/{path_component}",
+                    vertices=overlay.vertices * overlay.scale,
+                    faces=overlay.faces,
+                    color=self._mesh_marker_color(overlay.color),
+                    opacity=overlay.color[3],
+                    side="double",
+                    cast_shadow=False,
+                    receive_shadow=False,
+                )
+            mesh = _MeshOverlayHandle(
+                handle=handle,
+                vertices=overlay.vertices,
+                faces=overlay.faces,
+                scale=overlay.scale,
+                env_id=overlay.env_id,
+                uv_coords=overlay.uv_coords,
+                texture=overlay.texture,
+                color=overlay.color,
+                texture_wrap=overlay.texture_wrap,
+                unlit=overlay.unlit,
+            )
+            self._mesh_overlay_handles[key] = mesh
+            self._overlay_handles[key] = handle
+        else:
+            mesh.env_id = overlay.env_id
+            if overlay.texture is None:
+                mesh.handle.color = self._mesh_marker_color(overlay.color)
+                mesh.handle.opacity = overlay.color[3]
+        mesh.handle.position = overlay.position
+        mesh.handle.wxyz = overlay.wxyz
+        self._apply_overlay_visibility(key, mesh.handle)
+
     def publish_frame(self, frame: SceneFrame) -> bool:
         """Publish a dynamic scene frame.
 
@@ -1606,6 +1771,14 @@ class ViserBackend(VisualizationBackend):
             if pending_sequence is not None:
                 self._joint_control_pending_sequences.pop(control_id, None)
 
+        self._marker_env_ids = {
+            mesh.env_id for mesh in frame.overlays.meshes if mesh.env_id is not None
+        }
+        if self._manifest is not None and self._environment_ids(self._manifest) != set(
+            self._env_visibility
+        ):
+            self._register_visibility_controls(self._manifest)
+
         active_overlays: set[tuple[str, str]] = set()
         for overlay in frame.overlays.frames:
             self._update_frame_overlay("frames", overlay, active_overlays)
@@ -1615,10 +1788,13 @@ class ViserBackend(VisualizationBackend):
             self._update_trajectory(overlay, active_overlays)
         for overlay in frame.overlays.point_clouds:
             self._update_point_cloud(overlay, active_overlays)
+        for overlay in frame.overlays.meshes:
+            self._update_mesh_marker(overlay, active_overlays)
 
         stale = set(self._overlay_handles) - active_overlays
         for key in stale:
             self._overlay_handles.pop(key).remove()
+            self._mesh_overlay_handles.pop(key, None)
             self._overlay_base_visibility.pop(key, None)
         return True
 
@@ -1729,7 +1905,11 @@ class ViserBackend(VisualizationBackend):
         self._camera_preview_group_folders.clear()
         self._camera_image_handles.clear()
         self._overlay_handles.clear()
+        self._mesh_overlay_handles.clear()
         self._overlay_base_visibility.clear()
+        self._manifest = None
+        self._marker_env_ids.clear()
+        self._env_visibility.clear()
         while True:
             try:
                 self._gizmo_events.get_nowait()
