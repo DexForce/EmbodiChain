@@ -508,6 +508,7 @@ class MockEnv:
 from embodichain.lab.gym.envs.managers.events import (
     resolve_uids,
     resolve_dict,
+    set_visual_object_pose_from_env,
     set_detached_uids_for_env_reset,
     wait_for_dynamic_objects_to_settle,
 )
@@ -525,6 +526,53 @@ from embodichain.lab.gym.envs.managers.randomization.visual import (
 from embodichain.lab.gym.envs.managers.cfg import EventCfg, SceneEntityCfg
 from embodichain.lab.gym.envs.managers import EventManager, FunctorCfg
 from embodichain.utils.module_utils import find_function_from_modules
+
+
+@pytest.mark.parametrize(
+    "selection, selected_rows",
+    [(None, [0, 1]), (slice(None), [0, 1]), ([1], [1]), ([1, 0], [1, 0]), ([], [])],
+)
+def test_visual_pose_from_env_updates_only_selected_rows(
+    selection, selected_rows
+) -> None:
+    marker_pose = torch.eye(4).repeat(2, 1, 1)
+
+    def set_pose(pose, env_ids):
+        marker_pose[env_ids] = pose
+
+    marker = SimpleNamespace(set_local_pose=set_pose)
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        desired_pose=torch.eye(4).repeat(2, 1, 1),
+        sim=SimpleNamespace(
+            has_native_renderer=True,
+            get_visual_object=lambda uid: marker if uid == "marker" else None,
+            update=Mock(),
+        ),
+    )
+    env.desired_pose[:, :3, 3] = torch.tensor([[0.2, 0.1, 0.01], [0.4, -0.1, 0.02]])
+    env.desired_pose[1, :3, :3] = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+    source_before = env.desired_pose.clone()
+    expected = marker_pose.clone()
+    expected[selected_rows] = source_before[selected_rows]
+    set_visual_object_pose_from_env(
+        env, selection, SceneEntityCfg(uid="marker"), pose_key="desired_pose"
+    )
+
+    torch.testing.assert_close(marker_pose, expected)
+    torch.testing.assert_close(env.desired_pose, source_before)
+    env.sim.update.assert_not_called()
+
+
+def test_visual_pose_from_env_skips_unbound_no_render_declarations() -> None:
+    env = SimpleNamespace(
+        sim=SimpleNamespace(has_native_renderer=False, get_visual_object=Mock())
+    )
+    set_visual_object_pose_from_env(
+        env, [0], SceneEntityCfg(uid="marker"), pose_key="desired_pose"
+    )
+    env.sim.get_visual_object.assert_not_called()
 
 
 class TestResolveUids:

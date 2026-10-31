@@ -53,6 +53,11 @@ def official_dataset(tmp_path: Path) -> Path:
                 "names": ["position", "speed"],
             },
             "action": {"dtype": "float32", "shape": (1,), "names": ["request"]},
+            "observation.images.camera": {
+                "dtype": "image",
+                "shape": (8, 8, 3),
+                "names": ["height", "width", "channel"],
+            },
             "source.trace": {
                 "dtype": "int64",
                 "shape": (4,),
@@ -72,6 +77,9 @@ def official_dataset(tmp_path: Path) -> Path:
                 {
                     "observation.state": np.array([row, frame], dtype=np.float32),
                     "action": np.array([frame / 10], dtype=np.float32),
+                    "observation.images.camera": np.full(
+                        (8, 8, 3), row * 10 + frame, dtype=np.uint8
+                    ),
                     "source.trace": np.array([7, row, frame, 1], dtype=np.int64),
                     "source.continuity": np.array([int(frame >= 3)], dtype=np.int64),
                     "source.subtask": np.array([int(frame >= 3)], dtype=np.int64),
@@ -262,3 +270,48 @@ def test_reads_stay_bounded_and_on_cpu(official_dataset, monkeypatch):
         source = _load(official_dataset, read_batch_size=2)
     assert sizes and max(sizes) <= 2
     assert all(value.device.type == "cpu" for value in source.data.values())
+
+
+@pytest.mark.parametrize("provenance,cache_bytes", [(False, 0), (True, 192)])
+def test_rgb_reads_share_numeric_frame_identity_and_return_owned_cpu_images(
+    official_dataset, provenance, cache_bytes, monkeypatch
+):
+    sdk = pytest.importorskip("lerobot.datasets.lerobot_dataset")
+    dataset_type = sdk.LeRobotDataset
+    opened = []
+
+    def open_dataset(*args, **kwargs):
+        opened.append(kwargs.get("root"))
+        return dataset_type(*args, **kwargs)
+
+    monkeypatch.setattr(sdk, "LeRobotDataset", open_dataset)
+    source = _load(
+        official_dataset,
+        mapping=LeRobotFieldMappingCfg(
+            provenance_key="source.trace" if provenance else None
+        ),
+        image_keys=["observation.images.camera"],
+        image_cache_bytes=cache_bytes,
+        read_batch_size=2,
+    )
+    frames = source.data["frame_ids"][source.data["valid"]]
+    with torch.device("meta"):
+        images = source.read_images("observation.images.camera", frames)
+    expected = torch.tensor([0, 1, 3, 4, 10, 11], dtype=torch.uint8)
+    assert len(opened) == 1
+    assert images.device.type == "cpu"
+    assert images.shape == (6, 3, 8, 8)
+    torch.testing.assert_close(images[:, 0, 0, 0], expected)
+    images.zero_()
+    actual = source.read_images("observation.images.camera", frames)
+    torch.testing.assert_close(actual[:, 0, 0, 0], expected)
+    assert source.read_images("observation.images.camera", frames[:0]).shape == (
+        0,
+        3,
+        8,
+        8,
+    )
+    unknown = frames[:1].clone()
+    unknown[:, 0] += 1
+    with pytest.raises(KeyError, match="not found"):
+        source.read_images("observation.images.camera", unknown)

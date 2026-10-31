@@ -14,13 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Explicit, bounded numeric loading through the optional official LeRobot SDK."""
+"""Unified numeric and bounded RGB loading through the optional official LeRobot SDK."""
 
 from __future__ import annotations
 
 import hashlib
 from importlib.metadata import version
 import math
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -47,8 +48,8 @@ class LeRobotFieldMappingCfg:
             supports continuity/segment IDs, segment acceptance and language IDs.
 
     Column mapping is a declaration of semantics by the caller, not automatic
-    inference from a matching width. Image/video sequence decoding is not part
-    of this resident numeric backend.
+    inference from a matching width. RGB features are selected separately with
+    ``LeRobotDataSource.image_keys`` and decoded on demand.
     """
 
     observation_key: str = "observation.state"
@@ -167,7 +168,7 @@ def _feature(
 
 
 class LeRobotDataSource(TensorDataSource):
-    """Load numeric episodes once and serve owned resident context batches.
+    """Load numeric episodes and read aligned RGB from one LeRobot dataset.
 
     Args:
         root: Existing local LeRobot dataset directory.
@@ -185,6 +186,10 @@ class LeRobotDataSource(TensorDataSource):
             and empty padded rows. SDK episode order must match nonempty rows.
         read_batch_size: Maximum numeric SDK rows per read.
         language: Optional source-owned task/subtask ID-to-text dictionaries.
+        image_keys: Image feature columns available through ``read_images``.
+            Only HWC RGB image features are supported, not video features.
+        image_cache_bytes: Maximum decoded uint8 storage shared by all cameras.
+            Separate from the resident numeric limit; zero disables caching.
 
     Uses the official SDK lazily and never imports simulation modules. Missing
     backing-column access selects scalar SDK fallback; integrity failures do
@@ -205,7 +210,26 @@ class LeRobotDataSource(TensorDataSource):
         episode_frames: Sequence[Sequence[int]] | None = None,
         read_batch_size: int = 1024,
         language: Mapping[str, Mapping[int | str, str]] | None = None,
+        image_keys: Sequence[str] = (),
+        image_cache_bytes: int = 512 * 1024**2,
     ) -> None:
+        if (
+            isinstance(image_keys, str)
+            or not all(isinstance(key, str) and key for key in image_keys)
+            or len(set(image_keys)) != len(image_keys)
+        ):
+            raise ValueError("image_keys must contain distinct nonempty column names")
+        if type(image_cache_bytes) is not int or image_cache_bytes < 0:
+            raise ValueError("image_cache_bytes must be a nonnegative integer")
+        self.image_keys = tuple(image_keys)
+        self._image_cache_bytes = image_cache_bytes
+        self._image_cache: OrderedDict[
+            tuple[str, tuple[int, int, int]], torch.Tensor
+        ] = OrderedDict()
+        self._cached_image_bytes = 0
+        self._image_views: dict[str, Any] = {}
+        self._image_shapes: dict[str, tuple[int, ...]] = {}
+        self._image_rows: dict[tuple[int, int, int], int] = {}
         if type(memory_limit_bytes) is not int or memory_limit_bytes < 1:
             raise ValueError("memory_limit_bytes must be a positive integer")
         if type(read_batch_size) is not int or read_batch_size < 1:
@@ -239,8 +263,8 @@ class LeRobotDataSource(TensorDataSource):
             data, schema=schema, source_id=source_id, copy_data=False, metadata=metadata
         )
 
-    @staticmethod
     def _load(
+        self,
         root: Path,
         schema: Mapping[str, Any],
         memory_limit: int,
@@ -258,6 +282,17 @@ class LeRobotDataSource(TensorDataSource):
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
         dataset = LeRobotDataset(repo_id, root=root, download_videos=False)
+        if self.image_keys:
+            backing = getattr(dataset, "hf_dataset", None)
+            if backing is None or not hasattr(backing, "select_columns"):
+                raise ValueError("LeRobot RGB loading requires backing-column access")
+            for key in self.image_keys:
+                feature = dataset.features.get(key, {})
+                shape = tuple(feature.get("shape", ()))
+                if feature.get("dtype") != "image" or len(shape) != 3 or shape[-1] != 3:
+                    raise ValueError(f"{key} must name an HWC RGB image feature")
+                self._image_shapes[key] = shape
+                self._image_views[key] = backing.select_columns([key])
         backing = getattr(dataset, "hf_dataset", None)
         if (
             backing is not None
@@ -464,6 +499,16 @@ class LeRobotDataSource(TensorDataSource):
                     if value.shape != (size,) or value.dtype != fields[key][1]:
                         raise ValueError(f"LeRobot metadata {key} dtype/shape mismatch")
                     tensors[key][row, selected] = value
+                if self.image_keys:
+                    for index, frame_id in enumerate(
+                        tensors["frame_ids"][row, selected].tolist()
+                    ):
+                        identity = tuple(frame_id)
+                        if identity in self._image_rows:
+                            raise ValueError(
+                                "Image dataset contains duplicate canonical frame IDs"
+                            )
+                        self._image_rows[identity] = cursor + index
                 cursor += size
         backing = getattr(dataset, "hf_dataset", None)
         bulk = backing is not None and callable(getattr(backing, "__getitem__", None))
@@ -472,7 +517,7 @@ class LeRobotDataSource(TensorDataSource):
             "loader": "lerobot.datasets.lerobot_dataset.LeRobotDataset",
             "lerobot_version": version("lerobot"),
             "root": str(root.resolve()),
-            "per_minibatch_lerobot_io": False,
+            "per_minibatch_lerobot_io": bool(self.image_keys),
             "resident_tensor_bytes": resident_bytes,
             "memory_limit_bytes": memory_limit,
             "numeric_read_batch_size": batch_size,
@@ -489,3 +534,95 @@ class LeRobotDataSource(TensorDataSource):
             or None,
         }
         return TensorDict(tensors, batch_size=[rows, steps], device="cpu"), storage
+
+    def image_fingerprint(self, image_key: str) -> str:
+        """Hash persisted data and metadata in bounded blocks.
+
+        Args:
+            image_key: Configured RGB image column.
+
+        Returns:
+            SHA-256 identity of LeRobot data, metadata and PNG storage.
+        """
+        if image_key not in self._image_views:
+            raise ValueError(f"Image feature {image_key} was not configured")
+        root = Path(self.metadata["storage"]["root"])
+        files = sorted(
+            path
+            for directory in ("data", "images", "meta")
+            for path in (root / directory).rglob("*")
+            if path.is_file() and path.suffix in {".parquet", ".json", ".jsonl", ".png"}
+        )
+        if not files:
+            raise ValueError("No persisted LeRobot dataset files found")
+        digest = hashlib.sha256()
+        digest.update(image_key.encode())
+        for path in files:
+            digest.update(path.relative_to(root).as_posix().encode())
+            with path.open("rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(block)
+        return digest.hexdigest()
+
+    def read_images(self, image_key: str, frame_ids: torch.Tensor) -> torch.Tensor:
+        """Return owned RGB frames for canonical ``[source, episode, frame]`` IDs.
+
+        Args:
+            image_key: Configured RGB image column.
+            frame_ids: CPU integer tensor ``[B, 3]`` from a numeric source.
+
+        Returns:
+            CPU uint8 images ``[B, 3, H, W]``.
+
+        Raises:
+            ValueError: IDs or decoded images are invalid.
+            KeyError: A requested episode/frame does not exist.
+        """
+        if image_key not in self._image_views:
+            raise ValueError(f"Image feature {image_key} was not configured")
+        if (
+            frame_ids.device.type != "cpu"
+            or frame_ids.dtype != torch.int64
+            or frame_ids.ndim != 2
+            or frame_ids.shape[1] != 3
+        ):
+            raise ValueError("Image frame IDs must be CPU int64 [batch, 3]")
+        images = []
+        for identity in frame_ids.tolist():
+            frame_id = tuple(identity)
+            key = (image_key, frame_id)
+            if frame_id not in self._image_rows:
+                raise KeyError(f"Image frame {key} not found")
+            image = self._image_cache.get(key)
+            if image is not None:
+                self._image_cache.move_to_end(key)
+            else:
+                with torch.device("cpu"):
+                    image = self._image_views[image_key][self._image_rows[frame_id]][
+                        image_key
+                    ]
+                if not isinstance(image, torch.Tensor) or tuple(image.shape) != (
+                    3,
+                    *self._image_shapes[image_key][:2],
+                ):
+                    raise ValueError(f"Invalid decoded image at {key}")
+                if not bool(torch.isfinite(image).all()) or bool(
+                    ((image < 0) | (image > 1)).any()
+                ):
+                    raise ValueError(f"Decoded image outside [0,1] at {key}")
+                image = image.mul(255).round().to(torch.uint8).contiguous()
+                size = image.numel()
+                if size <= self._image_cache_bytes:
+                    while self._cached_image_bytes + size > self._image_cache_bytes:
+                        _, evicted = self._image_cache.popitem(last=False)
+                        self._cached_image_bytes -= evicted.numel()
+                    self._image_cache[key] = image
+                    self._cached_image_bytes += size
+            images.append(image)
+        if not images:
+            return torch.empty(
+                (0, 3, *self._image_shapes[image_key][:2]),
+                dtype=torch.uint8,
+                device="cpu",
+            )
+        return torch.stack(images)

@@ -1,0 +1,256 @@
+{
+  "baseline_commit": "950a16c6d93ba6bbbef384fcf8350c7ca2a0aa4d",
+  "scope": "Single default-physics simulator, fixed camera and randomized cube XY; 10 cm success radius",
+  "task_identity": {
+    "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml": "b03cdef23e1cc4cddf1902ce670c505ee877a8ef49772850be5399c7f4137b2f",
+    "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.visual.yaml": "9237ae3784ef23ae3959d365147a8d0b7fcc4257b1cc7ed83ecacb5f58544a23",
+    "extensions/embodichain_tasks/configs/components/embodiments/franka_panda_rgb_224.yaml": "1ce9d0e62d26ec2ec252bce1e9559851af260b2d8fc72721b3a1858563e1b832",
+    "extensions/embodichain_tasks/embodichain_tasks/manipulation/push_cube.py": "bc125a817723c5310cff2cef64666f755f62a66e822b45fa644956ed049d1212"
+  },
+  "runtime": {
+    "python": "3.11.14",
+    "torch": "2.7.0+cu128",
+    "torchvision": "0.22.0+cu128",
+    "cuda": "12.8",
+    "dexsim": "0.5.1rc1",
+    "lerobot": "0.4.4",
+    "gpu": "NVIDIA RTX PRO 5000 72GB Blackwell",
+    "nvidia_driver": "580.126.20"
+  },
+  "dataset": {
+    "expert_successes": 100,
+    "expert_attempts": 100,
+    "train_episodes": 100,
+    "validation_episodes": 20,
+    "train_seeds": [
+      100000,
+      100099
+    ],
+    "validation_seeds": [
+      200000,
+      200019
+    ],
+    "qualification_seeds": [
+      500000,
+      500099
+    ],
+    "development_seeds": [
+      300000,
+      300049
+    ],
+    "test_seeds": [
+      400000,
+      400099
+    ]
+  },
+  "training": {
+    "updates_per_seed": 30000,
+    "batch_size": 32,
+    "checkpoint_interval": 2000,
+    "pretrained_resnet18_sha256": "f37072fd47e89c5e827621c5baffa7500819f7896bbacec160b1a16c560e07ec",
+    "recipe_to_last_checkpoint_seconds": {
+      "19001": 2312.73,
+      "19002": 2312.84,
+      "19003": 2308.98
+    },
+    "wall_time_scope": "Approximate elapsed time from recipe file creation to last checkpoint modification; includes data loading and offline validation.",
+    "budget_check": {
+      "torch_allocator_cap_bytes": 21474836480,
+      "completed_updates": 30000,
+      "batch_size": 32,
+      "dataset": "same training and validation corpora",
+      "samples": 3078,
+      "checkpoint": "/tmp/act-pushcube-budget-train/last.pt",
+      "development_successes": 10,
+      "development_episodes": 10
+    }
+  },
+  "models": [
+    {
+      "seed": 19001,
+      "selected_update": 4000,
+      "development_successes": 50,
+      "development_episodes": 50,
+      "test_successes": 100,
+      "test_episodes": 100,
+      "test_wilson_95": [
+        0.9630065017930143,
+        1.0
+      ],
+      "failed_test_seeds": [],
+      "checkpoint_sha256": "79b59ab075786fbc31e8cb8b569e73d87350e592efea3c53a926dafe5ec2f04d",
+      "train_source_id": "act:273dfeab2c7834415d18ccc5b93211f8eb5b1d339e69588a499b296d76132c8b",
+      "validation_source_id": "act:238e9dec94a66dc3115c0321c602960462b8f55c3a0246b256c2fd1be2dc7ab7",
+      "mean_policy_seconds": 0.002810304546822174
+    },
+    {
+      "seed": 19002,
+      "selected_update": 16000,
+      "development_successes": 50,
+      "development_episodes": 50,
+      "test_successes": 100,
+      "test_episodes": 100,
+      "test_wilson_95": [
+        0.9630065017930143,
+        1.0
+      ],
+      "failed_test_seeds": [],
+      "checkpoint_sha256": "ed3294621ebd4f63de155e3d2635be82e9bae3f81215b9f361f1b46dc5b1eb66",
+      "train_source_id": "act:273dfeab2c7834415d18ccc5b93211f8eb5b1d339e69588a499b296d76132c8b",
+      "validation_source_id": "act:238e9dec94a66dc3115c0321c602960462b8f55c3a0246b256c2fd1be2dc7ab7",
+      "mean_policy_seconds": 0.0030231729974920904
+    },
+    {
+      "seed": 19003,
+      "selected_update": 2000,
+      "development_successes": 50,
+      "development_episodes": 50,
+      "test_successes": 98,
+      "test_episodes": 100,
+      "test_wilson_95": [
+        0.929988209271456,
+        0.9944980324498376
+      ],
+      "failed_test_seeds": [
+        400012,
+        400022
+      ],
+      "checkpoint_sha256": "407c6de0cf9bf249b93b6d4477d8c291c2ceaa13f6b7523605592ad707fc7619",
+      "train_source_id": "act:273dfeab2c7834415d18ccc5b93211f8eb5b1d339e69588a499b296d76132c8b",
+      "validation_source_id": "act:238e9dec94a66dc3115c0321c602960462b8f55c3a0246b256c2fd1be2dc7ab7",
+      "mean_policy_seconds": 0.0028809822668600933
+    }
+  ],
+  "test_mean_success_rate": 0.9933333333333333,
+  "fixed_baseline_successes": 0,
+  "untrained_baseline_successes": 0,
+  "overfit_training_scenes_successes": 4,
+  "visual_probe_successes": 10,
+  "visual_probe_shuffled_successes": 1,
+  "visual_probe_episodes": 10,
+  "strict_3cm_entry_successes": 0,
+  "benchmark_file": "benchmark.json",
+  "artifacts": "Datasets, checkpoints, training metrics, and MP4s were written to the /tmp paths in the original reports and are not bundled.",
+  "sampled_driver_memory_mib": {
+    "training_100_updates": 1558,
+    "single_rollout": 5872,
+    "sample_interval_seconds": 0.5,
+    "scope": "nvidia-smi compute-process readings; excludes graphics-only allocations",
+    "single_rollout_with_20GiB_torch_cap": 5872,
+    "full_training_30000_updates_with_20GiB_torch_cap": 1558
+  },
+  "reader_equivalence": {
+    "sampled_training_frames": 100,
+    "sampling_seed": 12,
+    "comparison": "column-only RGB reader vs original SDK item, uint8 exact"
+  },
+  "budget_revalidation": {
+    "torch_allocator_cap_bytes": 21474836480,
+    "sampling_interval_seconds": 0.25,
+    "collection_successes": 4,
+    "collection_attempts": 4,
+    "collection_primary_process_peak_bytes": 6120251392,
+    "evaluation_successes": 100,
+    "evaluation_episodes": 100,
+    "evaluation_primary_process_peak_bytes": 6158000128,
+    "secondary_graphics_context_peak_bytes": 6897664,
+    "device_note": "72GB GPUs; NVML compute and graphics counters overlap on the main GPU, and a small graphics context appeared on another GPU."
+  },
+  "hardware_budget_acceptance": "The 20 GiB Torch-cap and sampled NVML evidence satisfy the budget check; no physical 24 GB GPU was tested.",
+  "archived_reports": {
+    "commit": "69f0ab53564ae7d8aa2d2a6f08cbaa8b8aef0646",
+    "path": "examples/learning/act/results",
+    "sha256": {
+      "benchmark.json": "ca24ec3910388a9b72f76a3d5793411b55879aa45e1b1fa0aa1140fb3cde6f90",
+      "development_19001.json": "ed936b38d9bf57510b67188f385c4b0211ba28e783487df792d7f860b051d76c",
+      "development_19002.json": "5c4b7bd5623334a4eec46a240544ceb5965bb9567cb779bb6bfb1684547aff04",
+      "development_19003.json": "04e4cd7e413bf5e19372d7ed5ccc6a427d05b2fd8adbd667937b4b06c5a303c6",
+      "expert_qualification.json": "fd372dd9f3cb3b0d9e9626cb8f96d22f76c6fcfbfa2462c1a1aa0cddcbf355b7",
+      "fixed_test.json": "371d202140263c62a51901316a22471f5e34be04bfafae28801635c26057dd95",
+      "overfit.json": "92d664304ed9273a9acaa1d478b4613f0caf95c00f3cb892173345b4d31ecd05",
+      "shuffled_visual_probe.json": "720dbbf69efa666176a60b8913acc9d5c8dafbbe4829b898b9d3c963c045e62a",
+      "test_19001.json": "85d262d7aa6f60b4301158782f4bfa2ae00098908ef82d6f961f7e0bc5fd07ae",
+      "test_19002.json": "9861fa9b20d3494badedc083897bab46918d8a7cfcf2ee5a828d081557673d31",
+      "test_19003.json": "e9f80da2c3bac96ff0ecc419d3c0bd1fb8645b1fb7a12eb2f56cb972e9b56611",
+      "train_collection.json": "f1395552d5b8a1161baf4efb0fe04b3889be8ea6d83fedcf0b3b34a010a4f142",
+      "untrained_test.json": "60f3c1da0daebf36ed240ccf0a1faf2b076efe5177f4d356508f6765244c9e4b",
+      "validation_collection.json": "87caa78c052545fe09fafa185678169163ffe5f1bb6bea5b3e1e6d17afa2a141",
+      "visual_probe.json": "270a8deb37ed5a1a97865124ec402956545ea7e9f72ce3890ce95716ba7ee63b",
+      "rollout_gpu_samples.json": "a879f8dfe4a2a01c80a8fa66b5ddbde4b791e1d164df3acc4d95abcbd4542307",
+      "training_gpu_samples.json": "836290e3bf4b013a050e9a0ef12602dfefadc70d6743c6ac44eb2798f6b7d1c5",
+      "rollout_gpu_budget_samples.json": "06460dd96de2c90334e0b4bb51659c2dab99f411c36163c9487ed58c3f55b762",
+      "training_gpu_budget_samples.json": "7b34b9007254b387b8f1e4d289fc630638d29cf481520f9c2566b90e319dedec",
+      "budget_development.json": "5f5c83b3d92c30417c72fcaa510964e6d26097bd2e50d2cdb478b71e57a221d3",
+      "collection_nvml_budget.json": "94a48ba80ae868ed52213725d9dcc4dff7ab446cdcd034777ec763262a87a97f",
+      "evaluation_nvml_budget.json": "38b43ebbd833dee6c9a776b7dcd887b42183f4ec62ad10bc478927252e270927",
+      "current_budget_test.json": "10af004041583c56a4956ba44ec374c3fee6576076bdc4bb0b323468662760f7",
+      "current_budget_collection.json": "54dad6ab28f9eb236840982aecd7a345059f2c440c9cbeb1c47eb4fa00379a53",
+      "portable_monitor_play.json": "1c5d912ff083315aa799f0f9c44b0f940254cd83fde516ee1c0031c507c0f0ff"
+    }
+  },
+  "shared_task_revalidation": {
+    "task_identity": {
+      "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml": "b03cdef23e1cc4cddf1902ce670c505ee877a8ef49772850be5399c7f4137b2f",
+      "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.visual.yaml": "b1180524d662ce214ff43473be495faf6ce5dddd0c08df8fd93a936a6fa4e607",
+      "extensions/embodichain_tasks/configs/components/embodiments/franka_panda_rgb_224.yaml": "1ce9d0e62d26ec2ec252bce1e9559851af260b2d8fc72721b3a1858563e1b832",
+      "extensions/embodichain_tasks/embodichain_tasks/manipulation/push_cube.py": "ca76940b55ffffcf07da4fb6c8cffe6f04effc96f4306998251f3764a0e307fa"
+    },
+    "runtime": {
+      "python": "3.11.14",
+      "torch": "2.7.0+cu128",
+      "cuda": "12.8",
+      "device": "cuda:0",
+      "gpu": "NVIDIA RTX PRO 5000 72GB Blackwell",
+      "physics": "default",
+      "renderer": "no-render",
+      "dexsim": "0.5.1rc1",
+      "lerobot": "0.4.4"
+    },
+    "expert": {
+      "attempts": 100,
+      "successes": 100,
+      "seed_base": 610000
+    },
+    "rgb_recording": {
+      "attempts": 4,
+      "successes": 4,
+      "seed_base": 620000,
+      "renderer": "hybrid"
+    },
+    "recorded_dataset": {
+      "episodes": 4,
+      "valid_frames": 678,
+      "rgb_shape": [
+        4,
+        3,
+        224,
+        224
+      ],
+      "state_shape": [
+        4,
+        9
+      ],
+      "action_shape": [
+        4,
+        30,
+        8
+      ],
+      "valid_anchor_actions": true
+    },
+    "legacy_rl_smoke": {
+      "environment": "PushCubeEnv",
+      "deployment": "PushCubeRL",
+      "action_width": 6,
+      "steps": 1,
+      "finite_reward": true,
+      "metric": "distance_to_goal"
+    },
+    "training_smoke": {
+      "device": "cpu",
+      "updates": 2,
+      "batch_size": 2,
+      "resume_num_updates": 2
+    },
+    "scope": "Fresh shared PushCubeEnv expert, recording, data-loading, optimizer and checkpoint smoke checks. Historical trained-policy success rates above were not re-evaluated for this task identity."
+  }
+}

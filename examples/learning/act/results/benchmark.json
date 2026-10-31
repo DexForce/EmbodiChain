@@ -1,0 +1,56 @@
+{
+  "hardware": "NVIDIA RTX PRO 5000 72GB Blackwell",
+  "device": "cuda:0",
+  "torch": "2.7.0+cu128",
+  "python": "3.11.14",
+  "image": [
+    3,
+    224,
+    224
+  ],
+  "horizon": 30,
+  "cpu_threads": 1,
+  "setup_seconds_including_hashes": 3.2287289928644896,
+  "sampling": {
+    "cache_0_batch_1": {
+      "median_ms": 2.2990088909864426,
+      "p90_ms": 2.386612817645073,
+      "repeats": 30
+    },
+    "cache_0_batch_32": {
+      "median_ms": 56.802873499691486,
+      "p90_ms": 59.459950774908066,
+      "repeats": 30
+    },
+    "cache_536870912_batch_1": {
+      "median_ms": 2.284532645717263,
+      "p90_ms": 2.3938538506627083,
+      "repeats": 30
+    },
+    "cache_536870912_batch_32": {
+      "median_ms": 56.98464694432914,
+      "p90_ms": 59.198851231485605,
+      "repeats": 30
+    }
+  },
+  "inference": {
+    "1": {
+      "median_ms": 3.6934837698936462,
+      "p90_ms": 3.707705996930599,
+      "repeats": 30
+    },
+    "32": {
+      "median_ms": 11.738489614799619,
+      "p90_ms": 11.841886676847935,
+      "repeats": 30
+    }
+  },
+  "update_batch_32": {
+    "median_ms": 44.065925758332014,
+    "p90_ms": 44.16083125397563,
+    "repeats": 30
+  },
+  "peak_gpu_allocated_bytes": 1141037056,
+  "peak_gpu_reserved_bytes": 1247805440,
+  "peak_process_rss_kib": 2616636
+}

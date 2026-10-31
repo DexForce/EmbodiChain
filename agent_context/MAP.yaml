@@ -553,13 +553,15 @@ topics:
 
 - id: supervised-learning
   title: Supervised Learning
-  aliases: [supervised learning, SL learning, 监督学习, 统一监督学习]
-  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, SequenceBatchSource, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
+  aliases: [supervised learning, SL learning, visual ACT, 视觉模仿学习, 监督学习, 统一监督学习]
+  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, SequenceBatchSource, ACTPolicy, ACTSequenceSource, ACTTemporalEnsembler, build_act_trainer, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
   paths: [topics/supervised-learning/supervised-learning.md]
   source_of_truth:
   - embodichain/learning/sl/
   - embodichain/cli/main.py
-  watch_paths: [embodichain/learning/sl/, tests/learning/sl/]
+  - extensions/embodichain_models/embodichain_models/policy/act/
+  - examples/learning/act/
+  watch_paths: [embodichain/learning/sl/, tests/learning/sl/, extensions/embodichain_models/embodichain_models/policy/act/, examples/learning/act/, tests/models/policy/]
   related_topics: [learning-layers, data-pipeline, rl-learning, neural-dynamics, robot-world-model]
   status: active
 - id: robot-world-model

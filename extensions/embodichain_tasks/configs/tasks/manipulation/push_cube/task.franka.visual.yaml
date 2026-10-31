@@ -1,0 +1,10 @@
+id: PushCube-Franka-Visual-v1
+enable_sensor: true
+headless: true
+renderer: hybrid
+environment:
+  component: env.visual.yaml
+embodiment:
+  component: ../../../components/embodiments/franka_panda_rgb_224.yaml
+  overrides:
+    init_rot: [0.0, 0.0, 180.0]
