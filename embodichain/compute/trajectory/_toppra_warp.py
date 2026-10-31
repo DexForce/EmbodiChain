@@ -85,6 +85,7 @@ def _cpu_chunk(
     sample_dt: float | None,
     grid_size: int,
     output_dtype: torch.dtype,
+    preserve_waypoints: bool,
     grad_enabled: bool,
     inference_mode: bool,
 ) -> dict[str, torch.Tensor]:
@@ -99,6 +100,7 @@ def _cpu_chunk(
             sample_dt=sample_dt,
             grid_size=grid_size,
             output_dtype=output_dtype,
+            preserve_waypoints=preserve_waypoints,
         )
 
 
@@ -112,6 +114,7 @@ def _launch_cpu_parallel(
     sample_dt: float | None,
     grid_size: int,
     output_dtype: torch.dtype,
+    preserve_waypoints: bool,
 ) -> dict[str, torch.Tensor]:
     """Compute independent row blocks and restore the global padding contract."""
     wp.init()
@@ -130,6 +133,7 @@ def _launch_cpu_parallel(
             sample_dt,
             grid_size,
             output_dtype,
+            preserve_waypoints,
             torch.is_grad_enabled(),
             torch.is_inference_mode_enabled(),
         )
@@ -176,6 +180,7 @@ class _ToppraAutograd(torch.autograd.Function):
         sample_dt: float | None,
         grid_size: int,
         output_dtype: torch.dtype,
+        preserve_waypoints: bool,
     ) -> tuple[torch.Tensor, ...]:
         state: dict[str, Any] = {}
         result = _launch_toppra(
@@ -187,6 +192,7 @@ class _ToppraAutograd(torch.autograd.Function):
             sample_dt=sample_dt,
             grid_size=grid_size,
             output_dtype=output_dtype,
+            preserve_waypoints=preserve_waypoints,
             state=state,
         )
         ctx.state = state
@@ -232,7 +238,7 @@ class _ToppraAutograd(torch.autograd.Function):
                     state["inputs"], saved, ctx.needs_input_grad
                 )
             )
-        return *gradients, None, None, None, None, None
+        return *gradients, None, None, None, None, None, None
 
 
 def _retime_toppra_warp(
@@ -245,8 +251,14 @@ def _retime_toppra_warp(
     sample_dt: float | None = None,
     grid_size: int = 100,
     output_dtype: torch.dtype | None = None,
+    preserve_waypoints: bool = False,
 ) -> dict[str, torch.Tensor]:
     """Retime (B, N, DOF) paths, isolating invalid/infeasible rows.
+
+    ``preserve_waypoints`` selects PCHIP and sampling through every distinct
+    node, with exact-repeat removal and per-segment time spacing. Quantity
+    requests below a row's distinct node count fail that row. The default
+    retains the historical not-a-knot geometry, filtering and uniform clock.
 
     Failed rows contain zeros. Stationary rows have two zero-time samples.
     ``path_lengths`` can exclude rectangular tail padding independently for
@@ -294,6 +306,7 @@ def _retime_toppra_warp(
             sample_dt,
             grid_size,
             output_dtype,
+            preserve_waypoints,
         )
         return dict(
             zip(("success", "positions", "velocities", "accelerations", "dt"), values)
@@ -311,6 +324,7 @@ def _retime_toppra_warp(
                 sample_dt,
                 grid_size,
                 output_dtype,
+                preserve_waypoints,
             )
     return _launch_toppra(
         waypoints,
@@ -321,6 +335,7 @@ def _retime_toppra_warp(
         sample_dt=sample_dt,
         grid_size=grid_size,
         output_dtype=output_dtype,
+        preserve_waypoints=preserve_waypoints,
     )
 
 
@@ -383,6 +398,7 @@ def _launch_toppra(
     sample_dt: float | None = None,
     grid_size: int = 100,
     output_dtype: torch.dtype = torch.float64,
+    preserve_waypoints: bool = False,
     state: dict[str, Any] | None = None,
 ) -> dict[str, torch.Tensor]:
     """Run the shared forward kernels, recording a tape only for autograd."""
@@ -429,6 +445,7 @@ def _launch_toppra(
                 grid_size,
                 int(waypoints.dtype == torch.float32),
                 wp.float64(duplicate_tolerance),
+                int(preserve_waypoints),
             ],
             device=device,
             record_tape=False,
@@ -448,30 +465,39 @@ def _launch_toppra(
                     device=device,
                     record_tape=differentiable,
                 )
-            diagonal = wp.zeros_like(clean, requires_grad=False)
-            eliminated = wp.zeros_like(clean)
-            second = wp.zeros_like(clean)
             coefficients = wp.zeros(
                 (batch, count - 1, dofs, 4),
                 dtype=wp.float64,
                 device=device,
                 requires_grad=differentiable,
             )
-            wp.launch(
-                kernels._spline,
-                dim=(batch, dofs),
-                inputs=[
-                    clean,
-                    counts,
-                    success,
-                    diagonal,
-                    eliminated,
-                    second,
-                    coefficients,
-                ],
-                device=device,
-                record_tape=differentiable,
-            )
+            if preserve_waypoints:
+                wp.launch(
+                    kernels._pchip,
+                    dim=(batch, count - 1, dofs),
+                    inputs=[clean, counts, success, coefficients],
+                    device=device,
+                    record_tape=differentiable,
+                )
+            else:
+                diagonal = wp.zeros_like(clean, requires_grad=False)
+                eliminated = wp.zeros_like(clean)
+                second = wp.zeros_like(clean)
+                wp.launch(
+                    kernels._spline,
+                    dim=(batch, dofs),
+                    inputs=[
+                        clean,
+                        counts,
+                        success,
+                        diagonal,
+                        eliminated,
+                        second,
+                        coefficients,
+                    ],
+                    device=device,
+                    record_tape=differentiable,
+                )
             velocity_wp = wp.from_torch(
                 velocity.detach(), dtype=wp.float64, requires_grad=differentiable
             )
@@ -571,25 +597,56 @@ def _launch_toppra(
                 record_tape=differentiable,
                 block_dim=solve_block,
             )
-            duration_tensor = wp.to_torch(durations)
-            ok = wp.to_torch(success).bool()
-            moving = ok & (wp.to_torch(counts) > 1)
-            if sample_count is not None:
-                sample_lengths = torch.full(
-                    (batch,), sample_count, device=waypoints.device, dtype=torch.int32
+            offsets = None
+            if preserve_waypoints:
+                offsets = wp.zeros((batch, count), dtype=int, device=device)
+                length_array = wp.zeros(batch, dtype=int, device=device)
+                wp.launch(
+                    kernels._preserved_sample_counts,
+                    dim=batch,
+                    inputs=[
+                        counts,
+                        intervals,
+                        times,
+                        durations,
+                        success,
+                        offsets,
+                        length_array,
+                        sample_count or 0,
+                        wp.float64(sample_dt or 0),
+                    ],
+                    device=device,
+                    record_tape=False,
                 )
+                sample_lengths = wp.to_torch(length_array)
+                if bool((sample_lengths < 2).any().item()):
+                    raise ValueError("sampling requests too many samples")
             else:
-                # Integer output lengths are frozen for this forward/backward
-                # pair; timing and sampling still differentiate through duration.
-                desired = torch.ceil(duration_tensor.detach() / sample_dt) + 1
-                if bool((desired > torch.iinfo(torch.int32).max).any().item()):
-                    raise ValueError("sample_dt requests too many samples")
-                sample_lengths = desired.to(torch.int32).clamp_min(2)
-            sample_lengths = torch.where(moving, sample_lengths, 2).contiguous()
+                duration_tensor = wp.to_torch(durations)
+                moving = wp.to_torch(success).bool() & (wp.to_torch(counts) > 1)
+                if sample_count is not None:
+                    sample_lengths = torch.full(
+                        (batch,),
+                        sample_count,
+                        device=waypoints.device,
+                        dtype=torch.int32,
+                    )
+                else:
+                    desired = torch.ceil(duration_tensor.detach() / sample_dt) + 1
+                    if bool((desired > torch.iinfo(torch.int32).max).any().item()):
+                        raise ValueError("sample_dt requests too many samples")
+                    sample_lengths = desired.to(torch.int32).clamp_min(2)
+                sample_lengths = torch.where(moving, sample_lengths, 2).contiguous()
+            ok = wp.to_torch(success).bool()
             samples = int(sample_lengths.max().item())
             # Reuse scalar searches only when dense output amortizes the
             # point-wise joint loop; small outputs retain the flat sampler.
-            cpu_sampling = device.is_cpu and not differentiable and samples >= 512
+            cpu_sampling = (
+                device.is_cpu
+                and not differentiable
+                and samples >= 512
+                and not preserve_waypoints
+            )
             # Narrow only on final stores. Avoid nested Torch cast work in
             # CPU worker threads and an extra double-precision output buffer.
             sample_dtype = (
@@ -613,7 +670,11 @@ def _launch_toppra(
                 requires_grad=differentiable,
             )
             wp.launch(
-                kernels._sample_cpu if cpu_sampling else kernels._sample,
+                (
+                    kernels._sample_preserved
+                    if preserve_waypoints
+                    else kernels._sample_cpu if cpu_sampling else kernels._sample
+                ),
                 dim=(batch, samples) if cpu_sampling else (batch, samples, dofs),
                 inputs=[
                     clean,
@@ -625,6 +686,7 @@ def _launch_toppra(
                     times,
                     durations,
                     wp.from_torch(sample_lengths),
+                    *([offsets] if preserve_waypoints else []),
                     positions,
                     velocities,
                     accelerations,

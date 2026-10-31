@@ -81,12 +81,25 @@ def retime_joint_paths(
     run inline. Interval constraints enforce limits between grid points.
     Floating outputs use float64 so finite differences of dense position samples
     do not amplify float32 quantization into spurious dynamic-limit violations.
-    Input filtering retains float32/float64 input precision; other input dtypes
-    are promoted to float32 before solving. Consumers that narrow or resample
+    Inputs other than float32/float64 are promoted to float32 before solving.
+    Consumers that narrow or resample
     these positions must recheck the resulting trajectory's dynamic limits.
 
-    The path geometry is resampled along the fitted spline, so poses derived
-    from the input samples must be recomputed from the returned positions.
+    Geometry uses coordinatewise PCHIP, so the continuous path stays inside
+    each adjacent pair's joint-position box. Legal input positions therefore
+    remain legal without needing robot position limits here. This does not
+    certify collision freedom. The C1 curve has continuous velocity and may
+    have bounded acceleration jumps at knots; both sides are constrained by
+    the segment-aligned TOPPRA grid. Jerk is not constrained.
+
+    Every distinct input node appears in order in the returned samples.
+    Consecutive identical nodes are collapsed, including the final node;
+    without input timestamps, repeats do not specify a dwell duration.
+    TIME sampling is uniform within each spline segment, with spacing no
+    greater than the requested interval. QUANTITY retains the requested count
+    for moving rows and fails rows with more distinct nodes than samples.
+    Poses derived from input samples must be recomputed from returned positions.
+    Ordinary :class:`ToppraPlanner` retains its not-a-knot geometry.
 
     Args:
         positions: Planned joint paths of shape ``(B, N, DOF)``.
@@ -94,8 +107,7 @@ def retime_joint_paths(
             one value per joint, or signed ``(DOF, 2)`` bounds, matching
             :class:`ToppraPlanOptions`.
         path_lengths: Optional valid prefix length for each batch row. This
-            excludes rectangular tail padding from spline fitting while
-            preserving explicit repeated endpoints inside each prefix.
+            excludes rectangular tail padding from geometry and timing.
         sample_method: Fixed output quantity or approximately fixed time step.
         sample_interval: Output count for ``QUANTITY`` or seconds for ``TIME``.
             ``None`` keeps the input sample count and is only meaningful for
@@ -107,7 +119,9 @@ def retime_joint_paths(
 
     Returns:
         PlanResult whose ``success`` is per-env and false where the path could
-        not be parameterized.
+        not be parameterized or the output count cannot retain its nodes.
+        Failed rows are zero-filled; shorter rows hold their endpoint with
+        zero derivatives and zero arrival intervals in the tail.
 
     Raises:
         ValueError: If ``positions`` is not a ``(B, N, DOF)`` tensor,
@@ -165,6 +179,7 @@ def retime_joint_paths(
             sample_dt=None if quantity else float(resolved_interval),
             grid_size=grid_size,
             output_dtype=torch.float64,
+            preserve_waypoints=True,
         )
     except (ValueError, FloatingPointError, OverflowError):
         return _failed_result(batch, dofs, resolved_device, torch.float64)

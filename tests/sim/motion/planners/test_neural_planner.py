@@ -1960,3 +1960,60 @@ def test_neural_planner_forwards_explicit_precision_and_device(
     )
     assert planner._policy.cuda_use_tf32 is False
     assert planner._policy.device == torch.device(device)
+
+
+@pytest.mark.no_sim
+def test_retimed_rollout_retains_limit_waypoints_on_a_coarse_clock(
+    tmp_path, monkeypatch
+):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+            dt=1.0,
+            constraints={"velocity": 2.0, "acceleration": 4.0},
+        )
+    )
+    positions = torch.zeros(1, 3, NUM_ARM_JOINTS, dtype=torch.float64)
+    positions[0, :, 0] = torch.tensor([0.8, 1.0, 1.0])
+    positions[0, :, 1] = torch.tensor([0.0, 0.02, 0.04])
+    # Both a plateau at the position cap and an interior goal must survive.
+    joint_targets = torch.zeros(1, NUM_WAYPOINTS, NUM_ARM_JOINTS, dtype=torch.float64)
+    joint_targets[:, :2] = positions[:, 1:]
+    joint_mask = torch.zeros(1, NUM_WAYPOINTS)
+    joint_mask[:, :2] = 1.0
+    no_mask = torch.zeros_like(joint_mask)
+    quaternions = torch.zeros(1, NUM_WAYPOINTS, 4)
+    quaternions[..., 3] = 1.0
+    waypoints = (
+        torch.zeros(1, NUM_WAYPOINTS, 3),
+        quaternions,
+        joint_targets,
+        no_mask,
+        no_mask,
+        joint_mask,
+    )
+    lower, upper = torch.full((NUM_ARM_JOINTS,), -1.0), torch.ones(NUM_ARM_JOINTS)
+    result = planner._retimed_result(
+        torch.tensor([True]),
+        positions,
+        "main_arm",
+        path_lengths=torch.tensor([3]),
+        waypoints=waypoints,
+        episode_k=2,
+        qpos_limits=(lower, upper),
+    )
+    assert result.success.tolist() == [True]
+    torch.testing.assert_close(result.positions, positions)
+    assert result.positions.max() == 1.0
+    assert result.dt[0, 1:].min() > 0
+    assert result.velocities.abs().max() <= 2.0 + 1e-8
+    assert result.accelerations.abs().max() <= 4.0 + 1e-8
