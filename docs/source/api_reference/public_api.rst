@@ -1565,6 +1565,27 @@ embodichain.lab.sim.physics.newton
 
    NewtonPhysicsBackend
 
+embodichain.lab.sim.physics.worldparticle
+---------------------------------------
+
+The per-model Provider validates authored particle order, checkpoint timestep,
+gravity and supported scene capabilities before allocating frozen weights.
+It supports single-world CUDA particle inference and reset, without native
+rigid coupling, gradients or CUDA Graph capture. Model-specific boundaries
+replace native collision geometry; SimulationManager callers explicitly set
+``enable_default_ground=False`` and pass a ``ProviderNewtonSolverCfg`` object.
+Built-in and default solver selection remain unchanged.
+
+.. currentmodule:: embodichain.lab.sim.physics.worldparticle
+
+.. autosummary::
+
+   WorldParticleProvider
+
+.. autoclass:: WorldParticleProvider
+   :members: register_custom_attributes, create
+
+
 embodichain.lab.sim.motion.planners.base_planner
 ------------------------------------------------
 
