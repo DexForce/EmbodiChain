@@ -194,8 +194,9 @@ def test_uint8_lengths_on_paths_longer_than_255_nodes():
     assert result.success.item() and result.sample_lengths.item() == 2
 
 
-def test_public_output_precision_keeps_gradient_to_float32_input():
-    points = torch.tensor([[[0.0], [0.2], [0.5]]], requires_grad=True)
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_public_output_precision_keeps_gradient_to_float32_input(device):
+    points = torch.tensor([[[0.0], [0.2], [0.5]]], requires_grad=True, device=device)
     result = retime_joint_paths(
         points,
         constraints={"velocity": 1.0, "acceleration": 2.0},
