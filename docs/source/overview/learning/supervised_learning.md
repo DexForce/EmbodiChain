@@ -9,6 +9,8 @@ A model recipe defines the network, data encoding and loss. The SL layer runs
 that recipe without assuming an observation layout, action representation or
 sequence length. Shared networks live in `learning.models`; concrete models and
 their recipes live in the bundled `embodichain_models` extension.
+See [Integrated models](#integrated-models) to choose a model and find its data
+preparation and training workflow.
 
 ## Components and data flow
 
@@ -49,6 +51,88 @@ optimizer step does not undo that step or refund data already delivered.
 
 See the {doc}`SL API </api_reference/embodichain/embodichain.learning.sl>` for
 complete signatures and configuration fields.
+
+## Integrated models
+
+Four model families provide installable factories for the shared trainer. They
+ship in the main `embodichain` wheel; datasets, pretrained weights and optional
+runtime dependencies are prepared through each model's workflow.
+
+| Model | Use case | Prediction inputs | Prediction output |
+| --- | --- | --- | --- |
+| ACT | Visual imitation learning | Current RGB frame and robot state | A chunk of robot actions |
+| NeRD | Robot dynamics with history | States, joint efforts and optional contact history | State changes decoded into the next robot state |
+| RWM | Action-conditioned robot dynamics | Current state, action and optional physical context | Next robot state at a fixed control period |
+| RigidFormer | Interacting rigid-object dynamics | Geometry history, reference geometry and physical properties | Future rigid-object geometry |
+
+### ACT: visual action-chunk policy
+
+Action Chunking with Transformers (ACT) learns actions from demonstrations.
+The integrated policy combines a ResNet-18 image encoder, a Transformer and a
+conditional VAE. Training uses demonstrated action chunks with a masked L1 loss
+and a KL term; inference predicts an action chunk from current RGB and robot
+state without requiring future observations.
+
+The recipe reads frame-aligned RGB, numeric state and action windows from
+LeRobot datasets and fits normalization on training data only. The included
+Franka PushCube workflow covers expert collection, offline training, checkpoint
+selection and physical policy evaluation. It requires CUDA and the camera and
+dataset dependencies described in the
+{download}`ACT workflow <../../../../examples/learning/act/README.md>`.
+See the {doc}`visual ACT API </api_reference/visual_act>` for model and adapter
+interfaces.
+
+### NeRD: history-based robot dynamics
+
+Neural Robot Dynamics (NeRD) uses a causal Transformer to predict state changes
+from histories of robot states, generalized efforts and configured contact
+observations. A physical codec defines the feature representation and decodes
+predictions into native robot states. Training minimizes normalized state-change
+error using statistics computed from training windows.
+
+The shipped reference systems are Cartpole and Ant. Their committed trajectory
+shards, codec and physical metadata must match the model; the network runs on
+CPU or CUDA without starting a simulator. Start from the
+{download}`Cartpole recipe <../../../../examples/learning/nerd/configs/cartpole/sl.train.yaml>`
+or {download}`Ant recipe <../../../../examples/learning/nerd/configs/ant/sl.train.yaml>`
+after preparing data and updating paths as described in the
+{doc}`NeRD guide </features/neural_dynamics/nerd>`.
+
+### RWM: action-conditioned robot state prediction
+
+Robot World Model (RWM) uses an MLP to predict frame-local state increments and
+integrates them into the next robot state. Its supervised objective rolls out
+multiple steps autoregressively and compares them with measured targets while
+retaining state/action gradients. Use it when measured state/action transitions
+and a fixed control period define the prediction problem.
+
+The recipe reads a tensor corpus with initial states, actions, future state
+targets and validity masks. Action semantics, control period and ordered joints
+are explicit metadata. The CPU/CUDA example generates controlled fitting data
+and an SL `recipe.json`; these checks qualify fitting and interfaces rather
+than robot policy performance. See the
+{doc}`RWM guide </features/neural_dynamics/rwm>` and
+{download}`RWM example <../../../../examples/learning/rwm/README.md>` for corpus
+preparation and training.
+
+### RigidFormer: rigid geometry prediction
+
+RigidFormer combines a geometry encoder and attention to predict anchor motion,
+then applies rigid projection to produce the next object geometry. Its current
+adapter predicts motion from observed geometry and physical properties without
+an action input. Training uses position and acceleration losses on anchors
+before and after rigid projection, with model-specific augmentation and an
+exponential moving average (EMA) of model parameters.
+
+The MOVi-Sphere, MOVi-A and MOVi-B recipes consume prepared, aligned material-point
+sequences, reference geometry, anchors and physical properties. Geometry
+prediction requires CUDA and the `embodichain[rigidformer]` dependencies. The
+public `rollout()` runs without autograd; differentiable action-based control
+is not part of this adapter. Start from the
+{download}`MOVi-A recipe <../../../../examples/learning/rigidformer/configs/sl.movi_a.yaml>`
+after following the
+{doc}`RigidFormer guide </features/neural_dynamics/rigidformer>` for preparation,
+runtime requirements and evaluation.
 
 ## Run a first recipe
 
@@ -186,7 +270,7 @@ checkpoints without a run identity require a fresh destination. Resume checks
 compatibility before restoring live training state; a saved snapshot alone does
 not establish that its data source supports exact recovery.
 
-## Model recipes and related workflows
+## Recipe factories and related workflows
 
 Factory identifiers use the `embodichain_models.` prefix followed by the module
 and function below, joined with `:`.
@@ -196,6 +280,7 @@ and function below, joined with `:`.
 | ACT | `policy.act.sl_recipe`<br>`build_act_trainer` | Current RGB frame, causal action chunks, ACT loss and training-set normalization |
 | NeRD | `dynamics.nerd.sl_recipe`<br>`build_supervised_trainer` | Dynamics windows, state codec, integration and numerical policy |
 | RWM | `dynamics.rwm.sl_recipe`<br>`build_rwm_trainer` | Transition corpus, state/action contract and multi-step dynamics loss |
+| RigidFormer | `dynamics.rigidformer.sl_recipe`<br>`build_rigidformer_trainer` | MOVi geometry windows, anchor losses, augmentation and EMA |
 
 To integrate a model, define the batch semantics and objective, supply a source,
 and assemble the trainer in a factory. Record preprocessing and numerical-policy
