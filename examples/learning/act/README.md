@@ -25,7 +25,11 @@ The RL and visual deployments share `extensions.success_threshold` and the
 ## Requirements
 
 Run from a source checkout with EmbodiChain's matching DexSim runtime, Franka
-assets, PyTorch/torchvision, CUDA, LeRobot 0.4.x, and a native camera renderer.
+assets, PyTorch/torchvision, CUDA, the Python-selected LeRobot SDK (0.4.4 on
+Python 3.10/3.11, 0.6.1 on Python 3.12), and a native camera renderer.
+This example still uses the EmbodiChain ACT implementation; changing the SDK
+dependency does not replace its model or qualify its learning results on a new
+environment. See the root README for the dependency validation matrix.
 The default recipe uses one GPU with 24 GB or more. Select a physical GPU
 before starting Python, for example `export CUDA_VISIBLE_DEVICES=0`; use
 `cuda:0` in the commands below. The first full training run downloads the

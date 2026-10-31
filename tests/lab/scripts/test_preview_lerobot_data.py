@@ -284,3 +284,31 @@ def test_cli_propagates_validation_failure_exit_code(
         preview_module.cli(["dataset"])
 
     assert exc_info.value.code == VALIDATION_FAILURE_EXIT_CODE
+
+
+def test_inspect_dataset_resolves_legacy_subtasks_without_sdk_text(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 0.6.1 reader's numeric indices retain their recorded descriptions."""
+    import json
+    import pandas as pd
+
+    metadata = tmp_path / "meta"
+    metadata.mkdir()
+    (metadata / "info.json").write_text(json.dumps(_build_info()))
+    pd.DataFrame(
+        {"subtask_index": [0, 1, 2]},
+        index=[f"Move cube to target {i + 1}." for i in range(NUM_SEGMENTS)],
+    ).to_parquet(metadata / "subtasks.parquet")
+    samples = _build_samples()
+    for sample in samples:
+        del sample["subtask"]
+    monkeypatch.setattr(preview_module, "LeRobotDataset", lambda **kwargs: samples)
+
+    preview = preview_module.inspect_dataset(tmp_path, expected_segments=NUM_SEGMENTS)
+
+    assert preview.is_valid, preview.errors
+    assert [segment.description for segment in preview.segments] == [
+        f"Move cube to target {i + 1}." for i in range(NUM_SEGMENTS)
+    ]

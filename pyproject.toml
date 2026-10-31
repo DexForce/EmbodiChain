@@ -29,7 +29,8 @@ dependencies = [
   "shapely>=2.0",
   "setuptools>=78.1.1",
   "gymnasium>=0.29.1",
-  "huggingface_hub>=0.35.3,<1.0",
+  "huggingface_hub>=0.35.3,<0.36; python_version < '3.12'",
+  "huggingface_hub>=1.6,<2; python_version >= '3.12'",
   "langchain",
   "langchain-openai",
   "scipy",
@@ -48,12 +49,19 @@ dependencies = [
   "black==26.10.1",
   "fvcore",
   "h5py",
-  # Keep the tested 0.13 baseline; 0.15+ requires a newer torch stack.
-  "tensordict>=0.13,<0.15",
+  "tensordict>=0.13,<0.15; python_version < '3.12'",
+  "tensordict>=0.15.3,<0.16; python_version >= '3.12'",
   "viser==1.0.21",
-  "lerobot>=0.4.4,<0.5",
-  # torch 2.7 compatibility; newer TorchCodec releases target newer torch ABIs.
-  "torchcodec>=0.5,<0.6"
+  "lerobot==0.4.4; python_version < '3.12'",
+  "lerobot[training]==0.6.1; python_version >= '3.12'",
+  # TorchCodec's binary interface follows torch, not the LeRobot SDK version.
+  # Keep each Python profile's torch/torchvision/TorchCodec versions paired.
+  "torch>=2.7,<2.8; python_version < '3.12'",
+  "torchvision>=0.22,<0.23; python_version < '3.12'",
+  "torchcodec>=0.5,<0.6; python_version < '3.12'",
+  "torch>=2.11,<2.12; python_version >= '3.12'",
+  "torchvision>=0.26,<0.27; python_version >= '3.12'",
+  "torchcodec>=0.11.1,<0.12; python_version >= '3.12'"
 ]
 
 [project.optional-dependencies]

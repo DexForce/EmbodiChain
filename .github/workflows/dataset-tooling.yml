@@ -4,6 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - 'pyproject.toml'
       - 'embodichain/data_pipeline/**'
       - 'embodichain/cli/dataset.py'
       - 'embodichain/cli/main.py'
@@ -11,6 +12,10 @@ on:
       - 'embodichain/lab/gym/envs/managers/async_datasets.py'
       - 'embodichain/lab/gym/envs/embodied_env.py'
       - 'tests/data_pipeline/**'
+      - 'tests/test_lerobot_compatibility.py'
+      - 'tests/gym/envs/managers/**'
+      - 'embodichain/lab/scripts/preview_lerobot_data.py'
+      - 'tests/lab/scripts/test_preview_lerobot_data.py'
       - 'tools/lerobot_export/**'
       - '.github/workflows/dataset-tooling.yml'
   workflow_dispatch:
@@ -28,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python: ['3.10', '3.11']
+        python: ['3.10', '3.11', '3.12']
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -43,6 +48,66 @@ jobs:
           tests/data_pipeline/test_dataset_inspection.py
           tests/data_pipeline/recording/test_journal.py
           tests/data_pipeline/recording/test_segments.py
+
+  lerobot-sdk:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    # The main package uses the private DexSim index and native system libraries.
+    runs-on: Linux
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: '3.10'
+            torch: '2.7.0'
+            torchvision: '0.22.0'
+            torchcodec: '0.5.0'
+            tensordict: '0.13.0'
+          - python: '3.11'
+            torch: '2.7.0'
+            torchvision: '0.22.0'
+            torchcodec: '0.5.0'
+            tensordict: '0.13.0'
+          - python: '3.12'
+            torch: '2.11.0'
+            torchvision: '0.26.0'
+            torchcodec: '0.11.1'
+            tensordict: '0.15.3'
+    container:
+      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3-py311
+      volumes:
+        - '/cache:/cache'
+    env:
+      UV_CACHE_DIR: /cache/uv
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/activate-conda
+      - name: Install the Python-selected SDK with the normal resolver
+        shell: bash -l {0}
+        run: |
+          python -m pip install uv==0.12.5
+          uv venv --python '${{ matrix.python }}' /tmp/lerobot-compat
+          uv pip install --python /tmp/lerobot-compat/bin/python \
+            --torch-backend cpu --index-strategy unsafe-best-match \
+            --index-url https://pypi.org/simple \
+            --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+            -e . pytest \
+            'torch==${{ matrix.torch }}' \
+            'torchvision==${{ matrix.torchvision }}' \
+            'torchcodec==${{ matrix.torchcodec }}' \
+            'tensordict==${{ matrix.tensordict }}'
+          uv pip check --python /tmp/lerobot-compat/bin/python
+      - name: Check recording, reading, preview and official ACT
+        shell: bash -l {0}
+        run: >-
+          /tmp/lerobot-compat/bin/python -m pytest -q
+          tests/test_lerobot_compatibility.py
+          tests/data_pipeline/test_lerobot_source.py
+          tests/gym/envs/managers/test_dataset_functors.py
+          tests/gym/envs/managers/test_async_dataset_functors.py
+          tests/lab/scripts/test_preview_lerobot_data.py
 
   lerobot-export:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft

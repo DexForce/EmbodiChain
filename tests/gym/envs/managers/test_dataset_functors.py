@@ -76,6 +76,14 @@ except ImportError:
     _HAS_DEPTH_CODEC = False
 
 
+def _subtask_description(sample: dict, root: Path) -> str:
+    # 0.4.4 resolves the table in __getitem__; 0.6.1 exposes only its index.
+    if "subtask" in sample:
+        return sample["subtask"]
+    table = pd.read_parquet(root / "meta/subtasks.parquet")
+    return str(table.index[table["subtask_index"] == int(sample["subtask_index"])][0])
+
+
 class MockRobot:
     """Mock robot for dataset functor tests."""
 
@@ -323,40 +331,57 @@ class TestLeRobotRecorderInitialization:
         image = np.zeros((8, 10, 3), dtype=np.uint8)
         image[2:6, 3:8] = (13, 101, 247)
         image[0, 0] = (255, 7, 91)
-        dataset = datasets._ImageCompressionLeRobotDataset.__new__(
-            datasets._ImageCompressionLeRobotDataset
+        dataset = datasets._ImageCompressionLeRobotDataset.create(
+            repo_id="local/compression",
+            root=tmp_path / "dataset",
+            fps=30,
+            features={},
+            use_videos=False,
         )
-        dataset.image_writer = None
         dataset.image_compress_level = image_compress_level
         path = tmp_path / f"image_{image_compress_level}.png"
 
-        dataset._save_image(image, path, compress_level=6)
+        writer = dataset if hasattr(dataset, "episode_buffer") else dataset.writer
+        try:
+            writer._save_image(image, path, compress_level=6)
+        finally:
+            dataset.finalize()
 
         from PIL import Image
+        from io import BytesIO
 
         with Image.open(path) as decoded:
             np.testing.assert_array_equal(np.asarray(decoded), image)
+        expected = BytesIO()
+        Image.fromarray(image).save(
+            expected, format="PNG", compress_level=image_compress_level
+        )
+        assert path.read_bytes() == expected.getvalue()
 
     def test_image_compress_level_reaches_async_image_writer(self, tmp_path):
         """The configured level reaches a real LeRobot image-writer thread."""
-        from lerobot.datasets.image_writer import AsyncImageWriter
         from embodichain.lab.gym.envs.managers import datasets
 
         image = np.zeros((8, 10, 3), dtype=np.uint8)
         image[2:6, 3:8] = (13, 101, 247)
-        dataset = datasets._ImageCompressionLeRobotDataset.__new__(
-            datasets._ImageCompressionLeRobotDataset
+        dataset = datasets._ImageCompressionLeRobotDataset.create(
+            repo_id="local/compression",
+            root=tmp_path / "dataset",
+            fps=30,
+            features={},
+            use_videos=False,
+            image_writer_threads=2,
         )
-        writer = AsyncImageWriter(num_processes=0, num_threads=2)
-        dataset.image_writer = writer
+        owner = dataset if hasattr(dataset, "episode_buffer") else dataset.writer
+        writer = owner.image_writer
         dataset.image_compress_level = 3
         path = tmp_path / "async_image.png"
 
         try:
-            dataset._save_image(image, path, compress_level=6)
+            owner._save_image(image, path, compress_level=6)
             writer.wait_until_done()
         finally:
-            writer.stop()
+            dataset.finalize()
 
         from PIL import Image
 
@@ -2049,7 +2074,9 @@ def test_multisegment_episode_round_trips_task_and_subtasks(
     assert {sample["task"] for sample in samples} == {
         "Move the cube between two targets."
     }
-    assert [sample["subtask"] for sample in samples] == [
+    assert [
+        _subtask_description(sample, recorder.dataset_full_path) for sample in samples
+    ] == [
         "Pick up the cube.",
         "Pick up the cube.",
         "Place the cube at the next target.",
@@ -2158,7 +2185,9 @@ def test_action_contract_preserves_task_and_subtask(
     samples = [loaded[index] for index in range(2)]
 
     assert [sample["task"] for sample in samples] == ["Move the cube."] * 2
-    assert [sample["subtask"] for sample in samples] == [
+    assert [
+        _subtask_description(sample, recorder.dataset_full_path) for sample in samples
+    ] == [
         "Pick up the cube.",
         "Move the cube.",
     ]
@@ -2484,7 +2513,11 @@ def test_unknown_dynamic_snapshot_is_not_replaced_by_static_recorder_language(
     dataset = LeRobotDataset(
         repo_id=recorder.dataset_full_path.name, root=recorder.dataset_full_path
     )
-    assert dataset[0]["task"] == dataset[0]["subtask"] == "unknown_task"
+    assert (
+        dataset[0]["task"]
+        == _subtask_description(dataset[0], recorder.dataset_full_path)
+        == "unknown_task"
+    )
     record = json.loads(
         (recorder.dataset_full_path / "meta/embodichain_episodes.jsonl").read_text()
     )
