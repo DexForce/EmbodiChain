@@ -100,7 +100,7 @@ lives in `_toppra_common.py`. `_toppra.py` is an offline NumPy oracle and must
 not be imported by the runtime planner or Warp adapter.
 Robot-backed planning retains shared speed-cap and control-part resolution,
 including gradients of uncapped requested limits.
-The runtime and reference preserve uniform not-a-knot cubic geometry, the existing waypoint
+Ordinary planner calls and the reference preserve uniform not-a-knot cubic geometry, the existing waypoint
 deduplication tolerance and final knot, and signed velocity/acceleration bounds
 containing rest. Public planner and joint-path retiming outputs retain float64
 sampling precision: narrowing joint positions before differentiating dense
@@ -288,14 +288,21 @@ mixed order and real Franka adapter calls in
 
 `toppra_planner.py::retime_joint_paths()` is the shared entry point for
 re-parameterizing an already-planned joint path under velocity and acceleration
-limits, used by planners that emit geometry without executable timing. It is
-the planner's own time parameterization. All CPU/CUDA rows run on Warp,
-including single-row calls, so batch size does not change waypoint cleanup
-precision or the helper's float32/float64 output dtype. It resamples
-along the fitted spline, so recompute derived poses from its output rather
-than reusing the input samples. Optional per-row path lengths exclude
-rectangular tail holds from spline fitting; without them, an explicit repeated
-final waypoint retains the historical final-knot geometry.
+limits, used by planners that emit geometry without executable timing. It shares
+TOPPRA's interval solver but uses coordinatewise PCHIP: the continuous curve
+stays inside each adjacent pair's position box. C1 joins preserve velocity;
+acceleration can jump, with both sides bounded on segment-aligned cells. Jerk
+and collision freedom are not certified. All distinct input nodes remain in
+order in output, so rollout waypoint arrivals survive retiming. Consecutive
+exact repeats collapse; without timestamps they cannot specify dwell duration.
+TIME samples are uniform within each geometric segment and never exceed the
+requested spacing. QUANTITY keeps its requested count for moving rows and
+fails rows with too many distinct nodes. Ordinary `ToppraPlanner` geometry and
+sampling remain unchanged.
+All CPU/CUDA rows run on Warp, including single-row calls. Retiming outputs use
+float64; poses must be recomputed from returned positions. Optional per-row
+path lengths exclude rectangular tail holds. Failed rows remain zero-filled;
+shorter successful rows hold their endpoint with zero derivatives and zero dt.
 
 `compute/trajectory/timing.py` owns time-domain differentiation/resampling and
 `retime_to_control_grid()`. Zero-time position changes are invalid; repeated-time
