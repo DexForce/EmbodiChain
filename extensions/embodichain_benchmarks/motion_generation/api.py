@@ -48,6 +48,7 @@ def run_benchmark(
     worker_threads: int = 1,
     quality_batch_size: int = 1,
     quality_devices: Sequence[str] | None = None,
+    capture_trajectories: bool = False,
 ) -> BenchmarkRunResult:
     """Evaluate planners against a suite without modifying caller configuration.
 
@@ -89,6 +90,8 @@ def run_benchmark(
             round-robin; ``workers`` remains the total process count. One worker
             uses the first device. Parallel input preparation retains ``device``.
             Performance replay does not accept this option.
+        capture_trajectories: Save immutable per-stage tensors for measured
+            quality trials. Capture timings are not performance measurements.
 
     Returns:
         Raw trial records, aggregate metrics and paths to persisted artifacts.
@@ -136,6 +139,7 @@ def run_benchmark(
             worker_threads=worker_threads,
             quality_batch_size=quality_batch_size,
             quality_devices=quality_devices,
+            capture_trajectories=capture_trajectories,
         )
     if isinstance(suite, (str, Path)):
         resolved = load_suite(suite)
@@ -183,6 +187,7 @@ def run_benchmark(
             video=video,
             case_manifest=case_manifest,
             quality_batch_size=quality_batch_size,
+            capture_trajectories=capture_trajectories,
             **(
                 {"execution": {"quality_devices": quality_devices}}
                 if quality_devices

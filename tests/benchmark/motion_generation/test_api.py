@@ -62,6 +62,7 @@ pytestmark = pytest.mark.no_sim
             "nmg_onnx",
             {
                 "policy_frame_from_world_by_control_part",
+                "preserve_waypoint_arrivals",
                 "batch_control_parts",
                 "onnx_cuda_use_tf32",
             },
@@ -227,6 +228,44 @@ def test_external_adapter_runs_without_global_registration_or_input_mutation(
     assert [(row.id, row.enabled) for row in resolved.planners] == [("external", True)]
     fake_runtime[0].return_value.destroy.assert_called_once_with(exit_process=False)
     fake_runtime[0].flush_cleanup_queue.assert_called_once()
+
+
+def test_quality_capture_persists_exact_result_and_excludes_comparable_timing(
+    fake_runtime, tmp_path
+):
+    import hashlib
+
+    suite = load_suite()
+    suite.protocol.warmup_trials = 0
+    suite.protocol.measured_trials = 1
+    spec = PlannerSpecCfg(id="external", adapter="external", role="candidate")
+    result = run_benchmark(
+        suite,
+        planners=[spec],
+        adapters={"external": ExternalAdapter},
+        device="cpu",
+        output_root=tmp_path,
+        capture_trajectories=True,
+    )
+    rows = [json.loads(line) for line in result.trials_path.read_text().splitlines()]
+    measured = next(row for row in rows if row["phase"] == "measured")
+    reference = measured["metadata"]["trajectory_trace"]
+    path = Path(reference["path"])
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == reference["sha256"]
+    trace = torch.load(path, weights_only=True)
+    assert trace["algorithm_id"] == "external"
+    assert trace["case_id"] == measured["case_id"]
+    assert reference["stage_count"] == 1
+    stage = trace["stages"][0]
+    assert stage["stage"] == "planning_result"
+    torch.testing.assert_close(stage["positions"], torch.zeros(1, 2, 2))
+    torch.testing.assert_close(stage["dt"], torch.tensor([[0.0, 0.1]]))
+    assert measured["metadata"]["benchmark_execution"]["timing_comparable"] is False
+    assert all(
+        "trajectory_trace" not in row["metadata"]
+        for row in rows
+        if row["phase"] != "measured"
+    )
 
 
 def test_adapter_mapping_is_local_to_each_run(fake_runtime, tmp_path: Path) -> None:

@@ -242,4 +242,15 @@ def retime_to_control_grid(
     velocities[:, 0] = 0
     velocities[rows, terminal_indices] = 0
     velocities = torch.where(valid_mask.unsqueeze(-1), velocities, 0)
+    from ._trace import _record_trajectory
+
+    _record_trajectory(
+        "control_grid",
+        source_positions=positions,
+        source_dt=dt,
+        positions=retimed,
+        dt=intervals,
+        valid_lengths=valid_counts,
+        control_dt=destination_dt,
+    )
     return retimed, velocities, intervals, valid_counts
