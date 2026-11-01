@@ -118,6 +118,23 @@ python -m examples.expansion.trajectory.real2sim_carton.video \
 源码运行需从仓库根目录启动，或将 examples 的父目录加入 PYTHONPATH。
 `run-example` 与一键入口同时支持安装后的 examples 树和非仓库工作目录。
 
+## Franka 统一配置回归
+
+此演示依赖统一 Franka 基础层 [#916](https://github.com/DexForce/EmbodiChain/pull/916)，
+[Real2Sim PR #896](https://github.com/DexForce/EmbodiChain/pull/896) 使用同一配置。
+旧 `FrankaPanda` 入口继续保留历史 FR3 / Panda Hand 行为；本演示明确选择原始
+Panda / Robotiq，不用类名猜测模型。
+
+[迁移验收报告](franka_migration_report.json) 对照固定的已发布输入，记录两层软件检查、
+来源重新资格检查、完整 156 个候选的迁移前后结果、实际数据与物理指标比较。
+发布的 v1 资源、原型和哈希保留不变，独立重建的输入另存用于验证。
+本次回归仍为真实 72/78、合成 78/78；150 条成功 episode 的实际数组与物理指标
+逐项一致，6 个既有加速度拒绝消息一致。新回放和 150 秒视频已通过浏览器与完整解码检查。
+
+最新 GraspKit 使用真实夹爪碰撞表面和显式 TCP 映射。Pick refinement 的证据哈希
+因此包含实际表面身份，派生报告 ID 会变化；源机器人、对象、支撑及布局的物理
+几何身份、配方和实际执行数据分别比较，不能用报告哈希变化替代物理回归检查。
+
 ## 配置、原型与修正
 
 生成配置分别拥有物理环境、embodiment、执行策略、语义集成和 program；来源绑定只在
