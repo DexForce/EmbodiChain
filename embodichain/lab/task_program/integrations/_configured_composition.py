@@ -395,9 +395,16 @@ def _resolve_task_program_components(
                 )
                 if "prototype_manifest" not in value:
                     raise ValueError("nominal source requires prototype_manifest")
+                from embodichain.data._references import _resolve_data_reference
+
                 value["prototype_manifest"] = str(
                     _component_path(
-                        value["prototype_manifest"],
+                        str(
+                            _resolve_data_reference(
+                                value["prototype_manifest"],
+                                base_dir=integration_path.parent,
+                            )
+                        ),
                         base_dir=integration_path.parent,
                         path=f"integration.runtime_services.nominal_motion_sources[{index}].prototype_manifest",
                         suffixes=frozenset({".json"}),

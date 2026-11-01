@@ -85,9 +85,9 @@ SECTIONS = (
     ),
     (
         20,
-        "独立合成来源",
-        "可控误差解释修正过程",
-        "独立原生参考增加毫米级平移、3° 姿态偏差和缓慢漂移；没有复制真实轨迹或使用干净答案。",
+        "真实示范的派生轨迹",
+        "同一真实原型，空间与时间变化",
+        "所有候选沿用真实示范的来源血缘；新增连接、修正、轨迹变形与执行时间映射分别保存。",
     ),
     (
         18,
@@ -99,7 +99,7 @@ SECTIONS = (
         12,
         "验收与提交",
         "实测、附件与 confirmed receipt",
-        "两条来源分别统计；只有物理检查、附件校验和回执均通过才计入成功。结论限定于声明物理代理。",
+        "所有候选均源自真实示范；只有物理检查、附件校验和回执均通过才计入成功。结论限定于声明物理代理。",
     ),
 )
 
@@ -110,7 +110,7 @@ def render(
     output.mkdir(parents=True, exist_ok=False)
     manifest = json.loads((replay / "manifest.json").read_text())
     report = json.loads((replay / "acceptance-report.json").read_text())
-    cases = {origin: [] for origin in ("measured", "synthetic_reference")}
+    cases = {origin: [] for origin in ("measured",)}
     for entry in manifest["cases"]:
         if entry["status"] == "passed":
             case = json.loads((replay / entry["url"]).read_text())
@@ -121,16 +121,11 @@ def render(
             cases[entry["origin"]].append(case)
     if not all(cases.values()):
         raise ValueError(
-            "video requires a verified execution from each separate origin"
+            "video requires a verified execution from the real-motion origin"
         )
     real = next(
         c
         for c in cases["measured"]
-        if c["case"]["layout"] == "baseline" and c["case"]["recipe"] == "nominal"
-    )
-    synthetic = next(
-        c
-        for c in cases["synthetic_reference"]
         if c["case"]["layout"] == "baseline" and c["case"]["recipe"] == "nominal"
     )
     videos = {
@@ -148,7 +143,7 @@ def render(
     args = _create_parser().parse_args(
         [
             "--gym-config",
-            str(prepared / "task.native.yaml"),
+            str(prepared / "task.qualification.yaml"),
             "--device",
             "cpu",
             "--headless",
@@ -381,7 +376,17 @@ def render(
                 text(draw, (35, 22), "EMBODICHAIN   /   REAL2SIM", 21, BLUE)
                 text(draw, (35, 61), title, 36)
                 text(draw, (1280, 30), f"{section+1:02d} / 08 · {label}", 21, MUTED)
-                case = synthetic if section in (3, 5) else real
+                case = real
+                if section == 5:
+                    case = next(
+                        (
+                            c
+                            for c in cases["measured"]
+                            if c["case"]["layout"] == "baseline"
+                            and c["case"]["recipe"] == "time_130"
+                        ),
+                        real,
+                    )
                 if section == 6:
                     choices = [
                         c
@@ -427,13 +432,13 @@ def render(
                         for i, value in enumerate(labels):
                             text(draw, (45 + i * 510, 750), value, 21, BLUE)
                 elif section == 7:
-                    for i, origin in enumerate(("measured", "synthetic_reference")):
+                    for i, origin in enumerate(("measured",)):
                         stats = manifest["sources"][origin]
                         x = 60 + i * 770
                         text(
                             draw,
                             (x, 160),
-                            "真实运动来源" if i == 0 else "独立合成来源",
+                            "真实示范及其扩增候选",
                             36,
                             BLUE,
                         )
@@ -501,7 +506,7 @@ def render(
                     text(
                         draw,
                         (1063, 140),
-                        "合成参考 → 仿真" if case is synthetic else "真实运动 → 仿真",
+                        "真实运动 → 仿真",
                         28,
                         BLUE,
                     )
@@ -555,8 +560,8 @@ def render(
                             24,
                             AMBER,
                         )
-                        text(draw, (1063, 565), "偏差：+6 / −4 / +3 mm，yaw +3°", 21)
-                        text(draw, (1063, 606), "自由阶段缓慢漂移 ≤ 3 mm", 21)
+                        text(draw, (1063, 565), "真实输入的几何／运动学偏差", 21)
+                        text(draw, (1063, 606), "修正量与预算见逐调用报告", 21)
                         text(
                             draw,
                             (1063, 648),

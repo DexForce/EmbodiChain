@@ -83,6 +83,16 @@ remain visible to the run loop while explicit CLI values retain precedence.
 New offline collection configs should use `collection.target_episodes`; the
 legacy field and `--max_episodes` option map to that committed-row target.
 
+Source-bound tabletop collection can declare `real2sim: {profile: profile.yaml}`
+in the runnable deployment. This closed launcher binding is resolved relative
+to that deployment, retained in the returned launch metadata and removed before
+`EnvCfg` parsing. `--real2sim-profile` overrides it. Its exclusive synchronous
+recorder owns `--dataset-dir`; ordinary dataset-manager path rewriting is skipped.
+Execution and receipt limits belong to [Real2Sim motion](../data-pipeline/real2sim.md).
+The official `carton_stocking` deployment uses fixed real-source asset references
+and needs no example-generated configuration. Catalog commands include its
+required dataset destination without initializing source assets during browsing.
+
 An inline runnable config must declare exactly one
 `physics: default|newton` backend. A reusable environment component also owns
 exactly one backend and its optional `physics_config`; the thin deployment

@@ -116,6 +116,13 @@ workspace and requalifies the live model; collections and receipts are not part
 of this shared input cache. Distribution hashes live in the example's
 `resources.lock.json`, while `source.lock.json` preserves original upstream URLs.
 
+The official `carton_stocking` task consumes only the fixed measured inputs.
+`data._references` resolves closed `{asset, path}` references through registered
+asset initialization, rejects root escapes and preserves owner-relative string
+paths. Prototype/evidence consumers still verify their own content hashes.
+The carton asset URLs pin the recorded distribution commit. Catalog browsing
+reads declarations without initializing these resources.
+
 ## Default material resources
 
 `list_default_materials()` and `get_default_material_info()` are exported from

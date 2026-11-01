@@ -1,0 +1,211 @@
+integration_id: real2sim_carton_v1
+program_id: real2sim_carton_stocking
+requires:
+  scene_contract: carton_worktop_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: carton_worktop_v1
+  registry_id: carton_worktop
+  rigid_objects:
+  - entity_id: carton
+    simulation_uid: carton
+    dynamics: dynamic
+    semantic_type: carton
+    affordances:
+    - entity_id: carton_grasp
+      kind: antipodal_grasp
+  - entity_id: worktop
+    simulation_uid: worktop
+    dynamics: static
+    semantic_type: worktop
+    affordances:
+    - entity_id: marked_support
+      kind: support_surface
+      native_name: top
+      object_target_frame: parent
+      object_target_pose:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.062095391004831975
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    move_held_object:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+      lift_height: 0.045
+      pre_grasp_distance: 0.1
+      hand_interp_steps: 30
+      grasp_settle_steps: 10
+      grasp_frame_to_eef:
+      - 2.220446049250313e-16
+      - 1.0
+      - 0.0
+      - 0.0
+      - -1.0
+      - 2.220446049250313e-16
+      - -0.0
+      - 0.0
+      - -0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      fixed_object_to_eef:
+      - 1.0
+      - -2.220446049250313e-16
+      - 0.0
+      - -0.014791118689052474
+      - -2.220446049250313e-16
+      - -1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - -1.0
+      - -0.005
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    simulation.move_held_object:
+      kind: move_held_object
+    place:
+      kind: place
+      hand_interp_steps: 30
+      release_settle_steps: 60
+      preserve_current_object_orientation: false
+  effect_monitors:
+    pick:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 5
+    place:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 5
+        attached_translation_threshold: 0.01
+        detached_translation_threshold: 0.015
+runtime_services:
+  registered_semantic_lowerers:
+  - kind: move_held_object
+    target_id: above_worktop
+    reference_entity_id: worktop
+    relative_pose:
+    - 1.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    - 0.09509539100483197
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+  control_part_evidence:
+    kind: joint_position_constraint
+    control_parts:
+    - eef
+    open_qpos:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    minimum_displacement: 0.02
+  nominal_motion_sources:
+  - call_index: 0
+    program_fingerprint: e81f095a599f8473ee3e724310273fe54b46f8c9bd978be50d9a3926a0667474
+    provider_id: real2sim.prototype
+    revision: '1'
+    prototype_manifest:
+      asset: Real2SimCarton
+      path: inputs/measured/0/prototype.json
+    prototype_sha256: 33334f6e11aa3e49555d6753a222574082cbf831edfdcbff606c1d2aa912e699
+    object_entity_id: carton
+    authority: eef_pose
+    gripper_mode: semantic
+    require_collision_validation: true
+    refinement:
+      max_translation_m: 0.07
+      max_rotation_rad: 1.0471975511965976
+      project_pick_lift: true
+      project_pick_approach: true
+      project_free_boundaries: true
+      pick_entry_projection_samples: 24
+      smoothing_weight: 20.0
+      seed: 7
+  - call_index: 1
+    program_fingerprint: e81f095a599f8473ee3e724310273fe54b46f8c9bd978be50d9a3926a0667474
+    provider_id: real2sim.prototype
+    revision: '1'
+    prototype_manifest:
+      asset: Real2SimCarton
+      path: inputs/measured/1/prototype.json
+    prototype_sha256: c95045413ca712f4d288a82db8768f70fc6708e9213d37a530b3617c9d91ae45
+    object_entity_id: carton
+    authority: eef_pose
+    gripper_mode: semantic
+    require_collision_validation: true
+    refinement:
+      max_translation_m: 0.07
+      max_rotation_rad: 1.0471975511965976
+      project_pick_lift: true
+      project_pick_approach: true
+      project_free_boundaries: true
+      pick_entry_projection_samples: 24
+      smoothing_weight: 20.0
+      seed: 7
+    target_entity_id: worktop
+  - call_index: 2
+    program_fingerprint: e81f095a599f8473ee3e724310273fe54b46f8c9bd978be50d9a3926a0667474
+    provider_id: real2sim.prototype
+    revision: '1'
+    prototype_manifest:
+      asset: Real2SimCarton
+      path: inputs/measured/2/prototype.json
+    prototype_sha256: 0b7db9312750e1fc8d11293f8b630d25a304627b6010dcc0e750ea259525945d
+    object_entity_id: carton
+    authority: eef_pose
+    gripper_mode: semantic
+    require_collision_validation: true
+    refinement:
+      max_translation_m: 0.07
+      max_rotation_rad: 1.0471975511965976
+      project_pick_lift: true
+      project_pick_approach: true
+      project_free_boundaries: true
+      pick_entry_projection_samples: 24
+      smoothing_weight: 20.0
+      seed: 7
+    target_entity_id: worktop

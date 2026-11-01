@@ -312,6 +312,8 @@ def load_real2sim_tabletop_profile(path: str | Path) -> Real2SimTabletopCollecti
     if not isinstance(payload, dict):
         raise ValueError("Real2Sim profile must be a mapping")
     artifacts = payload.get("source_artifacts", {})
+    if not isinstance(artifacts, dict):
+        raise ValueError("source_artifacts must map compiled call indices")
     if isinstance(artifacts, dict):
         normalized = {}
         for index, value in artifacts.items():
@@ -328,15 +330,22 @@ def load_real2sim_tabletop_profile(path: str | Path) -> Real2SimTabletopCollecti
                 )
             normalized[index] = value
         payload["source_artifacts"] = normalized
+    from embodichain.data._references import _resolve_data_reference
+
+    for artifacts in payload.get("source_artifacts", {}).values():
+        if isinstance(artifacts, dict):
+            for item in artifacts.values():
+                if isinstance(item, dict) and "path" in item:
+                    item["path"] = str(
+                        _resolve_data_reference(
+                            item["path"], base_dir=Path(path).resolve().parent
+                        )
+                    )
     try:
         result = Real2SimTabletopCollectionCfg(**payload)
     except TypeError as error:
         raise ValueError("unknown Real2Sim profile field") from error
     result.validate()
-    for artifacts in result.source_artifacts.values():
-        for item in artifacts.values():
-            value = Path(item["path"])
-            item["path"] = str((Path(path).resolve().parent / value).resolve())
     return result
 
 

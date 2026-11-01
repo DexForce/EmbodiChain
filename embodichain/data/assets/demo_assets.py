@@ -191,6 +191,7 @@ class Real2SimCarton(EmbodiChainDataset):
     cache_prefix: ClassVar[str] = "Real2SimCartonV1"
     """Immutable revision-specific cache entry used by the download CLI."""
     _archive_name: ClassVar[str] = "real2sim_carton_v1.zip"
+    _revision: ClassVar[str] = "3c340238f6acc29a50272c33f79264764d0704ff"
     _archive_md5: ClassVar[str] = "cef38008a3bae2d17a422bf2698cb4fb"
     _archive_sha256: ClassVar[str] = (
         "169fff766e6c9e4af1ef3b890a52203867e75fd60f20c4ee5dedb0f6fcf6a11a"
@@ -202,10 +203,15 @@ class Real2SimCarton(EmbodiChainDataset):
     def __init__(self, data_root: str | None = None) -> None:
         filename = "demo/real2sim_carton/" + self._archive_name
         hub_prefix = (
-            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
+            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/"
+            + self._revision
+            + "/"
         )
-        urls = [EMBODICHAIN_DOWNLOAD_PREFIX + filename]
-        if EMBODICHAIN_DOWNLOAD_PREFIX != hub_prefix:
+        prefix = EMBODICHAIN_DOWNLOAD_PREFIX.replace(
+            "/resolve/main/", f"/resolve/{self._revision}/", 1
+        )
+        urls = [prefix + filename]
+        if prefix != hub_prefix:
             urls.append(hub_prefix + filename)
         descriptor = o3d.data.DataDescriptor(urls, self._archive_md5)
         root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

@@ -14,11 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Independently audit persisted synthetic Real2Sim acceptance evidence."""
+"""Independently audit persisted real-demonstration acceptance evidence."""
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import math
@@ -27,14 +26,8 @@ from uuid import NAMESPACE_URL, uuid5
 
 import numpy as np
 from scipy.spatial.transform import Rotation
-import yaml
 
 from embodichain.data_pipeline.real2sim import load_prototype
-from embodichain.data_pipeline.recording.journal import inspect_recording
-from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
-    load_real2sim_tabletop_profile,
-)
-from embodichain.lab.sim.atomic_actions import MotionPolicy
 from embodichain.lab.sim.atomic_actions._expansion_phases import FREE_PHASES
 
 __all__: list[str] = []
@@ -55,7 +48,7 @@ def _check_case(
     row: dict[str, object],
     profile: object,
     *,
-    expected_origin: str = "synthetic_reference",
+    expected_origin: str = "measured",
 ) -> dict[str, object]:
     receipt_path = (
         root
@@ -578,167 +571,3 @@ def _check_case(
         ),
         "phase_duration_validation": phases,
     }
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", type=Path, required=True)
-    parser.add_argument("--profile", type=Path, required=True)
-    parser.add_argument(
-        "--execution-policy",
-        type=Path,
-        default=Path(__file__).with_name("execution_policy.yaml"),
-    )
-    parser.add_argument("--output", type=Path, required=True)
-    options = parser.parse_args()
-    root = options.dataset.resolve()
-    profile = load_real2sim_tabletop_profile(options.profile)
-    execution_policy = yaml.safe_load(
-        options.execution_policy.read_text(encoding="utf-8")
-    )
-    arm_acceleration = execution_policy.get("motion", {}).get(
-        "acceleration_limit", MotionPolicy().acceleration_limit
-    )
-    expected = {
-        (layout["id"], recipe)
-        for layout in profile.layouts
-        for recipe in profile.recipes
-    }
-    journal = inspect_recording(root)
-    rows = [
-        json.loads(line)
-        for line in (root / "meta/embodichain_episodes.jsonl").read_text().splitlines()
-        if line
-    ]
-    cases, failures = [], []
-    seen = set()
-    for row in rows:
-        key = (row.get("layout"), row.get("recipe"))
-        if key in seen:
-            failures.append(
-                {
-                    "layout": key[0],
-                    "recipe": key[1],
-                    "error": "duplicate schedule entry",
-                }
-            )
-            continue
-        seen.add(key)
-        try:
-            cases.append(_check_case(root, row, profile))
-        except Exception as error:
-            failures.append(
-                {
-                    "layout": key[0],
-                    "recipe": key[1],
-                    "error": f"{type(error).__name__}: {error}",
-                }
-            )
-    for layout, recipe in sorted(expected - seen):
-        failures.append(
-            {"layout": layout, "recipe": recipe, "error": "missing episode"}
-        )
-    for layout, recipe in sorted(seen - expected):
-        failures.append(
-            {"layout": layout, "recipe": recipe, "error": "unexpected episode"}
-        )
-    if journal["errors"] or any(
-        item["status"] != "complete" for item in journal["commits"]
-    ):
-        failures.append(
-            {"error": "recording journal is incomplete", "details": journal["errors"]}
-        )
-    failed_dir = root / "meta/real2sim/failed-attempts"
-    attempts = (
-        [json.loads(path.read_text()) for path in sorted(failed_dir.glob("*.json"))]
-        if failed_dir.exists()
-        else []
-    )
-    report = {
-        "origin": "synthetic_reference",
-        "dataset": str(root),
-        "profile": str(options.profile.resolve()),
-        "profile_sha256": hashlib.sha256(options.profile.read_bytes()).hexdigest(),
-        "execution_policy": str(options.execution_policy.resolve()),
-        "execution_policy_sha256": hashlib.sha256(
-            options.execution_policy.read_bytes()
-        ).hexdigest(),
-        "policy_hash_scope": "audited local configuration; episode metadata does not carry this digest",
-        "velocity_limits": profile.velocity_limits,
-        "acceleration_limits": profile.acceleration_limits,
-        "arm_motion_policy_acceleration_limit": arm_acceleration,
-        "expected_cases": len(expected),
-        "validated_cases": len(cases),
-        "failure_count": len(failures),
-        "simulation_and_measured_validation_passed": len(cases),
-        "sampled_collision_validated": len(cases),
-        "persistence_receipts_verified": len(cases),
-        "synthetic_matrix_complete": not failures and len(cases) == len(expected),
-        "real_data_qualified": False,
-        "continuous_collision_qualified": False,
-        "metrics": {
-            "maximum_fk_position_error_m": max(
-                (
-                    item["fk_position_error_m"]
-                    for item in cases
-                    if item["fk_position_error_m"] is not None
-                ),
-                default=None,
-            ),
-            "maximum_fk_rotation_error_deg": (
-                math.degrees(
-                    max(
-                        (
-                            item["fk_rotation_error_rad"]
-                            for item in cases
-                            if item["fk_rotation_error_rad"] is not None
-                        ),
-                        default=0.0,
-                    )
-                )
-                if any(item["fk_rotation_error_rad"] is not None for item in cases)
-                else None
-            ),
-            "minimum_pick_lift_m": min(
-                (item["lift_m"] for item in cases if item["lift_m"] is not None),
-                default=None,
-            ),
-            "maximum_placement_xy_error_m": max(
-                (
-                    item["xy_error_m"]
-                    for item in cases
-                    if item["xy_error_m"] is not None
-                ),
-                default=None,
-            ),
-            "maximum_held_translation_drift_m": max(
-                (item["held_translation_drift_m"] for item in cases), default=None
-            ),
-            "maximum_held_rotation_drift_deg": max(
-                (item["held_rotation_drift_deg"] for item in cases), default=None
-            ),
-            "maximum_speed_ratio": max(
-                (item["maximum_speed_ratio"] for item in cases), default=None
-            ),
-            "maximum_acceleration_ratio": max(
-                (item["maximum_acceleration_ratio"] for item in cases), default=None
-            ),
-        },
-        "failures": failures,
-        "failed_attempts": attempts,
-        "collision_scope": "sampled nominal, expanded and measured states; no continuous or hardware qualification",
-        "velocity_limit_origin": profile.velocity_limit_origin,
-        "acceleration_limit_origin": profile.acceleration_limit_origin,
-        "cases": cases,
-    }
-    options.output.parent.mkdir(parents=True, exist_ok=True)
-    options.output.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
-    print(
-        f"{len(cases)}/{len(expected)} cases validated; {len(failures)} failure(s): {options.output}"
-    )
-    if failures or len(cases) != len(expected):
-        raise SystemExit(1)
-
-
-if __name__ == "__main__":
-    main()

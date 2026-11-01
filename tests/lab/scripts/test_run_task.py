@@ -431,21 +431,73 @@ def test_source_bound_recording_cannot_bypass_real2sim_receipt() -> None:
     assert env.reset_options == []
 
 
-def test_real2sim_dataset_path_is_owned_by_profile_not_dataset_manager() -> None:
+@pytest.mark.parametrize("configured", [False, True])
+def test_real2sim_dataset_path_is_owned_by_profile_not_dataset_manager(
+    configured,
+) -> None:
     args = _create_parser().parse_args(
         [
             "--gym-config",
             "task.yaml",
-            "--real2sim-profile",
-            "profile.yaml",
+            *([] if configured else ["--real2sim-profile", "profile.yaml"]),
             "--dataset-dir",
             "/tmp/real2sim-dataset",
         ]
     )
-    merged = merge_args_with_gym_config(
-        args, {"id": "Dummy-v0", "physics": "default", "env": {"dataset": {}}}
-    )
+    config = {"id": "Dummy-v0", "physics": "default", "env": {"dataset": {}}}
+    if configured:
+        config["real2sim"] = {"profile": "profile.yaml"}
+    merged = merge_args_with_gym_config(args, config)
     assert merged["env"]["dataset"] == {}
+
+
+@pytest.mark.parametrize("override", [None, "override.yaml"])
+def test_cli_selects_configured_real2sim_owner_and_explicit_profile_override(
+    monkeypatch, override
+) -> None:
+    """File-owned collection uses the same owner as the explicit CLI route."""
+    from embodichain.lab.task_program.integrations.simulation import real2sim_collection
+
+    arguments = ["--gym-config", "task.yaml", "--dataset-dir", "/tmp/real2sim-dataset"]
+    if override is not None:
+        arguments += ["--real2sim-profile", override]
+    args = _create_parser().parse_args(arguments)
+    cfg = SimpleNamespace(num_envs=1)
+    profile = SimpleNamespace(layouts=({"id": "baseline"},), recipes=("nominal",))
+    env = MagicMock()
+    load = MagicMock(return_value=profile)
+    install = MagicMock()
+    monkeypatch.setattr(
+        run_task, "_create_parser", lambda: SimpleNamespace(parse_args=lambda _: args)
+    )
+    monkeypatch.setattr(run_task, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(run_task, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(
+        run_task,
+        "build_env_cfg_from_args",
+        lambda _: (
+            cfg,
+            {"id": GYM_ID, "real2sim": {"profile": "/owned/profile.yaml"}},
+            {},
+        ),
+    )
+    monkeypatch.setattr(real2sim_collection, "load_real2sim_tabletop_profile", load)
+    monkeypatch.setattr(real2sim_collection, "install_real2sim_tabletop_owner", install)
+    monkeypatch.setattr(run_task.gymnasium, "make", lambda **_: env)
+    monkeypatch.setattr(run_task, "main", lambda *args: None)
+    monkeypatch.setattr(run_task, "_abort_and_close_env", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.sim_manager.SimulationManager.flush_cleanup_queue",
+        lambda: None,
+    )
+
+    run_task.cli([])
+
+    load.assert_called_once_with(override or "/owned/profile.yaml")
+    install.assert_called_once_with(env, profile, dataset_dir="/tmp/real2sim-dataset")
+    assert (
+        cfg.init_rollout_buffer and cfg.record_trajectory and cfg.filter_dataset_saving
+    )
 
 
 def test_real2sim_run_task_preserves_failed_write_without_rerunning(

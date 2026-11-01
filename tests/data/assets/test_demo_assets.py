@@ -95,9 +95,15 @@ def test_tabletop_descriptor_respects_source_and_cache_root(
     name, descriptor, root = captured[0]
     assert name == cache_prefix
     assert root == (selected if custom_root else default)
+    revision = "3c340238f6acc29a50272c33f79264764d0704ff"
+    if asset_name == "Real2SimCarton":
+        prefix = prefix.replace("/resolve/main/", f"/resolve/{revision}/", 1)
+        hub_prefix = _HUB_PREFIX.replace("/resolve/main/", f"/resolve/{revision}/")
+    else:
+        hub_prefix = _HUB_PREFIX
     urls = [prefix + filename]
-    if prefix != _HUB_PREFIX:
-        urls.append(_HUB_PREFIX + filename)
+    if prefix != hub_prefix:
+        urls.append(hub_prefix + filename)
     assert descriptor.urls == urls
     assert descriptor.md5 == checksum
 

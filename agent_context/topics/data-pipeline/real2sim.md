@@ -71,15 +71,20 @@ Explicit projection options can repair approach entry, gravity-aligned lift
 and free-phase boundary stops inside the same correction budget before freezing
 the baseline. Box-side grasp regions are grounded by
 `toolkits.graspkit.box_region`; they do not replace gripper, IK or collision checks.
-See `examples/expansion/trajectory/real2sim/REFINEMENT.md` for reproducible
-error-injection fixtures and the analytic/ablation/simulation verification ladder.
+See `examples/expansion/trajectory/real2sim_carton/README.md` for real-source
+prototype rebuilding, refinement comparisons and collection through the official
+`carton_stocking` task.
+Its local `_audit.py` independently verifies persisted real-source episode evidence.
 
 `AtomicActionEngine` accepts a call-scoped nominal source before native planning;
 only PickUp, MoveHeldObject and Place opt in. Their skill-owned assembly retains
 effects, tracking, segments and scene dependencies. Source plans reject retries
 and replans. Programmatic and configured Task Program bindings use a compiled
 program fingerprint and call occurrence; configured prototype content is
-rechecked by digest. Parallel calls are unsupported for this source path.
+rechecked by digest. Prototype manifests and typed source evidence may use closed
+`{asset, path}` file references resolved by `data._references`; registered bundle
+verification precedes the ordinary content checks. These references cannot escape
+the asset root. Catalog browsing does not initialize the assets. Parallel calls are unsupported for this source path.
 
 `retime_with_time_map` and `rebuild_plan_from_mapped_trajectory` provide an
 explicit B=1 timing route with protected samples, derivative stencils, limits,
@@ -88,7 +93,7 @@ duration is rounded up to the control grid; protected intervals remain fixed.
 The tabletop profile may narrow retiming by skill and phase with
 `retime_phase_allowlist`; a protected short phase then retains its original grid.
 The configured combined Expansion Profile does not select these timing variants.
-The separate `run-task --real2sim-profile` tabletop owner selects nominal,
+The separate `run-task` tabletop owner selects nominal,
 same-grid and mapped-time recipes once per B=1 episode. Programmatic
 `TaskProgramMappedRetimeFactory` and `TaskProgramSameGridExpansionFactory`
 bind an episode-owned recipe to call occurrences, preserve boundary stencils,
@@ -127,7 +132,11 @@ The B=1 scene integration may
 opt into `trace_actions` to retain acknowledged action-to-plan references;
 hosts must still assemble the typed trace and qualified validation before sink
 submission. Ordinary `run-task` recording still rejects source-bound collection
-without an installed Real2Sim owner. The tabletop profile requires exactly one
+without an installed Real2Sim owner. A deployment selects that owner with
+`real2sim: {profile: profile.yaml}`; the profile resolves from the deployment
+directory and `--real2sim-profile` overrides it. The launcher keeps this binding
+out of `EnvCfg` and gives its recorder the `--dataset-dir` destination.
+The tabletop profile requires exactly one
 dynamic box, one static box and a fixed plane. All sequential Pick,
 MoveHeldObject and Place call occurrences require pinned sources; repeats use
 distinct call indices even when they share a prototype. Per-Pick lift,
