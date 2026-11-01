@@ -317,14 +317,23 @@ embodichain_robots.flexiv.rizon4s.cfg
    An explicit URDF ``fpath`` is shared by simulation and serial-chain FK/IK.
 
 
+embodichain_robots.franka.cfg
+-----------------------------
+
+.. py:class:: embodichain_robots.franka.cfg.FrankaCfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.FrankaCfg`.
+   ``from_dict()`` selects the supported arm/tool pair before applying ordinary
+   robot overrides. ``build_pk_serial_chain()`` shares that arm's source URDF;
+   the solver applies the configured mounted-tool TCP once.
+   See :doc:`/resources/robot/franka/cfg` for selections and calibration.
+
+
 embodichain_robots.franka.panda
 -------------------------------
 
 Concrete robot configurations, exposed lazily from the bundled robot package.
-
-.. autoclass:: embodichain_robots.franka.cfg.FrankaCfg
-   :members: from_dict, build_pk_serial_chain
-   :no-index:
 
 .. py:class:: embodichain_robots.franka.panda.FrankaPandaCfg
    :no-index:
