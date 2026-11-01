@@ -1910,32 +1910,46 @@ def test_pick_uses_normalized_prototype_and_rejects_moved_fixed_scene() -> None:
 
     from unittest.mock import patch
 
-    recorded_prototype = build_motion_prototype(
-        normalize_trajectory(
-            replace(
-                source,
-                phases=tuple(
-                    replace(phase, authority="qpos") for phase in source.phases
+    for pose_error_m in (0.0, 0.001):
+        # A TCP inside the FK error tube must not trigger entry IK when
+        # observed joints already match the recorded qpos phase.
+        poses = source.eef_poses.copy()
+        poses[:, 0] += pose_error_m
+        recorded_prototype = build_motion_prototype(
+            normalize_trajectory(
+                replace(
+                    source,
+                    eef_poses=poses,
+                    phases=tuple(
+                        replace(phase, authority="qpos") for phase in source.phases
+                    ),
                 ),
+                joints=tuple(JointSpec(name, "revolute") for name in names),
+                control_dt=CONTROL_DT,
+            )
+        )
+        with (
+            patch.object(
+                generator,
+                "_solve_cartesian_waypoints",
+                side_effect=AssertionError("recorded qpos phases must not require IK"),
             ),
-            joints=tuple(JointSpec(name, "revolute") for name in names),
-            control_dt=CONTROL_DT,
+            patch.object(
+                generator,
+                "generate",
+                side_effect=AssertionError("recorded entry must not require IK"),
+            ),
+        ):
+            recorded = _ACTION_ENGINES[id(action)].plan(
+                invocation,
+                context,
+                nominal_source=replace(hybrid, prototype=recorded_prototype),
+            )
+        assert recorded.plan_success.item()
+        torch.testing.assert_close(
+            recorded.joint_trajectory.positions[:, :, :ARM_DOF],
+            torch.zeros(1, 6, ARM_DOF),
         )
-    )
-    with patch.object(
-        generator,
-        "_solve_cartesian_waypoints",
-        side_effect=AssertionError("recorded qpos phases must not require IK"),
-    ):
-        recorded = _ACTION_ENGINES[id(action)].plan(
-            invocation,
-            context,
-            nominal_source=replace(hybrid, prototype=recorded_prototype),
-        )
-    assert recorded.plan_success.item()
-    torch.testing.assert_close(
-        recorded.joint_trajectory.positions[:, :, :ARM_DOF], torch.zeros(1, 6, ARM_DOF)
-    )
 
     from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
 

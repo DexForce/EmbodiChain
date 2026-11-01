@@ -30,7 +30,9 @@ DROID sources, verifies their imported crop, and archives them with the prototyp
 phase-bound hybrid nominal motion. Cartesian transfer is limited to B=1,
 tabletop XY/yaw and compatible geometry; it checks IK/FK and sampled joint limits.
 Hybrid qpos phases retain their recorded joints without a fresh IK solve;
-independent FK, inter-phase continuity and motion checks still apply.
+a leading qpos phase requires its recorded entry joint state instead of a
+Cartesian entry correction. Independent FK, inter-phase continuity and motion
+checks still apply.
 For a subsequent Pick, a qualified tabletop host can additionally verify that
 the observed object rests on the target support and permit its changed height
 and at most two degrees of measured tilt. Grasp orientation follows that

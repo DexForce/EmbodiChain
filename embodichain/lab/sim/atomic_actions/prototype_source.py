@@ -630,7 +630,14 @@ class PrototypeMotionProvider:
             ):
                 raise ValueError("current TCP pose is unavailable")
             prefix = None
-            if not torch.allclose(start_pose, target_tcp[:, 0], atol=1e-5, rtol=0):
+            if self.authority == "hybrid" and unit.phases[0].authority == "qpos":
+                if not torch.allclose(
+                    start_qpos, positions[:, 0, arm_ids], atol=1e-4, rtol=0
+                ):
+                    raise ValueError(
+                        "a leading qpos phase requires its recorded entry joint state"
+                    )
+            elif not torch.allclose(start_pose, target_tcp[:, 0], atol=1e-5, rtol=0):
                 if unit.phases[0].kind != "free":
                     raise ValueError(
                         "prototype entry connection requires an explicitly free first phase"
