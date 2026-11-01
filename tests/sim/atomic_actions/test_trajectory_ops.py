@@ -520,6 +520,28 @@ def test_full_robot_grid_keeps_internal_corner_and_distinct_return_visit() -> No
     torch.testing.assert_close(result.positions, q)
 
 
+def test_full_robot_grid_preserves_velocity_targets_at_internal_stop() -> None:
+    positions = torch.tensor([[[0.0], [0.25], [0.5], [0.75], [1.0]]])
+    result = PlanResult(
+        success=torch.tensor([True]),
+        positions=positions,
+        dt=torch.tensor([[0.0, 0.25, 0.25, 0.25, 0.25]]),
+        waypoint_indices=torch.tensor([[2, 4]]),
+    )
+    _, timed = to_full_robot_trajectory(
+        result,
+        base_qpos=torch.zeros(1, 2),
+        joint_ids=[1],
+        env_ids=torch.tensor([0]),
+        control_dt=0.25,
+    )
+    torch.testing.assert_close(timed.positions[:, :, 1:], positions)
+    torch.testing.assert_close(
+        timed.velocities[0, :, 1], torch.tensor([0.0, 1.0, 0.0, 1.0, 0.0])
+    )
+    assert timed.velocities[0, :, 0].count_nonzero() == 0
+
+
 @pytest.mark.parametrize("planner_dtype", [torch.float32, torch.float64])
 @pytest.mark.parametrize("command_dtype", [torch.float32, torch.float64])
 def test_full_robot_trajectory_uses_retimed_positions_and_velocities(

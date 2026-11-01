@@ -230,6 +230,7 @@ def test_arrival_grid_preserves_repeated_visits_and_independent_row_lengths() ->
     torch.testing.assert_close(output["positions"][0], q[0])
     torch.testing.assert_close(output["positions"][1, :2], q[1, :2])
     assert output["dt"][1, 2:].count_nonzero() == 0
+    assert output["velocities"].count_nonzero() == 0
 
 
 def test_capture_preserves_outputs_and_owns_immutable_snapshots() -> None:

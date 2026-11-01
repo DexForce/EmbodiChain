@@ -366,6 +366,52 @@ def test_validity_keeps_distance_grid_hits_between_commands(hold_samples):
     assert outcome.geometry_valid
 
 
+@pytest.mark.parametrize("validation_samples", [2, 17])
+@pytest.mark.parametrize(
+    "validity", ["ordered_cartesian_waypoints", "ordered_joint_waypoints", "semantic"]
+)
+def test_validity_excludes_terminal_padding_but_keeps_timed_holds(
+    validation_samples, validity
+):
+    positions = torch.zeros(4, 3, 7, dtype=torch.float64)
+    positions[:, :, 0] = torch.tensor(
+        [[0.0, 1.0, 1.0], [0.0, 1.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 0.0]]
+    )
+    dt = torch.tensor(
+        [[0.0, 1.0, 0.0], [0.0, 1.0, 1.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    )
+    targets = positions[:, 1:].clone()
+    poses = torch.eye(4).repeat(4, 2, 1, 1)
+    poses[..., :3, 3] = targets[..., :3]
+    parameters = {"motion_validity": validity, "joint_threshold_rad": 1e-6}
+    if validity == "semantic":
+        parameters["constraint_modalities"] = ["joint", "joint"]
+    case = replace(
+        _case(),
+        batch_size=4,
+        num_waypoints=2,
+        start_qpos=positions[:, 0].clone(),
+        reference_qpos=targets,
+        target_waypoints=poses,
+        case_parameters=parameters,
+    )
+    outcomes = compute_case_outcomes(
+        PlanResult(positions=positions, dt=dt, success=False),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=validation_samples,
+        position_threshold_m=1e-6,
+        rotation_threshold_rad=0.1,
+        joint_limit_tolerance_rad=1e-6,
+    )
+    # No time passes in padding. A timed hold supplies a distinct visit; an
+    # illegal zero-time position change must remain visible to validation.
+    assert [o.ordered_waypoints_reached for o in outcomes] == [False, True, False, True]
+    assert [o.geometry_valid for o in outcomes] == [False, True, False, True]
+    assert all(not o.planning_success for o in outcomes)
+
+
 def test_arrival_grid_union_is_row_local_and_keeps_repeated_visits_ordered():
     from embodichain.compute.trajectory import resample_with_distance
     from embodichain_benchmarks.motion_generation.metrics.trajectory import (
@@ -385,6 +431,16 @@ def test_arrival_grid_union_is_row_local_and_keeps_repeated_visits_ordered():
     torch.testing.assert_close(
         union[1, :5, 0], torch.tensor([0.0, 0.5, 1.0, 0.5, 0.0], dtype=torch.float64)
     )
+
+    padded = torch.cat((positions, positions[:, -1:].expand(-1, 4, -1)), dim=1)
+    padded_dt = torch.tensor([[0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]]).expand(2, -1)
+    padded_distance = resample_with_distance(padded, 5, device="cpu", backend="torch")
+    padded_union, padded_lengths = _arrival_validation_grid(
+        padded, padded_distance, dt=padded_dt
+    )
+    torch.testing.assert_close(padded_lengths, lengths)
+    for row, length in enumerate(lengths.tolist()):
+        torch.testing.assert_close(padded_union[row, :length], union[row, :length])
 
 
 def _timed_plan_result(

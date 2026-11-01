@@ -682,30 +682,47 @@ def _policy_step_metrics(
 def _arrival_validation_grid(
     positions: torch.Tensor,
     distance_grid: torch.Tensor,
+    *,
+    dt: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Merge native/index and distance witnesses in row-local path order.
 
-    Native commands retain their identity and multiplicity. An extra distance
-    point identical to an existing point at the same path distance is omitted;
-    padding in the rectangular union is excluded through returned prefix lengths.
+    Timed holds retain their identity and multiplicity; trailing zero-time
+    repeats are padding. Subdivision density is independent of other rows'
+    padding. Extra distance witnesses already present at the same path distance
+    are omitted, and returned prefix lengths exclude rectangular union padding.
     """
     batch, count, dofs = positions.shape
     samples = distance_grid.shape[1]
     if count == 1:
         return positions, torch.ones(batch, device=positions.device, dtype=torch.long)
-    subdivisions = max(1, math.ceil((samples - 1) / (count - 1)))
-    parameter = (
-        torch.arange(
-            (count - 1) * subdivisions + 1,
-            device=positions.device,
-            dtype=positions.dtype,
+    lengths = torch.full((batch,), count, device=positions.device, dtype=torch.long)
+    if dt is not None:
+        # A zero-time position change is invalid motion, not removable padding.
+        nonpadding = (dt[:, 1:] > 0) | (positions.diff(dim=1) != 0).any(dim=-1)
+        lengths = (
+            torch.where(
+                nonpadding, torch.arange(1, count, device=positions.device)[None], 0
+            ).amax(dim=1)
+            + 1
         )
-        / subdivisions
+    segments = lengths - 1
+    subdivisions = torch.div(
+        samples - 2 + segments.clamp_min(1),
+        segments.clamp_min(1),
+        rounding_mode="floor",
+    ).clamp_min(1)
+    linear_counts = segments * subdivisions + 1
+    indices = torch.arange(int(linear_counts.max()), device=positions.device)
+    valid = indices[None] < linear_counts[:, None]
+    parameter = torch.minimum(
+        indices[None].to(positions.dtype) / subdivisions[:, None], segments[:, None]
     )
     left = parameter.long().clamp(max=count - 2)
     fraction = parameter - left
+    rows = torch.arange(batch, device=positions.device)[:, None]
     linear = torch.lerp(
-        positions[:, left], positions[:, left + 1], fraction[None, :, None]
+        positions[rows, left], positions[rows, left + 1], fraction[..., None]
     )
     cumulative = torch.cat(
         (
@@ -715,7 +732,7 @@ def _arrival_validation_grid(
         dim=1,
     )
     linear_distance = torch.lerp(
-        cumulative[:, left], cumulative[:, left + 1], fraction[None]
+        cumulative[rows, left], cumulative[rows, left + 1], fraction
     )
     distance = (
         cumulative[:, -1:]
@@ -723,20 +740,21 @@ def _arrival_validation_grid(
             None
         ]
     )
+    linear_keys = linear_distance.masked_fill(~valid, float("inf"))
     nearest = torch.searchsorted(
-        linear_distance.contiguous(), distance.contiguous()
+        linear_keys.contiguous(), distance.contiguous()
     ).clamp_max(linear.shape[1] - 1)
     duplicate = (linear_distance.gather(1, nearest) == distance) & (
         linear.gather(1, nearest[:, :, None].expand(-1, -1, dofs)) == distance_grid
     ).all(dim=-1)
     keys = torch.cat(
-        (linear_distance, distance.masked_fill(duplicate, float("inf"))), dim=1
+        (linear_keys, distance.masked_fill(duplicate, float("inf"))), dim=1
     )
     order = keys.argsort(dim=1, stable=True)
     union = torch.cat((linear, distance_grid), dim=1).gather(
         1, order[:, :, None].expand(-1, -1, dofs)
     )
-    return union, linear.shape[1] + (~duplicate).sum(dim=1)
+    return union, linear_counts + (~duplicate).sum(dim=1)
 
 
 def compute_case_outcomes(
@@ -834,7 +852,9 @@ def compute_case_outcomes(
     # index subdivision alone undersamples motion when actions contain long holds.
     # Path metrics retain the unchanged normalized distance grid above.
     constraint_qpos_batch, constraint_lengths = _arrival_validation_grid(
-        safe_positions, validation_qpos_batch
+        safe_positions,
+        validation_qpos_batch,
+        dt=sample_dt if positions.shape[1] else None,
     )
     constraint_pose_batch = robot.compute_batch_fk(
         qpos=constraint_qpos_batch, name=control_part, to_matrix=True

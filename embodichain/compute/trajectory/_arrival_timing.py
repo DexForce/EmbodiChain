@@ -163,17 +163,21 @@ def _resample_at_arrivals(
     path_lengths: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Retain visits on the command grid; this alone does not solve dynamics."""
-    from .timing import retime_to_control_grid, differentiate_positions
+    from .timing import retime_to_control_grid
     from ._trace import _record_trajectory
 
     q, _, intervals, visits = _split_arrival_segments(
         positions, arrival_indices, path_lengths, dt
     )
-    resampled, _, command_dt, _ = retime_to_control_grid(q, intervals, control_dt)
-    output = _join_arrival_segments(
-        {"positions": resampled, "dt": command_dt}, arrival_indices, visits, control_dt
+    resampled, velocities, command_dt, _ = retime_to_control_grid(
+        q, intervals, control_dt
     )
-    output["velocities"] = differentiate_positions(output["positions"], output["dt"])
+    output = _join_arrival_segments(
+        {"positions": resampled, "velocities": velocities, "dt": command_dt},
+        arrival_indices,
+        visits,
+        control_dt,
+    )
     _record_trajectory(
         "arrival_control_grid",
         source_positions=positions,
