@@ -117,10 +117,11 @@ free to install their own Torch/codec profile.
 
 ## CI rollout and rollback
 
-CI keeps the existing image and py311 until candidate qualification completes.
-Set repository variables `EMBODICHAIN_CI_IMAGE` to the qualified internal image
-digest and `EMBODICHAIN_CI_ENV` to the selected business environment. Moving the
-main CI to py312 requires PR #911's dependency changes in the checked-out code.
+CI defaults to the qualified internal `v4-py311-py312-c42e8a0b0857` image
+and activates `py312`. Repository variables `EMBODICHAIN_CI_IMAGE` and
+`EMBODICHAIN_CI_ENV` can override the image and business environment for rollout
+or rollback. The py312 CI profile requires PR #911's dependency changes in the
+checked-out code.
 
 After qualification, publish the public SHA-tagged candidate to Docker Hub,
 then move `ubuntu22.04-cuda12.8-py312` and the existing

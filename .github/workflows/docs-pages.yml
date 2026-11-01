@@ -178,7 +178,7 @@ jobs:
       NVIDIA_DISABLE_REQUIRE: 1
       DOCS_MAX_VERSIONS: 5
     container:
-      image: ${{ vars.EMBODICHAIN_CI_IMAGE || '192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3-py311' }}
+      image: ${{ vars.EMBODICHAIN_CI_IMAGE || '192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312-c42e8a0b0857' }}
       volumes:
         - "/cache:/cache"
         - "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d"
@@ -194,7 +194,7 @@ jobs:
           ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.ref != '' && inputs.ref || 'main' }}
       - uses: ./.github/actions/activate-conda
         with:
-          environment: ${{ vars.EMBODICHAIN_CI_ENV || 'py311' }}
+          environment: ${{ vars.EMBODICHAIN_CI_ENV || 'py312' }}
 
       - name: Trust checked-out repository
         shell: bash
