@@ -12,6 +12,10 @@ RigidFormer extra dependencies and model weights are not preinstalled. Models,
 task assets and remote service credentials remain runtime inputs. No production
 registry tag is changed by the build/qualification workflow.
 
+Verified, pullable source-commit candidates and their image digests are listed
+in [VALIDATION.md](VALIDATION.md). Use those explicit tags while the runtime PR
+is under review; the stable aliases below belong to the post-merge rollout.
+
 ## Build and qualify
 
 Run on a Linux amd64 Docker host with NVIDIA Container Toolkit, an appropriate
