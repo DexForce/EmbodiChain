@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.motion._budget import _planning_call
+
 import math
 from collections.abc import Callable, Mapping
 from copy import deepcopy
@@ -608,6 +610,7 @@ class MotionGenerator:
         cls = self._support_planner_dict[planner_type][0](cfg=planner_cfg)
         return cls
 
+    @_planning_call("planning")
     def generate(
         self,
         target_states: list[PlanState],

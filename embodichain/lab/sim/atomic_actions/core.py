@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.motion._budget import _planning_call
+
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from copy import deepcopy
@@ -394,6 +396,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         self.planning_services.validate_binding(request.binding, contract)
         return request.goal
 
+    @_planning_call("check")
     def plan(
         self,
         request: ResolvedActionRequest[GoalT, OptionsT],
