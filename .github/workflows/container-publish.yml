@@ -1,0 +1,60 @@
+name: Publish qualified public container
+
+on:
+  push:
+    branches: ['codex/container-*']
+    paths: ['.github/workflows/container-publish.yml']
+  workflow_dispatch:
+    inputs:
+      source_revision:
+        description: Full source commit of an already qualified internal candidate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: Linux
+    timeout-minutes: 120
+    env:
+      DOCKERHUB_TOKEN: ${{ secrets.EMBODICHAIN_DOCKERHUB_PUBLISH_ONCE }}
+      SOURCE_REVISION: ${{ inputs.source_revision || github.sha }}
+    steps:
+      - name: Check publishing identity
+        id: identity
+        shell: bash
+        run: |
+          if [[ -z "$DOCKERHUB_TOKEN" ]]; then
+            echo 'No publishing credential configured; qualification is independent.'
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish the qualified candidate
+        if: steps.identity.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          suffix="${SOURCE_REVISION:0:12}"
+          source="192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8-py312-$suffix"
+          target="dexforce/embodichain:ubuntu22.04-cuda12.8-py312-$suffix"
+          export DOCKER_CONFIG="$RUNNER_TEMP/embodichain-publish-$GITHUB_RUN_ID"
+          mkdir -m 700 "$DOCKER_CONFIG"
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login --username dexforce --password-stdin
+          docker pull "$source"
+          revision=$(docker image inspect "$source" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
+          test "$revision" = "$SOURCE_REVISION"
+          docker tag "$source" "$target"
+          docker push "$target"
+          mkdir -p "$RUNNER_TEMP/embodichain-publication"
+          docker image inspect "$target" > "$RUNNER_TEMP/embodichain-publication/public-image.json"
+      - name: Save publication digest
+        if: steps.identity.outputs.enabled == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: public-container-${{ github.run_id }}
+          path: ${{ runner.temp }}/embodichain-publication/
