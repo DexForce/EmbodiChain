@@ -59,7 +59,6 @@ dependencies = [
 [project.optional-dependencies]
 feasibility = [
   "python-fcl>=0.7.0.8",
-  "trimesh>=4.9",
 ]
 rigidformer = [
   "einops>=0.8.1",

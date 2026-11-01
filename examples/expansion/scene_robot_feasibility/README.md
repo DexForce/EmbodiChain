@@ -99,3 +99,35 @@ than inferred from the preflight endpoints alone.
 `search.bar_dual_ur5.yaml` uses the configured rigid-bar transfer task: grasp,
 handover, then placement. It preserves the composed robot's relative mounting
 while searching the installation and bar/support-group layout.
+
+## Evaluate Newton collision queries
+
+From a source checkout with the simulation runtime and the `feasibility` extra:
+
+```bash
+OMP_NUM_THREADS=4 python -m scripts.benchmark.scene.feasibility_collision \
+  --collect-config examples/expansion/scene_robot_feasibility/search.ur5.yaml \
+  --collect-config examples/expansion/scene_robot_feasibility/search.bar_dual_ur5.yaml \
+  --output outputs/benchmarks/newton_collision
+```
+
+Each configured workload uses one search candidate and at most one independent
+trial to profile the existing execution path. It saves physical collision shapes,
+the SDK's original convex declarations, phase permissions and a bounded reservoir
+of 256 queried states. The standalone comparison uses independent Newton states
+with no physics stepping. It compares CPU, CUDA and CUDA Graph queries against
+the current FCL checker at B=1/8/32/256. The physical task host remains B=1.
+
+`results.json` retains measurements and qualification errors; `report.md` contains
+timing/memory, classification agreement and complete-fixture qualification tables.
+Reuse captured inputs with repeated `--fixture path/to/fixture-*.json` arguments
+to rerun measurements without collecting another task. Timings separate geometry
+setup, device-resident queries and the full host-input-to-host-result call. B=1
+timings repeat one representative query, not the average cost of a task.
+
+This is a benchmark prototype, and the production checker remains FCL. Primitive
+and native convex-geometry agreement does not establish complete mesh support:
+the benchmark includes a concave-solid containment counterexample. Newton's
+separation values are limited to its detection band and are not global minimum
+distances. Dependency declarations reuse DexSim's `trimesh` and Newton packages;
+the `feasibility` extra supplies FCL for the existing runtime and comparison.
