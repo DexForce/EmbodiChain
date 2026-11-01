@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Robotiq 2F-85 linkage coordinates and measured-aperture conversion."""
+"""Robotiq_V2 2F-85 linkage coordinates and measured-aperture conversion."""
 
 from __future__ import annotations
 
@@ -22,27 +22,7 @@ import numpy as np
 
 __all__ = ["robotiq85_joint_positions"]
 
-_JOINT_NAMES = (
-    "finger_joint",
-    "left_inner_knuckle_joint",
-    "left_inner_finger_joint",
-    "right_outer_knuckle_joint",
-    "right_inner_knuckle_joint",
-    "right_inner_finger_joint",
-)
 _SIGNS = np.array([1.0, 1.0, -1.0, 1.0, 1.0, -1.0])
-# Tool-owned source and simulation defaults; arm presets compose these values.
-_TOOL_SPEC = dict(
-    asset="Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf",
-    joints=_JOINT_NAMES,
-    open_qpos=[0.0] * 6,
-    tcp_offset_m=0.15,
-    qpos_limits={
-        name: ([-0.8, 0.0] if sign < 0 else [0.0, 0.8])
-        for name, sign in zip(_JOINT_NAMES, _SIGNS)
-    },
-    drive=dict(stiffness=200.0, damping=5.0, max_effort=0.25, max_velocity=2.0),
-)
 
 
 def robotiq85_joint_positions(closed_fraction: np.ndarray) -> np.ndarray:
@@ -53,6 +33,8 @@ def robotiq85_joint_positions(closed_fraction: np.ndarray) -> np.ndarray:
     uses the open endpoint and clips only to the URDF's 0.8 rad closed stop.
     Returned columns follow the preset's explicit ``eef`` control part. This
     converts observed aperture independently of any closing command.
+    The layout belongs to the shared ``Robotiq`` archive; the separately
+    registered ``Robotiq2F85`` asset requires independent qualification.
 
     Args:
         closed_fraction: Finite normalized closed fractions in [0, 1].

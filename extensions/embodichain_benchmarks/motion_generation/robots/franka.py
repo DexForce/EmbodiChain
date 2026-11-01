@@ -19,8 +19,7 @@
 from __future__ import annotations
 
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain_robots import FrankaPandaCfg
-from .._atomic_fixtures import _create_franka_pgi_cfg
+from .._atomic_fixtures import _create_franka_pgi_cfg, _create_franka_native_hand_cfg
 
 from ..registry import register_robot_provider
 from .base import RobotProvider
@@ -35,10 +34,12 @@ class FrankaPandaProvider(RobotProvider):
         """Build a stock Panda while applying optional suite overrides."""
         values = {
             "uid": "benchmark_franka_panda",
-            "robot_type": "panda",
             **dict(self.spec.config),
         }
-        return FrankaPandaCfg.from_dict(values)
+        values.pop(
+            "robot_type", None
+        )  # Legacy suite selector; the embodiment selects FR3.
+        return _create_franka_native_hand_cfg(values)
 
 
 class FrankaPgiProvider(RobotProvider):

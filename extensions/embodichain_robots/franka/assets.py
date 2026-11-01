@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -35,6 +36,58 @@ from embodichain.data.constants import (
 __all__ = ["Franka", "FrankaPandaArm"]
 
 robot_assets = "robot_assets"
+
+
+def _materialize_hand_component(extract_dir: str, data_root: str) -> None:
+    """Split the authored hand subtree without modifying its source URDF."""
+    source = Path(extract_dir) / "Panda/PandaWithHand.urdf"
+    content = source.read_bytes()
+    expected = "a4a2d3265dadd69c4c7d8ed9238ae44494c217db6f66f586fcc40e8754ce2315"
+    if hashlib.sha256(content).hexdigest() != expected:
+        raise ValueError("pinned FR3/hand source changed in the asset cache")
+    original = ElementTree.fromstring(content)
+    links = ("fr3_hand", "fr3_hand_tcp", "fr3_leftfinger", "fr3_rightfinger")
+    joints = ("fr3_hand_tcp_joint", "fr3_finger_joint1", "fr3_finger_joint2")
+    hand = ElementTree.Element("robot", name="fr3_hand")
+    for tag, names in (("link", links), ("joint", joints)):
+        for name in names:
+            element = original.find(f"{tag}[@name='{name}']")
+            if element is None:
+                raise ValueError(f"pinned FR3 hand source is missing {tag} {name}")
+            hand.append(deepcopy(element))
+    output = ElementTree.tostring(hand, encoding="utf-8", xml_declaration=True)
+    report = json.dumps(
+        dict(
+            schema="fr3-hand-component/v1",
+            source_sha256=expected,
+            derived_sha256=hashlib.sha256(output).hexdigest(),
+            links=links,
+            joints=joints,
+        ),
+        sort_keys=True,
+        indent=2,
+    ).encode()
+    with _dataset_download_lock(data_root, "Franka"):
+        for name, value in (
+            ("Fr3HandV1.urdf", output),
+            ("Fr3HandV1.derivation.json", report),
+        ):
+            target = source.parent / name
+            if target.exists():
+                if target.read_bytes() != value:
+                    raise ValueError("derived FR3 hand differs from its pinned source")
+                continue
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    dir=target.parent, delete=False
+                ) as stream:
+                    temporary = Path(stream.name)
+                    stream.write(value)
+                temporary.replace(target)
+            finally:
+                if temporary is not None and temporary.exists():
+                    temporary.unlink()
 
 
 class Franka(EmbodiChainDataset):
@@ -69,6 +122,7 @@ class Franka(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+        _materialize_hand_component(self.extract_dir, path)
 
 
 class FrankaPandaArm(EmbodiChainDataset):

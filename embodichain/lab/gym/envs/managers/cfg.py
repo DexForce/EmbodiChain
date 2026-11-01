@@ -70,6 +70,20 @@ class FunctorCfg:
 
 
 @configclass
+class ConditionCfg(FunctorCfg):
+    """A measured task condition called as ``func(env, **params)``."""
+
+
+@configclass
+class RLTaskCfg:
+    """Named success (all), failure (any), and truncation (any) conditions."""
+
+    success: dict[str, ConditionCfg] = dict()
+    failure: dict[str, ConditionCfg] = dict()
+    truncation: dict[str, ConditionCfg] = dict()
+
+
+@configclass
 class EventCfg(FunctorCfg):
     """Configuration for a event functor.
 
@@ -378,3 +392,16 @@ class DatasetFunctorCfg(FunctorCfg):
     ``max_episodes`` instead of being discarded and retried. Empty plans and
     execution exceptions remain uncommitted.
     """
+
+
+__all__ = [
+    "FunctorCfg",
+    "ConditionCfg",
+    "RLTaskCfg",
+    "EventCfg",
+    "ObservationCfg",
+    "SceneEntityCfg",
+    "RewardCfg",
+    "ActionTermCfg",
+    "DatasetFunctorCfg",
+]

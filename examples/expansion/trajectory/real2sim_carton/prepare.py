@@ -39,6 +39,7 @@ from scipy.spatial.transform import Rotation
 import torch
 import yaml
 
+from embodichain.data import get_data_path
 from embodichain.data_pipeline.real2sim import (
     JointSpec,
     PhaseAnnotation,
@@ -312,7 +313,10 @@ def _calibration_checks(robot, episode, annotations, box) -> dict:
         video_offset_explicit=annotations["video_state_offset"] == 0,
         original_robot_model=(
             getattr(cfg, "arm_model", None) == "panda"
-            and getattr(cfg, "gripper", None) == "robotiq_2f85"
+            and Path(cfg.urdf_cfg.components["hand"]["urdf_path"]).resolve()
+            == Path(
+                get_data_path("Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf")
+            ).resolve()
             and tuple(cfg.control_parts["arm"])
             == tuple(f"Joint{i}" for i in range(1, 8))
             and tuple(cfg.control_parts["eef"])

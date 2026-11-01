@@ -34,17 +34,18 @@ arm count and simulation anchoring. Missing variant fields inherit the parent;
 explicit `None` stays unknown. Classification differences prevent variant rows
 from being grouped. Never infer these fields from paths or control-group names.
 
-`Franka` resolves the unified `FrankaCfg` in `franka/cfg.py`. Its explicit
-`arm_model`/`gripper` selections admit only `fr3/panda_hand` (the default) and
-`panda/robotiq_2f85`; the model/tool specifications own assets, source joints,
-limits, drives and solvers. `FrankaPanda` remains a compatibility catalog entry
-under this family: legacy `robot_type: panda` still selects the historical FR3
-with Panda Hand and retains dual-arm composition. It does not select the original
-Panda. The Robotiq combination is single-arm qualified; the reusable embodiment
-owns its mount/TCP calibration. Robotiq linkage and opening conversion live in
-`embodichain_robots.robotiq`, independently of the arm. PGI assemblies remain
-example/benchmark-owned. Flat concrete robot module paths are retired; root
-class exports remain stable.
+`Franka` resolves the bare-arm `FrankaCfg` in `franka/cfg.py`. `arm_model`
+selects `fr3` (default) or `panda`; both expose seven joints in `arm`, no finger
+group, and a flange TCP. `FrankaPanda` remains a legacy selector for the
+historical FR3 arm (`robot_type: panda`), now also bare. Native-hand and Robotiq
+embodiments add the hand URDF, group, drives, inertia/contact calibration and
+solver TCP through ordinary RobotCfg overrides, exactly as UR assemblies do.
+The native hand is a pinned subtree derivative of the integrated FR3 asset;
+model-owned asset generation retains the original file and a derivation report.
+Bare dual-arm selection has fourteen arm joints. Tool-equipped benchmark
+providers append separate left/right hand components. Robotiq observed-aperture
+conversion remains tool-owned and does not select a robot class. PGI fixtures
+remain example/benchmark-owned. Root public class exports remain available.
 
 `resolve_robot_cfg(..., variant=...)` selects a declared profile's defaults
 between catalog defaults and caller overrides. Omitting the variant keeps

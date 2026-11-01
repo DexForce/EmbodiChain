@@ -17,6 +17,9 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
+from threading import Lock
 from pathlib import Path
 import numpy as np
 import torch
@@ -38,12 +41,14 @@ from embodichain.utils.utility import get_class_instance
 from dexsim.utility import log_debug, log_error
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.managers.cfg import RLTaskCfg
     from embodichain.lab.sim.cfg import RobotCfg
     from embodichain.lab.sim.sensors import SensorCfg
 
 # Default manager modules for config parsing
 DEFAULT_MANAGER_MODULES = [
     "embodichain.lab.gym.envs.managers.actions",
+    "embodichain.lab.gym.envs.managers.conditions",
     "embodichain.lab.gym.envs.managers.datasets",
     "embodichain.lab.gym.envs.managers.async_datasets",
     "embodichain.lab.gym.envs.managers.randomization",
@@ -56,6 +61,7 @@ DEFAULT_MANAGER_MODULES = [
 # Extra manager modules registered by third-party packages via init hooks
 _EXTRA_MANAGER_MODULES: list[str] = []
 _PHYSICS_BACKENDS = frozenset({"default", "newton"})
+_RL_REGISTRATION_LOCK = Lock()
 
 # Pretrained policy bundles keep the training and Gym configuration snapshots
 # that were used to produce their checkpoints.  The published locomotion
@@ -453,6 +459,144 @@ def _collect_sensor_cfgs(
     return combined
 
 
+def _decode_rl_task(value: object, modules: Sequence[str]) -> RLTaskCfg:
+    from embodichain.lab.gym.envs.managers.cfg import (
+        ConditionCfg,
+        RLTaskCfg,
+        SceneEntityCfg,
+    )
+
+    if not isinstance(value, Mapping) or set(value) - {
+        "success",
+        "failure",
+        "truncation",
+    }:
+        raise ValueError(
+            "rl_task accepts only success, failure and truncation mappings."
+        )
+    groups = {}
+    for group in ("success", "failure", "truncation"):
+        entries = value.get(group, {})
+        if not isinstance(entries, Mapping):
+            raise TypeError(f"rl_task.{group} must be a mapping.")
+        groups[group] = {}
+        for name, declaration in entries.items():
+            if not isinstance(name, str) or not name or name != name.strip():
+                raise ValueError("Condition names must be nonempty strings.")
+            if (
+                not isinstance(declaration, Mapping)
+                or set(declaration) - {"func", "params"}
+                or "func" not in declaration
+            ):
+                raise ValueError(
+                    f"rl_task.{group}.{name} requires func and optional params."
+                )
+            func_name = declaration["func"]
+            if not isinstance(func_name, str):
+                raise TypeError(
+                    "Condition func must name a registered function or class."
+                )
+            params = deepcopy(declaration.get("params", {}))
+            if not isinstance(params, dict):
+                raise TypeError("Condition params must be a mapping.")
+            for key in tuple(params):
+                if key.endswith("entity_cfg") and isinstance(params[key], Mapping):
+                    params[key] = SceneEntityCfg(**params[key])
+            groups[group][name] = ConditionCfg(
+                func=find_function_from_modules(
+                    func_name, list(modules), raise_if_not_found=True
+                ),
+                params=params,
+            )
+    return RLTaskCfg(**groups)
+
+
+def _register_configured_rl(config: Mapping[str, Any], max_episode_steps: int) -> None:
+    from gymnasium.envs.registration import registry as gym_registry
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.lab.gym.utils.registration import (
+        REGISTERED_ENVS,
+        register_env_function,
+    )
+
+    env_id = config["id"]
+    if not isinstance(env_id, str) or not env_id or env_id != env_id.strip():
+        raise ValueError("Configured RL id must be a nonempty string.")
+    if type(max_episode_steps) is not int or max_episode_steps <= 0:
+        raise ValueError("Configured RL max_episode_steps must be a positive integer.")
+    signature = {
+        "rl_task": config["rl_task"],
+        "env": {
+            key: value
+            for key, value in config["env"].items()
+            if key
+            in {
+                "events",
+                "observations",
+                "rewards",
+                "actions",
+                "extensions",
+                "control_parts",
+                "active_joint_ids",
+                "sim_steps_per_control",
+                "target_control_frequency",
+            }
+        },
+        "physics": config["physics"],
+        "max_episode_steps": max_episode_steps,
+    }
+    signature["manager_order"] = {
+        name: list(config["env"].get(name, {}))
+        for name in ("events", "observations", "rewards", "actions")
+    }
+    signature["condition_order"] = {
+        name: list(config["rl_task"].get(name, {}))
+        for name in ("success", "failure", "truncation")
+    }
+    signature["scene"] = {
+        key: config[key]
+        for key in (
+            "robot",
+            "sensor",
+            "light",
+            "background",
+            "visual_object",
+            "rigid_object",
+            "rigid_object_group",
+            "articulation",
+            "physics_config",
+        )
+        if key in config
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(signature, sort_keys=True, allow_nan=False).encode()
+    ).hexdigest()
+    with _RL_REGISTRATION_LOCK:
+        existing = REGISTERED_ENVS.get(env_id)
+        if existing is not None:
+            if (
+                existing.cls is not EmbodiedEnv
+                or getattr(existing, "_configured_rl_fingerprint", None) != fingerprint
+            ):
+                raise ValueError(
+                    f"Configured RL environment ID {env_id!r} already has a different declaration."
+                )
+            if env_id not in gym_registry:
+                raise RuntimeError(
+                    f"Configured RL environment {env_id!r} lost its Gym registration."
+                )
+            return
+        if env_id in gym_registry:
+            raise ValueError(f"Gymnasium already owns configured RL ID {env_id!r}.")
+        register_env_function(
+            EmbodiedEnv,
+            env_id,
+            max_episode_steps=max_episode_steps,
+            supports_rl=True,
+        )
+        REGISTERED_ENVS[env_id]._configured_rl_fingerprint = fingerprint
+
+
 def config_to_cfg(
     config: dict,
     manager_modules: list | None = None,
@@ -544,6 +688,10 @@ def config_to_cfg(
         """
 
         pass
+
+    if "rl_task" in config:
+        if "task_program" in config or task_program_path_override is not None:
+            raise ValueError("rl_task and task_program cannot share one deployment.")
 
     env_cfg = EmbodiedEnvCfg()
 
@@ -1038,6 +1186,25 @@ def config_to_cfg(
                 contract=term_contract,
             )
             setattr(env_cfg.actions, term_name, action_term)
+
+    if "rl_task" in config:
+        env_cfg.rl_task = _decode_rl_task(config["rl_task"], manager_modules)
+        target_keys = {
+            cfg.params["target_pose_key"]
+            for group in ("success", "failure", "truncation")
+            for cfg in getattr(env_cfg.rl_task, group).values()
+            if "target_pose_key" in cfg.params
+        }
+        for event in config["env"].get("events", {}).values():
+            if (
+                event.get("params", {}).get("store_key", "target_pose") in target_keys
+                and event.get("func") == "randomize_target_pose"
+                and event.get("mode") != "reset"
+            ):
+                raise ValueError(
+                    "Configured RL virtual targets must be sampled in reset mode."
+                )
+        _register_configured_rl(config, env_cfg.max_episode_steps)
 
     if configured_task_program_integration is not None:
         from embodichain.lab.gym.envs.task_program.registration import (

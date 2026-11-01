@@ -66,6 +66,16 @@ vendor level for shared archives. The legacy `robot_assets`, `w1_assets`,
 `so101_assets` and migrated `locomotion_assets` names forward to the same class objects.
 Discovery excludes these imported aliases so IDs register once. Keep class names,
 asset IDs, URLs, digests and cache prefixes stable across ownership moves.
+All eleven EEF asset classes also live in vendor/model `assets.py` modules
+in `embodichain_robots`, registered once under category `eef` by the same
+catalog. Their former `embodichain.data.assets.eef_assets` module and aggregate
+class exports are removed; use the canonical modules or `get_data_class()`.
+String asset IDs and archive/cache paths remain unchanged. Pika belongs to
+`agilex.pika`; WheelTec's `fa2f` namespace records an asset identifier, not a
+verified manufacturer SKU. Each owner README is packaged with the wheel and
+separates manufacturer/model evidence from archive authorship, known edits
+and asset licensing. Missing provenance remains explicit, and Python source
+licenses do not establish URDF/mesh licensing.
 The six catalog locomotion models register their model-owned archives through
 the robot asset catalog. `HumanoidRun` and remaining core robot datasets still
 use the core category table, which excludes private helpers. Locomotion archives
@@ -84,6 +94,11 @@ Keep its source revision and complete file checksums together when updating it.
 
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
+
+`Franka` also materializes `Panda/Fr3HandV1.urdf` from the pinned integrated
+hand subtree, retaining source names and relative mesh paths. Bare FR3 arms
+resolve the existing `Panda/Panda.urdf`; embodiments mount the derived hand
+explicitly. Source and derived digests are recorded together.
 
 `FrankaPandaArm` is a separate pinned original-Panda asset in
 `embodichain_robots.franka.assets`; `FrankaV4` remains the historical FR3 asset.

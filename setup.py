@@ -201,6 +201,8 @@ def main():
                 "data/*.json",
             ],
             "embodichain_robots": [
+                "README.md",
+                "**/README.md",
                 "_ssik_artifacts/*.py",
                 "_ssik_artifacts/*.json",
                 "_ssik_artifacts/LICENSE.txt",

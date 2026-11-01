@@ -47,6 +47,16 @@ embodichain_robots
 
 Concrete robot configurations, exposed lazily from the bundled robot package.
 
+.. py:class:: embodichain_robots.BrainCoRevo1Cfg
+
+   Standalone fixed-base left/right BrainCo Revo 1 hand. Construct with
+   ``from_dict({"side": "left"})`` or select catalog ID ``BrainCoRevo1`` with
+   variant ``left`` / ``right``; right is the default. ``eef`` has six active
+   joint commands and four additional source mimic followers. The default
+   solver and serial-chain mappings are empty. Drive defaults are simulation
+   values, not manufacturer specifications.
+   See :doc:`/resources/robot/brainco/revo1`.
+
 .. py:class:: embodichain_robots.ARX5Cfg
 
    Configure the X5A arm and its two independently actuated parallel fingers.
@@ -93,17 +103,17 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 
 .. py:class:: embodichain_robots.FrankaPandaCfg
 
-   Legacy configuration for the historical FR3 asset with Panda Hand.
+   Legacy selector for the historical bare seven-DOF FR3 arm.
 
-   Compatibility entry retaining the historical FR3-named asset and defaults.
-   Explicit new model/tool selections use :class:`embodichain_robots.FrankaCfg`.
+   Compatibility entry retaining the historical FR3 model and legacy
+   ``robot_type`` selector. Mount tools explicitly; new model selections use
+   :class:`embodichain_robots.FrankaCfg`.
 
 .. py:class:: embodichain_robots.FrankaCfg
 
-   Unified Franka configuration with ``arm_model`` and ``gripper`` selections.
-   Supported combinations are ``fr3/panda_hand`` (default) and
-   ``panda/robotiq_2f85``. Tool calibration belongs to the selected embodiment;
-   configuration round trips do not apply it twice.
+   Bare seven-DOF Franka configuration selected by ``arm_model``:
+   ``fr3`` (default) or ``panda``. End effectors use ordinary URDF component,
+   control-group, drive and solver-TCP overrides in the embodiment.
 
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
@@ -175,6 +185,30 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
+
+
+embodichain_robots.brainco.revo1
+--------------------------------
+
+.. py:class:: embodichain_robots.brainco.revo1.BrainCoRevo1Cfg
+   :no-index:
+
+   Model-local lazy export of :class:`embodichain_robots.BrainCoRevo1Cfg`.
+   Importing its asset module does not load the configuration class.
+
+
+embodichain_robots.brainco.revo1.cfg
+------------------------------------
+
+.. py:class:: embodichain_robots.brainco.revo1.cfg.BrainCoRevo1Cfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.BrainCoRevo1Cfg`; native model
+   information is shared with the W1 mounting adapter.
+
+.. automethod:: embodichain_robots.brainco.revo1.cfg.BrainCoRevo1Cfg.from_dict
+
+.. automethod:: embodichain_robots.brainco.revo1.cfg.BrainCoRevo1Cfg.build_pk_serial_chain
 
 
 embodichain_robots.dexforce.w1
@@ -324,7 +358,7 @@ embodichain_robots.franka.cfg
    :no-index:
 
    Implementation of :class:`embodichain_robots.FrankaCfg`.
-   ``from_dict()`` selects the supported arm/tool pair before applying ordinary
+   ``from_dict()`` selects the bare arm model before applying ordinary
    robot overrides. ``build_pk_serial_chain()`` shares that arm's source URDF;
    the solver applies the configured mounted-tool TCP once.
    See :doc:`/resources/robot/franka/cfg` for selections and calibration.
@@ -338,7 +372,7 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 .. py:class:: embodichain_robots.franka.panda.FrankaPandaCfg
    :no-index:
 
-   Legacy configuration for the historical FR3 asset with Panda Hand.
+   Legacy selector for the historical bare seven-DOF FR3 arm.
 
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
