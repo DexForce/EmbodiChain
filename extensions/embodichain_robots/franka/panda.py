@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 from __future__ import annotations
 
-from .cfg import FrankaCfg
+from embodichain_robots.franka.cfg import FrankaCfg
 from embodichain.utils import configclass
 
 __all__ = ["FrankaPandaCfg"]
