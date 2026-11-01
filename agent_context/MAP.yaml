@@ -247,7 +247,7 @@ topics:
   title: Scene Expansion
   aliases: [scene expansion, scene augmentation, scene variant, scene robot feasibility, feasible region search, 场景扩增, 场景变体, 联合可行区域搜索]
   keywords: [SceneLayoutInput, SceneRandomizationPolicyCfg, prepare_scene_randomization, generate_scene_variants, apply_scene_variants, load_scene_variants, SceneExpansionCfg, ScenePoseChange, SceneVariant, FixedSceneCandidateSource,
-    SceneRobotFeasibilityCfg, TaskFeasibilityRequest, FeasibilityAtlas, RobotWorkspaceProposalSource, search-scene-feasibility,
+    SceneRobotFeasibilityCfg, TaskFeasibilityRequest, FeasibilityAtlas, RobotWorkspaceProposalSource, NewtonCollisionChecker, search-scene-feasibility,
     ScenePreparationResult, SceneVariantEpisodeResult, execute_scene_variant,
     SimulationSceneExpansionHost, SimulationSceneInitialState, episode_prepare]
   paths: [topics/scene-expansion/scene-expansion.md]
@@ -264,6 +264,7 @@ topics:
   - embodichain/lab/gym/envs/embodied_env.py
   - embodichain/lab/gym/envs/demo.py
   watch_paths: [embodichain/lab/sim/scene/feasibility/, embodichain/compute/geometry/planar.py,
+    embodichain/compute/geometry/_warp/contact_query.py,
     embodichain/lab/task_program/integrations/feasibility.py,
     embodichain/lab/task_program/integrations/simulation/feasibility.py,
     embodichain/lab/task_program/integrations/simulation/feasibility_geometry.py,

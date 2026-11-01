@@ -5,7 +5,7 @@
 ![Original installation and measured successful search result](assets/showcase.png)
 
 ```bash
-pip install -e '.[feasibility]'
+pip install -e .
 embodichain run-example expansion/scene_robot_feasibility/preview --output outputs/scene_feasibility_preview --open
 ```
 
@@ -53,7 +53,7 @@ must be new, or explicitly reopened with `--reuse`.
 Run from the repository root with the installed simulation runtime:
 
 ```bash
-pip install -e '.[feasibility]'
+pip install -e .
 embodichain search-scene-feasibility --config examples/expansion/scene_robot_feasibility/search.ur5.yaml --output outputs/scene_feasibility
 ```
 
@@ -102,7 +102,7 @@ while searching the installation and bar/support-group layout.
 
 ## Evaluate Newton collision queries
 
-From a source checkout with the simulation runtime and the `feasibility` extra:
+From a source checkout with the installed simulation runtime:
 
 ```bash
 OMP_NUM_THREADS=4 python -m scripts.benchmark.scene.feasibility_collision \
@@ -116,7 +116,8 @@ trial to profile the existing execution path. It saves physical collision shapes
 the SDK's original convex declarations, phase permissions and a bounded reservoir
 of 256 queried states. The standalone comparison uses independent Newton states
 with no physics stepping. It compares CPU, CUDA and CUDA Graph queries against
-the current FCL checker at B=1/8/32/256. The physical task host remains B=1.
+the production Newton CPU checker and captured/analytic outcomes at B=1/8/32/256.
+The physical task host remains B=1.
 
 `results.json` retains measurements and qualification errors; `report.md` contains
 timing/memory, classification agreement and complete-fixture qualification tables.
@@ -125,9 +126,14 @@ to rerun measurements without collecting another task. Timings separate geometry
 setup, device-resident queries and the full host-input-to-host-result call. B=1
 timings repeat one representative query, not the average cost of a task.
 
-This is a benchmark prototype, and the production checker remains FCL. Primitive
-and native convex-geometry agreement does not establish complete mesh support:
-the benchmark includes a concave-solid containment counterexample. Newton's
-separation values are limited to its detection band and are not global minimum
-distances. Dependency declarations reuse DexSim's `trimesh` and Newton packages;
-the `feasibility` extra supplies FCL for the existing runtime and comparison.
+The production checker is `NewtonCollisionChecker`, using DexSim-provided
+dependencies. It supports explicitly declared convex/primitive colliders and
+the global ground. Unsupported triangle meshes and SDFs are rejected; they are
+not substituted by convex hulls. Clearance estimates are capped by the contact
+detection band and are not global minimum distances. Runtime query identity
+and precision/device settings are recorded alongside the measured task outcome.
+
+Queries default to CPU. Set `search.collision_device: cuda:0` to select CUDA;
+`search.collision_use_cuda_graph` controls replay of the fixed query topology.
+These settings do not change the deployment's physical backend. No additional
+collision package or optional installation extra is required.

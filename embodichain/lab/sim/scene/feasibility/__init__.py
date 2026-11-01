@@ -17,7 +17,7 @@
 """Task-conditioned joint scene and robot installation feasibility search.
 
 Geometry/kinematics/planning evidence remains distinct from measured task
-success. Importing this package never imports FCL or creates a simulator.
+success. Importing this package never imports Newton or creates a simulator.
 """
 
 from __future__ import annotations
@@ -36,7 +36,11 @@ from .contracts import (
     CandidateEvaluation,
 )
 from .budget import FeasibilityBudget, FeasibilityBudgetExhausted
-from .collision import CollisionBody, FCLCollisionChecker, UnsupportedFeasibilityError
+from .collision import (
+    CollisionBody,
+    NewtonCollisionChecker,
+    UnsupportedFeasibilityError,
+)
 from .planning import (
     TaskPlanningBackend,
     TaskPlan,
@@ -77,7 +81,7 @@ __all__ = [
     "FeasibilityBudget",
     "FeasibilityBudgetExhausted",
     "CollisionBody",
-    "FCLCollisionChecker",
+    "NewtonCollisionChecker",
     "UnsupportedFeasibilityError",
     "TaskPlanningBackend",
     "TaskPlan",

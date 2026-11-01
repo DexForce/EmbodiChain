@@ -30,7 +30,7 @@ from embodichain.lab.sim.scene.feasibility import (
     SceneRobotFeasibilityCfg,
     FeasibilityCheck,
     TaskPhase,
-    FCLCollisionChecker,
+    NewtonCollisionChecker,
     UnsupportedFeasibilityError,
     prepare_feasibility,
     search_feasibility,
@@ -425,6 +425,7 @@ def build_feasibility_host(
         )
     # Identity incorporates actual thresholds and resolved policy/robot settings.
     from dataclasses import replace
+    from importlib.metadata import version
 
     registration = REGISTERED_ENVS[environment_id]
     factory_fingerprint = (
@@ -432,7 +433,17 @@ def build_feasibility_host(
     )
     request = replace(
         request,
-        validator_id=request.validator_id + ":" + digest(adapter),
+        validator_id=request.validator_id
+        + ":"
+        + digest(
+            (
+                adapter,
+                "newton-convex-query/v1",
+                version("newton"),
+                cfg.collision_device,
+                cfg.collision_use_cuda_graph,
+            )
+        ),
         policy_id=request.policy_id
         + ":"
         + digest((physical.task_program.to_dict(), factory_fingerprint)),
@@ -532,8 +543,11 @@ def build_feasibility_host(
     def collision_factory(env):
         if not bodies_cache:
             bodies_cache.extend(collision_bodies_from_simulation(env))
-        return FCLCollisionChecker(
-            tuple(bodies_cache), ignored_pairs=adapter.get("ignored_contacts", ())
+        return NewtonCollisionChecker(
+            tuple(bodies_cache),
+            ignored_pairs=adapter.get("ignored_contacts", ()),
+            device=cfg.collision_device,
+            use_cuda_graph=cfg.collision_use_cuda_graph,
         )
 
     host = TaskProgramFeasibilityHost(

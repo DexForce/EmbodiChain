@@ -18,16 +18,17 @@
 
 Run: python -m scripts.benchmark.scene.feasibility_collision --output outputs/benchmarks/newton_collision
 
-Uses isolated geometry states, never a physics solver or live scene. FCL is the
-current implementation reference; analytic primitive cases independently check
-both implementations. Match rate is collision-classification agreement, not
+Uses isolated geometry states, never a physics solver or live scene. Production
+Newton CPU queries and captured outcomes form the reference; analytic primitive
+cases independently check both implementations. Match rate is collision-classification agreement, not
 task success. Contact-band separations are not global minimum distances.
 """
 
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
+from dataclasses import replace
 import gc
 import importlib.metadata
 import json
@@ -40,10 +41,9 @@ import numpy as np
 import psutil
 from scipy.spatial.transform import Rotation
 import torch
-import trimesh
 import warp as wp
 
-from embodichain.lab.sim.scene.feasibility import CollisionBody, FCLCollisionChecker
+from embodichain.lab.sim.scene.feasibility import CollisionBody, NewtonCollisionChecker
 from ._newton_collision_probe import NewtonCollisionProbe
 
 
@@ -55,7 +55,7 @@ def _pose(x: float = 0, y: float = 0, z: float = 0.4) -> list:
 
 
 def _fixtures() -> list[tuple[str, tuple[CollisionBody, ...], list, list[dict]]]:
-    """Provide analytic primitive and closed concave-solid counterexamples."""
+    """Provide analytic primitive and transformed-containment cases."""
     fixtures = []
     for kind, dimensions, halfwidth in (
         ("box", (0.2, 0.2, 0.2), 0.1),
@@ -98,26 +98,6 @@ def _fixtures() -> list[tuple[str, tuple[CollisionBody, ...], list, list[dict]]]
             }
         )
         fixtures.append(("analytic_" + kind, bodies, [], samples))
-    mesh = trimesh.creation.annulus(r_min=0.3, r_max=0.5, height=0.2)
-    bodies = (
-        CollisionBody("robot", "robot", "sphere", (0.04,), robot=True),
-        CollisionBody(
-            "ring",
-            "ring",
-            "mesh",
-            vertices=tuple(map(tuple, mesh.vertices)),
-            triangles=tuple(map(tuple, mesh.faces)),
-        ),
-    )
-    samples = [
-        {
-            "frames": {"robot": _pose(x, z=0), "ring": _pose(z=0)},
-            "options": {},
-            "expected": expected,
-        }
-        for x, expected in ((0, True), (0.4, False), (0.7, True), (0.3, False))
-    ]
-    fixtures.append(("concave_solid", bodies, [], samples))
     # Non-symmetric local transforms expose root/local composition mistakes.
     rotation = np.eye(4)
     rotation[:3, :3] = Rotation.from_euler("xyz", (0.3, -0.2, 0.7)).as_matrix()
@@ -153,7 +133,15 @@ def _load_fixture(path: Path) -> tuple:
     )
     return (
         name,
-        tuple(CollisionBody(**body) for body in data["bodies"]),
+        tuple(
+            (
+                replace(CollisionBody(**body), kind="convex")
+                if body["kind"] == "mesh"
+                and data.get("shape_hints", {}).get(body["collision_id"]) == "CONVEX"
+                else CollisionBody(**body)
+            )
+            for body in data["bodies"]
+        ),
         data["ignored_pairs"],
         data["samples"],
         data.get("shape_hints", {}),
@@ -312,9 +300,9 @@ def _markdown(
         json.dumps(metadata, indent=2),
         "```",
         "",
-        "- Success rate means geometric classification agreement with the current FCL checker, including independent analytic cases. It is not task success or a continuous collision certificate.",
+        "- Success rate means geometric classification agreement with the current production Newton checker, including independent analytic cases. It is not task success or a continuous collision certificate.",
         "- Near-zero float32 separations (2e-5 m band) remain ambiguous and count as unmatched; they are never silently accepted.",
-        "- Newton's infinity means no active pair in the configured detection band, not exact global clearance. Concave-solid cases deliberately test missing containment coverage without adding the FCL fallback.",
+        "- Newton's infinity means no active pair in the configured detection band, not exact global clearance. Only declared native convex/primitive shapes are benchmarked; unsupported triangle meshes are covered by the production rejection tests.",
         "- resident: pre-uploaded transforms/masks, collision generation plus device reduction; excludes host packing and result readback.",
         "- host-to-host: frame dictionaries and phase permissions through packing, H2D, collision/reduction and owned D2H results. FK and task execution are outside both backend scopes.",
         "- Each latency row repeats a fixed representative query/batch; it is not the frame-distribution average. Workload profiles separately measure cumulative live-check time, so microbenchmark speedups must not be presented as task speedups.",
@@ -364,8 +352,6 @@ def run_all_benchmarks(args: argparse.Namespace) -> dict:
                 "newton",
                 "warp-lang",
                 "dexsim-engine",
-                "python-fcl",
-                "trimesh",
                 "torch",
             )
         },
@@ -376,22 +362,21 @@ def run_all_benchmarks(args: argparse.Namespace) -> dict:
         "cuda_driver_version": (
             wp.get_cuda_driver_version() if len(devices) > 1 else None
         ),
-        "dtype": "FCL float64 geometry / Newton float32; same supplied frame inputs",
+        "dtype": "Newton float32 geometry; same supplied frame inputs",
         "detection_band_m": args.detection_gap,
     }
     results, failures = [], []
     process = psutil.Process()
     for name, bodies, ignored, corpus, hints in fixtures:
-        convex_ids = [uid for uid, kind in hints.items() if kind == "CONVEX"]
         print(
             f"Geometry: {name}; shapes={len(bodies)} samples={len(corpus)}", flush=True
         )
-        fcl_rss = process.memory_info().rss
-        fcl_start = time.perf_counter()
-        baseline = FCLCollisionChecker(bodies, ignored_pairs=ignored)
-        fcl_setup = time.perf_counter() - fcl_start
-        fcl_memory = {
-            "cpu_delta_mb": (process.memory_info().rss - fcl_rss) / 2**20,
+        runtime_rss = process.memory_info().rss
+        runtime_start = time.perf_counter()
+        baseline = NewtonCollisionChecker(bodies, ignored_pairs=ignored)
+        runtime_setup = time.perf_counter() - runtime_start
+        runtime_memory = {
+            "cpu_delta_mb": (process.memory_info().rss - runtime_rss) / 2**20,
             "gpu_delta_mb": None,
             "peak_gpu_mb": None,
         }
@@ -401,16 +386,20 @@ def run_all_benchmarks(args: argparse.Namespace) -> dict:
                 baseline.check(sample["frames"], **sample.get("options", {}))[0].status
                 == "passed"
             )
-            if "expected" in sample and accepted != sample["expected"]:
+            expected = sample.get(
+                "expected",
+                sample.get("status") == "passed" if "status" in sample else accepted,
+            )
+            if accepted != expected:
                 raise AssertionError(f"Independent analytic oracle failed: {name}")
-            oracle.append(accepted)
+            oracle.append(expected)
         batches = args.batches if name.startswith("fixture-") else [1, 8]
         for batch in batches:
             indices = np.arange(batch) % len(corpus)
             samples = [corpus[i] for i in indices]
             expected = np.asarray(oracle)[indices]
 
-            def fcl_call():
+            def runtime_call():
                 return [
                     baseline.check(s["frames"], **s.get("options", {})) for s in samples
                 ]
@@ -429,7 +418,6 @@ def run_all_benchmarks(args: argparse.Namespace) -> dict:
                     batch=batch,
                     device=device,
                     detection_gap=args.detection_gap,
-                    convex_ids=convex_ids,
                 )
                 packed = probe.pack(samples)
                 probe.upload(packed)
@@ -561,14 +549,14 @@ def run_all_benchmarks(args: argparse.Namespace) -> dict:
                         )
                 del probe, packed
                 gc.collect()
-            timing = _latency(fcl_call, "cpu", args.warmup, args.repeats)
+            timing = _latency(runtime_call, "cpu", args.warmup, args.repeats)
             timing["scope"] = "host-to-host"
             results.append(
                 {
                     "fixture": name,
                     "batch": batch,
-                    "algorithm": "fcl_cpu",
-                    "setup_s": fcl_setup,
+                    "algorithm": "newton_runtime_cpu",
+                    "setup_s": runtime_setup,
                     "quality": {
                         "success_rate": 1.0,
                         "matched": batch,
@@ -578,7 +566,7 @@ def run_all_benchmarks(args: argparse.Namespace) -> dict:
                         "false_positive": 0,
                         "outside_detection_band": 0,
                     },
-                    "memory": fcl_memory,
+                    "memory": runtime_memory,
                     "timing": [timing],
                 }
             )
@@ -590,7 +578,6 @@ def run_all_benchmarks(args: argparse.Namespace) -> dict:
                 batch=1,
                 device=device,
                 detection_gap=args.detection_gap,
-                convex_ids=convex_ids,
             )
             observed = []
             for sample in corpus:
@@ -644,7 +631,7 @@ def run_all_benchmarks(args: argparse.Namespace) -> dict:
                 "fixture": name,
                 "scope": "full_corpus_qualification",
                 "device": "cpu",
-                "algorithm": "fcl_cpu",
+                "algorithm": "newton_runtime_cpu",
                 "success_rate": 1.0,
                 "matched": len(corpus),
                 "total": len(corpus),
@@ -654,6 +641,7 @@ def run_all_benchmarks(args: argparse.Namespace) -> dict:
                 "outside_detection_band": 0,
             }
         )
+        baseline.close()
         payload = {"metadata": metadata, "results": results, "qualification": failures}
         (args.output / "results.json").write_text(
             json.dumps(payload, indent=2, allow_nan=False)

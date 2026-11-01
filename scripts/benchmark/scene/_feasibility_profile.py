@@ -49,7 +49,7 @@ def capture_workload(source: Path, output: Path) -> Path:
     from embodichain.lab.task_program.integrations.simulation import (
         feasibility_geometry,
     )
-    from embodichain.lab.sim.scene.feasibility import FCLCollisionChecker
+    from embodichain.lab.sim.scene.feasibility import NewtonCollisionChecker
     from embodichain.lab.sim.scene.feasibility._values import plain
     from embodichain.lab.sim.scene.feasibility.planning import RobotFeasibilityBackend
 
@@ -66,8 +66,8 @@ def capture_workload(source: Path, output: Path) -> Path:
     path = output / "workflow.json"
     path.write_text(json.dumps(config))
     original_init, original_check = (
-        FCLCollisionChecker.__init__,
-        FCLCollisionChecker.check,
+        NewtonCollisionChecker.__init__,
+        NewtonCollisionChecker.check,
     )
     original_frames = RobotFeasibilityBackend.frame_poses
     original_extract = feasibility_geometry.collision_bodies_from_simulation
@@ -125,7 +125,10 @@ def capture_workload(source: Path, output: Path) -> Path:
 
     try:
         os.environ["EMBODICHAIN_SIM_EXIT_PROCESS"] = "0"
-        FCLCollisionChecker.__init__, FCLCollisionChecker.check = initialize, check
+        NewtonCollisionChecker.__init__, NewtonCollisionChecker.check = (
+            initialize,
+            check,
+        )
         RobotFeasibilityBackend.frame_poses = frames
         feasibility_geometry.collision_bodies_from_simulation = extract
         started = time.perf_counter()
@@ -140,7 +143,7 @@ def capture_workload(source: Path, output: Path) -> Path:
         target.write_text(json.dumps(fixture))
         return target
     finally:
-        FCLCollisionChecker.__init__, FCLCollisionChecker.check = (
+        NewtonCollisionChecker.__init__, NewtonCollisionChecker.check = (
             original_init,
             original_check,
         )

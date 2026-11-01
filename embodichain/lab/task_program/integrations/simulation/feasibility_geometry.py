@@ -61,13 +61,13 @@ def collision_bodies_from_simulation(env: Any) -> tuple[CollisionBody, ...]:
             dimensions = (float(shape.radius),)
         elif kind in ("capsule", "cylinder"):
             dimensions = (float(shape.radius), 2 * float(shape.half_height))
-        elif (
+        elif kind == "convex" and (
             shape.vertices is not None
             and shape.triangles is not None
             and shape.vertices.numel()
             and shape.triangles.numel()
         ):
-            kind, dimensions = "mesh", ()
+            dimensions = ()
             kwargs = {
                 "vertices": tuple(map(tuple, shape.vertices.cpu().numpy())),
                 "triangles": tuple(

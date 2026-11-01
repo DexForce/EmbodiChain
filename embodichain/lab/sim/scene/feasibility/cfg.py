@@ -61,6 +61,8 @@ class SceneRobotFeasibilityCfg:
     planning_timeout_s: float = 5.0
     max_rrt_nodes: int = 256
     device: str = "cpu"
+    collision_device: str = "cpu"
+    collision_use_cuda_graph: bool = True
 
     def __post_init__(self) -> None:
         count(self.seed, "seed", 0)
@@ -119,6 +121,18 @@ class SceneRobotFeasibilityCfg:
             raise ValueError("device must be a valid Torch CPU/CUDA device") from error
         if target.type not in ("cpu", "cuda"):
             raise ValueError("device must name cpu or a CUDA device")
+        if not isinstance(self.collision_device, str):
+            raise ValueError("collision_device must name cpu or CUDA")
+        try:
+            collision_target = torch.device(self.collision_device)
+        except (RuntimeError, ValueError) as error:
+            raise ValueError("collision_device must name cpu or CUDA") from error
+        if collision_target.type not in ("cpu", "cuda"):
+            raise ValueError("collision_device must name cpu or CUDA")
+        if collision_target.type == "cpu":
+            self.collision_device = "cpu"
+        if type(self.collision_use_cuda_graph) is not bool:
+            raise TypeError("collision_use_cuda_graph must be boolean")
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, object]) -> SceneRobotFeasibilityCfg:

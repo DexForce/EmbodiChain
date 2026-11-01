@@ -16,9 +16,8 @@
 
 """Benchmark-only Newton candidate geometry, independent of a live simulator.
 
-This deliberately measures CollisionPipeline's coverage rather than silently
-filling its geometry/solid-containment gaps with the FCL reference. It is not a
-production replacement for the feasibility checker.
+This measures replicated batches of the same explicitly declared physical
+convex shapes as the production B=1 checker. No physical world is stepped.
 """
 
 from __future__ import annotations
@@ -29,7 +28,6 @@ import math
 import newton
 import numpy as np
 from scipy.spatial.transform import Rotation
-import trimesh
 import warp as wp
 
 from embodichain.lab.sim.scene.feasibility import CollisionBody
@@ -90,7 +88,6 @@ class NewtonCollisionProbe:
         batch: int,
         device: str,
         detection_gap: float = 0.03,
-        convex_ids: Sequence[str] = (),
     ) -> None:
         if not 1 <= batch <= 256 or not bodies:
             raise ValueError("Probe requires 1..256 candidates and nonempty geometry")
@@ -153,32 +150,17 @@ class NewtonCollisionProbe:
                         length=0.0,
                         **kw,
                     )
-                elif body.kind == "mesh":
+                elif body.kind == "convex":
                     if i not in self.meshes:
-                        mesh = trimesh.Trimesh(
-                            vertices=np.asarray(body.vertices),
-                            faces=np.asarray(body.triangles),
-                            process=True,
-                        )
-                        convex = body.collision_id in convex_ids or bool(
-                            mesh.is_watertight
-                            and mesh.is_winding_consistent
-                            and mesh.is_convex
-                        )
-                        self.mesh_convex[i] = convex
+                        self.mesh_convex[i] = True
                         self.meshes[i] = newton.Mesh(
-                            np.asarray(mesh.vertices, dtype=np.float32),
-                            np.asarray(mesh.faces, dtype=np.int32).reshape(-1),
+                            np.asarray(body.vertices, dtype=np.float32),
+                            np.asarray(body.triangles, dtype=np.int32).reshape(-1),
                             compute_inertia=False,
-                            maxhullvert=len(mesh.vertices),
+                            maxhullvert=len(body.vertices),
                         )
-                        self.convex_vertex_counts[i] = len(mesh.vertices)
-                    factory = (
-                        builder.add_shape_convex_hull
-                        if self.mesh_convex[i]
-                        else builder.add_shape_mesh
-                    )
-                    shape = factory(mesh=self.meshes[i], **kw)
+                        self.convex_vertex_counts[i] = len(body.vertices)
+                    shape = builder.add_shape_convex_hull(mesh=self.meshes[i], **kw)
                 else:
                     raise ValueError(f"Unsupported benchmark geometry {body.kind}")
                 if shape != row * self.n + i or owner != shape:

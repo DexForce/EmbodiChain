@@ -38,7 +38,7 @@ from embodichain.lab.sim.scene.feasibility import (
     TaskPhase,
     RobotDeploymentCandidate,
     RobotFeasibilityBackend,
-    FCLCollisionChecker,
+    NewtonCollisionChecker,
     UnsupportedFeasibilityError,
     plan_task_mode,
 )
@@ -226,7 +226,7 @@ class TaskProgramFeasibilityHost:
         environment_factory: Callable[[RobotDeploymentCandidate], Any],
         initial_validator: Callable[[Any, JointSceneCandidate], ValidationResult],
         measured_validator: Callable[[Any, JointSceneCandidate], ValidationResult],
-        collision_factory: Callable[[Any], FCLCollisionChecker],
+        collision_factory: Callable[[Any], NewtonCollisionChecker],
         runtime_phase: Callable[[Any, Any, JointSceneCandidate], TaskPhase],
         configure_mode: Callable[[Any, JointSceneCandidate], None] | None = None,
         observe: Callable[[Any, Any], None] | None = None,
@@ -382,6 +382,7 @@ class TaskProgramFeasibilityHost:
         snapshot_id = None
         started_at = budget.clock()
         original_reset = None
+        collision = None
         simulation_updates = ExitStack()
         try:
             self._owned_environment = self._factory(candidate.deployment)
@@ -805,6 +806,7 @@ class TaskProgramFeasibilityHost:
                 "candidate_id": candidate.candidate_id,
                 "deployment_id": candidate.deployment.deployment_id,
                 "collision_geometry_id": digest(collision.bodies),
+                "collision_query": collision.metadata,
                 "runtime_collision_sampling": "control_boundaries",
                 "session_candidate_id": identity.candidate_id,
             }
@@ -919,7 +921,12 @@ class TaskProgramFeasibilityHost:
             )
         finally:
             try:
-                simulation_updates.close()
+                try:
+                    close_query = getattr(collision, "close", None)
+                    if callable(close_query):
+                        close_query()
+                finally:
+                    simulation_updates.close()
                 if identity is not None and not released and not pending_write:
                     self._session.release(identity, reason="interrupted_or_failed")
             finally:

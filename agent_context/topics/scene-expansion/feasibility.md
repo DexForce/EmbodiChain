@@ -37,12 +37,27 @@ without blocking cleanup; required observations use the qpos-only session schema
 mimic constraints. Hypothetical whole-robot FK supplies solver-root transforms;
 using live roots for projected torso/base states is incorrect. Complete path
 screening uses explicit physical geometry and phase contact permissions.
-`collision.py` lazily loads FCL; the default simulation extractor reads native robot-link and rigid shapes, includes the global ground, and
-rejects non-robot articulations or unsupported robot asset scales/formats.
-Native FCL halfspace distance calls are avoided using analytic shape support.
-Closed meshes include bidirectional component containment; open/inconsistent
-meshes cannot pass required containment checks. Discrete path/control-boundary
-checks do not certify continuous collision freedom.
+`collision.py` lazily builds a Newton `CollisionPipeline` over isolated query
+states. The physical extractor preserves native convex shapes, includes the
+global ground, and rejects triangle meshes, SDFs, non-robot articulations and
+unsupported robot asset scales/formats. No collider is silently convexified.
+Halfspaces use analytic physical-shape support. Phase masks do not mutate live
+filters, and the query never advances the simulation clock. Shape/pair/contact
+storage is bounded; saturation and nonfinite results remain unverified.
+The host closes the owned query arrays/graphs after every attempt.
+
+Query transforms are rebased before composing local offsets; precision budgets
+cover conversion, scale and nonfinite failures before no-contact acceptance.
+The owned tolerance array is refreshed before graph replay. Checker calls are
+serialized; unsupported precision cannot become successful geometry evidence.
+
+Collision queries default to CPU, independently of the physical backend and
+proposal device. CUDA graph replay is an explicit query option. Clearance is a
+capped contact-band estimate, not global minimum distance; execution evidence
+records the backend version, precision policy and query identity. Configuration
+request identities include the query contract so old checks are not reused as
+new evidence. Discrete path/control-boundary checks do not certify continuous
+collision freedom.
 
 `motion/_budget.py` supplies context-local cooperative hooks at Robot IK,
 MotionGenerator generation and Atomic planning/recovery boundaries. No active

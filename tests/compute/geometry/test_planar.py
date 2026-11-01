@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import math
-import numpy as np
 import pytest
 import torch
 
@@ -56,50 +55,3 @@ def test_planar_cuda_matches_cpu_with_noncontiguous_offsets():
     assert torch.allclose(
         actual, compose_planar_offsets(reference, offsets), atol=1e-6, rtol=0
     )
-
-
-def test_closed_mesh_membership_preserves_disconnected_components_and_chunking():
-    import trimesh
-    from embodichain.compute.geometry.solid import points_in_closed_mesh
-
-    left = trimesh.creation.box()
-    left.apply_translation((-2, 0, 0))
-    right = trimesh.creation.box()
-    right.apply_translation((2, 0, 0))
-    mesh = trimesh.util.concatenate((left, right))
-    vertices = torch.tensor(np.array(mesh.vertices, copy=True), dtype=torch.float64)
-    faces = torch.tensor(np.array(mesh.faces, copy=True), dtype=torch.int64)
-    points = torch.tensor(
-        [[-2.0, 0, 0], [2.0, 0, 0], [0.0, 0, 0], [4.0, 0, 0]], dtype=torch.float64
-    )
-    expected = torch.tensor([True, True, False, False])
-    assert torch.equal(
-        points_in_closed_mesh(
-            points, vertices, faces, point_chunk_size=1, triangle_chunk_size=3
-        ),
-        expected,
-    )
-    assert torch.equal(points_in_closed_mesh(points, vertices, faces), expected)
-
-
-@pytest.mark.gpu
-def test_closed_mesh_cuda_membership_matches_cpu_without_autograd_history():
-    import trimesh
-    from embodichain.compute.geometry.solid import points_in_closed_mesh
-
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA unavailable")
-    mesh = trimesh.creation.box(extents=(2.0, 2.0, 2.0))
-    vertices = torch.tensor(np.array(mesh.vertices), dtype=torch.float64)
-    triangles = torch.tensor(np.array(mesh.faces), dtype=torch.int64)
-    points = torch.tensor(
-        [[0.0, 0.0, 0.0], [0.9, -0.9, 0.9], [2.0, 0.0, 0.0]],
-        dtype=torch.float64,
-        requires_grad=True,
-    )
-    actual = points_in_closed_mesh(
-        points.cuda(), vertices.cuda(), triangles.cuda(), triangle_chunk_size=3
-    )
-    assert actual.is_cuda and not actual.requires_grad
-    assert actual.cpu().tolist() == [True, True, False]
-    assert torch.equal(actual.cpu(), points_in_closed_mesh(points, vertices, triangles))

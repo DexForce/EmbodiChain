@@ -23,7 +23,7 @@ import pytest
 
 from embodichain.lab.sim.scene.feasibility import (
     CollisionBody,
-    FCLCollisionChecker,
+    NewtonCollisionChecker,
     FeasibilityBudget,
     SceneRobotFeasibilityCfg,
     TaskPhase,
@@ -34,15 +34,15 @@ from embodichain.lab.sim.scene.feasibility import (
 )
 
 
-def test_fcl_self_interarm_payload_and_phase_contacts():
-    pytest.importorskip("fcl")
+def test_newton_self_interarm_payload_and_phase_contacts():
+    pytest.importorskip("newton")
     bodies = (
         CollisionBody("left", "left", "box", (0.2, 0.2, 0.2), robot=True),
         CollisionBody("right", "right", "box", (0.2, 0.2, 0.2), robot=True),
         CollisionBody("payload", "payload", "sphere", (0.1,)),
         CollisionBody("obstacle", "obstacle", "box", (0.2, 0.2, 0.2)),
     )
-    checker = FCLCollisionChecker(bodies)
+    checker = NewtonCollisionChecker(bodies)
 
     def pose(x):
         p = np.eye(4)
@@ -242,7 +242,7 @@ def test_robot_adapter_projects_mimic_follower_for_collision():
     import torch
     from embodichain.lab.sim.scene.feasibility import RobotFeasibilityBackend
 
-    pytest.importorskip("fcl")
+    pytest.importorskip("newton")
 
     class Transform:
         def __init__(self, x, y):
@@ -292,7 +292,7 @@ def test_robot_adapter_projects_mimic_follower_for_collision():
     )
     cfg = SceneRobotFeasibilityCfg(max_rrt_nodes=1)
     backend = RobotFeasibilityBackend(
-        RobotPort(), FCLCollisionChecker(bodies), cfg, {"wall": world}
+        RobotPort(), NewtonCollisionChecker(bodies), cfg, {"wall": world}
     )
     mode = TaskOperationMode(
         "close", (TaskPhase("close", joint_targets=(("leader", 1.0),)),)
@@ -309,7 +309,7 @@ def test_robot_adapter_projects_mimic_follower_for_collision():
     port = RobotPort()
     port.get_qpos = lambda: torch.full((1, 2), -5e-5)
     safe = RobotFeasibilityBackend(
-        port, FCLCollisionChecker(bodies), cfg, {"wall": world}
+        port, NewtonCollisionChecker(bodies), cfg, {"wall": world}
     )
     close = TaskOperationMode(
         "close", (TaskPhase("close", joint_targets=(("leader", 0.3),)),)
@@ -320,7 +320,7 @@ def test_robot_adapter_projects_mimic_follower_for_collision():
     assert np.all(planned.paths[0][1:] >= 0)
     port.get_qpos = lambda: torch.full((1, 2), -0.001)
     unsafe = RobotFeasibilityBackend(
-        port, FCLCollisionChecker(bodies), cfg, {"wall": world}
+        port, NewtonCollisionChecker(bodies), cfg, {"wall": world}
     )
     assert not plan_task_mode(
         close, unsafe, {"wall": world}, FeasibilityBudget(cfg)
@@ -328,8 +328,8 @@ def test_robot_adapter_projects_mimic_follower_for_collision():
 
 
 def test_halfspace_uses_physical_support_and_includes_ground():
-    pytest.importorskip("fcl")
-    checker = FCLCollisionChecker(
+    pytest.importorskip("newton")
+    checker = NewtonCollisionChecker(
         (
             CollisionBody("ground", "ground", "halfspace", (0.0, 0.0, 1.0, 0.0)),
             CollisionBody("robot", "robot", "box", (0.2, 0.2, 0.2), robot=True),
@@ -337,37 +337,39 @@ def test_halfspace_uses_physical_support_and_includes_ground():
     )
     pose = np.eye(4)
     pose[2, 3] = 0.2
-    assert checker.check({"ground": np.eye(4), "robot": pose})[0].status == "passed"
+    report, clearance = checker.check({"ground": np.eye(4), "robot": pose})
+    assert report.status == "passed" and 0 <= clearance <= checker.detection_gap_m
+    assert SceneRobotFeasibilityCfg(collision_device="cpu:0").collision_device == "cpu"
     pose[2, 3] = 0.05
     assert checker.check({"ground": np.eye(4), "robot": pose})[0].status == "failed"
 
 
 @pytest.mark.parametrize("reverse", (False, True))
-def test_closed_solid_mesh_contains_robot_even_without_surface_intersection(reverse):
+def test_declared_convex_contains_robot_even_without_surface_intersection(reverse):
     import trimesh
 
-    pytest.importorskip("fcl")
+    pytest.importorskip("newton")
     mesh = trimesh.creation.box(extents=(2.0, 2.0, 2.0))
     container = CollisionBody(
         "container",
         "container",
-        "mesh",
+        "convex",
         vertices=tuple(map(tuple, mesh.vertices)),
         triangles=tuple(tuple(int(i) for i in f) for f in mesh.faces),
     )
     robot = CollisionBody("robot", "robot", "sphere", (0.1,), robot=True)
     bodies = (robot, container) if reverse else (container, robot)
-    checker = FCLCollisionChecker(bodies)
+    checker = NewtonCollisionChecker(bodies)
     assert (
         checker.check({"container": np.eye(4), "robot": np.eye(4)})[0].status
         == "failed"
     )
 
 
-def test_concave_solid_preserves_hole_and_rejects_contained_sphere():
+def test_triangle_mesh_is_explicitly_unsupported_instead_of_being_convexified():
     import trimesh
 
-    pytest.importorskip("fcl")
+    pytest.importorskip("newton")
     mesh = trimesh.creation.annulus(r_min=0.5, r_max=1.0, height=2.0, sections=24)
     shell = CollisionBody(
         "ring",
@@ -376,19 +378,16 @@ def test_concave_solid_preserves_hole_and_rejects_contained_sphere():
         vertices=tuple(map(tuple, mesh.vertices)),
         triangles=tuple(tuple(int(i) for i in f) for f in mesh.faces),
     )
-    checker = FCLCollisionChecker(
-        (shell, CollisionBody("robot", "robot", "sphere", (0.05,), robot=True))
-    )
-    pose = np.eye(4)
-    assert checker.check({"ring": np.eye(4), "robot": pose})[0].status == "passed"
-    pose[0, 3] = 0.75
-    assert checker.check({"ring": np.eye(4), "robot": pose})[0].status == "failed"
+    with pytest.raises(UnsupportedFeasibilityError, match="Triangle meshes"):
+        NewtonCollisionChecker(
+            (shell, CollisionBody("robot", "robot", "sphere", (0.05,), robot=True))
+        )
 
 
 def test_contact_permissions_reject_ambiguous_frame_and_shape_ids():
-    pytest.importorskip("fcl")
+    pytest.importorskip("newton")
     with pytest.raises(ValueError, match="unambiguous"):
-        FCLCollisionChecker(
+        NewtonCollisionChecker(
             (
                 CollisionBody("arm/0", "arm", "sphere", (0.1,), robot=True),
                 CollisionBody("other", "arm/0", "sphere", (0.1,)),
@@ -396,12 +395,137 @@ def test_contact_permissions_reject_ambiguous_frame_and_shape_ids():
         )
 
 
+@pytest.mark.parametrize(
+    "device", ("cpu", pytest.param("cuda:0", marks=pytest.mark.gpu))
+)
+def test_newton_clearance_cap_masks_and_owned_query_lifetime(device):
+    checker = NewtonCollisionChecker(
+        (
+            CollisionBody("arm", "arm", "sphere", (0.1,), robot=True),
+            CollisionBody("payload", "payload", "box", (0.2, 0.2, 0.2)),
+        ),
+        device=device,
+        clearance_m=0.02,
+    )
+    fixed = np.eye(4)
+    target = np.eye(4)
+    target[0, 3] = 1.0
+    frames = {"arm": fixed, "payload": target}
+    before = {k: v.copy() for k, v in frames.items()}
+    report, clearance = checker.check(frames)
+    assert report.status == "passed" and 0.02 <= clearance <= checker.detection_gap_m
+    target[0, 3] = 0.21
+    assert checker.check(frames)[0].status == "failed"
+    assert (
+        checker.check(frames, allowed_contacts=(("arm", "payload"),))[0].status
+        == "passed"
+    )
+    assert checker.check(frames)[0].status == "failed"
+    target[0, 3] = 1.0
+    assert checker.check(frames)[0].status == "passed"
+    assert all(np.array_equal(frames[k], v) for k, v in before.items())
+    assert checker.metadata["clearance_scope"] == "capped_contact_band"
+    if device.startswith("cuda"):
+        assert checker.metadata["cuda_graph"] == "captured"
+    checker.close()
+    checker.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        checker.check(frames)
+
+
+def test_newton_saturated_contact_buffer_cannot_accept_a_configuration():
+    checker = NewtonCollisionChecker(
+        (
+            CollisionBody("a", "a", "box", (0.2, 0.2, 0.2), robot=True),
+            CollisionBody("b", "b", "box", (0.2, 0.2, 0.2)),
+        ),
+        max_contacts=1,
+    )
+    with pytest.raises(UnsupportedFeasibilityError, match="overflowed"):
+        checker.check({"a": np.eye(4), "b": np.eye(4)})
+    checker.close()
+
+
+@pytest.mark.parametrize(
+    "device", ("cpu", pytest.param("cuda:0", marks=pytest.mark.gpu))
+)
+def test_newton_rebased_coordinates_preserve_overlapping_spheres(device):
+    checker = NewtonCollisionChecker(
+        (
+            CollisionBody("a", "a", "sphere", (0.1,), robot=True),
+            CollisionBody("b", "b", "sphere", (0.1,)),
+        ),
+        device=device,
+    )
+    for a, b in (
+        (np.array([1e40, 0.0, 0.0]), np.array([1e40, 0.0, 0.0])),
+        (
+            np.array([105.60602987818785, 99.58739128249081, 97.52718946961653]),
+            np.array([105.75440541212491, 99.68305045067996, 97.62117683297595]),
+        ),
+    ):
+        assert np.linalg.norm(b - a) < 0.2
+        first, second = np.eye(4), np.eye(4)
+        first[:3, 3], second[:3, 3] = a, b
+        assert checker.check({"a": first, "b": second})[0].status == "failed"
+    checker.close()
+
+
+def test_newton_invalid_composition_or_query_precision_is_unsupported():
+    local = np.eye(4)
+    local[0, 3] = 1e308
+    checker = NewtonCollisionChecker(
+        (
+            CollisionBody("floor", "floor", "halfspace", (0, 0, 1, 0)),
+            CollisionBody("r", "r", "sphere", (0.1,), local_pose=local, robot=True),
+        ),
+    )
+    frame = np.eye(4)
+    frame[0, 3], frame[2, 3] = 1e308, -1
+    with pytest.raises(UnsupportedFeasibilityError, match="composed"):
+        checker.check({"floor": np.eye(4), "r": frame})
+    checker.close()
+    checker = NewtonCollisionChecker(
+        (
+            CollisionBody("a", "a", "sphere", (0.1,), robot=True),
+            CollisionBody("b", "b", "sphere", (0.1,)),
+        ),
+    )
+    frame[0, 3] = 1e40
+    with pytest.raises(UnsupportedFeasibilityError, match="precision"):
+        checker.check({"a": np.eye(4), "b": frame})
+    checker.close()
+    for radius in (1e40, 1e-50):
+        with pytest.raises(UnsupportedFeasibilityError):
+            NewtonCollisionChecker(
+                (CollisionBody("s", "s", "sphere", (radius,), robot=True),)
+            )
+
+
+def test_newton_translated_halfspace_preserves_small_shape_support():
+    local = np.eye(4)
+    local[2, 3] = 0.05
+    checker = NewtonCollisionChecker(
+        (
+            CollisionBody("floor", "floor", "halfspace", (0, 0, 1, 0)),
+            CollisionBody(
+                "sphere", "sphere", "sphere", (0.1,), local_pose=local, robot=True
+            ),
+        ),
+    )
+    for height in (0.0, 1e16, 1e40):
+        pose = np.eye(4)
+        pose[2, 3] = height
+        assert checker.check({"floor": pose, "sphere": pose})[0].status == "failed"
+    checker.close()
+
+
 def test_robot_rrt_routes_around_blockage_and_exhausts_a_complete_barrier():
     from types import SimpleNamespace
     import torch
     from embodichain.lab.sim.scene.feasibility import RobotFeasibilityBackend
 
-    pytest.importorskip("fcl")
+    pytest.importorskip("newton")
 
     class Transform:
         def __init__(self, q):
@@ -449,7 +573,7 @@ def test_robot_rrt_routes_around_blockage_and_exhausts_a_complete_barrier():
     cfg = SceneRobotFeasibilityCfg(max_motion_samples=8192, max_rrt_nodes=256)
 
     def backend(height):
-        checker = FCLCollisionChecker(
+        checker = NewtonCollisionChecker(
             (
                 CollisionBody("tool", "r/tcp", "sphere", (0.05,), robot=True),
                 CollisionBody("wall", "wall", "box", (0.4, height, 0.2)),

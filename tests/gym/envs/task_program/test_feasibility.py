@@ -286,6 +286,7 @@ def test_host_uses_restored_identity_and_releases_resources_on_sink_error(
 
     checker = SimpleNamespace(
         bodies=(CollisionBody("body", "body", "sphere", (0.1,), robot=True),),
+        metadata={"backend": "test-query", "clearance_scope": "test"},
         check=lambda *args, **kwargs: (FeasibilityCheck("collision", "passed"), 0.1),
     )
     host = module.TaskProgramFeasibilityHost(

@@ -28,7 +28,7 @@ import torch
 
 from .budget import FeasibilityBudget, FeasibilityBudgetExhausted
 from .cfg import SceneRobotFeasibilityCfg
-from .collision import FCLCollisionChecker, UnsupportedFeasibilityError
+from .collision import NewtonCollisionChecker, UnsupportedFeasibilityError
 from .contracts import FeasibilityCheck, TaskPhase, TaskOperationMode
 
 if TYPE_CHECKING:
@@ -244,7 +244,7 @@ class RobotFeasibilityBackend:
     def __init__(
         self,
         robot: Robot,
-        collision: FCLCollisionChecker,
+        collision: NewtonCollisionChecker,
         cfg: SceneRobotFeasibilityCfg,
         entity_poses: Mapping[str, object],
         *,

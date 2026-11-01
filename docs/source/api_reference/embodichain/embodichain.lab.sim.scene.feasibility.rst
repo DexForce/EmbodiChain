@@ -6,12 +6,12 @@ fixed while varying declared scene groups and installation XY/yaw. It returns
 conditional proposal regions and exact execution evidence. A workspace point,
 an IK solution and a complete physically successful task are different results.
 
-Install the optional physical collision dependencies and run the authored UR5
-example from the repository root:
+Install EmbodiChain and run the authored UR5 example from the repository root.
+The collision query reuses the Newton/Warp packages provided by DexSim:
 
 .. code-block:: bash
 
-   pip install -e '.[feasibility]'
+   pip install -e .
    embodichain search-scene-feasibility \
      --config examples/expansion/scene_robot_feasibility/search.ur5.yaml \
      --output outputs/scene_feasibility
@@ -52,14 +52,35 @@ adaptation are reported explicitly.
 The default physical adapter reads materialized native robot-link and rigid-body
 collision descriptors, including the engine's cooked convex geometry, rather
 than render meshes or uncooked URDF surfaces. It requires unit robot asset scale;
-other scales use a trusted explicit geometry adapter. It includes the global ground as a halfspace, checked
-analytically to avoid unsupported native FCL halfspace distance combinations.
+other scales use a trusted explicit geometry adapter. Native ``CONVEX`` shapes
+remain explicitly convex; they are not inferred from render surfaces or
+triangle winding. The global ground is a halfspace checked with analytic
+physical-shape support. Triangle mesh and SDF inputs return unsupported rather
+than being silently convexified.
+
+``NewtonCollisionChecker`` owns an independent query model and scratch state.
+It does not step physics or mutate the host's positions, filters or clock.
 Robot/environment, self, inter-arm and held-object queries use stage-local
-permissions. Closed convex meshes use solid FCL geometry; closed concave meshes also receive
-bidirectional connected-component containment checks using tiled solid angles.
-Open or inconsistently oriented meshes return unsupported when containment is
-required. Path checks are discrete and runtime checks occur at observed control boundaries;
-these results do not certify continuous collision freedom.
+permissions. Shape/pair/contact budgets are bounded, and overflow or nonfinite
+results cannot accept a candidate. Query arrays and graphs are released by the
+host after each attempt.
+
+CPU is the default query device. ``collision_device`` selects CPU/CUDA,
+independently of the environment-owned physical backend and proposal device;
+``collision_use_cuda_graph`` controls CUDA replay. Reported clearance is a
+nonnegative estimate capped by the declared contact detection band, never an
+infinite or exact global minimum distance when no contact is generated. Backend
+version, device, tolerances, detection band, budgets and verification identity
+are retained in execution evidence. Path checks are discrete and runtime checks
+occur at observed control boundaries; they do not certify continuous collision
+freedom.
+
+Transforms are translated to a query-local origin before applying shape-local
+offsets. Native queries additionally use an owned scale-aware tolerance value,
+updated before CUDA graph replay. Unrepresentable geometry, nonfinite composed
+poses/distances, or precision uncertainty beyond the contact-band budget return
+unsupported. The largest applied tolerance and coordinate policy are recorded
+in metadata; one checker instance expects serialized calls.
 
 Search, sampling and independent validation
 -------------------------------------------
@@ -148,7 +169,7 @@ Implementation modules
 .. autosummary::
 
    CollisionBody
-   FCLCollisionChecker
+   NewtonCollisionChecker
    UnsupportedFeasibilityError
 
 .. currentmodule:: embodichain.lab.sim.scene.feasibility.planning
@@ -199,9 +220,6 @@ Implementation modules
    :members:
 
 .. automodule:: embodichain.compute.geometry.planar
-   :members:
-
-.. automodule:: embodichain.compute.geometry.solid
    :members:
 
 .. currentmodule:: embodichain.lab.sim.objects.backends

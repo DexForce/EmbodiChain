@@ -50,8 +50,8 @@ def test_incomplete_graph_qualification_is_unranked_and_errors_visible(
         }
 
     qualifications = [
-        complete("primitive", "fcl_cpu"),
-        complete("robot", "fcl_cpu"),
+        complete("primitive", "newton_runtime_cpu"),
+        complete("robot", "newton_runtime_cpu"),
         complete("primitive", "newton_cuda_graph"),
         {
             "fixture": "robot",
@@ -60,7 +60,7 @@ def test_incomplete_graph_qualification_is_unranked_and_errors_visible(
         },
     ]
     summary = {r["algorithm"]: r for r in _qualification_summary([], qualifications)}
-    assert summary["fcl_cpu"]["success_rate"] == 1.0
+    assert summary["newton_runtime_cpu"]["success_rate"] == 1.0
     graph = summary["newton_cuda_graph"]
     assert graph["success_rate"] is None
     assert graph["coverage"] == "1/2" and graph["status"] == "incomplete"

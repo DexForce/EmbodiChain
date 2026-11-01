@@ -28,6 +28,34 @@ import numpy as np
 import pytest
 import yaml
 
+_WITHOUT_FCL = """
+import importlib.abc, runpy, sys
+class NoFCL(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'fcl' or fullname.startswith('fcl.'):
+            raise ModuleNotFoundError('FCL is deliberately unavailable')
+sys.meta_path.insert(0, NoFCL())
+sys.argv = ['embodichain', *sys.argv[1:]]
+runpy.run_module('embodichain', run_name='__main__')
+"""
+
+
+def _source_environment(root: Path) -> dict[str, str]:
+    """Keep bundled extensions in the same checkout as the tested core."""
+    env = dict(os.environ)
+    sources = (
+        root,
+        root / "extensions",
+        root / "extensions/embodichain_tasks",
+        root / "extensions/embodichain_benchmarks",
+        root / "extensions/embodichain_models",
+    )
+    env["PYTHONPATH"] = (
+        os.pathsep.join(map(str, sources)) + os.pathsep + env.get("PYTHONPATH", "")
+    )
+    env["EMBODICHAIN_SIM_EXIT_PROCESS"] = "0"
+    return env
+
 
 @pytest.mark.requires_sim
 @pytest.mark.subprocess_sim
@@ -47,14 +75,12 @@ def test_native_joint_search_preserves_actual_start_and_measured_receipts(tmp_pa
     path = tmp_path / "search.yaml"
     path.write_text(yaml.safe_dump(config))
     output = tmp_path / "output"
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")
-    env["EMBODICHAIN_SIM_EXIT_PROCESS"] = "0"
+    env = _source_environment(root)
     result = subprocess.run(
         [
             sys.executable,
-            "-m",
-            "embodichain",
+            "-c",
+            _WITHOUT_FCL,
             "search-scene-feasibility",
             "--config",
             str(path),
@@ -100,6 +126,14 @@ def test_native_joint_search_preserves_actual_start_and_measured_receipts(tmp_pa
                 == episode["observation/joint_positions"].shape[0]
             )
             assert "execution_seed" in metadata["metadata"]
+            assert (
+                metadata["metadata"]["collision_query"]["backend"]
+                == "newton.CollisionPipeline"
+            )
+            assert (
+                metadata["metadata"]["collision_query"]["clearance_scope"]
+                == "capped_contact_band"
+            )
     session = json.loads((output / "session.json").read_text())
     assert session["counts"]["committed"] == 2
 
@@ -125,14 +159,12 @@ def test_native_bimanual_search_requires_transfer_place_and_independent_collisio
     path = tmp_path / "bimanual.yaml"
     path.write_text(yaml.safe_dump(config))
     output = tmp_path / "bimanual"
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")
-    env["EMBODICHAIN_SIM_EXIT_PROCESS"] = "0"
+    env = _source_environment(root)
     result = subprocess.run(
         [
             sys.executable,
-            "-m",
-            "embodichain",
+            "-c",
+            _WITHOUT_FCL,
             "search-scene-feasibility",
             "--config",
             str(path),
@@ -161,6 +193,10 @@ def test_native_bimanual_search_requires_transfer_place_and_independent_collisio
             and "placed_and_released" in events
         )
         assert row.evaluation.evidence["first_runtime_collision"] is None
+        assert (
+            row.evaluation.evidence["collision_query"]["backend"]
+            == "newton.CollisionPipeline"
+        )
     files = list((output / "episodes").glob("*.npz"))
     assert len(files) == len(accepted)
     with np.load(files[0], allow_pickle=False) as episode:
