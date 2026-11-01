@@ -3604,9 +3604,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
           "symbol": "SimulationTaskProgramFactory.create_atomic_action_engine",
-          "start_line": 647,
-          "end_line": 651,
-          "excerpt": "        engine = AtomicActionEngine(\n            motion_generator,\n            control_profiles=profile.action_control_profiles(),\n            grasp_pose_generators=self._grasp_pose_generators,\n        )"
+          "start_line": 801,
+          "end_line": 802,
+          "excerpt": "        engine = AtomicActionEngine(\n            motion_generator,"
         }
       ]
     },
@@ -3622,9 +3622,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
           "symbol": "SimulationTaskProgramFactory._create_motion_generator",
-          "start_line": 788,
-          "end_line": 788,
-          "excerpt": "            generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))"
+          "start_line": 965,
+          "end_line": 966,
+          "excerpt": "            generator = MotionGenerator(\n                MotionGenCfg(planner_cfg=planner_cfg), **selection_kwargs"
         }
       ]
     },
@@ -3658,9 +3658,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 666,
-          "end_line": 666,
-          "excerpt": "        clock = EnvironmentStepClock(self._step_dt)"
+          "start_line": 777,
+          "end_line": 778,
+          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
         }
       ]
     },
@@ -3676,9 +3676,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 736,
-          "end_line": 736,
-          "excerpt": "        command_sink = BufferedGymCommandSink(command_encoder, clock)"
+          "start_line": 777,
+          "end_line": 778,
+          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
         }
       ]
     },
@@ -3695,8 +3695,8 @@
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
           "start_line": 777,
-          "end_line": 786,
-          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n            plan_transform_factory=plan_transform_factory,\n            nominal_source_factory=nominal_source_factory,\n        )"
+          "end_line": 778,
+          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
         }
       ]
     },
@@ -3841,8 +3841,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 740,
-          "end_line": 741,
+          "start_line": 777,
+          "end_line": 778,
           "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
         }
       ]
@@ -3938,9 +3938,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 736,
-          "end_line": 736,
-          "excerpt": "        command_sink = BufferedGymCommandSink(command_encoder, clock)"
+          "start_line": 777,
+          "end_line": 778,
+          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
         }
       ]
     },

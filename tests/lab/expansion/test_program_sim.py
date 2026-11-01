@@ -47,7 +47,8 @@ def _probe(source: str = "task_program") -> None:
     cfg.num_envs = cfg.sim_cfg.num_envs = 2
     cfg.seed = 0
     cfg.sim_cfg.headless = True
-    cfg.sim_cfg.device = "cpu"
+    if source != "task_program_newton":
+        cfg.sim_cfg.device = "cpu"
     cfg.sim_cfg.render_cfg.renderer = "no-render"
     cfg.light.direct = []
     cfg.light.indirect = None
@@ -220,7 +221,7 @@ def _probe(source: str = "task_program") -> None:
             changed = capture_physics_properties(view)
             torch.testing.assert_close(
                 changed["cube.com_pose"][:, 0] - parameters["cube.com_pose"][:, 0],
-                torch.tensor([0.001, -0.001]),
+                torch.tensor([0.001, -0.001], device=changed["cube.com_pose"].device),
                 atol=1e-7,
                 rtol=0,
             )
@@ -274,7 +275,13 @@ def _probe(source: str = "task_program") -> None:
 @pytest.mark.requires_sim
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "source", ["task_program", "task_program_abort", "task_program_newton", "real2sim"]
+    "source",
+    [
+        "task_program",
+        "task_program_abort",
+        pytest.param("task_program_newton", marks=pytest.mark.gpu),
+        "real2sim",
+    ],
 )
 def test_native_task_program_two_rows_one_world(source):
     if source == "real2sim" and not all(
