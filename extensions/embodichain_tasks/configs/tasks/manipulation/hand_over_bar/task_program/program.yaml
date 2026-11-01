@@ -1,0 +1,47 @@
+program_id: hand_over_bar
+instruction: Transfer the bar from the left gripper to the right gripper and place
+  it on the table.
+targets:
+  delivery:
+    kind: cyclic_pose
+    values:
+    - position:
+      - 0.45
+      - -0.18
+      - 0.815
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  rest:
+    kind: cyclic_pose
+    values:
+    - position:
+      - 0.45
+      - -0.18
+      - 0.775
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+program:
+  kind: segment
+  name: transfer_bar
+  steps:
+    kind: invoke
+    call:
+      kind: hand_over
+      object: bar
+      final_target:
+        kind: target_ref
+        target: delivery
+  post:
+  - kind: wait_stable
+    entity: bar
+  validators:
+  - kind: object_near_target
+    object: bar
+    target: rest
+    position_tolerance: 0.04

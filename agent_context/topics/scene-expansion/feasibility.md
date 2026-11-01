@@ -1,0 +1,66 @@
+# Joint scene and robot feasibility
+
+`embodichain.lab.sim.scene.feasibility` owns fixed task/robot/scene search
+contracts, joint XY/yaw proposals, branch screening, conditional regions and
+independent fixed-count validation. It owns no simulator, semantic registry,
+model client or data execution lifecycle. Numerical planar composition lives in
+`compute.geometry.planar`.
+
+The configured entry is `search-scene-feasibility`, dispatched to
+`lab.task_program.integrations.feasibility`. It strictly decodes an explicit
+request and a trusted existing Task Program deployment. Robot, resolved runtime
+policy, physical configuration and acceptance thresholds enter its identities.
+The configured adapter supports one runtime-policy mode; Python integrations
+can bind multiple legal operation modes explicitly. An explicit workspace phase,
+part and group can enable `RobotWorkspaceProposalSource`: it owns valid-only FK
+copies after a warm host is destroyed, retains independent uniform exploration,
+and never certifies projected height/orientation. Fixed coordinates canonicalize
+to zero; proposal prefixes require the same recorded feedback stream.
+
+`integrations/simulation/feasibility.py` owns the B=1 Gym host. It rebuilds an
+installation from copied configuration, prepares through
+`SimulationSceneExpansionHost`, screens the phase graph, restores and identifies
+the actual execution start, then uses `execute_scene_variant`. Runtime controller
+provenance selects phase contact permissions; measured object poses replace
+projected attachment poses during actual execution. `ExpansionSession` remains
+the owner of attempts, reservations, accepted episodes and persistence receipts.
+Only confirmed writes count as committed data. Required `observation_keys` use
+actual reset/step returns, preserving T+1 history without extra observation
+updates. Raw recording bytes are bounded. Independent variation events are
+rejected by the configured adapter; known reset settling is permitted, and
+physical geometry signatures are rechecked across preparation/restoration.
+Initial collision checks include static layout overlap with explicit support
+contacts. Per-instance simulation-update guards bound preparation/settling loops
+without blocking cleanup; required observations use the qpos-only session schema.
+
+`planning.py` retains full-joint branches, including synchronized targets and
+mimic constraints. Hypothetical whole-robot FK supplies solver-root transforms;
+using live roots for projected torso/base states is incorrect. Complete path
+screening uses explicit physical geometry and phase contact permissions.
+`collision.py` lazily loads FCL; the default simulation extractor reads native robot-link and rigid shapes, includes the global ground, and
+rejects non-robot articulations or unsupported robot asset scales/formats.
+Native FCL halfspace distance calls are avoided using analytic shape support.
+Closed meshes include bidirectional component containment; open/inconsistent
+meshes cannot pass required containment checks. Discrete path/control-boundary
+checks do not certify continuous collision freedom.
+
+`motion/_budget.py` supplies context-local cooperative hooks at Robot IK,
+MotionGenerator generation and Atomic planning/recovery boundaries. No active
+scope means no budget is installed. The host shares quotas with screening,
+reserves validation capacity, and preserves exhaustion even when a runtime
+converts an exception to a failed action. A native call is checked on return;
+cooperative cancellation cannot preempt its internal work.
+
+Regions retain joint coordinate conditions and operation mode. Sampled points,
+workspace/IK checks, path screening and measured task success are distinct
+outcomes. Independent validation freezes its distribution before trials and
+uses separate IID streams. Only completed fixed allocations have marginal
+binomial intervals; interruption leaves raw counts without an interval.
+Sampling new layouts reruns semantic/geometric checks and never inherits task
+success. Region projections must not be recombined into independent ranges.
+
+Use `tests/sim/scene/feasibility`, the geometry planar tests and
+`tests/gym/envs/task_program/test_feasibility.py` for production contracts. The
+UR5 job in `examples/expansion/scene_robot_feasibility` exercises the configured
+path; native qualification and recorded outcomes remain separate from CPU ports.
+See the [public API guide](../../../docs/source/api_reference/embodichain/embodichain.lab.sim.scene.feasibility.rst).

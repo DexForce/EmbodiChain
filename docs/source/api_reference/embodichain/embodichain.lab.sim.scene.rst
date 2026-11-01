@@ -368,3 +368,14 @@ See :mod:`embodichain.lab.task_program.integrations.scene_expansion` for task
 execution and :mod:`embodichain.compute.geometry` for reusable tensor kernels.
 The support, polygon-placement, greedy-packing and SLSQP policies remain private
 CPU implementations in ``sim.scene``.
+
+Joint task feasibility
+----------------------
+
+See :doc:`embodichain.lab.sim.scene.feasibility` for task-conditioned scene and
+robot installation search, independent validation and the configured entry point.
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.scene.feasibility

@@ -1,0 +1,11 @@
+task_key: hand_over_bar
+title: Hand Over Bar
+summary: Transfer a rigid bar between two manipulators and place it on the table.
+tags:
+- manipulation
+- bimanual
+- task_program
+default_deployment: dual_ur5
+deployments:
+  dual_ur5:
+    config: task.dual_ur5.yaml

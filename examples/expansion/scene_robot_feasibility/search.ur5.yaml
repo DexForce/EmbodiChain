@@ -1,0 +1,356 @@
+request:
+  task_id: cube-pick-place-once:v1
+  robot_profile_id: ur5-dh-pgi-140-80:v1
+  policy_id: trajectory-open-loop:v1
+  validator_id: measured-lift-place-release:v1
+  parent_scene_id: cube-ground:v1
+  entity_poses:
+    cube:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - -0.42
+    - - 0.0
+      - 1.0
+      - 0.0
+      - -0.08
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.025
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    UR5:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  variables:
+  - name: cube_layout
+    kind: scene
+    reference_pose:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - -0.42
+    - - 0.0
+      - 1.0
+      - 0.0
+      - -0.08
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.025
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    lower:
+    - -0.02
+    - -0.02
+    - 0.0
+    upper:
+    - 0.02
+    - 0.02
+    - 0.0
+    members:
+      cube:
+      - - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+  - name: installation
+    kind: robot
+    reference_pose:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    lower:
+    - -0.015
+    - -0.01
+    - -0.04
+    upper:
+    - 0.015
+    - 0.01
+    - 0.04
+    members:
+      UR5:
+      - - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+  modes:
+  - mode_id: runtime
+    phases:
+    - phase_id: approach
+      targets:
+      - control_part: arm
+        frame_uid: cube
+        pose:
+        - - 5.466299823517308e-07
+          - 0.9999996829735945
+          - 0.0007962740806152979
+          - 0.0
+        - - 0.999999682973641
+          - 8.742272935098221e-08
+          - -0.0007962742052351375
+          - 0.0
+        - - -0.000796274022407642
+          - 0.00079627426344278
+          - -0.9999993659472883
+          - 0.15
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: &id001
+      - - cube
+        - UR5/gripper_finger1_link_1
+      - - cube
+        - UR5/gripper_finger2_link_1
+      - - cube
+        - default_plane
+    - phase_id: grasp
+      dependencies:
+      - approach
+      targets:
+      - control_part: arm
+        frame_uid: cube
+        pose:
+        - - 5.466299823517308e-07
+          - 0.9999996829735945
+          - 0.0007962740806152979
+          - 0.0
+        - - 0.999999682973641
+          - 8.742272935098221e-08
+          - -0.0007962742052351375
+          - 0.0
+        - - -0.000796274022407642
+          - 0.00079627426344278
+          - -0.9999993659472883
+          - 0.06
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id001
+    - phase_id: lift
+      dependencies:
+      - grasp
+      targets:
+      - control_part: arm
+        frame_uid: cube
+        pose:
+        - - 5.466299823517308e-07
+          - 0.9999996829735945
+          - 0.0007962740806152979
+          - 0.0
+        - - 0.999999682973641
+          - 8.742272935098221e-08
+          - -0.0007962742052351375
+          - 0.0
+        - - -0.000796274022407642
+          - 0.00079627426344278
+          - -0.9999993659472883
+          - 0.2
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id001
+      held_objects:
+      - entity_uid: cube
+        control_part: arm
+        tcp_from_object: &id002
+        - - 5.466299823517304e-07
+          - 0.9999996829736408
+          - -0.0007962740224076418
+          - 4.7776441344458516e-05
+        - - 0.9999996829735945
+          - 8.742272935098192e-08
+          - 0.00079627426344278
+          - -4.77764558065668e-05
+        - - 0.0007962740806152977
+          - -0.0007962742052351374
+          - -0.9999993659472882
+          - 0.059999961956837294
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+    - phase_id: place
+      dependencies:
+      - lift
+      targets:
+      - control_part: arm
+        pose:
+        - - 5.466299823517308e-07
+          - 0.9999996829735945
+          - 0.0007962740806152979
+          - -0.4
+        - - 0.999999682973641
+          - 8.742272935098221e-08
+          - -0.0007962742052351375
+          - 0.48
+        - - -0.000796274022407642
+          - 0.00079627426344278
+          - -0.9999993659472883
+          - 0.15
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id001
+      held_objects:
+      - entity_uid: cube
+        control_part: arm
+        tcp_from_object: *id002
+search:
+  seed: 7
+  max_wall_time_s: 600.0
+  max_candidates: 8
+  max_regions: 2
+  validation_samples: 2
+  ik_seeds: 2
+  beam_width: 4
+  max_rrt_nodes: 128
+task_program:
+  deployment: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+  program: program.yaml
+  simulation_device: cpu
+  enable_sensor: false
+  settle_steps: 30
+  initial_semantics:
+  - kind: pose_near
+    entity: cube
+    position:
+    - -0.42
+    - -0.08
+    - 0.025
+    tolerance_m: 0.08
+  initial_geometry:
+  - kind: support_bounds
+    entity: cube
+    lower:
+    - -1.0
+    - -1.0
+    - -0.003
+    upper:
+    - 1.0
+    - 1.0
+    - 0.08
+  final_checks:
+  - &id003
+    kind: pose_near
+    entity: cube
+    position:
+    - -0.4
+    - 0.48
+    - 0.025
+    tolerance_m: 0.04
+  - &id004
+    kind: joint_range
+    joint: gripper_finger1_joint_1
+    lower: -0.001
+    upper: 0.005
+  - &id005
+    kind: speed_below
+    entity: cube
+    linear_m_s: 0.03
+    angular_rad_s: 0.2
+  events:
+  - event_id: lift
+    conditions:
+    - kind: lifted
+      entity: cube
+      height_m: 0.05
+  - event_id: placed_and_released
+    conditions:
+    - *id003
+    - *id004
+    - *id005
+    consecutive_steps: 3
+  runtime_phase_by_call:
+    '0': lift
+    '1': place
+  ignored_contacts:
+  - - UR5/arm_base_link
+    - UR5/shoulder_link
+  - - UR5/shoulder_link
+    - UR5/upper_arm_link
+  - - UR5/upper_arm_link
+    - UR5/forearm_link
+  - - UR5/forearm_link
+    - UR5/wrist_1_link
+  - - UR5/wrist_1_link
+    - UR5/wrist_2_link
+  - - UR5/wrist_2_link
+    - UR5/wrist_3_link
+  - - UR5/gripper_base_link_1
+    - UR5/gripper_finger1_link_1
+  - - UR5/gripper_base_link_1
+    - UR5/gripper_finger2_link_1
+  - - UR5/arm_base_link
+    - default_plane
+  - - UR5/wrist_3_link
+    - UR5/gripper_base_link_1
+  runtime_phase_by_segment:
+    repeated_cube_pick_place:segment:$.program.body.items[0]@$.program[0]: lift
+    repeated_cube_pick_place:segment:$.program.body.items[1]@$.program[0]: place
+  workspace_proposal:
+    phase_id: grasp
+    control_part: arm
+    variable_name: cube_layout
+    sample_count: 4096
+    uniform_fraction: 0.5
