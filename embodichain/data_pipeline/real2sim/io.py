@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 import zipfile
+from collections.abc import Mapping
 from dataclasses import asdict, fields
 from pathlib import Path
 
@@ -54,6 +56,44 @@ _ARRAY_FIELDS = frozenset(
 )
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _MAX_ARRAY_BYTES = 512 * 1024 * 1024
+
+
+def _validate_npz_arrays(
+    path: Path,
+    *,
+    max_bytes: int,
+    member_limits: Mapping[str, int] | None = None,
+) -> None:
+    """Check decoded NPY sizes against their payloads before array allocation."""
+    with zipfile.ZipFile(path) as archive:
+        entries = archive.infolist()
+        if sum(item.file_size for item in entries) > max_bytes:
+            raise ValueError("NPZ arrays exceed the decoded size limit")
+        names: set[str] = set()
+        for item in entries:
+            if item.filename in names or not item.filename.endswith(".npy"):
+                raise ValueError("NPZ requires unique NPY members")
+            names.add(item.filename)
+            with archive.open(item) as stream:
+                version = np.lib.format.read_magic(stream)
+                if version == (1, 0):
+                    shape, _, dtype = np.lib.format.read_array_header_1_0(stream)
+                elif version == (2, 0):
+                    shape, _, dtype = np.lib.format.read_array_header_2_0(stream)
+                else:
+                    raise ValueError("unsupported NPZ member NPY version")
+                size = math.prod(shape) * dtype.itemsize
+                budget = (member_limits or {}).get(item.filename, max_bytes)
+                if (
+                    dtype.kind not in "fiub"
+                    or dtype.itemsize <= 0
+                    or any(dimension < 0 for dimension in shape)
+                    or size > budget
+                    or stream.tell() + size != item.file_size
+                ):
+                    raise ValueError(
+                        "NPY shape exceeds its payload or decoded byte budget"
+                    )
 
 
 def _digest(path: Path) -> str:
@@ -170,9 +210,7 @@ def load_trajectory(manifest: str | Path) -> Real2SimTrajectory:
     if _digest(array_path) != payload["sha256"]:
         raise ValueError("trajectory NPZ digest mismatch")
     try:
-        with zipfile.ZipFile(array_path) as archive:
-            if sum(item.file_size for item in archive.infolist()) > _MAX_ARRAY_BYTES:
-                raise ValueError("trajectory arrays exceed the size limit")
+        _validate_npz_arrays(array_path, max_bytes=_MAX_ARRAY_BYTES)
         with np.load(array_path, allow_pickle=False) as archive:
             if (
                 len(archive.files) != len(set(archive.files))
@@ -379,9 +417,7 @@ def load_prototype(
             max_output_bytes=max_output_bytes,
         )
         prototype = build_motion_prototype(unit)
-        with zipfile.ZipFile(normalized_path) as archive:
-            if sum(item.file_size for item in archive.infolist()) > _MAX_ARRAY_BYTES:
-                raise ValueError("prototype arrays exceed the size limit")
+        _validate_npz_arrays(normalized_path, max_bytes=_MAX_ARRAY_BYTES)
         expected = {
             "qpos": unit.qpos,
             "initial_qpos": unit.initial_qpos,

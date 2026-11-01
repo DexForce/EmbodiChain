@@ -679,6 +679,11 @@ class PrototypeMotionProvider:
             valid = torch.ones(1, dtype=torch.bool, device=positions.device)
             phase_seed = start_qpos
             for phase in unit.phases:
+                if self.authority == "hybrid" and phase.authority == "qpos":
+                    part = positions[:, phase.start : phase.stop, arm_ids].clone()
+                    parts.append(part)
+                    phase_seed = part[:, -1]
+                    continue
                 targets = target_tcp[:, phase.start : phase.stop]
                 stationary = torch.allclose(
                     targets, targets[:, :1].expand_as(targets), atol=1e-7, rtol=0
@@ -699,8 +704,6 @@ class PrototypeMotionProvider:
                 )
                 if stationary:
                     part = part.expand(-1, targets.shape[1], -1).clone()
-                if self.authority == "hybrid" and phase.authority == "qpos":
-                    part = positions[:, phase.start : phase.stop, arm_ids].clone()
                 parts.append(part)
                 valid &= phase_valid
                 phase_seed = part[:, -1]
@@ -711,13 +714,6 @@ class PrototypeMotionProvider:
                 or not bool(torch.isfinite(path).all())
             ):
                 raise ValueError("prototype IK failed on a required sample")
-            if self.authority == "hybrid":
-                path = path.clone()
-                for phase in unit.phases:
-                    if phase.authority == "qpos":
-                        path[:, phase.start : phase.stop] = positions[
-                            :, phase.start : phase.stop, arm_ids
-                        ]
             observed = robot.compute_batch_fk(
                 qpos=path, name=arm.control_part, to_matrix=True
             )

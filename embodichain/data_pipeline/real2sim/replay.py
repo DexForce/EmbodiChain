@@ -155,8 +155,17 @@ def export_real2sim_replay_manifest(
             commits.add(row["commit_id"])
             lineage = row["real2sim_lineage"]
             _artifact(root, lineage["trace"])
-            for name in ("real2sim_episode_evidence", "real2sim_observed_geometry"):
-                _artifact(root, row[name])
+            _artifact(root, row["real2sim_episode_evidence"])
+            observed_geometry = row.get("real2sim_observed_geometry")
+            if observed_geometry is not None:
+                _artifact(root, observed_geometry)
+            elif any(
+                item.get("id") == "observed_collision"
+                for item in row.get("validation_checks", ())
+            ):
+                raise ValueError(
+                    "observed collision evidence is missing its geometry sidecar"
+                )
             sources = []
             for call in lineage["calls"]:
                 bundle = row["real2sim_artifacts"][call["source_bundle"]]

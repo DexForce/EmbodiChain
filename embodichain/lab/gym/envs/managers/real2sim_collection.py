@@ -70,13 +70,9 @@ def load_staged_real2sim_episode(path: str | Path) -> ExpertEpisode:
     if not path.is_file() or path.stat().st_size > 128 * 1024 * 1024:
         raise ValueError("pending episode is missing or exceeds its size limit")
     try:
-        with zipfile.ZipFile(path) as archive:
-            entries = archive.infolist()
-            if (
-                len({entry.filename for entry in entries}) != len(entries)
-                or sum(entry.file_size for entry in entries) > 256 * 1024 * 1024
-            ):
-                raise ValueError("pending episode exceeds its archive limits")
+        from embodichain.data_pipeline.real2sim.io import _validate_npz_arrays
+
+        _validate_npz_arrays(path, max_bytes=256 * 1024 * 1024)
         with np.load(path, allow_pickle=False) as arrays:
             if "manifest" not in arrays.files or arrays["manifest"].dtype != np.uint8:
                 raise ValueError("pending episode manifest is invalid")

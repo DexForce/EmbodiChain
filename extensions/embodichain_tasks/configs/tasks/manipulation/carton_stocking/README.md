@@ -34,6 +34,9 @@ The deployment reuses the SDK's `franka_panda_robotiq85` embodiment and
 Source bindings retain the existing program fingerprint and call occurrences
 0/1/2. The ordinary Task Program bridge, Gym stepping and qualified synchronous
 LeRobot sink own execution and submission.
+The Place call explicitly requests 3 cm of vertical retreat, matching the
+measured prototype's approximately 3.16 cm. The external skill validates that
+clearance using FK; requesting more than the prototype provides is rejected.
 
 Prototype and evidence references have the closed form
 `{asset: Real2SimCarton, path: inputs/measured/0/prototype.json}`. Only registered

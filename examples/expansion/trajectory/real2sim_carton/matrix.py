@@ -69,6 +69,7 @@ def run(
         if len(profile.layouts) != 13 or len(profile.recipes) != 6:
             raise ValueError("each origin must declare the complete 13 x 6 matrix")
         payload = yaml.safe_load(path.read_text())
+        payload["source_artifacts"] = profile.source_artifacts
         for layout in payload["layouts"]:
             for recipe in profile.recipes:
                 cases.append((origin, task, payload, layout, recipe))

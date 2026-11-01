@@ -28,7 +28,6 @@ import hashlib
 import json
 import os
 import tempfile
-import zipfile
 from pathlib import Path
 from typing import Literal, Mapping, Sequence
 
@@ -37,6 +36,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from .contracts import PhaseAnnotation, Real2SimTrajectory
+from .io import _validate_npz_arrays
 
 __all__ = [
     "DroidEpisode",
@@ -485,40 +485,11 @@ def verify_droid_unit_evidence(
     if not isinstance(source, Real2SimTrajectory) or source.origin != "measured":
         raise ValueError("DROID original evidence requires a measured source")
     path = Path(evidence)
-    with zipfile.ZipFile(path) as archive:
-        if sum(item.file_size for item in archive.infolist()) > 128 * 1024 * 1024:
-            raise ValueError("DROID evidence exceeds its decoded size budget")
-        # ZIP byte counts alone do not bound the allocation requested by an NPY
-        # shape header. Validate every member before NumPy materializes arrays.
-        names = set()
-        for item in archive.infolist():
-            if item.filename in names or not item.filename.endswith(".npy"):
-                raise ValueError("DROID evidence requires unique NPY members")
-            names.add(item.filename)
-            with archive.open(item) as stream:
-                version = np.lib.format.read_magic(stream)
-                if version == (1, 0):
-                    shape, _, dtype = np.lib.format.read_array_header_1_0(stream)
-                elif version == (2, 0):
-                    shape, _, dtype = np.lib.format.read_array_header_2_0(stream)
-                else:
-                    raise ValueError("unsupported DROID evidence NPY version")
-                import math
-
-                size = math.prod(shape) * dtype.itemsize
-                budget = (
-                    1024 * 1024
-                    if item.filename == "metadata.npy"
-                    else 128 * 1024 * 1024
-                )
-                if (
-                    dtype.kind not in "fiub"
-                    or size > budget
-                    or stream.tell() + size != item.file_size
-                ):
-                    raise ValueError(
-                        "DROID evidence NPY shape exceeds its payload or byte budget"
-                    )
+    _validate_npz_arrays(
+        path,
+        max_bytes=128 * 1024 * 1024,
+        member_limits={"metadata.npy": 1024 * 1024},
+    )
     episode = load_droid_episode(original_recording)
     base = {
         name

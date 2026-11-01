@@ -93,6 +93,8 @@ profile:
       kind: move_held_object
     place:
       kind: place
+      # The measured prototype retreats about 3.16 cm above its release anchor.
+      lift_height: 0.03
       hand_interp_steps: 30
       release_settle_steps: 60
       preserve_current_object_orientation: false

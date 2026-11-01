@@ -8,6 +8,10 @@ memory before allocating its grid or casting event indices. Preparation,
 prototype readers and CLI accept caller-owned budgets; bundle metadata cannot
 raise the reader's limits. These estimates exclude the already loaded source
 and do not claim a process-RSS peak bound.
+Source, normalized, DROID-evidence and pending-episode NPZ readers check each
+NPY header's decoded shape against its byte budget and actual member payload
+before NumPy materializes arrays; ZIP member sizes and content hashes alone
+do not bound the declared allocation.
 
 `embodichain real2sim prepare|validate` operates offline. qpos-only prototypes
 can be prepared without TCP data; object-relative transfer needs TCP poses and
@@ -25,6 +29,8 @@ DROID sources, verifies their imported crop, and archives them with the prototyp
 `atomic_actions.PrototypeMotionProvider` supplies qpos, EEF or explicitly
 phase-bound hybrid nominal motion. Cartesian transfer is limited to B=1,
 tabletop XY/yaw and compatible geometry; it checks IK/FK and sampled joint limits.
+Hybrid qpos phases retain their recorded joints without a fresh IK solve;
+independent FK, inter-phase continuity and motion checks still apply.
 For a subsequent Pick, a qualified tabletop host can additionally verify that
 the observed object rests on the target support and permit its changed height
 and at most two degrees of measured tilt. Grasp orientation follows that
@@ -79,7 +85,12 @@ Its local `_audit.py` independently verifies persisted real-source episode evide
 `AtomicActionEngine` accepts a call-scoped nominal source before native planning;
 only PickUp, MoveHeldObject and Place opt in. Their skill-owned assembly retains
 effects, tracking, segments and scene dependencies. Source plans reject retries
-and replans. Programmatic and configured Task Program bindings use a compiled
+and replans. Pick requires the configured grasp command by the end of closure
+and throughout lift. External Place checks the requested vertical retract
+clearance and optional world-Z cap while retaining the source's lateral retreat.
+External MoveHeldObject and Place accept one target pose and reject ordered
+multi-waypoint goals; the native planners retain their waypoint support.
+Programmatic and configured Task Program bindings use a compiled
 program fingerprint and call occurrence; configured prototype content is
 rechecked by digest. Prototype manifests and typed source evidence may use closed
 `{asset, path}` file references resolved by `data._references`; registered bundle
@@ -147,7 +158,10 @@ Optional directed yaw acceptance compares observed object +X to the requested
 semantic object pose, not approximate FK release; solver error consumes the same
 task tolerance. `real2sim.replay.export_real2sim_replay_manifest` exports existing
 identities read-only after joining every episode to its complete recording
-journal and confirmed receipt. Failed attempts retain available actual T+1
+journal and confirmed receipt. Observed geometry is verified whenever present
+and is mandatory for episodes declaring observed-collision checks; trace and
+actual episode evidence remain mandatory for every replayed commit.
+Failed attempts retain available actual T+1
 partial rollouts without becoming successful episodes.
 
 Focused coverage: `tests/data_pipeline/test_real2sim_normalize.py`,

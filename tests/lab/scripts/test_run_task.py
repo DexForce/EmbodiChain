@@ -500,6 +500,31 @@ def test_cli_selects_configured_real2sim_owner_and_explicit_profile_override(
     )
 
 
+def test_staged_real2sim_rejects_declared_allocation_before_loading(
+    tmp_path, monkeypatch
+) -> None:
+    import io
+    import zipfile
+    import numpy as np
+
+    from embodichain.lab.gym.envs.managers.real2sim_collection import (
+        load_staged_real2sim_episode,
+    )
+
+    path = tmp_path / "pending.npz"
+    header = io.BytesIO()
+    np.lib.format.write_array_header_1_0(
+        header, dict(descr="|u1", fortran_order=False, shape=(10**12,))
+    )
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("manifest.npy", header.getvalue())
+    monkeypatch.setattr(
+        np, "load", lambda *args, **kwargs: pytest.fail("unbounded array allocation")
+    )
+    with pytest.raises(ValueError, match="NPY shape"):
+        load_staged_real2sim_episode(path)
+
+
 def test_real2sim_run_task_preserves_failed_write_without_rerunning(
     monkeypatch,
     tmp_path,

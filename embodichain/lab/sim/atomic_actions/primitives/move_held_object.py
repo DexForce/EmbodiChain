@@ -163,7 +163,12 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             device=self.device,
         )
         if goal.ndim == 4:
-            goal = goal[:, -1]
+            if goal.shape[1] != 1:
+                raise ValueError(
+                    "external transport requires a single target pose; "
+                    "ordered waypoints are unsupported"
+                )
+            goal = goal[:, 0]
         relation = held.object_to_eef.to(goal)
         if relation.ndim == 2:
             relation = relation.unsqueeze(0)
