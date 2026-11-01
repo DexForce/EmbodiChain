@@ -32,10 +32,10 @@ to another host GPU index when necessary. Reports are written under
 `output/container-validation/`. `PUBLIC_IMAGE` and `INTERNAL_IMAGE` override
 the registry/repository; tags always include the source commit.
 
-The `Container environments` workflow runs on `codex/container-*` pushes and
-can also be dispatched manually. It pushes qualified SHA-tagged candidates to
-the internal registry only after all three environments pass. The public
-candidate is staged in that registry for inspection before Docker Hub publication.
+Container build and publication workflows are maintained as a separate
+automation change. The build/qualification scripts here remain runnable
+manually; qualified public candidates can be staged in the internal registry
+for inspection before Docker Hub publication.
 
 ## Runtime selection
 
@@ -118,15 +118,16 @@ free to install their own Torch/codec profile.
 ## CI rollout and rollback
 
 CI defaults to the qualified internal `v4-py311-py312-c42e8a0b0857` image
-and activates `py312`. Repository variables `EMBODICHAIN_CI_IMAGE` and
-`EMBODICHAIN_CI_ENV` can override the image and business environment for rollout
-or rollback. The py312 CI profile requires PR #911's dependency changes in the
-checked-out code.
+and activates `py312`. The image reference and activation command are explicit
+in the existing workflows/shared action; the existing job graph, triggers,
+test selection and installation commands are preserved. The py312 CI profile
+requires PR #911's dependency changes in the checked-out code.
 
 After qualification, publish the public SHA-tagged candidate to Docker Hub,
 then move `ubuntu22.04-cuda12.8-py312` and the existing
 `ubuntu22.04-cuda12.8` alias to that digest. Preserve the previous public digest
 under a legacy tag before promotion. Keep the old internal `v3-py311` tag.
 
-Rollback restores the previous image digest and `EMBODICHAIN_CI_ENV=py311`.
+Rollback restores the previous image reference and the `py311` activation
+commands.
 Qualification fails when required CUDA, native, Blender or codec checks skip.
