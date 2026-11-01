@@ -1,5 +1,5 @@
 request:
-  task_id: hand-over-bar:v1
+  task_id: hand-over:bar-feasibility-example:v1
   robot_profile_id: dual-ur5-dh-pgi-140-80:v1
   policy_id: motion-gen-verified:v1
   validator_id: measured-bar-transfer-release:v1
@@ -327,7 +327,7 @@ search:
   max_rrt_nodes: 128
   max_ik_calls: 65536
 task_program:
-  deployment: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/hand_over_bar/task.dual_ur5.yaml
+  deployment: hand_over/task.dual_ur5.yaml
   simulation_device: cpu
   enable_sensor: false
   settle_steps: 30
@@ -397,7 +397,7 @@ task_program:
   runtime_phase_by_call:
     '0': delivery_requirement
   runtime_phase_by_segment:
-    hand_over_bar:segment:$.program: delivery_requirement
+    tabletop_hand_over:segment:$.program: delivery_requirement
   ignored_contacts:
   - - DualUR5/left_base_link
     - DualUR5/left_shoulder_link

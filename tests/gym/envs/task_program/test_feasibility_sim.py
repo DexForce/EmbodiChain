@@ -142,7 +142,7 @@ def test_native_joint_search_preserves_actual_start_and_measured_receipts(tmp_pa
 @pytest.mark.subprocess_sim
 @pytest.mark.gpu
 @pytest.mark.slow
-def test_native_bimanual_search_requires_transfer_place_and_independent_collision_checks(
+def test_native_hand_over_example_requires_transfer_place_and_independent_collision_checks(
     tmp_path,
 ):
     root = Path(__file__).resolve().parents[4]
@@ -200,6 +200,12 @@ def test_native_bimanual_search_requires_transfer_place_and_independent_collisio
     files = list((output / "episodes").glob("*.npz"))
     assert len(files) == len(accepted)
     with np.load(files[0], allow_pickle=False) as episode:
+        metadata = json.loads(str(episode["metadata"]))
+        segments = metadata["metadata"]["execution"]["segments"]
+        assert segments and all(
+            segment["metadata"]["task_program_id"] == "tabletop_hand_over"
+            for segment in segments
+        )
         assert episode["actions"].shape[1] == 16
         assert (
             episode["actions"].shape[0] + 1

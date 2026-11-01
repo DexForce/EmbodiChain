@@ -1,8 +1,9 @@
-program_id: hand_over_bar
-instruction: Transfer the bar from the left gripper to the right gripper and place
-  it on the table.
+# Specialize hand_over/task_program/program.bar.yaml for this table and targets.
+program_id: tabletop_hand_over
+instruction: Pass the bar from the left gripper to the right gripper and place it
+  on the table.
 targets:
-  delivery:
+  delivery_pose:
     kind: cyclic_pose
     values:
     - position:
@@ -14,7 +15,7 @@ targets:
       - 0.0
       - 0.0
       - 1.0
-  rest:
+  delivery_rest_pose:
     kind: cyclic_pose
     values:
     - position:
@@ -28,7 +29,9 @@ targets:
       - 1.0
 program:
   kind: segment
-  name: transfer_bar
+  name: hand_over_can
+  instruction: Transfer the bar between the grippers and place it at the delivery
+    position.
   steps:
     kind: invoke
     call:
@@ -36,12 +39,12 @@ program:
       object: bar
       final_target:
         kind: target_ref
-        target: delivery
+        target: delivery_pose
   post:
   - kind: wait_stable
     entity: bar
   validators:
   - kind: object_near_target
     object: bar
-    target: rest
+    target: delivery_rest_pose
     position_tolerance: 0.04

@@ -1,11 +1,11 @@
-integration_id: hand_over_bar:v1
-program_id: hand_over_bar
+integration_id: hand_over_feasibility_example:v1
+program_id: tabletop_hand_over
 requires:
-  scene_contract: hand_over_bar_scene:v1
+  scene_contract: hand_over_feasibility_scene:v1
   embodiment_contract: dual_arm_parallel_gripper
 scene_binding:
-  contract_id: hand_over_bar_scene:v1
-  registry_id: hand_over_bar
+  contract_id: hand_over_feasibility_scene:v1
+  registry_id: hand_over_feasibility_example
   rigid_objects:
   - entity_id: bar
     simulation_uid: bar

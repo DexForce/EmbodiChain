@@ -96,9 +96,30 @@ events. The canonical runtime owns grasp choice and the full handover/placement
 motion; native qualification must be assessed from its resulting atlas, rather
 than inferred from the preflight endpoints alone.
 
-`search.bar_dual_ur5.yaml` uses the configured rigid-bar transfer task: grasp,
-handover, then placement. It preserves the composed robot's relative mounting
-while searching the installation and bar/support-group layout.
+`search.bar_dual_ur5.yaml` reuses the existing
+[`hand_over` task](../../../extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/README.md)
+for rigid-bar grasp, handover and placement. The example-local `hand_over/`
+directory contains the physical scene, scene binding and a specialization of
+`hand_over/task_program/program.bar.yaml` for this table's target poses and
+acceptance tolerance. It retains the `tabletop_hand_over` program identity and
+shared HandOver flow, DualUR5 embodiment and verified execution policy.
+The example deployment uses a distinct process-local Gym ID,
+`HandOver-DualUR5-FeasibilityExample-v1`, so it can coexist with the official
+deployment. It has no task catalog entry. The search preserves the composed
+robot's relative mounting while varying the installation and bar/support-group
+layout.
+
+Run the example with:
+
+```bash
+embodichain search-scene-feasibility \
+  --config examples/expansion/scene_robot_feasibility/search.bar_dual_ur5.yaml \
+  --output outputs/hand_over_feasibility
+```
+
+Measured successful episodes qualify their exact layouts and attempts. Region
+sampling remains exploratory until frozen-distribution validation supplies
+statistical evidence; rejected or unverified episodes remain diagnostics.
 
 ## Evaluate Newton collision queries
 
