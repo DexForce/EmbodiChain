@@ -42,6 +42,9 @@ def _worker_environment(python: Path) -> dict[str, str]:
         )
         if value
     }
+    # A system interpreter's /usr prefix also contains OS/driver libraries.
+    # Only dedicated Python prefixes belong to the business environment.
+    prefixes.difference_update({"/", "/usr", "/usr/local"})
     for name in (
         "PYTHONHOME",
         "PYTHONPATH",

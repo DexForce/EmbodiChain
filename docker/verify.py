@@ -245,6 +245,57 @@ def _onnx_cuda() -> dict[str, object]:
     return {"onnxruntime": ort.__version__, "provider": "CUDAExecutionProvider"}
 
 
+def _pytest_checks(
+    repo: Path, selections: list[str], *, gpu: bool = False
+) -> dict[str, object]:
+    import xml.etree.ElementTree as xml
+
+    with tempfile.TemporaryDirectory(prefix="embodichain-qualification-") as directory:
+        report = Path(directory) / "tests.xml"
+        command = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-o",
+            f"cache_dir={directory}/cache",
+        ]
+        if gpu:
+            command.append("--run-gpu")
+        result = subprocess.run(
+            [*command, *selections, f"--junitxml={report}"], cwd=repo
+        )
+        if result.returncode:
+            raise RuntimeError(f"Qualification pytest failed: exit {result.returncode}")
+        cases = list(xml.parse(report).iter("testcase"))
+        skipped = [
+            case.attrib.get("name")
+            for case in cases
+            if case.find("skipped") is not None
+        ]
+        assert (
+            cases and not skipped
+        ), f"Required checks must execute, skipped: {skipped}"
+        return {"cases": len(cases)}
+
+
+def _dataset_tests(repo: Path) -> dict[str, object]:
+    return _pytest_checks(
+        repo,
+        [
+            "tests/test_lerobot_compatibility.py",
+            "tests/data_pipeline/test_lerobot_source.py",
+            "tests/gym/envs/managers/test_dataset_functors.py",
+            "tests/gym/envs/managers/test_async_dataset_functors.py",
+            "tests/lab/scripts/test_preview_lerobot_data.py",
+            "tests/gen_sim/test_blender_runtime.py",
+            "tests/gen_sim/scene_engine/test_simready_processor_utils.py",
+            "tests/gen_sim/scene_engine/test_scene_generation.py",
+            "tests/gen_sim/simready_pipeline",
+        ],
+    )
+
+
 def _native_tests(repo: Path) -> dict[str, object]:
     # Existing tests cover the production native boundary, not a second copy
     # of simulation/planner setup logic in this verifier.
@@ -255,30 +306,7 @@ def _native_tests(repo: Path) -> dict[str, object]:
         "tests/sim/motion/planners/test_curobo_integration.py::test_curobo_v2_plans_a_joint_space_move",
         "tests/data_pipeline/depth_video/test_writer.py",
     ]
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            "--run-gpu",
-            *selections,
-            "--junitxml=/tmp/embodichain-native.xml",
-        ],
-        cwd=repo,
-    )
-    if result.returncode:
-        raise RuntimeError(
-            f"Native qualification failed: pytest exit {result.returncode}"
-        )
-    import xml.etree.ElementTree as xml
-
-    cases = list(xml.parse("/tmp/embodichain-native.xml").iter("testcase"))
-    skipped = [
-        case.attrib.get("name") for case in cases if case.find("skipped") is not None
-    ]
-    assert cases and not skipped, f"Native checks must execute, skipped: {skipped}"
-    return {"cases": len(cases)}
+    return _pytest_checks(repo, selections, gpu=True)
 
 
 def _main() -> None:
@@ -294,6 +322,8 @@ def _main() -> None:
     checks = {"versions": _versions}
     if args.suite in {"cpu", "all"}:
         checks["media"] = _media
+        if args.repo is not None:
+            checks["datasets"] = lambda: _dataset_tests(args.repo.resolve())
     if args.suite in {"blender", "all"}:
         checks["blender"] = _blender
     if args.suite in {"gpu", "all"}:

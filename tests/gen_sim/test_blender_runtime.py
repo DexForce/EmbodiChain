@@ -28,8 +28,9 @@ import pytest
 from embodichain.gen_sim import _blender_runtime as runtime
 
 
+@pytest.mark.parametrize("system_prefix", [False, True])
 def test_worker_uses_files_and_does_not_inherit_business_python(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, system_prefix: bool
 ) -> None:
     worker = tmp_path / "worker with spaces.py"
     worker.write_text(
@@ -42,6 +43,8 @@ def test_worker_uses_files_and_does_not_inherit_business_python(
         "Path(sys.argv[2]).write_text(json.dumps({'result': result}))\n"
     )
     monkeypatch.setattr(runtime, "_WORKER", worker)
+    if system_prefix:
+        monkeypatch.setattr(sys, "prefix", "/usr")
     monkeypatch.setenv("EMBODICHAIN_BLENDER_PYTHON", sys.executable)
     monkeypatch.setenv("PYTHONPATH", "/business/site-packages")
     monkeypatch.setenv("CONDA_PREFIX", "/business")
