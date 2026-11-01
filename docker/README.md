@@ -32,6 +32,12 @@ to another host GPU index when necessary. Reports are written under
 `output/container-validation/`. `PUBLIC_IMAGE` and `INTERNAL_IMAGE` override
 the registry/repository; tags always include the source commit.
 
+Reused behavior and native suites run from a temporary directory containing
+only tests and supporting scripts. Isolated Python ignores inherited import
+paths; checks before and after pytest require the core, tasks and robot
+packages to resolve to the installed wheel. Reports include those locations,
+and configuration checks read installed package resources.
+
 Container build and publication workflows are maintained as a separate
 automation change. The build/qualification scripts here remain runnable
 manually; qualified public candidates can be staged in the internal registry
@@ -96,6 +102,12 @@ DLSS assets are retained alongside EGL/Vulkan/OptiX driver support.
 `profiles/` fixes the qualified Torch/SDK pairings. `locks/` contains the
 complete Python dependency sets and explicit conda package URLs/checksums.
 The CUDA base, Node base, Miniforge installer and cuRobo commit are pinned.
+Both DexSim wheel URLs carry SHA256 pins, which the installer verifies even
+though the wheel server uses HTTP. These match the published index checksums
+and the payloads in the previously qualified Python 3.11/3.12 installations.
+DexSim and LeRobot currently require different OpenCV distributions sharing
+`cv2`. Python-selected dependencies pin both to the same release; qualification
+checks the imported binding as well as distribution metadata.
 Ubuntu security packages are installed from the base image's configured apt
 repositories; full image reproducibility is identified by the built digest.
 

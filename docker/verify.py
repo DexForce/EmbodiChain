@@ -23,6 +23,7 @@ from importlib.metadata import version
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -34,6 +35,7 @@ __all__ = []
 def _versions() -> dict[str, str]:
     import importlib.util
     import embodichain
+    import cv2
     import torch
 
     selected = os.environ.get("EMBODICHAIN_ENV")
@@ -59,6 +61,8 @@ def _versions() -> dict[str, str]:
             "onnxruntime-gpu",
             "gradio",
             "nvidia-curobo",
+            "opencv-python",
+            "opencv-python-headless",
         )
     }
     assert sys.version_info[:2] in {(3, 11), (3, 12)}
@@ -67,6 +71,8 @@ def _versions() -> dict[str, str]:
     ), "Blender must stay in its own runtime"
     assert [actual[name].split("+", 1)[0] for name in names] == list(expected), actual
     assert torch.version.cuda == "12.8", torch.version.cuda
+    assert actual["opencv-python"] == actual["opencv-python-headless"], actual
+    assert cv2.__version__ == actual["opencv-python"].rsplit(".", 1)[0], actual
     subprocess.run(["uv", "pip", "check", "--python", sys.executable], check=True)
     return {
         "python": sys.version,
@@ -245,6 +251,50 @@ def _onnx_cuda() -> dict[str, object]:
     return {"onnxruntime": ort.__version__, "provider": "CUDAExecutionProvider"}
 
 
+def _installed_pytest(provenance: str, arguments: list[str]) -> int:
+    """Run staged tests against this interpreter's installed distribution."""
+    from importlib.metadata import distribution
+    from importlib.util import find_spec
+
+    import pytest
+
+    # Only tests and their supporting scripts are staged here, never packages.
+    sys.path.insert(0, str(Path.cwd()))
+    installed = distribution("embodichain")
+    roots = {
+        name: Path(installed.locate_file(name)).resolve()
+        for name in ("embodichain", "embodichain_tasks", "embodichain_robots")
+    }
+
+    def check_imports() -> dict[str, str]:
+        for name, root in roots.items():
+            spec = find_spec(name)
+            locations = (
+                list(spec.submodule_search_locations or ()) if spec is not None else []
+            )
+            if (
+                not root.is_relative_to(Path(sys.prefix).resolve())
+                or not locations
+                or any(Path(location).resolve() != root for location in locations)
+            ):
+                raise RuntimeError(
+                    f"Qualification requires installed wheel: {name} resolved to "
+                    f"{locations}, expected {root} inside {sys.prefix}"
+                )
+        for name, module in list(sys.modules.items()):
+            root = roots.get(name.split(".", 1)[0])
+            origin = getattr(module, "__file__", None)
+            if root is not None and origin is not None:
+                if not Path(origin).resolve().is_relative_to(root):
+                    raise RuntimeError(f"Source package imported: {name} from {origin}")
+        return {name: str(root) for name, root in roots.items()}
+
+    check_imports()
+    result = pytest.main(arguments)
+    Path(provenance).write_text(json.dumps(check_imports()), encoding="utf-8")
+    return result
+
+
 def _pytest_checks(
     repo: Path, selections: list[str], *, gpu: bool = False
 ) -> dict[str, object]:
@@ -252,18 +302,40 @@ def _pytest_checks(
 
     with tempfile.TemporaryDirectory(prefix="embodichain-qualification-") as directory:
         report = Path(directory) / "tests.xml"
+        provenance = Path(directory) / "imports.json"
+        for name in ("tests", "scripts"):
+            shutil.copytree(
+                repo / name,
+                Path(directory) / name,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
+        shutil.copy2(repo / "pyproject.toml", Path(directory) / "pyproject.toml")
+        # Isolated Python ignores inherited PYTHONPATH and user site packages.
+        # The verifier loads by filename; the checkout never enters sys.path.
         command = [
             sys.executable,
-            "-m",
-            "pytest",
+            "-I",
+            "-c",
+            "import runpy, sys; "
+            "raise SystemExit(runpy.run_path(sys.argv[1])['_installed_pytest']("
+            "sys.argv[2], sys.argv[3:]))",
+            str(Path(__file__).resolve()),
+            str(provenance),
             "-q",
+            "--import-mode=importlib",
             "-o",
             f"cache_dir={directory}/cache",
         ]
         if gpu:
             command.append("--run-gpu")
+        environment = os.environ.copy()
+        for name in ("PYTHONPATH", "PYTHONHOME"):
+            environment.pop(name, None)
+        environment["PYTHONNOUSERSITE"] = "1"
         result = subprocess.run(
-            [*command, *selections, f"--junitxml={report}"], cwd=repo
+            [*command, *selections, f"--junitxml={report}"],
+            cwd=directory,
+            env=environment,
         )
         if result.returncode:
             raise RuntimeError(f"Qualification pytest failed: exit {result.returncode}")
@@ -276,7 +348,10 @@ def _pytest_checks(
         assert (
             cases and not skipped
         ), f"Required checks must execute, skipped: {skipped}"
-        return {"cases": len(cases)}
+        return {
+            "cases": len(cases),
+            "imports": json.loads(provenance.read_text(encoding="utf-8")),
+        }
 
 
 def _dataset_tests(repo: Path) -> dict[str, object]:

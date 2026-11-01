@@ -17,19 +17,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from importlib.resources import files
 from typing import Any
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-CONFIG_PATH = (
-    REPO_ROOT
-    / "embodichain"
-    / "gen_sim"
-    / "simready_pipeline"
-    / "configs"
-    / "gen_config.json"
+CONFIG_PATH = files("embodichain.gen_sim.simready_pipeline").joinpath(
+    "configs/gen_config.json"
 )
 ALLOWED_SCENE_MESH_STRATEGIES = {"first", "concatenate"}
 ALLOWED_SOURCE_PREPARATION_MODES = {"blender", "trimesh"}
