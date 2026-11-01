@@ -67,3 +67,8 @@ The [Atomic Skill example catalog](sim/atomic_action/README.md) owns all per-ski
 coordinated-manipulation and recovery demonstrations. The two source-checkout
 walkthroughs under `scripts/tutorials/atomic_action/` teach single-arm and dual-arm
 API composition; they reuse the canonical example setup.
+
+The [scene and robot feasibility preview](expansion/scene_robot_feasibility/README.md)
+compares an authored installation with task-conditioned joint layout/deployment
+search in an offline 3D viewer. It replays measured successful episodes, exposes
+failed candidates and keeps independent region validation separate.

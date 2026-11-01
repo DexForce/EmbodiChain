@@ -1,5 +1,55 @@
 # Joint scene and robot installation search
 
+## Preview the effect in 3D
+
+![Original installation and measured successful search result](assets/showcase.png)
+
+```bash
+pip install -e '.[feasibility]'
+embodichain run-example expansion/scene_robot_feasibility/preview --output outputs/scene_feasibility_preview --open
+```
+
+The preview first checks an intentionally distant UR5 installation, then searches
+the permitted cube XY and installation XY/yaw domain using the same task,
+physical parameters, fixed placement goal and measured acceptance conditions.
+The default demo allows 300 seconds for eight search candidates and one independent
+validation trial; the initial comparison has its own bounded check. A successful
+search is not guaranteed within this budget.
+
+Open `outputs/scene_feasibility_preview/index.html` to compare the original
+installation with the selected search result. Drag to orbit both views, scroll
+to zoom, select candidates from the plot/dropdown, and play or scrub successful
+recordings. The page shows actual stage outcomes, changed base/object poses,
+confirmed writes and independent validation separately. Failed candidates retain
+their initial proposal and diagnostic checks, without a fabricated trajectory.
+
+Playback uses measured joint and entity states from accepted NPZ episodes. Robot
+link meshes are exported through the native scene exporter and animated with FK;
+the export checks native/FK frame agreement. No physics is rerun in the browser,
+and no external JavaScript or network service is required. The original view
+shows an initial configuration, not an executed failure trajectory. Small-sample
+region intervals do not certify neighboring configurations.
+
+After generating once, rebuild/open the HTML without importing simulation:
+
+```bash
+embodichain run-example expansion/scene_robot_feasibility/preview --output outputs/scene_feasibility_preview --reuse --open
+```
+
+To visualize an existing run, supply the original workflow:
+
+```bash
+embodichain run-example expansion/scene_robot_feasibility/preview --config examples/expansion/scene_robot_feasibility/search.ur5.yaml --from-run outputs/scene_feasibility --output outputs/scene_feasibility_replay
+```
+
+The last command evaluates that workflow's authored installation and reads its
+existing `atlas.json`/`episodes/`; it does not perform another search. The resolved
+request must match. `preview.json` preserves the detached mesh/frame data and
+`workflow.json` preserves the exact search configuration. Output directories
+must be new, or explicitly reopened with `--reuse`.
+
+## Search configuration
+
 Run from the repository root with the installed simulation runtime:
 
 ```bash
@@ -45,3 +95,7 @@ with paired preflight reach requirements and explicit measured transfer/release
 events. The canonical runtime owns grasp choice and the full handover/placement
 motion; native qualification must be assessed from its resulting atlas, rather
 than inferred from the preflight endpoints alone.
+
+`search.bar_dual_ur5.yaml` uses the configured rigid-bar transfer task: grasp,
+handover, then placement. It preserves the composed robot's relative mounting
+while searching the installation and bar/support-group layout.
