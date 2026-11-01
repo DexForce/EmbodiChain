@@ -13,6 +13,9 @@ on:
       - 'embodichain/lab/gym/envs/embodied_env.py'
       - 'tests/data_pipeline/**'
       - 'tests/test_lerobot_compatibility.py'
+      - 'tests/models/policy/**'
+      - 'extensions/embodichain_models/embodichain_models/policy/act/**'
+      - 'examples/learning/act/**'
       - 'tests/gym/envs/managers/**'
       - 'embodichain/lab/scripts/preview_lerobot_data.py'
       - 'tests/lab/scripts/test_preview_lerobot_data.py'
@@ -106,6 +109,7 @@ jobs:
         run: >-
           /tmp/lerobot-compat/bin/python -m pytest -q
           tests/test_lerobot_compatibility.py
+          tests/models/policy
           tests/data_pipeline/test_lerobot_source.py
           tests/gym/envs/managers/test_dataset_functors.py
           tests/gym/envs/managers/test_async_dataset_functors.py

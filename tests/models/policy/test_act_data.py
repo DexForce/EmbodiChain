@@ -14,139 +14,150 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Real SDK coverage of the visual/action sequence join."""
+"""Native SDK datasets and official training configuration contracts."""
 
 from __future__ import annotations
 
+from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
 import pytest
-import torch
 
-from embodichain.data_pipeline.datasets import LeRobotDataSource
-from embodichain_models.policy.act import ACTSequenceSource, build_act_trainer
+from embodichain_models.policy.act import build_act_train_config, dataset_fingerprint
+
+pytestmark = pytest.mark.skipif(
+    version("lerobot") != "0.6.1",
+    reason="Official ACT integration requires LeRobot 0.6.1",
+)
 
 
-def test_rgb_and_action_windows_align_and_resume_checks_content(tmp_path: Path):
-    sdk = pytest.importorskip("lerobot.datasets.lerobot_dataset")
-    root = tmp_path / "dataset"
-    writer = sdk.LeRobotDataset.create(
-        repo_id="local/act-test",
-        root=root,
-        fps=30,
-        use_videos=False,
-        features={
-            "observation.state": {
-                "dtype": "float32",
-                "shape": (2,),
-                "names": ["episode", "frame"],
-            },
-            "observation.images.camera": {
-                "dtype": "image",
-                "shape": (8, 8, 3),
-                "names": ["height", "width", "channel"],
-            },
-            "action": {
-                "dtype": "float32",
-                "shape": (2,),
-                "names": ["episode", "frame"],
-            },
-        },
-    )
-    for episode, length in enumerate((3, 2)):
-        for frame in range(length):
-            writer.add_frame(
-                {
-                    "observation.state": np.array([episode, frame], dtype=np.float32),
-                    "action": np.array([episode, frame], dtype=np.float32),
-                    "observation.images.camera": np.full(
-                        (8, 8, 3), episode * 10 + frame, dtype=np.uint8
-                    ),
-                    "task": "push",
-                }
-            )
-        writer.save_episode()
-    writer.finalize()
-    schema = {
-        "observation": {"names": ["episode", "frame"], "dtype": "float32"},
-        "action": {
-            "names": ["episode", "frame"],
-            "semantics": "absolute",
-            "step_dt": 1 / 30,
-        },
-    }
-    numeric = LeRobotDataSource(
+def test_config_uses_native_training_and_declared_features(act_data, tmp_path: Path):
+    from lerobot.datasets.factory import make_dataset
+
+    root, schema = act_data
+    cfg = build_act_train_config(
         root,
+        tmp_path / "run",
         schema=schema,
-        source_id="act-test",
-        repo_id="local/act-test",
-        memory_limit_bytes=1024 * 1024,
-        image_keys=["observation.images.camera"],
-        image_cache_bytes=192,
+        image_key="observation.images.camera",
+        device="cpu",
+        smoke=True,
+        num_workers=0,
     )
-    source = ACTSequenceSource(
-        numeric, horizon=4, image_key="observation.images.camera"
-    )
-    batch = source.sample(40, generator=torch.Generator().manual_seed(32))
-    state, actions, valid, rgb = (
-        batch.inputs["state"],
-        batch.targets,
-        batch.masks["valid"],
-        batch.inputs["rgb"],
-    )
-    assert torch.equal(
-        rgb[:, 0, 0, 0], (state[:, 0] * 10 + state[:, 1]).to(torch.uint8)
-    )
-    torch.testing.assert_close(actions[:, 0], state)
-    assert torch.all(
-        actions[..., 0][valid] == state[:, None, 0].expand_as(valid)[valid]
-    )
-    assert torch.all(
-        actions[..., 1][valid] == (state[:, None, 1] + torch.arange(4))[valid]
-    )
-    assert (~valid).any()
-    saved = rgb.clone()
-    source.sample(8, generator=torch.Generator().manual_seed(2)).inputs["rgb"].zero_()
-    torch.testing.assert_close(rgb, saved)
-    source.validate_resume()
+    assert cfg.dataset.eval_split == 0
+    assert cfg.env_eval_freq == 0
+    assert cfg.policy.chunk_size == 30
+    assert cfg.policy.n_action_steps == 1
+    assert cfg.policy.temporal_ensemble_coeff == 0.01
+    dataset = make_dataset(cfg)
+    last = dataset[2]
+    np.testing.assert_array_equal(last["action_is_pad"].numpy(), [False] + [True] * 29)
+    np.testing.assert_array_equal(last["action"][0].numpy(), [2, 0])
+    assert tuple(last["observation.images.camera"].shape) == (3, 32, 32)
 
-    recipe = {
-        "model": {
-            "state_dim": 2,
-            "action_dim": 2,
-            "horizon": 4,
-            "hidden_dim": 32,
-            "heads": 4,
-            "encoder_layers": 1,
-            "decoder_layers": 1,
-            "feedforward_dim": 64,
-            "latent_dim": 4,
-            "dropout": 0.0,
-            "pretrained_backbone": False,
-        },
-        "data": {
-            "train_path": str(root),
-            "schema": schema,
-            "image_key": "observation.images.camera",
-        },
-        "trainer": {
-            "total_updates": 2,
-            "batch_size": 2,
-            "device": "cpu",
-            "seed": 12,
-            "output_dir": str(tmp_path / "run"),
-            "checkpoint_interval": 0,
-        },
-    }
-    first = build_act_trainer(recipe)
-    torch.testing.assert_close(first.learner.model.state_mean, torch.tensor([0.4, 0.8]))
-    checkpoint = first.fit(stop_after=1)["checkpoint"]
-    resumed = build_act_trainer(recipe)
-    resumed.resume(checkpoint)
-    assert resumed.fit()["num_updates"] == 2
 
-    with (root / "meta" / "info.json").open("ab") as stream:
-        stream.write(b" ")
-    with pytest.raises(ValueError, match="content changed"):
-        source.validate_resume()
+def test_config_rejects_wrong_feature_order_and_cadence(act_data, tmp_path: Path):
+    import copy
+
+    root, schema = act_data
+    bad = copy.deepcopy(schema)
+    bad["action"]["names"].reverse()
+    with pytest.raises(ValueError, match="order"):
+        build_act_train_config(root, tmp_path / "run", schema=bad)
+    bad = copy.deepcopy(schema)
+    bad["action"]["step_dt"] = 1 / 20
+    with pytest.raises(ValueError, match="control period"):
+        build_act_train_config(root, tmp_path / "run", schema=bad)
+
+
+def test_dataset_fingerprint_binds_rgb_and_ignores_sdk_cache(act_data):
+    root, _ = act_data
+    expected = dataset_fingerprint(root)
+    (root / ".cache").mkdir()
+    (root / ".cache/temporary").write_text("cache")
+    assert dataset_fingerprint(root) == expected
+    import io
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from PIL import Image
+
+    shard = next((root / "data").rglob("*.parquet"))
+    table = pq.read_table(shard)
+    key = "observation.images.camera"
+    values = table[key].to_pylist()
+    image = io.BytesIO()
+    Image.new("RGB", (32, 32), (255, 0, 0)).save(image, format="PNG")
+    values[0]["bytes"] = image.getvalue()
+    table = table.set_column(
+        table.schema.get_field_index(key), key, pa.array(values, type=table[key].type)
+    )
+    pq.write_table(table, shard)
+    assert dataset_fingerprint(root) != expected
+
+
+def test_official_trainer_publishes_and_resumes_native_checkpoint(
+    act_data, tmp_path: Path
+):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    root, schema = act_data
+    output = tmp_path / "native"
+    cfg = build_act_train_config(
+        root,
+        output,
+        schema=schema,
+        image_key="observation.images.camera",
+        device="cpu",
+        smoke=True,
+        updates=2,
+        batch_size=2,
+        save_freq=1,
+        num_workers=0,
+    )
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(cfg.to_dict()))
+    env = {**os.environ, "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "lerobot.scripts.lerobot_train",
+            f"--config_path={path}",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    checkpoint = output / "checkpoints/000002"
+    policy = checkpoint / "pretrained_model"
+    for name in [
+        "model.safetensors",
+        "config.json",
+        "policy_preprocessor.json",
+        "policy_postprocessor.json",
+    ]:
+        assert (policy / name).is_file()
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "lerobot.scripts.lerobot_train",
+            f"--config_path={policy / 'train_config.json'}",
+            "--resume=true",
+            "--steps=3",
+            f"--output_dir={output}",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    state = json.loads(
+        (output / "checkpoints/000003/training_state/training_step.json").read_text()
+    )
+    assert state["step"] == 3

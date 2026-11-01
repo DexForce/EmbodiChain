@@ -110,6 +110,7 @@ def main() -> None:
         close_env(env)
     report = {
         "mode": args.mode,
+        "smoke": args.smoke,
         "task_identity": identity,
         "seed_base": args.seed_base,
         "attempts": len(records),
