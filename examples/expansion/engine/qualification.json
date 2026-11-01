@@ -165,5 +165,12 @@
     "real2sim_default": "B=2 DROID RGB-D committed with source qualification",
     "real2sim_newton": "DROID B=2 rejected by physical-effect/segment validation; not qualified",
     "visual_variants": "2 physical parents plus 2 children exported; dataset validation: 4 episodes,1608 frames,0 errors,0 warnings"
+  },
+  "post_dependency_sync_validation": {
+    "dependency_head": "feb722cfadc76101ee1f54ec7aa12dfb59ce0206",
+    "focused_cpu": "1403 passed, 9 deselected",
+    "native_newton_cuda": "B=2 vector Task Program, CoM/drive readback/restoration and physics-disabled state publication: passed",
+    "context_and_docs_tools": "53 passed",
+    "public_api": "3581/3581 documented"
   }
 }

@@ -2619,7 +2619,7 @@
           "symbol": "<module>",
           "start_line": 24,
           "end_line": 35,
-          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0…DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
+          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0\u2026DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
         }
       ],
       "documentation": [
@@ -3658,9 +3658,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 777,
-          "end_line": 778,
-          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
+          "start_line": 666,
+          "end_line": 666,
+          "excerpt": "        clock = EnvironmentStepClock(self._step_dt)"
         }
       ]
     },
@@ -3676,9 +3676,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 777,
-          "end_line": 778,
-          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
+          "start_line": 736,
+          "end_line": 736,
+          "excerpt": "        command_sink = BufferedGymCommandSink(command_encoder, clock)"
         }
       ]
     },
@@ -3841,8 +3841,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 777,
-          "end_line": 778,
+          "start_line": 740,
+          "end_line": 741,
           "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
         }
       ]
@@ -3938,9 +3938,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 777,
-          "end_line": 778,
-          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
+          "start_line": 736,
+          "end_line": 736,
+          "excerpt": "        command_sink = BufferedGymCommandSink(command_encoder, clock)"
         }
       ]
     },
