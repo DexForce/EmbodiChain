@@ -1,20 +1,56 @@
-# Franka seven-DOF arms
+# Franka — seven-DOF bare arms
 
-`FrankaCfg` selects a bare seven-joint arm. Both variants expose only `arm`;
+`FrankaCfg`, catalog ID `Franka`, selects a bare seven-joint arm. Both variants expose only `arm`;
 the default TCP is the flange and no end effector is attached implicitly.
+
+<div style="text-align: center;">
+  <img src="../../../_static/robots/franka/fr3_arm.png" alt="Franka bare seven-DOF arm ending at its mounting flange, without a gripper" style="height: 400px; width: auto;"/>
+  <p><b>Franka — bare arm</b> (default FR3 model)</p>
+</div>
+
+The image is a native OfflineRT render of the configured FR3 asset in its
+initial joint pose, ending at the mounting flange. No physics steps or tool
+attachments are used. The [render record](../../../_static/robots/franka/fr3.json)
+preserves source URDF hashes, named joints, camera and renderer settings.
+The original Panda variant is selected separately through `arm_model` below.
 
 | Variant | Source arm | Solver | Flange |
 | --- | --- | --- | --- |
 | `fr3` (default) | Historical FR3 asset, `Franka/Panda/Panda.urdf` | FEP | `fr3_link8` |
 | `panda` | Pinned original Panda, `FrankaPandaArm/Panda/PandaExactV1.urdf` | Pink | `ee_link` |
 
+## Construction and preview
+
 ```python
 from embodichain_robots import FrankaCfg
 
-arm = FrankaCfg.from_dict({"arm_model": "panda"})
+arm = FrankaCfg.from_dict({})  # FR3 by default
+panda_arm = FrankaCfg.from_dict({"arm_model": "panda"})
 assert set(arm.control_parts) == {"arm"}
 assert len(arm.init_qpos) == 7
 ```
+
+Add the selected configuration to `SimulationManager` with `sim.add_robot(cfg=arm)`.
+The catalog and preview CLI use the same configuration:
+
+```bash
+embodichain preview-robot --robot Franka --variant fr3 --renderer rt
+embodichain preview-robot --robot Franka --variant panda --renderer rt
+```
+
+## Franka and the historical FrankaPanda entry
+
+| Selection | Constructed robot | Tool ownership |
+| --- | --- | --- |
+| `Franka` / `FrankaCfg`, `arm_model: fr3` | Seven-joint FR3 arm | Embodiment or standard RobotCfg overrides |
+| `Franka` / `FrankaCfg`, `arm_model: panda` | Seven-joint original Panda arm | Embodiment or standard RobotCfg overrides |
+| `FrankaPanda` / `FrankaPandaCfg` | Historical FR3 arm, with legacy `robot_type: panda` | Explicit assembly is also required |
+| `franka_panda` embodiment | FR3 arm plus native Panda Hand | Component declares hand joints, drives, mount and TCP |
+
+The legacy `FrankaPanda` name continues to select the historical FR3 asset
+family. The original Panda is selected by `FrankaCfg` with `arm_model: panda`.
+See [FrankaPanda and its native-hand setup](panda.md) for the compatibility
+constructor and a visual comparison with the explicit hand assembly.
 
 ## Mounting end effectors
 
