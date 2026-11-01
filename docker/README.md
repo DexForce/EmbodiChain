@@ -73,10 +73,13 @@ import the main package and does not inherit business Python/native-library
 paths. Blender stdout is diagnostic output; JSON response files carry results.
 Timeout, exceptions and pipeline cancellation terminate and reap the worker.
 
-For a non-container installation, install `docker/locks/blender311.txt` into
-a separate Python 3.11 environment and set `EMBODICHAIN_BLENDER_PYTHON` to its
-Python executable. `.[gensim]` installs the Python-facing GenSim dependencies;
-Blender is supplied by this independent runtime.
+For a non-container installation, create a separate Python 3.11 environment,
+then run `docker/install-profile.sh blender311 ENVIRONMENT_PREFIX` with
+`EMBODICHAIN_CONSTRAINTS_DIR` set to the repository's `docker/locks` directory.
+This installs the locked dependencies and applies the metadata correction.
+Set `EMBODICHAIN_BLENDER_PYTHON` to that environment's Python executable.
+`.[gensim]` installs the Python-facing GenSim dependencies; Blender is supplied
+by the independent runtime.
 
 Each business environment owns its CPython-specific DexSim wheel and Torch
 libraries. Do not globally add either environment's `dexsim/lib` or
