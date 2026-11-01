@@ -18,7 +18,23 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .fk import DifferentiableFKLayer
 from .ik import DifferentiableIKLayer
 
-__all__ = ["DifferentiableFKLayer", "DifferentiableIKLayer"]
+__all__ = [
+    "DifferentiableFKLayer",
+    "DifferentiableIKLayer",
+    "DifferentiableRetimingLayer",
+]
+
+
+def __getattr__(name: str) -> Any:
+    # FK/IK remain usable without the optional Warp runtime.
+    if name == "DifferentiableRetimingLayer":
+        from .toppra import DifferentiableRetimingLayer
+
+        globals()[name] = DifferentiableRetimingLayer
+        return DifferentiableRetimingLayer
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

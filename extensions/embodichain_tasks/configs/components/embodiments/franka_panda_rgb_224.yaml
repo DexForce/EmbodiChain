@@ -1,0 +1,15 @@
+embodiment_id: franka_panda_rgb_224
+simulation:
+  class_type: FrankaPanda
+  robot_type: panda
+  uid: FrankaPanda
+sensor:
+  - sensor_type: Camera
+    uid: cam_high
+    width: 224
+    height: 224
+    intrinsics: [200.0, 200.0, 112.0, 112.0]
+    extrinsics:
+      eye: [-0.52, -0.48, 0.65]
+      target: [-0.42, -0.08, 0.10]
+      up: [0.0, 0.0, 1.0]

@@ -54,6 +54,10 @@ state-transition fitting and state/action gradients. Its generated recipes use
 the installable `embodichain_models.dynamics.rwm` model family and shared SL
 trainer; its corpus generation and acceptance helpers remain private to the example.
 
+The [visual ACT example](learning/act/README.md) collects Franka PushCube
+demonstrations, trains an RGB and proprioception action-chunking policy, and
+evaluates checkpoints on independently seeded simulator scenes.
+
 The [RigidFormer showcase](learning/rigidformer/README.md) prepares official
 weights and geometry, trains and evaluates the model, and runs an engine demo
 with Newton spheres beside a free model rollout. The demo opens a native window
@@ -63,3 +67,8 @@ The [Atomic Skill example catalog](sim/atomic_action/README.md) owns all per-ski
 coordinated-manipulation and recovery demonstrations. The two source-checkout
 walkthroughs under `scripts/tutorials/atomic_action/` teach single-arm and dual-arm
 API composition; they reuse the canonical example setup.
+
+The [differentiable retiming showcase](learning/differentiable_toppra/README.md)
+compares a stopped duration objective with autograd optimization of free path
+nodes. Its CPU browser preview displays gradients, finite-difference checks and
+trajectories on a shared physical clock, with portable export and replay.

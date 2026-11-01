@@ -419,16 +419,20 @@ def test_configured_rl_rejects_mid_episode_virtual_target_resampling():
         config_to_cfg(config, source_path=_CONFIG)
 
 
-def test_falling_is_failure_only_in_configured_deployment():
+def test_falling_is_failure_only_in_configured_deployment(monkeypatch):
     from embodichain_tasks.manipulation.push_cube import PushCubeEnv
 
     env = _env()
-    env.success_threshold = 0.1
     env.pose[:, 2, 3] = -0.2
-    old_success, old_failure, _ = PushCubeEnv.compute_task_state(env)
+    monkeypatch.setattr(EmbodiedEnv, "__init__", lambda *args, **kwargs: None)
+    legacy = PushCubeEnv()
+    legacy._num_envs = env.num_envs
+    legacy.sim = env.sim
+    legacy.goal_pose = env.goal_pose
+    old_success, old_failure, _ = legacy.compute_task_state()
     assert old_success.all()  # XY alone is at the goal, as in the old task.
     assert not old_failure.any()
-    assert PushCubeEnv.check_truncated(env, {}, {}).all()
+    assert legacy.check_truncated({}, {}).all()
     env.outcome_manager.update()
     info = env.get_info()
     assert info["fail"].all()

@@ -286,16 +286,20 @@ mixed order and real Franka adapter calls in
 
 ## Retiming and playback
 
-`toppra_planner.py::retime_joint_paths()` is the shared entry point for
-re-parameterizing an already-planned joint path under velocity and acceleration
-limits, used by planners that emit geometry without executable timing. It is
-the planner's own time parameterization. All CPU/CUDA rows run on Warp,
-including single-row calls, so batch size does not change waypoint cleanup
-precision or the helper's float32/float64 output dtype. It resamples
-along the fitted spline, so recompute derived poses from its output rather
-than reusing the input samples. Optional per-row path lengths exclude
-rectangular tail holds from spline fitting; without them, an explicit repeated
-final waypoint retains the historical final-knot geometry.
+`compute.trajectory.retime_joint_paths()` is the simulation-independent public
+operator with explicit velocity/acceleration inputs. It returns plain tensors
+`(q, qd, qdd, dt, success, lengths)`; duration is `dt.sum(-1)`. Quantity sampling
+has fixed width, while time sampling pads to the maximum valid row length.
+Failures have zero valid length; stationary successes retain two samples.
+
+The legacy planner helper `toppra_planner.py::retime_joint_paths()` keeps its
+mapping/enum signature, float64 `PlanResult`, and native width (including width
+two for an entirely stationary/failed batch). It shares the same compute Warp
+backend without allocating padded learning outputs just to trim them again.
+Both boundaries validate lengths before integer narrowing. All CPU/CUDA rows
+use Warp, and input precision still controls point filtering. Recompute FK from
+returned positions: timing fits and samples a spline. Input valid lengths exclude
+rectangular padding; repeated final nodes retain final-knot geometry.
 
 `compute/trajectory/timing.py` owns time-domain differentiation/resampling and
 `retime_to_control_grid()`. Zero-time position changes are invalid; repeated-time

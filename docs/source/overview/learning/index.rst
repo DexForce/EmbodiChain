@@ -4,6 +4,8 @@ Learning Infrastructure
 Embodied learning trains agents to act through a robot's observations and
 actions. This section describes the learning infrastructure and its policy
 training and evaluation workflows.
+The :doc:`supervised_learning` layer composes model-owned objectives with shared
+optimizer updates, data-source adapters, validation and checkpoint recovery.
 Shared Torch models live in ``learning.models``; ``learning.layers`` composes
 simulation-independent kinematics from ``compute.kinematics`` as reusable network
 layers. For FK/IK usage, pose losses and gradient contracts, see
@@ -13,6 +15,7 @@ layers. For FK/IK usage, pose losses and gradient contracts, see
    :maxdepth: 1
 
    /overview/rl/index
+   supervised_learning
    differentiable_kinematics
 
 Related Workflows

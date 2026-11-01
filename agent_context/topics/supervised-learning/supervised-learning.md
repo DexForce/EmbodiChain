@@ -37,6 +37,11 @@ operations remain in `compute`; source storage belongs to data adapters.
 - The [RWM recipe](../robot-world-model/robot-world-model.md) is
   `embodichain_models.dynamics.rwm.sl_recipe:build_rwm_trainer`. Its model,
   state codec, objective, predictor and replay belong to that model family.
+- Visual ACT belongs to `embodichain_models.policy.act`; its recipe is
+  `build_act_trainer`. `ACTSequenceSource` joins only the current RGB frame to
+  causal numeric action windows from one `LeRobotDataSource`, sharing its
+  canonical frame index and binding image content to recovery. `examples/learning/act/` owns the PushCube collection,
+  checkpoint selection and physical evaluation.
 
 Objectives own loss masks, normalization, integration and multi-step graph
 construction. The optimizer does not infer action semantics or detach histories.

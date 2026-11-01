@@ -28,14 +28,19 @@ The first level describes the model's prediction contract:
 | `policy` | Observations/history to actions, action distributions or action chunks. |
 | `dynamics` | State/history, with optional controls and physical context, to future robot/environment states, geometry, observations or latent transitions. |
 
-Use the following canonical packages for the four current model directions:
+Use the following canonical packages for the current model directions:
 
 | Model family | Public package | Landing status |
 | --- | --- | --- |
 | Ordinary state/visual BC | `embodichain_models.policy.bc` | Target for the BC follow-up; not created yet. |
+| Visual ACT | `embodichain_models.policy.act` | Visual action-chunk policy and offline SL recipe. |
 | NeRD | `embodichain_models.dynamics.nerd` | Implemented in this change. |
 | Robot world model (RWM) | `embodichain_models.dynamics.rwm` | Implemented. |
 | RigidFormer | `embodichain_models.dynamics.rigidformer` | Native author architecture, official weights and shared-SL recipe. |
+
+Visual ACT's public classes and data adapter are documented in the
+[API reference](../../docs/source/api_reference/visual_act.rst); its runnable
+workflow lives in [examples/learning/act](../../examples/learning/act/README.md).
 
 RWM predicts action-conditioned robot state transitions, so it belongs to
 `dynamics`. World models also describe future-state/observation prediction;
@@ -60,6 +65,6 @@ model packages do not introduce parallel trainer frameworks.
 
 Collection, task/controller integration, reference research and downloadable
 resources remain in the corresponding example. Shared MLPs and normalizers
-remain in core. All four directions use the same SL contracts regardless of
+remain in core. These directions use the same SL contracts regardless of
 their domain. Create a family only when its implementation lands, without empty
 placeholder directories, eager cross-family imports or a new registry.
