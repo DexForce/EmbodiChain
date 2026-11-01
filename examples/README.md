@@ -67,3 +67,8 @@ The [Atomic Skill example catalog](sim/atomic_action/README.md) owns all per-ski
 coordinated-manipulation and recovery demonstrations. The two source-checkout
 walkthroughs under `scripts/tutorials/atomic_action/` teach single-arm and dual-arm
 API composition; they reuse the canonical example setup.
+
+The [differentiable retiming showcase](learning/differentiable_toppra/README.md)
+compares a stopped duration objective with autograd optimization of free path
+nodes. Its CPU browser preview displays gradients, finite-difference checks and
+trajectories on a shared physical clock, with portable export and replay.
