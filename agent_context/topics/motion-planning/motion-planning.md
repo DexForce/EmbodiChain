@@ -66,6 +66,11 @@ and backend diagnostics together. Read the
 changing interpolation or output sample counts. Final sampled collision checks
 do not establish continuous collision freedom or derivative compliance.
 
+Joint scene/deployment searches install a context-local cooperative call budget
+through `motion/_budget.py`. Robot IK, motion generation and Atomic planning
+boundaries share that host budget, including retries. See
+[scene feasibility](../scene-expansion/feasibility.md) for quota and evidence scope.
+
 ## Compute and execution ownership
 
 `compute.trajectory` owns pure interpolation, differentiation, resampling and

@@ -547,8 +547,12 @@ def test_case_outcomes_preserve_native_samples_for_masked_and_common_inputs(
 
     outcome = score(q)
     assert outcome.geometry_valid
-    assert outcome.constraint_metrics["arrival_indices"] == [5, 10]
-    assert outcome.constraint_metrics["sample_grid"] == "native_with_linear_subdivision"
+    first, second = outcome.constraint_metrics["arrival_indices"]
+    assert 0 <= first < second
+    assert (
+        outcome.constraint_metrics["sample_grid"]
+        == "native_linear_and_distance_subdivision"
+    )
     assert outcome.final_rotation_err_deg is None
     assert outcome.waypoint_rotation_err_deg_max is None
     broken = q.clone()

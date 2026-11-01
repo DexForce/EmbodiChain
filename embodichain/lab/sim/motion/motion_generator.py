@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.motion._budget import _planning_call
+
 import math
 from collections.abc import Callable, Mapping
 from copy import deepcopy
@@ -608,6 +610,7 @@ class MotionGenerator:
         cls = self._support_planner_dict[planner_type][0](cfg=planner_cfg)
         return cls
 
+    @_planning_call("planning")
     def generate(
         self,
         target_states: list[PlanState],
@@ -1603,6 +1606,7 @@ class MotionGenerator:
         velocities = normalize_derivative(result.velocities, "velocities")
         accelerations = normalize_derivative(result.accelerations, "accelerations")
         constraint_report = None if resampled else result.constraint_report
+        waypoint_indices = None if resampled else result.waypoint_indices
         preserve_failed_positions = (
             getattr(self.planner, "preserve_failed_plan_positions", False) is True
         )
@@ -1618,6 +1622,8 @@ class MotionGenerator:
                 start_qpos.to(dtype=positions.dtype).unsqueeze(1).expand_as(positions)
             )
             positions = torch.where(success[:, None, None], positions, held)
+            if waypoint_indices is not None:
+                waypoint_indices = torch.where(success[:, None], waypoint_indices, -1)
             if velocities is not None:
                 velocities = torch.where(
                     success[:, None, None],
@@ -1652,6 +1658,8 @@ class MotionGenerator:
             policy_rollout_positions=result.policy_rollout_positions,
             policy_rollout_lengths=result.policy_rollout_lengths,
             policy_batching=result.policy_batching,
+            waypoint_indices=waypoint_indices,
+            policy_waypoint_indices=result.policy_waypoint_indices,
         )
 
     def _runtime_device(self) -> torch.device:

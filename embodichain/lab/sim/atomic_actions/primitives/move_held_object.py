@@ -347,6 +347,14 @@ def _merge_yaw_paths(
     # recomputes derivatives on the control grid in to_full_robot_trajectory.
     return PlanResult(
         success=torch.where(rows, candidate.success, previous.success),
+        waypoint_indices=(
+            torch.where(
+                rows[:, None], candidate.waypoint_indices, previous.waypoint_indices
+            )
+            if candidate.waypoint_indices is not None
+            and previous.waypoint_indices is not None
+            else None
+        ),
         positions=torch.where(
             rows[:, None, None],
             pad_positions(candidate.positions),

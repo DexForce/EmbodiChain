@@ -1921,6 +1921,7 @@ def test_runner_preserves_preplan_attribution_after_planner_error(tmp_path):
     provider.plan_case.side_effect = RuntimeError("planner failed")
     provider.failure_outcomes.return_value = ()
     runner = object.__new__(BenchmarkRunner)
+    runner.capture_trajectories = False
     runner.execution = {"timing_comparable": True}
     runner.control_part = "arm"
     runner.suite = Mock()
