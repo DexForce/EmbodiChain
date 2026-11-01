@@ -27,9 +27,11 @@ task success. Contact-band separations are not global minimum distances.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import replace
 import gc
+import hashlib
 import importlib.metadata
 import json
 from pathlib import Path
@@ -125,14 +127,25 @@ def _fixtures() -> list[tuple[str, tuple[CollisionBody, ...], list, list[dict]]]
     return fixtures
 
 
-def _load_fixture(path: Path) -> tuple:
-    """Load canonical physical descriptors and observed frame/permission samples."""
-    data = json.loads(path.read_text())
+def _fixture_name(path: Path) -> str:
+    """Identify each input path even when captures share the same filename."""
     name = (
         path.stem if path.stem.startswith("fixture-") else "fixture-" + path.parent.name
     )
+    suffix = hashlib.sha256(str(path.resolve()).encode()).hexdigest()[:12]
+    return name + "-" + suffix
+
+
+def _load_fixture(path: Path) -> tuple:
+    """Load canonical physical descriptors and observed frame/permission samples."""
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict) or any(
+        not isinstance(data.get(key), list) or not data[key]
+        for key in ("bodies", "samples")
+    ):
+        raise ValueError("Fixture requires non-empty physical bodies and query samples")
     return (
-        name,
+        _fixture_name(path),
         tuple(
             (
                 replace(CollisionBody(**body), kind="convex")
@@ -210,14 +223,19 @@ def _qualification_summary(
     results: list[dict], qualification: list[dict]
 ) -> list[dict]:
     """Rank only algorithms qualified on the complete requested fixture set."""
-    fixtures = {row["fixture"] for row in results}
+    fixtures = {row["fixture"] for row in (*results, *qualification)}
     algorithms = {row["algorithm"] for row in results}
     grouped = {}
     for row in qualification:
         if row.get("scope") == "full_corpus_qualification":
             fixtures.add(row["fixture"])
             algorithms.add(row["algorithm"])
-            grouped.setdefault(row["algorithm"], {})[row["fixture"]] = row
+            completed = grouped.setdefault(row["algorithm"], {})
+            if row["fixture"] in completed:
+                raise ValueError(
+                    "Duplicate fixture qualification for " + row["algorithm"]
+                )
+            completed[row["fixture"]] = row
         elif row.get("scope", "").startswith("cuda_graph"):
             algorithms.add("newton_cuda_graph")
     summaries = []
@@ -278,6 +296,23 @@ def _markdown(
             lines.append(
                 f"| {q['fixture']} / full corpus | {q['total']} | {q['algorithm']} | {q['success_rate']:.6f} | {q['false_negative']} | {q['false_positive']} | {q['ambiguous']} | {q['outside_detection_band']} |"
             )
+    captured = [
+        row
+        for row in qualification
+        if row.get("scope") == "captured_outcome_comparison"
+    ]
+    if captured:
+        lines += [
+            "",
+            "## Captured outcomes versus current checker",
+            "",
+            "| fixture | matched / captured | status changes |",
+            "| --- | --- | --- |",
+        ]
+        for row in captured:
+            lines.append(
+                f"| {row['fixture']} | {row['matched']} / {row['total']} | {json.dumps(row['changes'], sort_keys=True)} |"
+            )
     lines += [
         "",
         "## Leaderboard",
@@ -301,6 +336,7 @@ def _markdown(
         "```",
         "",
         "- Success rate means geometric classification agreement with the current production Newton checker, including independent analytic cases. It is not task success or a continuous collision certificate.",
+        "- Saved capture statuses are historical evidence, reported separately from agreement with the current checker. A changed classification does not abort the report; independent analytic expectations remain assertions.",
         "- Near-zero float32 separations (2e-5 m band) remain ambiguous and count as unmatched; they are never silently accepted.",
         "- Newton's infinity means no active pair in the configured detection band, not exact global clearance. Only declared native convex/primitive shapes are benchmarked; unsupported triangle meshes are covered by the production rejection tests.",
         "- resident: pre-uploaded transforms/masks, collision generation plus device reduction; excludes host packing and result readback.",
@@ -311,7 +347,10 @@ def _markdown(
         "- Isolation checks use independent untouched states; no World, physics solver, reset or simulation stepping is used.",
     ]
     errors = [
-        row for row in qualification if row.get("scope") != "full_corpus_qualification"
+        row
+        for row in qualification
+        if row.get("scope")
+        not in {"full_corpus_qualification", "captured_outcome_comparison"}
     ]
     if errors:
         lines += ["", "## Incomplete checks / errors", ""]
@@ -328,16 +367,46 @@ def run_all_benchmarks(args: argparse.Namespace) -> dict:
         wp.set_mempool_enabled(args.cuda_device, True)
         devices.append(args.cuda_device)
     fixtures = [(*fixture, {}) for fixture in _fixtures()]
+    failures = []
+    fixture_paths = list(args.fixture)
+    fixture_sources = {}
     args.output.mkdir(parents=True, exist_ok=True)
     if args.collect_config:
         from ._feasibility_profile import capture_workload
 
         for i, source in enumerate(args.collect_config):
             print(f"Capturing canonical task workload: {source}", flush=True)
-            args.fixture.append(
-                capture_workload(source.resolve(), args.output / f"native-input-{i}")
+            capture_root = args.output / f"native-input-{i}"
+            captured = capture_workload(source.resolve(), capture_root)
+            if captured is None:
+                failures.append(
+                    {
+                        "fixture": f"capture-{i}:{source.name}",
+                        "scope": "workload_capture_error",
+                        "source": str(source.resolve()),
+                        "reason": "No physical geometry/query samples captured; see "
+                        + str(capture_root / "profile.json"),
+                    }
+                )
+            else:
+                fixture_paths.append(captured)
+    for path in fixture_paths:
+        try:
+            fixture = _load_fixture(path)
+        except ValueError as error:
+            failures.append(
+                {
+                    "fixture": _fixture_name(path),
+                    "scope": "fixture_load_error",
+                    "source": str(path.resolve()),
+                    "reason": str(error),
+                }
             )
-    fixtures += [_load_fixture(path) for path in args.fixture]
+            continue
+        fixtures.append(fixture)
+        fixture_sources[fixture[0]] = str(path.resolve())
+    if len({fixture[0] for fixture in fixtures}) != len(fixtures):
+        raise ValueError("Duplicate fixture input paths are not allowed")
     metadata = {
         "seed": 1701,
         "threads": args.threads,
@@ -364,8 +433,9 @@ def run_all_benchmarks(args: argparse.Namespace) -> dict:
         ),
         "dtype": "Newton float32 geometry; same supplied frame inputs",
         "detection_band_m": args.detection_gap,
+        "fixture_sources": fixture_sources,
     }
-    results, failures = [], []
+    results = []
     process = psutil.Process()
     for name, bodies, ignored, corpus, hints in fixtures:
         print(
@@ -381,18 +451,34 @@ def run_all_benchmarks(args: argparse.Namespace) -> dict:
             "peak_gpu_mb": None,
         }
         oracle = []
+        captured_statuses = []
         for sample in corpus:
-            accepted = (
-                baseline.check(sample["frames"], **sample.get("options", {}))[0].status
-                == "passed"
-            )
-            expected = sample.get(
-                "expected",
-                sample.get("status") == "passed" if "status" in sample else accepted,
-            )
-            if accepted != expected:
+            status = baseline.check(sample["frames"], **sample.get("options", {}))[
+                0
+            ].status
+            accepted = status == "passed"
+            if "expected" in sample and accepted != sample["expected"]:
+                baseline.close()
                 raise AssertionError(f"Independent analytic oracle failed: {name}")
-            oracle.append(expected)
+            oracle.append(accepted)
+            if "status" in sample:
+                captured_statuses.append((sample["status"], status))
+        if captured_statuses:
+            failures.append(
+                {
+                    "fixture": name,
+                    "scope": "captured_outcome_comparison",
+                    "matched": sum(old == new for old, new in captured_statuses),
+                    "total": len(captured_statuses),
+                    "changes": dict(
+                        Counter(
+                            f"{old}->{new}"
+                            for old, new in captured_statuses
+                            if old != new
+                        )
+                    ),
+                }
+            )
         batches = args.batches if name.startswith("fixture-") else [1, 8]
         for batch in batches:
             indices = np.arange(batch) % len(corpus)

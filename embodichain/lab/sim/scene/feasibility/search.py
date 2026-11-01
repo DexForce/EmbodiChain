@@ -717,6 +717,8 @@ def validate_feasibility(
     Returns:
         A new atlas containing held-out evidence and intervals for completed
         allocations only. Interrupted trials never count as completed successes.
+        Costs include the saved search and this validation call, even when the
+        caller provides a fresh budget.
     """
     if any(r.validation_planned for r in atlas.regions):
         raise ValueError("validation requires a frozen, not-yet-validated atlas")
@@ -724,6 +726,8 @@ def validate_feasibility(
     budget = budget or FeasibilityBudget(atlas.cfg)
     if plain(budget.cfg) != plain(atlas.cfg):
         raise ValueError("budget settings must match the frozen validation profile")
+    initial_calls = dict(budget.counts)
+    initial_elapsed = budget.clock() - budget.started
     budget.validation = True
     rows = list(atlas.observations)
     regions = [
@@ -780,6 +784,13 @@ def validate_feasibility(
         reason = str(error)
     metrics = dict(atlas.metrics)
     metrics.update(_metrics(rows, budget))
+    metrics["calls"] = {
+        kind: atlas.metrics.get("calls", {}).get(kind, 0) + count - initial_calls[kind]
+        for kind, count in metrics["calls"].items()
+    }
+    metrics["elapsed_s"] = atlas.metrics.get("elapsed_s", 0.0) + max(
+        0.0, metrics["elapsed_s"] - initial_elapsed
+    )
     metrics["validation_distribution"] = "raw_joint_region_proposals"
     return FeasibilityAtlas(
         atlas.request, atlas.cfg, tuple(regions), tuple(rows), reason, metrics

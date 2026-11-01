@@ -37,12 +37,19 @@ def shape_hints(env: object) -> dict[str, str]:
     return result
 
 
-def capture_workload(source: Path, output: Path) -> Path:
+def capture_workload(source: Path, output: Path) -> Path | None:
     """Profile the canonical workflow and reservoir-sample exact geometry queries.
 
     Timer scopes exclude reservoir serialization. This temporary instrumentation
     is process-local and restored in finally; it does not alter acceptance or
     own another execution lifecycle. Existing output paths are never reused.
+
+    Args:
+        source: Source workflow configuration.
+        output: New directory for the profile, task outputs and optional fixture.
+    Returns:
+        A fixture path, or None when no physical geometry/query samples were
+        captured. The profile retains the failed capture and workflow metrics.
     """
     from embodichain.utils.utility import load_config
     from embodichain.lab.task_program.integrations import feasibility as workflow
@@ -136,7 +143,15 @@ def capture_workload(source: Path, output: Path) -> Path:
         totals.update(
             wall_s=time.perf_counter() - started, metrics=plain(atlas.metrics)
         )
+        captured = bool(fixture["bodies"] and fixture["samples"])
+        totals["capture_status"] = "captured" if captured else "unavailable"
+        if not captured:
+            totals["capture_reason"] = (
+                "No physical geometry or collision query samples captured"
+            )
         (output / "profile.json").write_text(json.dumps(totals, indent=2))
+        if not captured:
+            return None
         target = output / (
             "fixture-" + source.stem.removeprefix("search.").replace(".", "-") + ".json"
         )

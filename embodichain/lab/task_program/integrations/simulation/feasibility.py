@@ -374,6 +374,8 @@ class TaskProgramFeasibilityHost:
             raise ValueError("host must be prepared for this exact task request")
         budget.check()
         self.close()
+        if self._session.stop_reason is not None:
+            raise FeasibilityBudgetExhausted(self._session.stop_reason)
         checks = []
         identity = None
         released = False
@@ -581,6 +583,8 @@ class TaskProgramFeasibilityHost:
                 torch.tensor(backend.joint_limits),
                 joint_names=backend.joint_names,
             )
+            if session.stop_reason is not None:
+                raise FeasibilityBudgetExhausted(session.stop_reason)
             identity, _ = session.propose(
                 case.scene_case_id,
                 snapshot_id,

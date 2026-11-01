@@ -158,8 +158,9 @@ def test_episode_writer_confirms_exact_idempotent_evidence(tmp_path):
         )
 
 
-def test_host_uses_restored_identity_and_releases_resources_on_sink_error(
-    monkeypatch, tmp_path
+@pytest.mark.parametrize("write_succeeds", [False, True])
+def test_host_preserves_restored_identity_on_write_error_or_rollout_exhaustion(
+    monkeypatch, tmp_path, write_succeeds
 ):
     from embodichain.lab.sim.scene.feasibility import (
         TaskFeasibilityRequest,
@@ -167,6 +168,8 @@ def test_host_uses_restored_identity_and_releases_resources_on_sink_error(
         TaskPhase,
         SceneRobotFeasibilityCfg,
         prepare_feasibility,
+        search_feasibility,
+        save_feasibility_atlas,
         FeasibilityBudget,
         FeasibilityCheck,
         TaskPlan,
@@ -282,6 +285,8 @@ def test_host_uses_restored_identity_and_releases_resources_on_sink_error(
 
     def sink(episode):
         captured.append(episode)
+        if write_succeeds:
+            return save_feasibility_episode(episode, tmp_path / "episodes")
         raise ValueError("existing artifact differs")
 
     checker = SimpleNamespace(
@@ -300,11 +305,33 @@ def test_host_uses_restored_identity_and_releases_resources_on_sink_error(
         sink=sink,
         observation_keys=("camera/rgb",),
     )
-    budget = FeasibilityBudget(SceneRobotFeasibilityCfg(max_candidates=1))
-    host.prepare(req, budget)
-    candidate = prepare_feasibility(req).candidate((), mode_id="runtime", ordinal=0)
-    with pytest.raises(ValueError, match="existing artifact differs"):
-        host.evaluate(candidate, budget)
+    cfg = SceneRobotFeasibilityCfg(
+        max_candidates=1, max_rollouts=1, max_regions=1, validation_samples=1
+    )
+    prepared = prepare_feasibility(req, cfg)
+    budget = FeasibilityBudget(cfg)
+    if write_succeeds:
+        atlas = search_feasibility(prepared, host, budget=budget)
+        assert atlas.metrics["committed"] == 1
+        assert atlas.stop_reason == "target_reached"
+        assert len(atlas.regions) == 1
+        region = atlas.regions[0]
+        assert region.validation_completed == 0 and not region.validation_complete
+        assert region.confidence_interval is None
+        assert not atlas.observations[-1].completed
+        save_feasibility_atlas(atlas, tmp_path / "atlas.json")
+        from embodichain.lab.sim.scene.feasibility.visualization import (
+            write_feasibility_report,
+        )
+
+        write_feasibility_report(atlas, tmp_path / "report.html")
+        assert (tmp_path / "atlas.json").is_file()
+        assert (tmp_path / "report.html").is_file()
+    else:
+        host.prepare(req, budget)
+        candidate = prepared.candidate((), mode_id="runtime", ordinal=0)
+        with pytest.raises(ValueError, match="existing artifact differs"):
+            host.evaluate(candidate, budget)
     assert env.closed == 1 and env.resets >= 1 and host._env is None
     assert captured[0].identity.initial_state_id == "actual_restored"
     assert captured[0].metadata["task_program"]["initial_state_id"] == "actual_restored"
@@ -312,7 +339,7 @@ def test_host_uses_restored_identity_and_releases_resources_on_sink_error(
     image_history = captured[0].observations["env/camera/rgb"]
     assert image_history[:, 0, 0, 0].tolist() == [3.0, 99.0]
     assert captured[0].metadata["terminal_poses"]["cube"][0][0] == 1.0
-    assert host.session_snapshot["counts"]["committed"] == 0
+    assert host.session_snapshot["counts"]["committed"] == int(write_succeeds)
 
 
 def test_required_observations_fail_closed_for_missing_or_oversized_frames():

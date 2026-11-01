@@ -45,7 +45,9 @@ embodichain run-example expansion/scene_robot_feasibility/preview --config examp
 The last command evaluates that workflow's authored installation and reads its
 existing `atlas.json`/`episodes/`; it does not perform another search. The resolved
 request must match. `preview.json` preserves the detached mesh/frame data and
-`workflow.json` preserves the exact search configuration. Output directories
+`workflow.json` preserves the exact search configuration. Custom workflows retain
+their authored resource paths, resolved from the original `--config` file.
+Output directories
 must be new, or explicitly reopened with `--reuse`.
 
 ## Search configuration

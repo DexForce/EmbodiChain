@@ -33,6 +33,7 @@ from embodichain.lab.sim.scene.feasibility import (
     SceneRobotFeasibilityCfg,
     prepare_feasibility,
     search_feasibility,
+    validate_feasibility,
     sample_feasibility,
     binomial_interval,
     save_feasibility_atlas,
@@ -131,6 +132,68 @@ def test_joint_disconnected_regions_and_fixed_count_holdout(tmp_path):
     path.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="changed"):
         load_feasibility_atlas(path)
+
+
+@pytest.mark.parametrize("shared_budget", [False, True])
+def test_validation_preserves_search_costs_with_fresh_or_shared_budget(
+    tmp_path, shared_budget
+):
+    now = [0.0]
+
+    class Measured:
+        def prepare(self, req, budget):
+            now[0] += 2.0
+
+        def evaluate(self, candidate, budget):
+            budget.charge("ik")
+            budget.charge("rollouts")
+            now[0] += 3.0
+            return CandidateEvaluation(
+                candidate.candidate_id,
+                tuple(
+                    FeasibilityCheck(stage, "passed")
+                    for stage in (
+                        "semantics",
+                        "geometry",
+                        "kinematics",
+                        "motion",
+                        "execution",
+                    )
+                ),
+                True,
+                True,
+                "measured-state",
+            )
+
+    cfg = SceneRobotFeasibilityCfg(
+        max_candidates=1, max_regions=1, validation_samples=2
+    )
+    budget = FeasibilityBudget(cfg, clock=lambda: now[0])
+    atlas = search_feasibility(
+        prepare_feasibility(request(), cfg),
+        Measured(),
+        budget=budget,
+        validate_regions=False,
+    )
+    assert len(atlas.regions) == 1 and atlas.metrics["elapsed_s"] == 5.0
+    path = tmp_path / "atlas.json"
+    save_feasibility_atlas(atlas, path)
+    validated = validate_feasibility(
+        load_feasibility_atlas(path),
+        Measured(),
+        budget=(
+            budget if shared_budget else FeasibilityBudget(cfg, clock=lambda: now[0])
+        ),
+    )
+    assert validated.metrics["calls"] == {
+        "candidates": 3,
+        "ik": 3,
+        "planning": 0,
+        "rollouts": 3,
+    }
+    assert validated.metrics["elapsed_s"] == 13.0
+    assert validated.metrics["measured_successes"] == 3
+    assert validated.regions[0].validation_complete
 
 
 def test_sampler_preserves_joint_region_and_requires_both_prechecks():

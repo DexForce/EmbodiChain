@@ -56,18 +56,24 @@ def _workflow(output: Path, source: Path, demonstration: bool) -> Path:
     from embodichain.utils.utility import load_config
 
     config = copy.deepcopy(load_config(source))
-    if demonstration:
-        # Deliberately poor *installation*, retaining the original physical task.
-        config["request"]["entity_poses"]["UR5"][0][3] = 0.75
-        installation = next(
-            v for v in config["request"]["variables"] if v["name"] == "installation"
+    if not demonstration:
+        # Resolve from the source file below; resource spelling participates in
+        # the workflow identity and must match an existing run exactly.
+        (output / "workflow.json").write_text(
+            json.dumps(config, indent=2, allow_nan=False)
         )
-        installation["reference_pose"][0][3] = 0.75
-        installation["lower"] = [-0.8, -0.08, -0.12]
-        installation["upper"] = [0.05, 0.08, 0.12]
-        config["search"].update(
-            max_wall_time_s=300.0, max_candidates=8, max_regions=1, validation_samples=1
-        )
+        return source
+    # Deliberately poor *installation*, retaining the original physical task.
+    config["request"]["entity_poses"]["UR5"][0][3] = 0.75
+    installation = next(
+        v for v in config["request"]["variables"] if v["name"] == "installation"
+    )
+    installation["reference_pose"][0][3] = 0.75
+    installation["lower"] = [-0.8, -0.08, -0.12]
+    installation["upper"] = [0.05, 0.08, 0.12]
+    config["search"].update(
+        max_wall_time_s=300.0, max_candidates=8, max_regions=1, validation_samples=1
+    )
     for key in ("deployment", "program"):
         if key in config["task_program"]:
             resource = (source.parent / config["task_program"][key]).resolve()
@@ -87,14 +93,14 @@ def _workflow(output: Path, source: Path, demonstration: bool) -> Path:
     return target
 
 
-def _baseline(config: dict, output: Path) -> dict:
+def _baseline(config: dict, output: Path, config_directory: Path) -> dict:
     from embodichain.lab.sim.scene.feasibility import FeasibilityBudget
     from embodichain.lab.task_program.integrations.feasibility import (
         build_feasibility_host,
     )
 
     prepared, host = build_feasibility_host(
-        config, output_directory=output / "baseline"
+        config, config_directory=config_directory, output_directory=output / "baseline"
     )
     # The authored zero offsets have their own exact position in this joint box.
     parameters = []
@@ -122,19 +128,21 @@ def _baseline(config: dict, output: Path) -> dict:
         host.close()
 
 
-def _asset_environment(config: dict) -> Any:
+def _asset_environment(config: dict, config_directory: Path) -> Any:
     """Create one read-only asset/FK source; this environment does not replay actions."""
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
     from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
     from embodichain.utils.utility import load_config
 
     adapter = config["task_program"]
-    deployment = Path(adapter["deployment"])
+    deployment = config_directory / adapter["deployment"]
     data = load_config(deployment)
     cfg = config_to_cfg(
         data,
         source_path=deployment,
-        task_program_path_override=adapter.get("program"),
+        task_program_path_override=(
+            config_directory / adapter["program"] if "program" in adapter else None
+        ),
     )
     cfg.num_envs = cfg.sim_cfg.num_envs = 1
     cfg.sim_cfg.device = "cpu"
@@ -225,10 +233,12 @@ def _matrices(
     return result.swapaxes(-1, -2).reshape(len(q), len(meshes), 16)
 
 
-def _preview_data(config: dict, root: Path, atlas: Any, baseline: dict) -> dict:
+def _preview_data(
+    config: dict, root: Path, atlas: Any, baseline: dict, config_directory: Path
+) -> dict:
     from embodichain.lab.sim import SimulationManager
 
-    owned = _asset_environment(config)
+    owned = _asset_environment(config, config_directory)
     env = getattr(owned, "unwrapped", owned)
     try:
         env.reset(options={"save_data": False})
@@ -407,6 +417,7 @@ def main() -> None:
             run_feasibility,
         )
         from embodichain.lab.sim.scene.feasibility import load_feasibility_atlas
+        from embodichain.utils.utility import load_config
 
         torch.set_num_threads(4)
         if args.from_run is not None and args.config is None:
@@ -419,11 +430,11 @@ def main() -> None:
             else Path(__file__).with_name("search.ur5.yaml")
         )
         workflow = _workflow(output, source, args.config is None)
-        config = json.loads(workflow.read_text())
+        config = load_config(workflow)
         print(
             "Checking the authored installation with the same task gates…", flush=True
         )
-        baseline = _baseline(config, output)
+        baseline = _baseline(config, output, workflow.parent)
         root = args.from_run.resolve() if args.from_run else output / "search"
         if args.from_run:
             atlas = load_feasibility_atlas(root / "atlas.json")
@@ -437,7 +448,7 @@ def main() -> None:
             raise ValueError(
                 "Baseline and search must use the same resolved task request"
             )
-        data = _preview_data(config, root, atlas, baseline)
+        data = _preview_data(config, root, atlas, baseline, workflow.parent)
         (output / "preview.json").write_text(json.dumps(data, allow_nan=False))
     payload = (
         json.dumps(data, allow_nan=False)
