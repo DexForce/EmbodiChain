@@ -198,6 +198,13 @@ runtime services 中以 program fingerprint + compiled occurrence 定位。`prog
 本次是 **156 项完整报告、150 条确认成功**，不是矩阵全通过。机器可读摘要在
 `acceptance_report.json`，完整逐条报告随运行产物保存。
 
+Franka 裸臂与显式末端装配调整后的回归记录在
+[`franka_arm_only_report.json`](franka_arm_only_report.json)。真实／合成固定输入的
+928／1726 步名义采集均获得匹配的确认回执；实际 T+1 数组与候选血缘和先前基线一致。
+24 个已发布输入文件保持原哈希，重新构建的 12 个真实来源文件也逐字节相同。
+UR5 立方体的 628 步采集通过独立审核。本次未重跑全部 156 个候选；上表及
+`franka_migration_report.json` 保留为先前完整矩阵的证据，回放导出已使用新装配验证。
+
 ## 输出与展示
 
 | 产物 | 内容 |

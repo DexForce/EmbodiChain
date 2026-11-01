@@ -1,0 +1,128 @@
+{
+  "schema": "franka-bare-arm-migration/v1",
+  "scope": "Bare-arm configuration and explicit end-effector assembly; simulation regression only",
+  "foundation_pr": "https://github.com/DexForce/EmbodiChain/pull/916",
+  "integration_pr": "https://github.com/DexForce/EmbodiChain/pull/896",
+  "foundation_commit": "ac7e1f01cfe447a9e23a77e559d932f770162132",
+  "validated_code_commit": "f1ceeafa86cff4f697b00102182e050f6a238208",
+  "robot_selection": {
+    "class_type": "Franka",
+    "arm_model": "panda",
+    "hand_component": "Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf",
+    "mount_z_m": 0.018,
+    "flange_to_tcp_z_m": 0.168
+  },
+  "assembled_urdf_sha256": "6d067164495cb48efb1beec1aa501415dc3b2fa5f2e550cc2fb4bd0de127f81c",
+  "geometry_identity_unchanged": true,
+  "published_hf_revision": "3c340238f6acc29a50272c33f79264764d0704ff",
+  "published_input_files_verified": 24,
+  "requalified_measured_files_identical": 12,
+  "published_inputs_replaced": false,
+  "qualification": {
+    "admitted": true,
+    "checks": {
+      "flange_fk_position_m": true,
+      "flange_fk_rotation_rad": true,
+      "camera_fit_rms_px": true,
+      "camera_fit_max_coordinate_px": true,
+      "camera_holdout_px": true,
+      "box_bbox_rms_px": true,
+      "box_bbox_max_coordinate_px": true,
+      "physical_box_within_opening": true,
+      "source_commands_submitted": true,
+      "video_offset_explicit": true,
+      "original_robot_model": true,
+      "source_joint_layout": true,
+      "source_geometry_identity": true
+    },
+    "metrics": {
+      "flange_fk_position_m": 1.7881635962892907e-07,
+      "flange_fk_rotation_rad": 6.925986640700632e-08,
+      "camera_fit_rms_px": 4.579581027660895,
+      "camera_fit_max_coordinate_px": 9.139327009309426,
+      "camera_holdout_px": 8.782744702879388,
+      "box_bbox_rms_px": 3.643971055664278,
+      "box_bbox_max_coordinate_px": 6.809544748974474
+    }
+  },
+  "nominals": {
+    "measured": {
+      "steps": 928,
+      "receipt_confirmed": true,
+      "candidate_id": "candidate:3dfe1f700f83617bc0bbb76dccfb8e2789332d2fe1b3898baeb633e1e48dcf4c",
+      "xy_error_m": 0.0009784178676991882,
+      "lift_m": 0.042698152363300323,
+      "candidate_and_source_lineage_identical": true,
+      "actual_arrays_bit_identical_to_previous": {
+        "real2sim_episode_evidence": {
+          "observation_0": true,
+          "observation_1": true,
+          "observation_2": true,
+          "actions": true,
+          "timestamps": true
+        },
+        "real2sim_observed_geometry": {
+          "object_pose": true,
+          "target_pose": true,
+          "timestamps": true
+        }
+      }
+    },
+    "synthetic_reference": {
+      "steps": 1726,
+      "receipt_confirmed": true,
+      "candidate_id": "candidate:b1868aa7109a584a039b3c8592aa1720400674325c9b5d5d27061a6fd04a3cab",
+      "xy_error_m": 0.00042957388334027944,
+      "lift_m": 0.04411114752292633,
+      "candidate_and_source_lineage_identical": true,
+      "actual_arrays_bit_identical_to_previous": {
+        "real2sim_episode_evidence": {
+          "observation_0": true,
+          "observation_1": true,
+          "observation_2": true,
+          "actions": true,
+          "timestamps": true
+        },
+        "real2sim_observed_geometry": {
+          "object_pose": true,
+          "target_pose": true,
+          "timestamps": true
+        }
+      }
+    }
+  },
+  "ur5_regression": {
+    "steps": 628,
+    "receipt_confirmed": true,
+    "xy_error_m": 0.002651204396749933,
+    "lift_m": 0.10058104991912842
+  },
+  "replay": {
+    "export_succeeded": true,
+    "candidates": 156,
+    "read_only": true,
+    "recordings_source": "Previously audited fixed 156-candidate matrix; this export does not run physics"
+  },
+  "previous_full_matrix": {
+    "report": "franka_migration_report.json",
+    "validated_code_commit": "e85efefbaf9c5138a84fc72f11866739bfaf49da",
+    "candidates": 156,
+    "measured_confirmed": 72,
+    "synthetic_confirmed": 78,
+    "rejected": 6,
+    "rerun_for_this_bare_arm_change": false
+  },
+  "software": {
+    "affected_production_modules": 36,
+    "tests_passed": 1646,
+    "tests_deselected": 1,
+    "public_api_exports": 3429,
+    "black_version": "26.10.1",
+    "context": "passed",
+    "sphinx_dummy": "passed with existing repository warnings"
+  },
+  "limitations": [
+    "No hardware dynamics qualification",
+    "The previous 156-case evidence is retained as a historical baseline; current execution covers both fixed-input nominals and the UR5 regression"
+  ]
+}
