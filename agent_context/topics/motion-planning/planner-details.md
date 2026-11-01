@@ -286,9 +286,21 @@ mixed order and real Franka adapter calls in
 
 ## Retiming and playback
 
+`compute.trajectory.retime_joint_paths()` is the simulation-independent public
+operator with explicit velocity/acceleration inputs. It returns plain tensors
+`(q, qd, qdd, dt, success, lengths)`; duration is `dt.sum(-1)`. Quantity sampling
+has fixed width, while time sampling pads to the maximum valid row length.
+Failures have zero valid length; stationary successes retain two samples.
+This API and `DifferentiableRetimingLayer` retain not-a-knot geometry, including
+the repeated final knot. They share the Warp solver with the planner helper
+below, which explicitly selects PCHIP instead. Both boundaries validate path
+lengths before integer narrowing.
+
 `toppra_planner.py::retime_joint_paths()` is the shared entry point for
 re-parameterizing an already-planned joint path under velocity and acceleration
-limits, used by planners that emit geometry without executable timing. It shares
+limits, used by planners that emit geometry without executable timing. It keeps
+its mapping/enum signature and native-width float64 `PlanResult`, without
+allocating padded learning outputs. It shares
 TOPPRA's interval solver but uses coordinatewise PCHIP: the continuous curve
 stays inside each adjacent pair's position box. C1 joins preserve velocity;
 acceleration can jump, with both sides bounded on segment-aligned cells. Jerk
@@ -307,6 +319,11 @@ with `preserve_waypoint_arrivals`. `PlanResult.waypoint_indices` and
 `policy_waypoint_indices` carry output and native visits; missing visits use -1
 and padding never establishes an arrival. Atomic control-grid conversion and
 event splits consume these identities instead of recovering visits by proximity.
+Position-only composite paths encode each declared stop without a stationary
+neighbor as a one-control-period hold, including terminal stops that can become
+interior junctions. This extends those paths by one tick per added hold and
+preserves zero velocity targets when the final composite is differentiated.
+Direct full-robot conversion retains phase velocities without adding these holds.
 Revalidate float32 compiled dynamics after holds and concatenation.
 
 Call-scoped trajectory capture in `compute/trajectory/_trace.py` clones device

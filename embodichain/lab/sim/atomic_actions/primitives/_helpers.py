@@ -135,6 +135,36 @@ def hold_inactive_cartesian_rows(
     )
 
 
+def _hold_arrival_stops(
+    positions: torch.Tensor,
+    arrivals: torch.Tensor,
+    lengths: torch.Tensor,
+) -> torch.Tensor:
+    """Encode stops in position-only composite paths as one-tick holds.
+
+    Composition may discard endpoint samples, so terminal declared stops also
+    need a retained pair. Existing timed holds already supply that pair; other
+    rows' zero-time padding does not. All source samples stay in order.
+    """
+    _, count, dofs = positions.shape
+    samples = torch.arange(count, device=positions.device)[None]
+    valid = samples < lengths[:, None]
+    stops = torch.zeros_like(valid, dtype=torch.long)
+    stops.scatter_add_(1, arrivals.clamp_min(0).long(), (arrivals >= 0).long())
+    stationary = (positions[:, 1:] == positions[:, :-1]).all(dim=-1)
+    stationary &= valid[:, 1:]
+    held = torch.zeros_like(valid)
+    held[:, :-1] |= stationary
+    held[:, 1:] |= stationary
+    copies = valid.long() + ((stops > 0) & ~held & valid).long()
+    ends = copies.cumsum(dim=1)
+    output_lengths = ends[:, -1]
+    query = torch.arange(int(output_lengths.max()), device=positions.device)[None]
+    query = torch.minimum(query, output_lengths[:, None] - 1).contiguous()
+    indices = torch.searchsorted(ends.contiguous(), query, right=True)
+    return positions.gather(1, indices[:, :, None].expand(-1, -1, dofs))
+
+
 def resample_planned_trajectory(
     trajectory: torch.Tensor,
     sample_count: int,
@@ -158,6 +188,9 @@ def resample_planned_trajectory(
         control_dt: Destination control interval, required together with ``dt``.
         arrival_indices: Optional ordered target indices ``(B, K)`` to retain
             exactly on the destination grid. Missing visits use a -1 suffix.
+            Each visit without a stationary neighbor adds one control-period
+            hold, including terminal visits that can become composite interiors.
+            These pairs retain zero velocity targets after position-only assembly.
 
     Returns:
         A float32 control-command path with at least ``sample_count`` samples
@@ -199,9 +232,10 @@ def resample_planned_trajectory(
                 _resample_at_arrivals,
             )
 
-            retimed = _resample_at_arrivals(
-                trajectory, dt, control_dt, arrival_indices
-            )["positions"]
+            grid = _resample_at_arrivals(trajectory, dt, control_dt, arrival_indices)
+            retimed = _hold_arrival_stops(
+                grid["positions"], grid["waypoint_indices"], grid["valid_lengths"]
+            )
         retimed = retimed.to(torch.float32)
         if retimed.shape[1] >= sample_count:
             return retimed

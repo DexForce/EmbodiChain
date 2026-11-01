@@ -26,6 +26,7 @@ import torch
 from embodichain.lab.sim.atomic_actions.plans import normalize_success_mask
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     resolve_object_target,
+    resample_planned_trajectory,
     split_joint_trajectory_at_pose,
 )
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
@@ -351,8 +352,53 @@ def test_split_uses_declared_repeated_visit_and_retains_later_target():
         arrival_indices=torch.tensor([[1, 2, 3, 4]]),
         split_target_index=2,
     )
-    torch.testing.assert_close(first, trajectory[:, :4])
-    torch.testing.assert_close(second, trajectory[:, 3:])
+    torch.testing.assert_close(first, trajectory[:, [0, 1, 1, 2, 2, 3, 3]])
+    torch.testing.assert_close(second, trajectory[:, [3, 4, 4]])
+
+
+def test_composite_arrival_holds_preserve_rows_and_terminal_junctions():
+    q = torch.tensor(
+        [
+            [[0.0], [0.25], [0.5], [0.75], [1.0]],
+            [[0.0], [0.25], [0.5], [0.5], [0.5]],
+            [[0.0], [0.25], [0.5], [0.5], [1.0]],
+            [[0.0], [0.25], [0.5], [0.75], [1.0]],
+        ],
+        dtype=torch.float64,
+    )
+    dt = torch.tensor(
+        [
+            [0, 0.25, 0.25, 0.25, 0.25],
+            [0, 0.25, 0.25, 0, 0],
+            [0, 0.25, 0.25, 0.25, 0.25],
+            [0, 0.25, 0.25, 0.25, 0.25],
+        ],
+        dtype=torch.float64,
+    )
+    arrivals = torch.tensor([[2, 4, -1], [2, -1, -1], [2, 3, 4], [-1, -1, -1]])
+    expected = [
+        [0, 0.25, 0.5, 0.5, 0.75, 1, 1],
+        [0, 0.25, 0.5, 0.5],
+        [0, 0.25, 0.5, 0.5, 1, 1],
+        [0, 0.25, 0.5, 0.75, 1],
+    ]
+    batch = resample_planned_trajectory(
+        q, 1, dt=dt, control_dt=0.25, arrival_indices=arrivals
+    )
+    for row, values in enumerate(expected):
+        single = resample_planned_trajectory(
+            q[row : row + 1],
+            1,
+            dt=dt[row : row + 1],
+            control_dt=0.25,
+            arrival_indices=arrivals[row : row + 1],
+        )
+        torch.testing.assert_close(single[0, :, 0], torch.tensor(values))
+        torch.testing.assert_close(batch[row, : len(values)], single[0])
+        torch.testing.assert_close(
+            batch[row, len(values) :],
+            single[0, -1:].expand(batch.shape[1] - len(values), -1),
+        )
 
 
 class TestTranslatePoseWorld:

@@ -1303,6 +1303,22 @@ def test_place_releases_at_the_declared_visit_instead_of_an_equivalent_pose() ->
         q[:, 3:4].float().expand(-1, release.stop - release.start, -1),
     )
     torch.testing.assert_close(positions[:, -1], q[:, -1].float())
+    # The first declared visit is inside the approach, away from the release
+    # hold. Its velocity target must remain zero after composite assembly.
+    velocities = torch.stack(
+        [
+            command.payload.velocities
+            for frame in plan.commands.frames
+            for command in frame.commands
+            if command.target.control_part == "arm"
+        ],
+        dim=1,
+    )
+    arrival = (positions == q[:, 1:2].float()).all(dim=-1)
+    assert arrival.any(dim=1).all()
+    assert velocities[arrival].count_nonzero() == 0
+    moving = (positions[..., 0] > 0.01) & (positions[..., 0] < 0.09)
+    assert velocities[moving].abs().min() > 0
 
 
 def test_place_restores_grasp_pressure_only_for_held_rows() -> None:
