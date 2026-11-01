@@ -1,0 +1,50 @@
+embodiment_id: franka_panda_robotiq85
+simulation:
+  class_type: Franka
+  arm_model: panda
+  gripper: robotiq_2f85
+  uid: FrankaPandaRobotiq85
+  gripper_mount_z_m: 0.018
+  gripper_mount_yaw_rad: 0.0
+  tcp_offset_m: 0.15
+sensor: []
+skill_profile:
+  contract_id: single_arm_parallel_gripper
+  profile_id: franka_panda_robotiq85
+  resources:
+  - resource_id: primary_manipulator
+    endpoints:
+    - endpoint_id: motion
+      control_part: arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: eef
+      capabilities:
+      - interaction.grasp
+      command_preset: parallel_jaw_commands
+  command_presets:
+  - preset_id: parallel_jaw_commands
+    control_part: eef
+    commands:
+      open:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      grasp:
+      - 0.8
+      - 0.8
+      - -0.8
+      - 0.8
+      - 0.8
+      - -0.8
+  runtime_services:
+    grasp_pose_generators:
+      eef:
+        kind: antipodal_parallel_jaw
+        model: robotiq_2f85

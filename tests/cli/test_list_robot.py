@@ -114,6 +114,7 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "TianjiMarvin",
         "DexforceW1",
         "CobotMagic",
+        "Franka",
         "FrankaPanda",
         "FlexivRizon4S",
         "SO101Follower",
@@ -132,7 +133,15 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "ur10",
         "ur10e",
     }
-    for robot_id in expected_ids - {"ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"}:
+    for robot_id in expected_ids - {
+        "ur3",
+        "ur3e",
+        "ur5",
+        "ur5e",
+        "ur10",
+        "ur10e",
+        "FrankaPanda",
+    }:
         assert re.search(rf"│\s*{re.escape(robot_id)}\s*│", output)
     assert set(registry.list_robot_cfgs()) == expected_ids
     for alias in (

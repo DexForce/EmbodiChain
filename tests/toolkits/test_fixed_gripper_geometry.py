@@ -182,3 +182,26 @@ def test_revolute_mimic_open_state_and_virtual_tcp(tmp_path: Path) -> None:
     kwargs["joint_positions"] = {"drive": np.pi / 2, "follower": np.pi / 2}
     with pytest.raises(ValueError, match="contradicts mimic"):
         FixedGripperCollisionGeometry.from_urdf(path, **kwargs)
+
+
+def test_authored_collision_box_preserves_physical_pad_dimensions(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "pad.urdf"
+    path.write_text(
+        '<robot name="pad"><link name="root"><collision><origin xyz="0.01 -0.02 0.03"/><geometry><box size="0.02 0.04 0.06"/></geometry></collision></link></robot>'
+    )
+    geometry = FixedGripperCollisionGeometry.from_urdf(
+        path,
+        root_link="root",
+        tcp_link="root",
+        collision_links=("root",),
+        joint_positions={},
+        grasp_from_tcp=np.eye(4),
+        point_spacing=0.012,
+    )
+    np.testing.assert_allclose(geometry.points.amin(0), [0.0, -0.04, 0.0], atol=1e-8)
+    np.testing.assert_allclose(geometry.points.amax(0), [0.02, 0.0, 0.06], atol=1e-8)
+    assert geometry.provenance["parts"][0]["geometry_kind"] == "urdf_box"
+    assert geometry.provenance["parts"][0]["mesh_path"] is None
+    assert len(geometry.provenance["files_sha256"]) == 1

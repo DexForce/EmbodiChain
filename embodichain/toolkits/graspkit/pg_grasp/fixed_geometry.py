@@ -278,18 +278,35 @@ class FixedGripperCollisionGeometry:
             for collision in collisions:
                 mesh_node = collision.find("geometry/mesh")
                 if mesh_node is None:
-                    raise ValueError(
-                        "Fixed collision templates require triangle meshes."
-                    )
-                filename = mesh_node.attrib["filename"]
-                mesh_path = Path(
-                    (mesh_paths or {}).get(filename, path.parent / filename)
-                ).resolve(strict=True)
-                files[str(mesh_path)] = hashlib.sha256(
-                    mesh_path.read_bytes()
-                ).hexdigest()
-                mesh = trimesh.load(mesh_path, force="mesh", process=False)
-                scale = np.fromstring(mesh_node.get("scale", "1 1 1"), sep=" ")
+                    box = collision.find("geometry/box")
+                    if box is None:
+                        raise ValueError(
+                            "Fixed collision templates require meshes or authored URDF boxes."
+                        )
+                    size = np.fromstring(box.get("size", ""), sep=" ")
+                    if (
+                        size.shape != (3,)
+                        or not np.isfinite(size).all()
+                        or (size <= 0).any()
+                    ):
+                        raise ValueError(
+                            "URDF collision box dimensions must be positive and finite."
+                        )
+                    # Exact triangulation of an authored physical box (e.g.
+                    # rubber finger pads), never a fitted envelope of a mesh.
+                    mesh = trimesh.creation.box(extents=size)
+                    mesh_path = None
+                    scale = np.ones(3)
+                else:
+                    filename = mesh_node.attrib["filename"]
+                    mesh_path = Path(
+                        (mesh_paths or {}).get(filename, path.parent / filename)
+                    ).resolve(strict=True)
+                    files[str(mesh_path)] = hashlib.sha256(
+                        mesh_path.read_bytes()
+                    ).hexdigest()
+                    mesh = trimesh.load(mesh_path, force="mesh", process=False)
+                    scale = np.fromstring(mesh_node.get("scale", "1 1 1"), sep=" ")
                 transform = (
                     grasp_from_tcp
                     @ tcp_from_root
@@ -308,7 +325,10 @@ class FixedGripperCollisionGeometry:
                 part_records.append(
                     {
                         "link": name,
-                        "mesh_path": str(mesh_path),
+                        "mesh_path": str(mesh_path) if mesh_path is not None else None,
+                        "geometry_kind": (
+                            "mesh" if mesh_node is not None else "urdf_box"
+                        ),
                         "grasp_from_mesh": transform.tolist(),
                         "bounds_m": [
                             vertices.min(0).tolist(),

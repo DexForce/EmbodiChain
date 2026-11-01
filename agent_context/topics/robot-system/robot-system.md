@@ -11,6 +11,7 @@
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
+| Franka arm/tool selection and legacy compatibility | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
