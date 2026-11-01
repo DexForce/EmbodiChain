@@ -44,12 +44,5 @@ profile:
 runtime_services:
   handover_pose_providers:
   - kind: configured_pose
-    final_position:
-    - 0.45
-    - -0.18
-    - 0.815
-    final_quaternion_xyzw:
-    - 0.0
-    - 0.0
-    - 0.0
-    - 1.0
+    final_position: [0.45, -0.18, 0.815]
+    final_quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]

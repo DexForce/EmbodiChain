@@ -146,9 +146,7 @@ def test_native_hand_over_example_requires_transfer_place_and_independent_collis
     tmp_path,
 ):
     root = Path(__file__).resolve().parents[4]
-    source = (
-        root / "examples/expansion/scene_robot_feasibility/search.bar_dual_ur5.yaml"
-    )
+    source = root / "examples/expansion/scene_robot_feasibility/search.dual_ur5.yaml"
     config = yaml.safe_load(source.read_text())
     config["task_program"]["deployment"] = str(
         (source.parent / config["task_program"]["deployment"]).resolve()

@@ -90,17 +90,11 @@ valid cached qpos/FK data can be reused instead. Half of prior requests retain
 uniform exploration, and every proposed layout still runs fresh IK/path/physical
 checks. The report records prior identity and guided/fallback counts.
 
-`search.dual_ur5.yaml` exercises the existing verified tabletop HandOver program,
-with paired preflight reach requirements and explicit measured transfer/release
-events. The canonical runtime owns grasp choice and the full handover/placement
-motion; native qualification must be assessed from its resulting atlas, rather
-than inferred from the preflight endpoints alone.
-
-`search.bar_dual_ur5.yaml` reuses the existing
+`search.dual_ur5.yaml` reuses the existing
 [`hand_over` task](../../../extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/README.md)
 for rigid-bar grasp, handover and placement. The example-local `hand_over/`
-directory contains the physical scene, scene binding and a specialization of
-`hand_over/task_program/program.bar.yaml` for this table's target poses and
+directory contains an inline physical deployment, scene binding and a
+specialization of `hand_over/task_program/program.bar.yaml` for this table's target poses and
 acceptance tolerance. It retains the `tabletop_hand_over` program identity and
 shared HandOver flow, DualUR5 embodiment and verified execution policy.
 The example deployment uses a distinct process-local Gym ID,
@@ -113,7 +107,7 @@ Run the example with:
 
 ```bash
 embodichain search-scene-feasibility \
-  --config examples/expansion/scene_robot_feasibility/search.bar_dual_ur5.yaml \
+  --config examples/expansion/scene_robot_feasibility/search.dual_ur5.yaml \
   --output outputs/hand_over_feasibility
 ```
 
@@ -128,7 +122,7 @@ From a source checkout with the installed simulation runtime:
 ```bash
 OMP_NUM_THREADS=4 python -m scripts.benchmark.scene.feasibility_collision \
   --collect-config examples/expansion/scene_robot_feasibility/search.ur5.yaml \
-  --collect-config examples/expansion/scene_robot_feasibility/search.bar_dual_ur5.yaml \
+  --collect-config examples/expansion/scene_robot_feasibility/search.dual_ur5.yaml \
   --output outputs/benchmarks/newton_collision
 ```
 
