@@ -6,5 +6,7 @@ default_deployment: default
 deployments:
   default:
     config: env.json
+  configured_rl:
+    config: env.configured_rl.yaml
   franka_visual:
     config: task.franka.visual.yaml

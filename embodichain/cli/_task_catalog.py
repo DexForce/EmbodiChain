@@ -459,7 +459,8 @@ def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
                         resource,
                         _backend(config, resource),
                         _config_embodiment_names(config),
-                        {_TASK_PROGRAM} if "task_program" in config else set(),
+                        ({_TASK_PROGRAM} if "task_program" in config else set())
+                        | ({_RL} if "rl_task" in config else set()),
                     )
                 )
                 if metadata and "validation" in metadata["deployments"][name]:
