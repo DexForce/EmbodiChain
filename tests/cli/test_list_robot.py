@@ -158,8 +158,8 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     assert output.count("│ URRobot") == 1
     for model in ("ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"):
         assert model in output
-    assert "eef (1+1m)" in output
-    assert "fr3_finger_joint2" in _column_text(output, 5)
+    assert "arm (7)" in _column_text(output, 4)
+    assert "fr3_finger_joint2" not in _column_text(output, 5)
 
 
 @pytest.mark.parametrize("terminal_width", [80, 120])
@@ -300,9 +300,9 @@ def test_dual_arm_variant_rows_use_each_base_dof(catalogs: list[Any]) -> None:
     assert profiles[0][1]["dof"] == 12
     assert "ur10*" in profiles[0][0]
     assert profiles[1][0] == "FrankaPanda"
-    assert profiles[1][1]["dof"] == 16
-    assert len(profiles[1][1]["mimic_joints"]) == 2
-    assert "left_eef (1+1m)" in list_robot._format_control_parts(profiles[1][1])
+    assert profiles[1][1]["dof"] == 14
+    assert not profiles[1][1]["mimic_joints"]
+    assert "left_arm (7)" in list_robot._format_control_parts(profiles[1][1])
 
 
 def test_dual_arm_composite_part_marks_overlapping_mimics(

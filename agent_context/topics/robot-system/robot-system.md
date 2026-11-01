@@ -11,7 +11,7 @@
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
-| Franka arm/tool selection and legacy compatibility | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
+| Bare Franka arm selection and explicit tool assembly | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Independent Revo1 hand or shared hand asset names | `extensions/embodichain_robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
@@ -118,7 +118,8 @@ declare capabilities. Custom keys, including `hand`, remain valid and are not
 automatically aliased. URDF component names such as `left_hand` and native link
 or joint names belong to the asset namespace and are independent of this rule.
 
-Panda's default `hand` group is now `eef`; Aloha Mini, Tianji Marvin and the
+Bare Franka presets declare only `arm`; their explicit hand embodiments add
+`eef`. Aloha Mini, Tianji Marvin and the
 official dual-UR5 embodiment use `left_eef` / `right_eef` in place of
 `left_hand` / `right_hand`. Callers of those defaults must update named-part
 queries, drive overrides, endpoint bindings and service keys together. Existing

@@ -33,7 +33,7 @@ from embodichain.lab.sim.cfg import (
 __all__: list[str] = []
 
 _LINKS = {
-    "arm_base_link": {
+    "base_link": {
         "mass": 0.629769,
         "com_position": [-0.041018, -0.00014, 0.049974],
         "inertia": [

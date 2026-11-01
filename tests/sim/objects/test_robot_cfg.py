@@ -809,7 +809,7 @@ def test_control_part_naming_convention_does_not_rewrite_user_names(
 @pytest.mark.parametrize(
     ("robot_class", "module_path", "expected_eef_parts"),
     [
-        (FrankaPandaCfg, "franka.panda", {"eef"}),
+        (FrankaPandaCfg, "franka.panda", set()),
         (AlohaMiniCfg, "alohamini.aloha_mini.cfg", {"left_eef", "right_eef"}),
         (TianjiMarvinCfg, "tianji.marvin.cfg", {"left_eef", "right_eef"}),
     ],
@@ -832,7 +832,7 @@ def test_specified_robot_defaults_use_eef_control_part_names(
     assert expected_eef_parts.issubset(cfg.control_parts)
     assert {"hand", "left_hand", "right_hand"}.isdisjoint(cfg.control_parts)
     if robot_class is FrankaPandaCfg:
-        assert cfg.control_parts["eef"] == ["fr3_finger_joint1", "fr3_finger_joint2"]
+        assert cfg.control_parts == {"arm": [f"fr3_joint{i}" for i in range(1, 8)]}
     elif robot_class is AlohaMiniCfg:
         assert cfg.control_parts["left_eef"] == ["left_gripper"]
     else:
@@ -1551,17 +1551,19 @@ def test_specified_robots_use_portable_joint_drive_semantics(
     assert cfg.joint_drive_props._resolve_modes() == ("position_velocity", "force")
 
 
-@pytest.mark.parametrize(
-    ("cfg_type", "expected_links"),
-    [
-        (FrankaPandaCfg, {"fr3_leftfinger|fr3_rightfinger"}),
-    ],
-)
-def test_franka_variants_own_newton_gripper_contact_defaults(
-    cfg_type: type[RobotCfg], expected_links: set[str]
-) -> None:
-    cfg = cfg_type.from_dict({})
+def test_explicit_franka_hand_embodiment_owns_contact_defaults() -> None:
+    from embodichain_tasks.configs import get_config_path
+    from embodichain.utils.utility import load_config
+    from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
 
+    bare = FrankaPandaCfg.from_dict({})
+    assert not bare.link_attrs
+    cfg = _robot_cfg_from_dict(
+        load_config(get_config_path("components/embodiments/franka_panda.yaml"))[
+            "simulation"
+        ]
+    )
+    expected_links = {"fr3_leftfinger|fr3_rightfinger"}
     group = cfg.link_attrs["newton_gripper_contacts"]
     assert set(group.link_names_expr) == expected_links
     assert isinstance(group.attrs.collision_props, NewtonCollisionPropertiesCfg)
@@ -1697,12 +1699,18 @@ def test_original_panda_robotiq_tcp_linkage_limits_and_model_isolation(
     }
 
     def source(name):
-        return str(sources[name])
+        return str(sources[name]) if not Path(name).is_absolute() else name
 
     monkeypatch.setattr(panda, "get_data_path", source)
-    cfg = panda.FrankaCfg.from_dict(
-        {"arm_model": "panda", "gripper": "robotiq_2f85", "gripper_mount_z_m": 0.018}
-    )
+    monkeypatch.setattr("embodichain.lab.sim.cfg.get_data_path", source)
+    from embodichain_tasks.configs import get_config_path
+    from embodichain.utils.utility import load_config
+    from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
+
+    declaration = load_config(
+        get_config_path("components/embodiments/franka_panda_robotiq85.yaml")
+    )["simulation"]
+    cfg = _robot_cfg_from_dict(declaration)
     restored = panda.FrankaCfg.from_dict(cfg.to_dict())
     assert restored.control_parts == cfg.control_parts
     chain = restored.build_pk_serial_chain()["arm"]
@@ -1715,15 +1723,10 @@ def test_original_panda_robotiq_tcp_linkage_limits_and_model_isolation(
     torch.testing.assert_close(
         tcp[0, :3, 3], torch.tensor([0.088, 0.0, 0.758]), atol=1e-6, rtol=0
     )
-    variant = panda.FrankaCfg.from_dict(
-        {
-            "arm_model": "panda",
-            "gripper": "robotiq_2f85",
-            "gripper_mount_z_m": 0.025,
-            "gripper_mount_yaw_rad": 0.1,
-        }
-    )
-    assert variant.urdf_cfg.fname != cfg.urdf_cfg.fname
+    # The embodiment owns the tool while the underlying config owns only arm joints.
+    assert set(panda.FrankaCfg.from_dict({"arm_model": "panda"}).control_parts) == {
+        "arm"
+    }
     for name, bounds in cfg.qpos_limits.items():
         assert bounds == ([-0.8, 0.0] if "inner_finger_joint" in name else [0.0, 0.8])
 
@@ -1753,7 +1756,7 @@ def test_franka_family_preserves_legacy_configuration_and_isolates_overrides() -
     legacy = FrankaPandaCfg.from_dict({"robot_type": "panda"})
     family = FrankaCfg.from_dict({})
     for key, value in legacy.to_dict().items():
-        if key != "robot_type":
+        if key not in {"robot_type", "uid"}:
             assert family.to_dict()[key] == value
     changed = FrankaCfg.from_dict(
         {
@@ -1764,7 +1767,7 @@ def test_franka_family_preserves_legacy_configuration_and_isolates_overrides() -
     )
     assert changed.uid == "custom"
     assert changed.joint_drive_props.stiffness["fr3_joint[1-7]"] == 123.0
-    assert changed.joint_drive_props.stiffness["fr3_finger_joint[1-2]"] == 1e3
+    assert set(changed.joint_drive_props.stiffness) == {"fr3_joint[1-7]"}
     assert changed.solver_cfg["arm"].position_tolerance == 0.0003
     assert FrankaCfg.from_dict(changed.to_dict()).to_dict() == changed.to_dict()
     assert family.joint_drive_props.stiffness["fr3_joint[1-7]"] == 1e4
@@ -1774,8 +1777,9 @@ def test_franka_family_preserves_legacy_configuration_and_isolates_overrides() -
 @pytest.mark.parametrize(
     "values",
     [
-        {"arm_model": "panda", "gripper": "panda_hand"},
-        {"arm_model": "fr3", "gripper": "robotiq_2f85"},
+        {"gripper": "panda_hand"},
+        {"gripper_mount_z_m": 0.018},
+        {"gripper_mount_yaw_rad": 0.0},
         {"arm_model": "unknown"},
         {"arm_model": True},
         {"robot_type": "panda"},
@@ -1793,3 +1797,22 @@ def test_franka_family_rejects_unqualified_combinations_before_downloading(
     monkeypatch.setattr(module, "get_data_path", download_forbidden)
     with pytest.raises(ValueError):
         module.FrankaCfg.from_dict(values)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("model", ["fr3", "panda"])
+def test_franka_bare_arm_has_only_seven_source_dofs(model: str) -> None:
+    import xml.etree.ElementTree as ET
+    from embodichain_robots import FrankaCfg
+
+    cfg = FrankaCfg.from_dict({"arm_model": model})
+    source = ET.parse(cfg.urdf_cfg.components["arm"]["urdf_path"]).getroot()
+    movable = [
+        j.get("name") for j in source.findall("joint") if j.get("type") != "fixed"
+    ]
+    assert movable == cfg.control_parts["arm"]
+    assert len(movable) == len(cfg.init_qpos) == 7
+    assert set(cfg.control_parts) == {"arm"}
+    assert set(cfg.urdf_cfg.components) == {"arm"}
+    np.testing.assert_array_equal(cfg.solver_cfg["arm"].tcp, np.eye(4))
+    assert FrankaCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()

@@ -103,17 +103,17 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 
 .. py:class:: embodichain_robots.FrankaPandaCfg
 
-   Legacy configuration for the historical FR3 asset with Panda Hand.
+   Legacy selector for the historical bare seven-DOF FR3 arm.
 
-   Compatibility entry retaining the historical FR3-named asset and defaults.
-   Explicit new model/tool selections use :class:`embodichain_robots.FrankaCfg`.
+   Compatibility entry retaining the historical FR3 model and legacy
+   ``robot_type`` selector. Mount tools explicitly; new model selections use
+   :class:`embodichain_robots.FrankaCfg`.
 
 .. py:class:: embodichain_robots.FrankaCfg
 
-   Unified Franka configuration with ``arm_model`` and ``gripper`` selections.
-   Supported combinations are ``fr3/panda_hand`` (default) and
-   ``panda/robotiq_2f85``. Tool calibration belongs to the selected embodiment;
-   configuration round trips do not apply it twice.
+   Bare seven-DOF Franka configuration selected by ``arm_model``:
+   ``fr3`` (default) or ``panda``. End effectors use ordinary URDF component,
+   control-group, drive and solver-TCP overrides in the embodiment.
 
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
@@ -358,7 +358,7 @@ embodichain_robots.franka.cfg
    :no-index:
 
    Implementation of :class:`embodichain_robots.FrankaCfg`.
-   ``from_dict()`` selects the supported arm/tool pair before applying ordinary
+   ``from_dict()`` selects the bare arm model before applying ordinary
    robot overrides. ``build_pk_serial_chain()`` shares that arm's source URDF;
    the solver applies the configured mounted-tool TCP once.
    See :doc:`/resources/robot/franka/cfg` for selections and calibration.
@@ -372,7 +372,7 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 .. py:class:: embodichain_robots.franka.panda.FrankaPandaCfg
    :no-index:
 
-   Legacy configuration for the historical FR3 asset with Panda Hand.
+   Legacy selector for the historical bare seven-DOF FR3 arm.
 
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime

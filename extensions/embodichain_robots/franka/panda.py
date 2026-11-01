@@ -23,10 +23,10 @@ __all__ = ["FrankaPandaCfg"]
 
 @configclass
 class FrankaPandaCfg(FrankaCfg):
-    """Compatibility entry preserving the historical FR3/Panda-Hand preset.
+    """Legacy selector for the historical FR3 model, now a bare arm.
 
-    The legacy ``robot_type=\"panda\"`` selector retains its authored asset
-    and defaults. New arm/tool selections use :class:`FrankaCfg`.
+    ``robot_type="panda"`` keeps selecting the historical FR3 asset family.
+    Mount a hand explicitly through an embodiment or ordinary RobotCfg overrides.
     """
 
     robot_type: str = "panda"
@@ -38,15 +38,13 @@ class FrankaPandaCfg(FrankaCfg):
             raise ValueError(
                 f"Unknown Franka robot_type: {self.robot_type!r}; expected panda"
             )
-        if (
-            values.get("arm_model", "fr3") != "fr3"
-            or values.get("gripper", "panda_hand") != "panda_hand"
-        ):
+        if values.get("arm_model", "fr3") != "fr3":
             raise ValueError(
-                "FrankaPanda preserves its legacy combination; select FrankaCfg for other models"
+                "FrankaPanda keeps the historical FR3 model; use FrankaCfg for Panda"
             )
-        values.update(arm_model="fr3", gripper="panda_hand")
+        values["arm_model"] = "fr3"
         super()._build_defaults(values)
+        self.uid = "FrankaPanda"
 
 
 if __name__ == "__main__":

@@ -2743,8 +2743,8 @@ class _FrankaPgiCfg(RobotCfg):
     gripper on the ``fr3_link8`` flange. The configuration owns the whole
     assembly: the ``arm`` and ``eef`` control parts, the PGI finger drive and
     open initial state, the PGI tool center point, and the Newton fingertip
-    contacts on the PGI finger links. The stock Panda hand settings of
-    :class:`FrankaPandaCfg` do not apply.
+    contacts on the PGI finger links. End-effector settings are owned by this
+    explicit assembly rather than the bare Franka arm preset.
 
     The arm solver and the FK/IK serial chain both end at ``fr3_link8`` on the
     arm URDF used by the assembly. The solver's ``tcp`` gives the PGI tool

@@ -1,16 +1,24 @@
-# Original Panda with Robotiq 2F-85
+# Franka seven-joint arms and explicit tools
 
-`FrankaCfg` with `arm_model="panda", gripper="robotiq_2f85"` assembles the original seven-joint Panda arm and the
-Robotiq 2F-85 linkage. The shared Franka family also preserves the existing FR3/Panda-Hand preset. The flange mount and TCP are explicit configuration; the carton demo
-uses an estimated coaxial 18 mm adapter and 150 mm tool offset. Preserve that
-conditional calibration when interpreting public DROID input.
+`FrankaCfg` selects a bare `fr3` (default) or original `panda` arm. Its only
+selector is `arm_model`; all arm variants expose seven arm joints and a flange
+TCP. End effectors are mounted through the same generic URDF component,
+control-group, drive and solver-TCP overrides used by UR robots. The official
+embodiments own native-hand and Robotiq installations and their calibration.
+
+The native FR3 hand is materialized as `Franka/Panda/Fr3HandV1.urdf` from the
+pinned `PandaWithHand.urdf` subtree (SHA256
+`a4a2d3265dadd69c4c7d8ed9238ae44494c217db6f66f586fcc40e8754ce2315`).
+The original source is unchanged; the sidecar records retained link/joint names
+and both hashes. The bare arm and the source integrated model have identical
+arm link/joint descriptions.
 
 The model-owned `FrankaPandaArm` asset downloads historical `FrankaV2.zip`
 (MD5 `f0675b9da98126bc3d4e18c98ef5e06c`, SHA-256
 `3bf4adfc5ffe6d32a18d2cfe357fcfe787d3539312ffb1b9a4638c91df680768`).
 The original URDF is retained. A separately recorded variant replaces rounded
 quarter-turn RPY values with exact ±π/2 in six arm joints. The simulator and
-serial-chain solver share this variant and the configured mount/TCP.
+serial-chain solver share this arm variant; the embodiment adds its tool TCP.
 
 Robotiq uses the existing `Robotiq_V2.zip` asset (MD5
 `9bcbf92946b200c903938d59323e7b2c`, SHA-256
@@ -24,7 +32,8 @@ for this calibrated model; the stable asset reference, joint layout and geometry
 remain unchanged after the EEF ownership migration.
 
 Legacy CAD descriptions omit several inertials. `franka/_physics.py` owns the
-identified Panda overlay; `robotiq/_physics.py` owns the nominal tool overlay:
+identified Panda arm overlay. The explicit Robotiq embodiment supplies the tool
+overlays and redirects the fixed arm-base overlay to its assembled link name:
 
 | Source | Pinned revision / SHA-256 | Qualification |
 | --- | --- | --- |

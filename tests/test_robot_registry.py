@@ -706,14 +706,13 @@ def test_franka_family_profiles_use_one_implementation(catalogs, local_robot_ass
     from embodichain_robots import FrankaCfg, FrankaPandaCfg
 
     catalogs.append(_entry("official", ROBOT_CONFIGS))
-    for variant, arm, hand, count in [
-        ("fr3/panda_hand", "fr3", "panda_hand", 2),
-        ("panda/robotiq_2f85", "panda", "robotiq_2f85", 6),
-    ]:
+    for variant in ("fr3", "panda"):
         cfg = registry.resolve_robot_cfg("Franka", variant=variant)
         assert type(cfg) is FrankaCfg
-        assert (cfg.arm_model, cfg.gripper) == (arm, hand)
-        assert len(cfg.control_parts["eef"]) == count
+        assert cfg.arm_model == variant
+        assert set(cfg.control_parts) == {"arm"}
+        assert len(cfg.control_parts["arm"]) == 7
+        assert not hasattr(cfg, "gripper")
     legacy = registry.resolve_robot_cfg("FrankaPanda")
     assert isinstance(legacy, FrankaPandaCfg)
     assert legacy.robot_type == "panda" and legacy.arm_model == "fr3"

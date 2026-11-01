@@ -95,6 +95,11 @@ Keep its source revision and complete file checksums together when updating it.
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
 
+`Franka` also materializes `Panda/Fr3HandV1.urdf` from the pinned integrated
+hand subtree, retaining source names and relative mesh paths. Bare FR3 arms
+resolve the existing `Panda/Panda.urdf`; embodiments mount the derived hand
+explicitly. Source and derived digests are recorded together.
+
 `FrankaPandaArm` is a separate pinned original-Panda asset in
 `embodichain_robots.franka.assets`; `FrankaV4` remains the historical FR3 asset.
 The original-Panda derivative normalizes only authored rounded right angles,
