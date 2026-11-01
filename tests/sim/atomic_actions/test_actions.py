@@ -1267,6 +1267,44 @@ def test_place_holds_fully_open_before_retracting_when_configured() -> None:
     )
 
 
+def test_place_releases_at_the_declared_visit_instead_of_an_equivalent_pose() -> None:
+    generator = _motion_generator()
+    dofs = len(generator.robot.get_joint_ids("arm"))
+    q = (
+        torch.arange(5, dtype=torch.float64)[None, :, None].expand(NUM_ENVS, -1, dofs)
+        / 10
+    )
+    generator.generate = Mock(
+        return_value=PlanResult(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            positions=q,
+            dt=torch.tensor([[0.0, 0.1, 0.1, 0.1, 0.1]], dtype=torch.float64).expand(
+                NUM_ENVS, -1
+            ),
+            waypoint_indices=torch.tensor([[1, 3, 4]]).expand(NUM_ENVS, -1),
+        )
+    )
+    action = _bind_action(generator, Place())
+    task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": _held()})
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="place",
+            goal=PlaceGoal(torch.eye(4)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(strategy="motion_gen", sample_count=20),
+        ),
+        _context(task),
+    )
+    release = plan.segment("release")
+    positions = _joint_command_positions(plan, "arm")
+    torch.testing.assert_close(
+        positions[:, release.start : release.stop],
+        q[:, 3:4].float().expand(-1, release.stop - release.start, -1),
+    )
+    torch.testing.assert_close(positions[:, -1], q[:, -1].float())
+
+
 def test_place_restores_grasp_pressure_only_for_held_rows() -> None:
     """Measured contact positions must not replace a closing grasp target."""
     action = _bind_action(_motion_generator(), Place())

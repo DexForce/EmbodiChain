@@ -305,6 +305,88 @@ def _valid_motion_case_and_positions() -> tuple[BenchmarkCase, torch.Tensor]:
     return case, positions
 
 
+@pytest.mark.parametrize(
+    "validity", ["ordered_cartesian_waypoints", "ordered_joint_waypoints"]
+)
+def test_validity_preserves_threshold_hit_at_an_interior_command(validity):
+    # A distance grid of 1024 points omits the actual middle command: its
+    # 9.990 mm Cartesian hit becomes a 10.080 mm miss. Joint validity likewise
+    # must retain the interior command instead of replacing its sampling grid.
+    case, _ = _valid_motion_case_and_positions()
+    positions = torch.zeros(1, 3, 7, dtype=torch.float64)
+    positions[0, :, :2] = torch.tensor([[-0.2, 0.0], [0.0, 0.09001], [0.2, 0.0]])
+    case.target_waypoints[0, 0, :3, 3] = torch.tensor([0.0, 0.1, 0.0])
+    case = replace(
+        case,
+        start_qpos=positions[:, 0].clone(),
+        reference_qpos=positions[:, 1:2].clone(),
+        case_parameters={
+            **case.case_parameters,
+            "motion_validity": validity,
+            "joint_threshold_rad": 1.0e-6,
+        },
+    )
+    outcome = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=1024,
+        position_threshold_m=0.01,
+        rotation_threshold_rad=0.1,
+        joint_limit_tolerance_rad=1.0e-6,
+        timing_is_solved=False,
+    )[0]
+    assert outcome.geometry_valid
+    assert outcome.ordered_waypoints_reached
+
+
+@pytest.mark.parametrize("hold_samples", [0, 600])
+def test_validity_keeps_distance_grid_hits_between_commands(hold_samples):
+    # A native/index grid can miss a legitimate interpolated hit. Long action
+    # holds make its motion intervals particularly coarse. Retain the old
+    # distance witnesses as well as every actual command, in path order.
+    case, _ = _valid_motion_case_and_positions()
+    positions = torch.zeros(1, 3 + 2 * hold_samples, 7, dtype=torch.float64)
+    positions[0, hold_samples + 1, 0] = 0.2
+    positions[0, hold_samples + 2 :, 0] = 1.0
+    case.target_waypoints[0, 0, :3, 3] = torch.tensor([512 / 1023, 0.00999, 0.0])
+    case = replace(case, start_qpos=positions[:, 0].clone())
+    outcome = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=1024,
+        position_threshold_m=0.01,
+        rotation_threshold_rad=0.1,
+        joint_limit_tolerance_rad=1e-6,
+        timing_is_solved=False,
+    )[0]
+    assert outcome.geometry_valid
+
+
+def test_arrival_grid_union_is_row_local_and_keeps_repeated_visits_ordered():
+    from embodichain.compute.trajectory import resample_with_distance
+    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+        _arrival_validation_grid,
+    )
+
+    positions = torch.tensor(
+        [[[0.0], [0.2], [1.0]], [[0.0], [1.0], [0.0]]], dtype=torch.float64
+    )
+    distance = resample_with_distance(positions, 5, device="cpu", backend="torch")
+    union, lengths = _arrival_validation_grid(positions, distance)
+    assert lengths.tolist() == [8, 5]
+    torch.testing.assert_close(
+        union[0, :8, 0],
+        torch.tensor([0.0, 0.1, 0.2, 0.25, 0.5, 0.6, 0.75, 1.0], dtype=torch.float64),
+    )
+    torch.testing.assert_close(
+        union[1, :5, 0], torch.tensor([0.0, 0.5, 1.0, 0.5, 0.0], dtype=torch.float64)
+    )
+
+
 def _timed_plan_result(
     positions: torch.Tensor,
     *,

@@ -208,3 +208,43 @@ def test_retime_rejects_nonzero_first_arrival_offset() -> None:
         trajectory.retime_to_control_grid(
             torch.zeros(1, 2, 1), torch.tensor([[0.1, 0.1]]), control_dt=0.1
         )
+
+
+def test_arrival_grid_preserves_repeated_visits_and_independent_row_lengths() -> None:
+    from embodichain.compute.trajectory._arrival_timing import _resample_at_arrivals
+
+    q = torch.tensor(
+        [
+            [[0.0, 0.0], [0.2, 0.0], [0.2, 0.2], [0.2, 0.0], [0.4, 0.2]],
+            [[0.0, 0.0], [0.2, 0.0], [0.2, 0.0], [0.2, 0.0], [0.2, 0.0]],
+        ],
+        dtype=torch.float64,
+    )
+    dt = torch.tensor(
+        [[0.0, 0.01, 0.01, 0.01, 0.01], [0.0, 0.1, 0.0, 0.0, 0.0]], dtype=torch.float64
+    )
+    arrivals = torch.tensor([[1, 2, 3, 4], [1, -1, -1, -1]])
+    output = _resample_at_arrivals(q, dt, 0.16, arrivals, torch.tensor([5, 2]))
+    assert output["valid_lengths"].tolist() == [5, 2]
+    assert output["waypoint_indices"].tolist() == arrivals.tolist()
+    torch.testing.assert_close(output["positions"][0], q[0])
+    torch.testing.assert_close(output["positions"][1, :2], q[1, :2])
+    assert output["dt"][1, 2:].count_nonzero() == 0
+
+
+def test_capture_preserves_outputs_and_owns_immutable_snapshots() -> None:
+    from embodichain.compute.trajectory._trace import _capture_trajectories
+
+    q = torch.tensor([[[0.0], [0.3], [1.0]]])
+    dt = torch.tensor([[0.0, 0.1, 0.2]])
+    with _capture_trajectories(False) as disabled:
+        reference = trajectory.retime_to_control_grid(q, dt, 0.04)
+    assert disabled == []
+    with _capture_trajectories(True) as records:
+        actual = trajectory.retime_to_control_grid(q, dt, 0.04)
+    for expected, observed in zip(reference, actual):
+        assert torch.equal(expected, observed)
+    q.add_(3)
+    actual[0].add_(4)
+    assert records[0]["source_positions"][0, 0, 0] == 0
+    torch.testing.assert_close(records[0]["positions"], reference[0])

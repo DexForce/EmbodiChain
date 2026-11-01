@@ -569,6 +569,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             sample_count,
             dt=result.dt,
             control_dt=interpolation_dt,
+            arrival_indices=result.waypoint_indices,
         )
 
     def _axis_alignment_eef_keyframes(

@@ -654,6 +654,7 @@ class PushObject(AtomicAction[PushObjectGoal, PushObjectOptions]):
             sample_count,
             dt=result.dt,
             control_dt=interpolation_dt,
+            arrival_indices=result.waypoint_indices,
         )
 
 

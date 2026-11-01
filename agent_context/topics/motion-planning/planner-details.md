@@ -299,6 +299,19 @@ TIME samples are uniform within each geometric segment and never exceed the
 requested spacing. QUANTITY keeps its requested count for moving rows and
 fails rows with too many distinct nodes. Ordinary `ToppraPlanner` geometry and
 sampling remain unchanged.
+
+Explicit `arrival_indices` in TIME mode retain distinct semantic visits, even
+at identical configurations, and solve each phase rest-to-rest. This can lengthen
+motion; it is separate from preserving geometric knots. NeuralPlanner opts in
+with `preserve_waypoint_arrivals`. `PlanResult.waypoint_indices` and
+`policy_waypoint_indices` carry output and native visits; missing visits use -1
+and padding never establishes an arrival. Atomic control-grid conversion and
+event splits consume these identities instead of recovering visits by proximity.
+Revalidate float32 compiled dynamics after holds and concatenation.
+
+Call-scoped trajectory capture in `compute/trajectory/_trace.py` clones device
+tensors only when enabled. Benchmark hosts own case identities and file export;
+capture is quality diagnostics and must be disabled for performance replay.
 All CPU/CUDA rows run on Warp, including single-row calls. Retiming outputs use
 float64; poses must be recomputed from returned positions. Optional per-row
 path lengths exclude rectangular tail holds. Failed rows remain zero-filled;
