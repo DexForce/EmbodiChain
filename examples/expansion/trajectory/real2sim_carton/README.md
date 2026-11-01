@@ -19,8 +19,12 @@
 选定 episode 为 `RAIL+d027f2ae+2023-11-20-11h-50m-49s`，来自
 [DROID 官方原始发布](https://droid-dataset.github.io/droid/the-droid-dataset.html)
 `droid_raw/1.0.1/RAIL/success/2023-11-20/`。只获取该记录的 HDF5、metadata 和三个
-单视角 MP4；五个文件共约 14.6 MB，完整路径、字节数、SHA-256 见
-[source.lock.json](source.lock.json)。数据及派生真实输入标注按 CC BY 4.0 保留归属。
+单视角 MP4。原始五个文件的来源、字节数、SHA-256 保留在
+[source.lock.json](source.lock.json)。已核验的副本与标注、原型、物理代理一起发布于
+[Hugging Face demo/real2sim_carton](https://huggingface.co/datasets/DexForceAI/embodichain_data/tree/main/demo/real2sim_carton)，
+版本化 ZIP 约 14.5 MB，分发 revision 与校验值见 [resources.lock.json](resources.lock.json)。
+DROID 原始数据及其派生真实输入保留 CC BY 4.0，独立合成数据保留 Apache-2.0；
+资源包中的 `ATTRIBUTION.md` 和逐文件清单说明具体来源与修改。
 
 腕部视角可确认白蓝色 STAPLES 5000 COUNT 闭合盒体。没有确认 SKU，也未使用 YCB
 模型代替。盒体是两幅已标定外部视角和观测夹爪开口约束下估计的刚性长方体：
@@ -68,8 +72,21 @@ python -m http.server 8000 --bind 127.0.0.1 --directory /tmp/carton-real2sim
 # 打开 http://127.0.0.1:8000/replay/
 ```
 
+也可以先通过统一资产入口下载，再运行示例：
+
+```bash
+embodichain data download --name Real2SimCarton
+```
+
+缓存默认位于 `~/.cache/embodichain_data/extract/Real2SimCartonV1/`，可通过
+`EMBODICHAIN_DATA_ROOT` 在启动前指定。下载复用公共锁、ZIP 校验与解压机制，另核验
+SHA-256 和每个文件的哈希。`get_data_path("Real2SimCarton/raw")`、
+`get_data_path("Real2SimCarton/inputs")` 和 `get_data_path("Real2SimCarton/scene")`
+分别解析原始记录、冻结输入和场景资源；运行产物仍写入 `--output`，不写入资源缓存。
+
 输出目录必须不存在，已有产物不会被替换。`--source-dir` 可复用经过五个固定哈希
-校验的下载缓存；`--no-video` 显式跳过视频，不能算视频阶段完成。若矩阵有失败，
+校验的原始文件工作目录；不存在的文件从公共 `Real2SimCarton` 缓存复制，已有文件
+必须匹配原始哈希。`--no-video` 显式跳过视频，不能算视频阶段完成。若矩阵有失败，
 入口仍导出完整报告、回放与视频，最终返回非零状态。资格或名义执行失败会停止后续
 阶段并保留日志，不能用合成结果代替真实分支。
 
@@ -105,8 +122,10 @@ runtime services 中以 program fingerprint + compiled occurrence 定位。`prog
 不包含来源路径、机器人信息或可执行导入。场景只有一个动态盒体、一个静态盒状
 工作台与固定地面，B=1，`physics: default`，30 Hz 控制 / 240 Hz 物理步进。
 
-原型在扩增前冻结。六个已验收输入 bundle 的副本位于 [inputs](inputs/)，可离线
-检查固定源 revision；正式真实采集还必须取得原始 HDF5 和匹配 typed evidence。
+原型在扩增前冻结。六个已验收输入 bundle 发布在 `Real2SimCarton/inputs`；仓库
+[inputs](inputs/) 只保留检查清单和获取说明，避免再次存储轨迹数组。资源包还包含
+原始 HDF5、三个视频、匹配 typed evidence，以及干净合成参考与其实际 T+1 观测。
+冻结副本用于检查来源 revision；正式运行仍重新规范化和核验实际场景。
 扩增不调用生成器替代重定向。
 
 合成参考在同一物理模型中独立执行；原生采样先通过关节运动检查，再保存设计参考、
@@ -178,6 +197,16 @@ runtime services 中以 program fingerprint + compiled occurrence 定位。`prog
 程序化的白蓝包装面、标记与 +X 箭头用于说明几何方向，不是真实扫描纹理。
 [assets.lock.json](assets.lock.json) 和 [机器人模型说明](../../../../extensions/embodichain_robots/franka/README.md)
 记录资产、尺度、惯量来源与许可。未使用 YCB 或 Poly Haven 素材。
+
+`Real2SimCarton/scene` 中的 GLB 是与盒体尺寸和物体局部坐标一致的显示代理；
+物理参数由同目录 `environment.yaml` 与 `physical.json` 声明。原始 Panda 与
+Robotiq 模型继续引用已有模型资产，不在 demo 包中重复发布。`preview.mp4` 和轨迹
+对比图位于 Hugging Face 资源目录，完整生成的数据集和确认回执仍属于各次运行。
+
+维护者可在源码 checkout 中使用 `package_resources.py`，从经过核验的原始记录、
+prepared、native capture 和冻结 inputs 构建排序、固定时间戳的 ZIP。该脚本只生成
+资源包与哈希索引，不上传、不执行仿真。发布新内容时使用新资源版本与缓存前缀，
+不得覆盖已经固定哈希的 v1。
 
 生产测试覆盖来源映射/缺失/损坏、独立 FK、联动首次接触、合法抓取区、方向验收、
 修正预算、源无回退、完整计划/时间映射、持有状态与持久化边界。示例通过实际执行、

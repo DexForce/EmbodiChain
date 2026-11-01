@@ -30,7 +30,6 @@ from itertools import product
 import json
 from pathlib import Path
 import shutil
-import urllib.request
 
 import cv2
 import gymnasium
@@ -95,28 +94,35 @@ def write_yaml(path: Path, value: object) -> None:
 
 
 def acquire(directory: Path) -> None:
+    """Copy pinned raw files from the shared demo asset cache when needed."""
     lock = json.loads((ROOT / "source.lock.json").read_text())
+    missing = []
     for item in lock["files"]:
         path = directory / item["path"]
         if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = path.with_suffix(path.suffix + ".download")
-            try:
-                with (
-                    urllib.request.urlopen(item["url"], timeout=90) as source,
-                    temporary.open("wb") as target,
-                ):
-                    shutil.copyfileobj(source, target)
-                if (
-                    temporary.stat().st_size != item["size"]
-                    or digest(temporary) != item["sha256"]
-                ):
-                    raise ValueError(f"download digest differs: {item['path']}")
-                temporary.rename(path)
-            finally:
-                temporary.unlink(missing_ok=True)
-        if path.stat().st_size != item["size"] or digest(path) != item["sha256"]:
+            missing.append(item)
+        elif path.stat().st_size != item["size"] or digest(path) != item["sha256"]:
             raise ValueError(f"pinned DROID source differs: {path}")
+    if not missing:
+        return
+    from embodichain.data import get_data_path
+
+    resource = Path(get_data_path("Real2SimCarton/raw"))
+    for item in missing:
+        original = resource / item["path"]
+        path = directory / item["path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".copy")
+        try:
+            shutil.copyfile(original, temporary)
+            if (
+                temporary.stat().st_size != item["size"]
+                or digest(temporary) != item["sha256"]
+            ):
+                raise ValueError(f"cached DROID source differs: {item['path']}")
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def matrix_layouts() -> list[dict]:

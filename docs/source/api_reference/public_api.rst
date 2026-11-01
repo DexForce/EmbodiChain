@@ -63,6 +63,15 @@ EmbodiChain data cache.
    RubiksCube
    ScoopIceNewEnv
    TabletopFourBases
+   Real2SimCarton
+
+``Real2SimCarton`` downloads a checksum-pinned original DROID episode, manual
+annotations, two motion-prototype sources and estimated physical proxies. Its
+revision-specific cache verifies extracted files. Measured DROID derivatives
+retain CC BY 4.0; the bundle is not a generated training dataset or hardware
+qualification.
+
+.. autoclass:: Real2SimCarton
 
 embodichain.data.assets.materials
 ------------------------------------
