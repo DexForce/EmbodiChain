@@ -1,0 +1,169 @@
+{
+  "python": "3.11.14 (main, Oct 21 2025, 18:31:21) [GCC 11.2.0]",
+  "platform": "Linux-5.15.0-119-generic-x86_64-with-glibc2.35",
+  "seed": 7,
+  "threads": {
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1"
+  },
+  "scope": "fresh-process wall time through verified commit; no warmup excluded",
+  "gpus": [
+    "NVIDIA RTX PRO 5000 72GB Blackwell",
+    "NVIDIA RTX PRO 5000 72GB Blackwell",
+    "NVIDIA RTX PRO 5000 72GB Blackwell",
+    "NVIDIA RTX PRO 5000 72GB Blackwell",
+    "NVIDIA RTX PRO 5000 72GB Blackwell",
+    "NVIDIA RTX PRO 5000 72GB Blackwell",
+    "NVIDIA RTX PRO 5000 72GB Blackwell",
+    "NVIDIA RTX PRO 5000 72GB Blackwell"
+  ],
+  "status": "draft-foundation; rerun release qualification after prerequisite PRs merge",
+  "dependency_base": "fa622e071f0641aa534f9ef7ee179bf0c23e77ca",
+  "runs": [
+    {
+      "mode": "state",
+      "batch_size": 1,
+      "exit_code": 0,
+      "elapsed_seconds": 57.77455045701936,
+      "committed_episodes_per_second": 0.017308659125680904,
+      "success_rate": 1.0,
+      "peak_process_rss_bytes": 15342469120,
+      "peak_process_gpu_bytes": 511705088,
+      "outcome": {
+        "job_id": "fc2dffdf66a3b9e47ec60ccca06d671a83e28e4babb148b2cce81c3e6403833c",
+        "committed": 1,
+        "attempts": 1,
+        "rollout_attempted": 1,
+        "measured_successes": 1,
+        "target_episodes": 1,
+        "complete": true,
+        "outcomes": {
+          "committed": 1
+        },
+        "collection_complete": true
+      }
+    },
+    {
+      "mode": "state",
+      "batch_size": 8,
+      "exit_code": 0,
+      "elapsed_seconds": 69.04642194695771,
+      "committed_episodes_per_second": 0.11586407773810055,
+      "success_rate": 1.0,
+      "peak_process_rss_bytes": 15157854208,
+      "peak_process_gpu_bytes": 511705088,
+      "outcome": {
+        "job_id": "c8ccce2e305be44b8f6f5b261c94b368eef4ac157ed881a2246880bba265a736",
+        "committed": 8,
+        "attempts": 8,
+        "rollout_attempted": 8,
+        "measured_successes": 8,
+        "target_episodes": 8,
+        "complete": true,
+        "outcomes": {
+          "committed": 8
+        },
+        "collection_complete": true
+      }
+    },
+    {
+      "mode": "state",
+      "batch_size": 32,
+      "exit_code": 0,
+      "elapsed_seconds": 269.67197594000027,
+      "committed_episodes_per_second": 0.11866268227707773,
+      "success_rate": 1.0,
+      "peak_process_rss_bytes": 15157940224,
+      "peak_process_gpu_bytes": 511705088,
+      "outcome": {
+        "job_id": "71b11807c89033ee33e39627456981c8f1ee2598ebd249d12ca7ff9fa4cbb967",
+        "committed": 32,
+        "attempts": 32,
+        "rollout_attempted": 32,
+        "measured_successes": 32,
+        "target_episodes": 32,
+        "complete": true,
+        "outcomes": {
+          "committed": 32
+        },
+        "collection_complete": true
+      }
+    },
+    {
+      "mode": "rgbd",
+      "batch_size": 1,
+      "exit_code": 0,
+      "elapsed_seconds": 42.522514161188155,
+      "committed_episodes_per_second": 0.02351695377675331,
+      "success_rate": 1.0,
+      "peak_process_rss_bytes": 16955162624,
+      "peak_process_gpu_bytes": 3504529408,
+      "outcome": {
+        "job_id": "dd5bf9e4b16b91b35dd91d5e9f0d284954f85d7aff5b71076065cbaa3308ba9a",
+        "committed": 1,
+        "attempts": 1,
+        "rollout_attempted": 1,
+        "measured_successes": 1,
+        "target_episodes": 1,
+        "complete": true,
+        "outcomes": {
+          "committed": 1
+        },
+        "collection_complete": true
+      }
+    },
+    {
+      "mode": "rgbd",
+      "batch_size": 8,
+      "exit_code": 0,
+      "elapsed_seconds": 85.50316628208384,
+      "committed_episodes_per_second": 0.09356378655741435,
+      "success_rate": 1.0,
+      "peak_process_rss_bytes": 16763731968,
+      "peak_process_gpu_bytes": 3659259904,
+      "outcome": {
+        "job_id": "dac12471ed0aca94d3acbd1e2dbb144ea47e0ea74ae27a6bc4e1edc80d41ae01",
+        "committed": 8,
+        "attempts": 8,
+        "rollout_attempted": 8,
+        "measured_successes": 8,
+        "target_episodes": 8,
+        "complete": true,
+        "outcomes": {
+          "committed": 8
+        },
+        "collection_complete": true
+      }
+    },
+    {
+      "mode": "rgbd",
+      "batch_size": 32,
+      "exit_code": 0,
+      "elapsed_seconds": 352.00947063509375,
+      "committed_episodes_per_second": 0.09090664504641241,
+      "success_rate": 1.0,
+      "peak_process_rss_bytes": 16931512320,
+      "peak_process_gpu_bytes": 4203274240,
+      "outcome": {
+        "job_id": "bd709220fd0ba7969c2a201cbe2a0cbd4f90849f8027f797212118fe56530fd1",
+        "committed": 32,
+        "attempts": 32,
+        "rollout_attempted": 32,
+        "measured_successes": 32,
+        "target_episodes": 32,
+        "complete": true,
+        "outcomes": {
+          "committed": 32
+        },
+        "collection_complete": true
+      }
+    }
+  ],
+  "native_qualification": {
+    "task_program_default": "B=1/8/32 state and RGB-D committed in one World",
+    "task_program_newton": "B=2 committed; B=8 mass/force and sliding-friction probes passed",
+    "real2sim_default": "B=2 DROID RGB-D committed with source qualification",
+    "real2sim_newton": "DROID B=2 rejected by physical-effect/segment validation; not qualified",
+    "visual_variants": "2 physical parents plus 2 children exported; dataset validation: 4 episodes,1608 frames,0 errors,0 warnings"
+  }
+}

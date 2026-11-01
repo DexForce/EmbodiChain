@@ -400,6 +400,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             control_dt=interpolation_dt,
             arrival_indices=motion_result.waypoint_indices,
             split_target_index=1,
+            env_ids=self.planning_services.env_ids,
         )
         n_approach = approach_arm.shape[1]
         n_lift = lift_arm.shape[1]
@@ -651,7 +652,14 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             # candidate is derived from the robot's FK at the declared anchor.
             qpos = motion.trajectory.positions[:, grasp_index, list(endpoint.joint_ids)]
             grasp_xpos = self.robot.compute_fk(
-                qpos=qpos, name=endpoint.control_part, to_matrix=True
+                qpos=qpos,
+                name=endpoint.control_part,
+                to_matrix=True,
+                **(
+                    {"env_ids": self.planning_services.env_ids}
+                    if self.planning_services.env_ids is not None
+                    else {}
+                ),
             )
             if (
                 not isinstance(grasp_xpos, torch.Tensor)
@@ -947,6 +955,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             qpos=start_qpos,
             name=manipulator.control_part,
             to_matrix=True,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
         )
         start_quat = quat_from_matrix(start_xpos[:, :3, :3])
         # Preserve the established preference between symmetric roll variants;
@@ -1023,6 +1036,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             pose=flat_poses,
             name=manipulator.control_part,
             joint_seed=flat_seed,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
         )
         return (
             is_success.to(device=self.device, dtype=torch.bool).reshape(

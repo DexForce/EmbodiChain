@@ -42,6 +42,8 @@ from .contracts import (
 from .coverage import CoverageIndex, describe_trajectory
 from .manipulability import ManipulabilityBands
 
+from embodichain.lab.expansion.contracts import EpisodeCandidate
+
 __all__ = ["ExpansionSession"]
 
 
@@ -49,7 +51,7 @@ __all__ = ["ExpansionSession"]
 class _Attempt:
     identity: CandidateIdentity
     state: str = "proposed"
-    trajectory: CandidateTrajectoryBatch | None = None
+    trajectory: CandidateTrajectoryBatch | EpisodeCandidate | None = None
     joint_names: tuple[str, ...] = ()
     episode: ExpertEpisode | None = None
     episode_byte_budget: int = 0
@@ -74,7 +76,9 @@ def _json_bytes(value: object) -> int:
     return len(json.dumps(value, default=encode, ensure_ascii=False).encode())
 
 
-def _candidate_bytes(batch: CandidateTrajectoryBatch) -> int:
+def _candidate_bytes(batch: CandidateTrajectoryBatch | EpisodeCandidate) -> int:
+    if isinstance(batch, EpisodeCandidate):
+        return _json_bytes(batch.identity) + len(batch.recipe_json.encode("utf-8"))
     return _tensor_bytes(
         batch.positions, batch.dt, batch.valid_length, batch.source_row_indices
     ) + sum(
@@ -502,6 +506,43 @@ class ExpansionSession:
             )
         self._counts["planned_valid"] += len(rows)
 
+    def add_prepared_episode(
+        self, candidate: EpisodeCandidate, validation: ValidationResult
+    ) -> None:
+        """Admit a lazy episode after source and configuration validation.
+
+        Args:
+            candidate: Immutable recipe for a candidate already proposed here.
+            validation: Nonempty passing preparation evidence. This is separate
+                from path validation, which the runtime must perform as it plans.
+
+        The measured episode must still pass every configured rollout check.
+        No trajectory, collision certificate or physical success is synthesized.
+        """
+        if not isinstance(candidate, EpisodeCandidate):
+            raise TypeError("candidate must be an EpisodeCandidate")
+        attempt = self._attempt(candidate.identity, "proposed")
+        if not isinstance(validation, ValidationResult) or not validation.accepted:
+            raise ValueError("episode preparation requires passing evidence")
+        ready = [
+            item.trajectory for item in self._attempts.values() if item.state == "ready"
+        ]
+        if (
+            len(ready) >= self._cfg.execution.ready_high_watermark
+            or sum(_candidate_bytes(item) for item in ready)
+            + _candidate_bytes(candidate)
+            > self._cfg.execution.ready_max_bytes
+        ):
+            raise BufferError("The ready candidate pool is full.")
+        identity = candidate.identity
+        attempt.joint_names = self._cases[
+            (identity.scene_case_id, identity.initial_state_id)
+        ][2]
+        attempt.trajectory = candidate
+        attempt.planning_validation = _validation_summary(validation)
+        attempt.state = "ready"
+        self._counts["prepared_valid"] = self._counts.get("prepared_valid", 0) + 1
+
     def _reserved(self) -> int:
         return sum(
             attempt.state in {"assigned", "running", "pending_write", "committed"}
@@ -515,7 +556,7 @@ class ExpansionSession:
         *,
         episode_byte_budget: int | None = None,
         candidate_id: str | None = None,
-    ) -> CandidateTrajectoryBatch | None:
+    ) -> CandidateTrajectoryBatch | EpisodeCandidate | None:
         """Reserve a row, rollout attempt, and pending payload capacity before execution.
 
         ``episode_byte_budget`` is a trusted upper bound on serialized metadata
@@ -704,12 +745,27 @@ class ExpansionSession:
         ):
             raise ValueError("Episode and commit IDs must match the candidate attempt.")
         attempt.rollout_validation = _validation_summary(episode.validation)
-        if episode.action_representation not in {
-            "qpos",
-            "joint_position",
-        } or episode.actions.shape[1] != len(attempt.joint_names):
+        width = len(attempt.joint_names)
+        if episode.action_representation == "joint_position_velocity":
+            spec = episode.metadata.get("expert_action_spec")
+            if (
+                not isinstance(spec, Mapping)
+                or spec.get("joint_command_mode") != "position_velocity"
+                or tuple(spec.get("joint_names", ())) != attempt.joint_names
+                or tuple(spec.get("qpos_slice", ())) != (0, width)
+                or tuple(spec.get("qvel_slice", ())) != (width, 2 * width)
+            ):
+                raise ValueError(
+                    "position-velocity evidence requires an explicit matching expert action schema"
+                )
+            width *= 2
+        elif episode.action_representation not in {"qpos", "joint_position"}:
             raise ValueError(
-                "Episode actions must use full-joint qpos or joint_position commands in candidate joint order."
+                "Episode actions must use full-joint qpos or explicitly declared position-velocity commands"
+            )
+        if episode.actions.shape[1] != width:
+            raise ValueError(
+                "Episode actions must use full-joint qpos or matching position-velocity width in registered joint order"
             )
         if not self._validation_passes(episode.validation, rollout=True):
             self.release(episode.identity, reason="rollout_validation_failed")

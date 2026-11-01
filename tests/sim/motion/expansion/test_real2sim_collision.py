@@ -479,3 +479,39 @@ def test_coupled_revolute_projection_stops_both_fingers_at_first_contact(
         projector.project_held(commands, measured)
     with pytest.raises(ValueError, match="coupling"):
         tolerant.project_held(commands + [0, 0.0004], measured)
+
+
+def test_geometry_identity_ignores_generated_comments_but_tracks_physical_changes(
+    tmp_path,
+):
+    from embodichain.lab.sim.motion.expansion.real2sim_collision import (
+        _physical_urdf_digest,
+    )
+
+    a, b = tmp_path / "a.urdf", tmp_path / "b.urdf"
+    a.write_text(
+        '<robot name="generated-a"><!-- generated yesterday --><link name="base"><collision><geometry><box size="1 2 3"/></geometry></collision></link></robot>'
+    )
+    b.write_text(
+        '<robot name="generated-b">\n<!-- generated today -->\n<link name="base">\n<collision><geometry><box size="1 2 3"/></geometry></collision></link></robot>'
+    )
+    assert _physical_urdf_digest(a, ()) == _physical_urdf_digest(b, ())
+    b.write_text(b.read_text().replace('size="1 2 3"', 'size="1 2 4"'))
+    assert _physical_urdf_digest(a, ()) != _physical_urdf_digest(b, ())
+
+
+def test_collision_mesh_identity_uses_content_and_preserves_scale(tmp_path):
+    from embodichain.lab.sim.motion.expansion.real2sim_collision import (
+        _physical_urdf_digest,
+    )
+
+    first, second = tmp_path / "old.mesh", tmp_path / "new.mesh"
+    first.write_bytes(b"physical geometry")
+    second.write_bytes(first.read_bytes())
+    a, b = tmp_path / "a.urdf", tmp_path / "b.urdf"
+    template = '<robot><link name="base"><collision><geometry><mesh filename="{}" scale="1 1 1"/></geometry></collision></link></robot>'
+    a.write_text(template.format(first))
+    b.write_text(template.format(second))
+    assert _physical_urdf_digest(a, ()) == _physical_urdf_digest(b, ())
+    second.write_bytes(b"changed physical geometry")
+    assert _physical_urdf_digest(a, ()) != _physical_urdf_digest(b, ())

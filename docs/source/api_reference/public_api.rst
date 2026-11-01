@@ -21,6 +21,17 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.cli.expansion
+-------------------------
+
+Offline job preflight, run, resume and verified inspection commands.
+
+.. currentmodule:: embodichain.cli.expansion
+
+.. autosummary::
+
+   main
+
 embodichain.data
 ----------------
 
@@ -268,6 +279,18 @@ embodichain.data_pipeline.depth_video
    DEPTH_METER_UNIT
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
+
+embodichain.data_pipeline.recording.media
+-----------------------------------------
+
+Byte-bounded owned frame chunks with checksums, timestamps and final manifests.
+
+.. currentmodule:: embodichain.data_pipeline.recording.media
+
+.. autosummary::
+
+   MediaSpool
+   verify_media_manifest
 
 embodichain.gen_sim.env
 -----------------------
@@ -653,6 +676,201 @@ embodichain.gen_sim.simready_pipeline.cli.start
    cli_ingest_single
    main
 
+embodichain.lab.expansion
+------------------------
+
+.. currentmodule:: embodichain.lab.expansion
+
+Compatible-cohort orchestration for explicitly supplied host and writer ports.
+The engine reuses the canonical session for admission, budgets and receipts.
+``ExpansionEngine.from_job(ExpansionRunCfg(...))`` selects the native Gym host,
+Task Program or pinned Real2Sim sources, bounded media, render-only variants,
+and durable episode-boundary recovery. See the offline expansion example.
+
+.. autosummary::
+
+   ExpansionEngine
+   ExpansionJobCfg
+   ExpansionAssignment
+   ExpansionHost
+   EpisodeSink
+   ExpansionSession
+
+.. autosummary::
+
+   ExpansionRunCfg
+   load_expansion_job
+   preflight_expansion_job
+   run_expansion_job
+   inspect_expansion_job
+   ArtifactEpisodeSink
+   EpisodeCandidate
+   ExpertSource
+   ExpansionOperator
+   ExpansionContext
+   OperatorCapability
+   PinnedExpertSource
+   UniformRangeOperator
+   JointSceneSource
+
+.. autosummary::
+
+   ExpansionEpisode
+
+embodichain.lab.expansion.configured
+------------------------------------
+
+Closed file configuration resolves existing deployments without changing backend ownership.
+
+.. currentmodule:: embodichain.lab.expansion.configured
+
+.. autosummary::
+
+   ExpansionRunCfg
+   load_expansion_job
+   preflight_expansion_job
+
+embodichain.lab.expansion.contracts
+-----------------------------------
+
+Immutable source, candidate, numerical episode and commit identities shared with motion expansion. Old motion import paths remain compatible.
+
+.. currentmodule:: embodichain.lab.expansion.contracts
+
+.. autosummary::
+
+   EpisodeCandidate
+   SceneCase
+   MotionSnapshot
+   TrajectoryPhase
+   TrajectoryTemplate
+   CandidateIdentity
+   ProposalRequest
+   CandidateSpec
+   CandidateTrajectoryBatch
+   ValidationCheck
+   ValidationResult
+   ExpertEpisode
+   CommitReceipt
+
+.. autosummary::
+
+   ExpansionEpisode
+
+embodichain.lab.expansion.engine
+-------------------------------
+
+.. currentmodule:: embodichain.lab.expansion.engine
+
+Candidates must be proposed in the supplied session before enqueueing.
+``preflight`` groups their existing compatibility keys without changing state.
+``run`` reserves payload capacity before invoking the host once per cohort.
+The host reports actual starts independently for each row and returns measured
+T+1 observations with T submitted commands. Rejected rows do not commit.
+
+Accepted payloads are staged before writes begin. When a submission is ambiguous,
+obtain its final receipt from the writer and pass it to ``resolve_receipt``;
+``flush`` then submits the remaining staged rows without another physical rollout.
+These methods reconcile supplied in-process ports. Configured jobs instead use
+``resume`` to verify disk receipts, repair frozen writes and restart interrupted
+attempts at episode boundaries. Native failures invalidate the active host.
+
+.. autosummary::
+
+   ExpansionJobCfg
+   ExpansionAssignment
+   ExpansionHost
+   EpisodeSink
+   ExpansionEngine
+
+embodichain.lab.expansion.export
+--------------------------------
+
+Stream confirmed numeric episodes and observation children through the existing LeRobot recorder. A finalized export attests the exact physical and visual episode set.
+
+.. currentmodule:: embodichain.lab.expansion.export
+
+.. autosummary::
+
+   export_expansion_lerobot
+
+embodichain.lab.expansion.persistence
+-------------------------------------
+
+Stage immutable numeric evidence and archived source attachments before publishing a confirmed commit receipt. Recovery retries the same artifact without replaying physics.
+
+.. currentmodule:: embodichain.lab.expansion.persistence
+
+.. autosummary::
+
+   ArtifactEpisodeSink
+
+embodichain.lab.expansion.program
+---------------------------------
+
+Drive either one vector Task Program or independently bound source runtimes through one World loop. Finished and unused rows contribute no padding samples.
+
+.. currentmodule:: embodichain.lab.expansion.program
+
+.. autosummary::
+
+   ProgramBatchResult
+   collect_program_batch
+   collect_vector_program
+
+embodichain.lab.expansion.recipes
+---------------------------------
+
+Source-pinned, versioned random streams depend on logical candidate identity rather than arena assignment. Operators declare resource scope and return immutable changes.
+
+.. currentmodule:: embodichain.lab.expansion.recipes
+
+.. autosummary::
+
+   ExpansionContext
+   ExpertSource
+   PinnedExpertSource
+   OperatorCapability
+   ExpansionOperator
+   UniformRangeOperator
+
+embodichain.lab.expansion.scene
+-------------------------------
+
+Reuse complete scene/workspace joint candidates without splitting their conditional geometry. Every applied proposal requires new measured execution evidence.
+
+.. currentmodule:: embodichain.lab.expansion.scene
+
+.. autosummary::
+
+   JointSceneSource
+   apply_joint_scene_candidates
+
+embodichain.lab.expansion.visual
+--------------------------------
+
+Apply one native visual profile per compatible World cohort. Render complete recorded scene states with physics disabled and preserve physical parent lineage.
+
+.. currentmodule:: embodichain.lab.expansion.visual
+
+.. autosummary::
+
+   load_visual_profiles
+   render_observation_variants
+   inspect_observation_variants
+
+embodichain.lab.expansion.workflow
+----------------------------------
+
+Native offline collection owns preparation, settling, independent validation, frozen writes and episode-boundary recovery.
+
+.. currentmodule:: embodichain.lab.expansion.workflow
+
+.. autosummary::
+
+   run_expansion_job
+   inspect_expansion_job
+
 embodichain.lab.gym.envs.base_env
 ---------------------------------
 
@@ -690,6 +908,52 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.sim.scene.operations
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.operations
+
+``apply_changes_batch`` accepts an environment-indexed change set for each row
+of a scene view. It preflights every row before any mutation, then batches writes
+by entity. Neighboring rows remain untouched; no operation steps physics.
+
+.. autosummary::
+
+   apply_changes_batch
+
+.. currentmodule:: embodichain.lab.sim.scene
+
+.. autosummary::
+
+   apply_changes_batch
+
+.. autosummary::
+
+   restore_render_state
+
+embodichain.lab.sim.scene.physics
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.physics
+
+Capture and restore measured mass, principal inertia and friction for explicitly
+selected dynamic rigid bodies on Default or Newton. Applying a mass scale also
+scales inertia from the original baseline, so repeated application does not
+accumulate. Every parameter is preflighted before writes; actual backend readback
+must match the request. These operations do not step physics or verify task success.
+Native failures may leave partial changes, requiring the host to stop execution.
+
+.. autosummary::
+
+   RigidPhysicsState
+   capture_rigid_physics
+   apply_rigid_physics
+   restore_rigid_physics
+
+.. autosummary::
+
+   capture_physics_properties
 
 embodichain.lab.sim.scene.expansion.layout
 ------------------------------------------

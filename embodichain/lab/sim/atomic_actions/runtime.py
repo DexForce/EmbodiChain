@@ -63,10 +63,21 @@ class ActionPlanningServices:
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
         tracking_runtime: TrackingRuntime | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
+        env_ids: tuple[int, ...] | None = None,
     ) -> None:
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
         self._device = resolve_runtime_device(motion_generator.device)
+        if env_ids is not None:
+            env_ids = tuple(env_ids)
+            count = self._robot.get_qpos().shape[0]
+            if (
+                not env_ids
+                or len(set(env_ids)) != len(env_ids)
+                or any(type(i) is not int or not 0 <= i < count for i in env_ids)
+            ):
+                raise ValueError("env_ids must be unique physical row indices")
+        self.env_ids = env_ids
         self._binding_owner_id = uuid4().hex
         if tracking_runtime is not None and not isinstance(
             tracking_runtime,

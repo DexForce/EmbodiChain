@@ -242,13 +242,42 @@ class MotionGenerator:
         "curobo": (CuroboPlanner, CuroboPlannerCfg),
     }
 
-    def __init__(self, cfg: MotionGenCfg) -> None:
+    def __init__(
+        self, cfg: MotionGenCfg, *, env_ids: tuple[int, ...] | None = None
+    ) -> None:
 
         # Create planner based on planner_type
         self.planner: BasePlanner = self._create_planner(cfg.planner_cfg)
 
         self.robot = self.planner.robot
         self.device = self.robot.device
+        self._env_ids = None if env_ids is None else tuple(env_ids)
+        if self._env_ids is not None:
+            count = self.robot.get_qpos().shape[0]
+            if (
+                not self._env_ids
+                or len(set(self._env_ids)) != len(self._env_ids)
+                or any(type(i) is not int or not 0 <= i < count for i in self._env_ids)
+            ):
+                raise ValueError("env_ids must be unique physical row indices")
+            if type(self.planner).__name__ not in {
+                "ToppraPlanner",
+                "TrapezoidalPlanner",
+            }:
+                raise ValueError(
+                    "selected-row motion supports TOPPRA and trapezoidal planners only"
+                )
+            if self.collision_world_info is not None:
+                raise ValueError(
+                    "selected-row motion needs an explicitly row-aware collision planner"
+                )
+
+        self.planner._planning_env_ids = self._env_ids
+
+    def _selected_qpos(self, control_part: str | None) -> torch.Tensor:
+        value = self.robot.get_qpos(name=control_part)
+        selection = getattr(self, "_env_ids", None)
+        return value if selection is None else value[list(selection)]
 
     @property
     def collision_world_info(self) -> CollisionWorldInfo | None:
@@ -564,6 +593,8 @@ class MotionGenerator:
                 limits,
                 torch.inf,
             )
+        if getattr(self, "_env_ids", None) is not None:
+            limits = limits[list(self._env_ids)]
         if limits.shape[0] < batch_size:
             raise ValueError(
                 "Robot velocity limits do not cover the interpolation batch."
@@ -791,7 +822,7 @@ class MotionGenerator:
                 )
 
             if options.start_qpos is None:
-                options.start_qpos = self.robot.get_qpos(name=options.control_part)
+                options.start_qpos = self._selected_qpos(options.control_part)
             if options.start_qpos is not None:
                 start = options.start_qpos
                 if start.dim() == 1:
@@ -800,7 +831,14 @@ class MotionGenerator:
                     qpos_list = torch.cat([start.unsqueeze(1), qpos_list], dim=1)
                 if xpos_list is not None:
                     start_xpos = self.robot.compute_fk(
-                        qpos=start, name=options.control_part, to_matrix=True
+                        qpos=start,
+                        name=options.control_part,
+                        to_matrix=True,
+                        **(
+                            {"env_ids": self._env_ids}
+                            if getattr(self, "_env_ids", None) is not None
+                            else {}
+                        ),
                     )
                     if start_xpos.dim() == 3:
                         start_xpos = start_xpos.unsqueeze(1)
@@ -1036,6 +1074,11 @@ class MotionGenerator:
             joint_seed=joint_seed,
             name=control_part,
             **({"continuous": True} if continuous else {}),
+            **(
+                {"env_ids": self._env_ids}
+                if getattr(self, "_env_ids", None) is not None
+                else {}
+            ),
         )
         batch_size, count = poses.shape[:2]
         if isinstance(valid, torch.Tensor) and valid.shape != (batch_size, count):
@@ -1311,6 +1354,11 @@ class MotionGenerator:
             qpos=solved_keyframes[:, 0],
             name=control_part,
             to_matrix=True,
+            **(
+                {"env_ids": self._env_ids}
+                if getattr(self, "_env_ids", None) is not None
+                else {}
+            ),
         ).to(device=target_poses.device, dtype=target_poses.dtype)
         path = torch.cat([start_pose[:, None], target_poses], dim=1)
         segment_lengths = solved_keyframes.diff(dim=1).abs().amax(dim=-1)
@@ -1737,6 +1785,11 @@ class MotionGenerator:
                 qpos=qpos_list,
                 name=control_part,
                 to_matrix=True,
+                **(
+                    {"env_ids": self._env_ids}
+                    if getattr(self, "_env_ids", None) is not None
+                    else {}
+                ),
             )
         else:
             if original_dim == 3:  # [N, 4, 4]
@@ -1966,6 +2019,11 @@ class MotionGenerator:
                 qpos=qpos_list,
                 name=control_part,
                 to_matrix=True,
+                **(
+                    {"env_ids": self._env_ids}
+                    if getattr(self, "_env_ids", None) is not None
+                    else {}
+                ),
             )  # (B, N, 4, 4)
 
         if xpos_list is None and qpos_list is None:
@@ -1987,7 +2045,7 @@ class MotionGenerator:
             qpos_seed = qpos_list[:, 0]  # (B, DOF)
         if qpos_seed is None:
             # Fallback to current robot state as seed.
-            qpos_seed = self.robot.get_qpos(name=control_part)  # (B, DOF)
+            qpos_seed = self._selected_qpos(control_part)  # (B, DOF)
         qpos_seed = qpos_seed.to(self._runtime_device())
 
         # Generate trajectory
@@ -2035,7 +2093,14 @@ class MotionGenerator:
             # analytic IK can fail at a wrist singularity despite later poses
             # being reachable. Preserve it only for rows whose whole pose agrees.
             start_pose = self.robot.compute_fk(
-                qpos=qpos_seed, name=control_part, to_matrix=True
+                qpos=qpos_seed,
+                name=control_part,
+                to_matrix=True,
+                **(
+                    {"env_ids": self._env_ids}
+                    if getattr(self, "_env_ids", None) is not None
+                    else {}
+                ),
             )
             known_start = torch.isclose(
                 total_interpolated_poses[:, 0],
@@ -2051,7 +2116,14 @@ class MotionGenerator:
             )
             # Keep the FK consistency guard, but never remove required poses.
             fk_batch = self.robot.compute_batch_fk(
-                qpos=qpos_batch, name=control_part, to_matrix=True
+                qpos=qpos_batch,
+                name=control_part,
+                to_matrix=True,
+                **(
+                    {"env_ids": self._env_ids}
+                    if getattr(self, "_env_ids", None) is not None
+                    else {}
+                ),
             )
             pos_err = torch.linalg.vector_norm(
                 fk_batch[..., :3, 3] - total_interpolated_poses[..., :3, 3], dim=-1

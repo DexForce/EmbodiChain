@@ -621,7 +621,14 @@ class PrototypeMotionProvider:
             robot = generator.robot
             start_qpos = context.robot.qpos[:, arm_ids]
             start_pose = robot.compute_fk(
-                qpos=start_qpos, name=arm.control_part, to_matrix=True
+                qpos=start_qpos,
+                name=arm.control_part,
+                to_matrix=True,
+                **(
+                    {"env_ids": context.env_ids}
+                    if getattr(self.motion_generator, "_env_ids", None) is not None
+                    else {}
+                ),
             )
             if not isinstance(start_pose, torch.Tensor) or start_pose.shape != (
                 1,
@@ -684,7 +691,14 @@ class PrototypeMotionProvider:
                     targets, targets[:, :1].expand_as(targets), atol=1e-7, rtol=0
                 )
                 current = robot.compute_fk(
-                    qpos=phase_seed, name=arm.control_part, to_matrix=True
+                    qpos=phase_seed,
+                    name=arm.control_part,
+                    to_matrix=True,
+                    **(
+                        {"env_ids": context.env_ids}
+                        if getattr(self.motion_generator, "_env_ids", None) is not None
+                        else {}
+                    ),
                 )
                 known = (
                     torch.isclose(current, targets[:, 0], atol=1e-5, rtol=0)
@@ -719,7 +733,14 @@ class PrototypeMotionProvider:
                             :, phase.start : phase.stop, arm_ids
                         ]
             observed = robot.compute_batch_fk(
-                qpos=path, name=arm.control_part, to_matrix=True
+                qpos=path,
+                name=arm.control_part,
+                to_matrix=True,
+                **(
+                    {"env_ids": context.env_ids}
+                    if getattr(self.motion_generator, "_env_ids", None) is not None
+                    else {}
+                ),
             )
             if (
                 not isinstance(observed, torch.Tensor)
@@ -744,6 +765,12 @@ class PrototypeMotionProvider:
                 raise ValueError("prototype IK path does not satisfy the TCP targets")
             limits = robot.get_qpos_limits(name=arm.control_part)
             if (
+                getattr(self.motion_generator, "_env_ids", None) is not None
+                and isinstance(limits, torch.Tensor)
+                and limits.ndim == 3
+            ):
+                limits = limits.index_select(0, context.env_ids.to(limits.device))
+            if (
                 not isinstance(limits, torch.Tensor)
                 or limits.shape != (1, len(arm_ids), 2)
                 or not bool(torch.isfinite(limits).all())
@@ -754,6 +781,14 @@ class PrototypeMotionProvider:
             ):
                 raise ValueError("prototype IK violates a joint limit")
             velocity_limits = robot.get_qvel_limits(name=arm.control_part)
+            if (
+                getattr(self.motion_generator, "_env_ids", None) is not None
+                and isinstance(velocity_limits, torch.Tensor)
+                and velocity_limits.ndim == 2
+            ):
+                velocity_limits = velocity_limits.index_select(
+                    0, context.env_ids.to(velocity_limits.device)
+                )
             if (
                 not isinstance(velocity_limits, torch.Tensor)
                 or velocity_limits.shape != (1, len(arm_ids))
@@ -884,7 +919,15 @@ class PrototypeMotionProvider:
                         ):
                             continue
                         filtered_fk = robot.compute_batch_fk(
-                            qpos=candidate_path, name=arm.control_part, to_matrix=True
+                            qpos=candidate_path,
+                            name=arm.control_part,
+                            to_matrix=True,
+                            **(
+                                {"env_ids": context.env_ids}
+                                if getattr(self.motion_generator, "_env_ids", None)
+                                is not None
+                                else {}
+                            ),
                         )
                         if (
                             not isinstance(filtered_fk, torch.Tensor)
@@ -961,6 +1004,12 @@ class PrototypeMotionProvider:
                         qpos=positions[:, offset:, arm_ids],
                         name=arm.control_part,
                         to_matrix=True,
+                        **(
+                            {"env_ids": context.env_ids}
+                            if getattr(self.motion_generator, "_env_ids", None)
+                            is not None
+                            else {}
+                        ),
                     )[0]
                     .detach()
                     .cpu()

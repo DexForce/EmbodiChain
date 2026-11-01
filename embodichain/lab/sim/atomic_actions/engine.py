@@ -66,6 +66,7 @@ class AtomicActionEngine:
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
+        env_ids: tuple[int, ...] | None = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
 
@@ -91,6 +92,7 @@ class AtomicActionEngine:
             control_profiles=control_profiles,
             tracking_runtime=tracking_runtime,
             grasp_pose_generators=grasp_pose_generators,
+            env_ids=env_ids,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}
@@ -504,8 +506,14 @@ class AtomicActionEngine:
             if isinstance(candidate, torch.Tensor):
                 qvel_value = candidate.to(self.device)
         qvel = torch.zeros_like(qpos) if qvel_value is None else qvel_value
+        selection = self._planning_services.env_ids
+        env_ids = (
+            torch.arange(qpos.shape[0], dtype=torch.long, device=self.device)
+            if selection is None
+            else torch.tensor(selection, dtype=torch.long, device=self.device)
+        )
+        qpos, qvel = qpos.index_select(0, env_ids), qvel.index_select(0, env_ids)
         batch_size = int(qpos.shape[0])
-        env_ids = torch.arange(batch_size, dtype=torch.long, device=self.device)
         if task is None:
             task = TaskState.empty(batch_size=batch_size, device=self.device)
         if scene is None:
@@ -665,7 +673,13 @@ class AtomicActionEngine:
                 f"got {context.robot.robot_dof} and {self.robot.dof}."
             )
         robot_qpos = self.robot.get_qpos()
-        if context.batch_size != int(robot_qpos.shape[0]):
+        selection = self._planning_services.env_ids
+        expected_count = (
+            int(robot_qpos.shape[0]) if selection is None else len(selection)
+        )
+        if selection is not None and tuple(context.env_ids.tolist()) != selection:
+            raise ValueError("PlanningContext env_ids must match the engine selection")
+        if context.batch_size != expected_count:
             raise ValueError(
                 "PlanningContext batch size must match the engine robot, "
                 f"got {context.batch_size} and {robot_qpos.shape[0]}."

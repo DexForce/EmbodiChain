@@ -139,6 +139,9 @@ def collision_shapes_from_articulation_link(
                 if body is None
                 else _from_physical_body(body, object_uid=f"{object_uid}/{link_name}")
             )
+    native_shapes = _from_newton_link(binding, link_name)
+    if native_shapes is not None:
+        return native_shapes
     for port in physical_ports:
         getter = getattr(port, "get_collision_mesh", None)
         if callable(getter):
@@ -162,6 +165,75 @@ def collision_shapes_from_articulation_link(
     raise RuntimeError(
         f"Articulation {object_uid!r} cannot expose physical collision geometry for {link_name!r}"
     )
+
+
+def _from_newton_link(
+    binding: object, link_name: str
+) -> list[CollisionShapeDesc] | None:
+    """Preserve each cooked Newton shape and its actual convex/triangle type.
+
+    Newton's interaction mesh accessor merges shapes, losing convex decomposition.
+    This backend adapter reads the prepared model instead; no render mesh or
+    inferred convex hull is substituted for the actual physical resource.
+    """
+    runtime = getattr(binding, "_runtime", None)
+    model = getattr(runtime, "model", None)
+    links = getattr(binding, "_links", None)
+    if model is None or links is None:
+        return None
+    import newton
+    from embodichain.utils.math import matrix_from_quat
+    from ..rigid_object import CollisionShapeDesc
+
+    link = next((link for link in links if link.name == link_name), None)
+    if link is None:
+        return []
+
+    def tensor(value, dtype=torch.float32):
+        return torch.as_tensor(
+            value.numpy() if hasattr(value, "numpy") else value, dtype=dtype
+        ).clone()
+
+    kinds = tensor(model.shape_type, torch.int64)
+    flags = tensor(model.shape_flags, torch.int64)
+    scales = tensor(model.shape_scale)
+    transforms = tensor(model.shape_transform)
+    result = []
+    mapping = {
+        newton.GeoType.CONVEX_MESH: RigidBodyShape.CONVEX,
+        newton.GeoType.MESH: RigidBodyShape.MESH,
+        newton.GeoType.BOX: RigidBodyShape.BOX,
+        newton.GeoType.SPHERE: RigidBodyShape.SPHERE,
+        newton.GeoType.CAPSULE: RigidBodyShape.CAPSULE,
+    }
+    for index, shape_id in enumerate(link.shape_ids):
+        if not int(flags[shape_id]) & int(newton.ShapeFlags.COLLIDE_SHAPES):
+            continue
+        kind = newton.GeoType(int(kinds[shape_id]))
+        if kind not in mapping:
+            raise RuntimeError(
+                f"Unsupported Newton physical collision kind {kind.name}"
+            )
+        transform = transforms[shape_id]
+        pose = torch.eye(4)
+        pose[:3, :3] = matrix_from_quat(transform[3:].reshape(1, 4))[0]
+        pose[:3, 3] = transform[:3]
+        shape = CollisionShapeDesc(f"shape_{index}", mapping[kind], pose)
+        scale = scales[shape_id]
+        if kind in {newton.GeoType.CONVEX_MESH, newton.GeoType.MESH}:
+            source = model.shape_source[shape_id]
+            if source is None:
+                raise RuntimeError("Newton mesh collision source is missing")
+            shape.vertices = tensor(source.vertices).reshape(-1, 3) * scale
+            shape.triangles = tensor(source.indices, torch.int32).reshape(-1, 3)
+        elif kind == newton.GeoType.BOX:
+            shape.half_extents = scale
+        else:
+            shape.radius = float(scale[0])
+            if kind == newton.GeoType.CAPSULE:
+                shape.half_height = float(scale[1])
+        result.append(shape)
+    return result
 
 
 def _from_physical_body(

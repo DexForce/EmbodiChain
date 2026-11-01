@@ -115,6 +115,13 @@ Real2Sim source templates and protected mapped retiming integrate with this
 boundary; their control-grid, source-permission and host limits are documented
 in [Real2Sim motion](../data-pipeline/real2sim.md).
 
+Cross-domain offline collection belongs to
+[Expansion Engine](../expansion-engine/expansion-engine.md). It reuses the same
+session and trajectory operators, while native hosts own World stepping,
+per-row evidence, media and durable receipts. Motion code must not own those
+cross-domain lifecycle responsibilities.
+
+
 Scene layout proposals and their Task Program execution adapter belong to
 [scene expansion](../scene-expansion/scene-expansion.md). The trajectory
 contracts below operate within a specified scene and initial state.

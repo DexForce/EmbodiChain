@@ -145,3 +145,12 @@ Focused coverage: `tests/data_pipeline/test_real2sim_normalize.py`,
 `tests/sim/motion/expansion/test_mapped_timing.py`, and matching Atomic Action
 and Task Program source-binding tests. Synthetic fixtures establish software
 contracts, not real-data physical qualification.
+
+## Batched offline collection
+
+The original qualified tabletop owner retains its B=1/no-sensor contract.
+[Expansion Engine](../expansion-engine/expansion-engine.md) provides a separate
+World owner that binds each source runtime to one physical row and merges actual
+commands into one batched step. It reuses the same source preparation and measured
+qualification functions, and adds bounded native camera media, frozen artifacts
+and LeRobot export. Source permissions and contact protections are unchanged.

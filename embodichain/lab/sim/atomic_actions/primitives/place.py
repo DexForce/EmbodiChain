@@ -284,6 +284,11 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             qpos=start_arm_qpos,
             name=control_part,
             to_matrix=True,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
         )
         down_xpos = torch.cat([approach_xpos.unsqueeze(1), place_xpos], dim=1)
         down_xpos = self._translation_keyframes(start_xpos, down_xpos, options)
@@ -320,6 +325,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             control_dt=context.control_dt,
             arrival_indices=motion_result.waypoint_indices,
             split_target_index=down_xpos.shape[1] - 1,
+            env_ids=self.planning_services.env_ids,
         )
         n_down = down_arm.shape[1]
         n_back = back_arm.shape[1]
@@ -673,6 +679,11 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             qpos=start_qpos,
             name=control_part,
             to_matrix=True,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
         )
         start_quat = quat_from_matrix(start_xpos[:, :3, :3])
         first_waypoint_quat = quat_from_matrix(place_variants[:, 0, :, :3, :3])

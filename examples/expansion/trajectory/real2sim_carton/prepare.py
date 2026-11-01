@@ -199,6 +199,8 @@ def robot_evidence(robot, bodies) -> tuple[dict, tuple[JointSpec, ...]]:
         dict(
             joint_names=list(names),
             robot_geometry_sha256=checker.geometry_sha256,
+            geometry_identity_scheme="physical-urdf-v2",
+            legacy_robot_geometry_sha256=checker.legacy_geometry_sha256,
             object_geometry_sha256=bodies[0].geometry_sha256,
             target_geometry_sha256=bodies[1].geometry_sha256,
             urdf_path=robot.cfg.fpath,
@@ -673,10 +675,11 @@ def prepare(source_directory: Path, output: Path) -> None:
             }
             and tuple(snapshot["joint_names"][:7])
             == tuple(f"Joint{i}" for i in range(1, 8)),
-            # Frozen v1 source geometry; changing the public class is allowed,
-            # changing its declared physical model requires requalification.
+            # Physical-URDF v2 identity: generated comments/cache paths are not
+            # physical geometry. Locked Panda/Robotiq archives and the published
+            # joint, inertial, drive and calibration evidence remain unchanged.
             source_geometry_identity=snapshot["robot_geometry_sha256"]
-            == "6b08aff1b8de77edfd1deab3da3f139d2ecfb20838bd21cf2d6207058c0d4d82",
+            == "7ff24e7c93b15267a71c200b47a28959b95a25e9924d30304383418ac7445d79",
         )
         qualification["admitted"] = all(qualification["checks"].values())
         qualification.update(
