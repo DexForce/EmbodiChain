@@ -102,30 +102,3 @@ These requirements apply only when the environment enables RL outcomes;
 ordinary and Task Program replay keep their existing contracts.
 Kinematic/control playback does not establish measured physical acceptance.
 Replay exhaustion stops playback and is distinct from the task's own time limit.
-
-## Fixed-budget training comparison
-
-```bash
-python examples/learning/configured_manipulation/compare_push_cube.py \
-  --gpus 3 4 --output output/configured_rl_comparison
-```
-
-Choose currently available GPU indices. The runner permits at most two simulator
-processes, one per selected GPU. It runs legacy/configured variants with seeds
-42/43/44, each with 64 environments, rollout length 1024 and 1000 PPO updates.
-W&B and camera recording are disabled; monitoring runs every 50 updates.
-
-Each worker captures the untrained policy and reloads the final checkpoint.
-Both policies use the same 100 single-environment case seeds (20000–20099),
-deterministic actions and recorded initial object/goal/robot state. Final
-qualification requires the configured three-seed mean to be within five
-percentage points of legacy and at least twenty points above the untrained
-configured policy. Actual results, including failure to meet these thresholds,
-are preserved without expanding budgets or reducing thresholds.
-
-Each result records its configuration/implementation fingerprint, budget,
-complete case list and checkpoint. Reusing an incompatible result directory
-fails explicitly. Reduced `--iterations` / `--cases` runs are smoke checks and
-cannot claim formal acceptance. The output contains progress JSON, learning
-curves, evaluation history, initial policies, checkpoint/run references and a
-comparison report.
