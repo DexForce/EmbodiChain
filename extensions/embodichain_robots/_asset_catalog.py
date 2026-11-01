@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Official robot asset IDs; metadata only, with no implementation imports."""
+"""Official robot and end-effector asset IDs; metadata only, with no implementation imports."""
 
 from __future__ import annotations
 
@@ -118,5 +118,49 @@ ROBOT_ASSETS = {
     "SO101FollowerAssets": {
         "class_path": "embodichain_robots.the_robot_studio.so101.assets:SO101FollowerAssets",
         "category": "robot",
+    },
+    "DH_PGC_140_50": {
+        "class_path": "embodichain_robots.dh_robotics.pgc_140_50.assets:DH_PGC_140_50",
+        "category": "eef",
+    },
+    "DH_PGC_140_50_M": {
+        "class_path": "embodichain_robots.dh_robotics.pgc_140_50.assets:DH_PGC_140_50_M",
+        "category": "eef",
+    },
+    "DH_PGI_140_80": {
+        "class_path": "embodichain_robots.dh_robotics.pgi_140_80.assets:DH_PGI_140_80",
+        "category": "eef",
+    },
+    "DH_AG95": {
+        "class_path": "embodichain_robots.dh_robotics.ag95.assets:DH_AG95",
+        "category": "eef",
+    },
+    "ZH_CTM2F110": {
+        "class_path": "embodichain_robots.changingtek.ctm2f110.assets:ZH_CTM2F110",
+        "category": "eef",
+    },
+    "BrainCoHandRevo1": {
+        "class_path": "embodichain_robots.brainco.revo1.assets:BrainCoHandRevo1",
+        "category": "eef",
+    },
+    "InspireHand": {
+        "class_path": "embodichain_robots.inspire.hand.assets:InspireHand",
+        "category": "eef",
+    },
+    "Robotiq": {
+        "class_path": "embodichain_robots.robotiq.assets:Robotiq",
+        "category": "eef",
+    },
+    "Robotiq2F85": {
+        "class_path": "embodichain_robots.robotiq.robotiq_2f85.assets:Robotiq2F85",
+        "category": "eef",
+    },
+    "WheelTecFA2F": {
+        "class_path": "embodichain_robots.wheeltec.fa2f.assets:WheelTecFA2F",
+        "category": "eef",
+    },
+    "PikaGripper": {
+        "class_path": "embodichain_robots.agilex.pika.assets:PikaGripper",
+        "category": "eef",
     },
 }

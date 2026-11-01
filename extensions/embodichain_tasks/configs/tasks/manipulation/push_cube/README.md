@@ -12,3 +12,15 @@ embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/manipul
 
 The catalog describes configured RL support; it does not claim a trained policy or
 physical qualification. No preview or independent physical result is supplied.
+
+## Configuration-defined RL deployment
+
+`env.configured_rl.yaml` deploys `PushCubeConfiguredRL-v1` through the common
+`EmbodiedEnv`, without a task-specific Python class. It retains the original
+robot/TCP, observations, actions and reward formulas. Its measured XY target
+condition uses a strict 0.1 m bound; falling below -0.1 m is a failure, whereas
+the legacy deployment keeps its truncation behavior.
+
+```bash
+embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.configured_rl.yaml
+```

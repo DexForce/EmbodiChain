@@ -58,6 +58,11 @@ COMMANDS = (
         help="Generate a scene export from an input image using gen_sim/.env.",
     ),
     Command(
+        name="search-scene-feasibility",
+        target="embodichain.lab.task_program.integrations.feasibility:cli",
+        help="Search task-conditioned scene layouts and robot installations.",
+    ),
+    Command(
         name="scene-randomization",
         target="embodichain.gen_sim.scene_engine.cli.randomization:main",
         help="Generate and save grouped scene layouts from an existing output root.",

@@ -14,10 +14,10 @@ Official Franka robot configurations live in the
      - Current coverage
    * - :doc:`Franka family <cfg>`
      - ``FrankaCfg``
-     - Explicit FR3/Panda-Hand or original-Panda/Robotiq 2F-85 combinations.
+     - Bare seven-DOF FR3 and original Panda arms; tools use explicit assembly.
    * - :doc:`Franka Panda <panda>`
      - ``FrankaPandaCfg``
-     - Compatibility entry preserving the historical FR3-named asset and Panda Hand.
+     - Compatibility entry selecting the historical FR3 model as a bare arm.
 
 .. toctree::
    :maxdepth: 1

@@ -53,6 +53,7 @@ EXPECTED_COMMANDS = {
     "run-atomic-action",
     "scene-engine",
     "scene-randomization",
+    "search-scene-feasibility",
     "simready",
     "train-rl",
     "train-sl",

@@ -157,7 +157,7 @@ Collision meshes under `Collision/`:
 
 ### PikaGripper
 
-Source: `PikaGripper/PikaGripper.urdf`, registered by `eef_assets.PikaGripper`.
+Source: `PikaGripper/PikaGripper.urdf`, registered by `embodichain_robots.agilex.pika.assets.PikaGripper`.
 Archive MD5: `8a9d0779e7dbfa7bf5d4713175df014e`; URDF SHA-256:
 `cb99efefd74f26011c56d5afcf13839c13a5374160fecb02ac02ba9fa172d952`.
 

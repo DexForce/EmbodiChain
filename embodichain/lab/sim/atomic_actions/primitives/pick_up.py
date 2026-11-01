@@ -398,6 +398,8 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             second_sample_count=n_lift,
             dt=motion_result.dt,
             control_dt=interpolation_dt,
+            arrival_indices=motion_result.waypoint_indices,
+            split_target_index=1,
         )
         n_approach = approach_arm.shape[1]
         n_lift = lift_arm.shape[1]

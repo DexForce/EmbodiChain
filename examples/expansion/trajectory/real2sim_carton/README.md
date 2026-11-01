@@ -91,6 +91,11 @@ time_115、time_130。`--jobs` 运行至多三个独立 B=1 进程；正式宿�
 假设。机器人复用官方原始 Panda＋Robotiq embodiment；安装和 TCP 必须通过 FK 与
 物理几何身份检查。人工阶段、坐标及相机证据见 `annotations/` 和 `source.lock.json`。
 
+`FrankaCfg(arm_model="panda")` 仅配置七自由度裸臂。官方 embodiment 按 UR 相同的方式
+显式装配 Robotiq，声明夹爪控制组、驱动、18 mm 安装变换及 150 mm TCP 偏移。
+来源资格检查核对实际工具资产、关节布局、固定几何身份和 FK；回放读取同一部署的
+机器人配置。
+
 素材在 [Hugging Face](https://huggingface.co/datasets/DexForceAI/embodichain_data/tree/main/demo/real2sim_carton)
 版本化发布；`resources.lock.json` 固定分发 revision、SHA-256 和 manifest 哈希。
 DROID 原始和派生真实输入保留 CC BY 4.0。已发布 v1 中的历史合成内容保持字节不变，

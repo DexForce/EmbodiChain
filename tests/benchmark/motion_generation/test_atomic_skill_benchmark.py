@@ -1921,6 +1921,7 @@ def test_runner_preserves_preplan_attribution_after_planner_error(tmp_path):
     provider.plan_case.side_effect = RuntimeError("planner failed")
     provider.failure_outcomes.return_value = ()
     runner = object.__new__(BenchmarkRunner)
+    runner.capture_trajectories = False
     runner.execution = {"timing_comparable": True}
     runner.control_part = "arm"
     runner.suite = Mock()
@@ -3139,12 +3140,11 @@ def test_franka_panda_pgi_leaves_the_stock_panda_defaults_intact() -> None:
     stock = FrankaPandaCfg.from_dict({})
 
     assert stock.to_dict() == before
-    assert stock.control_parts["eef"] == ["fr3_finger_joint1", "fr3_finger_joint2"]
-    assert stock.solver_cfg["arm"].end_link_name == "fr3_hand_tcp"
-    assert stock.link_attrs["newton_gripper_contacts"].link_names_expr == [
-        "fr3_leftfinger|fr3_rightfinger"
-    ]
-    assert stock._pk_urdf_path.endswith("PandaWithHand.urdf")
+    assert set(stock.control_parts) == {"arm"}
+    assert len(stock.init_qpos) == 7
+    assert stock.solver_cfg["arm"].end_link_name == "fr3_link8"
+    assert not stock.link_attrs
+    assert stock._pk_urdf_path.endswith("Panda.urdf")
 
 
 def test_franka_panda_pgi_kinematic_chain_matches_the_assembled_solver() -> None:

@@ -22,7 +22,6 @@ from .materials import *
 from .demo_assets import *
 from .obj_assets import *
 from .w1_assets import *
-from .eef_assets import *
 from .robot_assets import *
 from .scene_assets import *
 from .solver_assets import *

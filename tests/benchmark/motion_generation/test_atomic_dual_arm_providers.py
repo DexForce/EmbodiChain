@@ -1568,8 +1568,10 @@ def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_pat
     assert len(cfg.init_qpos) == 18
     assert cfg.init_qpos[-4:] == [0.04] * 4
     assert [Path(c["urdf_path"]).name for c in cfg.urdf_cfg.components.values()] == [
-        "PandaWithHand.urdf",
-        "PandaWithHand.urdf",
+        "Panda.urdf",
+        "Panda.urdf",
+        "Fr3HandV1.urdf",
+        "Fr3HandV1.urdf",
     ]
     contact_links = resolve_matching_names(
         cfg.link_attrs["newton_gripper_contacts"].link_names_expr, links
@@ -1587,12 +1589,20 @@ def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_pat
         resolve_matching_names(list(rules), list(joints))
 
     stock = FrankaPandaCfg.from_dict({})
-    stock_chain = stock.build_pk_serial_chain(device=CPU)["arm"]
     qpos = torch.tensor(
         [stock.init_qpos[:7], [0.3, -0.2, 0.1, -2.0, 0.2, 2.5, 0.4]],
         dtype=torch.float32,
     )
-    expected_fk = stock_chain.forward_kinematics(qpos).get_matrix()
+    from embodichain.data import get_data_path
+    from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
+
+    source = create_pk_serial_chain(
+        urdf_path=get_data_path("Franka/Panda/PandaWithHand.urdf"),
+        device=CPU,
+        root_link_name="base",
+        end_link_name="fr3_hand_tcp",
+    )
+    expected_fk = source.forward_kinematics(qpos).get_matrix()
     chains = cfg.build_pk_serial_chain(device=CPU)
     for side in ("left", "right"):
         arm = f"{side}_arm"
@@ -1617,14 +1627,16 @@ def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_pat
         torch.testing.assert_close(opened, torch.full((2,), 0.04))
         torch.testing.assert_close(closed, torch.zeros(2))
         solver_cfg = cfg.solver_cfg[arm]
-        assert solver_cfg.end_link_name == f"{side}_fr3_hand_tcp"
-        np.testing.assert_allclose(solver_cfg.tcp, np.eye(4))
+        assert solver_cfg.end_link_name == f"{side}_fr3_link8"
+        assert np.asarray(solver_cfg.tcp)[2, 3] == pytest.approx(0.1034)
         solver_cfg.urdf_path = assembled_path
         solver_cfg.joint_names = cfg.control_parts[arm]
         solver = solver_cfg.init_solver(device=CPU)
         torch.testing.assert_close(solver.get_fk(qpos), expected_fk)
         torch.testing.assert_close(
-            chains[arm].forward_kinematics(qpos).get_matrix(), expected_fk
+            chains[arm].forward_kinematics(qpos).get_matrix()
+            @ torch.tensor(solver_cfg.tcp, dtype=qpos.dtype),
+            expected_fk,
         )
 
     # Hardware replacement retains both arm base transforms in the world.

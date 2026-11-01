@@ -37,6 +37,7 @@ _CONFIG_CLASSES = {
     "FlexivRizon4S": "embodichain_robots.flexiv.rizon4s:FlexivRizon4SCfg",
     "URRobot": "embodichain_robots.universal_robots.ur_robot:URRobotCfg",
     "SO101Follower": "embodichain_robots.the_robot_studio.so101:SO101FollowerCfg",
+    "BrainCoRevo1": "embodichain_robots.brainco.revo1:BrainCoRevo1Cfg",
 }
 
 _DEFAULT_CONTROL_INFO = {
@@ -88,14 +89,12 @@ _DEFAULT_CONTROL_INFO = {
             "right_eef": 2,
         },
     },
-    "Franka": {"dof": 8, "control_parts": {"arm": 7, "eef": 2}},
-    "FrankaPanda": {
-        "dof": 8,
-        "control_parts": {"arm": 7, "eef": 2},
-    },
+    "Franka": {"dof": 7, "control_parts": {"arm": 7}},
+    "FrankaPanda": {"dof": 7, "control_parts": {"arm": 7}},
     "URRobot": {"dof": 6, "control_parts": {"arm": 6}},
     "SO101Follower": {"dof": 6, "control_parts": {"arm": 5, "eef": 1}},
     "FlexivRizon4S": {"dof": 7, "control_parts": {"arm": 7}},
+    "BrainCoRevo1": {"dof": 6, "control_parts": {"eef": 6}},
 }
 
 _MIMIC_JOINTS = {
@@ -113,8 +112,8 @@ _MIMIC_JOINTS = {
         "left_joint8": "left_joint7",
         "right_joint8": "right_joint7",
     },
-    "Franka": {"fr3_finger_joint2": "fr3_finger_joint1"},
-    "FrankaPanda": {"fr3_finger_joint2": "fr3_finger_joint1"},
+    "Franka": {},
+    "FrankaPanda": {},
     "URRobot": {},
 }
 _CONTROL_PART_MIMICS = {
@@ -123,8 +122,8 @@ _CONTROL_PART_MIMICS = {
         "right_eef": ("RIGHT_HAND_FINGER_2",),
     },
     "CobotMagic": {"left_eef": ("left_joint8",), "right_eef": ("right_joint8",)},
-    "Franka": {"eef": ("fr3_finger_joint2",)},
-    "FrankaPanda": {"eef": ("fr3_finger_joint2",)},
+    "Franka": {},
+    "FrankaPanda": {},
 }
 
 _CLASSIFICATION = {
@@ -144,6 +143,7 @@ _CLASSIFICATION = {
     "FlexivRizon4S": ("flexiv", "fixed_manipulator", 1),
     "URRobot": ("universal_robots", "fixed_manipulator", 1),
     "SO101Follower": ("the_robot_studio", "fixed_manipulator", 1),
+    "BrainCoRevo1": ("BrainCo", "dexterous_hand", 0),
 }
 
 ROBOT_CONFIGS = {
@@ -153,7 +153,7 @@ ROBOT_CONFIGS = {
         **_DEFAULT_CONTROL_INFO.get(name, {}),
         "mimic_joints": _MIMIC_JOINTS.get(name, {}),
         "control_part_mimics": _CONTROL_PART_MIMICS.get(name, {}),
-        "supports_dual_arm": name in ("FrankaPanda", "URRobot"),
+        "supports_dual_arm": name in ("Franka", "FrankaPanda", "URRobot"),
     }
     for name, class_path in _CONFIG_CLASSES.items()
 }
@@ -240,6 +240,27 @@ _UR_VARIANTS = {
     for variant in ("ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e")
 }
 ROBOT_CONFIGS["URRobot"].update(variants=_UR_VARIANTS, default_variant="ur10")
+
+# Native side-specific metadata remains cheap to enumerate without loading cfg.
+_REVO1_VARIANTS = {
+    side: {
+        **_DEFAULT_CONTROL_INFO["BrainCoRevo1"],
+        "defaults": {"side": side},
+        "control_part_mimics": {},
+        "supports_dual_arm": False,
+        "mimic_joints": {
+            f"{side.upper()}_{finger}_PIP": f"{side.upper()}_HAND_{finger}"
+            for finger in ("INDEX", "MIDDLE", "RING", "PINKY")
+        },
+    }
+    for side in ("left", "right")
+}
+ROBOT_CONFIGS["BrainCoRevo1"].update(
+    defaults={"side": "right"},
+    mimic_joints=_REVO1_VARIANTS["right"]["mimic_joints"],
+    variants=_REVO1_VARIANTS,
+    default_variant="right",
+)
 for _variant, _profile in _UR_VARIANTS.items():
     ROBOT_CONFIGS[_variant] = {
         "class_path": _CONFIG_CLASSES["URRobot"],
@@ -249,33 +270,15 @@ for _variant, _profile in _UR_VARIANTS.items():
     }
 
 
-_FRANKA_ROBOTIQ_FOLLOWERS = (
-    "left_inner_knuckle_joint",
-    "left_inner_finger_joint",
-    "right_outer_knuckle_joint",
-    "right_inner_knuckle_joint",
-    "right_inner_finger_joint",
-)
 ROBOT_CONFIGS["Franka"].update(
     variants={
-        "fr3/panda_hand": {
+        model: {
             **_DEFAULT_CONTROL_INFO["Franka"],
-            "defaults": {"arm_model": "fr3", "gripper": "panda_hand"},
-            "mimic_joints": _MIMIC_JOINTS["Franka"],
-            "control_part_mimics": _CONTROL_PART_MIMICS["Franka"],
-            "supports_dual_arm": True,
-        },
-        "panda/robotiq_2f85": {
-            "dof": 8,
-            "control_parts": {"arm": 7, "eef": 6},
-            "defaults": {"arm_model": "panda", "gripper": "robotiq_2f85"},
-            "mimic_joints": {
-                name: "finger_joint" for name in _FRANKA_ROBOTIQ_FOLLOWERS
-            },
-            "control_part_mimics": {"eef": _FRANKA_ROBOTIQ_FOLLOWERS},
-            "supports_dual_arm": False,
-        },
+            "defaults": {"arm_model": model},
+            "supports_dual_arm": model == "fr3",
+        }
+        for model in ("fr3", "panda")
     },
-    default_variant="fr3/panda_hand",
+    default_variant="fr3",
 )
 ROBOT_CONFIGS["FrankaPanda"]["variant_of"] = "Franka"

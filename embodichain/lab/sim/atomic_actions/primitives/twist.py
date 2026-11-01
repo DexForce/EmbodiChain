@@ -454,6 +454,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             sample_count,
             dt=result.dt,
             control_dt=interpolation_dt,
+            arrival_indices=result.waypoint_indices,
         )
 
     def _twisted_grasp_poses(

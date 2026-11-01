@@ -113,7 +113,7 @@ def test_opt_in_pick_projection_consumes_budget_and_preserves_source() -> None:
     progress = np.linspace(0, 1, 40)
     poses[60:, 0, 3] = 0.012 * progress
     poses[60:, :3, :3] = Rotation.from_euler(
-        "z", 15 * progress, degrees=True
+        "z", 15 * progress[:, None], degrees=True
     ).as_matrix()
     before = poses.copy()
     cfg = MotionRefinementCfg(

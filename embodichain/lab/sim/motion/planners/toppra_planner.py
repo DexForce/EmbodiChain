@@ -70,6 +70,7 @@ def retime_joint_paths(
     sample_interval: float | int | None = None,
     grid_size: int = 100,
     device: torch.device | None = None,
+    arrival_indices: torch.Tensor | None = None,
 ) -> PlanResult:
     """Re-parameterize already-planned joint paths under dynamic limits.
 
@@ -84,12 +85,25 @@ def retime_joint_paths(
     run inline. Interval constraints enforce limits between grid points.
     Floating outputs use float64 so finite differences of dense position samples
     do not amplify float32 quantization into spurious dynamic-limit violations.
-    Input filtering retains float32/float64 input precision; other input dtypes
-    are promoted to float32 before solving. Consumers that narrow or resample
+    Inputs other than float32/float64 are promoted to float32 before solving.
+    Consumers that narrow or resample
     these positions must recheck the resulting trajectory's dynamic limits.
 
-    The path geometry is resampled along the fitted spline, so poses derived
-    from the input samples must be recomputed from the returned positions.
+    Geometry uses coordinatewise PCHIP, so the continuous path stays inside
+    each adjacent pair's joint-position box. Legal input positions therefore
+    remain legal without needing robot position limits here. This does not
+    certify collision freedom. The C1 curve has continuous velocity and may
+    have bounded acceleration jumps at knots; both sides are constrained by
+    the segment-aligned TOPPRA grid. Jerk is not constrained.
+
+    Every distinct input node appears in order in the returned samples.
+    Consecutive identical nodes are collapsed, including the final node;
+    without input timestamps, repeats do not specify a dwell duration.
+    TIME sampling is uniform within each spline segment, with spacing no
+    greater than the requested interval. QUANTITY retains the requested count
+    for moving rows and fails rows with more distinct nodes than samples.
+    Poses derived from input samples must be recomputed from returned positions.
+    Ordinary :class:`ToppraPlanner` retains its not-a-knot geometry.
 
     Args:
         positions: Planned joint paths of shape ``(B, N, DOF)``.
@@ -97,8 +111,7 @@ def retime_joint_paths(
             one value per joint, or signed ``(DOF, 2)`` bounds, matching
             :class:`ToppraPlanOptions`.
         path_lengths: Optional valid prefix length for each batch row. This
-            excludes rectangular tail padding from spline fitting while
-            preserving explicit repeated endpoints inside each prefix.
+            excludes rectangular tail padding from geometry and timing.
         sample_method: Fixed output quantity or approximately fixed time step.
         sample_interval: Output count for ``QUANTITY`` or seconds for ``TIME``.
             ``None`` keeps the input sample count and is only meaningful for
@@ -107,10 +120,16 @@ def retime_joint_paths(
         grid_size: Minimum parameterization grid size, as for
             :class:`ToppraPlannerCfg`.
         device: Device for the assembled tensors; defaults to the input's.
+        arrival_indices: Optional strictly ordered ``(B, K)`` source visits,
+            with -1 for unreached targets. TIME sampling retimes each phase
+            rest-to-rest while retaining every path-defining source sample.
+            All declared visits become explicit stops; this can increase duration.
 
     Returns:
         PlanResult whose ``success`` is per-env and false where the path could
-        not be parameterized.
+        not be parameterized or the output count cannot retain its nodes.
+        Failed rows are zero-filled; shorter rows hold their endpoint with
+        zero derivatives and zero arrival intervals in the tail.
 
     Raises:
         ValueError: If ``positions`` is not a ``(B, N, DOF)`` tensor,
@@ -137,6 +156,42 @@ def retime_joint_paths(
     path_lengths = _tensor_path_lengths(path_lengths, batch, count, positions.device)
     resolved_interval = count if sample_interval is None else sample_interval
 
+    if arrival_indices is not None:
+        if sample_method is not TrajectorySampleMethod.TIME:
+            raise ValueError("arrival_indices requires TIME sampling.")
+        from embodichain.compute.trajectory._arrival_timing import (
+            _split_arrival_segments,
+            _join_arrival_segments,
+        )
+
+        segments, lengths, _, visits = _split_arrival_segments(
+            positions,
+            arrival_indices,
+            path_lengths,
+        )
+        phased = retime_joint_paths(
+            segments,
+            constraints=constraints,
+            path_lengths=lengths,
+            sample_method=sample_method,
+            sample_interval=sample_interval,
+            grid_size=grid_size,
+            device=positions.device,
+        )
+        joined = _join_arrival_segments(
+            {
+                key: getattr(phased, key)
+                for key in ("positions", "velocities", "accelerations", "dt", "success")
+            },
+            arrival_indices,
+            visits,
+            float(sample_interval),
+        )
+        joined.pop("valid_lengths")
+        return PlanResult(
+            **{key: value.to(resolved_device) for key, value in joined.items()}
+        )
+
     quantity = sample_method == TrajectorySampleMethod.QUANTITY
     waypoints = (
         positions
@@ -153,6 +208,7 @@ def retime_joint_paths(
             sample_dt=None if quantity else float(resolved_interval),
             grid_size=grid_size,
             output_dtype=torch.float64,
+            preserve_waypoints=True,
         )
     except (ValueError, FloatingPointError, OverflowError):
         return _failed_result(batch, dofs, resolved_device, torch.float64)
