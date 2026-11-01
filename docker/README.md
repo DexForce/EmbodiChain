@@ -61,6 +61,12 @@ Python 3.12 and NumPy 2. Both images therefore contain a small `blender311`
 worker environment in addition to the business environment(s). It has no
 Torch or DexSim installation.
 
+The official bpy 4.5.15 cp311 artifact has an upstream cp39 tag inside its
+WHEEL metadata. Its SHA256 is pinned; the install step corrects that tag and
+the corresponding RECORD checksum without modifying native binaries or the
+download cache. The complete Blender render/mesh/baking checks qualify the
+installed artifact.
+
 `EMBODICHAIN_BLENDER_PYTHON` selects that interpreter. GenSim sends file-based
 mesh/render jobs to the packaged worker automatically. The worker does not
 import the main package and does not inherit business Python/native-library

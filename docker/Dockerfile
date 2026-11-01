@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcb1 libxcb-cursor0 libxcb-xinerama0 libfontconfig1 libfreetype6 \
     libdbus-1-3 libnss3 libasound2 fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
-COPY docker/locks/ /opt/embodichain/locks/
+COPY docker/locks/conda-*.txt /opt/embodichain/locks/
 RUN curl -fL --retry 3 \
     "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-${MINIFORGE_VERSION}-Linux-x86_64.sh" \
     -o /tmp/miniforge.sh \
@@ -37,7 +37,8 @@ RUN curl -fL --retry 3 \
 # Media has no business Python packages: exposing its shared FFmpeg libraries
 # never makes one business environment load the other's DexSim/libpython.
 ENV LD_LIBRARY_PATH=/opt/embodichain/media/lib:$LD_LIBRARY_PATH
-COPY docker/install-profile.sh docker/entrypoint.sh docker/verify.py /opt/embodichain/
+COPY docker/locks/py311.txt docker/locks/py312.txt docker/locks/blender311.txt /opt/embodichain/locks/
+COPY docker/install-profile.sh docker/entrypoint.sh docker/verify.py docker/repair-bpy-wheel.py /opt/embodichain/
 COPY docker/profile.sh /etc/profile.d/embodichain.sh
 
 FROM system AS dependencies

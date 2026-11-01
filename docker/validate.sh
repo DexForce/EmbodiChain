@@ -16,6 +16,14 @@ common=(--rm --gpus "device=${EMBODICHAIN_GPU_DEVICE:-0}" --shm-size 4g
 for path in /usr/share/vulkan/icd.d /usr/share/vulkan/implicit_layer.d /usr/share/glvnd/egl_vendor.d /usr/share/nvidia; do
   [[ ! -d "$path" ]] || common+=(-v "$path:$path:ro")
 done
+docker run "${common[@]}" "$internal_image" bash -lc \
+  'set -euo pipefail
+   conda activate py311
+   test "$EMBODICHAIN_ENV" = py311
+   test "$(python -c "import sys; print(sys.version_info.minor)")" = 11
+   conda activate py312
+   test "$EMBODICHAIN_ENV" = py312
+   test "$(python -c "import sys; print(sys.version_info.minor)")" = 12'
 docker run "${common[@]}" "$public_image" bash -c \
   'test ! -d /opt/conda/envs/py311 && test -x /opt/conda/envs/blender311/bin/python'
 for pair in public:py312 internal:py311 internal:py312; do

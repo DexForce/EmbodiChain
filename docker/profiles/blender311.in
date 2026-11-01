@@ -1,6 +1,10 @@
 # Blender owns an independent Python/NumPy ABI. No Torch or DexSim here.
-bpy==4.5.15
+bpy @ https://files.pythonhosted.org/packages/22/61/2d176a9dce27522cff1b29d9029772fb103f9cb1537deb05f005c1eac18e/bpy-4.5.15-cp311-cp311-manylinux_2_28_x86_64.whl#sha256=19203fb7825b005d2024b2e724d600fc82550a6deea71fbcc4447244df9ea737
 numpy==1.26.4
 Pillow
 scipy
 openai
+# Include packaging seeds retained by uv when synchronizing a conda env.
+wheel
+setuptools
+pip
