@@ -72,3 +72,8 @@ The [scene and robot feasibility preview](expansion/scene_robot_feasibility/READ
 compares an authored installation with task-conditioned joint layout/deployment
 search in an offline 3D viewer. It replays measured successful episodes, exposes
 failed candidates and keeps independent region validation separate.
+
+The [differentiable retiming showcase](learning/differentiable_toppra/README.md)
+compares a stopped duration objective with autograd optimization of free path
+nodes. Its CPU browser preview displays gradients, finite-difference checks and
+trajectories on a shared physical clock, with portable export and replay.
