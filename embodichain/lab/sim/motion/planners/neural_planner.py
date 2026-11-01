@@ -442,6 +442,13 @@ class NeuralPlannerCfg(BasePlannerCfg):
     the path's own jerk -- only the duration over which it is traversed.
     """
 
+    preserve_waypoint_arrivals: bool = False
+    """Retain target visits through retiming and host control-grid conversion.
+
+    Solved timing uses rest-to-rest phases at every declared target, preserving
+    each phase's original samples. These semantic stops can increase duration.
+    """
+
 
 @configclass
 class NeuralPlanOptions(PlanOptions):
@@ -481,6 +488,8 @@ class NeuralPlanner(BasePlanner):
         super().__init__(cfg)
 
         self.cfg: NeuralPlannerCfg = cfg
+        if type(cfg.preserve_waypoint_arrivals) is not bool:
+            raise TypeError("preserve_waypoint_arrivals must be boolean")
         if cfg.onnx_model_path is MISSING or not str(cfg.onnx_model_path):
             logger.log_error("onnx_model_path is required", ValueError)
         self._load_onnx_model(Path(cfg.onnx_model_path))
@@ -805,6 +814,9 @@ class NeuralPlanner(BasePlanner):
 
         last_action = torch.zeros(actor_batch, self._action_dim, device=self.device)
         active_idx = torch.zeros(actor_batch, dtype=torch.long, device=self.device)
+        arrival_indices = torch.full(
+            (actor_batch, self._num_waypoints), -1, dtype=torch.long, device=self.device
+        )
         positions = [qpos.clone()]
         world_pose, ee_pose = forward_kinematics(qpos)
         xpos_list = [world_pose]
@@ -849,6 +861,14 @@ class NeuralPlanner(BasePlanner):
                 joint_mask,
                 active_idx,
             )
+            arrival_slot = active_idx.clamp(max=self._num_waypoints - 1)[:, None]
+            arrival_indices.scatter_(
+                1,
+                arrival_slot,
+                torch.where(
+                    reached[:, None], step + 1, arrival_indices.gather(1, arrival_slot)
+                ),
+            )
             active_idx = torch.where(reached, active_idx + 1, active_idx)
             converged |= active_idx >= episode_k
             if (converged | (step + 1 >= step_limits)).all():
@@ -871,6 +891,29 @@ class NeuralPlanner(BasePlanner):
             count = int(lengths.max().item())
             arm_positions = positions_t[rows, :count]
             success = converged[rows]
+            arm_arrivals = arrival_indices[rows, : parsed[index][7]]
+            from embodichain.compute.trajectory._trace import (
+                _record_trajectory,
+                _tracing_enabled,
+            )
+
+            if _tracing_enabled():
+                native_dt = torch.full_like(arm_positions[..., 0], float(self.cfg.dt))
+                native_dt[:, 0] = 0
+                _record_trajectory(
+                    "native_policy",
+                    control_part=part,
+                    positions=arm_positions,
+                    dt=native_dt,
+                    valid_lengths=lengths,
+                    arrival_indices=arm_arrivals,
+                    target_positions=parsed[index][0],
+                    target_rotations=parsed[index][1],
+                    target_joints=parsed[index][2],
+                    position_mask=parsed[index][4],
+                    rotation_mask=parsed[index][5],
+                    joint_mask=parsed[index][6],
+                )
             if self.cfg.constraints is not None:
                 result = self._retimed_result(
                     success,
@@ -887,6 +930,7 @@ class NeuralPlanner(BasePlanner):
                     ),
                     episode_k=parsed[index][7],
                     qpos_limits=bounds[index],
+                    arrival_indices=arm_arrivals,
                 )
             else:
                 dt = torch.full(
@@ -908,7 +952,19 @@ class NeuralPlanner(BasePlanner):
                     dt=dt,
                     policy_rollout_positions=arm_positions,
                     policy_rollout_lengths=lengths,
+                    waypoint_indices=(
+                        arm_arrivals if self.cfg.preserve_waypoint_arrivals else None
+                    ),
                 )
+            result.policy_waypoint_indices = arm_arrivals
+            _record_trajectory(
+                "planner_output",
+                control_part=part,
+                positions=result.positions,
+                dt=result.dt,
+                arrival_indices=result.waypoint_indices,
+                success=result.success,
+            )
             result.policy_batching = dict(batching)
             results[part] = result
         return results
@@ -923,17 +979,13 @@ class NeuralPlanner(BasePlanner):
         waypoints: tuple[torch.Tensor, ...],
         episode_k: int,
         qpos_limits: tuple[torch.Tensor, torch.Tensor],
+        arrival_indices: torch.Tensor,
     ) -> PlanResult:
         """Re-parameterize the rollout path under the configured limits.
 
-        Retiming fits a spline through the rollout samples and resamples it, so
-        the returned trajectory is not the one the rollout verified. Success is
-        therefore re-derived from the samples actually returned rather than
-        carried over: the resampled grid can step past a waypoint the rollout
-        stopped on, and a spline through samples clamped at a joint limit can
-        overshoot that limit between them. A row is reported as successful only
-        when its returned trajectory parameterizes, moves in nonzero time,
-        stays inside the joint limits, and still reaches every waypoint.
+        Recheck the returned samples for legal joint positions, nonzero timing
+        on moving rows, and strictly ordered target visits. Explicit arrival
+        preservation adds rest boundaries at the policy's declared visits.
 
         Args:
             success: Per-env rollout convergence of shape ``(B,)``.
@@ -946,17 +998,13 @@ class NeuralPlanner(BasePlanner):
                 :meth:`_parse_waypoints`.
             episode_k: Number of waypoints this episode must reach.
             qpos_limits: Lower and upper joint-position limits.
+            arrival_indices: Ordered policy target visits before retiming.
 
         Returns:
             PlanResult with solved timing, derivatives and recomputed poses.
         """
         from .toppra_planner import retime_joint_paths
 
-        # Sample the solved trajectory on the configured control period rather
-        # than on the rollout's step count. The rollout emits however many
-        # steps it happened to take, which is far too coarse once the duration
-        # stretches: a waypoint the rollout stopped on then falls between two
-        # output samples and is reported as missed.
         retimed = retime_joint_paths(
             positions,
             constraints=dict(self.cfg.constraints),
@@ -964,6 +1012,9 @@ class NeuralPlanner(BasePlanner):
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=float(self.cfg.dt),
             device=self.device,
+            arrival_indices=(
+                arrival_indices if self.cfg.preserve_waypoint_arrivals else None
+            ),
         )
         retimed_positions = retimed.positions
         # One batched FK over every sample; the waypoint re-check reuses it.
@@ -974,9 +1025,16 @@ class NeuralPlanner(BasePlanner):
         success = success & self._retimed_is_executable(
             retimed_positions, retimed.dt, qpos_limits
         )
-        success = success & self._retimed_reaches_waypoints(
-            retimed_positions, poses, waypoints, episode_k, control_part
+        retimed_lengths = (retimed.dt > 0).sum(dim=1) + 1
+        arrivals = self._retimed_waypoint_indices(
+            retimed_positions,
+            poses,
+            waypoints,
+            episode_k,
+            control_part,
+            valid_lengths=retimed_lengths,
         )
+        success = success & (arrivals >= 0).all(dim=1)
         return PlanResult(
             success=success,
             positions=retimed_positions,
@@ -986,6 +1044,11 @@ class NeuralPlanner(BasePlanner):
             dt=retimed.dt,
             policy_rollout_positions=positions,
             policy_rollout_lengths=path_lengths,
+            waypoint_indices=(
+                retimed.waypoint_indices
+                if self.cfg.preserve_waypoint_arrivals
+                else None
+            ),
         )
 
     def _retimed_is_executable(
@@ -994,14 +1057,7 @@ class NeuralPlanner(BasePlanner):
         dt: torch.Tensor,
         qpos_limits: tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
-        """Return whether each retimed row has real timing and legal positions.
-
-        The shared retiming kernel returns a zero-duration result for a path
-        whose endpoints nearly coincide, which would claim a move with no time
-        to execute it. Spline interpolation through samples the rollout clamped
-        at a joint limit can also overshoot that limit between them, since the
-        fit sees only the sampled values.
-        """
+        """Return whether moving rows have positive duration and legal positions."""
         lower, upper = qpos_limits
         arm = positions[..., : self._action_dim]
         moves = (arm - arm[:, :1]).abs().amax(dim=(1, 2)) > 1.0e-9
@@ -1017,7 +1073,25 @@ class NeuralPlanner(BasePlanner):
         episode_k: int,
         control_part: str | None = None,
     ) -> torch.Tensor:
-        """Return whether each retimed row still reaches every waypoint in order.
+        """Check distinct ordered visits on the actual returned sample grid."""
+        return (
+            self._retimed_waypoint_indices(
+                positions, poses, waypoints, episode_k, control_part
+            )
+            >= 0
+        ).all(dim=1)
+
+    def _retimed_waypoint_indices(
+        self,
+        positions: torch.Tensor,
+        poses: torch.Tensor,
+        waypoints: tuple[torch.Tensor, ...],
+        episode_k: int,
+        control_part: str | None = None,
+        *,
+        valid_lengths: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return each target's arrival index, or -1 when not reached.
 
         Applies the rollout's own arrival test to the resampled grid, so a
         trajectory that passes a waypoint only between output samples is not
@@ -1025,9 +1099,9 @@ class NeuralPlanner(BasePlanner):
 
         The test runs once per waypoint over every sample at once rather than
         once per sample, so its cost does not grow with the solved duration
-        and nothing synchronizes with the host inside the loop. Order follows
-        the rollout with nondecreasing arrival indices, so targets independently
-        satisfied by one stationary sample do not require duplicate output.
+        and nothing synchronizes with the host inside the loop. Distinct target
+        visits require strictly increasing sample indices, matching the rollout
+        and canonical validation even for identical stationary targets.
         """
         (
             waypoints_pos,
@@ -1056,6 +1130,7 @@ class NeuralPlanner(BasePlanner):
         # Sample at which the previous waypoint was first reached; -1 before
         # the first, and `samples` once a row has missed one.
         reached_at = torch.full((batch,), -1, dtype=torch.long, device=self.device)
+        arrivals = []
         for waypoint in range(episode_k):
             active = torch.full(
                 (batch * samples,), waypoint, dtype=torch.long, device=self.device
@@ -1063,11 +1138,14 @@ class NeuralPlanner(BasePlanner):
             reached = self._is_active_reached(
                 flat_joint, flat_pose, *targets, active
             ).view(batch, samples)
-            eligible = reached & (sample_index >= reached_at.unsqueeze(-1))
+            eligible = reached & (sample_index > reached_at.unsqueeze(-1))
+            if valid_lengths is not None:
+                eligible &= sample_index < valid_lengths[:, None]
             reached_at = torch.where(
                 eligible, sample_index, torch.full_like(sample_index, samples)
             ).amin(dim=-1)
-        return reached_at < samples
+            arrivals.append(torch.where(reached_at < samples, reached_at, -1))
+        return torch.stack(arrivals, dim=1)
 
     def _parse_waypoints(
         self,

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import tempfile
 from collections.abc import Iterator, Mapping
 from contextlib import closing
@@ -51,6 +52,7 @@ from .embodiments import (
     resolve_embodiment,
 )
 from .metrics import timed_call
+from .metrics.performance import TimedCall
 from .models import (
     BenchmarkCase,
     PlannerMetadata,
@@ -131,6 +133,7 @@ class BenchmarkRunner:
         case_manifest: str | Path | None = None,
         execution: Mapping[str, object] | None = None,
         quality_batch_size: int = 1,
+        capture_trajectories: bool = False,
     ) -> None:
         self.adapters = dict(adapters or {})
         for name, adapter in self.adapters.items():
@@ -158,7 +161,11 @@ class BenchmarkRunner:
             raise ValueError("quality_batch_size must be a positive integer.")
         self.quality_batch_size = quality_batch_size
         self.execution["quality_batch_size"] = quality_batch_size
-        if quality_batch_size > 1:
+        if type(capture_trajectories) is not bool:
+            raise TypeError("capture_trajectories must be boolean.")
+        self.capture_trajectories = capture_trajectories
+        self.execution["capture_trajectories"] = capture_trajectories
+        if quality_batch_size > 1 or capture_trajectories:
             self.execution["timing_comparable"] = False
         self.output_root = Path(output_root)
         self.video = VideoRecordCfg() if video is None else video
@@ -177,6 +184,13 @@ class BenchmarkRunner:
             )
         )
         if self.replay_cases is not None:
+            if capture_trajectories and any(
+                case.case_parameters.get("measurement_purpose") == "performance_replay"
+                for case in self.replay_cases
+            ):
+                raise ValueError(
+                    "Trajectory capture is for quality diagnostics, not performance replay."
+                )
             tracks = {track.id for track in suite.evaluation_tracks()}
             if {case.track for case in self.replay_cases} != tracks or any(
                 case.suite_version != suite.suite_version for case in self.replay_cases
@@ -421,6 +435,82 @@ class BenchmarkRunner:
                 ),
             )
 
+    def _plan_with_trace(
+        self,
+        writer: TrialJsonlWriter,
+        adapter: PlannerAdapter,
+        provider: ScenarioProvider,
+        case: BenchmarkCase,
+        phase: TrialPhase,
+        repeat: int,
+    ) -> tuple[TimedCall[tuple[Any, Exception | None]], dict[str, Any] | None]:
+        """Capture measured quality stages and persist outside planning timing."""
+        from embodichain.compute.trajectory._trace import (
+            _capture_trajectories,
+            _record_trajectory,
+        )
+
+        enabled = self.capture_trajectories and phase is TrialPhase.MEASURED
+        with _capture_trajectories(enabled) as records:
+            measured = timed_call(
+                lambda: _capture(lambda: provider.plan_case(adapter, case))
+            )
+            result, error = measured.result
+            if (
+                enabled
+                and error is None
+                and getattr(result, "positions", None) is not None
+            ):
+                _record_trajectory(
+                    "planning_result",
+                    positions=result.positions,
+                    dt=result.dt,
+                    success=result.success,
+                    policy_positions=getattr(result, "policy_rollout_positions", None),
+                    policy_lengths=getattr(result, "policy_rollout_lengths", None),
+                    target_waypoints=case.target_waypoints,
+                    target_joints=case.reference_qpos,
+                    arrival_indices=getattr(result, "waypoint_indices", None),
+                    policy_arrival_indices=getattr(
+                        result, "policy_waypoint_indices", None
+                    ),
+                )
+        if not enabled:
+            return measured, None
+
+        def cpu(value: Any) -> Any:
+            if isinstance(value, torch.Tensor):
+                return value.cpu()
+            if isinstance(value, dict):
+                return {key: cpu(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [cpu(item) for item in value]
+            return value
+
+        identity = {
+            "algorithm_id": adapter.metadata.algorithm_id,
+            "case_id": case.case_id,
+            "phase": phase.value,
+            "repeat": repeat,
+        }
+        path = (
+            writer.path.parent / "trajectory_traces" / (stable_hash(identity) + ".pt")
+        )
+        path.parent.mkdir(exist_ok=True)
+        if path.exists():
+            raise FileExistsError(f"Trajectory trace already exists: {path}")
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            torch.save(
+                {"schema_version": 1, **identity, "stages": cpu(records)}, stream
+            )
+        os.replace(temporary, path)
+        return measured, {
+            "path": str(path.resolve()),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "stage_count": len(records),
+        }
+
     def _run_plan_call(
         self,
         writer: TrialJsonlWriter,
@@ -439,9 +529,11 @@ class BenchmarkRunner:
         # Adapters may normalize tensors in place. Keep the canonical manifest
         # and external metric inputs independent; copying is outside timing.
         planner_case = deepcopy(case)
-        measured = timed_call(
-            lambda: _capture(lambda: provider.plan_case(adapter, planner_case))
+        measured, trace = self._plan_with_trace(
+            writer, adapter, provider, planner_case, phase, repeat
         )
+        if trace is not None:
+            record_metadata["trajectory_trace"] = trace
         result, error = measured.result
         failure_code = None
         failure_message = None
@@ -874,8 +966,8 @@ class BenchmarkRunner:
         packed = pack_cases(cases, self.quality_batch_size)
         provider.reset_case(sim, robot, packed, self.control_part)
         planner_case = deepcopy(packed)
-        measured = timed_call(
-            lambda: _capture(lambda: provider.plan_case(adapter, planner_case))
+        measured, trace = self._plan_with_trace(
+            writer, adapter, provider, planner_case, phase, repeat
         )
         result, error = measured.result
         contract_error = (
@@ -883,6 +975,12 @@ class BenchmarkRunner:
         )
         for row, case in enumerate(cases):
             info = self._trial_metadata(provider, case, metadata)
+            if trace is not None:
+                info["trajectory_trace"] = {
+                    **trace,
+                    "batch_row": row,
+                    "source_case_ids": [value.case_id for value in cases],
+                }
             info["execution_batch"] = {
                 "id": packed.case_id,
                 "row": row,

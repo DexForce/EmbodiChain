@@ -649,3 +649,179 @@ def test_numpy_frozen_joint_raw_excursion_is_not_dropped(dtype) -> None:
     points = np.array([[0.0, 0.0], [0.0, 1e-7], [0.4, 0.0]], dtype=dtype)
     with pytest.raises(ValueError, match="zero-speed joints"):
         _NumpyToppra(points, [0.5, 0.0], 0.5)
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("count", [3, 5])
+def test_preserved_paths_match_pchip_geometry_and_chain_rule(
+    device: str, dtype: torch.dtype, count: int
+) -> None:
+    from scipy.interpolate import PchipInterpolator
+
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    # The last coordinate is s itself, making path progress and its time
+    # derivatives observable without reproducing the solver's timing law.
+    values = [[0.8, -0.8, 0.0], [1.0, -1.0, 0.5], [1.0, -1.0, 1.0]]
+    if count == 5:
+        values = [
+            [0.0, 0.5, 0.0],
+            [1.0, -0.5, 0.25],
+            [-1.0, 0.5, 0.5],
+            [0.25, -0.5, 0.75],
+            [0.25, 0.5, 1.0],
+        ]
+    points = torch.tensor([values], device=device, dtype=dtype)
+    result = _retime_toppra_warp(
+        points,
+        2.0,
+        4.0,
+        sample_dt=0.003,
+        output_dtype=torch.float64,
+        preserve_waypoints=True,
+    )
+    assert result["success"].tolist() == [True]
+    q, v, a = [
+        result[key][0].cpu().numpy()
+        for key in ("positions", "velocities", "accelerations")
+    ]
+    reference = PchipInterpolator(
+        np.linspace(0, 1, count), points[0].double().cpu().numpy()
+    )
+    s = q[:, -1]
+    np.testing.assert_allclose(q, reference(s), atol=1e-12)
+    np.testing.assert_allclose(v, reference(s, 1) * v[:, -1, None], atol=2e-10)
+    np.testing.assert_allclose(
+        a,
+        reference(s, 2) * v[:, -1, None] ** 2 + reference(s, 1) * a[:, -1, None],
+        atol=2e-9,
+    )
+    assert np.all(q >= np.min(values, axis=0))
+    assert np.all(q <= np.max(values, axis=0))
+    assert np.abs(v).max() <= 2.0 + 1e-9
+    assert np.abs(a).max() <= 4.0 + 1e-9
+    assert result["dt"].max() <= 0.003
+    previous = -1
+    for point in points[0].double():
+        matches = torch.nonzero((result["positions"][0] == point).all(dim=-1)).flatten()
+        assert bool((matches > previous).any())
+        previous = int(matches[matches > previous][0])
+    # The independent compact divided difference is valid on a nonuniform grid.
+    dt = result["dt"][0, 1:]
+    secants = result["positions"][0].diff(dim=0) / dt[:, None]
+    differences = secants.diff(dim=0) / ((dt[:-1] + dt[1:])[:, None] / 2)
+    assert secants.abs().max() <= 2.0 + 1e-8
+    assert differences.abs().max() <= 4.0 + 1e-7
+
+
+@pytest.mark.parametrize("sampling", [{"sample_count": 11}, {"sample_dt": 0.04}])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_preserved_paths_isolate_padding_repeats_and_failures(
+    sampling: dict, device: str
+) -> None:
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    points = torch.tensor(
+        [
+            [[0.8, 0.0], [1.0, 0.02], [1.0, 0.04], [float("nan"), 50.0]],
+            [[0.0, 0.0], [0.5, 0.0], [0.5, 0.0], [0.5, 0.0]],
+            [[2.0, 3.0], [2.0, 3.0], [2.0, 3.0], [2.0, 3.0]],
+            [[0.0, 0.0], [float("nan"), 0.0], [0.5, 0.0], [0.5, 0.0]],
+            [[0.0, 0.0], [0.5, 0.0], [0.0, 0.0], [0.0, 0.0]],
+        ],
+        dtype=torch.float64,
+        device=device,
+    )
+    result = _retime_toppra_warp(
+        points,
+        1.0,
+        2.0,
+        path_lengths=torch.tensor([3, 4, 4, 4, 4], device=device),
+        preserve_waypoints=True,
+        **sampling,
+    )
+    assert result["success"].tolist() == [True, True, True, False, True]
+    for row, length in ((0, 3), (1, 4), (2, 4), (4, 4)):
+        single = _retime_toppra_warp(
+            points[row : row + 1, :length],
+            1.0,
+            2.0,
+            preserve_waypoints=True,
+            **sampling,
+        )
+        for key in ("positions", "velocities", "accelerations", "dt"):
+            expected = single[key][0]
+            torch.testing.assert_close(result[key][row, : len(expected)], expected)
+        valid = max(2, 1 + int((result["dt"][row] > 0).sum()))
+        assert torch.equal(
+            result["positions"][row, valid - 1 :],
+            points[row, length - 1].expand_as(result["positions"][row, valid - 1 :]),
+        )
+        assert result["dt"][row, valid:].count_nonzero() == 0
+        assert result["velocities"][row, valid:].count_nonzero() == 0
+        assert result["accelerations"][row, valid:].count_nonzero() == 0
+    assert result["positions"][3].count_nonzero() == 0
+    assert result["dt"][2:4].count_nonzero() == 0
+    # A repeated endpoint is a geometric hold, not a new loop or dwell clock.
+    trimmed = _retime_toppra_warp(
+        points[1:2, :2], 1.0, 2.0, preserve_waypoints=True, **sampling
+    )
+    torch.testing.assert_close(result["dt"][1].sum(), trimmed["dt"].sum())
+
+
+def test_preserved_quantity_fails_only_rows_that_cannot_retain_nodes() -> None:
+    points = torch.tensor([[[0.0], [0.5], [1.0]], [[0.0], [1.0], [1.0]]])
+    result = _retime_toppra_warp(
+        points, 1.0, 2.0, sample_count=2, preserve_waypoints=True
+    )
+    assert result["success"].tolist() == [False, True]
+    assert result["positions"][0].count_nonzero() == 0
+    assert result["dt"][0].count_nonzero() == 0
+    torch.testing.assert_close(result["positions"][1], torch.tensor([[0.0], [1.0]]))
+
+
+@pytest.mark.parametrize("sampling", [{"sample_count": 23}, {"sample_dt": 0.03}])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_preserved_path_gradients_match_finite_differences(
+    sampling: dict, device: str
+) -> None:
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    points = torch.tensor(
+        [[[0.0, 0.0], [0.3, 0.5], [0.7, 0.8]]], dtype=torch.float64, device=device
+    )
+    velocity = torch.tensor(0.8, dtype=torch.float64, device=device)
+    acceleration = torch.tensor(1.7, dtype=torch.float64, device=device)
+
+    def loss(q: torch.Tensor, v: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+        result = _retime_toppra_warp(q, v, a, preserve_waypoints=True, **sampling)
+        assert result["success"].all()
+        return result["dt"].sum() + 0.01 * sum(
+            result[key].square().mean()
+            for key in ("positions", "velocities", "accelerations")
+        )
+
+    arguments = [points, velocity, acceleration]
+    gradients = torch.autograd.grad(
+        loss(*[value.requires_grad_() for value in arguments]), arguments
+    )
+    epsilon = 1e-6
+    for i, (argument, gradient) in enumerate(zip(arguments, gradients)):
+        direction = (
+            torch.arange(1, argument.numel() + 1, device=argument.device).reshape(
+                argument.shape
+            )
+            * 0.1
+        )
+        plus, minus = [value.detach() for value in arguments], [
+            value.detach() for value in arguments
+        ]
+        plus[i], minus[i] = (
+            plus[i] + epsilon * direction,
+            minus[i] - epsilon * direction,
+        )
+        numerical = (loss(*plus) - loss(*minus)) / (2 * epsilon)
+        torch.testing.assert_close(
+            (gradient * direction).sum(), numerical, rtol=2e-3, atol=2e-5
+        )
