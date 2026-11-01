@@ -67,6 +67,7 @@ def retime_joint_paths(
     sample_interval: float | int | None = None,
     grid_size: int = 100,
     device: torch.device | None = None,
+    arrival_indices: torch.Tensor | None = None,
 ) -> PlanResult:
     """Re-parameterize already-planned joint paths under dynamic limits.
 
@@ -116,6 +117,10 @@ def retime_joint_paths(
         grid_size: Minimum parameterization grid size, as for
             :class:`ToppraPlannerCfg`.
         device: Device for the assembled tensors; defaults to the input's.
+        arrival_indices: Optional strictly ordered ``(B, K)`` source visits,
+            with -1 for unreached targets. TIME sampling retimes each phase
+            rest-to-rest while retaining every path-defining source sample.
+            All declared visits become explicit stops; this can increase duration.
 
     Returns:
         PlanResult whose ``success`` is per-env and false where the path could
@@ -162,6 +167,42 @@ def retime_joint_paths(
         path_lengths = path_lengths.contiguous()
     resolved_interval = count if sample_interval is None else sample_interval
     velocity, acceleration = constraints["velocity"], constraints["acceleration"]
+
+    if arrival_indices is not None:
+        if sample_method is not TrajectorySampleMethod.TIME:
+            raise ValueError("arrival_indices requires TIME sampling.")
+        from embodichain.compute.trajectory._arrival_timing import (
+            _split_arrival_segments,
+            _join_arrival_segments,
+        )
+
+        segments, lengths, _, visits = _split_arrival_segments(
+            positions,
+            arrival_indices,
+            path_lengths,
+        )
+        phased = retime_joint_paths(
+            segments,
+            constraints=constraints,
+            path_lengths=lengths,
+            sample_method=sample_method,
+            sample_interval=sample_interval,
+            grid_size=grid_size,
+            device=positions.device,
+        )
+        joined = _join_arrival_segments(
+            {
+                key: getattr(phased, key)
+                for key in ("positions", "velocities", "accelerations", "dt", "success")
+            },
+            arrival_indices,
+            visits,
+            float(sample_interval),
+        )
+        joined.pop("valid_lengths")
+        return PlanResult(
+            **{key: value.to(resolved_device) for key, value in joined.items()}
+        )
 
     quantity = sample_method == TrajectorySampleMethod.QUANTITY
     waypoints = (

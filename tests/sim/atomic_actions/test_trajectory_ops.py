@@ -332,6 +332,29 @@ def test_split_joint_trajectory_uses_per_environment_target_pose_boundary():
     assert second_input[:, :, 0].tolist() == [[2, 3, 4, 4, 4], [3, 4, 4, 4, 4]]
 
 
+def test_split_uses_declared_repeated_visit_and_retains_later_target():
+    trajectory = torch.tensor([[[0.0], [1.0], [0.0], [1.0], [2.0]]])
+    poses = torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 5, 1, 1)
+    poses[0, :, 0, 3] = trajectory[0, :, 0]
+    target = poses[:, 1]
+    robot = Mock()
+    robot.compute_batch_fk.return_value = poses
+    first, second = split_joint_trajectory_at_pose(
+        trajectory,
+        target,
+        robot=robot,
+        control_part="arm",
+        first_sample_count=2,
+        second_sample_count=2,
+        dt=torch.tensor([[0.0, 0.04, 0.04, 0.04, 0.04]]),
+        control_dt=0.04,
+        arrival_indices=torch.tensor([[1, 2, 3, 4]]),
+        split_target_index=2,
+    )
+    torch.testing.assert_close(first, trajectory[:, :4])
+    torch.testing.assert_close(second, trajectory[:, 3:])
+
+
 class TestTranslatePoseWorld:
     def test_offset_adds_to_translation(self):
         pose = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
@@ -469,6 +492,54 @@ class TestInterpolateJointTrajectory:
 
         with pytest.raises(ValueError, match="at least the number of keyframes"):
             interpolate_joint_trajectory(start, waypoints, n_waypoints=2)
+
+
+def test_full_robot_grid_keeps_internal_corner_and_distinct_return_visit() -> None:
+    q = torch.tensor(
+        [[[0.0, 0.0], [0.5, 0.0], [0.5, 0.5], [0.5, 0.0], [0.5, 0.5]]],
+        dtype=torch.float64,
+    )
+    result = PlanResult(
+        success=torch.tensor([True]),
+        positions=q,
+        dt=torch.tensor([[0.0, 0.01, 0.01, 0.01, 0.01]], dtype=torch.float64),
+        waypoint_indices=torch.tensor([[1, 2, 3, 4]]),
+    )
+    _, trajectory = to_full_robot_trajectory(
+        result,
+        base_qpos=torch.zeros(1, 3),
+        joint_ids=[0, 2],
+        env_ids=torch.tensor([0]),
+        control_dt=0.1,
+    )
+    torch.testing.assert_close(trajectory.positions[:, :, [0, 2]], q.float())
+    torch.testing.assert_close(
+        trajectory.dt,
+        torch.tensor([[0.0, 0.1, 0.1, 0.1, 0.1]], dtype=trajectory.dt.dtype),
+    )
+    torch.testing.assert_close(result.positions, q)
+
+
+def test_full_robot_grid_preserves_velocity_targets_at_internal_stop() -> None:
+    positions = torch.tensor([[[0.0], [0.25], [0.5], [0.75], [1.0]]])
+    result = PlanResult(
+        success=torch.tensor([True]),
+        positions=positions,
+        dt=torch.tensor([[0.0, 0.25, 0.25, 0.25, 0.25]]),
+        waypoint_indices=torch.tensor([[2, 4]]),
+    )
+    _, timed = to_full_robot_trajectory(
+        result,
+        base_qpos=torch.zeros(1, 2),
+        joint_ids=[1],
+        env_ids=torch.tensor([0]),
+        control_dt=0.25,
+    )
+    torch.testing.assert_close(timed.positions[:, :, 1:], positions)
+    torch.testing.assert_close(
+        timed.velocities[0, :, 1], torch.tensor([0.0, 1.0, 0.0, 1.0, 0.0])
+    )
+    assert timed.velocities[0, :, 0].count_nonzero() == 0
 
 
 @pytest.mark.parametrize("planner_dtype", [torch.float32, torch.float64])

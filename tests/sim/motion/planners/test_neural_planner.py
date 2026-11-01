@@ -562,6 +562,95 @@ def test_retime_joint_paths_rejects_malformed_input():
         )
 
 
+def test_arrival_retiming_keeps_event_stop_after_control_grid_and_hold():
+    from embodichain.compute.trajectory._arrival_timing import _resample_at_arrivals
+
+    path = torch.tensor(
+        [[[0.0, 0.0], [0.2, 0.1], [0.4, 0.2], [0.6, 0.3], [0.8, 0.4]]],
+        dtype=torch.float64,
+    )
+    limits = {"velocity": 2.0, "acceleration": 4.0}
+    options = dict(
+        constraints=limits,
+        sample_method=TrajectorySampleMethod.TIME,
+        sample_interval=0.01,
+    )
+    original = retime_joint_paths(path, **options)
+    stopped = retime_joint_paths(
+        path, arrival_indices=torch.tensor([[2, 4]]), **options
+    )
+    assert stopped.success.tolist() == [True]
+    assert stopped.dt.sum() > original.dt.sum()
+    output = _resample_at_arrivals(
+        stopped.positions, stopped.dt, 0.04, stopped.waypoint_indices
+    )
+    arrivals = output["waypoint_indices"][0]
+    torch.testing.assert_close(output["positions"][0, arrivals], path[0, [2, 4]])
+    split = int(arrivals[0])
+    q = output["positions"]
+    compiled = (
+        torch.cat(
+            (
+                q[:, : split + 1],
+                q[:, split : split + 1].expand(-1, 3, -1),
+                q[:, split:],
+            ),
+            dim=1,
+        )
+        .float()
+        .double()
+    )
+    velocity = compiled.diff(dim=1) / 0.04
+    acceleration = velocity.diff(dim=1) / 0.04
+    assert velocity.abs().max() <= 2.002
+    assert acceleration.abs().max() <= 4.004
+
+
+def test_arrival_retiming_preserves_distinct_stationary_visits():
+    result = retime_joint_paths(
+        torch.zeros(1, 4, 2),
+        constraints={"velocity": 2.0, "acceleration": 4.0},
+        arrival_indices=torch.tensor([[1, 2, 3]]),
+        sample_method=TrajectorySampleMethod.TIME,
+        sample_interval=0.01,
+    )
+    assert result.success.tolist() == [True]
+    assert result.waypoint_indices.tolist() == [[1, 2, 3]]
+    torch.testing.assert_close(
+        result.dt, torch.tensor([[0.0, 0.01, 0.01, 0.01]], dtype=torch.float64)
+    )
+
+
+def test_arrival_retiming_keeps_failed_rows_and_tail_derivatives_zero():
+    paths = torch.tensor(
+        [
+            [[0.0], [0.1], [0.2], [0.2]],
+            [[0.0], [0.5], [1.0], [1.5]],
+            [[1.0], [2.0], [3.0], [float("nan")]],
+        ],
+        dtype=torch.float64,
+    )
+    result = retime_joint_paths(
+        paths,
+        constraints={"velocity": 2.0, "acceleration": 4.0},
+        sample_method=TrajectorySampleMethod.TIME,
+        sample_interval=0.1,
+        arrival_indices=torch.tensor([[2], [2], [2]]),
+    )
+    assert result.success.tolist() == [True, True, False]
+    short_length = int((result.dt[0] > 0).sum()) + 1
+    assert short_length < result.positions.shape[1]
+    torch.testing.assert_close(
+        result.positions[0, short_length:],
+        paths[0, -1].expand_as(result.positions[0, short_length:]),
+    )
+    for name in ("velocities", "accelerations", "dt"):
+        assert torch.count_nonzero(getattr(result, name)[0, short_length:]) == 0
+    for name in ("positions", "velocities", "accelerations", "dt"):
+        assert torch.count_nonzero(getattr(result, name)[2]) == 0
+    assert result.waypoint_indices[2].tolist() == [-1]
+
+
 def test_retime_joint_paths_slices_a_single_cpu_path_to_its_valid_prefix():
     path = torch.zeros(1, 4, NUM_ARM_JOINTS, dtype=torch.float64)
     path[0, :, 0] = torch.tensor([0.0, 0.05, 0.1, 0.1])
@@ -747,7 +836,7 @@ def test_retimed_waypoint_check_keeps_order_and_runs_once_per_waypoint(
     assert len(calls) == 2
 
 
-def test_retimed_waypoint_check_allows_repeated_stationary_targets(
+def test_retimed_waypoint_check_requires_distinct_repeated_target_visits(
     tmp_path, monkeypatch
 ):
     model_path = _create_fake_onnx_model(tmp_path)
@@ -785,6 +874,10 @@ def test_retimed_waypoint_check_allows_repeated_stationary_targets(
 
     reached = planner._retimed_reaches_waypoints(positions, poses, waypoints, 3)
 
+    assert reached.tolist() == [False]
+    positions = torch.cat((positions, positions[:, -1:].expand(-1, 2, -1)), dim=1)
+    poses = torch.eye(4).repeat(1, 4, 1, 1)
+    reached = planner._retimed_reaches_waypoints(positions, poses, waypoints, 3)
     assert reached.tolist() == [True]
 
 
@@ -1643,8 +1736,9 @@ def test_shared_policy_uses_each_arms_frame_for_targets_and_rollout(
 
 
 @pytest.mark.parametrize("retime", [False, True])
+@pytest.mark.parametrize("preserve_arrivals", [False, True])
 def test_packed_arms_share_inference_and_match_independent_rollouts(
-    tmp_path, monkeypatch, retime
+    tmp_path, monkeypatch, retime, preserve_arrivals
 ):
     """Two scene rows × two arms preserve different goals, budgets and failures."""
     bases = {
@@ -1702,6 +1796,7 @@ def test_packed_arms_share_inference_and_match_independent_rollouts(
             robot_uid="fake_robot",
             onnx_model_path=_create_fake_onnx_model(tmp_path),
             batch_control_parts=True,
+            preserve_waypoint_arrivals=preserve_arrivals,
             num_waypoints=NUM_WAYPOINTS,
             action_scale=0.2,
             policy_frame_from_world_by_control_part={
@@ -2007,6 +2102,7 @@ def test_retimed_rollout_retains_limit_waypoints_on_a_coarse_clock(
         positions,
         "main_arm",
         path_lengths=torch.tensor([3]),
+        arrival_indices=torch.tensor([[1, 2]]),
         waypoints=waypoints,
         episode_k=2,
         qpos_limits=(lower, upper),

@@ -397,7 +397,10 @@ class AtomicActionEngine:
             )
         current = self.initial_context() if context is None else context
         self._validate_context(current)
-        plan = action.plan(request, current)
+        from embodichain.compute.trajectory._trace import _trajectory_scope
+
+        with _trajectory_scope(skill_id=request.skill_id):
+            plan = action.plan(request, current)
         self._validate_plan(plan, current, request)
         if plan_transform is not None:
             if not callable(plan_transform):
@@ -408,6 +411,21 @@ class AtomicActionEngine:
             owned = transformed.snapshot()
             self._validate_plan(owned, current, request)
             plan = owned
+        from embodichain.compute.trajectory._trace import _record_trajectory
+
+        if plan.joint_trajectory is not None:
+            _record_trajectory(
+                "action_compiled",
+                skill_id=plan.skill_id,
+                positions=plan.joint_trajectory.positions,
+                dt=plan.joint_trajectory.dt,
+                env_ids=plan.joint_trajectory.env_ids,
+                success=plan.plan_success,
+                segments=[
+                    {"name": s.name, "start": s.start, "stop": s.stop}
+                    for s in plan.segments
+                ],
+            )
         return plan
 
     def plan(
@@ -563,6 +581,17 @@ class AtomicActionEngine:
             alive = step_success
 
         compiled = TimedTrajectory.concatenate(trajectories, empty_like=context)
+        from embodichain.compute.trajectory._trace import _record_trajectory
+
+        _record_trajectory(
+            "actions_concatenated",
+            positions=compiled.positions,
+            dt=compiled.dt,
+            env_ids=compiled.env_ids,
+            success=alive,
+            action_lengths=[item.waypoint_count for item in trajectories],
+            skill_ids=[plan.skill_id for plan in plans],
+        )
         return CompiledTrajectory(
             plan_success=alive,
             trajectory=compiled,
