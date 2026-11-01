@@ -236,7 +236,7 @@ jobs:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
     container: &container_template
-      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3-py311
+      image: ${{ vars.EMBODICHAIN_CI_IMAGE || '192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3-py311' }}
       volumes:
         - "/cache:/cache"
         - "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d"
@@ -249,6 +249,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: ./.github/actions/activate-conda
+        with:
+          environment: ${{ vars.EMBODICHAIN_CI_ENV || 'py311' }}
       - name: Prepare Git for architecture generation
         shell: bash
         run: |
@@ -297,7 +299,11 @@ jobs:
           # msgspec wheel metadata. Resolve viser's dependency from PyPI first.
           python -m pip --isolated install --index-url https://pypi.org/simple \
             'msgspec>=0.18.6,<1.0.0'
-          pip install -e ".[gensim]" \
+          constraints=()
+          if [[ -n "${EMBODICHAIN_CONSTRAINTS_DIR:-}" ]]; then
+            constraints=(-c "${EMBODICHAIN_CONSTRAINTS_DIR}/${EMBODICHAIN_ENV}.txt")
+          fi
+          pip install "${constraints[@]}" -e ".[gensim]" \
             --index-url https://pypi.org/simple \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \
@@ -361,6 +367,8 @@ jobs:
       - name: Preserve Node path for login shells
         run: echo "CI_NODE_BIN_DIR=$(dirname "$(command -v node)")" >> "$GITHUB_ENV"
       - uses: ./.github/actions/activate-conda
+        with:
+          environment: ${{ vars.EMBODICHAIN_CI_ENV || 'py311' }}
       - name: Download test plan
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -369,7 +377,6 @@ jobs:
       - name: Install test package
         shell: bash -l {0}
         run: |
-          source activate py311
           set -euo pipefail
           if [[ "${NEEDS_GENSIM}" == "true" ]]; then
             package='.[gensim]'
@@ -380,7 +387,11 @@ jobs:
           # msgspec wheel metadata. Resolve viser's dependency from PyPI first.
           python -m pip --isolated install --index-url https://pypi.org/simple \
             'msgspec>=0.18.6,<1.0.0'
-          pip install -e "${package}" \
+          constraints=()
+          if [[ -n "${EMBODICHAIN_CONSTRAINTS_DIR:-}" ]]; then
+            constraints=(-c "${EMBODICHAIN_CONSTRAINTS_DIR}/${EMBODICHAIN_ENV}.txt")
+          fi
+          pip install "${constraints[@]}" -e "${package}" \
             --index-url https://pypi.org/simple \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \
@@ -403,7 +414,6 @@ jobs:
       - name: Run selected tests
         shell: bash -l {0}
         run: |
-          source activate py311
           set -euo pipefail
           # Login shells may use a different Git config from actions/checkout.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"

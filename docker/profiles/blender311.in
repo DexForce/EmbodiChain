@@ -1,0 +1,6 @@
+# Blender owns an independent Python/NumPy ABI. No Torch or DexSim here.
+bpy==4.5.15
+numpy==1.26.4
+Pillow
+scipy
+openai

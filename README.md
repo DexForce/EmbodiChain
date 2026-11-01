@@ -82,6 +82,15 @@ Use the [standalone exporter](tools/lerobot_export/README.md) for native 0.6.1
 persistent-language annotations and depth features. The SDK dependency upgrade
 does not replace the existing EmbodiChain ACT model or migrate its checkpoints.
 
+### Container environments
+
+The public container provides the complete Python 3.12 runtime, including
+GenSim, cuRobo and ONNX CUDA deployment. The internal container additionally
+provides a complete Python 3.11 environment. Both use an isolated Blender
+runtime to preserve Python/NumPy compatibility. See
+[container setup and qualification](docker/README.md) for build commands,
+environment selection and dependency locks.
+
 ### Task Environments
 
 Official task environments are included in the main `embodichain` installation.

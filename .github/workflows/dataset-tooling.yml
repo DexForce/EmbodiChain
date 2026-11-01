@@ -74,7 +74,9 @@ jobs:
             torchcodec: '0.11.1'
             tensordict: '0.15.3'
     container:
-      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3-py311
+      image: ${{ vars.EMBODICHAIN_CI_IMAGE || '192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3-py311' }}
+      # CPU Torch tests still import DexSim's native CUDA/NVML-linked module.
+      options: --gpus device=0 --shm-size 2g
       volumes:
         - '/cache:/cache'
     env:
@@ -84,6 +86,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: ./.github/actions/activate-conda
+        with:
+          environment: ${{ vars.EMBODICHAIN_CI_ENV || 'py311' }}
       - name: Install the Python-selected SDK with the normal resolver
         shell: bash -l {0}
         run: |

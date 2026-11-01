@@ -645,6 +645,20 @@ embodichain.gen_sim.simready_pipeline.cli.start
    cli_ingest_single
    main
 
+embodichain.gen_sim.simready_pipeline.utils.geometry_utils
+----------------------------------------------------------
+
+File-based OBJ cleanup and simplification through the isolated Blender runtime.
+The caller retains ownership of its input and destination asset paths.
+
+.. currentmodule:: embodichain.gen_sim.simready_pipeline.utils.geometry_utils
+
+.. autosummary::
+
+   process_obj
+
+.. autofunction:: process_obj
+
 embodichain.lab.gym.envs.base_env
 ---------------------------------
 

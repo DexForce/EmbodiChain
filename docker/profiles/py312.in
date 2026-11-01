@@ -1,0 +1,10 @@
+# Qualified CUDA 12.8 versions; regenerate using docker/lock.sh.
+dexsim-engine @ http://pyp.open3dv.site:2345/packages/dexsim_engine-0.5.1rc1-cp312-cp312-manylinux_2_31_x86_64.whl
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
+torchcodec==0.11.1+cu128
+tensordict==0.15.3
+numpy>=2,<2.3
+gradio==6.17.3
+onnxruntime-gpu==1.26.0
+nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@4ea77366ca48ee453e7df139e39fa6532af49f3b

@@ -1,0 +1,47 @@
+name: Container environments
+
+on:
+  push:
+    branches: ['codex/container-*']
+    paths:
+      - 'docker/**'
+      - '!docker/**/*.md'
+      - '.dockerignore'
+      - '.github/workflows/container-images.yml'
+      - 'pyproject.toml'
+      - 'embodichain/gen_sim/**'
+      - 'tests/gen_sim/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-environments-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: Linux
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Build and qualify both image targets
+        env:
+          # Candidate tags live in the internal registry until qualification.
+          # This workflow never moves an existing production/default tag.
+          PUBLIC_IMAGE: 192.168.3.13:5000/dexsdk
+          INTERNAL_IMAGE: 192.168.3.13:5000/dexsdk
+        run: bash docker/build.sh --verify
+      - name: Save qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: container-qualification-${{ github.sha }}
+          path: output/container-validation/
+      - name: Push qualified candidates
+        shell: bash
+        run: |
+          suffix="${GITHUB_SHA:0:12}"
+          docker push "192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8-py312-$suffix"
+          docker push "192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312-$suffix"

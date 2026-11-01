@@ -125,6 +125,15 @@ without sampling. File/model coordinate adaptation remains owned here.
 
 ## Runtime and extension boundaries
 
+Blender operations use `gen_sim/_blender_runtime.py` to launch the standalone
+worker selected by `EMBODICHAIN_BLENDER_PYTHON`. The worker loads only Blender
+operations and their direct dependencies; it must not import the business
+framework, Torch or DexSim. Input/output files cross this process boundary;
+Blender objects and business-environment Python/native-library paths do not.
+`docker/` owns the py312 public runtime, py311/py312 internal profiles and the
+separate Python 3.11/NumPy 1.26 Blender environment. See
+[container setup](../../../docker/README.md) for building and qualification.
+
 Keep parser capabilities idempotent so recorded stages support resume.
 Provider configuration belongs to its loader/client, while coordinate and graph
 contracts belong to importer/exporter. Task registration and physical/semantic

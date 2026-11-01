@@ -1,12 +1,22 @@
-name: Activate conda py311 environment
-description: Activate py311 and expose its executables on PATH.
+name: Activate EmbodiChain conda environment
+description: Activate the selected business environment and expose its executables on PATH.
+inputs:
+  environment:
+    description: Business environment name (py311 or py312).
+    required: false
+    default: py312
 runs:
   using: composite
   steps:
-    - name: Activate conda py311 environment
+    - name: Activate selected conda environment
       shell: bash -l {0}
+      env:
+        SELECTED_CONDA_ENV: ${{ inputs.environment }}
       run: |
-        source activate py311
+        case "$SELECTED_CONDA_ENV" in py311|py312) ;; *) exit 2 ;; esac
+        source "$(conda info --base)/etc/profile.d/conda.sh"
+        conda activate "$SELECTED_CONDA_ENV"
         echo "$CONDA_PREFIX/bin" >> "$GITHUB_PATH"
+        echo "EMBODICHAIN_ENV=$SELECTED_CONDA_ENV" >> "$GITHUB_ENV"
         python --version
         which python pip

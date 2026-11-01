@@ -76,7 +76,7 @@ policy-deploy = [
   "onnxruntime-gpu>=1.20,<1.27",
 ]
 gensim = [
-  "bpy",
+  # Blender runs in a separate Python 3.11 runtime; see docker/README.md.
   "gradio>=6.17.3,<6.18",
   "pyrender==0.1.45",
   "requests",
@@ -109,6 +109,7 @@ bpy = { index = "blender" }
 [[tool.uv.index]]
 name = "blender"
 url = "https://download.blender.org/pypi/"
+explicit = true
 
 [tool.setuptools.dynamic]
 version = { file = ["VERSION"] }
