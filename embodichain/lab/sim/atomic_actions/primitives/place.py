@@ -317,6 +317,8 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             second_sample_count=n_back,
             dt=motion_result.dt,
             control_dt=context.control_dt,
+            arrival_indices=motion_result.waypoint_indices,
+            split_target_index=down_xpos.shape[1] - 1,
         )
         n_down = down_arm.shape[1]
         n_back = back_arm.shape[1]

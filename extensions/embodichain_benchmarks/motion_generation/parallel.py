@@ -186,6 +186,7 @@ def _run_shard(job: dict[str, Any]) -> tuple[BenchmarkRunResult, dict[str, Any]]
                 output_root=directory,
                 case_manifest=job["case_manifest"],
                 quality_batch_size=job.get("quality_batch_size", 1),
+                capture_trajectories=job.get("capture_trajectories", False),
                 execution={
                     "mode": "parallel_quality",
                     "workers": job["workers"],
@@ -347,6 +348,7 @@ def run_parallel_benchmark(
     worker_threads: int,
     quality_batch_size: int = 1,
     quality_devices: Sequence[str] | None = None,
+    capture_trajectories: bool = False,
 ) -> BenchmarkRunResult:
     """Freeze inputs, execute bounded independent processes, then aggregate."""
     import torch
@@ -412,6 +414,7 @@ def run_parallel_benchmark(
         "status": "preparing",
         "workers_requested": workers,
         "quality_batch_size": quality_batch_size,
+        "capture_trajectories": capture_trajectories,
         "worker_threads": worker_threads,
         "device": device,
         "quality_devices": devices,
@@ -484,6 +487,7 @@ def run_parallel_benchmark(
                     "workers": len(shards),
                     "case_count": len(indices),
                     "quality_batch_size": quality_batch_size,
+                    "capture_trajectories": capture_trajectories,
                 }
             )
         write_json(run_dir / "execution.json", execution)

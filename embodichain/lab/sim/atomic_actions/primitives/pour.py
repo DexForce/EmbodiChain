@@ -343,6 +343,8 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
             second_sample_count=minimum_return,
             dt=result.dt,
             control_dt=control_dt,
+            arrival_indices=result.waypoint_indices,
+            split_target_index=0,
         )
         dwell_steps = math.ceil(options.dwell_duration / control_dt)
         dwell_arm = pour_arm[:, -1:].expand(-1, dwell_steps, -1)
@@ -581,6 +583,7 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
                         path.shape[1] + 1,
                         dt=result.dt,
                         control_dt=context.require_control_dt(),
+                        arrival_indices=result.waypoint_indices,
                     )
                 else:
                     planned, arm = plan_named_arm_trajectory(

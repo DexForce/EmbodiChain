@@ -108,6 +108,28 @@ stable online language IDs. Language intent does not establish physical success.
 - Environments without a Task Program keep the ordinary `BaseEnv.is_task_success()`
   behavior and task-specific overrides.
 
+### Configured manipulation RL outcomes
+
+`EmbodiedEnvCfg.rl_task` optionally enables RL outcomes on `EmbodiedEnv`.
+Its ordinary loop calls `TerminationManager.compute()` once after physics and
+interval events, supplying this transition's time-limit mask before observations
+and rewards. `BaseEnv._get_termination_flags()` lets the configured host return
+those cached Gym flags; recording does not finalize or recompute acceptance.
+Queries return owned tensors and never sample stateful conditions. No declared
+success terms means no default success; invalid evidence fails only its own rows.
+Failure or truncation excludes accepted success while retaining raw physical
+truth. `ignore_terminations` suppresses Gym termination flags without changing
+measured acceptance or disabling time limits. Legacy environments and Task
+Program keep their existing info-based termination and success rules.
+
+Reset consumes old buffers first, then clears selected condition rows and
+captures virtual targets after reset events and trusted preparation. Explicit
+mid-episode exports derive labels from the configured outcome rather than the
+previous reset-time success cache. Trajectories retain initial virtual
+targets in episode metadata; single-row dynamic replay restores them after
+physical state and before observations/recording initialization. Missing context
+is an error. Replay exhaustion is a playback boundary, not new measured evidence.
+
 ### Segment terminal progress (`demo.py`, `run_task.py`)
 
 Every demo path reaches the same terminal `tqdm` wrapper through

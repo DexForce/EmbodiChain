@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from math import log
+from math import isfinite, log
 from functools import wraps
 from datetime import datetime
 import logging
@@ -27,6 +27,7 @@ import copy
 from pathlib import Path
 import tempfile
 from uuid import uuid4
+import embodichain
 import torch
 import numpy as np
 import gymnasium as gym
@@ -85,6 +86,8 @@ from embodichain.lab.gym.envs.managers import (
     ActionTrace,
     DatasetManager,
     FunctorCfg,
+    TerminationManager,
+    RLTaskCfg,
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.utils.gym_utils import (
@@ -112,6 +115,18 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
 
 __all__ = ["EmbodiedEnvCfg", "EmbodiedEnv"]
+
+
+def _outcome_row(value: Any, env_id: int) -> Any:
+    if isinstance(value, torch.Tensor):
+        return _outcome_row(value[env_id].detach().cpu().tolist(), env_id)
+    if isinstance(value, Mapping):
+        return {key: _outcome_row(child, env_id) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_outcome_row(child, env_id) for child in value]
+    if isinstance(value, float) and not isfinite(value):
+        return None
+    return value
 
 
 @configclass
@@ -327,6 +342,13 @@ class EmbodiedEnvCfg(EnvCfg):
     ``trajectory_save_dir`` before an explicitly committed episode reset.
     Closing discards trajectories that were never committed."""
 
+    rl_task: embodichain.lab.gym.envs.managers.RLTaskCfg | None = None
+    """Optional measured RL success, failure and truncation conditions.
+
+    Configured conditions use cached per-step outcomes and recorded reset-target
+    context. Keep this declaration and ``task_program`` in separate deployments.
+    """
+
     task_program: TaskProgramCfg | None = None
     """Optional declarative Task Program used to generate demo segments.
 
@@ -397,6 +419,21 @@ class EmbodiedEnv(BaseEnv):
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
         **kwargs,
     ):
+        rl_task = getattr(cfg, "rl_task", None)
+        if rl_task is not None:
+            if not isinstance(rl_task, RLTaskCfg):
+                raise TypeError("rl_task must be an RLTaskCfg or None.")
+            if (
+                getattr(cfg, "task_program", None) is not None
+                or task_program_adapter_factory is not None
+            ):
+                raise ValueError(
+                    "rl_task and task_program cannot share one deployment."
+                )
+        self.termination_manager: (
+            embodichain.lab.gym.envs.managers.TerminationManager | None
+        ) = None
+        self._task_initial_states: list[dict[str, Any]] = []
         if task_program_adapter_factory is not None:
             from embodichain.lab.task_program.integrations import (
                 TaskProgramAdapterFactory,
@@ -787,6 +824,10 @@ class EmbodiedEnv(BaseEnv):
             # Override action space to match ActionManager output dim.
             self.single_action_space = self.action_manager.single_action_space
 
+        if getattr(self.cfg, "rl_task", None) is not None:
+            self.termination_manager = TerminationManager(self.cfg.rl_task, self)
+            self._task_initial_states = [{} for _ in range(self.num_envs)]
+
     def _apply_functor_filter(self) -> None:
         """Apply functor filters to the environment components based on configuration.
 
@@ -1108,6 +1149,15 @@ class EmbodiedEnv(BaseEnv):
                 with self._profiler.section("event_interval"):
                     self.event_manager.apply(mode="interval")
 
+        termination = getattr(self, "termination_manager", None)
+        if termination is not None:
+            # BaseEnv advances elapsed steps after rewards. Supply this
+            # transition's deadline once; Gym flags later consume this cache.
+            termination.compute(
+                self._elapsed_steps + 1 >= self.max_episode_steps,
+                ignore_terminations=self.cfg.ignore_terminations,
+            )
+
     def _initialize_physical_objective(self) -> None:
         """Bind an optional objective to an existing measured rigid object."""
         cfg = getattr(self.cfg, "objective", None)
@@ -1150,6 +1200,111 @@ class EmbodiedEnv(BaseEnv):
         objective = getattr(self, "physical_objective", None)
         if objective is not None:
             objective.reset(env_ids)
+        if getattr(self, "termination_manager", None) is not None:
+            self.initialize_task_outcome(env_ids)
+
+    def _rl_target_keys(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    cfg.params["target_pose_key"]
+                    for group in ("success", "failure", "truncation")
+                    for cfg in getattr(self.cfg.rl_task, group).values()
+                    if "target_pose_key" in cfg.params
+                }
+            )
+        )
+
+    def initialize_task_outcome(
+        self, env_ids: Sequence[int] | torch.Tensor | None = None
+    ) -> None:
+        """Initialize configured RL rows after reset events or replay restore.
+
+        Args:
+            env_ids: Rows with their final initial physical state restored.
+        """
+        if getattr(self, "termination_manager", None) is None:
+            return
+        ids = self.episode_context._ids(env_ids)
+        targets = {}
+        for key in self._rl_target_keys():
+            value = getattr(self, key, None)
+            if not isinstance(value, torch.Tensor) or value.shape not in (
+                (self.num_envs, 3),
+                (self.num_envs, 4, 4),
+            ):
+                raise ValueError(f"Missing or malformed reset target {key!r}.")
+            if not value.is_floating_point() or not bool(
+                torch.isfinite(value[ids]).all()
+            ):
+                raise ValueError(
+                    f"Reset target {key!r} must contain finite floating poses."
+                )
+            targets[key] = value
+        self.termination_manager.reset(ids)
+        for env_id in ids.cpu().tolist():
+            self._task_initial_states[env_id] = {
+                "schema_version": 1,
+                "targets": {
+                    key: value[env_id].detach().cpu().tolist()
+                    for key, value in targets.items()
+                },
+            }
+
+    def get_task_initial_state(self, env_id: int = 0) -> dict[str, Any]:
+        """Return an owned initial virtual-target context for configured RL.
+
+        Args:
+            env_id: Environment row to snapshot.
+
+        Returns:
+            Versioned JSON-compatible reset target values.
+
+        Raises:
+            ValueError: The environment has no configured RL task.
+        """
+        if getattr(self, "termination_manager", None) is None:
+            raise ValueError("Initial task context requires an rl_task declaration.")
+        return copy.deepcopy(self._task_initial_states[env_id])
+
+    def restore_task_initial_state(self, state: Mapping[str, Any]) -> None:
+        """Restore a recorded single-environment configured RL target context.
+
+        Args:
+            state: Versioned initial state from episode trajectory metadata.
+
+        Raises:
+            ValueError: RL context is absent, malformed, or replay is vectorized.
+        """
+        if getattr(self, "termination_manager", None) is None:
+            raise ValueError("Task context restore requires an rl_task declaration.")
+        if self.num_envs != 1:
+            raise ValueError("Task-outcome replay requires a single environment.")
+        if not isinstance(state, Mapping) or state.get("schema_version") != 1:
+            raise ValueError(
+                "Dynamic task replay requires task_initial_state metadata."
+            )
+        targets = state.get("targets")
+        if not isinstance(targets, Mapping) or set(targets) != set(
+            self._rl_target_keys()
+        ):
+            raise ValueError("Replay virtual targets do not match the configured task.")
+        prepared = {}
+        for key, value in targets.items():
+            current = getattr(self, key, None)
+            restored = torch.as_tensor(
+                value, dtype=torch.float32, device=self.device
+            ).unsqueeze(0)
+            if (
+                current is None
+                or restored.shape != current.shape
+                or not bool(torch.isfinite(restored).all())
+            ):
+                raise ValueError(f"Invalid replay target {key!r}.")
+            prepared[key] = restored.to(dtype=current.dtype)
+        for key, value in prepared.items():
+            getattr(self, key).copy_(value)
+        self.initialize_task_outcome()
 
     def _before_episode_reset(
         self, env_ids: Sequence[int] | None = None, **kwargs
@@ -1641,6 +1796,30 @@ class EmbodiedEnv(BaseEnv):
             dict(segment)
             for segment in self._demo_episode_metadata[env_id].get("segments", [])
         ]
+        termination_manager = getattr(self, "termination_manager", None)
+        outcome = None
+        if termination_manager is not None:
+            outcome = _outcome_row(termination_manager.snapshot(), env_id)
+            metadata["task_initial_state"] = self.get_task_initial_state(env_id)
+            metadata["task_outcome"] = outcome
+            if not metadata["segments"]:
+                accepted = bool(outcome["accepted"])
+                reason = (
+                    "truncated"
+                    if outcome["truncation"]
+                    else (
+                        "failure"
+                        if outcome["failure"]
+                        else "success" if accepted else "task_incomplete"
+                    )
+                )
+                metadata.update(
+                    success=accepted,
+                    completed=accepted,
+                    terminal_reason=reason,
+                    terminated=bool(outcome["terminated"]),
+                    truncated=bool(outcome["truncation"]),
+                )
         rollout_steps = getattr(self, "rollout_steps", None)
         length = int(
             (
@@ -1658,31 +1837,37 @@ class EmbodiedEnv(BaseEnv):
             )
         if length > 0 and not metadata["segments"]:
             instruction = metadata["instruction"]
-            success_status = getattr(self, "episode_success_status", None)
-            task_success = getattr(self, "_task_success", None)
-            success = bool(
-                (success_status is not None and success_status[env_id])
-                or (task_success is not None and task_success[env_id])
-            )
-            terminated = bool(
-                self.rollout_buffer is not None
-                and "terminated" in self.rollout_buffer.keys()
-                and self.rollout_buffer["terminated"][env_id, length - 1]
-            )
-            truncated = bool(
-                self.rollout_buffer is not None
-                and "truncated" in self.rollout_buffer.keys()
-                and self.rollout_buffer["truncated"][env_id, length - 1]
-            )
-            if truncated:
-                success = False
-                terminal_reason = "truncated"
-            elif success:
-                terminal_reason = "success"
-            elif terminated:
-                terminal_reason = "failure"
+            if outcome is not None:
+                success = metadata["success"]
+                terminated = metadata["terminated"]
+                truncated = metadata["truncated"]
+                terminal_reason = metadata["terminal_reason"]
             else:
-                terminal_reason = "task_incomplete"
+                success_status = getattr(self, "episode_success_status", None)
+                task_success = getattr(self, "_task_success", None)
+                success = bool(
+                    (success_status is not None and success_status[env_id])
+                    or (task_success is not None and task_success[env_id])
+                )
+                terminated = bool(
+                    self.rollout_buffer is not None
+                    and "terminated" in self.rollout_buffer.keys()
+                    and self.rollout_buffer["terminated"][env_id, length - 1]
+                )
+                truncated = bool(
+                    self.rollout_buffer is not None
+                    and "truncated" in self.rollout_buffer.keys()
+                    and self.rollout_buffer["truncated"][env_id, length - 1]
+                )
+                if truncated:
+                    success = False
+                    terminal_reason = "truncated"
+                elif success:
+                    terminal_reason = "success"
+                elif terminated:
+                    terminal_reason = "failure"
+                else:
+                    terminal_reason = "task_incomplete"
             metadata.update(
                 {
                     "completed": success,
@@ -2343,12 +2528,16 @@ class EmbodiedEnv(BaseEnv):
     ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Compute task-specific state: success, fail, and metrics.
 
-        Override this method in subclass to define task-specific logic for RL tasks.
+        Configured ``rl_task`` conditions return cached acceptance. Subclasses
+        can override this method for handwritten task-specific logic.
 
         Returns:
             tuple[torch.Tensor, torch.Tensor, dict[str, Any]]: Success and failure
             masks of shape ``(num_envs,)``, followed by the metric tensor mapping.
         """
+        outcome = getattr(self, "termination_manager", None)
+        if outcome is not None:
+            return outcome.task_state()
         success = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         metrics: Dict[str, Any] = {}
@@ -2357,8 +2546,8 @@ class EmbodiedEnv(BaseEnv):
     def get_info(self, **kwargs) -> Dict[str, Any]:
         """Get environment info dictionary.
 
-        Calls compute_task_state() to get task-specific success/fail/metrics when
-        available. Subclasses should override compute_task_state() for RL tasks.
+        Calls compute_task_state() for success/failure/metrics and includes an
+        owned outcome snapshot when ``rl_task`` is configured.
 
         Returns:
             Info dictionary with success, fail, elapsed_steps, metrics
@@ -2373,8 +2562,35 @@ class EmbodiedEnv(BaseEnv):
         objective = getattr(self, "physical_objective", None)
         if objective is not None:
             info["physical_objective"] = objective.snapshot()
+        outcome = getattr(self, "termination_manager", None)
+        if outcome is not None:
+            info["task_outcome"] = outcome.snapshot()
         info["episode_context"] = self.episode_context.snapshot()
         return info
+
+    def check_truncated(self, obs: EnvObs, info: dict[str, Any]) -> torch.Tensor:
+        """Return cached RL truncation, or the ordinary host's custom mask.
+
+        Args:
+            obs: Current observations.
+            info: Cached task information.
+
+        Returns:
+            Per-environment truncation mask.
+        """
+        outcome = getattr(self, "termination_manager", None)
+        if outcome is not None:
+            return outcome.truncated
+        return super().check_truncated(obs, info)
+
+    def _get_termination_flags(
+        self, obs: EnvObs, info: Dict[str, Any]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Use the same cached flags consumed by observations and rewards."""
+        termination = getattr(self, "termination_manager", None)
+        if termination is not None:
+            return termination.terminated, termination.truncated
+        return super()._get_termination_flags(obs, info)
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:
         """Evaluate the environment state.
@@ -2957,7 +3173,7 @@ class EmbodiedEnv(BaseEnv):
         return () if bridge is None else bridge.expansion_records
 
     def is_task_success(self, **kwargs: Any) -> torch.Tensor:
-        """Return completed Task Program acceptance or legacy task success.
+        """Return configured RL, completed Task Program, or legacy acceptance.
 
         Task Program success is published only after its bridge has consumed
         every segment lifecycle, including post-policies and validators.
@@ -2968,6 +3184,9 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             Per-environment task-success mask.
         """
+        outcome = getattr(self, "termination_manager", None)
+        if outcome is not None:
+            return outcome.task_state()[0]
         bridge = self._active_task_program_bridge
         task_program = getattr(getattr(self, "cfg", None), "task_program", None)
         if bridge is None:
