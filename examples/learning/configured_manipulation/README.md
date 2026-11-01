@@ -17,6 +17,13 @@ The full protocol and condition configuration are described in
 
 ## Recorded qualification
 
+These models were evaluated before configured RL was consolidated into
+`EmbodiedEnv`. They record the earlier implementation's qualification; the
+current runner fingerprints the new host and requires a fresh output directory.
+Recorded checkpoints retain their previous environment-class metadata. Their
+policy weights remain available for evaluation; trainer resume on the unified
+host uses checkpoints saved by `EmbodiedEnv`.
+
 The six-run comparison started on 2026-10-30 did **not** meet the fixed
 convergence threshold. The configured environment passed noninferiority to
 legacy, but gained only 12 percentage points over untrained policies instead

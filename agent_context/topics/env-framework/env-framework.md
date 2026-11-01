@@ -18,12 +18,11 @@ Lightweight RL environments have a separate owner in
 | Robot selector decoding | `robot.class_type` → `embodichain/robot_registry.py`; catalog ownership is in [robot-system](../robot-system/robot-system.md) |
 | Import registration | `embodichain/lab/gym/utils/registration.py`; official task imports under `extensions/embodichain_tasks/embodichain_tasks/` |
 | Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
-| Scene, manager and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
+| Scene, managers, RL outcomes and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
 | Optional measured physical objectives | `embodichain/lab/gym/envs/objectives/`; Gym owns observation/reset hooks independently of expert acceptance |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
 | Demo segment execution / outcomes | `embodichain/lab/gym/envs/demo.py` |
-| Configuration-owned RL host and outcomes | `embodichain/lab/gym/envs/configured_rl_env.py`, `managers/outcome_manager.py` |
 | Configured Task Program registration | `embodichain/lab/gym/envs/task_program/registration.py` |
 | Timing instrumentation | `embodichain/lab/gym/utils/profiler.py` |
 

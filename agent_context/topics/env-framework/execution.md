@@ -110,10 +110,10 @@ stable online language IDs. Language intent does not establish physical success.
 
 ### Configured manipulation RL outcomes
 
-`ConfiguredRLEnv` inherits the ordinary `EmbodiedEnv` loop. It updates
-`OutcomeManager` after physics/interval events, applies the imminent horizon
-before reward/info publication, and finalizes actual truncation before invoking
-the parent recording hook. Queries return owned cached tensors and never sample
+`EmbodiedEnvCfg.rl_task` optionally enables RL outcomes on `EmbodiedEnv`.
+Its ordinary loop updates `OutcomeManager` after physics/interval events, applies
+the imminent horizon before reward/info publication, and finalizes actual
+truncation before recording. Queries return owned cached tensors and never sample
 stateful conditions. No declared success terms means no default success; invalid
 evidence rejects only its own rows. Legacy environment and Task Program success
 remain unchanged.
@@ -121,7 +121,7 @@ remain unchanged.
 Reset consumes old buffers first, then clears selected condition rows and
 captures virtual targets after reset events and trusted preparation. Explicit
 mid-episode exports derive labels from the configured outcome rather than the
-parent's previous reset-time success cache. Trajectories retain initial virtual
+previous reset-time success cache. Trajectories retain initial virtual
 targets in episode metadata; single-row dynamic replay restores them after
 physical state and before observations/recording initialization. Missing context
 is an error. Replay exhaustion is a playback boundary, not new measured evidence.

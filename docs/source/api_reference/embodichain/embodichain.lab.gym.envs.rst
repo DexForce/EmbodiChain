@@ -16,6 +16,11 @@ functor/``FunctorCfg`` pattern. Tasks are registered with
 :func:`~embodichain.lab.gym.utils.registration.register_env` and instantiated
 through :func:`~embodichain.lab.gym.utils.registration.make`.
 
+``EmbodiedEnvCfg.rl_task`` optionally enables measured RL outcomes on this same
+host. ``OutcomeManager`` supplies cached success/failure/truncation results,
+and the environment records reset-target context for dynamic replay. Task Program
+adapters and acceptance keep their own contract; use separate deployments.
+
    .. rubric:: Submodules
 
    .. autosummary::

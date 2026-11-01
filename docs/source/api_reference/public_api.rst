@@ -2857,26 +2857,6 @@ Asset generalization contracts
    asset_generalization
 
 
-embodichain.lab.gym.envs.configured_rl_env
-------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.configured_rl_env
-
-Configuration-defined manipulation tasks share one simulator host. Outcome queries are cached; final acceptance rejects failure and time limits before recording.
-
-.. autosummary::
-
-   ConfiguredRLEnv
-   ConfiguredRLEnvCfg
-
-.. autoclass:: ConfiguredRLEnv
-   :members:
-
-.. autoclass:: ConfiguredRLEnvCfg
-   :members: rl_task
-   :no-autosummary:
-
-
 embodichain.lab.gym.envs.managers.cfg
 -------------------------------------
 

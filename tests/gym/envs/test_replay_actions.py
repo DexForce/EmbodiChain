@@ -357,6 +357,7 @@ class _TaskReplayEnv(_ReplayEnv):
     def __init__(self, num_envs=1):
         super().__init__(num_envs)
         self.goal_pose = torch.zeros(num_envs, 3)
+        self.outcome_manager = object()
         self.sim = SimpleNamespace(enable_physics=lambda value: None)
         self.restored = False
 
@@ -401,6 +402,13 @@ def test_dynamic_replay_restores_virtual_goal_before_first_observation(monkeypat
 def test_dynamic_task_replay_requires_recorded_context():
     with pytest.raises(ValueError, match="task_initial_state"):
         ReplayWrapper(_TaskReplayEnv(), _trajectory(kind="raw_policy"))
+
+
+def test_dynamic_replay_ignores_inactive_rl_restore_method():
+    env = _TaskReplayEnv()
+    env.outcome_manager = None
+    replay = ReplayWrapper(env, _trajectory(kind="raw_policy"))
+    assert replay._task_outcome_replay is False
 
 
 def test_kinematic_task_replay_does_not_claim_measured_goal_acceptance():

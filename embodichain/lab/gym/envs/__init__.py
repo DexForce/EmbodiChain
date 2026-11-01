@@ -22,7 +22,6 @@ from .episode_context import *
 from .base_env import *
 from .demo import *
 from .embodied_env import *
-from .configured_rl_env import *
 from .expert_trajectory import *
 from .settling import *
 from .types import *

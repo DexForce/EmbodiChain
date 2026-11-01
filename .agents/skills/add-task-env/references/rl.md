@@ -18,8 +18,9 @@ Do not use a simulator Gym config for APG. Differentiable algorithms require a
 ## Simulator Gym RL
 
 Use the normal task-first simulator layout. A manipulation deployment with a
-root `rl_task` mapping dynamically registers `ConfiguredRLEnv` and needs no task
-Python module. Reuse existing action/observation/reward/event managers; declare
+root `rl_task` mapping dynamically registers `EmbodiedEnv` and enables its
+optional `OutcomeManager`; no task Python module is needed. Reuse existing
+action/observation/reward/event managers; declare
 measured success, failure and optional truncation condition functors. The ID
 must be free or match an identical configuration-owned declaration.
 

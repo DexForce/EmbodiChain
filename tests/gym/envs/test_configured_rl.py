@@ -28,11 +28,7 @@ import pytest
 import torch
 import yaml
 
-from embodichain.lab.gym.envs.configured_rl_env import (
-    ConfiguredRLEnv,
-    ConfiguredRLEnvCfg,
-)
-from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
 from embodichain.lab.gym.envs.managers import ConditionCfg, RLTaskCfg, SceneEntityCfg
 from embodichain.lab.gym.envs.managers.conditions import (
@@ -79,7 +75,7 @@ def _task():
 
 
 def _env():
-    env = object.__new__(ConfiguredRLEnv)
+    env = object.__new__(EmbodiedEnv)
     env._num_envs = 2
     env.cfg = SimpleNamespace(rl_task=_task(), task_program=None)
     env.pose = torch.eye(4).repeat(2, 1, 1)
@@ -100,6 +96,11 @@ def _env():
     env._last_terminated = torch.zeros(2, dtype=torch.bool)
     env._last_truncated = torch.zeros(2, dtype=torch.bool)
     env.physical_objective = None
+    env.rollout_buffer = None
+    env._profiler = SimpleNamespace(section=lambda *args, **kwargs: nullcontext())
+    env._write_trajectory_step = lambda: None
+    env.episode_success_status = torch.zeros(2, dtype=torch.bool)
+    env._active_task_program_bridge = None
     return env
 
 
@@ -162,6 +163,34 @@ def test_empty_success_set_never_accepts():
     assert manager.task_state()[0].tolist() == [False, False]
 
 
+@pytest.mark.parametrize("task_program", [None, object()])
+def test_unconfigured_host_keeps_legacy_and_task_program_acceptance(task_program):
+    env = _env()
+    env.outcome_manager = None
+    env.cfg = SimpleNamespace(task_program=task_program)
+    env.initialize_task_outcome([0])
+    info = env.get_info()
+    assert "task_outcome" not in info
+    assert "task_initial_state" not in info
+    assert not info["success"].any()
+    assert env.is_task_success().tolist() == [task_program is None] * 2
+    assert not env.check_truncated({}, info).any()
+    with pytest.raises(ValueError, match="rl_task"):
+        env.restore_task_initial_state({})
+
+
+@pytest.mark.parametrize("integration", ["program", "adapter"])
+def test_rl_task_constructor_rejects_task_program_integration(integration):
+    cfg = EmbodiedEnvCfg(rl_task=_task())
+    kwargs = {}
+    if integration == "program":
+        cfg.task_program = object()
+    else:
+        kwargs["task_program_adapter_factory"] = object()
+    with pytest.raises(ValueError, match="cannot share"):
+        EmbodiedEnv(cfg, **kwargs)
+
+
 def test_reset_target_is_required_and_initial_context_is_owned():
     env = _env()
     del env.goal_pose
@@ -194,8 +223,8 @@ def test_config_registers_once_and_rejects_changed_declarations():
     config = yaml.safe_load(_CONFIG.read_text())
     config["id"] = "ConfiguredRLDecodeTest-v1"
     cfg = config_to_cfg(config, source_path=_CONFIG)
-    assert isinstance(cfg, ConfiguredRLEnvCfg)
-    assert get_env_spec(config["id"]).cls is ConfiguredRLEnv
+    assert isinstance(cfg, EmbodiedEnvCfg)
+    assert get_env_spec(config["id"]).cls is EmbodiedEnv
     assert get_env_spec(config["id"]).supports_rl
     runtime_change = deepcopy(config)
     runtime_change.update(num_envs=3, device="cpu", seed=11)
@@ -230,8 +259,8 @@ def test_finalized_info_reaches_recorder_before_reset(monkeypatch):
     captured = []
     monkeypatch.setattr(
         EmbodiedEnv,
-        "_hook_after_sim_step",
-        lambda self, *args, **kwargs: captured.append(args[4]["success"].clone()),
+        "_update_episode_success_status",
+        lambda self, info, dones: captured.append(info["success"].clone()),
     )
     info = env.get_info()
     env._hook_after_sim_step(
@@ -406,7 +435,7 @@ def test_configured_rl_composes_existing_physical_and_embodiment_components(tmp_
         "rl_task": source["rl_task"],
     }
     cfg = config_to_cfg(deployment, source_path=tmp_path / "task.yaml")
-    assert isinstance(cfg, ConfiguredRLEnvCfg)
+    assert isinstance(cfg, EmbodiedEnvCfg)
     assert cfg.robot.uid == "Manipulator"
     assert cfg.rl_task.success["goal"].params["entity_cfg"].uid == "cube"
     assert get_env_spec(deployment["id"]).supports_rl

@@ -83,8 +83,8 @@ class ReplayWrapper(gym.Wrapper):
         self._trajectory = load_trajectory(trajectory)
         meta = self._trajectory["meta"]
         self._controller_spec = None
-        self._task_outcome_replay = mode == "dynamic" and callable(
-            getattr(env, "restore_task_initial_state", None)
+        self._task_outcome_replay = mode == "dynamic" and (
+            getattr(env, "outcome_manager", None) is not None
         )
         self._objective_replay = mode == "dynamic" and (
             getattr(env, "physical_objective", None) is not None

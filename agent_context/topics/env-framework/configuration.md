@@ -188,7 +188,7 @@ examples use this path and have no task environment subclass.
 
 ### Configuration-owned manipulation RL
 
-A runnable deployment with root `rl_task` uses `ConfiguredRLEnv` and needs no
+A runnable deployment with root `rl_task` uses `EmbodiedEnv` and needs no
 Python task registration module. `config_to_cfg` decodes `RLTaskCfg`, reuses the
 ordinary manager and physical-component configuration, and registers the common
 host with explicit RL capability. Conditions are grouped as success, failure

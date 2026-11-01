@@ -2,14 +2,17 @@
 
 A supported manipulation task can select observations, actions, rewards, reset
 events and measured outcome conditions without defining a Python environment.
-The loader registers the common `ConfiguredRLEnv` under the deployment's `id`.
-The original Python-owned task route remains available.
+The loader registers the common `EmbodiedEnv` under the deployment's `id` and
+sets `EmbodiedEnvCfg.rl_task`. This optional declaration enables `OutcomeManager`
+on the existing environment; ordinary environments keep their existing success
+behavior. The original Python-owned task route remains available.
 
 ## Deployment
 
 Use an ordinary inline Gym configuration, or select existing physical environment
 and embodiment components. Keep exactly one file-owned physics backend. Add a
 root `rl_task` mapping; it cannot coexist with `task_program` in one deployment.
+Task Program adapters and acceptance remain separate from RL outcomes.
 Existing `env.actions`, `env.observations`, `env.rewards` and `env.events` retain
 their current manager contracts and ownership rules.
 
@@ -85,6 +88,8 @@ Trajectory metadata includes the original virtual-target context as
 physical scene and before returning observations or reseeding recordings.
 Measured task replay requires one environment and full resets. Missing context
 is rejected; a newly randomized goal cannot stand in for the recorded goal.
+These requirements apply only when the environment enables RL outcomes;
+ordinary and Task Program replay keep their existing contracts.
 Kinematic/control playback does not establish measured physical acceptance.
 Replay exhaustion stops playback and is distinct from the task's own time limit.
 
