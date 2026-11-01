@@ -12,6 +12,9 @@ Official AgileX robot configurations live in the
    * - Robot
      - Configuration class
      - Current coverage
+   * - :doc:`Pika Gripper <pika>`
+     - Asset class
+     - Standalone tool asset for host-owned mounting and control configuration.
    * - :doc:`CobotMagic <cobotmagic>`
      - ``CobotMagicCfg``
      - Fixed-base dual arms and grippers for bimanual tasks.
@@ -21,3 +24,4 @@ Official AgileX robot configurations live in the
    :hidden:
 
    cobotmagic
+   pika
