@@ -2909,30 +2909,34 @@ embodichain.lab.gym.envs.managers.conditions
 
 .. currentmodule:: embodichain.lab.gym.envs.managers.conditions
 
-Measured manipulation conditions read live bound objects and reset-owned virtual targets. Missing target contexts fail explicitly.
+Measured manipulation functors bind rigid objects and validate geometric parameters at construction. Calls read live physical state and reset-owned virtual targets. Missing target contexts fail explicitly.
 
 .. autosummary::
 
    object_near_target
    object_below_height
 
-.. autofunction:: object_near_target
+.. autoclass:: object_near_target
+   :members:
+   :special-members: __call__
 
-.. autofunction:: object_below_height
+.. autoclass:: object_below_height
+   :members:
+   :special-members: __call__
 
 
-embodichain.lab.gym.envs.managers.outcome_manager
--------------------------------------------------
+embodichain.lab.gym.envs.managers.termination_manager
+-----------------------------------------------------
 
-.. currentmodule:: embodichain.lab.gym.envs.managers.outcome_manager
+.. currentmodule:: embodichain.lab.gym.envs.managers.termination_manager
 
-The outcome manager samples once per control transition, resets selected rows and publishes owned snapshots without resampling.
+The termination manager combines condition measurements with a host-supplied time limit once per control transition. It owns the cached Gym flags and task acceptance, resets selected rows and publishes owned snapshots without resampling.
 
 .. autosummary::
 
-   OutcomeManager
+   TerminationManager
 
-.. autoclass:: OutcomeManager
+.. autoclass:: TerminationManager
    :members:
 
 

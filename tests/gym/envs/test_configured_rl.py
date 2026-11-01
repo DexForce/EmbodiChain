@@ -36,7 +36,7 @@ from embodichain.lab.gym.envs.managers.conditions import (
     object_below_height,
 )
 from embodichain.lab.gym.envs.managers.manager_base import Functor
-from embodichain.lab.gym.envs.managers.outcome_manager import OutcomeManager
+from embodichain.lab.gym.envs.managers.termination_manager import TerminationManager
 from embodichain.lab.gym.envs.objectives import (
     ConditionResult,
     evaluate_near_target,
@@ -77,7 +77,9 @@ def _task():
 def _env():
     env = object.__new__(EmbodiedEnv)
     env._num_envs = 2
-    env.cfg = SimpleNamespace(rl_task=_task(), task_program=None)
+    env.cfg = SimpleNamespace(
+        rl_task=_task(), task_program=None, ignore_terminations=False
+    )
     env.pose = torch.eye(4).repeat(2, 1, 1)
     env.sim = SimpleNamespace(
         device=torch.device("cpu"),
@@ -89,12 +91,10 @@ def _env():
         ),
     )
     env.goal_pose = torch.eye(4).repeat(2, 1, 1)
-    env.outcome_manager = OutcomeManager(env.cfg.rl_task, env)
+    env.termination_manager = TerminationManager(env.cfg.rl_task, env)
     env._task_initial_states = [{}, {}]
     env.episode_context = EpisodeContext(2)
     env._elapsed_steps = torch.zeros(2, dtype=torch.int32)
-    env._last_terminated = torch.zeros(2, dtype=torch.bool)
-    env._last_truncated = torch.zeros(2, dtype=torch.bool)
     env.physical_objective = None
     env.rollout_buffer = None
     env._profiler = SimpleNamespace(section=lambda *args, **kwargs: nullcontext())
@@ -124,21 +124,24 @@ def test_outcome_queries_partial_reset_and_invalid_failure():
     env = _env()
     assert env.is_task_success().tolist() == [False, False]
     env.initialize_task_outcome()
-    env.outcome_manager.update()
+    env.termination_manager.compute()
     initial = env.get_info()
     assert initial["success"].tolist() == [True, True]
     for _ in range(3):
         env.get_info()
         env.evaluate()
         env.is_task_success()
-    assert env.outcome_manager.snapshot()["steps"].tolist() == [1, 1]
+    assert env.termination_manager.snapshot()["steps"].tolist() == [1, 1]
     initial["task_outcome"]["accepted"].fill_(False)
+    env.termination_manager.terminated.fill_(False)
     assert env.is_task_success().all()
+    assert env.termination_manager.terminated.all()
     env.initialize_task_outcome([1])
     assert env.is_task_success().tolist() == [True, False]
-    assert env.outcome_manager.snapshot()["steps"].tolist() == [1, 0]
+    assert env.termination_manager.snapshot()["steps"].tolist() == [1, 0]
+    assert env.termination_manager.terminated.tolist() == [True, False]
     env.pose[1, 2, 3] = float("nan")
-    env.outcome_manager.update()
+    env.termination_manager.compute()
     assert env.get_info()["fail"].tolist() == [False, True]
     assert env.get_info()["task_outcome"]["invalid_measurement"].tolist() == [
         False,
@@ -149,8 +152,7 @@ def test_outcome_queries_partial_reset_and_invalid_failure():
 def test_failure_and_actual_time_limit_override_physical_success():
     env = _env()
     env.pose[1, 2, 3] = -0.2
-    env.outcome_manager.update()
-    env.outcome_manager.finalize(torch.tensor([True, False]))
+    env.termination_manager.compute(time_out=torch.tensor([True, False]))
     assert env.is_task_success().tolist() == [False, False]
     assert env.get_info()["task_outcome"]["physical_success"].tolist() == [True, True]
     assert env.get_info()["fail"].tolist() == [False, True]
@@ -158,15 +160,15 @@ def test_failure_and_actual_time_limit_override_physical_success():
 
 def test_empty_success_set_never_accepts():
     env = _env()
-    manager = OutcomeManager(RLTaskCfg(), env)
-    manager.update()
+    manager = TerminationManager(RLTaskCfg(), env)
+    manager.compute()
     assert manager.task_state()[0].tolist() == [False, False]
 
 
 @pytest.mark.parametrize("task_program", [None, object()])
 def test_unconfigured_host_keeps_legacy_and_task_program_acceptance(task_program):
     env = _env()
-    env.outcome_manager = None
+    env.termination_manager = None
     env.cfg = SimpleNamespace(task_program=task_program)
     env.initialize_task_outcome([0])
     info = env.get_info()
@@ -205,18 +207,31 @@ def test_reset_target_is_required_and_initial_context_is_owned():
     assert env.get_task_initial_state()["targets"]["goal_pose"][0][3] == 0
 
 
-@pytest.mark.parametrize("change", ["missing_entity", "bad_param", "bad_threshold"])
-def test_conditions_fail_during_binding(change):
+@pytest.mark.parametrize(
+    "change, error, message",
+    [
+        ("missing_entity", ValueError, "absent"),
+        ("bad_param", ValueError, "unexpected"),
+        ("bad_threshold", RuntimeError, "tolerance"),
+        ("bad_height", RuntimeError, "height"),
+        ("bad_target_key", RuntimeError, "target_pose_key"),
+    ],
+)
+def test_conditions_fail_during_binding(change, error, message):
     env = _env()
     task = _task()
     if change == "missing_entity":
         task.success["goal"].params["entity_cfg"].uid = "absent"
     elif change == "bad_param":
         task.success["goal"].params["unexpected"] = 1
-    else:
+    elif change == "bad_threshold":
         task.success["goal"].params["tolerance"] = -1
-    with pytest.raises((ValueError, TypeError)):
-        OutcomeManager(task, env)
+    elif change == "bad_height":
+        task.failure["fallen"].params["height"] = float("nan")
+    else:
+        task.success["goal"].params["target_pose_key"] = " "
+    with pytest.raises(error, match=message):
+        TerminationManager(task, env)
 
 
 def test_config_registers_once_and_rejects_changed_declarations():
@@ -253,39 +268,13 @@ def test_rl_and_task_program_are_mutually_exclusive():
         config_to_cfg(config, source_path=_CONFIG)
 
 
-def test_finalized_info_reaches_recorder_before_reset(monkeypatch):
-    env = _env()
-    env.outcome_manager.update()
-    captured = []
-    monkeypatch.setattr(
-        EmbodiedEnv,
-        "_update_episode_success_status",
-        lambda self, info, dones: captured.append(info["success"].clone()),
-    )
-    info = env.get_info()
-    env._hook_after_sim_step(
-        {},
-        torch.zeros(2, 1),
-        torch.zeros(2),
-        torch.ones(2, dtype=torch.bool),
-        info,
-        terminateds=torch.tensor([True, True]),
-        truncateds=torch.tensor([True, False]),
-    )
-    assert captured[0].tolist() == [False, True]
-    assert info["success"].tolist() == [False, True]
-    assert env.get_info()["success"].tolist() == [False, True]
-
-
 def test_task_context_restore_rejects_missing_metadata_and_restores_goal():
     env = _env()
     env._num_envs = 1
-    env._last_terminated = torch.zeros(1, dtype=torch.bool)
-    env._last_truncated = torch.zeros(1, dtype=torch.bool)
     env.goal_pose = env.goal_pose[:1]
     env.pose = env.pose[:1]
     env.episode_context = EpisodeContext(1)
-    env.outcome_manager = OutcomeManager(env.cfg.rl_task, env)
+    env.termination_manager = TerminationManager(env.cfg.rl_task, env)
     env.initialize_task_outcome()
     original = env.get_task_initial_state()
     env.goal_pose[:, 0, 3] = 20
@@ -293,7 +282,7 @@ def test_task_context_restore_rejects_missing_metadata_and_restores_goal():
         env.restore_task_initial_state({})
     env.restore_task_initial_state(original)
     assert env.goal_pose[0, 0, 3] == 0
-    assert env.outcome_manager.snapshot()["steps"].tolist() == [0]
+    assert env.termination_manager.snapshot()["steps"].tolist() == [0]
 
 
 class _CountingCondition(Functor):
@@ -313,17 +302,17 @@ class _CountingCondition(Functor):
         self.counts[env_ids] = 0
 
 
-def test_stateful_condition_advances_only_on_update_and_resets_selected_rows():
+def test_stateful_condition_advances_only_on_compute_and_resets_selected_rows():
     env = _env()
-    manager = OutcomeManager(
+    manager = TerminationManager(
         RLTaskCfg(success={"count": ConditionCfg(func=_CountingCondition)}), env
     )
-    manager.update()
+    manager.compute()
     old = manager.snapshot()
     manager.snapshot()
     manager.task_state()
     manager.reset([1])
-    manager.update()
+    manager.compute()
     assert manager.task_state()[2]["success.count.count"].tolist() == [2, 1]
     assert old["conditions"]["success.count"]["metrics"]["count"].tolist() == [1, 1]
 
@@ -343,11 +332,17 @@ def test_registration_preserves_ordered_policy_interface(manager):
         config_to_cfg(config, source_path=_CONFIG)
 
 
-def test_imminent_timeout_is_applied_before_success_reward(monkeypatch):
+@pytest.mark.parametrize("ignore_terminations", [False, True])
+def test_step_uses_one_condition_snapshot_for_obs_reward_flags_and_recording(
+    monkeypatch, ignore_terminations
+):
     env = _env()
     env.cfg.events = None
-    env.cfg.ignore_terminations = False
-    env.max_episode_steps = 1
+    env.cfg.ignore_terminations = ignore_terminations
+    env.cfg.rl_task.success["count"] = ConditionCfg(func=_CountingCondition)
+    env.termination_manager = TerminationManager(env.cfg.rl_task, env)
+    env.max_episode_steps = 2
+    env._elapsed_steps[1] = 1  # Only the second row expires on this step.
     env._profiler = SimpleNamespace(section=lambda *args, **kwargs: nullcontext())
     env.sim.render_frame = lambda **kwargs: nullcontext()
     env._demo_no_auto_reset = True
@@ -355,25 +350,50 @@ def test_imminent_timeout_is_applied_before_success_reward(monkeypatch):
     env._preprocess_action = lambda action: action
     env._step_action = lambda action: action
     env._postprocess_action = lambda action: action
-    env.get_obs = lambda **kwargs: {}
+    env.get_obs = lambda **kwargs: {"accepted": env.is_task_success()}
     env.get_reward = lambda obs, action, info: info["success"].float() * 10
     env._extend_reward = lambda rewards, **kwargs: rewards
+    recorded = []
     monkeypatch.setattr(
-        EmbodiedEnv, "_hook_after_sim_step", lambda *args, **kwargs: None
+        EmbodiedEnv,
+        "_update_episode_success_status",
+        lambda self, info, dones: recorded.append(info["success"].clone()),
     )
-    _, reward, terminated, truncated, info = env.step(torch.zeros(2, 1))
-    assert reward.tolist() == [0, 0]
-    assert terminated.tolist() == [False, False]
-    assert truncated.tolist() == [True, True]
-    assert info["success"].tolist() == [False, False]
+    obs, reward, terminated, truncated, info = env.step(torch.zeros(2, 1))
+    assert obs["accepted"].tolist() == [True, False]
+    assert reward.tolist() == [10, 0]
+    assert terminated.tolist() == [not ignore_terminations, False]
+    assert truncated.tolist() == [False, True]
+    assert info["success"].tolist() == recorded[0].tolist() == [True, False]
     assert info["task_outcome"]["physical_success"].tolist() == [True, True]
+    assert info["task_outcome"]["terminated"].tolist() == terminated.tolist()
+    assert info["task_outcome"]["truncation"].tolist() == truncated.tolist()
+    assert info["metrics"]["success.count.count"].tolist() == [1, 1]
+    assert env.termination_manager.snapshot()["steps"].tolist() == [1, 1]
+
+
+@pytest.mark.parametrize("ignore_terminations", [False, True])
+def test_unconfigured_host_preserves_info_failure_and_time_limit_flags(
+    ignore_terminations,
+):
+    env = _env()
+    env.termination_manager = None
+    env.cfg.ignore_terminations = ignore_terminations
+    env.max_episode_steps = 2
+    env._elapsed_steps[:] = torch.tensor([1, 2])
+    terminated, truncated = env._get_termination_flags(
+        {},
+        {"success": torch.tensor([True, False]), "fail": torch.tensor([False, True])},
+    )
+    assert terminated.tolist() == [not ignore_terminations] * 2
+    assert truncated.tolist() == [False, True]
 
 
 def test_explicit_export_does_not_inherit_previous_episode_success():
     env = _env()
     env.initialize_task_outcome()
     env.pose[0, 0, 3] = 1
-    env.outcome_manager.update()
+    env.termination_manager.compute()
     env._demo_episode_metadata = [{"segments": []}, {"segments": []}]
     env._demo_steps = torch.ones(2, dtype=torch.long)
     env.rollout_buffer = None
@@ -388,9 +408,7 @@ def test_explicit_export_does_not_inherit_previous_episode_success():
 def test_trajectory_only_export_retains_final_gym_flags():
     env = _env()
     env.initialize_task_outcome()
-    env.outcome_manager.update()
-    env.outcome_manager.finalize(torch.tensor([True, False]))
-    env._last_truncated[0] = True
+    env.termination_manager.compute(time_out=torch.tensor([True, False]))
     env._demo_episode_metadata = [{"segments": []}, {"segments": []}]
     env._demo_steps = torch.ones(2, dtype=torch.long)
     env.rollout_buffer = None
@@ -462,7 +480,7 @@ def test_falling_is_failure_only_in_configured_deployment(monkeypatch):
     assert old_success.all()  # XY alone is at the goal, as in the old task.
     assert not old_failure.any()
     assert legacy.check_truncated({}, {}).all()
-    env.outcome_manager.update()
+    env.termination_manager.compute()
     info = env.get_info()
     assert info["fail"].all()
     assert not info["success"].any()

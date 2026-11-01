@@ -3,7 +3,7 @@
 A supported manipulation task can select observations, actions, rewards, reset
 events and measured outcome conditions without defining a Python environment.
 The loader registers the common `EmbodiedEnv` under the deployment's `id` and
-sets `EmbodiedEnvCfg.rl_task`. This optional declaration enables `OutcomeManager`
+sets `EmbodiedEnvCfg.rl_task`. This optional declaration enables `TerminationManager`
 on the existing environment; ordinary environments keep their existing success
 behavior. The original Python-owned task route remains available.
 
@@ -54,8 +54,14 @@ Declare virtual target poses with the existing `randomize_target_pose` event in
 episode are outside this initial replay contract. Missing or malformed targets
 fail after reset events, before returning the initial observation.
 
-Conditions update once after physics and interval events. Queries of info,
-evaluation, final task success and episode metadata read cached owned values.
+`TerminationManager.compute()` runs once after physics and interval events,
+with the host's time-limit mask for that transition. Observations, rewards,
+Gym termination flags and episode metadata consume the same cache; recording
+does not alter acceptance. The environment owns step timing, reset targets and
+replay context. The manager owns condition execution, aggregation and selected
+row reset. Queries of info, evaluation and final task success return owned values.
+`ignore_terminations` suppresses Gym termination flags while preserving measured
+success/failure and time-limit truncation.
 Stateful conditions subclass `Functor` and implement `reset(env_ids)`; selected
 row resets do not sample or advance another row's condition history.
 
@@ -64,6 +70,10 @@ Register their module through the existing manager-module mechanism, use
 `SceneEntityCfg` for entities, and return boolean `(num_envs,)` masks and
 batch-aligned metric tensors on the environment device. Metric names, shapes
 and dtypes must stay stable during an episode.
+Use a class functor when entity or geometric parameters need validation at
+construction, as the built-in conditions do. Validate those parameters in
+`__init__(cfg, env)` without sampling reset targets; the generic manager does not
+know individual condition implementations.
 
 Registration is process-local: load the deployment through `config_to_cfg`
 before calling `gym.make(id)`. Reloading the same declaration is idempotent;

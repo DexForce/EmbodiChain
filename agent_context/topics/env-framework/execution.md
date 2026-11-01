@@ -111,12 +111,16 @@ stable online language IDs. Language intent does not establish physical success.
 ### Configured manipulation RL outcomes
 
 `EmbodiedEnvCfg.rl_task` optionally enables RL outcomes on `EmbodiedEnv`.
-Its ordinary loop updates `OutcomeManager` after physics/interval events, applies
-the imminent horizon before reward/info publication, and finalizes actual
-truncation before recording. Queries return owned cached tensors and never sample
-stateful conditions. No declared success terms means no default success; invalid
-evidence rejects only its own rows. Legacy environment and Task Program success
-remain unchanged.
+Its ordinary loop calls `TerminationManager.compute()` once after physics and
+interval events, supplying this transition's time-limit mask before observations
+and rewards. `BaseEnv._get_termination_flags()` lets the configured host return
+those cached Gym flags; recording does not finalize or recompute acceptance.
+Queries return owned tensors and never sample stateful conditions. No declared
+success terms means no default success; invalid evidence fails only its own rows.
+Failure or truncation excludes accepted success while retaining raw physical
+truth. `ignore_terminations` suppresses Gym termination flags without changing
+measured acceptance or disabling time limits. Legacy environments and Task
+Program keep their existing info-based termination and success rules.
 
 Reset consumes old buffers first, then clears selected condition rows and
 captures virtual targets after reset events and trusted preparation. Explicit

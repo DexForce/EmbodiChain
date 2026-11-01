@@ -33,7 +33,7 @@ from .cfg import (
     DatasetFunctorCfg,
 )
 from .manager_base import Functor, ManagerBase
-from .outcome_manager import OutcomeManager
+from .termination_manager import TerminationManager
 from .event_manager import EventManager
 from .observation_manager import ObservationManager
 from .reward_manager import RewardManager
@@ -48,7 +48,7 @@ __all__ = [
     "FunctorCfg",
     "ConditionCfg",
     "RLTaskCfg",
-    "OutcomeManager",
+    "TerminationManager",
     "SceneEntityCfg",
     "EventCfg",
     "ObservationCfg",

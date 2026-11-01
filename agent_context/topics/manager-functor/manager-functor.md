@@ -10,7 +10,7 @@
 | Reward manager + built-in functors | `managers/reward_manager.py`, `managers/rewards.py` |
 | Event manager + built-in functors | `managers/event_manager.py`, `managers/events.py` |
 | Action manager + built-in terms | `managers/action_manager.py`, `managers/actions.py` |
-| RL outcome manager + condition functors | `managers/outcome_manager.py`, `managers/conditions.py` |
+| RL termination manager + condition functors | `managers/termination_manager.py`, `managers/conditions.py` |
 | Dataset manager + built-in recorders | `managers/dataset_manager.py`, `managers/datasets.py`, `managers/async_datasets.py` |
 | Randomization functors (event sub-type) | `managers/randomization/` (spatial, visual, physics, geometry) |
 
@@ -36,7 +36,7 @@ At init, the manager resolves every `FunctorCfg.func` (string → callable or cl
 | `RewardManager` | `RewardCfg` | `add`, `replace` | `compute(obs, action, info) → (reward, info_dict)` |
 | `EventManager` | `EventCfg` | `startup`, `reset`, `interval`, user-defined | `apply(mode, env_ids)` |
 | `ActionManager` | `ActionTermCfg` | Ordered flat slices | `process_action(action)`, then `apply_action()` |
-| `OutcomeManager` | `ConditionCfg` in `RLTaskCfg` | success/failure/truncation groups | `update()` then cached snapshots |
+| `TerminationManager` | `ConditionCfg` in `RLTaskCfg` | success/failure/truncation groups | `compute(time_out, ignore_terminations=...)` then cached flags/snapshots |
 | `DatasetManager` | `DatasetFunctorCfg` | `save` | `apply(mode, env_ids)` |
 
 ---
@@ -72,6 +72,7 @@ and implement the same call contract; use them for persistent state or buffers.
 |---|---|---|
 | Observation | `env, obs` | Added tensor or modified observations, according to mode |
 | Reward | `env, obs, action, info` | Reward tensor |
+| Condition | `env, **params` | `ConditionResult` with truth, validity and measurements |
 | Event / randomization | `env, env_ids` | Side effects; normally `None` |
 | Dataset | `env, env_ids` | Persistence side effects |
 | Action term | `process_actions(actions)`, then `apply_actions()` | Stores one raw slice, then writes its owned robot resources |
@@ -103,7 +104,10 @@ the full loop and reset ordering are owned by
 
 Condition functors receive `env, **params` and return a `ConditionResult` from
 `envs/objectives`. Stateful conditions use `Functor.reset(env_ids)` like other
-manager terms. Metrics retain their schema; snapshots do not invoke functors.
+manager terms. Built-in conditions bind rigid objects and validate geometric
+parameters in their `Functor` constructors, before reset targets exist; the
+manager has no task-specific condition checks. Metrics retain their schema;
+snapshots do not invoke functors.
 The host's termination and replay rules belong to
 [configured RL execution](../env-framework/execution.md#configured-manipulation-rl-outcomes).
 

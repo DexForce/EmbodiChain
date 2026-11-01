@@ -95,8 +95,9 @@ def _fingerprint(variant: str, seed: int, iterations: int, cases: int) -> str:
     gym = _TASK / ("env.json" if variant == "legacy" else "env.configured_rl.yaml")
     implementation = [
         "examples/learning/configured_manipulation/compare_push_cube.py",
+        "embodichain/lab/gym/envs/base_env.py",
         "embodichain/lab/gym/envs/embodied_env.py",
-        "embodichain/lab/gym/envs/managers/outcome_manager.py",
+        "embodichain/lab/gym/envs/managers/termination_manager.py",
         "embodichain/lab/gym/envs/managers/conditions.py",
         "embodichain/lab/gym/envs/objectives/conditions.py",
         "embodichain/learning/rl/train.py",

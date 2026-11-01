@@ -34,7 +34,7 @@ functors), :class:`ActionManager` (``process_action(action)`` then
       FunctorCfg
       ConditionCfg
       RLTaskCfg
-      OutcomeManager
+      TerminationManager
       SceneEntityCfg
       EventCfg
       ObservationCfg
@@ -324,5 +324,5 @@ Configured RL conditions
 .. autoclass:: RLTaskCfg
     :members:
 
-.. autoclass:: OutcomeManager
+.. autoclass:: TerminationManager
     :members:

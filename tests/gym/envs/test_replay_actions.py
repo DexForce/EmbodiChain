@@ -357,7 +357,7 @@ class _TaskReplayEnv(_ReplayEnv):
     def __init__(self, num_envs=1):
         super().__init__(num_envs)
         self.goal_pose = torch.zeros(num_envs, 3)
-        self.outcome_manager = object()
+        self.termination_manager = object()
         self.sim = SimpleNamespace(enable_physics=lambda value: None)
         self.restored = False
 
@@ -406,7 +406,7 @@ def test_dynamic_task_replay_requires_recorded_context():
 
 def test_dynamic_replay_ignores_inactive_rl_restore_method():
     env = _TaskReplayEnv()
-    env.outcome_manager = None
+    env.termination_manager = None
     replay = ReplayWrapper(env, _trajectory(kind="raw_policy"))
     assert replay._task_outcome_replay is False
 

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Once-per-transition evaluation and final acceptance of configured RL tasks."""
+"""Once-per-transition condition evaluation and cached RL termination flags."""
 
 from __future__ import annotations
 
@@ -31,11 +31,16 @@ from ..objectives.conditions import ConditionResult
 if TYPE_CHECKING:
     from ..embodied_env import EmbodiedEnv
 
-__all__ = ["OutcomeManager"]
+__all__ = ["TerminationManager"]
 
 
-class OutcomeManager(ManagerBase):
-    """Aggregate named conditions without advancing them during queries.
+class TerminationManager(ManagerBase):
+    """Evaluate conditions and own one authoritative termination snapshot.
+
+    Success conditions use AND; failure and truncation conditions use OR.
+    Invalid measurements fail the affected rows. Failure and truncation both
+    exclude accepted success, while raw physical success remains available.
+    The host supplies its time-limit mask when calling :meth:`compute`.
 
     Args:
         cfg: Success, failure and custom truncation condition groups.
@@ -52,7 +57,7 @@ class OutcomeManager(ManagerBase):
         self._failure = torch.zeros_like(self._initialized)
         self._truncation = torch.zeros_like(self._initialized)
         self._valid = torch.zeros_like(self._initialized)
-        self._accepted = torch.zeros_like(self._initialized)
+        self._terminated = torch.zeros_like(self._initialized)
         self._results: dict[str, ConditionResult] = {}
         self._steps = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
 
@@ -60,6 +65,16 @@ class OutcomeManager(ManagerBase):
     def active_functors(self) -> dict[str, list[str]]:
         """Return condition names grouped by their outcome role."""
         return {group: list(terms) for group, terms in self._terms.items()}
+
+    @property
+    def terminated(self) -> torch.Tensor:
+        """Return owned Gym termination flags from the latest computation."""
+        return self._terminated.clone()
+
+    @property
+    def truncated(self) -> torch.Tensor:
+        """Return owned custom and time-limit truncation flags."""
+        return self._truncation.clone()
 
     def _prepare_functors(self) -> None:
         for group in ("success", "failure", "truncation"):
@@ -70,34 +85,6 @@ class OutcomeManager(ManagerBase):
                     raise TypeError(f"{group}.{name} must be a ConditionCfg.")
                 self._resolve_common_functor_cfg(f"{group}.{name}", cfg, min_argc=1)
                 inspect.signature(cfg.func).bind(self._env, **cfg.params)
-                from .conditions import object_near_target, object_below_height
-                from ..objectives.conditions import (
-                    evaluate_near_target,
-                    evaluate_below_height,
-                )
-
-                if cfg.func in (object_near_target, object_below_height):
-                    entity = self._env.sim.get_rigid_object(
-                        cfg.params["entity_cfg"].uid
-                    )
-                    if entity is None:
-                        raise ValueError(f"{group}.{name} requires a rigid object.")
-                    sample = torch.zeros(1, 3)
-                    if cfg.func is object_near_target:
-                        key = cfg.params["target_pose_key"]
-                        if not isinstance(key, str) or not key or key != key.strip():
-                            raise ValueError(
-                                "target_pose_key must be a nonempty string."
-                            )
-                        evaluate_near_target(
-                            sample,
-                            sample,
-                            cfg.params["tolerance"],
-                            axes=cfg.params.get("axes", (0, 1, 2)),
-                            inclusive=cfg.params.get("inclusive", False),
-                        )
-                    else:
-                        evaluate_below_height(sample, cfg.params["height"])
                 self._terms[group][name] = cfg
 
     def _ids(self, env_ids: Sequence[int] | torch.Tensor | None) -> torch.Tensor:
@@ -127,7 +114,7 @@ class OutcomeManager(ManagerBase):
             self._failure,
             self._truncation,
             self._valid,
-            self._accepted,
+            self._terminated,
             self._steps,
         ):
             value[ids] = 0
@@ -139,18 +126,37 @@ class OutcomeManager(ManagerBase):
         return {}
 
     def __str__(self) -> str:
-        return f"OutcomeManager({sum(len(terms) for terms in self._terms.values())} conditions)"
+        return f"TerminationManager({sum(len(terms) for terms in self._terms.values())} conditions)"
 
-    def update(self) -> None:
-        """Sample each condition exactly once for the current control transition.
+    def compute(
+        self,
+        time_out: torch.Tensor | None = None,
+        *,
+        ignore_terminations: bool = False,
+    ) -> None:
+        """Compute conditions, acceptance and Gym flags once per transition.
 
         Stateful functors advance only here. Reset and snapshot operations never
         call them, so partial resets cannot advance another row's history.
+
+        Args:
+            time_out: Host-owned time-limit mask for this transition, or no
+                external time limit. Must be a boolean vector on the env device.
+            ignore_terminations: Suppress Gym termination flags while retaining
+                measured task acceptance and failure, matching the host option.
         """
+        if time_out is not None and (
+            time_out.shape != (self.num_envs,)
+            or time_out.dtype != torch.bool
+            or time_out.device != torch.device(self.device)
+        ):
+            raise ValueError("time_out must match the environment batch and device.")
         self._valid.fill_(True)
         self._success.fill_(bool(self._terms["success"]))
         self._failure.zero_()
         self._truncation.zero_()
+        if time_out is not None:
+            self._truncation.copy_(time_out)
         masks = {
             "success": self._success,
             "failure": self._failure,
@@ -197,19 +203,13 @@ class OutcomeManager(ManagerBase):
                     owned.metrics[metric].copy_(value)
         self._initialized.fill_(True)
         self._failure |= ~self._valid
-        self._accepted.copy_(
-            self._success & self._valid & ~self._failure & ~self._truncation
-        )
+        self._terminated.copy_(self._accepted_success() | self._failure)
+        if ignore_terminations:
+            self._terminated.zero_()
         self._steps += 1
 
-    def finalize(self, truncated: torch.Tensor) -> None:
-        """Apply actual Gym time limits before recording or publication.
-
-        Args:
-            truncated: Actual per-row truncation mask from the host step.
-        """
-        self._truncation |= truncated
-        self._accepted &= ~self._failure & ~self._truncation
+    def _accepted_success(self) -> torch.Tensor:
+        return self._success & self._valid & ~self._failure & ~self._truncation
 
     def snapshot(self) -> dict[str, Any]:
         """Return owned result tensors; reading does not sample conditions."""
@@ -220,7 +220,8 @@ class OutcomeManager(ManagerBase):
             "invalid_measurement": (self._initialized & ~self._valid).clone(),
             "failure": self._failure.clone(),
             "truncation": self._truncation.clone(),
-            "accepted": self._accepted.clone(),
+            "accepted": self._accepted_success(),
+            "terminated": self._terminated.clone(),
             "steps": self._steps.clone(),
             "conditions": {
                 name: {
@@ -241,8 +242,4 @@ class OutcomeManager(ManagerBase):
             for name, result in self._results.items()
             for key, value in result.metrics.items()
         }
-        return self._accepted.clone(), self._failure.clone(), metrics
-
-    def truncation(self) -> torch.Tensor:
-        """Return cached custom or finalized time-limit truncation."""
-        return self._truncation.clone()
+        return self._accepted_success(), self._failure.clone(), metrics

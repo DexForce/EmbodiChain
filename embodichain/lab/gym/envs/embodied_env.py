@@ -86,7 +86,7 @@ from embodichain.lab.gym.envs.managers import (
     ActionTrace,
     DatasetManager,
     FunctorCfg,
-    OutcomeManager,
+    TerminationManager,
     RLTaskCfg,
 )
 from embodichain.lab.gym.utils.registration import register_env
@@ -430,8 +430,8 @@ class EmbodiedEnv(BaseEnv):
                 raise ValueError(
                     "rl_task and task_program cannot share one deployment."
                 )
-        self.outcome_manager: (
-            embodichain.lab.gym.envs.managers.OutcomeManager | None
+        self.termination_manager: (
+            embodichain.lab.gym.envs.managers.TerminationManager | None
         ) = None
         self._task_initial_states: list[dict[str, Any]] = []
         if task_program_adapter_factory is not None:
@@ -825,11 +825,7 @@ class EmbodiedEnv(BaseEnv):
             self.single_action_space = self.action_manager.single_action_space
 
         if getattr(self.cfg, "rl_task", None) is not None:
-            self.outcome_manager = OutcomeManager(self.cfg.rl_task, self)
-            self._last_terminated = torch.zeros(
-                self.num_envs, dtype=torch.bool, device=self.device
-            )
-            self._last_truncated = torch.zeros_like(self._last_terminated)
+            self.termination_manager = TerminationManager(self.cfg.rl_task, self)
             self._task_initial_states = [{} for _ in range(self.num_envs)]
 
     def _apply_functor_filter(self) -> None:
@@ -1050,13 +1046,6 @@ class EmbodiedEnv(BaseEnv):
         info: Dict,
         **kwargs,
     ):
-        outcome = getattr(self, "outcome_manager", None)
-        if outcome is not None:
-            outcome.finalize(kwargs["truncateds"])
-            self._last_terminated.copy_(kwargs["terminateds"])
-            self._last_truncated.copy_(kwargs["truncateds"])
-            info["success"], info["fail"], info["metrics"] = outcome.task_state()
-            info["task_outcome"] = outcome.snapshot()
         # TODO: We may make the data collection customizable for rollout buffer.
         if self.rollout_buffer is not None:
             with self._profiler.section("rollout_write"):
@@ -1160,12 +1149,14 @@ class EmbodiedEnv(BaseEnv):
                 with self._profiler.section("event_interval"):
                     self.event_manager.apply(mode="interval")
 
-        outcome = getattr(self, "outcome_manager", None)
-        if outcome is not None:
-            outcome.update()
-            # BaseEnv advances the counter after rewards. Resolve this step's
-            # deadline now so rewards, info and recording share acceptance.
-            outcome.finalize(self._elapsed_steps + 1 >= self.max_episode_steps)
+        termination = getattr(self, "termination_manager", None)
+        if termination is not None:
+            # BaseEnv advances elapsed steps after rewards. Supply this
+            # transition's deadline once; Gym flags later consume this cache.
+            termination.compute(
+                self._elapsed_steps + 1 >= self.max_episode_steps,
+                ignore_terminations=self.cfg.ignore_terminations,
+            )
 
     def _initialize_physical_objective(self) -> None:
         """Bind an optional objective to an existing measured rigid object."""
@@ -1209,7 +1200,7 @@ class EmbodiedEnv(BaseEnv):
         objective = getattr(self, "physical_objective", None)
         if objective is not None:
             objective.reset(env_ids)
-        if getattr(self, "outcome_manager", None) is not None:
+        if getattr(self, "termination_manager", None) is not None:
             self.initialize_task_outcome(env_ids)
 
     def _rl_target_keys(self) -> tuple[str, ...]:
@@ -1232,7 +1223,7 @@ class EmbodiedEnv(BaseEnv):
         Args:
             env_ids: Rows with their final initial physical state restored.
         """
-        if getattr(self, "outcome_manager", None) is None:
+        if getattr(self, "termination_manager", None) is None:
             return
         ids = self.episode_context._ids(env_ids)
         targets = {}
@@ -1250,9 +1241,7 @@ class EmbodiedEnv(BaseEnv):
                     f"Reset target {key!r} must contain finite floating poses."
                 )
             targets[key] = value
-        self.outcome_manager.reset(ids)
-        self._last_terminated[ids] = False
-        self._last_truncated[ids] = False
+        self.termination_manager.reset(ids)
         for env_id in ids.cpu().tolist():
             self._task_initial_states[env_id] = {
                 "schema_version": 1,
@@ -1274,7 +1263,7 @@ class EmbodiedEnv(BaseEnv):
         Raises:
             ValueError: The environment has no configured RL task.
         """
-        if getattr(self, "outcome_manager", None) is None:
+        if getattr(self, "termination_manager", None) is None:
             raise ValueError("Initial task context requires an rl_task declaration.")
         return copy.deepcopy(self._task_initial_states[env_id])
 
@@ -1287,7 +1276,7 @@ class EmbodiedEnv(BaseEnv):
         Raises:
             ValueError: RL context is absent, malformed, or replay is vectorized.
         """
-        if getattr(self, "outcome_manager", None) is None:
+        if getattr(self, "termination_manager", None) is None:
             raise ValueError("Task context restore requires an rl_task declaration.")
         if self.num_envs != 1:
             raise ValueError("Task-outcome replay requires a single environment.")
@@ -1807,10 +1796,10 @@ class EmbodiedEnv(BaseEnv):
             dict(segment)
             for segment in self._demo_episode_metadata[env_id].get("segments", [])
         ]
-        outcome_manager = getattr(self, "outcome_manager", None)
+        termination_manager = getattr(self, "termination_manager", None)
         outcome = None
-        if outcome_manager is not None:
-            outcome = _outcome_row(outcome_manager.snapshot(), env_id)
+        if termination_manager is not None:
+            outcome = _outcome_row(termination_manager.snapshot(), env_id)
             metadata["task_initial_state"] = self.get_task_initial_state(env_id)
             metadata["task_outcome"] = outcome
             if not metadata["segments"]:
@@ -1828,8 +1817,8 @@ class EmbodiedEnv(BaseEnv):
                     success=accepted,
                     completed=accepted,
                     terminal_reason=reason,
-                    terminated=bool(self._last_terminated[env_id]),
-                    truncated=bool(self._last_truncated[env_id]),
+                    terminated=bool(outcome["terminated"]),
+                    truncated=bool(outcome["truncation"]),
                 )
         rollout_steps = getattr(self, "rollout_steps", None)
         length = int(
@@ -2546,7 +2535,7 @@ class EmbodiedEnv(BaseEnv):
             tuple[torch.Tensor, torch.Tensor, dict[str, Any]]: Success and failure
             masks of shape ``(num_envs,)``, followed by the metric tensor mapping.
         """
-        outcome = getattr(self, "outcome_manager", None)
+        outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
             return outcome.task_state()
         success = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -2573,26 +2562,35 @@ class EmbodiedEnv(BaseEnv):
         objective = getattr(self, "physical_objective", None)
         if objective is not None:
             info["physical_objective"] = objective.snapshot()
-        outcome = getattr(self, "outcome_manager", None)
+        outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
             info["task_outcome"] = outcome.snapshot()
         info["episode_context"] = self.episode_context.snapshot()
         return info
 
     def check_truncated(self, obs: EnvObs, info: dict[str, Any]) -> torch.Tensor:
-        """Return custom RL truncation before the base loop adds its time limit.
+        """Return cached RL truncation, or the ordinary host's custom mask.
 
         Args:
             obs: Current observations.
             info: Cached task information.
 
         Returns:
-            Per-environment custom truncation mask.
+            Per-environment truncation mask.
         """
-        outcome = getattr(self, "outcome_manager", None)
+        outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
-            return outcome.truncation()
+            return outcome.truncated
         return super().check_truncated(obs, info)
+
+    def _get_termination_flags(
+        self, obs: EnvObs, info: Dict[str, Any]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Use the same cached flags consumed by observations and rewards."""
+        termination = getattr(self, "termination_manager", None)
+        if termination is not None:
+            return termination.terminated, termination.truncated
+        return super()._get_termination_flags(obs, info)
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:
         """Evaluate the environment state.
@@ -3186,7 +3184,7 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             Per-environment task-success mask.
         """
-        outcome = getattr(self, "outcome_manager", None)
+        outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
             return outcome.task_state()[0]
         bridge = self._active_task_program_bridge
