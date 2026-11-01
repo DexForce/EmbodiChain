@@ -18,6 +18,10 @@ Robotiq uses the existing `Robotiq_V2.zip` asset (MD5
 One driver controls five mimic followers, including negative multipliers.
 `robotiq85_joint_positions()` maps observed DROID aperture to this linkage;
 actuator close commands remain separate from measured contact-limited positions.
+The downloader is owned by `embodichain_robots.robotiq.assets.Robotiq`.
+The separate `Robotiq2F85` archive is a different asset and is not a replacement
+for this calibrated model; the stable asset reference, joint layout and geometry
+remain unchanged after the EEF ownership migration.
 
 Legacy CAD descriptions omit several inertials. `franka/_physics.py` owns the
 identified Panda overlay; `robotiq/_physics.py` owns the nominal tool overlay:
@@ -31,7 +35,10 @@ Rubber pads use an explicit 5 g simulation assumption with box inertia. Drive
 gains, force limits and solver iterations are simulation settings. None of these
 parameters establishes hardware contact or dynamics equivalence.
 
-The asset distribution declares Apache-2.0. Franka's `franka_description` is
-Apache-2.0; the upstream Robotiq visualization package declares BSD and credits
-Daniel Ordonez and Robotiq contributors. Preserve upstream notices when
-redistributing their descriptions or meshes. These sources define the simulation model independently of any task or dataset.
+The Python implementation is Apache-2.0. This does not establish the license
+or original authorship of the packaged geometry. The shared Robotiq archive's
+asset-specific license and upstream revision remain unverified; see the
+[owning asset provenance](../robotiq/README.md). The separately cited inertial
+parameter sources do not establish the provenance of those URDFs or meshes.
+Preserve the applicable upstream notices when redistributing source material.
+These sources define the simulation model independently of any task or dataset.

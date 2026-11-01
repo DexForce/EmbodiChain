@@ -47,6 +47,16 @@ embodichain_robots
 
 Concrete robot configurations, exposed lazily from the bundled robot package.
 
+.. py:class:: embodichain_robots.BrainCoRevo1Cfg
+
+   Standalone fixed-base left/right BrainCo Revo 1 hand. Construct with
+   ``from_dict({"side": "left"})`` or select catalog ID ``BrainCoRevo1`` with
+   variant ``left`` / ``right``; right is the default. ``eef`` has six active
+   joint commands and four additional source mimic followers. The default
+   solver and serial-chain mappings are empty. Drive defaults are simulation
+   values, not manufacturer specifications.
+   See :doc:`/resources/robot/brainco/revo1`.
+
 .. py:class:: embodichain_robots.ARX5Cfg
 
    Configure the X5A arm and its two independently actuated parallel fingers.
@@ -175,6 +185,30 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
+
+
+embodichain_robots.brainco.revo1
+--------------------------------
+
+.. py:class:: embodichain_robots.brainco.revo1.BrainCoRevo1Cfg
+   :no-index:
+
+   Model-local lazy export of :class:`embodichain_robots.BrainCoRevo1Cfg`.
+   Importing its asset module does not load the configuration class.
+
+
+embodichain_robots.brainco.revo1.cfg
+------------------------------------
+
+.. py:class:: embodichain_robots.brainco.revo1.cfg.BrainCoRevo1Cfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.BrainCoRevo1Cfg`; native model
+   information is shared with the W1 mounting adapter.
+
+.. automethod:: embodichain_robots.brainco.revo1.cfg.BrainCoRevo1Cfg.from_dict
+
+.. automethod:: embodichain_robots.brainco.revo1.cfg.BrainCoRevo1Cfg.build_pk_serial_chain
 
 
 embodichain_robots.dexforce.w1

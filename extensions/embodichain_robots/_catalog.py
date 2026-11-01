@@ -37,6 +37,7 @@ _CONFIG_CLASSES = {
     "FlexivRizon4S": "embodichain_robots.flexiv.rizon4s:FlexivRizon4SCfg",
     "URRobot": "embodichain_robots.universal_robots.ur_robot:URRobotCfg",
     "SO101Follower": "embodichain_robots.the_robot_studio.so101:SO101FollowerCfg",
+    "BrainCoRevo1": "embodichain_robots.brainco.revo1:BrainCoRevo1Cfg",
 }
 
 _DEFAULT_CONTROL_INFO = {
@@ -96,6 +97,7 @@ _DEFAULT_CONTROL_INFO = {
     "URRobot": {"dof": 6, "control_parts": {"arm": 6}},
     "SO101Follower": {"dof": 6, "control_parts": {"arm": 5, "eef": 1}},
     "FlexivRizon4S": {"dof": 7, "control_parts": {"arm": 7}},
+    "BrainCoRevo1": {"dof": 6, "control_parts": {"eef": 6}},
 }
 
 _MIMIC_JOINTS = {
@@ -144,6 +146,7 @@ _CLASSIFICATION = {
     "FlexivRizon4S": ("flexiv", "fixed_manipulator", 1),
     "URRobot": ("universal_robots", "fixed_manipulator", 1),
     "SO101Follower": ("the_robot_studio", "fixed_manipulator", 1),
+    "BrainCoRevo1": ("BrainCo", "dexterous_hand", 0),
 }
 
 ROBOT_CONFIGS = {
@@ -240,6 +243,27 @@ _UR_VARIANTS = {
     for variant in ("ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e")
 }
 ROBOT_CONFIGS["URRobot"].update(variants=_UR_VARIANTS, default_variant="ur10")
+
+# Native side-specific metadata remains cheap to enumerate without loading cfg.
+_REVO1_VARIANTS = {
+    side: {
+        **_DEFAULT_CONTROL_INFO["BrainCoRevo1"],
+        "defaults": {"side": side},
+        "control_part_mimics": {},
+        "supports_dual_arm": False,
+        "mimic_joints": {
+            f"{side.upper()}_{finger}_PIP": f"{side.upper()}_HAND_{finger}"
+            for finger in ("INDEX", "MIDDLE", "RING", "PINKY")
+        },
+    }
+    for side in ("left", "right")
+}
+ROBOT_CONFIGS["BrainCoRevo1"].update(
+    defaults={"side": "right"},
+    mimic_joints=_REVO1_VARIANTS["right"]["mimic_joints"],
+    variants=_REVO1_VARIANTS,
+    default_variant="right",
+)
 for _variant, _profile in _UR_VARIANTS.items():
     ROBOT_CONFIGS[_variant] = {
         "class_path": _CONFIG_CLASSES["URRobot"],

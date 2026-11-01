@@ -38,7 +38,9 @@ calibration fields must remain `None` for that combination. Standard
 The reusable `franka_panda_robotiq85.yaml` embodiment selects `class_type: Franka`
 and owns its tool calibration and semantic open/grasp commands. It exposes all
 six Robotiq linkage joints, including five mimic followers with signed motion.
-Grasp planning uses full open-hand URDF collision surfaces, including authored
+The tool keeps the shared ``Robotiq/robotiq_arg2f_85`` asset reference and its
+calibration. The separately registered ``Robotiq2F85`` archive is a different
+model identity and is not substituted. Grasp planning uses full open-hand URDF collision surfaces, including authored
 box-shaped rubber pads. Contact width alone cannot establish grasp feasibility.
 
 ## Compatibility and physical identity

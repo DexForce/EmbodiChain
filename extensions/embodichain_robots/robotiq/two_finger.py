@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Robotiq 2F-85 linkage coordinates and measured-aperture conversion."""
+"""Robotiq_V2 2F-85 linkage coordinates and measured-aperture conversion."""
 
 from __future__ import annotations
 
@@ -53,6 +53,8 @@ def robotiq85_joint_positions(closed_fraction: np.ndarray) -> np.ndarray:
     uses the open endpoint and clips only to the URDF's 0.8 rad closed stop.
     Returned columns follow the preset's explicit ``eef`` control part. This
     converts observed aperture independently of any closing command.
+    The layout belongs to the shared ``Robotiq`` archive; the separately
+    registered ``Robotiq2F85`` asset requires independent qualification.
 
     Args:
         closed_fraction: Finite normalized closed fractions in [0, 1].

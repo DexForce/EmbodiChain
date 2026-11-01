@@ -13,6 +13,7 @@
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
 | Franka arm/tool selection and legacy compatibility | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
+| Independent Revo1 hand or shared hand asset names | `extensions/embodichain_robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
@@ -35,6 +36,15 @@ must stay lazy so asset lookup cannot load robot configurations. Asset discovery
 and backward-compatible asset IDs are owned by
 [data assets](../data-assets/data-assets.md). The core
 `embodichain.lab.sim.robots` package exposes only generic dual-arm composition.
+
+EEF models follow the same vendor/model ownership. A standalone hand can be a
+`Robot`, while EEF describes its role when mounted on another robot.
+`BrainCoRevo1` has `left`/`right` variants (right by default), six native active
+joints in `eef`, and four source mimic followers. It declares no serial-chain
+FK/IK or tool TCP. Native identifiers in the model's private `_specs.py` are
+shared with W1; W1's `hand_specs.py` retains installation transforms, assembled
+name mapping and the historical root/end conventions. W1 hand release IDs
+remain adapter versions rather than manufacturer product revisions.
 
 Catalog listing defers robot classes and asset downloads; resolution imports
 one `RobotCfg` subclass and isolates its defaults/overrides. Gym, workspace
@@ -229,6 +239,7 @@ metadata. Acceleration budgets and missing-speed fallback belong to the
 | Removed legacy imports and lazy canonical robot imports | `tests/sim/robots/test_imports.py` |
 | Bundled robot package discovery/staging | `tests/test_robot_package.py` |
 | Config merge, W1 versions/TCP round-trips, chain DOFs | `tests/sim/objects/test_robot_cfg.py` |
+| Standalone Revo1 variants, native control/mimic contract and mounted reuse | `tests/sim/robots/test_brainco_revo1.py` |
 | W1 V030 component assembly, source FK agreement and configured FEP branches | `tests/sim/robots/test_dexforce_w1_v030.py` |
 | Dual-arm source/assembled frames and properties | `tests/sim/objects/test_dual_arm.py` |
 | Runtime part/joint/frame behavior | `tests/sim/objects/test_robot.py` |
