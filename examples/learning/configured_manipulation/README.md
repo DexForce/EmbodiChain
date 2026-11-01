@@ -14,3 +14,7 @@ training budgets automatically.
 
 The full protocol and condition configuration are described in
 `docs/source/guides/configured_manipulation_rl.md`.
+
+The [recorded six-run comparison](results/20261030/README.md) includes the
+final metrics and learning curves. It did not meet the fixed convergence
+acceptance threshold; the framework checks passed.
