@@ -511,6 +511,15 @@ class CuroboPlanOptions(PlanOptions):
     max_acceleration: float | list[float] | None = None
     """Per-plan joint acceleration budget, intersected by the motion facade."""
 
+    waypoint_modalities: list[str] | None = None
+    """Optional per-waypoint joint/position/orientation/pose semantics.
+
+    Omitted values retain full-pose Cartesian targets. Partial Cartesian goals
+    change terminal costs and convergence tests only; they impose no additional
+    path constraint. Position-only targets require the cuRobo tool and TCP
+    origins to coincide.
+    """
+
 
 # =============================================================================
 # Pure conversion / validation helpers (no cuRobo import required)
@@ -774,6 +783,7 @@ def _require_curobo(log_level: str = "error") -> "Any":
         collision_mod = importlib.import_module("curobo.collision_checking")
         scene_mod = importlib.import_module("curobo.scene")
         types_mod = importlib.import_module("curobo.types")
+        criteria_mod = importlib.import_module("curobo._src.cost.tool_pose_criteria")
     except ModuleNotFoundError as exc:
         raise ImportError(
             "cuRobo V2 is required for the 'curobo' planner but was not found. "
@@ -800,6 +810,7 @@ def _require_curobo(log_level: str = "error") -> "Any":
         Pose=types_mod.Pose,
         GoalToolPose=types_mod.GoalToolPose,
         DeviceCfg=types_mod.DeviceCfg,
+        ToolPoseCriteria=criteria_mod.ToolPoseCriteria,
         Scene=scene_mod.Scene,
     )
 
@@ -884,6 +895,8 @@ class CuroboPlanner(BasePlanner):
     """
 
     supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
+    supports_heterogeneous_waypoints = True
+    """Sequential segments retain their individual pose or joint backend."""
     supports_collision_world_updates = True
     supports_joint_trajectory_validation = True
 
@@ -2068,6 +2081,21 @@ class CuroboPlanner(BasePlanner):
         alive = torch.ones(B, dtype=torch.bool, device=self._curobo_device)
         current = start.clone()
 
+        modalities = options.waypoint_modalities
+        if modalities is not None:
+            if len(modalities) != len(target_states):
+                raise ValueError("waypoint_modalities must match the target count.")
+            for target, modality in zip(target_states, modalities):
+                expected = (
+                    {"joint"}
+                    if target.move_type == MoveType.JOINT_MOVE
+                    else {"position", "orientation", "pose"}
+                )
+                if modality not in expected:
+                    raise ValueError(
+                        "Waypoint modality is incompatible with its move type."
+                    )
+
         for seg_idx, target in enumerate(target_states):
             self._validate_segment_batch(target, B, seg_idx)
             backend = backends[target.move_type]
@@ -2078,9 +2106,22 @@ class CuroboPlanner(BasePlanner):
                         f"Segment {seg_idx} EEF_MOVE target missing xpos.",
                         ValueError,
                     )
-                goal = self._to_curobo_pose_goal(
-                    target.xpos, backend, sim_base_pose_inv
-                )
+                modality = "pose" if modalities is None else modalities[seg_idx]
+                self._set_pose_modality(backend, modality)
+                # Never pass an unused component into frame conversion or the
+                # native optimizer, even when its terminal cost is disabled.
+                xpos = target.xpos
+                if modality != "pose":
+                    xpos = (
+                        torch.eye(4, device=xpos.device, dtype=xpos.dtype)
+                        .expand_as(xpos)
+                        .clone()
+                    )
+                    if modality == "position":
+                        xpos[:, :3, 3] = target.xpos[:, :3, 3]
+                    else:
+                        xpos[:, :3, :3] = target.xpos[:, :3, :3]
+                goal = self._to_curobo_pose_goal(xpos, backend, sim_base_pose_inv)
                 start_time = time.time()
                 capture_mode = (
                     _torch_cuda_graph_capture_mode(
@@ -2545,6 +2586,29 @@ class CuroboPlanner(BasePlanner):
         return self._bindings.JointState.from_position(
             position, joint_names=curobo_names
         )
+
+    def _set_pose_modality(self, backend: "_CuroboBackend", modality: str) -> None:
+        """Update native terminal pose costs, including reset after partial goals."""
+        if modality == "position":
+            transform = self._tool_to_frame_matrix(backend)
+            if transform is not None and bool((transform[:3, 3].abs() > 1.0e-8).any()):
+                raise ValueError(
+                    "cuRobo position-only goals require coincident tool/TCP origins."
+                )
+        if getattr(backend, "pose_modality", "pose") == modality:
+            return
+        weights = {
+            "position": [1.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+            "orientation": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            "pose": [1.0] * 6,
+        }[modality]
+        criteria = self._bindings.ToolPoseCriteria(
+            terminal_pose_axes_weight_factor=weights,
+            non_terminal_pose_axes_weight_factor=[0.0] * 6,
+            device_cfg=self._bindings.DeviceCfg(device=str(self._curobo_device)),
+        )
+        backend.planner.update_tool_pose_criteria({backend.tool_frame: criteria})
+        backend.pose_modality = modality
 
     def _to_curobo_pose_goal(
         self,

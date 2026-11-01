@@ -27,6 +27,9 @@ from scipy.spatial.transform import Rotation
 import torch
 
 from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
+from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
+    FixedGripperCollisionGeometry,
+)
 from embodichain.toolkits.graspkit.pose_generator import (
     GraspPoseGenerator,
     ParallelJawGripperModelCfg,
@@ -86,6 +89,12 @@ def _pick_refinement_anchor(
         vertices.astype("<f8").tobytes() + triangles.astype("<i8").tobytes()
     )
     digest.update(json.dumps(model.to_dict(), sort_keys=True).encode())
+    geometry = getattr(generator, "collision_geometry", None)
+    if geometry is not None and not isinstance(geometry, FixedGripperCollisionGeometry):
+        raise ValueError("Pick refinement requires explicit fixed collision geometry")
+    if geometry is not None:
+        digest.update(json.dumps(geometry.provenance, sort_keys=True).encode())
+        digest.update(geometry.points.numpy().astype("<f8").tobytes())
     calibration = (
         request.skill_options.grasp_frame_to_eef.detach()
         .cpu()
@@ -134,9 +143,15 @@ def _pick_refinement_anchor(
         origin = "affordance_mesh"
     if not len(candidates):
         raise ValueError("refinement found no legal grasp candidates")
-    # Geometry generators return canonical grasp poses, while explicit/fixed
-    # goals and the source anchor already refer to the robot end effector.
-    if origin == "affordance_mesh":
+    # Registered mesh generators return runtime TCP poses. Custom services
+    # without a geometry mapping retain the explicit service-to-EEF calibration.
+    # Explicit/fixed goals already name EEF, as in ordinary PickUp planning.
+    if geometry is not None:
+        grasp_from_tcp = np.asarray(geometry.provenance["grasp_from_tcp"])
+        canonical_candidates = candidates @ np.linalg.inv(grasp_from_tcp)
+        if origin == "affordance_mesh":
+            candidates = candidates @ calibration
+    elif origin == "affordance_mesh":
         canonical_candidates = candidates
         candidates = canonical_candidates @ calibration
     else:
@@ -157,16 +172,12 @@ def _pick_refinement_anchor(
         local = np.linalg.inv(canonical_candidates[index]) @ object_pose
         points = vertices @ local[:3, :3].T + local[:3, 3]
         width = float(np.ptp(points[:, 0]))
-        # This is a necessary jaw-envelope check. Exact hand/self/scene mesh
-        # collisions and intended-contact depth remain independently validated.
+        # Aperture is a necessary contact-pair condition. Actual hand, robot
+        # and scene collision/contact checks belong to the provider's full
+        # geometry validator; width bounds do not invent finger envelopes.
         if not model.min_opening_width <= width <= model.max_opening_width:
             continue
         if float(points[:, 0].min()) > 0 or float(points[:, 0].max()) < 0:
-            continue
-        if (
-            abs(float((points[:, 2].max() + points[:, 2].min()) / 2))
-            > model.finger_length / 2
-        ):
             continue
         arm = request.binding.endpoint("primary", "motion").require_target(
             JointPositionTarget

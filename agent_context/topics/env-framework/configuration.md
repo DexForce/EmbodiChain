@@ -211,8 +211,10 @@ selected embodiment, supported use, and runnable config filename:
 
 - `[Expert Demo: Task Program]` comes from a task-local Gym config declaring
   the `task_program` component mapping;
-- `[Expert Demo: Handwritten Trajectory]` means the registered task class
-  overrides `create_demo_segments()` or `create_demo_action_list()`;
+- `[Expert Demo: Handwritten Trajectory]` uses an explicit per-registration
+  `supports_handwritten_demo` value when provided, otherwise it checks whether
+  the task class overrides `create_demo_segments()` or `create_demo_action_list()`.
+  Shared classes can disable this label on deployments without a configured expert;
 - `[RL]` comes from explicit simulator `supports_rl`, a training configuration
   whose `trainer.gym_config` resolves to that deployment (or equivalent
   JSON/YAML environment entry), or a registered lightweight learning environment;

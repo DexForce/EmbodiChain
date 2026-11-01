@@ -11,9 +11,9 @@
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
+| Franka arm/tool selection and legacy compatibility | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
-| Original Panda with Robotiq 2F-85, mount/TCP and mimic calibration | `extensions/embodichain_robots/franka/panda_robotiq_85.py`; model provenance in the adjacent README |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
 `Robot` extends `Articulation` with named control parts, per-part solvers and
@@ -44,7 +44,7 @@ An explicit `variant` applies profile defaults before caller overrides, while
 omission preserves existing construction behavior. See
 [catalog contracts](catalogs.md) for entry points, metadata and model profiles.
 
-`FrankaPandaRobotiq85` uses the pinned original-Panda arm archive and all Robotiq
+`FrankaCfg` with `panda/robotiq_2f85` uses the pinned original-Panda arm archive and all Robotiq
 linkage followers. Its flange mount/TCP must match the source calibration; an
 existing similarly named Franka/FR3 or Panda-Hand configuration is not equivalent.
 Observed aperture mapping does not substitute a full-close actuator command for

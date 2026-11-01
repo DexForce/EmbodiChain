@@ -168,7 +168,7 @@ def _run_case(
                 )
             },
             grasp_pose_generators={
-                "eef": create_benchmark_grasp_pose_generator(case_args)
+                "eef": create_benchmark_grasp_pose_generator(case_args, robot)
             },
         )
         semantics = create_antipodal_object_semantics(

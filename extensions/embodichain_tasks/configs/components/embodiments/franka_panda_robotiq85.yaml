@@ -1,6 +1,8 @@
 embodiment_id: franka_panda_robotiq85
 simulation:
-  class_type: FrankaPandaRobotiq85
+  class_type: Franka
+  arm_model: panda
+  gripper: robotiq_2f85
   uid: FrankaPandaRobotiq85
   gripper_mount_z_m: 0.018
   gripper_mount_yaw_rad: 0.0

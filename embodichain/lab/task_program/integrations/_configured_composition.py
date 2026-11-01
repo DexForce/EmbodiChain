@@ -53,8 +53,7 @@ _GRASP_GENERATOR_OVERRIDE_FIELDS = frozenset(
     {
         "sample_count",
         "approach_direction_samples",
-        "opening_margin",
-        "point_sample_density",
+        "point_spacing",
         "filter_ground_collision",
         "force_refresh",
     }

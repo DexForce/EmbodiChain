@@ -31,7 +31,10 @@ DROID 原始数据及其派生真实输入保留 CC BY 4.0，独立合成数据�
 约 **96.6 × 47.2 × 36.6 mm**。质量 50 g、摩擦与阻尼是显式仿真假设。
 
 使用原始 Panda 七关节运动链和 Robotiq 2F-85；18 mm 同轴安装件和 150 mm TCP
-偏移是条件标定参数。Panda 状态到源 flange FK 最大位置偏差约 0.00018 mm；
+偏移是条件标定参数。公共 `FrankaCfg` 统一选择
+`arm_model: panda` 与 `gripper: robotiq_2f85`；embodiment 提供安装与 TCP，
+来源资格检查依据型号、工具、实际关节布局、固定几何身份和 FK，不依赖类名。
+Panda 状态到源 flange FK 最大位置偏差约 0.00018 mm；
 相机一的人工夹指投影拟合 RMS 约 4.58 px，独立留出点约 8.78 px；盒体双视角
 边界框拟合 RMS 约 3.64 px。这些投影残差不能解释为真实物体毫米级测量认证。
 具体依据、源索引和条件假设在 [annotations](annotations/) 及生成的

@@ -29,7 +29,7 @@ __all__ = ["FrankaPandaProvider", "FrankaPgiProvider"]
 
 
 class FrankaPandaProvider(RobotProvider):
-    """Build the stock Franka Panda used by the free-space track."""
+    """Build the stock Franka Panda with its native two-finger hand and TCP."""
 
     def build_cfg(self) -> RobotCfg:
         """Build a stock Panda while applying optional suite overrides."""

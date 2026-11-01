@@ -60,6 +60,8 @@ dependencies = [
 rigidformer = [
   "einops>=0.8.1",
   "roma==1.5.4",
+  "pyarrow>=15",
+  "trimesh>=4.9",
 ]
 policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.

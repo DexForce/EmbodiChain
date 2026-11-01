@@ -23,7 +23,10 @@ from dataclasses import field
 import torch
 
 from embodichain.compute.trajectory._toppra_common import _validate_grid_size
-from embodichain.compute.trajectory._toppra_warp import _retime_toppra_warp
+from embodichain.compute.trajectory._toppra_warp import (
+    _retime_toppra_warp,
+    _tensor_path_lengths,
+)
 from embodichain.compute.trajectory._toppra_stopped import _retime_toppra_stopped
 from embodichain.utils import logger, configclass
 from .base_planner import (
@@ -79,8 +82,11 @@ def retime_joint_paths(
     Warp handles both CPU and CUDA inputs. Sufficiently large CPU inference
     batches share a bounded thread pool; small requests and gradient recording
     run inline. Interval constraints enforce limits between grid points.
-    Floating outputs retain float32/float64 input precision; other input dtypes
-    are promoted to float32 before solving.
+    Floating outputs use float64 so finite differences of dense position samples
+    do not amplify float32 quantization into spurious dynamic-limit violations.
+    Input filtering retains float32/float64 input precision; other input dtypes
+    are promoted to float32 before solving. Consumers that narrow or resample
+    these positions must recheck the resulting trajectory's dynamic limits.
 
     The path geometry is resampled along the fitted spline, so poses derived
     from the input samples must be recomputed from the returned positions.
@@ -128,23 +134,8 @@ def retime_joint_paths(
         )
     resolved_device = positions.device if device is None else device
     batch, count, dofs = positions.shape
-    if path_lengths is not None:
-        if not isinstance(path_lengths, torch.Tensor) or path_lengths.shape != (batch,):
-            raise ValueError(f"path_lengths must have shape ({batch},)")
-        if path_lengths.dtype not in (
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-        ):
-            raise ValueError("path_lengths must contain integers")
-        path_lengths = path_lengths.to(device=positions.device, dtype=torch.int32)
-        if bool(((path_lengths < 2) | (path_lengths > count)).any().item()):
-            raise ValueError(f"path_lengths must be between 2 and {count}")
-        path_lengths = path_lengths.contiguous()
+    path_lengths = _tensor_path_lengths(path_lengths, batch, count, positions.device)
     resolved_interval = count if sample_interval is None else sample_interval
-    velocity, acceleration = constraints["velocity"], constraints["acceleration"]
 
     quantity = sample_method == TrajectorySampleMethod.QUANTITY
     waypoints = (
@@ -155,15 +146,16 @@ def retime_joint_paths(
     try:
         result = _retime_toppra_warp(
             waypoints,
-            velocity,
-            acceleration,
+            constraints["velocity"],
+            constraints["acceleration"],
             path_lengths=path_lengths,
             sample_count=int(resolved_interval) if quantity else None,
             sample_dt=None if quantity else float(resolved_interval),
             grid_size=grid_size,
+            output_dtype=torch.float64,
         )
     except (ValueError, FloatingPointError, OverflowError):
-        return _failed_result(batch, dofs, resolved_device, waypoints.dtype)
+        return _failed_result(batch, dofs, resolved_device, torch.float64)
     return PlanResult(
         **{key: value.to(resolved_device) for key, value in result.items()}
     )
@@ -336,14 +328,8 @@ class ToppraPlanner(BasePlanner):
                         else None
                     ),
                     grid_size=self.cfg.grid_size,
+                    output_dtype=torch.float64,
                 )
         except (ValueError, FloatingPointError, OverflowError):
-            return _failed_result(b, dofs, self.device, torch.float32)
-        # The existing planner contract returns float32 for all floating
-        # fields, independently of input precision.
-        return PlanResult(
-            **{
-                key: value if key == "success" else value.to(torch.float32)
-                for key, value in result.items()
-            }
-        )
+            return _failed_result(b, dofs, self.device, torch.float64)
+        return PlanResult(**result)

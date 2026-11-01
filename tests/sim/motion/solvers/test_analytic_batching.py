@@ -252,3 +252,46 @@ def test_cuda_stream_reuse(kind):
         )
         torch.testing.assert_close(valid, expected_valid)
         torch.testing.assert_close(result, expected_result)
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_opw_fk_accepts_retimed_float64_paths_without_mutating_them(device):
+    """Retimed trajectories retain precision while the OPW kernel consumes float32."""
+    from embodichain.lab.sim.motion.planners.toppra_planner import retime_joint_paths
+
+    wp.init()
+    device = torch.device(device)
+    preset = CobotMagicCfg.from_dict({})
+    chain = preset.build_pk_serial_chain(device)["left_arm"]
+    cfg = preset.solver_cfg["left_arm"]
+    cfg.joint_names = chain.get_joint_parameter_names()
+    opw = cfg.init_solver(device=device, pk_serial_chain=chain)
+    start = (opw.lower_qpos_limits + opw.upper_qpos_limits) / 2
+    waypoints = torch.stack([start, start + 0.01, start + 0.02])[None]
+    result = retime_joint_paths(
+        waypoints,
+        constraints={
+            "velocity": torch.ones(6, device=device),
+            "acceleration": torch.ones(6, device=device),
+        },
+        sample_interval=8,
+    )
+    assert result.success.all()
+    assert result.positions.dtype == torch.float64
+    original = result.positions.clone()
+    expected = opw.get_fk_warp(result.positions.float().reshape(-1, 6))
+
+    actual = opw.get_fk_warp(result.positions.reshape(-1, 6))
+    single = opw.get_fk_warp(result.positions[0, 0])
+
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    torch.testing.assert_close(single, expected[:1], rtol=0, atol=0)
+    if device.type == "cuda":
+        torch.testing.assert_close(
+            opw.get_fk_batch(result.positions),
+            expected.reshape(*result.positions.shape[:-1], 4, 4),
+            rtol=0,
+            atol=0,
+        )
+    assert result.positions.dtype == torch.float64
+    torch.testing.assert_close(result.positions, original, rtol=0, atol=0)

@@ -93,19 +93,21 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 
 .. py:class:: embodichain_robots.FrankaPandaCfg
 
-   Configuration for the Franka Emika Panda robot with Panda hand.
+   Legacy configuration for the historical FR3 asset with Panda Hand.
+
+   Compatibility entry retaining the historical FR3-named asset and defaults.
+   Explicit new model/tool selections use :class:`embodichain_robots.FrankaCfg`.
+
+.. py:class:: embodichain_robots.FrankaCfg
+
+   Unified Franka configuration with ``arm_model`` and ``gripper`` selections.
+   Supported combinations are ``fr3/panda_hand`` (default) and
+   ``panda/robotiq_2f85``. Tool calibration belongs to the selected embodiment;
+   configuration round trips do not apply it twice.
 
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
-
-.. py:class:: embodichain_robots.FrankaPandaRobotiq85Cfg
-
-   Original Panda arm with Robotiq 2F-85 linkage, explicit flange mount and TCP.
-   Six configured gripper joints follow one driver. The preset uses identified
-   Panda inertials and nominal Robotiq CAD inertials, with declared pad mass
-   assumptions; these are simulation parameters, not hardware certification.
-   Construct with ``from_dict()`` and preserve dataset-specific mount calibration.
 
 .. py:class:: embodichain_robots.URRobotCfg
 
@@ -320,27 +322,18 @@ embodichain_robots.franka.panda
 
 Concrete robot configurations, exposed lazily from the bundled robot package.
 
+.. autoclass:: embodichain_robots.franka.cfg.FrankaCfg
+   :members: from_dict, build_pk_serial_chain
+   :no-index:
+
 .. py:class:: embodichain_robots.franka.panda.FrankaPandaCfg
    :no-index:
 
-   Configuration for the Franka Emika Panda robot with Panda hand.
+   Legacy configuration for the historical FR3 asset with Panda Hand.
 
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
-
-
-embodichain_robots.franka.panda_robotiq_85
------------------------------------------
-
-.. py:class:: embodichain_robots.franka.panda_robotiq_85.FrankaPandaRobotiq85Cfg
-   :no-index:
-
-   Implementation of :class:`embodichain_robots.FrankaPandaRobotiq85Cfg`.
-   The original Panda kinematic chain and assembled simulation share the
-   configured flange mount and TCP transform.
-
-.. autofunction:: embodichain_robots.franka.panda_robotiq_85.robotiq85_joint_positions
 
 
 embodichain_robots.the_robot_studio.so101.cfg
@@ -546,12 +539,9 @@ and cache prefixes while using the shared core download and locking services.
 
    Dataset class for the Franka robots.
 
-.. py:class:: embodichain_robots.franka.assets.FrankaPandaArm
-   :no-index:
+.. autoclass:: embodichain_robots.franka.assets.FrankaPandaArm
 
-   Download the checksum-pinned historical original-Panda archive. Preserve the
-   original URDF and record a separate exact-quarter-turn RPY normalization
-   artifact for the shared simulation/FK description.
+.. autofunction:: embodichain_robots.robotiq.two_finger.robotiq85_joint_positions
 
 
 embodichain_robots.the_robot_studio.so101

@@ -42,7 +42,7 @@ from embodichain.lab.sim.motion.expansion.real2sim_collision import (
     SampledRobotCollisionChecker,
     PlaneCollisionBody,
 )
-from embodichain_robots import FrankaPandaRobotiq85Cfg
+from embodichain_robots import FrankaCfg
 from examples.expansion.trajectory.real2sim_carton.prepare import (
     ROOT,
     digest,
@@ -271,7 +271,9 @@ def export(
     )
     archive = json.loads(raw_manifest.read_text())
     rows = {item["dataset"]: item for item in archive["episodes"]}
-    cfg = FrankaPandaRobotiq85Cfg.from_dict({"gripper_mount_z_m": 0.018})
+    cfg = FrankaCfg.from_dict(
+        {"arm_model": "panda", "gripper": "robotiq_2f85", "gripper_mount_z_m": 0.018}
+    )
     urdf = Path(cfg.urdf_cfg.assemble_urdf())
     geometry = SampledRobotCollisionChecker(
         urdf,

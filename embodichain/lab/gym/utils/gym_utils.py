@@ -880,11 +880,11 @@ def config_to_cfg(
         # parser env events config
         for event_name, event_params in config["env"]["events"].items():
             event_params_modified = deepcopy(event_params)
-            if "entity_cfg" in event_params["params"]:
-                entity_cfg = SceneEntityCfg(
-                    **event_params_modified["params"]["entity_cfg"]
-                )
-                event_params_modified["params"]["entity_cfg"] = entity_cfg
+            for key in ("entity_cfg", "reference_entity_cfg"):
+                if key in event_params["params"]:
+                    event_params_modified["params"][key] = SceneEntityCfg(
+                        **event_params_modified["params"][key]
+                    )
             if "entity_cfgs" in event_params["params"]:
                 entity_cfgs = [
                     SceneEntityCfg(**cfg)

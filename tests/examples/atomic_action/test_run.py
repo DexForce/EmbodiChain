@@ -475,10 +475,14 @@ def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry() -> No
     from examples.sim.atomic_action import handover
     from examples.sim.atomic_action.support import (
         create_parallel_jaw_grasp_pose_generator,
+        create_tutorial_robot_cfg,
     )
 
     generator = create_parallel_jaw_grasp_pose_generator(
-        n_sample=32, force_refresh=False, gripper_model=handover.HANDOVER_GRIPPER_MODEL
+        n_sample=32,
+        force_refresh=False,
+        robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur10")),
+        gripper_model=handover.HANDOVER_GRIPPER_MODEL,
     )
     assert generator.gripper_model.model_id == "robotiq_2f_140"
     assert generator.gripper_model.max_opening_width == 0.14
@@ -486,9 +490,15 @@ def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry() -> No
     geometry.max_opening_width = 0.12
     assert generator.gripper_model.max_opening_width == 0.14
     assert handover.HANDOVER_GRIPPER_MODEL.max_opening_width == 0.14
+    collision_geometry = generator.collision_geometry
+    original_points = collision_geometry.points.clone()
+    collision_geometry.points.add_(1.0)
+    assert torch.equal(generator.collision_geometry.points, original_points)
     assert (
         create_parallel_jaw_grasp_pose_generator(
-            n_sample=32, force_refresh=False
+            n_sample=32,
+            force_refresh=False,
+            robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur5")),
         ).gripper_model.model_id
         == "dh_pgi_140_80"
     )

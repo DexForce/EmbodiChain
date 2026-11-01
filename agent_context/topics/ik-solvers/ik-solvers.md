@@ -45,6 +45,12 @@ For graph-preserving fixed-step DLS, use the standalone
 implementation directly without a registered runtime solver. Existing solver
 names do not imply end-to-end differentiability.
 
+The benchmark's partial-pose TOPPRA route uses the private inference solver in
+`compute/kinematics/_masked_ik.py`, supplied with batched FK and joint limits.
+It is separate from registered full-pose robot IK; its active-component contract
+and benchmark attribution belong to the
+[motion planner details](../motion-planning/planner-details.md).
+
 ## Frame and result contracts
 
 Solvers consume poses relative to the configured chain root and apply the TCP

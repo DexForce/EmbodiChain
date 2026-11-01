@@ -1,8 +1,10 @@
 task_key: push_cube
 title: Push Cube
-summary: Push a cube toward its target with the bundled PPO or GRPO training configuration.
-tags: [pushing, reinforcement_learning]
+summary: Push a cube toward its target with RL or visual imitation learning.
+tags: [pushing, reinforcement_learning, imitation_learning]
 default_deployment: default
 deployments:
   default:
     config: env.json
+  franka_visual:
+    config: task.franka.visual.yaml

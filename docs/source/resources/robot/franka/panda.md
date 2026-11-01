@@ -1,8 +1,9 @@
 # Franka Panda
 
-`FrankaPandaCfg` configures the Franka Panda manipulator together with its
-parallel-jaw hand. The bundled model contains the seven-joint arm and two
-finger joints in one URDF.
+`FrankaPandaCfg` is the compatibility entry for the historical seven-joint arm
+and Panda Hand preset. Its bundled `PandaWithHand.urdf` is internally named
+`fr3`; its existing physical model and defaults are preserved. New model/tool
+selections use the [Franka family](cfg.md).
 
 <div style="text-align: center;">
   <img src="../../../_static/robots/franka_panda.png" alt="Franka Panda robot" style="height: 400px; width: auto;"/>
@@ -14,7 +15,7 @@ finger joints in one URDF.
 - **Seven-axis manipulator** with the two-joint Panda hand.
 - **Ready-to-use robot configuration** for the URDF, control parts, joint
   drives, and initial joint positions.
-- **Numerical forward and inverse kinematics** through `PytorchSolverCfg` and
+- **Forward and inverse kinematics** through `FEPSolverCfg` and
   `pytorch-kinematics`.
 - **Multi-environment simulation support** through `SimulationManager`.
 - **Dual-arm composition support** through the `"FrankaPanda"` base-robot key.
@@ -55,7 +56,7 @@ cfg = FrankaPandaCfg.from_dict(
 | Arm joints | `fr3_joint1` through `fr3_joint7` |
 | Hand joints | `fr3_finger_joint1`, `fr3_finger_joint2` |
 | Kinematics root / end link | `base` / `fr3_hand_tcp` |
-| Solver | `PytorchSolverCfg` with 30 samples |
+| Solver | `FEPSolverCfg` with redundancy search |
 
 The configuration exposes two independently addressable control parts:
 

@@ -22,7 +22,7 @@ from pathlib import Path
 import torch
 from .model import RigidFormerCfg, RigidFormerModel
 
-__all__ = ["load_rigidformer_checkpoint"]
+__all__ = ["load_rigidformer_checkpoint", "export_rigidformer_checkpoint"]
 
 
 def load_rigidformer_checkpoint(
@@ -76,3 +76,68 @@ def load_rigidformer_checkpoint(
             raise ValueError(f"Official checkpoint tensor differs: {name}")
     model.network.load_state_dict(state, strict=True)
     return model.to(device).eval()
+
+
+def export_rigidformer_checkpoint(
+    source: str | Path, destination: str | Path, *, weights: str = "ema"
+) -> Path:
+    """Export a native SL training checkpoint to tensor/config inference weights.
+
+    Args:
+        source: Checkpoint produced by the native author-based SL recipe.
+        destination: Fresh output path; existing files are rejected.
+        weights: Explicit ema or raw model selection.
+
+    Returns:
+        Written inference checkpoint, loadable by load_rigidformer_checkpoint.
+    """
+    import numpy as np
+
+    if weights not in ("ema", "raw"):
+        raise ValueError("weights must be ema or raw")
+    output = Path(destination)
+    if output.exists():
+        raise FileExistsError(output)
+    try:
+        reconstruct = np._core.multiarray._reconstruct
+    except AttributeError:  # NumPy 1.x
+        reconstruct = np.core.multiarray._reconstruct
+    safe = [
+        (reconstruct, "numpy.core.multiarray._reconstruct"),
+        (reconstruct, "numpy._core.multiarray._reconstruct"),
+        np.ndarray,
+        np.dtype,
+        type(np.dtype(np.uint32)),
+    ]
+    with torch.serialization.safe_globals(safe):
+        state = torch.load(source, map_location="cpu", weights_only=True, mmap=True)
+    signature = state.get("signature", {})
+    if signature.get("family") != "rigidformer-author-v1":
+        raise ValueError("Expected a native author-based RigidFormer SL checkpoint")
+    raw = state["learner"]["model"]
+    if weights == "ema":
+        extra = state.get("training_states", {}).get("ema", {}).get("state")
+        if extra is None:
+            raise ValueError("Checkpoint has no EMA; select raw explicitly")
+        selected = {k: v.to(raw[k].dtype) for k, v in extra["shadow"].items()}
+    else:
+        selected = raw
+    if not all(k.startswith("network.") for k in selected):
+        raise ValueError("Native model weight namespace differs")
+    payload = {
+        "model_state_dict": {
+            k.removeprefix("network."): v.detach().clone() for k, v in selected.items()
+        },
+        "config": signature["reference_config"],
+        "source": {
+            "format": "embodichain.sl",
+            "author_revision": signature["author_revision"],
+            "num_updates": state["learner"]["num_updates"],
+            "weights": weights,
+        },
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(output.suffix + ".tmp")
+    torch.save(payload, temporary)
+    temporary.replace(output)
+    return output

@@ -25,12 +25,22 @@ __all__ = [
     "RigidFormerCfg",
     "RigidFormerModel",
     "load_rigidformer_checkpoint",
+    "export_rigidformer_checkpoint",
+    "MOViSequenceSource",
+    "RigidFormerObjective",
+    "rigidformer_batch",
+    "build_rigidformer_trainer",
 ]
 _EXPORTS = {
     "RIGIDFORMER_REVISION": "model",
     "RigidFormerCfg": "model",
     "RigidFormerModel": "model",
     "load_rigidformer_checkpoint": "checkpoint",
+    "export_rigidformer_checkpoint": "checkpoint",
+    "MOViSequenceSource": "data",
+    "RigidFormerObjective": "supervised",
+    "rigidformer_batch": "supervised",
+    "build_rigidformer_trainer": "sl_recipe",
 }
 
 

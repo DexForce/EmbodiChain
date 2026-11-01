@@ -64,7 +64,7 @@ from embodichain.lab.sim.motion.expansion.real2sim_collision import (
 from embodichain.lab.task_program.integrations.nominal import (
     BoundTaskProgramNominalSources,
 )
-from embodichain_robots.franka.panda_robotiq_85 import robotiq85_joint_positions
+from embodichain_robots.robotiq.two_finger import robotiq85_joint_positions
 from embodichain.toolkits.graspkit.box_region import (
     BoxSideGraspRegionCfg,
     project_box_side_grasp,
@@ -310,7 +310,21 @@ def _calibration_checks(robot, episode, annotations, box) -> dict:
         physical_box_within_opening=bool(0 < x[5] < 0.085),
         source_commands_submitted=bool(episode.submitted[25:93].all()),
         video_offset_explicit=annotations["video_state_offset"] == 0,
-        original_robot_model=cfg.__class__.__name__ == "FrankaPandaRobotiq85Cfg",
+        original_robot_model=(
+            getattr(cfg, "arm_model", None) == "panda"
+            and getattr(cfg, "gripper", None) == "robotiq_2f85"
+            and tuple(cfg.control_parts["arm"])
+            == tuple(f"Joint{i}" for i in range(1, 8))
+            and tuple(cfg.control_parts["eef"])
+            == (
+                "finger_joint",
+                "left_inner_knuckle_joint",
+                "left_inner_finger_joint",
+                "right_outer_knuckle_joint",
+                "right_inner_knuckle_joint",
+                "right_inner_finger_joint",
+            )
+        ),
     )
     return dict(
         metrics=metrics,
@@ -642,6 +656,25 @@ def prepare(source_directory: Path, output: Path) -> None:
             target.compile_task_program(target.cfg.task_program), {}
         ).program_fingerprint
         qualification = _calibration_checks(target.robot, episode, annotation, box)
+        qualification["checks"].update(
+            source_joint_layout=set(target.robot.joint_names)
+            == {
+                *snapshot["joint_names"][:7],
+                "finger_joint",
+                "left_inner_knuckle_joint",
+                "left_inner_finger_joint",
+                "right_outer_knuckle_joint",
+                "right_inner_knuckle_joint",
+                "right_inner_finger_joint",
+            }
+            and tuple(snapshot["joint_names"][:7])
+            == tuple(f"Joint{i}" for i in range(1, 8)),
+            # Frozen v1 source geometry; changing the public class is allowed,
+            # changing its declared physical model requires requalification.
+            source_geometry_identity=snapshot["robot_geometry_sha256"]
+            == "6b08aff1b8de77edfd1deab3da3f139d2ecfb20838bd21cf2d6207058c0d4d82",
+        )
+        qualification["admitted"] = all(qualification["checks"].values())
         qualification.update(
             source_id=lock["source_id"],
             source_revision=episode.sha256,

@@ -588,7 +588,11 @@ def _augment_runtime(tasks: list[_Task], task_packages: Sequence[str]) -> None:
             or spec.task_program_adapter_factory is not None
         ):
             capabilities.add(_TASK_PROGRAM)
-        elif _implements_handwritten_demo(spec.cls):
+        elif (
+            spec.supports_handwritten_demo
+            if getattr(spec, "supports_handwritten_demo", None) is not None
+            else _implements_handwritten_demo(spec.cls)
+        ):
             capabilities.add(_HANDWRITTEN_DEMO)
         if spec.supports_rl:
             capabilities.add(_RL)

@@ -1421,6 +1421,23 @@ def test_curobo_joint_case_uses_reference_joint_waypoints():
     assert torch.equal(targets[1].qpos, joint_targets[:, 1])
 
 
+def test_curobo_prepares_both_named_atomic_arms():
+    adapter = _curobo_adapter()
+    case = replace(
+        _case(),
+        case_parameters={
+            "control_parts": {
+                "source": {"motion": "left_arm", "grasp": "left_eef"},
+                "destination": {"motion": "right_arm", "grasp": "right_eef"},
+            }
+        },
+    )
+    adapter.prepare_cases([case, replace(case, case_id="duplicate")])
+    calls = adapter.motion_generator.planner.prepare_backend.call_args_list
+    assert [call.kwargs["control_part"] for call in calls] == ["left_arm", "right_arm"]
+    assert all(call.kwargs["move_type"] is MoveType.EEF_MOVE for call in calls)
+
+
 def test_nmg_rejects_unknown_motion_validity():
     from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
     from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
@@ -1591,7 +1608,14 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(
             success[unreachable_row] = False
         return success, solved
 
+    tcp = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.15],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
     robot = SimpleNamespace(
+        cfg=SimpleNamespace(solver_cfg={"arm": SimpleNamespace(tcp=tcp)}),
         device=torch.device("cpu"),
         _all_indices=torch.arange(batch_size),
         _solvers={"arm": SimpleNamespace(root_link_name="base", get_ik=solve)},
@@ -1624,7 +1648,11 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(
         )
 
     generator_factory.assert_called_once_with(
-        n_sample=321, force_refresh=False, max_candidates=8
+        n_sample=321,
+        force_refresh=False,
+        max_candidates=8,
+        gripper_model=None,
+        root_from_tcp=tcp,
     )
     call = generator.get_valid_grasp_poses.call_args.kwargs
     assert torch.equal(call["mesh_vertices"], vertices)
@@ -1687,7 +1715,14 @@ def test_atomic_screen_selects_its_robot_environments(monkeypatch, env_ids):
         solved.append(target_xpos.clone())
         return torch.ones(len(qpos_seed), dtype=torch.bool), qpos_seed.clone()
 
+    tcp = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.15],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
     robot = SimpleNamespace(
+        cfg=SimpleNamespace(solver_cfg={"arm": SimpleNamespace(tcp=tcp)}),
         device=torch.device("cpu"),
         _all_indices=torch.arange(8),
         _solvers={"arm": SimpleNamespace(root_link_name="base", get_ik=solve)},
@@ -2958,8 +2993,7 @@ def test_report_includes_workload_and_measured_difficulty_tables(tmp_path):
     report = write_markdown_report(tmp_path / "report.md", suite, aggregates)
     text = report.read_text(encoding="utf-8")
 
-    assert text.count("\n| ---") == 6
-    assert "### Common Joint / FullPose comparison" in text
+    assert text.count("\n| ---") == 5
     assert "### Workload Success & Uncertainty" in text
     assert "### Measured Start Difficulty" in text
     assert text.count("## Time & Memory") == 1

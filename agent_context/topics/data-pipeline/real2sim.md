@@ -49,8 +49,11 @@ Configured source bindings may opt into `MotionRefinementCfg` with explicit
 `eef_pose` authority. `motion.refinement.KinematicMotionRefiner` repairs a
 scene-retargeted nominal path before expansion freezes its protected samples.
 The source provider grounds the anchor from the skill goal, the current held
-relation, or existing antipodal mesh candidates with calibrated gripper-envelope
-and endpoint-IK checks. Pick commits the corrected grasp through ordinary skill
+relation, or existing antipodal candidates with aperture and endpoint-IK
+checks. Registered mesh services return runtime TCP poses; refinement uses their
+explicit canonical/TCP mapping once and includes actual collision-geometry
+identity in its evidence. Full hand/robot/scene collision and closing-contact
+checks remain provider-owned; scalar finger envelopes are not inferred. Pick commits the corrected grasp through ordinary skill
 effects; later transport and Place reuse that relation. Place refinement needs
 the tabletop host's physical footprint and signed release-gap validator. A
 geometry/authority/budget failure rejects the bound source without fallback.

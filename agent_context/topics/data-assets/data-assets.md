@@ -85,6 +85,13 @@ Keep its source revision and complete file checksums together when updating it.
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
 
+`FrankaPandaArm` is a separate pinned original-Panda asset in
+`embodichain_robots.franka.assets`; `FrankaV4` remains the historical FR3 asset.
+The original-Panda derivative normalizes only authored rounded right angles,
+checks the upstream URDF digest and writes derivation evidence under the shared
+dataset lock. Its identity must stay distinct from the FR3 archive; see the
+[vendor provenance](../../../extensions/embodichain_robots/franka/README.md).
+
 `UniversalRobots` selects the V4 archive with corrected UR3/UR3e material
 colors. Its versioned `UniversalRobotsV4` cache directory changes source paths
 so URDF assembly also refreshes previously copied mesh materials; public

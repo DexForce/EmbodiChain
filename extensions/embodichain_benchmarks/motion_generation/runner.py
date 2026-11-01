@@ -219,6 +219,42 @@ class BenchmarkRunner:
         self._run_dir: Path | None = None
         self._video_paths: list[str] = []
 
+    def run_paired_arm_performance(
+        self,
+        output: str | Path,
+        *,
+        request_manifest: str | Path,
+        warmup_trials: int,
+        measured_trials: int,
+        source_cases_per_suite: int,
+    ) -> dict[str, object]:
+        """Replay frozen task-derived arm pairs with serial completed-call timing.
+
+        Args:
+            output: Fresh result directory for trials, metrics and one report.
+            request_manifest: Immutable request cache bound to source task cases.
+            warmup_trials: Untimed warmups per request and dispatch mode.
+            measured_trials: Repeated completed calls per request and mode.
+            source_cases_per_suite: Number of sorted frozen task cases to use.
+
+        Returns:
+            Performance-only summary; no repetitions enter task quality counts.
+
+        Raises:
+            ValueError: If inputs, cached provenance or measurement settings
+                conflict. Missing backends and invalid preparation are errors.
+        """
+        from ._paired_arm_performance import _run
+
+        return _run(
+            self,
+            Path(output),
+            request_manifest=Path(request_manifest),
+            warmup_trials=warmup_trials,
+            measured_trials=measured_trials,
+            source_cases_per_suite=source_cases_per_suite,
+        )
+
     def _create_simulation(self, batch_size: int) -> tuple[SimulationManager, "Robot"]:
         """Create one uninitialized suite-selected robot for a fixed batch size."""
         sim = SimulationManager(

@@ -1,8 +1,7 @@
 # Original Panda with Robotiq 2F-85
 
-`FrankaPandaRobotiq85Cfg` assembles the original seven-joint Panda arm and the
-Robotiq 2F-85 linkage. It is a separate catalog entry from existing Franka
-presets. The flange mount and TCP are explicit configuration; the carton demo
+`FrankaCfg` with `arm_model="panda", gripper="robotiq_2f85"` assembles the original seven-joint Panda arm and the
+Robotiq 2F-85 linkage. The shared Franka family also preserves the existing FR3/Panda-Hand preset. The flange mount and TCP are explicit configuration; the carton demo
 uses an estimated coaxial 18 mm adapter and 150 mm tool offset. Preserve that
 conditional calibration when interpreting public DROID input.
 
@@ -20,8 +19,8 @@ One driver controls five mimic followers, including negative multipliers.
 `robotiq85_joint_positions()` maps observed DROID aperture to this linkage;
 actuator close commands remain separate from measured contact-limited positions.
 
-Legacy CAD descriptions omit several inertials. `_panda_robotiq_physics.py`
-overlays identified Panda parameters and nominal Robotiq CAD parameters:
+Legacy CAD descriptions omit several inertials. `franka/_physics.py` owns the
+identified Panda overlay; `robotiq/_physics.py` owns the nominal tool overlay:
 
 | Source | Pinned revision / SHA-256 | Qualification |
 | --- | --- | --- |
@@ -35,6 +34,4 @@ parameters establishes hardware contact or dynamics equivalence.
 The asset distribution declares Apache-2.0. Franka's `franka_description` is
 Apache-2.0; the upstream Robotiq visualization package declares BSD and credits
 Daniel Ordonez and Robotiq contributors. Preserve upstream notices when
-redistributing their descriptions or meshes. The carton demo's
-`assets.lock.json` records source URLs, hashes and scale conventions; visual
-GLB export records each converted mesh in its read-only replay bundle.
+redistributing their descriptions or meshes. These sources define the simulation model independently of any task or dataset.

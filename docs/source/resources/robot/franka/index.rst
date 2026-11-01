@@ -12,12 +12,16 @@ Official Franka robot configurations live in the
    * - Robot
      - Configuration class
      - Current coverage
+   * - :doc:`Franka family <cfg>`
+     - ``FrankaCfg``
+     - Explicit FR3/Panda-Hand or original-Panda/Robotiq 2F-85 combinations.
    * - :doc:`Franka Panda <panda>`
      - ``FrankaPandaCfg``
-     - Panda arm with the stock Panda hand and numerical FK/IK.
+     - Compatibility entry preserving the historical FR3-named asset and Panda Hand.
 
 .. toctree::
    :maxdepth: 1
    :hidden:
 
    panda
+   cfg
