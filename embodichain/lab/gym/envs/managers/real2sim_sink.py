@@ -1116,9 +1116,15 @@ class Real2SimLeRobotEpisodeSink:
                         raise RuntimeError(
                             "required source or episode artifact is incomplete"
                         )
-                self._recorder.dataset = LeRobotDataset(
-                    repo_id=previous.repo_id, root=root, download_videos=False
-                )
+                # LeRobot 0.6.1 opens datasets read-only through its constructor;
+                # use its recording API to append after the durable close.
+                resume = getattr(LeRobotDataset, "resume", None)
+                if callable(resume):
+                    self._recorder.dataset = resume(repo_id=previous.repo_id, root=root)
+                else:
+                    self._recorder.dataset = LeRobotDataset(
+                        repo_id=previous.repo_id, root=root, download_videos=False
+                    )
                 return CommitReceipt(**receipt_args, confirmed=True)
             except Exception as exc:
                 journal = getattr(self._recorder, "_recording_journal", None)
