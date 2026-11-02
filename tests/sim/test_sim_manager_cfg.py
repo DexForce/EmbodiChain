@@ -124,15 +124,15 @@ def test_newton_physics_cfg_uses_device() -> None:
 
 
 @pytest.mark.no_sim
-def test_newton_physics_cfg_preserves_dexsim_auto_solver_default() -> None:
-    from dexsim.engine.newton_physics import AutoSolverCfg
+def test_newton_physics_cfg_defaults_to_dexuni() -> None:
+    from dexsim.engine.newton_physics import DexUniSolverCfg
 
     cfg = NewtonPhysicsCfg()
 
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
-    assert isinstance(dexsim_cfg.solver_cfg, AutoSolverCfg)
-    assert dexsim_cfg.solver_cfg.solver_type == "auto"
+    assert isinstance(dexsim_cfg.solver_cfg, DexUniSolverCfg)
+    assert dexsim_cfg.solver_cfg.solver_type == "dexuni"
 
 
 @pytest.mark.no_sim
@@ -158,22 +158,35 @@ def test_newton_physics_cfg_forwards_render_sync_policy(
 
 
 @pytest.mark.no_sim
-def test_newton_physics_cfg_requires_dexsim_auto_solver_api(
+@pytest.mark.parametrize(
+    "solver_cfg",
+    [None, {}, {"solver_type": "dexuni"}, {"class_type": "DexUniSolverCfg"}],
+)
+def test_newton_physics_cfg_does_not_require_auto_solver_api(
     monkeypatch: pytest.MonkeyPatch,
+    solver_cfg: dict[str, str] | None,
 ) -> None:
     from dexsim.engine import newton_physics
 
-    monkeypatch.delattr(newton_physics, "AutoSolverCfg")
+    monkeypatch.delattr(newton_physics, "AutoSolverCfg", raising=False)
 
-    with pytest.raises(
-        ImportError,
-        match="cannot import name 'AutoSolverCfg'",
-    ):
-        NewtonPhysicsCfg().to_dexsim_cfg(gpu_id=0)
+    native_cfg = NewtonPhysicsCfg(solver_cfg=solver_cfg).to_dexsim_cfg(gpu_id=0)
+
+    assert isinstance(native_cfg.solver_cfg, newton_physics.DexUniSolverCfg)
 
 
 @pytest.mark.no_sim
-def test_newton_gradient_mode_rejects_auto_solver() -> None:
+def test_newton_physics_cfg_default_mapping_forwards_dexuni_options() -> None:
+    native_cfg = NewtonPhysicsCfg(
+        solver_cfg={"vbd_options": {"iterations": 7}}
+    ).to_dexsim_cfg(gpu_id=0)
+
+    assert native_cfg.solver_cfg.solver_type == "dexuni"
+    assert native_cfg.solver_cfg.vbd_options["iterations"] == 7
+
+
+@pytest.mark.no_sim
+def test_newton_gradient_mode_requires_explicit_semi_implicit_solver() -> None:
     cfg = NewtonPhysicsCfg(requires_grad=True)
 
     with pytest.raises(RuntimeError, match="explicit.*semi_implicit"):
@@ -292,7 +305,7 @@ def test_newton_backend_exposes_resolved_solver_type() -> None:
 
 
 @pytest.mark.no_sim
-def test_newton_backend_reports_scene_resolved_auto_solver(
+def test_newton_backend_reports_scene_resolved_solver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     world = object()
@@ -308,7 +321,7 @@ def test_newton_backend_reports_scene_resolved_auto_solver(
 
     backend.configure_world(world_config, sim_config)
 
-    assert world_config.newton_cfg.solver_cfg.solver_type == "auto"
+    assert world_config.newton_cfg.solver_cfg.solver_type == "dexuni"
     assert backend.solver_type == "mujoco_warp"
 
 
@@ -450,14 +463,25 @@ def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
 
 
 @pytest.mark.no_sim
-def test_newton_physics_cfg_accepts_explicit_auto_solver_mapping() -> None:
-    from dexsim.engine.newton_physics import AutoSolverCfg
+@pytest.mark.parametrize("selector", ["solver_type", "class_type"])
+@pytest.mark.parametrize(
+    "name", ["auto", "AutoSolverCfg", "auto_solver", "auto-solver-cfg", "AutoSolver"]
+)
+def test_newton_physics_cfg_rejects_legacy_auto_selectors(
+    selector: str, name: str
+) -> None:
+    cfg = NewtonPhysicsCfg(solver_cfg={selector: name})
 
-    cfg = NewtonPhysicsCfg(solver_cfg={"class_type": "AutoSolverCfg"})
+    with pytest.raises(RuntimeError, match="AutoSolverCfg.*removed.*dexuni"):
+        cfg.to_dexsim_cfg(gpu_id=0)
 
-    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
-    assert isinstance(dexsim_cfg.solver_cfg, AutoSolverCfg)
+@pytest.mark.no_sim
+def test_newton_physics_cfg_rejects_legacy_auto_config_object() -> None:
+    cfg = NewtonPhysicsCfg(solver_cfg=SimpleNamespace(solver_type="auto"))
+
+    with pytest.raises(RuntimeError, match="AutoSolverCfg.*removed.*dexuni"):
+        cfg.to_dexsim_cfg(gpu_id=0)
 
 
 @pytest.mark.no_sim

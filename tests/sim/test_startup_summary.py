@@ -47,7 +47,7 @@ def _sim(physics_cfg=None):
             sync_render_state=lambda result: None,
         ),
         _requested_renderer="auto",
-        _requested_solver="auto",
+        _requested_solver="dexuni",
         is_window_opened=False,
         _robots={},
         _articulations={},
@@ -104,14 +104,14 @@ def test_newton_reports_pending_then_resolved_solver_and_graph(monkeypatch):
     summary = importlib.import_module("embodichain.lab.sim._startup_summary")
     monkeypatch.setattr(summary.torch.cuda, "is_available", lambda: False)
     sim = _sim(NewtonPhysicsCfg())
-    sim.physics.solver_type = "auto"
+    sim.physics.solver_type = None
     before = str(summary.simulation_rows(sim))
     assert "PENDING" in before
     sim.spawn_result = SimpleNamespace(topology_revision=1, needs_rebuild=False)
     sim._ready_spawn_topology_revision = 1
     sim.physics.solver_type = "mujoco_warp"
     after = str(summary.scene_rows(sim))
-    assert "auto -> mujoco_warp" in after
+    assert "dexuni -> mujoco_warp" in after
     assert "PENDING" in after and "CAPTURED" not in after
     sim.physics.cuda_graph_status = "captured"
     assert "CAPTURED" in str(summary.scene_rows(sim))

@@ -771,6 +771,32 @@ def test_robot_preset_selects_complete_backend_and_solver_variants() -> None:
 
 
 @configclass
+class _DexUniRobotPresetCfg(RobotPresetCfg):
+    default: RobotCfg = RobotCfg(uid="fallback")
+    newton: RobotCfg = RobotCfg(uid="newton")
+    newton_dexuni: RobotCfg = RobotCfg(uid="dexuni")
+
+
+@pytest.mark.parametrize(
+    "solver_cfg",
+    [None, {}, {"solver_type": "dexuni"}, {"class_type": "DexUniSolverCfg"}],
+)
+def test_robot_preset_default_matches_dexuni_runtime(
+    solver_cfg: dict[str, str] | None,
+) -> None:
+    preset = _DexUniRobotPresetCfg()
+
+    assert preset.resolve(NewtonPhysicsCfg(solver_cfg=solver_cfg)).uid == "dexuni"
+
+
+def test_robot_preset_rejects_removed_auto_selector() -> None:
+    with pytest.raises(RuntimeError, match="AutoSolverCfg.*removed.*dexuni"):
+        _DexUniRobotPresetCfg().resolve(
+            NewtonPhysicsCfg(solver_cfg={"solver_type": "auto"})
+        )
+
+
+@configclass
 class _CommonRobotPresetCfg(RobotPresetCfg):
     default: RobotCfg = RobotCfg(uid="portable")
 

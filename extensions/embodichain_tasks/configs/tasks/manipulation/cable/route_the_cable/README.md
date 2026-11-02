@@ -11,10 +11,13 @@ in-episode state writes.
 ## Requirements and entry point
 
 Use CUDA and a DexSim build exposing `CableDesc`, `Scene.create_cable_batch`,
-`CableBatch.fetch_default_state/apply_state` and `Scene.reset_arenas`. The current
-qualification environment uses cable-state branch commit
-`43d078958e6e00158eda0c3024d8af0c5682eb59` and Newton 1.6. A stock wheel lacking
-these APIs cannot run this deployment. Permanent cable attachments to articulations
+`CableBatch.fetch_default_state/apply_state` and `Scene.reset_arenas`. See the
+[cable example installation guide](../../../../../../../examples/README.md#newton-cable-demo)
+for the development-build dependency and solver migration. Earlier routing
+qualification used cable-state commit
+`43d078958e6e00158eda0c3024d8af0c5682eb59` with Newton 1.6; those results do not
+qualify full routing on a newer engine. A stock wheel lacking the required
+cable APIs cannot run this deployment. Permanent cable attachments to articulations
 with nonzero initial joint positions are rejected before scene commit: the current
 engine resolves their anchors before model-initialization hooks. This task uses
 contact-only grasps and does not need that unsupported combination. The file owns Newton/DexUni, dynamic
