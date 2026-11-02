@@ -14,42 +14,27 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Offline configured expert collection over one batched simulation World."""
+"""Assemble native ports around the shared engine and independent production stages."""
 
 from __future__ import annotations
-from collections.abc import Mapping
-from dataclasses import asdict
-from contextlib import ExitStack
+from pathlib import Path
 import fcntl
 import hashlib
 import json
-import math
-from pathlib import Path
-import random
-import time
+import resource
 import numpy as np
 import torch
-from embodichain.data_pipeline.recording.media import MediaSpool, _atomic_json
-from embodichain.lab.expansion.configured import (
-    ExpansionRunCfg,
-    preflight_expansion_job,
-)
-from embodichain.lab.expansion.contracts import EpisodeCandidate
-from embodichain.lab.expansion.persistence import ArtifactEpisodeSink
-from embodichain.lab.expansion.program import (
-    collect_program_batch,
-    collect_vector_program,
-)
+from embodichain.data_pipeline.recording.media import _atomic_json, _digest, _mkdir
 from embodichain.lab.sim.motion.expansion import (
     ExpansionSession,
     TrajectoryExpansionJobCfg,
-    SceneCase,
-    ExpertEpisode,
-    ValidationCheck,
-    ValidationResult,
 )
+from .configured import ExpansionRunCfg, preflight_expansion_job, resolve_expansion_job
+from .engine import ExpansionEngine, ExpansionJobCfg
+from .journal import ExpansionJournal
+from .persistence import ArtifactEpisodeSink
 
-__all__ = ["run_expansion_job", "inspect_expansion_job"]
+__all__ = ["run_expansion_job", "inspect_expansion_job", "resume_expansion_export"]
 
 
 def _hash(value: object) -> str:
@@ -84,994 +69,450 @@ def _images(
     return frames
 
 
+class _RecordedSink:
+    def __init__(self, sink, journal):
+        self.sink, self.journal = sink, journal
+
+    def _attempt(self, episode):
+        return (
+            self.journal.root
+            / "attempts"
+            / f"{episode.metadata['attempt_sequence']:08d}"
+        )
+
+    def stage(self, episode):
+        path = self.sink.stage(episode)
+        self.journal.update(
+            self._attempt(episode), status="pending_write", artifact_id=_digest(path)
+        )
+        return path
+
+    def submit(self, episode, *, submission_id):
+        receipt = self.sink.submit(episode, submission_id=submission_id)
+        self.journal.update(
+            self._attempt(episode),
+            status="committed",
+            storage_id=str(Path(receipt.storage_id).relative_to(self.journal.root)),
+        )
+        return receipt
+
+
+class _RecipeSource:
+    def __init__(self, cfg, host, journal):
+        self.cfg, self.host, self.journal = cfg, host, journal
+
+    def next_batch(self, capacity):
+        if self.journal.time_usage()[0] >= self.cfg.max_wall_time_s:
+            return ()
+        for field, checksum in self.host.report["input_files"].items():
+            if _digest(Path(getattr(self.cfg, field))) != checksum:
+                raise ValueError(f"job input {field} changed after preflight")
+        return self.journal.next_batch(
+            self.host.recipe,
+            capacity=capacity,
+            target=self.cfg.target_episodes,
+            max_attempts=self.cfg.max_attempts,
+            retry_interrupted=self.cfg.retry_interrupted,
+        )
+
+    def after_batch(self, snapshot):
+        self.journal.checkpoint(force=True)
+        _atomic_json(
+            self.journal.root / "progress.json",
+            {
+                "counts": dict(snapshot["counts"]),
+                "engine_seconds": dict(snapshot.get("timings", {})),
+                "host_seconds": dict(self.host.timings),
+                "wall_time_lower_bound_s": self.journal.time_usage()[0],
+            },
+        )
+
+
 def inspect_expansion_job(directory: str | Path) -> dict[str, object]:
-    """Verify persisted receipts and report job progress without simulation."""
-    root = Path(directory)
+    """Audit physical commits and independently report collection/render/export progress."""
+    root = Path(directory).resolve()
     job = json.loads((root / "job.json").read_text())
+    cfg = (
+        json.loads((root / "execution.json").read_text())["config"]
+        if (root / "execution.json").exists()
+        else job["config"]
+    )
     receipts = ArtifactEpisodeSink(root).inspect()
-    attempts = [
-        json.loads(path.read_text())
-        for path in sorted((root / "attempts").glob("*/attempt.json"))
-    ]
+    records = ExpansionJournal(root).attempts()
+    outcomes = {
+        status: sum(r["status"] == status for r in records)
+        for status in sorted({r["status"] for r in records})
+    }
     result = {
         "job_id": job["job_id"],
+        "semantic_id": job.get("semantic_id", job["job_id"]),
         "committed": len(receipts),
-        "attempts": len(attempts),
+        "attempts": len(records),
+        "target_episodes": cfg["target_episodes"],
+        "outcomes": outcomes,
         "rollout_attempted": sum(
-            item.get("steps", item.get("executed_steps_lower_bound", 0)) > 0
-            or item.get("status") == "running"
-            for item in attempts
+            max(r.get("steps", 0), r.get("executed_steps_lower_bound", 0)) > 0
+            or r["status"] == "running"
+            for r in records
         ),
         "measured_successes": sum(
-            bool(item.get("measured_accepted", item.get("status") == "committed"))
-            for item in attempts
+            bool(r.get("measured_accepted", r["status"] == "committed"))
+            for r in records
         ),
-        "target_episodes": job["target_episodes"],
-        "complete": len(receipts) >= job["target_episodes"],
-        "outcomes": {
-            status: sum(item.get("status") == status for item in attempts)
-            for status in {item.get("status") for item in attempts}
+    }
+    result["collection_complete"] = len(receipts) >= cfg["target_episodes"]
+    from .visual import inspect_observation_variants
+
+    variants = inspect_observation_variants(root)
+    result["observation_variants"] = len(variants)
+    plan = (
+        json.loads((root / "postprocessing.json").read_text())
+        if (root / "postprocessing.json").exists()
+        else None
+    )
+    requested = set(cfg.get("render_profiles", ()))
+    known = {variant["variant_id"] for variant in variants}
+    profiles = {} if plan is None else plan.get("profiles", {})
+    if (root / "execution.json").exists():
+        profiles = (
+            json.loads((root / "execution.json").read_text()).get(
+                "render_profile_snapshots"
+            )
+            or profiles
+        )
+    from .visual import _variant_key
+
+    render_pending = []
+    for parent in receipts:
+        for name in requested:
+            if name in profiles:
+                key = _variant_key(parent.commit_id, name, profiles[name]["revision"])
+                if key not in known:
+                    render_pending.append(key)
+            elif not any(
+                v["parent_commit_id"] == parent.commit_id and v["profile_id"] == name
+                for v in variants
+            ):
+                render_pending.append((parent.commit_id, name))
+    result["stages"] = {
+        "collection": {"complete": result["collection_complete"]},
+        "render": {"complete": not render_pending, "pending": len(render_pending)},
+        "export": {
+            "complete": not cfg.get("export_lerobot", False),
+            "pending": int(bool(receipts) and cfg.get("export_lerobot", False)),
         },
     }
-    result["collection_complete"] = result["complete"]
-    if job["config"].get("export_lerobot", False):
-        result["complete"] = False
-        if (root / "lerobot-export.json").exists():
-            from .export import export_expansion_lerobot
+    if cfg.get("export_lerobot") and (root / "lerobot-export.json").exists():
+        from .export import export_expansion_lerobot
 
-            result["lerobot"] = export_expansion_lerobot(None, root)
-            result["complete"] = result["collection_complete"]
-    requested = job["config"].get("render_profiles", [])
-    if requested:
-        from .visual import inspect_observation_variants
+        try:
+            exported = export_expansion_lerobot(None, root, verify_only=True)
+            result["lerobot"] = exported
+            result["stages"]["export"] = {"complete": True, "pending": 0}
+        except ValueError as error:
+            result["stages"]["export"]["reason"] = str(error)
+    for path in (root / "stages").glob("*/*.json"):
+        stage = json.loads(path.read_text())
+        requested = (
+            bool(cfg.get("render_profiles"))
+            if stage["stage"] == "render"
+            else bool(cfg.get("export_lerobot")) if stage["stage"] == "export" else True
+        )
+        satisfied_collection = (
+            stage["stage"] == "collection" and result["collection_complete"]
+        )
+        if requested and stage.get("state") == "failed" and not satisfied_collection:
+            result["stages"].setdefault(stage["stage"], {}).update(
+                error=stage.get("error"), complete=False
+            )
+    seconds, uncertain = ExpansionJournal(root).time_usage()
+    result["wall_time_lower_bound_s"], result["wall_time_uncertain"] = (
+        seconds,
+        uncertain,
+    )
+    from .reporting import build_expansion_report
 
-        variants = inspect_observation_variants(root)
-        expected = len(receipts) * len(requested)
-        result["observation_variants"] = len(variants)
-        result["complete"] = result["complete"] and len(variants) == expected
+    coverage = build_expansion_report(root, receipts=receipts, variants=variants)
+    result["coverage"] = {
+        "geometry_buckets": coverage["geometry"]["buckets"],
+        "physical_conditions": coverage["physics"]["condition_fingerprints"],
+        "visual_variants": coverage["visual"]["variants"],
+        "source_groups": len(coverage["sources"]["ancestor_groups"]),
+    }
+    result["complete"] = all(stage["complete"] for stage in result["stages"].values())
     return result
+
+
+def _migrate_legacy(root, cfg, report):
+    path = root / "job.json"
+    if not path.exists():
+        return
+    previous = json.loads(path.read_text())
+    if previous.get("schema_version") == 2:
+        return
+    old_cfg = resolve_expansion_job(ExpansionRunCfg(**previous["config"]))
+    old_report = preflight_expansion_job(old_cfg)
+    if previous.get("resolved_deployment") != old_report["resolved_deployment"]:
+        raise ValueError(
+            "legacy resolved deployment changed or is missing; frozen export remains available"
+        )
+    if (
+        old_report["semantic_id"] != report["semantic_id"]
+        or old_report["input_files"] != previous["input_files"]
+    ):
+        raise ValueError(
+            "legacy job inputs changed; cannot migrate its recorded evidence"
+        )
+    _atomic_json(root / "legacy-job.json", previous)
+    for item in (root / "attempts").glob("*/attempt.json"):
+        record = json.loads(item.read_text())
+        _atomic_json(root / "legacy_attempts" / (item.parent.name + ".json"), record)
+        record.update(
+            sequence=int(item.parent.name),
+            recipe_id=record.get("identity", {}).get(
+                "template_id", str(record["ordinal"])
+            ),
+            attempt_id=record.get("identity", {}).get("attempt_id", 0),
+        )
+        if record["status"] in {"prepared", "running", "interrupted"}:
+            record.update(
+                status="abandoned", reason="legacy attempt lacks a typed replay recipe"
+            )
+        _atomic_json(item, record)
+    observed = []
+    if (root / "runtime.json").exists():
+        observed.append(
+            json.loads((root / "runtime.json").read_text())
+            .get("seconds", {})
+            .get("elapsed", 0.0)
+        )
+    if (root / "progress.json").exists():
+        observed.append(
+            json.loads((root / "progress.json").read_text()).get("elapsed_seconds", 0.0)
+        )
+    _atomic_json(
+        root / "runs" / "legacy" / "status.json",
+        {
+            "state": "closed",
+            "elapsed_seconds": max(observed, default=0.0),
+            "time_uncertain": True,
+        },
+    )
+    _atomic_json(
+        path,
+        {
+            **report,
+            "schema_version": 2,
+            "config": cfg.to_dict(),
+            "legacy_job_id": previous["job_id"],
+        },
+    )
 
 
 def run_expansion_job(
     cfg: ExpansionRunCfg, *, resume: bool = False
 ) -> dict[str, object]:
-    """Collect qualified episodes with bounded media and durable per-attempt records.
+    """Assemble one native host, shared scheduler and durable stage coordinator.
 
-    Args:
-        cfg: Closed job configuration referencing an existing deployment.
-        resume: Verify prior output and continue only uncommitted work.
-    Returns:
-        Verified progress report. Exhausting attempts does not imply completion.
+    Resource budgets may change on resume; physical recipe semantics remain pinned.
+    Accepted parents are postprocessed even when collection exhausts its budget.
     """
-    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
-    from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
-    from embodichain.lab.sim import SimulationManager
-    from embodichain.lab.sim.scene import SceneView, capture_state
-    from embodichain.lab.sim.scene.physics import (
-        capture_physics_properties,
-        capture_rigid_physics,
-        apply_rigid_physics,
-    )
-    from embodichain.utils.utility import load_config
-
+    cfg = resolve_expansion_job(cfg)
     report = preflight_expansion_job(cfg)
-    root = Path(cfg.output_dir)
-    root.mkdir(parents=True, exist_ok=True)
+    root = Path(cfg.output_dir).resolve()
+    _mkdir(root)
     with (root / ".owner.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        manifest = root / "job.json"
-        if manifest.exists():
-            if not resume:
-                raise FileExistsError("job output already exists; use resume")
-            if json.loads(manifest.read_text())["job_id"] != report["job_id"]:
-                raise ValueError("job configuration or source content changed")
-        elif resume:
-            raise FileNotFoundError("resume requires an existing job manifest")
-        else:
-            _atomic_json(manifest, {**report, "config": cfg.to_dict()})
-        source_artifacts = {
-            field: {
-                "path": str(Path(getattr(cfg, field)).resolve()),
-                "sha256": checksum,
-            }
-            for field, checksum in report["input_files"].items()
-        }
-        source_artifacts["job"] = {
-            "path": str(manifest.resolve()),
-            "sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
-        }
-        sink = ArtifactEpisodeSink(root)
         if resume:
-            verified = {receipt.commit_id: receipt for receipt in sink.inspect()}
-            for attempt_path in sorted((root / "attempts").glob("*/attempt.json")):
-                record = json.loads(attempt_path.read_text())
-                receipt = verified.get(record["commit_id"])
-                if receipt is None:
-                    receipt = sink.recover(record["commit_id"])
-                if receipt is None and record["status"] == "pending_write":
-                    raise RuntimeError("pending write has lost its staged evidence")
-                if receipt is None and record["status"] in {"prepared", "running"}:
-                    record["executed_steps_lower_bound"] = (
-                        1 if record["status"] == "running" else 0
-                    )
-                    record["status"] = "interrupted"
-                    _atomic_json(attempt_path, record)
-                if receipt is not None:
-                    record["status"] = "committed"
-                    record["storage_id"] = receipt.storage_id
-                    _atomic_json(attempt_path, record)
-        committed = len(sink.inspect())
-        if committed >= cfg.target_episodes:
-            status = inspect_expansion_job(root)
-            if status["complete"]:
-                return status
-        attempts_root = root / "attempts"
-        attempts_root.mkdir(exist_ok=True)
-        previous = sorted(attempts_root.glob("*/attempt.json"))
-        next_ordinal = (
-            max(
-                (json.loads(path.read_text())["ordinal"] for path in previous),
-                default=-1,
-            )
-            + 1
-        )
-        # Source artifacts and camera buffers belong to this run, never normal reset-time writers.
-        path = Path(cfg.deployment)
-        raw = load_config(path)
-        environment_cfg = config_to_cfg(
-            raw, source_path=path, task_program_path_override=cfg.program
-        )
-        environment_cfg.num_envs = environment_cfg.sim_cfg.num_envs = cfg.batch_size
-        environment_cfg.seed = cfg.seed
-        environment_cfg.dataset = None
-        environment_cfg.init_rollout_buffer = False
-        environment_cfg.record_trajectory = False
-        environment_cfg.sim_cfg.headless = True
-        if not cfg.capture_media:
-            environment_cfg.enable_sensor = False
-            environment_cfg.sim_cfg.render_cfg.renderer = "no-render"
-        else:
-            environment_cfg.enable_sensor = True
-            if environment_cfg.sim_cfg.render_cfg.renderer == "no-render":
-                environment_cfg.sim_cfg.render_cfg.renderer = "hybrid"
-        from embodichain.lab.sim.profiler import ProfilerCfg
-
-        environment_cfg.profiler = ProfilerCfg(
-            warmup_steps=0, output_path=str(root / "profile.json")
-        )
-        env = None
-        collision = None
-        appearance = None
-        visual_registry = None
-        if cfg.visual_profile_file is not None:
-            from .visual import load_visual_profiles
-
-            visual_registry = load_visual_profiles(cfg.visual_profile_file)
-        started = time.monotonic()
-        timings = {
-            "prepare": 0.0,
-            "execute": 0.0,
-            "commit": 0.0,
-            "render_variants": 0.0,
-            "export": 0.0,
-        }
+            _migrate_legacy(root, cfg, report)
+        journal = ExpansionJournal(root)
+        journal.open_run(report, cfg.to_dict(), resume=resume)
+        sink = ArtifactEpisodeSink(root)
+        host = None
+        engine = None
         try:
-            env = REGISTERED_ENVS[raw["id"]].make(cfg=environment_cfg)
-            timings["startup"] = time.monotonic() - started
-            if getattr(
-                env, "event_manager", None
-            ) is not None and env.event_manager.active_functors.get("interval"):
-                raise ValueError(
-                    "offline expansion requires fixed episode parameters; interval events are unsupported"
-                )
-            view = SceneView(env.sim, env_ids=tuple(range(cfg.batch_size)))
-            managed = tuple(sorted(set(cfg.mass_scale) | set(cfg.friction)))
-            baseline = capture_rigid_physics(view, managed) if managed else None
-            auxiliary_baseline = (
-                capture_physics_properties(view)
-                if (
-                    cfg.center_of_mass
-                    or cfg.joint_stiffness_scale
-                    or cfg.joint_damping_scale
-                )
-                else None
-            )
-            if cfg.collision_profile is not None:
-                from .collision import _MeasuredCollision
+            journal.reconcile(sink)
+            completed = len(sink.inspect())
+            prior = journal.attempts()
+            from .stages import plan_postprocessing, render_pending, run_postprocessing
 
-                collision = _MeasuredCollision(
-                    env, cfg.collision_profile, root / "collision"
-                )
-            profile = None
-            if cfg.source == "real2sim":
-                from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
-                    load_real2sim_tabletop_profile,
-                )
+            plan = plan_postprocessing(cfg, root, sink.inspect())
+            status = inspect_expansion_job(root)
+            if not status["complete"]:
+                source_artifacts = {
+                    field: {
+                        "path": str(Path(getattr(cfg, field)).resolve()),
+                        "sha256": checksum,
+                    }
+                    for field, checksum in report["input_files"].items()
+                }
+                for field, path in (
+                    ("job", root / "job.json"),
+                    (
+                        "execution",
+                        root / "runs" / journal.run_id / "configuration.json",
+                    ),
+                ):
+                    source_artifacts[field] = {
+                        "path": str(path),
+                        "sha256": _digest(path),
+                    }
+                from .host import GymExpansionHost
 
-                profile = load_real2sim_tabletop_profile(cfg.source_profile)
-            scene_source = None
-            if cfg.scene_atlas is not None:
-                from .scene import JointSceneSource
-
-                scene_source = JointSceneSource(cfg.scene_atlas)
-            motion_profile = None
-            motion_recipes = ()
-            if cfg.motion_profile is not None:
-                from embodichain.lab.sim.motion.expansion.profile import (
-                    load_expansion_profile,
+                needs_collection = (
+                    completed < cfg.target_episodes
+                    and len(prior) < cfg.max_attempts
+                    and journal.time_usage()[0] < cfg.max_wall_time_s
                 )
-                from embodichain.lab.sim.motion.expansion.combined import (
-                    enumerate_candidate_recipes,
-                )
-
-                motion_profile = load_expansion_profile(cfg.motion_profile)
-                motion_recipes = enumerate_candidate_recipes(motion_profile)
-            names = tuple(env.robot.joint_names[i] for i in env.active_joint_ids)
-            limits = env.robot.get_qpos_limits()
-            if limits.ndim == 3:
-                limits = limits[0]
-            limits = limits[list(env.active_joint_ids)].cpu()
-            session = None
-            if committed < cfg.target_episodes:
-                session = ExpansionSession(
-                    TrajectoryExpansionJobCfg.from_mapping(
-                        {
-                            "collection": {
-                                "max_wall_time_s": cfg.max_wall_time_s,
-                                "target_committed_episodes": cfg.target_episodes
-                                - committed,
-                                "max_rollout_attempts": max(
-                                    1, cfg.max_attempts - next_ordinal
-                                ),
-                                "max_proposals": max(
-                                    1, cfg.max_attempts - next_ordinal
-                                ),
-                            },
-                            "execution": {
-                                "ready_high_watermark": cfg.batch_size,
-                                "ready_low_watermark": 0,
-                            },
-                            "persistence": {
-                                "pending_episode_limit": cfg.batch_size,
-                                "pending_max_bytes": cfg.batch_size
-                                * cfg.episode_byte_budget,
-                            },
-                            "validation": {"require_path_collision": True},
-                        }
-                    )
-                )
-            while (
-                next_ordinal < cfg.max_attempts
-                and committed < cfg.target_episodes
-                and not session.stop_reason
-            ):
-                for field, checksum in report["input_files"].items():
-                    if (
-                        hashlib.sha256(
-                            Path(getattr(cfg, field)).read_bytes()
-                        ).hexdigest()
-                        != checksum
-                    ):
-                        raise ValueError(f"job input {field} changed after preflight")
-                count = min(
-                    cfg.batch_size,
-                    cfg.max_attempts - next_ordinal,
-                    cfg.target_episodes - committed,
-                )
-                ordinals = list(range(next_ordinal, next_ordinal + count))
-                from .recipes import PinnedExpertSource, UniformRangeOperator
-
-                expert_source = PinnedExpertSource(
-                    cfg.source, report["recipe_revision"]
-                )
-                physical = {}
-                for row, ordinal in enumerate(ordinals):
-                    values = {}
-                    for kind in (
-                        "mass_scale",
-                        "friction",
-                        "joint_stiffness_scale",
-                        "joint_damping_scale",
-                    ):
-                        if kind.startswith("joint_") and not getattr(cfg, kind):
-                            continue
-                        values[kind] = dict(
-                            UniformRangeOperator(kind, getattr(cfg, kind)).sample(
-                                expert_source.context(cfg.seed, ordinal)
-                            )
+                needs_render = bool(render_pending(root, plan))
+                render_startup_error = None
+                if needs_collection or needs_render:
+                    try:
+                        host = GymExpansionHost(
+                            cfg, report, root, journal, source_artifacts
                         )
-                    if cfg.center_of_mass:
-                        context = expert_source.context(cfg.seed, ordinal)
-                        values["center_of_mass"] = {
-                            uid: [
-                                context.random(
-                                    "center_of_mass", "1", f"{uid}/{axis}"
-                                ).uniform(*bounds)
-                                for axis, bounds in enumerate(axes)
-                            ]
-                            for uid, axes in cfg.center_of_mass.items()
-                        }
-                    physical[row] = values
-
-                if appearance is not None:
-                    appearance.close()
-                appearance = ExitStack()
-
-                def prepare():
-                    if scene_source is not None:
-                        from .scene import apply_joint_scene_candidates
-
-                        apply_joint_scene_candidates(
-                            SceneView(env.sim, env_ids=tuple(range(count))),
+                    except Exception as error:
+                        render_startup_error = str(error)
+                        journal.stage(
+                            "collection" if needs_collection else "render",
+                            "failed",
+                            error=render_startup_error,
+                        )
+                remaining = max(0, cfg.max_attempts - len(prior))
+                if needs_collection and host is not None:
+                    journal.stage("collection", "running")
+                    session = ExpansionSession(
+                        TrajectoryExpansionJobCfg.from_mapping(
                             {
-                                row: scene_source.candidate(ordinal)
-                                for row, ordinal in enumerate(ordinals)
-                            },
-                        )
-                    if baseline is not None:
-                        masses = {
-                            uid: torch.tensor(
-                                [
-                                    (
-                                        physical[row]["mass_scale"].get(uid, 1.0)
-                                        if row < count
-                                        else 1.0
-                                    )
-                                    for row in range(cfg.batch_size)
-                                ]
-                            )
-                            for uid in cfg.mass_scale
-                        }
-                        friction = {
-                            uid: torch.tensor(
-                                [
-                                    (
-                                        physical[row]["friction"][uid]
-                                        if row < count
-                                        else baseline.bodies[managed.index(uid)][3][row]
-                                    )
-                                    for row in range(cfg.batch_size)
-                                ]
-                            )
-                            for uid in cfg.friction
-                        }
-                        apply_rigid_physics(
-                            view, baseline, mass_scale=masses, friction=friction
-                        )
-
-                    if auxiliary_baseline is not None:
-                        from .parameters import _apply_auxiliary_physics
-
-                        _apply_auxiliary_physics(
-                            view,
-                            auxiliary_baseline,
-                            robot_uid=env.robot.uid,
-                            com_offsets={
-                                uid: torch.tensor(
-                                    [
-                                        (
-                                            physical[row]["center_of_mass"][uid]
-                                            if row < count
-                                            else [0.0, 0.0, 0.0]
-                                        )
-                                        for row in range(cfg.batch_size)
-                                    ]
-                                )
-                                for uid in cfg.center_of_mass
-                            },
-                            stiffness_scale={
-                                joint: torch.tensor(
-                                    [
-                                        (
-                                            physical[row]["joint_stiffness_scale"][
-                                                joint
-                                            ]
-                                            if row < count
-                                            else 1.0
-                                        )
-                                        for row in range(cfg.batch_size)
-                                    ]
-                                )
-                                for joint in cfg.joint_stiffness_scale
-                            },
-                            damping_scale={
-                                joint: torch.tensor(
-                                    [
-                                        (
-                                            physical[row]["joint_damping_scale"][joint]
-                                            if row < count
-                                            else 1.0
-                                        )
-                                        for row in range(cfg.batch_size)
-                                    ]
-                                )
-                                for joint in cfg.joint_damping_scale
-                            },
-                        )
-
-                    if cfg.visual_profile is not None:
-                        from .visual import _visual_profile
-
-                        if (
-                            hashlib.sha256(
-                                Path(cfg.visual_profile_file).read_bytes()
-                            ).hexdigest()
-                            != report["input_files"]["visual_profile_file"]
-                        ):
-                            raise ValueError("visual profile changed after preflight")
-                        appearance.enter_context(
-                            _visual_profile(env, visual_registry[cfg.visual_profile])
-                        )
-
-                phase_started = time.monotonic()
-
-                def prepare_and_settle():
-                    prepare()
-                    if cfg.settling_steps:
-                        env.sim.update(step=cfg.settling_steps)
-                    env.sim.sync_render_state()
-
-                initial_obs, _ = env.reset(
-                    seed=cfg.seed,
-                    options={"save_data": False, "episode_prepare": prepare_and_settle},
-                )
-                initial = capture_state(view)
-                physics_before = capture_physics_properties(view)
-                if collision is not None:
-                    collision.prepare()
-                assignments, bridges, services, records, spools = {}, {}, {}, {}, {}
-                program = env.compile_task_program(environment_cfg.task_program)
-                for row, ordinal in enumerate(ordinals):
-                    if session.stop_reason:
-                        break
-                    recipe = {
-                        "ordinal": ordinal,
-                        "seed": cfg.seed,
-                        "physics": physical[row],
-                        "source": cfg.source,
-                        "scene_candidate_id": (
-                            scene_source.candidate(ordinal).candidate_id
-                            if scene_source is not None
-                            else None
-                        ),
-                        "motion_recipe": (
-                            ordinal % len(motion_recipes) if motion_recipes else None
-                        ),
-                    }
-                    recipe_id = _hash((report["recipe_revision"], recipe))
-                    initial_values = [asdict(entity) for entity in initial.batches[row]]
-                    initial_id = _hash(initial_values)
-                    case = SceneCase(
-                        _hash((report["recipe_revision"], physical[row])),
-                        initial_id,
-                        report["job_id"],
-                        program.program_id,
-                        env.robot.uid,
-                    )
-                    session.register_case(case, limits, joint_names=names)
-                    identity, _ = session.propose(
-                        case.scene_case_id,
-                        case.initial_state_id,
-                        source_id=program.program_id,
-                        source_revision=report["recipe_revision"],
-                        template_id=recipe_id,
-                        operator_id="episode",
-                    )
-                    if collision is not None and not collision.initial[row]:
-                        session.release(identity, reason="initial_validation_failed")
-                        directory = attempts_root / f"{ordinal:08d}"
-                        directory.mkdir(exist_ok=False)
-                        _atomic_json(
-                            directory / "attempt.json",
-                            {
-                                "ordinal": ordinal,
-                                "status": "initial_rejected",
-                                "identity": asdict(identity),
-                                "commit_id": session.episode_ids(identity)[1],
-                                "steps": 0,
-                            },
-                        )
-                        continue
-                    session.add_prepared_episode(
-                        EpisodeCandidate(identity, json.dumps(recipe)),
-                        ValidationResult(
-                            (ValidationCheck("source_configuration", "passed"),)
-                        ),
-                    )
-                    reserved = session.take_ready(
-                        case.scene_case_id,
-                        case.initial_state_id,
-                        episode_byte_budget=cfg.episode_byte_budget,
-                        candidate_id=identity.candidate_id,
-                    )
-                    if reserved is None:
-                        raise RuntimeError("session cannot reserve requested cohort")
-                    episode_id, commit_id = session.episode_ids(identity)
-                    directory = attempts_root / f"{ordinal:08d}"
-                    directory.mkdir(exist_ok=False)
-                    record = {
-                        "ordinal": ordinal,
-                        "status": "prepared",
-                        "recipe": recipe,
-                        "case": asdict(case),
-                        "identity": asdict(identity),
-                        "episode_id": episode_id,
-                        "commit_id": commit_id,
-                        "joint_names": names,
-                        "initial_state": initial_values,
-                    }
-                    _atomic_json(directory / "attempt.json", record)
-                    assignments[row] = (
-                        identity,
-                        episode_id,
-                        commit_id,
-                        directory,
-                        record,
-                    )
-                    if profile is None:
-                        pass
-                    else:
-                        from .real2sim import _Real2SimRow
-
-                        service = _Real2SimRow(
-                            env,
-                            row,
-                            profile,
-                            output=directory,
-                            ordinal=ordinal,
-                            attempt=0,
-                            initial_state_id=initial_id,
-                            recipe=profile.recipes[ordinal % len(profile.recipes)],
-                        )
-                        services[row] = service
-                        bridges[row] = service.bridge
-                    scene_fields = {
-                        (entity.uid, name): tuple(getattr(entity, name))
-                        for entity in initial.batches[row]
-                        for name in (
-                            "pose",
-                            "velocity",
-                            "qpos",
-                            "qvel",
-                            "target_qpos",
-                            "target_qvel",
-                            "qf",
-                        )
-                        if getattr(entity, name)
-                    }
-                    records[row] = {
-                        "scene": {
-                            key: [torch.tensor(value, dtype=torch.float32)]
-                            for key, value in scene_fields.items()
-                        },
-                        "qpos": [env.robot.get_qpos()[row].detach().cpu().clone()],
-                        "qvel": [env.robot.get_qvel()[row].detach().cpu().clone()],
-                        "qf": [env.robot.get_qf()[row].detach().cpu().clone()],
-                        "actions": [],
-                        "objects": {
-                            uid: [
-                                env.sim.get_rigid_object(uid)
-                                .body_state[row]
-                                .detach()
-                                .cpu()
-                                .clone()
-                            ]
-                            for uid in env.sim.get_rigid_object_uid_list()
-                        },
-                    }
-                    if cfg.capture_media:
-                        from .visual import _calibrated_frames, _camera_calibration
-
-                        frames = _calibrated_frames(env, initial_obs, row)
-                        if not frames:
-                            raise ValueError(
-                                "capture_media requires configured RGB/depth sensor observations"
-                            )
-                        spool = MediaSpool(
-                            directory / "media",
-                            max_buffer_bytes=max(
-                                1, cfg.media_buffer_bytes // cfg.batch_size
-                            ),
-                            parent_episode_id=episode_id,
-                            calibration=_camera_calibration(env, row),
-                        )
-                        spool.append(0.0, frames)
-                        spools[row] = spool
-
-                def observe(ids, action, observation):
-                    if collision is not None:
-                        collision.sample(ids, action)
-                    frame_state = capture_state(view)
-                    measured_qpos = env.robot.get_qpos().detach().cpu().clone()
-                    measured_qvel = env.robot.get_qvel().detach().cpu().clone()
-                    measured_qf = env.robot.get_qf().detach().cpu().clone()
-                    measured_objects = {
-                        uid: env.sim.get_rigid_object(uid)
-                        .body_state.detach()
-                        .cpu()
-                        .clone()
-                        for uid in env.sim.get_rigid_object_uid_list()
-                    }
-                    for row in ids:
-                        record = records[row]
-                        value = (
-                            {"qpos": action.value}
-                            if isinstance(action.value, torch.Tensor)
-                            else action.value
-                        )
-
-                        def active_command(name):
-                            data = value[name][row]
-                            if data.shape[-1] == env.robot.dof:
-                                data = data[list(env.active_joint_ids)]
-                            elif data.shape[-1] != len(env.active_joint_ids):
-                                raise ValueError(
-                                    "submitted command joint layout differs"
-                                )
-                            return data.detach().cpu()
-
-                        command = active_command("qpos")
-                        if (
-                            env.expert_action_spec.joint_command_mode
-                            == "position_velocity"
-                        ):
-                            command = torch.cat(
-                                (
-                                    command,
-                                    active_command("qvel"),
-                                )
-                            )
-                        entity_states = {
-                            entity.uid: entity for entity in frame_state.batches[row]
-                        }
-                        for (uid, field), values in record["scene"].items():
-                            values.append(
-                                torch.tensor(
-                                    getattr(entity_states[uid], field),
-                                    dtype=torch.float32,
-                                )
-                            )
-                        record["actions"].append(command.clone())
-                        record["qpos"].append(measured_qpos[row].clone())
-                        record["qvel"].append(measured_qvel[row].clone())
-                        record["qf"].append(measured_qf[row].clone())
-                        for uid, values in record["objects"].items():
-                            values.append(measured_objects[uid][row].clone())
-                        if row in spools:
-                            spools[row].append(
-                                len(record["actions"]) * env.step_dt,
-                                _calibrated_frames(env, observation, row),
-                            )
-                        size = sum(
-                            x.numel() * x.element_size()
-                            for key in ("actions", "qpos", "qvel", "qf")
-                            for x in record[key][-1:]
-                        )
-                        size += sum(
-                            x.numel() * x.element_size()
-                            for values in record["objects"].values()
-                            for x in values[-1:]
-                        )
-                        size += sum(
-                            values[-1].numel() * values[-1].element_size()
-                            for values in record["scene"].values()
-                        )
-                        record["bytes"] = record.get("bytes", 0) + size
-                        if record["bytes"] > cfg.episode_byte_budget:
-                            raise BufferError("numeric episode buffer budget exceeded")
-
-                def mark_started(row):
-                    session.mark_rollout_started(assignments[row][0])
-                    record = assignments[row][4]
-                    record["status"] = "running"
-                    _atomic_json(assignments[row][3] / "attempt.json", record)
-
-                timings["prepare"] += time.monotonic() - phase_started
-                phase_started = time.monotonic()
-                if not assignments:
-                    next_ordinal += count
-                    continue
-                if profile is None:
-                    result = collect_vector_program(
-                        env,
-                        program,
-                        tuple(assignments),
-                        max_steps=cfg.max_steps,
-                        observe_step=observe,
-                        on_started=mark_started,
-                        expansion_profile=motion_profile,
-                        recipe_indices=(
-                            tuple(
-                                (next_ordinal + row) % len(motion_recipes)
-                                for row in range(cfg.batch_size)
-                            )
-                            if motion_recipes
-                            else None
-                        ),
-                    )
-                else:
-                    result = collect_program_batch(
-                        env,
-                        bridges,
-                        max_steps=cfg.max_steps,
-                        observe_step=observe,
-                        on_started=mark_started,
-                        reject_row=(
-                            None
-                            if collision is None
-                            else lambda row: row in collision.results
-                            and collision.results[row].status != "passed"
-                        ),
-                    )
-                timings["execute"] += time.monotonic() - phase_started
-                phase_started = time.monotonic()
-                physics_after = capture_physics_properties(view)
-                pending_commits = []
-                for result_row, row in enumerate(result.env_ids):
-                    identity, episode_id, commit_id, directory, record = assignments[
-                        row
-                    ]
-                    record["program_segments"] = result.segments[result_row]
-                    record["steps"] = result.lengths[result_row]
-                    record["reason"] = result.reasons[result_row]
-                    if not result.accepted[result_row]:
-                        session.release(identity, reason=result.reasons[result_row])
-                        record["status"] = "rejected"
-                        _atomic_json(directory / "attempt.json", record)
-                        continue
-                    numeric = records[row]
-                    positions = torch.stack(numeric["qpos"])
-                    observations = {
-                        "joint_positions": positions[:, list(env.active_joint_ids)],
-                        "full_joint_positions": positions,
-                        "joint_velocities": torch.stack(numeric["qvel"])[
-                            :, list(env.active_joint_ids)
-                        ],
-                        "joint_efforts": torch.stack(numeric["qf"])[
-                            :, list(env.active_joint_ids)
-                        ],
-                    }
-                    observations.update(
-                        {
-                            f"rigid/{uid}/state": torch.stack(values)
-                            for uid, values in numeric["objects"].items()
-                        }
-                    )
-                    scene_keys = []
-                    for index, ((uid, field), values) in enumerate(
-                        numeric["scene"].items()
-                    ):
-                        key = f"scene_state_{index}"
-                        observations[key] = torch.stack(values)
-                        scene_keys.append(
-                            {"key": key, "entity_uid": uid, "field": field}
-                        )
-                    metadata = {
-                        "expansion_source_artifacts": source_artifacts,
-                        "data_type": "sim",
-                        "observation_origin": "simulation",
-                        "visual_profile": cfg.visual_profile,
-                        "visual_profile_revision": report["input_files"].get(
-                            "visual_profile_file"
-                        ),
-                        "recipe": record["recipe"],
-                        "scene_case": record["case"],
-                        "joint_names": names,
-                        "source_episode_uuid": _hash(
-                            ("task_program", program.program_id)
-                        ),
-                        "expert_action_spec": env.expert_action_spec.metadata(
-                            step_dt=env.step_dt
-                        ),
-                        "initial_state": record["initial_state"],
-                        "scene_state_fields": scene_keys,
-                        "physics_backend": env.sim.physics_backend,
-                        "program_segments": result.segments[result_row],
-                        "expansion": (
-                            result.expansion_records[result_row]
-                            if result.expansion_records
-                            else ()
-                        ),
-                        "segments": result.segments[result_row],
-                        "instruction": program.instruction,
-                        "instruction_source": "task_program",
-                    }
-                    physics_unchanged = all(
-                        torch.allclose(
-                            physics_before[key][row],
-                            physics_after[key][row],
-                            atol=1e-6,
-                            rtol=1e-6,
-                        )
-                        for key in physics_before
-                    )
-
-                    def parameter_value(value):
-                        if isinstance(value, list):
-                            return [parameter_value(item) for item in value]
-                        return (
-                            value
-                            if math.isfinite(value)
-                            else ("+inf" if value > 0 else "-inf")
-                        )
-
-                    metadata["physics_parameters"] = {
-                        key: parameter_value(value[row].detach().cpu().tolist())
-                        for key, value in physics_before.items()
-                    }
-                    metadata["physics_fingerprint"] = _hash(
-                        metadata["physics_parameters"]
-                    )
-                    checks = [
-                        ValidationCheck(
-                            "physics_parameters",
-                            "passed" if physics_unchanged else "failed",
-                            "Measured episode parameter baseline",
-                        ),
-                        ValidationCheck(
-                            "task_success",
-                            "passed",
-                            "Canonical Task Program and segment validators completed",
-                        ),
-                    ]
-                    if collision is not None:
-                        measured = collision.terminal.get(row)
-                        if measured is None:
-                            checks.append(
-                                ValidationCheck("task.measured", "unavailable")
-                            )
-                        else:
-                            checks.extend(measured.checks)
-                        checked = collision.results.get(row)
-                        checks.append(
-                            ValidationCheck(
-                                "path_collision",
-                                (
-                                    "passed"
-                                    if checked is not None
-                                    and checked.status == "passed"
-                                    else "failed"
-                                ),
-                                (
-                                    "Measured control-boundary collision checks"
-                                    if checked is None
-                                    else checked.reason
-                                ),
-                            )
-                        )
-                    if row in services:
-                        request = services[row].qualify(
-                            qpos=positions,
-                            object_pose=torch.stack(
-                                numeric["objects"][profile.object_uid]
-                            )[:, :7],
-                        )
-                        metadata.update(dict(request.metadata))
-                        metadata.pop("source_episode_uuid", None)
-                        metadata["source_episode_uuids"] = sorted(
-                            {
-                                _hash(
-                                    (
-                                        "real2sim",
-                                        unit.unit.source.source_id,
-                                        unit.unit.source.source_revision,
-                                    )
-                                )
-                                for unit in services[row].prototypes.values()
+                                "collection": {
+                                    "target_committed_episodes": cfg.target_episodes
+                                    - completed,
+                                    "max_rollout_attempts": remaining,
+                                    "max_proposals": remaining,
+                                    "max_wall_time_s": max(
+                                        0.001,
+                                        cfg.max_wall_time_s - journal.time_usage()[0],
+                                    ),
+                                },
+                                "execution": {
+                                    "ready_high_watermark": cfg.batch_size,
+                                    "ready_low_watermark": 0,
+                                },
+                                "persistence": {
+                                    "pending_episode_limit": cfg.batch_size,
+                                    "pending_max_bytes": cfg.batch_size
+                                    * cfg.episode_byte_budget,
+                                },
+                                "validation": {"require_path_collision": True},
                             }
-                        )
-                        checks.extend(request.validation.checks)
-                        checks.append(
-                            ValidationCheck(
-                                "path_collision",
-                                "passed",
-                                "Source-qualified planned and measured collision checks",
-                            )
-                        )
-                    if row in spools:
-                        metadata["media_manifest"] = str(spools[row].finish())
-                        metadata["media_manifest_sha256"] = hashlib.sha256(
-                            Path(metadata["media_manifest"]).read_bytes()
-                        ).hexdigest()
-                    episode = ExpertEpisode(
-                        identity,
-                        observations,
-                        torch.stack(numeric["actions"]),
-                        torch.arange(len(positions), dtype=torch.float64) * env.step_dt,
-                        (
-                            "joint_position_velocity"
-                            if env.expert_action_spec.joint_command_mode
-                            == "position_velocity"
-                            else "joint_position"
                         ),
-                        ValidationResult(tuple(checks)),
-                        episode_id,
-                        commit_id,
-                        metadata=metadata,
+                        episode_namespace=journal.job_instance_id,
                     )
-                    record["measured_accepted"] = episode.validation.accepted
-                    record["validation"] = [
-                        dict(
-                            check_id=check.check_id,
-                            status=check.status,
-                            detail=check.detail,
-                            metrics=dict(check.metrics),
-                        )
-                        for check in episode.validation.checks
-                    ]
-                    if session.accept_episode(episode):
-                        sink.stage(episode)
-                        record["status"] = "pending_write"
-                        _atomic_json(directory / "attempt.json", record)
-                        pending_commits.append((episode, directory, record))
-                    else:
-                        record["status"] = "coverage_rejected"
-                    _atomic_json(directory / "attempt.json", record)
-                # Freeze every accepted row before the first potentially ambiguous write.
-                for episode, directory, record in pending_commits:
-                    receipt = sink.submit(episode, submission_id=0)
-                    session.apply_receipt(receipt)
-                    committed += 1
-                    record["status"] = "committed"
-                    record["storage_id"] = receipt.storage_id
-                    _atomic_json(directory / "attempt.json", record)
-                timings["commit"] += time.monotonic() - phase_started
-                next_ordinal += count
-                _atomic_json(
-                    root / "progress.json",
-                    {
-                        "committed": committed,
-                        "next_ordinal": next_ordinal,
-                        "elapsed_seconds": time.monotonic() - started,
-                    },
+                    engine = ExpansionEngine(
+                        ExpansionJobCfg(
+                            batch_size=cfg.batch_size,
+                            episode_byte_budget=cfg.episode_byte_budget,
+                            candidate_budget=cfg.batch_size,
+                        ),
+                        session=session,
+                        host=host,
+                        sink=_RecordedSink(sink, journal),
+                    )
+                    engine.run_source(_RecipeSource(cfg, host, journal))
+                    journal.stage(
+                        "collection",
+                        (
+                            "complete"
+                            if len(sink.inspect()) >= cfg.target_episodes
+                            else "budget_exhausted"
+                        ),
+                    )
+                run_postprocessing(
+                    cfg, host, sink, journal, render_startup_error=render_startup_error
                 )
-            if appearance is not None:
-                appearance.close()
-                appearance = None
-            if cfg.render_profiles and committed >= cfg.target_episodes:
-                from .visual import render_observation_variants
+                from .reporting import build_expansion_report
 
-                phase_started = time.monotonic()
-                render_observation_variants(
-                    env,
-                    root,
-                    profile_file=cfg.visual_profile_file,
-                    profiles=cfg.render_profiles,
-                    buffer_bytes=cfg.media_buffer_bytes,
-                )
-                timings["render_variants"] += time.monotonic() - phase_started
-            if cfg.export_lerobot and committed >= cfg.target_episodes:
-                from .export import export_expansion_lerobot
-
-                phase_started = time.monotonic()
-                export_expansion_lerobot(env, root)
-                timings["export"] += time.monotonic() - phase_started
-            import resource
-
-            timings["elapsed"] = time.monotonic() - started
-            _atomic_json(
-                root / "runtime.json",
-                {
-                    "seconds": timings,
-                    "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-                    * 1024,
-                    "committed": committed,
-                    "stop_reason": session.stop_reason if session is not None else None,
-                    "profiler": env._profiler.report(),
-                },
-            )
-            return inspect_expansion_job(root)
+                build_expansion_report(root, write=True)
+                if host is not None:
+                    _atomic_json(
+                        root / "runtime.json",
+                        {
+                            "seconds": host.timings,
+                            "engine_seconds": (
+                                dict(engine.timings) if engine is not None else {}
+                            ),
+                            "peak_rss_bytes": resource.getrusage(
+                                resource.RUSAGE_SELF
+                            ).ru_maxrss
+                            * 1024,
+                            "profiler": host.env._profiler.report(),
+                        },
+                    )
         finally:
-            if appearance is not None:
-                appearance.close()
-            if collision is not None:
-                collision.close()
-            if env is not None:
-                # Release row runtimes before destroying their native entity bindings.
-                if "bridges" in locals():
-                    bridges.clear()
-                    services.clear()
-                env._active_task_program_bridge = None
-                env.close(exit_process=False)
-            env = None
-            SimulationManager.flush_cleanup_queue()
+            try:
+                if host is not None:
+                    host.close()
+            finally:
+                journal.checkpoint(force=True, state="closed")
+
+        from .reporting import build_expansion_report
+
+        build_expansion_report(root, write=True)
+        return inspect_expansion_job(root)
+
+
+def resume_expansion_export(directory: str | Path) -> dict[str, object]:
+    """Recover frozen writes and export confirmed artifacts without source configs or a World.
+
+    Args:
+        directory: Existing job bundle, including a relocated portable v2 bundle.
+    Returns:
+        Current job progress with a separate stage_complete flag. Exporting a
+        partial collection never marks its physical target as achieved.
+    """
+    root = Path(directory).resolve()
+    job = json.loads((root / "job.json").read_text())
+    saved = (
+        json.loads((root / "execution.json").read_text())["config"]
+        if (root / "execution.json").exists()
+        else job["config"]
+    )
+    cfg = ExpansionRunCfg(**{**saved, "output_dir": str(root), "export_lerobot": True})
+    report = {
+        **job,
+        "semantic_id": job.get("semantic_id", job["job_id"]),
+        "execution_id": _hash(("frozen-export/v2", cfg.media_buffer_bytes)),
+    }
+    if (root / "execution.json").exists():
+        report["render_profile_snapshots"] = json.loads(
+            (root / "execution.json").read_text()
+        ).get("render_profile_snapshots", job.get("render_profile_snapshots"))
+    with (root / ".owner.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        journal = ExpansionJournal(root)
+        journal.open_run(report, cfg.to_dict(), resume=True, operation="export")
+        try:
+            sink = ArtifactEpisodeSink(root)
+            journal.reconcile(sink)
+            journal.stage("export", "running")
+            from .export import export_expansion_lerobot
+
+            try:
+                exported = export_expansion_lerobot(None, root)
+                journal.stage(
+                    "export",
+                    "complete",
+                    dataset_path=exported["dataset_path"],
+                    episode_ids=exported["episode_ids"],
+                )
+            except Exception as error:
+                journal.stage("export", "failed", error=str(error))
+                raise
+        finally:
+            journal.checkpoint(force=True, state="closed")
+        result = inspect_expansion_job(root)
+        return {
+            **result,
+            "operation": "export",
+            "stage_complete": result["stages"]["export"]["complete"],
+        }

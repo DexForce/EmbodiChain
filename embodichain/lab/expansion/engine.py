@@ -25,17 +25,19 @@ from __future__ import annotations
 from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .configured import ExpansionRunCfg
+import time
+from typing import Protocol
+from .configured import ExpansionRunCfg
 
 from embodichain.utils import configclass
+from .contracts import EpisodeCandidate
+from .journal import RecipeAttempt
 from embodichain.lab.sim.motion.expansion.contracts import (
     CandidateIdentity,
     CommitReceipt,
     ExpertEpisode,
     ValidationResult,
+    CandidateSpec,
 )
 from embodichain.lab.sim.motion.expansion.coordinator import CandidateWorkItem
 from embodichain.lab.sim.motion.expansion.session import ExpansionSession
@@ -43,6 +45,10 @@ from embodichain.lab.sim.motion.expansion.session import ExpansionSession
 __all__ = [
     "ExpansionJobCfg",
     "ExpansionAssignment",
+    "PreparedEpisodeWorkItem",
+    "ExpansionWorkItem",
+    "ExpansionRecipeSource",
+    "PreparingExpansionHost",
     "ExpansionHost",
     "EpisodeSink",
     "ExpansionEngine",
@@ -70,6 +76,31 @@ class ExpansionJobCfg:
 
 
 @dataclass(frozen=True)
+class PreparedEpisodeWorkItem:
+    """Prepared lazy recipe sharing the trajectory scheduler's admission protocol.
+
+    Args:
+        candidate: Immutable recipe and session-allocated identity.
+        compatibility_key: Host-validated World/resource compatibility identity.
+        env_id: Physical row prepared by the host; rejected peers never renumber it.
+    """
+
+    candidate: EpisodeCandidate
+    compatibility_key: str
+    env_id: int
+
+    @property
+    def spec(self) -> CandidateSpec:
+        """Expose the common scheduling identity without inventing a trajectory."""
+        return CandidateSpec(
+            self.candidate.identity, compatibility_key=self.compatibility_key
+        )
+
+
+ExpansionWorkItem = CandidateWorkItem | PreparedEpisodeWorkItem
+
+
+@dataclass(frozen=True)
 class ExpansionAssignment:
     """One logical candidate assigned to a physical cohort row.
 
@@ -80,7 +111,7 @@ class ExpansionAssignment:
         commit_id: Idempotent persistence identity.
     """
 
-    item: CandidateWorkItem
+    item: ExpansionWorkItem
     env_id: int
     episode_id: str
     commit_id: str
@@ -96,11 +127,11 @@ class ExpansionHost(Protocol):
 
     capacity: int
 
-    def preflight(self, items: tuple[CandidateWorkItem, ...]) -> None:
+    def preflight(self, items: tuple[ExpansionWorkItem, ...]) -> None:
         """Check supported sources, backend, scope and budgets without mutation."""
         ...
 
-    def validate_plan(self, item: CandidateWorkItem) -> ValidationResult:
+    def validate_plan(self, item: ExpansionWorkItem) -> ValidationResult:
         """Return independent required planning checks for one candidate."""
         ...
 
@@ -111,6 +142,28 @@ class ExpansionHost(Protocol):
         on_started: Callable[[CandidateIdentity], None],
     ) -> Sequence[ExpertEpisode | None]:
         """Prepare and execute all assignments in one world loop."""
+        ...
+
+
+class ExpansionRecipeSource(Protocol):
+    """Bounded durable recipe-attempt producer, independent of motion source kind."""
+
+    def next_batch(self, capacity: int) -> tuple[RecipeAttempt, ...]:
+        """Allocate at most capacity requests; an empty batch ends sampling."""
+        ...
+
+    def after_batch(self, snapshot: Mapping[str, object]) -> None:
+        """Persist collection progress after the common scheduler drains a cohort."""
+        ...
+
+
+class PreparingExpansionHost(ExpansionHost, Protocol):
+    """Host that prepares immutable recipe attempts before engine admission."""
+
+    def prepare_batch(
+        self, requests: tuple[RecipeAttempt, ...], session: ExpansionSession
+    ) -> tuple[PreparedEpisodeWorkItem, ...]:
+        """Return session-proposed items bound to validated physical rows."""
         ...
 
 
@@ -138,26 +191,53 @@ class ExpansionEngine:
 
     def __init__(
         self,
-        cfg: ExpansionJobCfg,
+        cfg: ExpansionJobCfg | ExpansionRunCfg,
         *,
-        session: ExpansionSession,
-        host: ExpansionHost,
-        sink: EpisodeSink,
+        session: ExpansionSession | None = None,
+        host: ExpansionHost | None = None,
+        sink: EpisodeSink | None = None,
     ) -> None:
+        from .configured import ExpansionRunCfg
+
         self._configured_cfg = None
-        cfg.__post_init__()
-        self.cfg = ExpansionJobCfg(**cfg.to_dict())
-        if type(host.capacity) is not int or host.capacity < cfg.batch_size:
-            raise ValueError("host capacity cannot satisfy requested batch_size")
-        if cfg.episode_byte_budget > session.pending_max_bytes:
-            raise ValueError("episode_byte_budget exceeds session pending capacity")
+        if isinstance(cfg, ExpansionRunCfg):
+            if any(port is not None for port in (session, host, sink)):
+                raise ValueError("configured jobs assemble their execution ports")
+            self._configured_cfg = ExpansionRunCfg(**cfg.to_dict())
+            self.cfg = self._configured_cfg
+        else:
+            cfg.__post_init__()
+            if session is None or host is None or sink is None:
+                raise ValueError("custom engines require session, host and sink")
+            self.cfg = ExpansionJobCfg(**cfg.to_dict())
+            if type(host.capacity) is not int or host.capacity < cfg.batch_size:
+                raise ValueError("host capacity cannot satisfy requested batch_size")
+            if cfg.episode_byte_budget > session.pending_max_bytes:
+                raise ValueError("episode_byte_budget exceeds session pending capacity")
         self.session, self.host, self.sink = session, host, sink
-        self._queue: list[CandidateWorkItem] = []
+        self._queue: list[ExpansionWorkItem] = []
         self._seen: set[str] = set()
         self._pending: dict[str, ExpertEpisode] = {}
         self._admitted: set[str] = set()
         self._submitted: set[str] = set()
+        self._staged: set[str] = set()
+        self._submission_ids: dict[str, int] = {}
+        self._write_failures: set[str] = set()
+        self._resolved_receipts: dict[tuple[str, int], CommitReceipt] = {}
         self._failed = False
+        self.timings: dict[str, float] = {}
+
+    def _measure(self, name, operation, *args, **kwargs):
+        started = time.perf_counter()
+        try:
+            return operation(*args, **kwargs)
+        finally:
+            self.timings[name] = (
+                self.timings.get(name, 0.0) + time.perf_counter() - started
+            )
+
+    def _snapshot(self):
+        return {**self.session.snapshot(), "timings": dict(self.timings)}
 
     @classmethod
     def from_job(cls, cfg: "ExpansionRunCfg") -> "ExpansionEngine":
@@ -172,10 +252,7 @@ class ExpansionEngine:
 
         if not isinstance(cfg, ExpansionRunCfg):
             raise TypeError("cfg must be ExpansionRunCfg")
-        result = cls.__new__(cls)
-        result._configured_cfg = ExpansionRunCfg(**cfg.to_dict())
-        result.cfg = result._configured_cfg
-        return result
+        return cls(cfg)
 
     def resume(self) -> Mapping[str, object]:
         """Reconcile durable receipts and continue a configured offline job."""
@@ -185,7 +262,7 @@ class ExpansionEngine:
 
         return run_expansion_job(self._configured_cfg, resume=True)
 
-    def enqueue(self, items: Sequence[CandidateWorkItem]) -> None:
+    def enqueue(self, items: Sequence[ExpansionWorkItem]) -> None:
         """Append a bounded, unique set of candidates after read-only preflight.
 
         Args:
@@ -194,8 +271,13 @@ class ExpansionEngine:
         if self._configured_cfg is not None:
             raise ValueError("configured jobs own their candidate source")
         owned = tuple(items)
-        if any(not isinstance(item, CandidateWorkItem) for item in owned):
-            raise TypeError("items must contain CandidateWorkItem values")
+        if any(
+            not isinstance(item, (CandidateWorkItem, PreparedEpisodeWorkItem))
+            for item in owned
+        ):
+            raise TypeError(
+                "items must contain trajectory or prepared episode work items"
+            )
         ids = [item.spec.identity.candidate_id for item in owned]
         if len(ids) != len(set(ids)) or self._seen.intersection(ids):
             raise ValueError("candidate may only be enqueued once")
@@ -242,6 +324,9 @@ class ExpansionEngine:
             from .workflow import run_expansion_job
 
             return run_expansion_job(self._configured_cfg)
+        return self._drain()
+
+    def _drain(self, *, one_batch: bool = False) -> Mapping[str, object]:
         if self._failed:
             raise RuntimeError(
                 "host failed; construct a new host before further execution"
@@ -258,14 +343,21 @@ class ExpansionEngine:
                 for item in selected:
                     identity = item.spec.identity
                     if identity.candidate_id not in self._admitted:
-                        validation = self.host.validate_plan(item)
+                        validation = self._measure(
+                            "admission", self.host.validate_plan, item
+                        )
                         if not validation.accepted:
                             self.session.release(
                                 identity, reason="planning_validation_failed"
                             )
                             self._queue.remove(item)
                             continue
-                        self.session.add_planned(item.to_batch(), validation)
+                        if isinstance(item, PreparedEpisodeWorkItem):
+                            self.session.add_prepared_episode(
+                                item.candidate, validation
+                            )
+                        else:
+                            self.session.add_planned(item.to_batch(), validation)
                         self._admitted.add(identity.candidate_id)
                     ready = self.session.take_ready(
                         identity.scene_case_id,
@@ -278,7 +370,14 @@ class ExpansionEngine:
                     episode_id, commit_id = self.session.episode_ids(identity)
                     assignments.append(
                         ExpansionAssignment(
-                            item, len(assignments), episode_id, commit_id
+                            item,
+                            (
+                                item.env_id
+                                if isinstance(item, PreparedEpisodeWorkItem)
+                                else len(assignments)
+                            ),
+                            episode_id,
+                            commit_id,
                         )
                     )
             except Exception:
@@ -295,6 +394,13 @@ class ExpansionEngine:
                 ):
                     continue
                 break
+            if len({a.env_id for a in assignments}) != len(assignments) or any(
+                not 0 <= a.env_id < self.host.capacity for a in assignments
+            ):
+                for a in assignments:
+                    self.session.release(a.item.spec.identity, reason="invalid_slots")
+                self._failed = True
+                raise ValueError("host preparation produced invalid physical slots")
             started: set[CandidateIdentity] = set()
             expected = {a.item.spec.identity for a in assignments}
 
@@ -305,8 +411,13 @@ class ExpansionEngine:
                 started.add(identity)
 
             try:
-                episodes = tuple(
-                    self.host.execute_batch(tuple(assignments), on_started=on_started)
+                episodes = self._measure(
+                    "execute",
+                    lambda: tuple(
+                        self.host.execute_batch(
+                            tuple(assignments), on_started=on_started
+                        )
+                    ),
                 )
                 if len(episodes) != len(assignments):
                     raise ValueError(
@@ -339,8 +450,13 @@ class ExpansionEngine:
                         self.session.release(
                             assignment.item.spec.identity, reason="host_rejected"
                         )
-                    elif self.session.accept_episode(episode):
-                        self._pending[episode.commit_id] = episode
+                    else:
+                        accepted = self.session.accept_episode(episode)
+                        if accepted:
+                            self._pending[episode.commit_id] = episode
+                        callback = getattr(self.host, "on_acceptance", None)
+                        if callback is not None:
+                            callback(assignment, episode, accepted)
             except Exception:
                 self._failed = True
                 states = {
@@ -356,7 +472,45 @@ class ExpansionEngine:
                 raise
             # Stage every accepted row before any write can fail.
             self.flush()
-        return self.session.snapshot()
+            if one_batch:
+                break
+        return self._snapshot()
+
+    def run_source(self, source: ExpansionRecipeSource) -> Mapping[str, object]:
+        """Drive bounded source batches through the same admission/execution/writer core.
+
+        The source owns durable logical recipe allocation. The host prepares a
+        whole cohort and returns session-proposed work items. No native adapter
+        implements a second dispatch or commit loop.
+        """
+        if self._configured_cfg is not None:
+            raise ValueError("configured jobs assemble their source internally")
+        if not callable(getattr(self.host, "prepare_batch", None)):
+            raise TypeError("recipe execution requires a PreparingExpansionHost")
+        while not self.session.stop_reason:
+            requests = source.next_batch(self.cfg.batch_size)
+            if not requests:
+                break
+            try:
+                items = self._measure(
+                    "prepare",
+                    lambda: tuple(self.host.prepare_batch(requests, self.session)),
+                )
+                self.enqueue(items)
+                self._drain(one_batch=True)
+                for item in tuple(self._queue):
+                    self.session.release(
+                        item.spec.identity, reason="cohort_not_started"
+                    )
+                    callback = getattr(self.host, "on_deferred", None)
+                    if callback is not None:
+                        callback(item)
+                    self._queue.remove(item)
+                source.after_batch(self._snapshot())
+            except BaseException:
+                self._failed = True
+                raise
+        return self._snapshot()
 
     def flush(self) -> None:
         """Submit staged rows, stopping until ambiguous writes are reconciled.
@@ -368,9 +522,21 @@ class ExpansionEngine:
             raise ValueError("configured jobs reconcile durable writes through resume")
         if self._submitted:
             raise RuntimeError("reconcile pending receipts before submitting more data")
+        if self._write_failures:
+            raise RuntimeError("retry failed writes before submitting more data")
+        for commit_id, episode in tuple(self._pending.items()):
+            stage = getattr(self.sink, "stage", None)
+            if commit_id not in self._staged and stage is not None:
+                self._measure("stage", stage, episode)
+                self._staged.add(commit_id)
         for commit_id, episode in tuple(self._pending.items()):
             self._submitted.add(commit_id)
-            receipt = self.sink.submit(episode, submission_id=0)
+            receipt = self._measure(
+                "submit",
+                self.sink.submit,
+                episode,
+                submission_id=self._submission_ids.get(commit_id, 0),
+            )
             self.resolve_receipt(receipt)
 
     def resolve_receipt(self, receipt: CommitReceipt) -> None:
@@ -381,11 +547,36 @@ class ExpansionEngine:
         """
         if self._configured_cfg is not None:
             raise ValueError("configured jobs reconcile durable writes through resume")
+        key = (receipt.commit_id, receipt.submission_id)
+        if key in self._resolved_receipts:
+            if self._resolved_receipts[key] != receipt:
+                raise ValueError("contradictory final receipt")
+            return
         if receipt.commit_id not in self._submitted:
             raise ValueError("receipt does not identify a submitted episode")
         self.session.apply_receipt(receipt)
-        del self._pending[receipt.commit_id]
+        self._resolved_receipts[key] = receipt
+        if receipt.confirmed:
+            del self._pending[receipt.commit_id]
+        else:
+            self._write_failures.add(receipt.commit_id)
         self._submitted.remove(receipt.commit_id)
+
+    def retry_commit(self, commit_id: str) -> None:
+        """Retry one explicitly failed frozen payload independently of peer failures."""
+        if self._submitted:
+            raise RuntimeError("reconcile pending receipts before retrying data")
+        if commit_id not in self._write_failures:
+            raise ValueError("commit has no resolved failure to retry")
+        episode, submission_id = self.session.retry_write(commit_id)
+        self._pending[commit_id] = episode
+        self._submission_ids[commit_id] = submission_id
+        self._write_failures.remove(commit_id)
+        self._submitted.add(commit_id)
+        receipt = self._measure(
+            "submit", self.sink.submit, episode, submission_id=submission_id
+        )
+        self.resolve_receipt(receipt)
 
     @property
     def pending_commit_ids(self) -> tuple[str, ...]:

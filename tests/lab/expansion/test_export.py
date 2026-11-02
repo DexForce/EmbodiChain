@@ -19,6 +19,7 @@
 from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
+from pathlib import Path
 import json
 import numpy as np
 import torch
@@ -71,18 +72,32 @@ def test_export_includes_visual_children_without_new_physical_receipts(
     import embodichain.lab.expansion.visual as visual
 
     child = {
+        "profile_id": "blue",
+        "profile_revision": visual._profile_revision({"materials": {}}),
+        "parent_episode_id": parent.episode_id,
+        "source_sha256": _digest(Path(sink.inspect()[0].storage_id)),
+        "physics_steps": 0,
+        "schema_version": 2,
+        "frame_count": 3,
         "parent_commit_id": parent.commit_id,
         "variant_id": "blue",
         "media_manifest": str(streams[1]),
         "media_sha256": _digest(streams[1]),
         "profile": {"materials": {}},
     }
-    monkeypatch.setattr(visual, "inspect_observation_variants", lambda _: (child,))
+    child["variant_id"] = visual._variant_key(
+        parent.commit_id, "blue", child["profile_revision"]
+    )
+    (tmp_path / "observations").mkdir()
+    (tmp_path / "observations" / (child["variant_id"] + ".json")).write_text(
+        json.dumps(child)
+    )
     captured = []
 
     class Recorder:
         def __init__(self, *args):
-            pass
+            self.dataset_path = str(tmp_path / "exports" / "fake" / "dataset")
+            Path(self.dataset_path).mkdir(parents=True)
 
         def _persist_episode_payload(self, row, frames, actions, *, episode_metadata):
             captured.append(
@@ -94,7 +109,7 @@ def test_export_includes_visual_children_without_new_physical_receipts(
             )
 
         def finalize(self):
-            return tmp_path / "dataset"
+            return Path(self.dataset_path)
 
     monkeypatch.setattr(module, "LeRobotRecorder", Recorder)
     monkeypatch.setattr(

@@ -798,6 +798,10 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             raise ValueError(
                 "Motion generator must own the exact robot selected by the factory."
             )
+        from embodichain.lab.sim.profiler import Profiler
+
+        profiler = getattr(self._simulation, "profiler", None)
+        profiling = {"profiler": profiler} if isinstance(profiler, Profiler) else {}
         engine = AtomicActionEngine(
             motion_generator,
             env_ids=(
@@ -808,6 +812,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             ),
             control_profiles=profile.action_control_profiles(),
             grasp_pose_generators=self._grasp_pose_generators,
+            **profiling,
         )
         self._registration.validate_engine(engine)
         return engine

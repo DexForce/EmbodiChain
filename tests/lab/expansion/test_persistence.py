@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 from dataclasses import replace
+from pathlib import Path
 import json
 import hashlib
 import numpy as np
@@ -109,10 +110,15 @@ def test_changed_media_manifest_cannot_pass_inspection(tmp_path):
         ),
         submission_id=0,
     )
+    from embodichain.lab.expansion.persistence import load_expansion_episode
+
+    path = Path(
+        load_expansion_episode(sink.inspect()[0].storage_id).metadata["media_manifest"]
+    )
     manifest = json.loads(path.read_text())
     manifest["calibration"] = {"changed": True}
     path.write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="manifest changed"):
+    with pytest.raises(ValueError, match="(manifest|artifact content) changed"):
         sink.inspect()
 
 
@@ -136,5 +142,54 @@ def test_archived_job_sources_survive_input_removal_and_detect_corruption(tmp_pa
     assert len(sink.inspect()) == 1
     copied = next((tmp_path / "output").glob("episodes/*/job_sources/*.yaml"))
     copied.write_text("program_id: changed")
-    with pytest.raises(ValueError, match="attachment changed"):
+    with pytest.raises(ValueError, match="(attachment|artifact content) changed"):
         sink.inspect()
+
+
+def test_frozen_media_and_sources_survive_bundle_relocation(tmp_path):
+    import shutil
+    from embodichain.lab.expansion.persistence import load_expansion_episode
+    from embodichain.lab.expansion.artifacts import EpisodeArtifactManifest
+
+    root = tmp_path / "job"
+    source = tmp_path / "source.json"
+    source.write_text('{"version":1}')
+    spool = MediaSpool(
+        tmp_path / "frames",
+        max_buffer_bytes=16,
+        parent_episode_id="episode",
+        calibration={"camera": {"intrinsics": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]}},
+    )
+    for stamp in (0.0, 0.1, 0.2):
+        spool.append(stamp, {"sensor/camera/depth": np.ones((1, 1), np.float32)})
+    media = spool.finish()
+    data = replace(
+        episode(),
+        metadata={
+            "media_manifest": str(media),
+            "media_manifest_sha256": hashlib.sha256(media.read_bytes()).hexdigest(),
+            "expansion_source_artifacts": {
+                "program": {
+                    "path": str(source),
+                    "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                }
+            },
+        },
+    )
+    sink = ArtifactEpisodeSink(root)
+    sink.stage(data)
+    # Crash after the numerical link but before content/receipt publication.
+    next(root.glob("episodes/*/content.json")).unlink()
+    moved = tmp_path / "moved"
+    root.rename(moved)
+    shutil.rmtree(tmp_path / "frames")
+    source.unlink()
+    repaired = ArtifactEpisodeSink(moved).recover(data.commit_id)
+    assert repaired.confirmed
+    assert len(ArtifactEpisodeSink(moved).inspect()) == 1
+    frozen = load_expansion_episode(repaired.storage_id)
+    torch.testing.assert_close(frozen.actions, data.actions)
+    assert Path(frozen.metadata["media_manifest"]).is_relative_to(moved)
+    EpisodeArtifactManifest.read(
+        Path(repaired.storage_id).parent / "artifacts.json"
+    ).verify(Path(repaired.storage_id).parent)

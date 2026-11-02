@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from functools import wraps
+
 from types import MappingProxyType
 from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 
@@ -54,6 +57,20 @@ PlanTransform = Callable[
 ]
 
 
+def _profile_planning(method):
+    @wraps(method)
+    def measured(self, *args, **kwargs):
+        profiler = getattr(self, "_profiler", None)
+        with (
+            profiler.section("atomic_planning", is_root=True)
+            if profiler is not None
+            else nullcontext()
+        ):
+            return method(self, *args, **kwargs)
+
+    return measured
+
+
 class AtomicActionEngine:
     """Own planning resources and coordinate side-effect-free atomic actions."""
 
@@ -67,6 +84,7 @@ class AtomicActionEngine:
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
         env_ids: tuple[int, ...] | None = None,
+        profiler: object | None = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
 
@@ -84,9 +102,14 @@ class AtomicActionEngine:
             scene_provider: Optional default scene-observation source used by
                 :meth:`initial_context` when the caller does not supply an
                 explicit scene snapshot. The provider is borrowed by reference.
+            env_ids: Optional environment subset bound to planning services.
+            profiler: Optional owner-provided profiler exposing ``section``.
+                Planning is recorded under ``atomic_planning`` without taking
+                ownership of the profiler or looking up a simulation World.
         """
         if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
             raise TypeError("scene_provider must implement SceneProvider.")
+        self._profiler = profiler
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
@@ -377,6 +400,7 @@ class AtomicActionEngine:
             )
         return action.resolve_request(invocation)
 
+    @_profile_planning
     def _plan_request(
         self,
         request: ResolvedActionRequest,

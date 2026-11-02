@@ -342,8 +342,10 @@ class ProposalRequest:
     operator_id: str
     geometry_family_id: str | None = None
     parent_id: str | None = None
+    attempt_id: int = 0
 
     def __post_init__(self) -> None:
+        _integer(self.attempt_id, "attempt_id")
         for name in (
             "scene_case_id",
             "initial_state_id",

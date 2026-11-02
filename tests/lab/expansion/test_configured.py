@@ -48,3 +48,24 @@ def test_native_media_requires_complete_decision_contract():
     cfg.render_profiles = ("blue",)
     with pytest.raises(ValueError, match="observation_independent"):
         ExpansionEngine.from_job(cfg)
+
+
+def test_resource_changes_preserve_semantics_but_record_new_execution(tmp_path):
+    from embodichain.lab.expansion.configured import preflight_expansion_job
+
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "examples/expansion/engine/job.default.yaml"
+    )
+    cfg = load_expansion_job(path)
+    a = preflight_expansion_job(cfg)
+    cfg.batch_size = 32
+    cfg.max_attempts = 64
+    cfg.target_episodes = 32
+    cfg.episode_byte_budget *= 2 // 2
+    cfg.output_dir = str(tmp_path)
+    b = preflight_expansion_job(cfg)
+    assert a["semantic_id"] == b["semantic_id"]
+    assert a["execution_id"] != b["execution_id"]
+    cfg.mass_scale = {"cube": (2.0, 3.0)}
+    assert preflight_expansion_job(cfg)["semantic_id"] != a["semantic_id"]

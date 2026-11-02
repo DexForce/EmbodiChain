@@ -26,7 +26,12 @@ from pathlib import Path
 from collections.abc import Mapping
 from embodichain.utils import configclass
 
-__all__ = ["ExpansionRunCfg", "load_expansion_job", "preflight_expansion_job"]
+__all__ = [
+    "ExpansionRunCfg",
+    "load_expansion_job",
+    "resolve_expansion_job",
+    "preflight_expansion_job",
+]
 
 
 @configclass
@@ -41,6 +46,8 @@ class ExpansionRunCfg:
     deployment: str = ""
     output_dir: str = ""
     source: str = "task_program"
+    motion_source: str | None = None
+    retry_interrupted: bool = True
     source_profile: str | None = None
     collision_profile: str | None = None
     program: str | None = None
@@ -108,8 +115,10 @@ class ExpansionRunCfg:
             raise ValueError("seed and capture_media have invalid types")
         if self.source not in {"task_program", "real2sim"}:
             raise ValueError("source must be task_program or real2sim")
-        if (self.source == "real2sim") != (self.source_profile is not None):
-            raise ValueError("real2sim requires exactly one source_profile")
+        if self.motion_source not in {None, "native", "prototype"}:
+            raise ValueError("motion_source must be native or prototype")
+        if type(self.retry_interrupted) is not bool:
+            raise ValueError("retry_interrupted must be bool")
         if type(self.observation_independent) is not bool:
             raise ValueError("observation_independent must be bool")
         if not isinstance(self.render_profiles, (list, tuple)) or any(
@@ -183,6 +192,80 @@ class ExpansionRunCfg:
                 )
 
 
+def resolve_expansion_job(cfg: ExpansionRunCfg) -> ExpansionRunCfg:
+    """Resolve motion bindings owned by the selected Task Program deployment.
+
+    Legacy source/profile fields remain accepted. A narrower collection profile
+    may select recipes, but cannot replace the deployment's pinned source artifacts.
+    """
+    from embodichain.utils.utility import load_config
+    from embodichain.utils.config_paths import resolve_config_path
+
+    result = ExpansionRunCfg(**cfg.to_dict())
+    path = Path(result.deployment).expanduser().resolve()
+    declared = load_config(path).get("real2sim", {}).get("profile")
+    if declared is not None:
+        declared = str(resolve_config_path(declared, base_dir=path.parent).resolve())
+    kind = result.motion_source or (
+        "prototype"
+        if declared or result.source_profile or result.source == "real2sim"
+        else "native"
+    )
+    if kind == "native" and (
+        declared or result.source_profile or result.source == "real2sim"
+    ):
+        raise ValueError("native planning cannot override a pinned prototype source")
+    if kind == "prototype":
+        from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
+            load_real2sim_tabletop_profile,
+        )
+
+        selected = result.source_profile or declared
+        if selected is None:
+            raise ValueError("prototype motion requires a deployment source profile")
+        actual = load_real2sim_tabletop_profile(selected)
+        if (
+            declared is not None
+            and Path(selected).resolve() != Path(declared).resolve()
+        ):
+            expected = load_real2sim_tabletop_profile(declared)
+
+            def references(profile):
+                return {
+                    str(call): {
+                        name: reference["sha256"] for name, reference in bundle.items()
+                    }
+                    for call, bundle in profile.source_artifacts.items()
+                }
+
+            if references(actual) != references(expected):
+                raise ValueError(
+                    "collection profile changes deployment-owned source artifacts"
+                )
+        result.source_profile = str(Path(selected).resolve())
+    result.motion_source = kind
+    result.source = "real2sim" if kind == "prototype" else "task_program"
+    return result
+
+
+def _semantic_value(value, hashes):
+    if isinstance(value, Mapping):
+        return {
+            str(key): _semantic_value(item, hashes)
+            for key, item in value.items()
+            if key not in {"output_dir", "save_path"}
+        }
+    if isinstance(value, (list, tuple)):
+        return [_semantic_value(item, hashes) for item in value]
+    if isinstance(value, str) and value.startswith("/"):
+        path = Path(value)
+        if path.is_file():
+            if value not in hashes:
+                hashes[value] = hashlib.sha256(path.read_bytes()).hexdigest()
+            return {"file_sha256": hashes[value]}
+    return value
+
+
 def load_expansion_job(path: str | Path) -> ExpansionRunCfg:
     """Read a closed YAML/JSON job and resolve paths relative to that file."""
     import yaml
@@ -223,6 +306,7 @@ def preflight_expansion_job(cfg: ExpansionRunCfg) -> dict[str, object]:
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
     from embodichain.utils.utility import load_config
 
+    cfg = resolve_expansion_job(cfg)
     cfg.__post_init__()
     path = Path(cfg.deployment)
     environment = config_to_cfg(
@@ -340,56 +424,106 @@ def preflight_expansion_job(cfg: ExpansionRunCfg) -> dict[str, object]:
             )
     payload = cfg.to_dict()
     payload.pop("output_dir")
-    # Resolved component content participates, including source declaration digests.
     resolved = environment.to_dict()
+    file_fields = (
+        "deployment",
+        "program",
+        "source_profile",
+        "collision_profile",
+        "visual_profile_file",
+        "motion_profile",
+        "scene_atlas",
+    )
     files = {
         name: hashlib.sha256(Path(getattr(cfg, name)).read_bytes()).hexdigest()
-        for name in (
-            "deployment",
-            "program",
-            "source_profile",
-            "collision_profile",
-            "visual_profile_file",
-            "motion_profile",
-            "scene_atlas",
-        )
+        for name in file_fields
         if getattr(cfg, name) is not None
     }
-    encoded = json.dumps(
-        {"job": payload, "deployment": resolved, "files": files},
-        sort_keys=True,
-        default=str,
-        allow_nan=False,
-    )
-    recipe_settings = {
+    execution_fields = {
+        "batch_size",
+        "target_episodes",
+        "max_attempts",
+        "max_steps",
+        "max_wall_time_s",
+        "episode_byte_budget",
+        "media_buffer_bytes",
+        "export_lerobot",
+        "render_profiles",
+        "retry_interrupted",
+    }
+    semantic = {
         key: value
         for key, value in payload.items()
-        if not (
-            key in {"center_of_mass", "joint_stiffness_scale", "joint_damping_scale"}
-            and not value
-        )
-        and key
-        not in {
-            "batch_size",
-            "target_episodes",
-            "max_attempts",
-            "max_steps",
-            "max_wall_time_s",
-            "episode_byte_budget",
-            "media_buffer_bytes",
-            "export_lerobot",
-        }
+        if key not in execution_fields and key not in file_fields and key != "source"
     }
-    recipe_revision = hashlib.sha256(
+    semantic_files = {
+        name: checksum
+        for name, checksum in files.items()
+        if name != "visual_profile_file"
+    }
+    if cfg.visual_profile:
+        semantic["visual_profile_content"] = profiles[cfg.visual_profile]
+    semantic_payload = {
+        "job": semantic,
+        "deployment": _semantic_value(resolved, {}),
+        "files": semantic_files,
+    }
+    # Top-level locator paths and resource budgets do not define physical recipes.
+    encoded = json.dumps(semantic_payload, sort_keys=True, default=str, allow_nan=False)
+    recipe_revision = hashlib.sha256(encoded.encode()).hexdigest()
+    from importlib.metadata import version, PackageNotFoundError
+    import platform
+
+    runtime_versions = {"python": platform.python_version()}
+    for package in ("embodichain", "dexsim", "newton", "torch"):
+        try:
+            runtime_versions[package] = version(package)
+        except PackageNotFoundError:
+            runtime_versions[package] = "uninstalled"
+    postprocessing_revision = (
+        hashlib.sha256(
+            json.dumps(
+                {name: profiles[name] for name in cfg.render_profiles},
+                sort_keys=True,
+                allow_nan=False,
+            ).encode()
+        ).hexdigest()
+        if cfg.render_profiles
+        else None
+    )
+    execution_id = hashlib.sha256(
         json.dumps(
-            {"recipe": recipe_settings, "deployment": resolved, "files": files},
+            {
+                "resources": {key: payload[key] for key in execution_fields},
+                "postprocessing_revision": postprocessing_revision,
+                "runtime_versions": runtime_versions,
+            },
             sort_keys=True,
-            default=str,
             allow_nan=False,
         ).encode()
     ).hexdigest()
     return {
-        "job_id": hashlib.sha256(encoded.encode()).hexdigest(),
+        "job_id": recipe_revision,
+        "semantic_id": recipe_revision,
+        "execution_id": execution_id,
+        "runtime_versions": runtime_versions,
+        "postprocessing_revision": postprocessing_revision,
+        "render_profile_snapshots": {
+            name: {
+                "revision": hashlib.sha256(
+                    json.dumps(
+                        profiles[name],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ).encode()
+                ).hexdigest(),
+                "profile": profiles[name],
+            }
+            for name in cfg.render_profiles
+        },
+        "task_runtime": "task_program",
+        "motion_source": cfg.motion_source,
         "recipe_revision": recipe_revision,
         "input_files": files,
         "resolved_deployment": json.loads(

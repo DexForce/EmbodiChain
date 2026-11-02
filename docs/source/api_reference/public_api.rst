@@ -292,6 +292,22 @@ Byte-bounded owned frame chunks with checksums, timestamps and final manifests.
    MediaSpool
    verify_media_manifest
 
+
+.. autosummary::
+
+   MediaFrameReader
+
+embodichain.data_pipeline.recording.schema
+------------------------------------------
+
+Simulation-independent camera dimensions used to reconstruct recording features from frozen evidence.
+
+.. currentmodule:: embodichain.data_pipeline.recording.schema
+
+.. autosummary::
+
+   RecordedCamera
+
 embodichain.gen_sim.env
 -----------------------
 
@@ -684,7 +700,7 @@ embodichain.lab.expansion
 Compatible-cohort orchestration for explicitly supplied host and writer ports.
 The engine reuses the canonical session for admission, budgets and receipts.
 ``ExpansionEngine.from_job(ExpansionRunCfg(...))`` selects the native Gym host,
-Task Program or pinned Real2Sim sources, bounded media, render-only variants,
+Task Program with native or pinned prototype motion, bounded media, render-only variants,
 and durable episode-boundary recovery. See the offline expansion example.
 
 .. autosummary::
@@ -717,6 +733,39 @@ and durable episode-boundary recovery. See the offline expansion example.
 
    ExpansionEpisode
 
+
+.. autosummary::
+
+   resume_expansion_export
+   ExpansionRecipe
+   RecipeOperation
+   BatchCompatibility
+   PreparedEpisodeWorkItem
+   ExpansionWorkItem
+   ExpansionRecipeSource
+   PreparingExpansionHost
+   GymExpansionHost
+   ExpansionJournal
+   RecipeAttempt
+   ArtifactReference
+   EpisodeArtifactManifest
+   load_expansion_episode
+   resolve_expansion_job
+   build_expansion_report
+
+embodichain.lab.expansion.artifacts
+-----------------------------------
+
+Typed content-addressed numeric, media and source references. Paths remain contained within the artifact directory so bundles can move independently of their producing job.
+
+.. currentmodule:: embodichain.lab.expansion.artifacts
+
+.. autosummary::
+
+   ArtifactReference
+   EpisodeArtifactManifest
+   resolve_artifact_path
+
 embodichain.lab.expansion.configured
 ------------------------------------
 
@@ -729,6 +778,11 @@ Closed file configuration resolves existing deployments without changing backend
    ExpansionRunCfg
    load_expansion_job
    preflight_expansion_job
+
+
+.. autosummary::
+
+   resolve_expansion_job
 
 embodichain.lab.expansion.contracts
 -----------------------------------
@@ -783,16 +837,47 @@ attempts at episode boundaries. Native failures invalidate the active host.
    EpisodeSink
    ExpansionEngine
 
+
+.. autosummary::
+
+   PreparedEpisodeWorkItem
+   ExpansionWorkItem
+   ExpansionRecipeSource
+   PreparingExpansionHost
+
 embodichain.lab.expansion.export
 --------------------------------
 
-Stream confirmed numeric episodes and observation children through the existing LeRobot recorder. A finalized export attests the exact physical and visual episode set.
+Stream confirmed numeric episodes and observation children through the existing LeRobot recorder. A finalized export attests the exact physical and visual episode set. Portable bundles retain relative media, calibration and source references; frame reads do not materialize an entire image trajectory.
 
 .. currentmodule:: embodichain.lab.expansion.export
 
 .. autosummary::
 
    export_expansion_lerobot
+
+embodichain.lab.expansion.host
+------------------------------
+
+The native Gym adapter owns World preparation, parameter readback and Task Program execution. Admission, receipt handling and retries remain in the common engine.
+
+.. currentmodule:: embodichain.lab.expansion.host
+
+.. autosummary::
+
+   GymExpansionHost
+
+embodichain.lab.expansion.journal
+---------------------------------
+
+Persist logical recipe identity separately from physical attempt and invocation identity. Resource revisions may change batch capacity without changing sampled conditions.
+
+.. currentmodule:: embodichain.lab.expansion.journal
+
+.. autosummary::
+
+   RecipeAttempt
+   ExpansionJournal
 
 embodichain.lab.expansion.persistence
 -------------------------------------
@@ -804,6 +889,11 @@ Stage immutable numeric evidence and archived source attachments before publishi
 .. autosummary::
 
    ArtifactEpisodeSink
+
+
+.. autosummary::
+
+   load_expansion_episode
 
 embodichain.lab.expansion.program
 ---------------------------------
@@ -817,6 +907,11 @@ Drive either one vector Task Program or independently bound source runtimes thro
    ProgramBatchResult
    collect_program_batch
    collect_vector_program
+
+
+.. autosummary::
+
+   TaskProgramBatchExecutor
 
 embodichain.lab.expansion.recipes
 ---------------------------------
@@ -833,6 +928,24 @@ Source-pinned, versioned random streams depend on logical candidate identity rat
    OperatorCapability
    ExpansionOperator
    UniformRangeOperator
+
+
+.. autosummary::
+
+   BatchCompatibility
+   RecipeOperation
+   ExpansionRecipe
+
+embodichain.lab.expansion.reporting
+-----------------------------------
+
+Report trajectory geometry, actual physical conditions, visual descendants and source ancestry separately. Coverage is diagnostic and does not silently alter admission.
+
+.. currentmodule:: embodichain.lab.expansion.reporting
+
+.. autosummary::
+
+   build_expansion_report
 
 embodichain.lab.expansion.scene
 -------------------------------
@@ -862,7 +975,7 @@ Apply one native visual profile per compatible World cohort. Render complete rec
 embodichain.lab.expansion.workflow
 ----------------------------------
 
-Native offline collection owns preparation, settling, independent validation, frozen writes and episode-boundary recovery.
+Assemble the common engine, native host, durable journal and independently recoverable render/export stages. Frozen export recovery needs neither source configuration nor a simulator.
 
 .. currentmodule:: embodichain.lab.expansion.workflow
 
@@ -870,6 +983,11 @@ Native offline collection owns preparation, settling, independent validation, fr
 
    run_expansion_job
    inspect_expansion_job
+
+
+.. autosummary::
+
+   resume_expansion_export
 
 embodichain.lab.gym.envs.base_env
 ---------------------------------

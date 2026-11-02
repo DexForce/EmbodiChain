@@ -293,3 +293,29 @@ def test_admission_exception_releases_prior_reservations():
     assert all(
         state != "assigned" for _, state, _ in engine.session.snapshot()["audit"]
     )
+
+
+def test_explicit_failed_receipts_retry_independently_and_duplicates_are_idempotent():
+    class RejectOnce(Sink):
+        def submit(self, episode, *, submission_id):
+            self.calls.append(episode)
+            receipt = replace(self.receipt(episode), submission_id=submission_id)
+            return (
+                replace(receipt, confirmed=False, error="rejected")
+                if submission_id == 0
+                else receipt
+            )
+
+    sink = RejectOnce()
+    engine, host, _, _ = setup(count=2, batch_size=2, sink=sink)
+    engine.run()
+    commits = engine.pending_commit_ids
+    assert len(commits) == 2 and engine.session.snapshot()["counts"]["committed"] == 0
+    engine.retry_commit(commits[0])
+    assert engine.session.snapshot()["counts"]["committed"] == 1
+    assert engine.pending_commit_ids == (commits[1],)
+    engine.retry_commit(commits[1])
+    assert engine.session.snapshot()["counts"]["committed"] == 2
+    engine.resolve_receipt(replace(sink.receipt(sink.calls[-1]), submission_id=1))
+    assert engine.session.snapshot()["counts"]["committed"] == 2
+    assert len(host.calls) == 1

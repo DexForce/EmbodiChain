@@ -17,9 +17,7 @@
 """Restorable native visual profiles and state-only observation fan-out."""
 
 from __future__ import annotations
-from collections.abc import Mapping
 from contextlib import contextmanager, ExitStack
-from dataclasses import replace
 import hashlib
 import json
 import math
@@ -42,10 +40,8 @@ from embodichain.lab.sim.scene import (
     compare_states,
 )
 from embodichain.lab.sim.scene.state import restore_render_state
-from embodichain.lab.gym.envs.managers.real2sim_collection import (
-    load_staged_real2sim_episode,
-)
-from .persistence import ArtifactEpisodeSink
+from .persistence import ArtifactEpisodeSink, load_expansion_episode
+from .artifacts import resolve_artifact_path
 
 __all__ = [
     "load_visual_profiles",
@@ -114,41 +110,50 @@ def load_visual_profiles(path: str | Path) -> dict[str, dict]:
     return result
 
 
-def _camera_calibration(env, row):
-    result = {}
+def _calibration_batch(env):
+    """Read each camera's full calibration once at the current control boundary."""
+    rows = [{} for _ in range(env.num_envs)]
     for uid in env.sim.get_sensor_uid_list():
         camera = env.sim.get_sensor(uid)
         if not callable(getattr(camera, "get_intrinsics", None)):
             continue
-        intrinsics = camera.get_intrinsics()
-        if isinstance(intrinsics, tuple):
+        intrinsic = camera.get_intrinsics()
+        if isinstance(intrinsic, tuple):
             poses = camera.get_left_right_arena_pose()
-            result[uid] = {
-                "intrinsics_left": intrinsics[0][row].cpu().tolist(),
-                "intrinsics_right": intrinsics[1][row].cpu().tolist(),
-                "arena_pose_left": poses[0][row].cpu().tolist(),
-                "arena_pose_right": poses[1][row].cpu().tolist(),
+            values = {
+                "intrinsics_left": intrinsic[0].detach().cpu(),
+                "intrinsics_right": intrinsic[1].detach().cpu(),
+                "arena_pose_left": poses[0].detach().cpu(),
+                "arena_pose_right": poses[1].detach().cpu(),
             }
         else:
-            result[uid] = {
-                "intrinsics": intrinsics[row].cpu().tolist(),
-                "arena_pose": camera.get_arena_pose(to_matrix=True)[row].cpu().tolist(),
+            values = {
+                "intrinsics": intrinsic.detach().cpu(),
+                "arena_pose": camera.get_arena_pose(to_matrix=True).detach().cpu(),
             }
-        result[uid].update(
-            width=camera.cfg.width,
-            height=camera.cfg.height,
-            camera_axes="opengl",
-            pose_convention="camera_to_arena_z_up",
-        )
-    return result
+        for row in range(env.num_envs):
+            rows[row][uid] = {key: value[row].tolist() for key, value in values.items()}
+            rows[row][uid].update(
+                width=camera.cfg.width,
+                height=camera.cfg.height,
+                camera_axes="opengl",
+                pose_convention="camera_to_arena_z_up",
+            )
+    return tuple(rows)
 
 
-def _calibrated_frames(env, observation, row):
+def _camera_calibration(env, row):
+    return _calibration_batch(env)[row]
+
+
+def _calibrated_frames(env, observation, row, *, calibration=None):
     from .workflow import _images
 
     result = _images(observation, row)
-    for uid, calibration in _camera_calibration(env, row).items():
-        for name, value in calibration.items():
+    for uid, values in (
+        calibration if calibration is not None else _camera_calibration(env, row)
+    ).items():
+        for name, value in values.items():
             if isinstance(value, list):
                 result[f"calibration/{uid}/{name}"] = np.asarray(
                     value, dtype=np.float32
@@ -171,6 +176,20 @@ def _verify_rendered_state(expected, actual):
                     )
 
 
+def _profile_revision(profile):
+    return hashlib.sha256(
+        json.dumps(
+            profile, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
+
+
+def _variant_key(parent_commit_id, profile_id, revision):
+    return hashlib.sha256(
+        json.dumps((parent_commit_id, profile_id, revision)).encode()
+    ).hexdigest()
+
+
 def inspect_observation_variants(directory: str | Path) -> tuple[dict, ...]:
     """Verify observation children against their unchanged physical parents."""
     root = Path(directory)
@@ -180,6 +199,18 @@ def inspect_observation_variants(directory: str | Path) -> tuple[dict, ...]:
     results = []
     for path in sorted((root / "observations").glob("*.json")):
         value = json.loads(path.read_text())
+        value["media_manifest"] = str(
+            resolve_artifact_path(root, value["media_manifest"], legacy_absolute=True)
+        )
+        expected_key = _variant_key(
+            value["parent_commit_id"], value["profile_id"], value["profile_revision"]
+        )
+        if value["variant_id"] != expected_key or path.stem != expected_key:
+            raise ValueError("observation variant identity changed")
+        if value.get("schema_version") == 2 and value[
+            "profile_revision"
+        ] != _profile_revision(value["profile"]):
+            raise ValueError("observation profile content changed")
         parent = parents.get(value["parent_commit_id"])
         if (
             parent is None
@@ -327,7 +358,6 @@ def render_observation_variants(
     root = Path(directory)
     registry = load_visual_profiles(profile_file)
     source_receipts = ArtifactEpisodeSink(root).inspect()
-    profile_revision = _digest(Path(profile_file))
     output = root / "observations"
     output.mkdir(exist_ok=True)
     emitted = []
@@ -339,24 +369,25 @@ def render_observation_variants(
     try:
         for name in profiles:
             profile = registry[name]
+            profile_revision = _profile_revision(profile)
             with _visual_profile(env, profile):
                 for start in range(0, len(source_receipts), env.num_envs):
                     receipts = source_receipts[start : start + env.num_envs]
-                    parents = [
-                        load_staged_real2sim_episode(r.storage_id) for r in receipts
-                    ]
+                    parents = [load_expansion_episode(r.storage_id) for r in receipts]
                     selection = SceneView(env.sim, env_ids=tuple(range(len(parents))))
+                    calibrations = _calibration_batch(env)
                     streams = {}
                     pending = {}
                     for row, (parent, receipt) in enumerate(zip(parents, receipts)):
-                        key = hashlib.sha256(
-                            json.dumps(
-                                (parent.commit_id, name, profile_revision)
-                            ).encode()
-                        ).hexdigest()
+                        key = _variant_key(parent.commit_id, name, profile_revision)
                         marker = output / (key + ".json")
                         if marker.exists():
                             record = json.loads(marker.read_text())
+                            record["media_manifest"] = str(
+                                resolve_artifact_path(
+                                    root, record["media_manifest"], legacy_absolute=True
+                                )
+                            )
                             if record["source_sha256"] != _digest(
                                 Path(receipt.storage_id)
                             ) or record["media_sha256"] != _digest(
@@ -384,7 +415,7 @@ def render_observation_variants(
                             location,
                             max_buffer_bytes=max(1, buffer_bytes // env.num_envs),
                             parent_episode_id=parent.episode_id,
-                            calibration=_camera_calibration(env, row),
+                            calibration=calibrations[row],
                         )
                         pending[row] = (key, marker, receipt, parent)
                     if not pending:
@@ -417,15 +448,19 @@ def render_observation_variants(
                                 )
                             camera.update(fetch_only=True)
                             sensor[uid] = camera.get_data()
+                        calibrations = _calibration_batch(env)
                         for row, (_, _, _, parent) in pending.items():
                             if index < len(parent.timestamps):
                                 if index == 0:
-                                    streams[row].calibration = _camera_calibration(
-                                        env, row
-                                    )
+                                    streams[row].calibration = calibrations[row]
                                 streams[row].append(
                                     float(parent.timestamps[index]),
-                                    _calibrated_frames(env, {"sensor": sensor}, row),
+                                    _calibrated_frames(
+                                        env,
+                                        {"sensor": sensor},
+                                        row,
+                                        calibration=calibrations[row],
+                                    ),
                                 )
                     for row, (key, marker, receipt, parent) in pending.items():
                         media = streams[row].finish()
@@ -443,14 +478,15 @@ def render_observation_variants(
                             "profile_id": name,
                             "profile_revision": profile_revision,
                             "profile": profile,
-                            "media_manifest": str(media),
+                            "media_manifest": media.relative_to(root).as_posix(),
+                            "schema_version": 2,
                             "media_sha256": _digest(media),
                             "observation_origin": "state_rerender",
                             "physics_steps": 0,
                             "frame_count": len(parent.timestamps),
                         }
                         _atomic_json(marker, record)
-                        emitted.append(record)
+                        emitted.append({**record, "media_manifest": str(media)})
     finally:
         try:
             restore_render_state(full_view, before)

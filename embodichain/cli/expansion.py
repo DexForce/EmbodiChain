@@ -35,24 +35,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(prog="embodichain expansion")
     commands = parser.add_subparsers(dest="operation", required=True)
-    for name in ("preflight", "run", "resume"):
+    for name in ("preflight", "run"):
         command = commands.add_parser(name)
         command.add_argument("--job", required=True)
+    command = commands.add_parser("resume")
+    source = command.add_mutually_exclusive_group(required=True)
+    source.add_argument("--job")
+    source.add_argument("--output")
+    command.add_argument("--stage", choices=("all", "export"), default="all")
     command = commands.add_parser("inspect")
     command.add_argument("--output", required=True)
     args = parser.parse_args(argv)
     from embodichain.lab.expansion.configured import (
         load_expansion_job,
-        preflight_expansion_job,
     )
     from embodichain.lab.expansion.workflow import (
-        run_expansion_job,
         inspect_expansion_job,
     )
 
     if args.operation == "inspect":
         result = inspect_expansion_job(args.output)
+    elif args.operation == "resume" and args.output is not None:
+        if args.stage != "export":
+            parser.error("--output recovery requires --stage export")
+        from embodichain.lab.expansion.workflow import resume_expansion_export
+
+        result = resume_expansion_export(args.output)
     else:
+        if args.operation == "resume" and args.stage != "all":
+            parser.error("use --output with --stage export")
         cfg = load_expansion_job(args.job)
         from embodichain.lab.expansion import ExpansionEngine
 
@@ -62,6 +73,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         key: value for key, value in result.items() if key != "resolved_deployment"
     }
     print(json.dumps(printable, indent=2, sort_keys=True))
-    if args.operation in {"run", "resume"} and not result["complete"]:
+    if args.operation in {"run", "resume"} and not result.get(
+        "stage_complete", result["complete"]
+    ):
         raise SystemExit(2)
     return 0

@@ -122,6 +122,9 @@ class ExpansionSession:
     Args:
         cfg: Semantically valid job settings, copied on construction.
         clock: Monotonic seconds, injectable for deterministic budget tests.
+        episode_namespace: Optional persistent job-instance identity. Logical
+            candidate sampling is unchanged; physical episode/commit IDs remain
+            unique across independent jobs and stable across write retries.
     """
 
     def __init__(
@@ -129,11 +132,17 @@ class ExpansionSession:
         cfg: TrajectoryExpansionCfg | TrajectoryExpansionJobCfg,
         *,
         clock: Callable[[], float] = time.monotonic,
+        episode_namespace: str | None = None,
     ) -> None:
         if isinstance(cfg, TrajectoryExpansionJobCfg):
             cfg = TrajectoryExpansionCfg.from_expansion_job(cfg)
         if not isinstance(cfg, TrajectoryExpansionCfg):
             raise TypeError("cfg must be a TrajectoryExpansionCfg")
+        if episode_namespace is not None and (
+            not isinstance(episode_namespace, str) or not episode_namespace
+        ):
+            raise ValueError("episode_namespace must be nonempty text")
+        self._episode_namespace = episode_namespace
         self._cfg = TrajectoryExpansionCfg.from_mapping(cfg.to_dict())
         self._clock, self._started_at = clock, clock()
         self._cases: dict[
@@ -361,6 +370,8 @@ class ExpansionSession:
             )
             ordinal = ordinals.get(stream, 0)
             digest = _digest(self._cfg.augmentation.seed, *stream, ordinal)
+            if request.attempt_id:
+                digest = _digest(digest, request.attempt_id)
             identity = CandidateIdentity(
                 request.scene_case_id,
                 request.initial_state_id,
@@ -370,6 +381,7 @@ class ExpansionSession:
                 request.source_revision,
                 request.template_id,
                 parent_id=request.parent_id,
+                attempt_id=request.attempt_id,
             )
             if identity.candidate_id in self._attempts or any(
                 existing.candidate_id == identity.candidate_id
@@ -403,6 +415,7 @@ class ExpansionSession:
         operator_id: str,
         geometry_family_id: str | None = None,
         parent_id: str | None = None,
+        attempt_id: int = 0,
     ) -> tuple[CandidateIdentity, torch.Generator]:
         """Allocate stable lineage and a local CPU RNG independent of execution slots.
 
@@ -430,6 +443,7 @@ class ExpansionSession:
                     operator_id,
                     geometry_family_id,
                     parent_id,
+                    attempt_id,
                 ),
             )
         )[0]
@@ -656,6 +670,8 @@ class ExpansionSession:
         """
         self._attempt(identity)
         digest = _digest(identity.candidate_id, identity.attempt_id)
+        if self._episode_namespace is not None:
+            digest = _digest(self._episode_namespace, digest)
         return "episode_" + digest, "commit_" + digest
 
     def _episode_bytes(self, episode: ExpertEpisode) -> int:

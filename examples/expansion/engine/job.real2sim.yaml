@@ -1,5 +1,5 @@
 deployment: /tmp/embodichain-expansion/carton/task.measured.yaml
-source: real2sim
+motion_source: prototype
 source_profile: /tmp/embodichain-expansion/carton/profile.measured.single.yaml
 output_dir: /tmp/embodichain-expansion/real2sim
 batch_size: 8

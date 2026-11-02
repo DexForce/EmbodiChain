@@ -21,12 +21,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 import hashlib
 import json
+import math
+import zipfile
+from bisect import bisect_right
 import os
 from pathlib import Path
 import tempfile
 import numpy as np
 
-__all__ = ["MediaSpool", "verify_media_manifest"]
+__all__ = ["MediaSpool", "verify_media_manifest", "MediaFrameReader"]
 
 
 def _digest(path: Path) -> str:
@@ -37,7 +40,28 @@ def _digest(path: Path) -> str:
     return value.hexdigest()
 
 
+def _sync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _mkdir(path: Path) -> None:
+    """Persist newly created directory links before publishing child artifacts."""
+    missing = []
+    current = path
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+    for directory in reversed(missing):
+        directory.mkdir(exist_ok=True)
+        _sync_directory(directory.parent)
+
+
 def _atomic_json(path: Path, value: object) -> None:
+    _mkdir(path.parent)
     handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=".pending-")
     try:
         with os.fdopen(handle, "w") as stream:
@@ -82,7 +106,9 @@ class MediaSpool:
             raise ValueError("parent_episode_id must be nonempty")
         self.calibration = json.loads(json.dumps(dict(calibration), allow_nan=False))
         self.directory = Path(directory)
-        self.directory.mkdir(parents=True, exist_ok=False)
+        _mkdir(self.directory.parent)
+        self.directory.mkdir()
+        _sync_directory(self.directory.parent)
         self.max_buffer_bytes = max_buffer_bytes
         self.parent_episode_id = parent_episode_id
         self._frames: list[dict[str, np.ndarray]] = []
@@ -150,7 +176,9 @@ class MediaSpool:
         path = self.directory / f"chunk-{len(self._chunks):06d}.npz"
         names = sorted(self._schema)
         arrays = {
-            f"feature_{index}": np.stack([frame[name] for frame in self._frames])
+            f"feature_{index}": np.ascontiguousarray(
+                np.stack([frame[name] for frame in self._frames])
+            )
             for index, name in enumerate(names)
         }
         arrays["timestamps"] = np.asarray(self._times, dtype=np.float64)
@@ -273,3 +301,183 @@ def verify_media_manifest(
     if count != expected_frames or count <= 0:
         raise ValueError("media chunks do not cover the complete episode")
     return value
+
+
+class MediaFrameReader:
+    """Read owned individual frames without materializing a full NPZ chunk.
+
+    Args:
+        manifest: Verified media manifest address.
+        fields: Optional feature subset; calibration matrices are ordinary features.
+        max_frame_bytes: Optional bound on the requested raw frame payload.
+
+    Streams retain only headers and ZIP handles. Returned arrays own their bytes.
+    Legacy Fortran-ordered arrays use bounded block scans; newly produced chunks
+    use C order. Chunk hashes and array layouts are checked before reading values.
+    """
+
+    def __init__(
+        self,
+        manifest: str | Path,
+        *,
+        fields: tuple[str, ...] | None = None,
+        max_frame_bytes: int | None = None,
+    ) -> None:
+        self.path = Path(manifest)
+        self.manifest = json.loads(self.path.read_text())
+        if (
+            self.manifest.get("schema_version") != 1
+            or type(self.manifest.get("frame_count")) is not int
+            or self.manifest["frame_count"] < 1
+        ):
+            raise ValueError("invalid media manifest")
+        for schema in self.manifest["features"].values():
+            if (
+                not schema["shape"]
+                or any(type(v) is not int or v < 1 for v in schema["shape"])
+                or np.dtype(schema["dtype"]).kind not in "buif"
+            ):
+                raise ValueError("invalid media feature shape or dtype")
+        self.names = tuple(sorted(self.manifest["features"]))
+        self.fields = self.names if fields is None else tuple(fields)
+        self._indexes = {name: index for index, name in enumerate(self.names)}
+        if set(self.fields) - set(self.names):
+            raise ValueError("unknown recorded media feature")
+        required = sum(
+            math.prod(self.manifest["features"][name]["shape"])
+            * np.dtype(self.manifest["features"][name]["dtype"]).itemsize
+            for name in self.fields
+        )
+        if max_frame_bytes is not None and required > max_frame_bytes:
+            raise BufferError("recorded frame exceeds export byte budget")
+        self._chunk = None
+        self._archive = None
+        self._streams = {}
+        self._starts = [chunk["start"] for chunk in self.manifest["chunks"]]
+
+    def close(self) -> None:
+        """Release chunk handles; callers may subsequently open another frame."""
+        for stream, _, _, _, _ in self._streams.values():
+            stream.close()
+        self._streams.clear()
+        if self._archive is not None:
+            self._archive.close()
+        self._archive = None
+        self._chunk = None
+
+    def _open(self, index):
+        if self._chunk == index:
+            return
+        self.close()
+        chunk = self.manifest["chunks"][index]
+        path = self.path.parent / chunk["path"]
+        if (
+            path.parent.resolve() != self.path.parent.resolve()
+            or path.is_symlink()
+            or _digest(path) != chunk["sha256"]
+        ):
+            raise ValueError("media chunk address or content changed")
+        self._archive = zipfile.ZipFile(path)
+        try:
+            requested = {"timestamps": ((chunk["count"],), np.dtype("float64"))}
+            for name in self.fields:
+                schema = self.manifest["features"][name]
+                requested[f"feature_{self._indexes[name]}"] = (
+                    (chunk["count"], *schema["shape"]),
+                    np.dtype(schema["dtype"]),
+                )
+            for key, (expected_shape, expected_dtype) in requested.items():
+                stream = self._archive.open(key + ".npy")
+                self._streams[key] = (stream, 0, (), None, False)
+                version = np.lib.format.read_magic(stream)
+                reader = {
+                    (1, 0): np.lib.format.read_array_header_1_0,
+                    (2, 0): np.lib.format.read_array_header_2_0,
+                }.get(version)
+                if reader is None:
+                    stream.close()
+                    raise ValueError("unsupported media array encoding")
+                shape, fortran, dtype = reader(stream)
+                offset = stream.tell()
+                if (
+                    tuple(shape) != tuple(expected_shape)
+                    or dtype != expected_dtype
+                    or dtype.kind not in "buif"
+                    or self._archive.getinfo(key + ".npy").file_size
+                    != offset + math.prod(shape) * dtype.itemsize
+                ):
+                    stream.close()
+                    raise ValueError("recorded media array layout changed")
+                self._streams[key] = (stream, offset, shape, dtype, fortran)
+            self._chunk = index
+        except BaseException:
+            self.close()
+            raise
+
+    def _array(self, key, row):
+        stream, offset, shape, dtype, fortran = self._streams[key]
+        frame_shape = shape[1:]
+        size = math.prod(frame_shape)
+        if not fortran or shape[0] == 1:
+            stream.seek(offset + row * size * dtype.itemsize)
+            raw = stream.read(size * dtype.itemsize)
+            if len(raw) != size * dtype.itemsize:
+                raise ValueError("truncated media frame")
+            return (
+                np.frombuffer(raw, dtype=dtype)
+                .reshape(frame_shape, order="F" if fortran else "C")
+                .copy()
+            )
+        # Legacy first-axis interleaving: retain one output frame and <=1 MiB input.
+        output = np.empty(size, dtype=dtype)
+        stream.seek(offset)
+        remaining = math.prod(shape)
+        position = 0
+        written = 0
+        block = max(1, (1024 * 1024) // dtype.itemsize)
+        while remaining:
+            count = min(block, remaining)
+            raw = stream.read(count * dtype.itemsize)
+            if len(raw) != count * dtype.itemsize:
+                raise ValueError("truncated media frame")
+            values = np.frombuffer(raw, dtype=dtype)
+            first = (row - position) % shape[0]
+            selected = values[first :: shape[0]]
+            output[written : written + len(selected)] = selected
+            written += len(selected)
+            position += count
+            remaining -= count
+        if written != size:
+            raise ValueError("incomplete media frame")
+        return output.reshape(frame_shape, order="F")
+
+    def read(self, index: int) -> tuple[float, dict[str, np.ndarray]]:
+        """Return one aligned timestamp and owned requested feature arrays."""
+        if type(index) is not int or not 0 <= index < self.manifest["frame_count"]:
+            raise IndexError(index)
+        chunk_index = bisect_right(self._starts, index) - 1
+        if chunk_index < 0:
+            raise ValueError("media chunks have a missing initial range")
+        self._open(chunk_index)
+        row = index - self._starts[chunk_index]
+        if row >= self.manifest["chunks"][chunk_index]["count"]:
+            raise ValueError("media chunks have a gap")
+        timestamp = float(self._array("timestamps", row))
+        if not math.isfinite(timestamp) or timestamp < 0:
+            raise ValueError("invalid media timestamp")
+        return timestamp, {
+            name: self._array(f"feature_{self._indexes[name]}", row)
+            for name in self.fields
+        }
+
+    def __enter__(self) -> MediaFrameReader:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass

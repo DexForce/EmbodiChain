@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from copy import deepcopy
 from typing import Any
@@ -27,7 +27,12 @@ from tensordict import TensorDict
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
 
-__all__ = ["ProgramBatchResult", "collect_program_batch", "collect_vector_program"]
+__all__ = [
+    "ProgramBatchResult",
+    "TaskProgramBatchExecutor",
+    "collect_program_batch",
+    "collect_vector_program",
+]
 
 
 @dataclass(frozen=True)
@@ -378,3 +383,66 @@ def collect_vector_program(
         )
     finally:
         env._active_task_program_bridge = previous
+
+
+class TaskProgramBatchExecutor:
+    """One execution port for Task Programs with native or prototype motion bindings.
+
+    Args:
+        environment: Prepared World owner.
+        program: Common compiled task structure.
+        row_bridges: Optional independently bound task runtimes for sources whose
+            planning protocol is row-scoped. They still share one World step loop.
+        expansion_profile: Optional native motion/affordance recipe profile.
+        recipe_indices: Per-slot logical recipe selection, including inactive padding.
+    """
+
+    def __init__(
+        self,
+        environment: Any,
+        program: Any,
+        *,
+        row_bridges: Mapping[int, TaskProgramDemoBridge] | None = None,
+        expansion_profile: Any = None,
+        recipe_indices: tuple[int, ...] | None = None,
+    ) -> None:
+        self.environment, self.program = environment, program
+        self.row_bridges = row_bridges
+        self.expansion_profile, self.recipe_indices = expansion_profile, recipe_indices
+        if row_bridges is not None and any(
+            bridge._program.program_id != program.program_id
+            for bridge in row_bridges.values()
+        ):
+            raise ValueError("one batch must execute the same Task Program structure")
+
+    def run(
+        self,
+        env_ids: tuple[int, ...],
+        *,
+        max_steps: int,
+        observe_step: Callable[[tuple[int, ...], ControllerAction, object], None],
+        on_started: Callable[[int], None] | None = None,
+        reject_row: Callable[[int], bool] | None = None,
+    ) -> ProgramBatchResult:
+        """Execute the requested rows with the canonical acknowledgement protocol."""
+        if self.row_bridges is not None:
+            if set(self.row_bridges) != set(env_ids):
+                raise ValueError("row bindings differ from assigned environments")
+            return collect_program_batch(
+                self.environment,
+                self.row_bridges,
+                max_steps=max_steps,
+                observe_step=observe_step,
+                on_started=on_started,
+                reject_row=reject_row,
+            )
+        return collect_vector_program(
+            self.environment,
+            self.program,
+            env_ids,
+            max_steps=max_steps,
+            observe_step=observe_step,
+            on_started=on_started,
+            expansion_profile=self.expansion_profile,
+            recipe_indices=self.recipe_indices,
+        )

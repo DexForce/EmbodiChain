@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.data_pipeline.recording.schema import RecordedCamera
+
 import copy
 import json
 import math
@@ -1834,7 +1836,7 @@ class LeRobotRecorder(Functor):
             for sensor_name, value in sensor_obs_space.items():
                 sensor = self._env.get_sensor(sensor_name)
 
-                if isinstance(sensor, Camera):
+                if isinstance(sensor, (Camera, RecordedCamera)):
                     for frame_name, space in value.items():
                         if frame_name in CAMERA_IMAGE_FRAMES:
                             feature_key = self._camera_feature_key(
@@ -2170,7 +2172,7 @@ class LeRobotRecorder(Functor):
             for sensor_name, value in sensor_obs_space.items():
                 sensor = self._env.get_sensor(sensor_name)
 
-                if isinstance(sensor, Camera):
+                if isinstance(sensor, (Camera, RecordedCamera)):
                     for frame_name in value:
                         if (
                             frame_name not in CAMERA_IMAGE_FRAMES

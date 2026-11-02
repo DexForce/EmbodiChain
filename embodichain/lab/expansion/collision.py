@@ -20,6 +20,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
+import torch
+from embodichain.utils.math import matrix_from_quat
 from embodichain.lab.task_program.integrations.feasibility import (
     build_feasibility_host,
     MeasuredTaskMonitor,
@@ -27,6 +29,47 @@ from embodichain.lab.task_program.integrations.feasibility import (
 from embodichain.utils.utility import load_config
 
 __all__: list[str] = []
+
+
+class _MeasuredFrameBody:
+    def __init__(self, states, shapes):
+        self.body_state = torch.tensor(
+            [(*state.pose, *state.velocity) for state in states], dtype=torch.float32
+        )
+        self._poses = torch.eye(4).repeat(len(states), 1, 1)
+        self._poses[:, :3, :3] = matrix_from_quat(self.body_state[:, 3:7])
+        self._poses[:, :3, 3] = self.body_state[:, :3]
+        self.shapes = shapes
+
+    def get_local_pose(self, *, to_matrix=False):
+        return self._poses if to_matrix else self.body_state[:, :7]
+
+    def get_collision_shapes(self, env_id=0):
+        return self.shapes[env_id]
+
+
+def _measured_frame(env, snapshot, shapes):
+    if snapshot.env_ids != tuple(range(env.num_envs)):
+        raise ValueError("measured validation requires a complete World snapshot")
+    entities = {state.uid: [] for state in snapshot.batches[0]}
+    for batch in snapshot.batches:
+        for state in batch:
+            entities[state.uid].append(state)
+    bodies = {
+        uid: _MeasuredFrameBody(states, shapes[uid])
+        for uid, states in entities.items()
+        if states[0].kind == "rigid_object"
+    }
+    qpos = torch.tensor(
+        [state.qpos for state in entities[env.robot.uid]], dtype=torch.float32
+    )
+    return SimpleNamespace(
+        robot=SimpleNamespace(joint_names=env.robot.joint_names, get_qpos=lambda: qpos),
+        sim=SimpleNamespace(
+            get_rigid_object_uid_list=lambda: tuple(bodies),
+            get_rigid_object=lambda uid: bodies[uid],
+        ),
+    )
 
 
 class _MeasuredCollision:
@@ -63,7 +106,7 @@ class _MeasuredCollision:
         )
         self.results = {}
 
-    def prepare(self):
+    def prepare(self, snapshot=None):
         from embodichain.lab.task_program.integrations.simulation.feasibility_geometry import (
             collision_bodies_from_simulation,
         )
@@ -76,14 +119,29 @@ class _MeasuredCollision:
         self.results.clear()
         self.initial.clear()
         self.terminal.clear()
+        self.shapes = {
+            uid: tuple(
+                self.env.sim.get_rigid_object(uid).get_collision_shapes(env_id=row)
+                for row in range(self.env.num_envs)
+            )
+            for uid in self.env.sim.get_rigid_object_uid_list()
+        }
+        measured = (
+            self.env
+            if snapshot is None
+            else _measured_frame(self.env, snapshot, self.shapes)
+        )
         for row, monitor in self.monitors.items():
-            monitor.reset(self.env)
+            monitor.reset(measured)
             self.initial[row] = all(
-                monitor.predicate(self.env, c) for c in self.initial_conditions
-            ) and not all(monitor.predicate(self.env, c) for c in monitor.final_checks)
+                monitor.predicate(measured, c) for c in self.initial_conditions
+            ) and not all(monitor.predicate(measured, c) for c in monitor.final_checks)
 
-    def sample(self, ids, action):
+    def sample(self, ids, action, snapshot=None):
         env = self.env
+        measured = (
+            env if snapshot is None else _measured_frame(env, snapshot, self.shapes)
+        )
         frames = {
             f"{env.robot.uid}/{name}": env.robot.get_link_pose(
                 link_name=name, to_matrix=True
@@ -95,7 +153,7 @@ class _MeasuredCollision:
         }
         frames.update(
             {
-                uid: env.sim.get_rigid_object(uid)
+                uid: measured.sim.get_rigid_object(uid)
                 .get_local_pose(to_matrix=True)
                 .detach()
                 .cpu()
@@ -104,8 +162,8 @@ class _MeasuredCollision:
             }
         )
         for row in ids:
-            self.monitors[row].observe(env, action)
-            self.terminal[row] = self.monitors[row].validation(env)
+            self.monitors[row].observe(measured, action)
+            self.terminal[row] = self.monitors[row].validation(measured)
             metadata = action.metadata["row_actions"][str(row)]
             phase = self.phase(env, SimpleNamespace(metadata=metadata), None)
             row_frames = {key: value[row] for key, value in frames.items()}
