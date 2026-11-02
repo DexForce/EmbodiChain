@@ -70,19 +70,19 @@ class G1RoughTerrains(_RLAsset):
 class ShadowHandPen(_RLAsset):
     """Bundled model inputs for ShadowHandPen."""
 
-    archive_md5 = "d5642a9fb20bf49be918455826c35a97"
+    archive_md5 = "5dc61ae6cfe2f993c2f27eba8103cb89"
 
 
 class LeapHandCubeFaceTurn(_RLAsset):
     """Bundled model inputs for LeapHandCubeFaceTurn."""
 
-    archive_md5 = "6394cd7665963f3fdcacbcf170a9af79"
+    archive_md5 = "0dcc05a60e258a305af4e5bb49fc3e2c"
 
 
 class LeapHandCube(_RLAsset):
     """Bundled model inputs for LeapHandCube."""
 
-    archive_md5 = "1bf309614884c706e225d7cd5165b949"
+    archive_md5 = "96ecb448c72a8b21f8daba32fa3e4a41"
 
 
 _ASSET_CATALOG: dict[str, dict[str, str]] = {

@@ -104,7 +104,7 @@ def snapshot_execution_model(
         }:
             # These solver-computed caches are not authored inputs checked below.
             # Keep their batch variation visible without treating it as lost USD
-            # metadata; strict rollout comparison validates its output effects.
+            # metadata; rollout measurements record its output effects.
             if derived_cache_report is not None and values.size:
                 spread = (
                     values - values[0]

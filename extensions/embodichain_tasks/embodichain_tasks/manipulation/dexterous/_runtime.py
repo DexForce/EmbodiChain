@@ -200,8 +200,6 @@ class DexSimManipulationEnv:
             # large batches. Keep headroom for the 256-contact allocation.
             "njmax": 2048 if task_id == "M3" else 512,
             "nconmax": 256,
-            "deterministic": wp.DeterministicMode.RUN_TO_RUN,
-            "graph_conditional": False,
             "update_data_interval": 0,
         }
         self.backend_option_overrides = {}
@@ -217,9 +215,7 @@ class DexSimManipulationEnv:
                 }
                 solver_options[name] = value
         if solver_kind == "dexuni":
-            solver_cfg = DexUniSolverCfg(
-                mujoco_options=solver_options, mujoco_joints="all"
-            )
+            solver_cfg = DexUniSolverCfg(mujoco_options=solver_options)
         else:
             solver_cfg = MJWarpSolverCfg(**solver_options)
         config.newton_cfg = NewtonCfg(
@@ -236,6 +232,12 @@ class DexSimManipulationEnv:
         self.backend = get_newton_backend(self.world)
         builder = dexsim.spawn.SceneBuilder(self.world)
         builder.add_usd("asset", str(self.usd))
+        if solver_kind == "dexuni":
+            from ._dexuni_adapter import _mujoco_articulation_ids
+
+            self.backend.cfg.solver_cfg.mujoco_articulations = _mujoco_articulation_ids(
+                builder.scene_desc, num_envs
+            )
         self._explicit_collision_filtering = bool(
             builder.scene_desc.newton
             and builder.scene_desc.newton.use_explicit_collision_filtering

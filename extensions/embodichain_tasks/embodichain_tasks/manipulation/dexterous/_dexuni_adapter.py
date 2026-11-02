@@ -22,8 +22,24 @@ from typing import Any
 import torch
 import warp as wp
 from newton import Model
+from dexsim.spawn import SceneDesc
+from dexsim.types import ActorType
 
 __all__ = ["DexUniStateAdapter"]
+
+
+def _mujoco_articulation_ids(scene: SceneDesc, num_envs: int) -> tuple[int, ...]:
+    """Select every rigid articulation in the replicated manipulation scene."""
+    # Each non-static standalone body creates its own free or mocap articulation.
+    standalone = sum(
+        item.physics is not None
+        and item.physics.actor_type != ActorType.STATIC
+        and (
+            bool(item.collisions) or bool(getattr(item.physics.newton, "mocap", False))
+        )
+        for item in scene.mesh_objects
+    )
+    return tuple(range(num_envs * (len(scene.articulations) + standalone)))
 
 
 class DexUniStateAdapter:
