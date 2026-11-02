@@ -87,9 +87,22 @@ does not replace the existing EmbodiChain ACT model or migrate its checkpoints.
 The public container provides the complete Python 3.12 runtime, including
 GenSim, cuRobo and ONNX CUDA deployment. The internal container additionally
 provides a complete Python 3.11 environment. Both use an isolated Blender
-runtime to preserve Python/NumPy compatibility. See
-[container setup and qualification](docker/README.md) for build commands,
-environment selection and dependency locks.
+runtime to preserve Python/NumPy compatibility.
+
+On a Linux amd64 host with NVIDIA Container Toolkit installed:
+
+```bash
+docker pull dexforce/embodichain:ubuntu22.04-cuda12.8
+docker run --rm --gpus all -it --shm-size 8g \
+  -v "$PWD":/workspace --workdir /workspace \
+  dexforce/embodichain:ubuntu22.04-cuda12.8 bash
+```
+
+The public `ubuntu22.04-cuda12.8` and `ubuntu22.04-cuda12.8-py312` tags
+provide the same Python 3.12 image. Internal users can select `py311` or `py312`
+in `192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312`.
+See [container installation and environments](docker/README.md) for host
+requirements, environment selection, source development and dependency locks.
 
 ### Task Environments
 

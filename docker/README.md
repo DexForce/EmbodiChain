@@ -9,12 +9,70 @@ profiles introduced by [PR #911](https://github.com/DexForce/EmbodiChain/pull/91
 | `internal` | `py312` (default), `py311` | All public features in both profiles; Node.js 22 and CI test tools |
 
 RigidFormer extra dependencies and model weights are not preinstalled. Models,
-task assets and remote service credentials remain runtime inputs. No production
-registry tag is changed by the build/qualification workflow.
+task assets and remote service credentials remain runtime inputs.
 
-Verified, pullable source-commit candidates and their image digests are listed
-in [VALIDATION.md](VALIDATION.md). Use those explicit tags while the runtime PR
-is under review; the stable aliases below belong to the post-merge rollout.
+## Install and run
+
+Use a Linux amd64 host with an NVIDIA driver compatible with CUDA 12.8,
+Docker and NVIDIA Container Toolkit. Confirm GPU access with `nvidia-smi`
+on the host before starting the container.
+
+| Runtime | Published image |
+| --- | --- |
+| Public Python 3.12 | `dexforce/embodichain:ubuntu22.04-cuda12.8-py312` |
+| Public compatibility alias, same image | `dexforce/embodichain:ubuntu22.04-cuda12.8` |
+| Internal Python 3.11 / 3.12 | `192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312` |
+
+Pull the public image and mount a working directory:
+
+```bash
+docker pull dexforce/embodichain:ubuntu22.04-cuda12.8-py312
+docker run --rm --gpus all -it --shm-size 8g \
+  -v "$PWD":/workspace --workdir /workspace \
+  dexforce/embodichain:ubuntu22.04-cuda12.8-py312 bash
+```
+
+EmbodiChain and its runtime dependencies are already installed. Check the
+selected environment inside the container:
+
+```bash
+python -c 'import sys, torch, dexsim; print(sys.version); print(torch.__version__); assert torch.cuda.is_available()'
+embodichain list-task
+```
+
+The internal registry requires access to the internal network. Add
+`"insecure-registries": ["192.168.3.13:5000"]` to the existing Docker daemon
+configuration (`/etc/docker/daemon.json`) and restart Docker to enable its HTTP
+endpoint. Start its Python 3.11 environment with:
+
+```bash
+docker pull 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312
+docker run --rm --gpus all -it --shm-size 8g -e EMBODICHAIN_ENV=py311 \
+  -v "$PWD":/workspace --workdir /workspace \
+  192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312 bash
+```
+
+Use `EMBODICHAIN_ENV=py312` for the other environment; `py312` is the image
+default. CI explicitly activates `py311`.
+
+The images contain the EmbodiChain wheel built from the source revision in
+[VALIDATION.md](VALIDATION.md). For source development, mount your checkout as
+above and install it into the selected environment. Select the checkout's
+dependency locks, which may be newer than the image's bundled locks:
+
+```bash
+export EMBODICHAIN_CONSTRAINTS_DIR="$PWD/docker/locks"
+python -m pip install -e '.[gensim]' \
+  -c "$EMBODICHAIN_CONSTRAINTS_DIR/$CONDA_DEFAULT_ENV.txt" \
+  --index-url https://pypi.org/simple \
+  --extra-index-url https://download.pytorch.org/whl/cu128 \
+  --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+  --trusted-host pyp.open3dv.site
+```
+
+Stable tags reuse the qualified image digests. The source-commit candidate
+tags and previous public image remain available for reproducibility and rollback;
+see [VALIDATION.md](VALIDATION.md) for digests and CI evidence.
 
 ## Build and qualify
 
@@ -51,7 +109,8 @@ docker run --rm --gpus all dexforce/embodichain:ubuntu22.04-cuda12.8-py312 \
   python -c 'import torch, dexsim; print(torch.__version__)'
 
 # Internal image: the entrypoint selects the complete legacy environment.
-docker run --rm --gpus all -e EMBODICHAIN_ENV=py311 INTERNAL_IMAGE \
+docker run --rm --gpus all -e EMBODICHAIN_ENV=py311 \
+  192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312 \
   python -c 'import sys, torch; print(sys.version, torch.__version__)'
 
 # Existing container: choose an environment explicitly.
@@ -121,7 +180,7 @@ for profile in py311 py312 media; do python docker/lock-native.py "$profile"; do
 Use the matching profile when installing additional business dependencies:
 
 ```bash
-python -m pip install -c "$EMBODICHAIN_CONSTRAINTS_DIR/$EMBODICHAIN_ENV.txt" PACKAGE
+python -m pip install -c "$EMBODICHAIN_CONSTRAINTS_DIR/$CONDA_DEFAULT_ENV.txt" PACKAGE
 ```
 
 Constraints are explicit rather than global: isolated CPU SDK jobs must remain
@@ -129,17 +188,21 @@ free to install their own Torch/codec profile.
 
 ## CI rollout and rollback
 
-CI defaults to the qualified internal `v4-py311-py312-c42e8a0b0857` image
+CI defaults to the published internal `v4-py311-py312` image
 and activates `py311`. The image reference and activation command are explicit
 in the existing workflows/shared action; the existing job graph, triggers,
 test selection and installation commands are preserved. The SDK compatibility
 matrix selects Python 3.10, 3.11 and 3.12 independently of this default.
 
-After qualification, publish the public SHA-tagged candidate to Docker Hub,
-then move `ubuntu22.04-cuda12.8-py312` and the existing
-`ubuntu22.04-cuda12.8` alias to that digest. Preserve the previous public digest
-under a legacy tag before promotion. Keep the old internal `v3-py311` tag.
+Builds continue producing source-commit candidate tags. After qualification
+and successful CI, promote the existing manifests to the public
+`ubuntu22.04-cuda12.8-py312` / `ubuntu22.04-cuda12.8` tags and the internal
+`ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312` tag. Promotion preserves the
+image digest and does not rebuild the layers. Preserve the previous public
+digest under a legacy tag before moving the alias; retain the old internal
+`v3-py311` tag.
 
-Rollback restores the previous image reference and the `py311` activation
-commands.
+For rollback, restore the previous public digest from its legacy tag. CI can
+select the retained internal source-commit candidate or `v3-py311` reference
+and activate `py311`.
 Qualification fails when required CUDA, native, Blender or codec checks skip.

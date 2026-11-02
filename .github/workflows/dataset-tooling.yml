@@ -74,7 +74,7 @@ jobs:
             torchcodec: '0.11.1'
             tensordict: '0.15.3'
     container:
-      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312-c42e8a0b0857
+      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312
       # CPU Torch tests still import DexSim, which requires host CUDA/NVML libraries.
       options: --gpus device=0 --shm-size 2g
       volumes:

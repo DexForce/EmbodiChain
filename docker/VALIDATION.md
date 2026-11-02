@@ -1,4 +1,4 @@
-# Qualified container candidates
+# Published container images
 
 Source commit: `c42e8a0b0857ae00aeeb21d414d30318abb2e171`.
 Implementation: [PR #914](https://github.com/DexForce/EmbodiChain/pull/914),
@@ -6,8 +6,9 @@ which incorporates [PR #911](https://github.com/DexForce/EmbodiChain/pull/911).
 
 | Target | Published reference | Compressed layers |
 | --- | --- | ---: |
-| Public py312 | `dexforce/embodichain:ubuntu22.04-cuda12.8-py312-c42e8a0b0857` | 9.86 GB |
-| Internal py311/py312 | `192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312-c42e8a0b0857` | 16.44 GB |
+| Public py312 | `dexforce/embodichain:ubuntu22.04-cuda12.8-py312` | 9.86 GB |
+| Public compatibility alias | `dexforce/embodichain:ubuntu22.04-cuda12.8` | 9.86 GB |
+| Internal py311/py312 | `192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312` | 16.44 GB |
 
 Public digest:
 `sha256:7e0627b9ab3f7da3cb81109e8bd7fcc6e9231492d250026130ea518426b366dc`.
@@ -15,6 +16,9 @@ Docker Hub and the staged public target have identical digests.
 
 Internal digest:
 `sha256:c3514d70890af98e413fdfe5ba2859c039d51f5b23be24639c3fed14cf31f322`.
+
+Both public tags identify the same image. The original candidate tags ending
+in `-c42e8a0b0857` remain available with these same digests.
 
 ## Actual image qualification
 
@@ -74,6 +78,34 @@ This follow-up validates fresh installed-wheel environments. The published
 succeeded. The public digest and source revision were verified after publishing.
 The approved temporary GitHub secret was deleted and its absence verified.
 
-These are source-commit candidates. Merge the consolidated runtime PR,
-rebuild/qualify the merge commit, and follow [README.md](README.md) before
-promoting production aliases or CI variables.
+[Formal manifest promotion](https://github.com/DexForce/EmbodiChain/actions/runs/41487856201)
+succeeded after both CI workflows passed at implementation commit
+`df878c6eb913d00f25f4b2c73226304814fb1c57`:
+
+- [Main py311 CI](https://github.com/DexForce/EmbodiChain/actions/runs/41471747933):
+  10,830 CPU, 499 GPU and 409 simulation cases passed; 38/8/5 cases were skipped
+  respectively. Formatting, API coverage, documentation tests, the Sphinx build
+  and the final test gate passed.
+- [SDK compatibility](https://github.com/DexForce/EmbodiChain/actions/runs/41471747895):
+  all seven jobs passed, including 141 SDK cases each on Python 3.10, 3.11 and
+  3.12, all three offline-tool jobs and the standalone exporter.
+
+Promotion copied the existing manifests without rebuilding the images. Their
+bundled wheel and source labels remain at `c42e8a0b0857`; the CI runs above
+installed and tested the updated PR source in those environments. Use the
+source-development instructions in [README.md](README.md) to install a newer
+checkout into a running container.
+
+Independent registry reads verified all three formal tags against the candidate
+digests. The previous public image is preserved as
+`dexforce/embodichain:ubuntu22.04-cuda12.8-legacy-5cfd8f52237d`, with digest
+`sha256:5cfd8f52237d8da7bf2461239295f4c136c482e30dd3c588ee283f882036ff6c`.
+The internal `v3-py311` tag still identifies its original
+`sha256:3ed6575c47aa3015f1b24b1be4355804f2e96ce71b0111cd021fbb47989b9b06` image.
+Temporary registry credentials were removed from the publishing runner, the
+GitHub secret was deleted and its absence verified, and local Docker login
+credentials were deleted.
+
+The PR's main, dataset and documentation workflows now use the formal internal
+tag and retain explicit `py311` activation. The SDK matrix continues selecting
+Python 3.10/3.11/3.12 independently.
