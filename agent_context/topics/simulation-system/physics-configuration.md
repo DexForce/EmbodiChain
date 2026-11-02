@@ -6,7 +6,7 @@ Return to the [simulation overview](simulation-system.md) for lifecycle entry.
 ## Backend, solver and device resolution
 
 `SimulationManagerCfg.physics_cfg` selects the backend by config type.
-`cfg/simulation.py` owns `PhysicsBackendCfg`, `DefaultPhysicsCfg` and
+`cfg/physics.py` owns `PhysicsBackendCfg`, `DefaultPhysicsCfg` and
 `NewtonPhysicsCfg`; do not add another backend string to the manager config.
 Gym's file-owned selector and composition rules belong to
 [environment configuration](../env-framework/configuration.md).
@@ -21,13 +21,18 @@ device, not a separate environment tensor device.
 `None` retains the native default. Gym accepts the former in `physics_config`
 and the latter at the top level through `config_to_cfg()`.
 
-Newton `solver_cfg=None` preserves DexSim's scene-aware `AutoSolverCfg`.
-The concrete solver is resolved from the complete Spawn scene, then exposed
-through `NewtonPhysicsBackend.solver_type`. Do not guess a solver-specific robot
-preset while it is unresolved. Gradient mode requires an explicit
-`semi_implicit` solver. Read exact solver options/defaults in
-`cfg/simulation.py` and the installed DexSim config types; do not substitute a
-hardcoded fallback when an expected DexSim API is absent.
+Newton `solver_cfg=None` leaves the solver argument unset and preserves the
+installed DexSim default. Current DexSim uses scene-aware `DexUniSolverCfg`;
+older builds use `AutoSolverCfg`. Explicit `auto` mappings are accepted only
+when that class is available. After its removal, migrate to `solver_cfg=None`
+or `solver_type="dexuni"`; callers depending on an older automatic selection
+must explicitly select that concrete solver.
+
+The scene-resolved solver is exposed through `NewtonPhysicsBackend.solver_type`.
+Do not guess a solver-specific robot preset while it is unresolved. Gradient
+mode requires an explicit `semi_implicit` solver. Read exact options/defaults in
+`cfg/physics.py` and the installed DexSim config types. DexUni's
+`joint_mode="dynamic"` remains a supported top-level solver option.
 
 `collision_cfg` owns the external Newton contact pipeline. Its
 `update_interval=None` updates at the first local solver substep; positive `k`

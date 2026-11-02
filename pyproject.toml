@@ -52,9 +52,10 @@ dependencies = [
   "tensordict>=0.13,<0.15",
   "viser==1.0.21",
   "lerobot>=0.4.4,<0.5",
-  # Select the TorchCodec release matching the installed Torch ABI.
-  # Supported examples: Torch 2.7 / TorchCodec 0.5 and Torch 2.10 / TorchCodec 0.10.
-  "torchcodec>=0.5,<0.11"
+  # Keep TorchCodec's binary ABI and LeRobot's supported Torch range aligned.
+  "torch>=2.10,<2.11",
+  "torchvision>=0.25,<0.26",
+  "torchcodec>=0.10,<0.11"
 ]
 
 [project.optional-dependencies]
@@ -102,6 +103,7 @@ bpy = { index = "blender" }
 [[tool.uv.index]]
 name = "blender"
 url = "https://download.blender.org/pypi/"
+explicit = true
 
 [tool.setuptools.dynamic]
 version = { file = ["VERSION"] }

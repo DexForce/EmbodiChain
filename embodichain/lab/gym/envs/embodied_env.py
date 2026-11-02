@@ -358,6 +358,40 @@ class EmbodiedEnvCfg(EnvCfg):
     """
 
 
+class _EpisodeMetadataRows(Sequence):
+    """Retain reset-time metadata, materializing row copies when recording uses them."""
+
+    def __init__(self, count: int, template: dict[str, Any]) -> None:
+        pending = (copy.deepcopy(template),)
+        self._rows = [pending] * count
+
+    def __len__(self) -> int:
+        return len(self._rows)
+
+    def __getitem__(self, index: int | slice) -> dict[str, Any] | list[dict[str, Any]]:
+        if isinstance(index, slice):
+            return [self[i] for i in range(*index.indices(len(self)))]
+        record = self._rows[index]
+        if isinstance(record, tuple):
+            record = copy.deepcopy(record[0])
+            episode_uuid = str(uuid4())
+            record.update(
+                env_id=index % len(self),
+                episode_uuid=episode_uuid,
+                source_episode_uuid=episode_uuid,
+            )
+            self._rows[index] = record
+        return record
+
+    def __setitem__(self, index: int, record: dict[str, Any]) -> None:
+        self._rows[index] = record
+
+    def reset_rows(self, ids: Sequence[int], template: dict[str, Any]) -> None:
+        pending = (copy.deepcopy(template),)
+        for index in ids:
+            self._rows[index] = pending
+
+
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
     """Embodied AI environment that is used to simulate the Embodied AI tasks.
@@ -1452,8 +1486,15 @@ class EmbodiedEnv(BaseEnv):
         if episode_metadata is not None and getattr(
             self, "_demo_metadata_initialized", True
         ):
-            for env_id in env_ids_to_process.cpu().tolist():
-                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
+            metadata_ids = env_ids_to_process.cpu().tolist()
+            if isinstance(episode_metadata, _EpisodeMetadataRows):
+                if metadata_ids:
+                    episode_metadata.reset_rows(
+                        metadata_ids, self._new_demo_episode_metadata(metadata_ids[0])
+                    )
+            else:
+                for env_id in metadata_ids:
+                    episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
         # Stateful managers reset selected rows before reset-mode events run.
         action_manager = getattr(self, "action_manager", None)
         if action_manager is not None:
@@ -1611,9 +1652,9 @@ class EmbodiedEnv(BaseEnv):
         self._demo_active_segment_start_steps = self._demo_steps.clone()
         self._demo_active_rollout_start_steps = self.rollout_steps.clone()
         self._demo_metadata_initialized = True
-        self._demo_episode_metadata = [
-            self._new_demo_episode_metadata(env_id) for env_id in range(self.num_envs)
-        ]
+        self._demo_episode_metadata = _EpisodeMetadataRows(
+            self.num_envs, self._new_demo_episode_metadata(0)
+        )
         bridge = getattr(self, "_active_task_program_bridge", None)
         program = getattr(bridge, "_program", None)
         if program is not None:

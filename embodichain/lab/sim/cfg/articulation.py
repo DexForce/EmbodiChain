@@ -35,6 +35,15 @@ from .rigid import (
     _rigid_body_physics_from_dict,
 )
 
+__all__ = [
+    "ArticulationRootPropertiesCfg",
+    "LinkPhysicsOverrideCfg",
+    "link_attrs_from_dict",
+    "JointDrivePropertiesCfg",
+    "NewtonJointDrivePropertiesCfg",
+    "ArticulationCfg",
+]
+
 
 def _normalize_joint_target_mode(value: object) -> int:
     """Normalize a portable joint target mode to its backend integer value."""
@@ -278,6 +287,24 @@ class JointDrivePropertiesCfg:
 
     * For linear joints, the unit is kg-m/s (N-s/m).
     * For angular joints, the unit is kg-m^2/s/rad (N-m-s/rad).
+    """
+
+    limit_stiffness: Dict[str, float] | float | None = None
+    """Newton joint-limit restoring gain, separate from the drive stiffness.
+
+    Scalars and joint-rule mappings follow :attr:`stiffness`. ``None`` keeps
+    the source/backend limit gain. With Newton's MuJoCo solver, explicitly
+    setting both limit gains to zero selects MuJoCo's default limit response
+    (``solref=[0.02, 1.0]``); it does not remove the joint limits. Other Newton
+    solvers interpret these gains according to their joint-limit model.
+    """
+
+    limit_damping: Dict[str, float] | float | None = None
+    """Newton joint-limit damping gain, separate from the drive damping.
+
+    ``None`` keeps the source/backend value. See :attr:`limit_stiffness` for
+    the MuJoCo solver's explicit-zero behavior. The Default backend does not
+    consume either Newton limit gain.
     """
 
     max_effort: Dict[str, float] | float | None = None

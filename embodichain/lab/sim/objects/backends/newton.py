@@ -90,6 +90,7 @@ def _stabilize_newton_mimic_target_write(
     qvel_limits: torch.Tensor,
     articulation_view: Any,
     device: torch.device,
+    clamp_target_qpos: bool = True,
 ) -> None:
     """Keep Newton mimic follower-drive targets on the commanded relation."""
     if not configured:
@@ -137,8 +138,9 @@ def _stabilize_newton_mimic_target_write(
         )
         return
 
-    limits = qpos_limits[env_ids][:, follower_ids_tensor, :]
-    targets = targets.clamp(limits[..., 0], limits[..., 1])
+    if clamp_target_qpos:
+        limits = qpos_limits[env_ids][:, follower_ids_tensor, :]
+        targets = targets.clamp(limits[..., 0], limits[..., 1])
     articulation_view.apply_qpos(
         targets,
         env_ids,
