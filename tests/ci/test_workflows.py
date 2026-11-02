@@ -281,7 +281,7 @@ def test_test_job_restores_git_access_before_running_selected_tests(
     tests = next(step for step in steps if step.get("name") == "Run selected tests")
     assert tests["shell"] == "bash -l {0}"
     preparation = tests["run"].split("python scripts/ci/run_test_plan.py", 1)[0]
-    preparation = preparation.replace("source activate py312", ":").replace(
+    preparation = preparation.replace("source activate py311", ":").replace(
         "node --version", ":"
     )
     repository = tmp_path / "checkout with spaces"

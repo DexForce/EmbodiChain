@@ -130,10 +130,10 @@ free to install their own Torch/codec profile.
 ## CI rollout and rollback
 
 CI defaults to the qualified internal `v4-py311-py312-c42e8a0b0857` image
-and activates `py312`. The image reference and activation command are explicit
+and activates `py311`. The image reference and activation command are explicit
 in the existing workflows/shared action; the existing job graph, triggers,
-test selection and installation commands are preserved. The py312 CI profile
-requires PR #911's dependency changes in the checked-out code.
+test selection and installation commands are preserved. The SDK compatibility
+matrix selects Python 3.10, 3.11 and 3.12 independently of this default.
 
 After qualification, publish the public SHA-tagged candidate to Docker Hub,
 then move `ubuntu22.04-cuda12.8-py312` and the existing

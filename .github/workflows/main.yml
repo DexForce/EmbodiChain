@@ -369,7 +369,7 @@ jobs:
       - name: Install test package
         shell: bash -l {0}
         run: |
-          source activate py312
+          source activate py311
           set -euo pipefail
           if [[ "${NEEDS_GENSIM}" == "true" ]]; then
             package='.[gensim]'
@@ -403,7 +403,7 @@ jobs:
       - name: Run selected tests
         shell: bash -l {0}
         run: |
-          source activate py312
+          source activate py311
           set -euo pipefail
           # Login shells may use a different Git config from actions/checkout.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
