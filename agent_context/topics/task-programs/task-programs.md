@@ -119,6 +119,10 @@ For a minimal projected workflow, start with
 [repeated pick/place](../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/README.md).
 For measured handover, inspect the selected deployment and execution policy in
 `extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/`.
+For fixed real-motion source binding and qualified expansion, use
+`extensions/embodichain_tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml`.
+It selects three real-source prototypes through verified asset references and
+the existing Real2Sim recorder owner; the example rebuilds sources from the same templates.
 Assurance belongs to that policy, not the task name or backend. Read the
 [environment selection contract](../env-framework/configuration.md#reusable-gym-deployment-components)
 for backend variants: selecting a physical component does not rename a Gym ID.

@@ -42,9 +42,8 @@ from embodichain.lab.sim.motion.expansion.real2sim_collision import (
     SampledRobotCollisionChecker,
     PlaneCollisionBody,
 )
-from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
-from embodichain_tasks.configs import get_config_path
-from embodichain.utils.utility import load_config
+from embodichain.lab.gym.utils.gym_utils import build_env_cfg_from_args
+from embodichain.lab.scripts.run_task import _create_parser
 from examples.expansion.trajectory.real2sim_carton.prepare import (
     ROOT,
     digest,
@@ -163,15 +162,15 @@ def _offset(pose: np.ndarray, values) -> np.ndarray:
 
 
 def _comparison_plot(output: Path, index: list[dict]) -> None:
-    """Plot the two measured baselines and their explicitly unexecuted targets."""
+    """Plot the measured baseline and their explicitly unexecuted targets."""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    figure = plt.figure(figsize=(14, 8))
+    figure = plt.figure(figsize=(14, 4))
     handles = []
-    for row_number, origin in enumerate(("measured", "synthetic_reference")):
+    for row_number, origin in enumerate(("measured",)):
         entry = next(
             item
             for item in index
@@ -187,7 +186,7 @@ def _comparison_plot(output: Path, index: list[dict]) -> None:
         times = np.array(case["frames"]["t"])
         for column, curve in enumerate(case["curves"]):
             axes = figure.add_subplot(
-                2, 3, row_number * 3 + column + 1, projection="3d"
+                1, 3, row_number * 3 + column + 1, projection="3d"
             )
             for key, color, label in (
                 ("input", "#3c74d6", "Input target (unexecuted)"),
@@ -211,9 +210,7 @@ def _comparison_plot(output: Path, index: list[dict]) -> None:
             if row_number == 0 and column == 0:
                 handles.append(line)
             axes.set_title(
-                ("DROID" if origin == "measured" else "Independent synthetic")
-                + " / "
-                + curve["skill_id"],
+                "DROID" + " / " + curve["skill_id"],
                 fontsize=10,
             )
             axes.set_xlabel("X / m", fontsize=8)
@@ -233,9 +230,7 @@ def _comparison_plot(output: Path, index: list[dict]) -> None:
     plt.close(figure)
 
 
-def export(
-    prepared: Path, synthetic: Path, matrix: Path, source_directory: Path, output: Path
-) -> Path:
+def export(prepared: Path, matrix: Path, source_directory: Path, output: Path) -> Path:
     report = json.loads(matrix.read_text())
     scene = json.loads((prepared / "scene.lock.json").read_text())
     qualification = json.loads((prepared / "qualification.json").read_text())
@@ -273,11 +268,11 @@ def export(
     )
     archive = json.loads(raw_manifest.read_text())
     rows = {item["dataset"]: item for item in archive["episodes"]}
-    cfg = _robot_cfg_from_dict(
-        load_config(
-            get_config_path("components/embodiments/franka_panda_robotiq85.yaml")
-        )["simulation"]
+    arguments = _create_parser().parse_args(
+        ["--gym-config", str(prepared / "task.measured.yaml")]
     )
+    environment_cfg, _, _ = build_env_cfg_from_args(arguments)
+    cfg = environment_cfg.robot
     urdf = Path(cfg.urdf_cfg.assemble_urdf())
     geometry = SampledRobotCollisionChecker(
         urdf,
@@ -499,7 +494,7 @@ def export(
                 ),
             )
         else:
-            base = prepared / "measured" if case["origin"] == "measured" else synthetic
+            base = prepared / "measured"
             prototypes = [
                 load_prototype(base / f"prototypes/{i}/prototype.json")
                 for i in range(3)
@@ -601,13 +596,12 @@ def export(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("prepared", "synthetic", "matrix", "source-dir", "output"):
+    for name in ("prepared", "matrix", "source-dir", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
     args = parser.parse_args()
     print(
         export(
             args.prepared.resolve(),
-            args.synthetic.resolve(),
             args.matrix.resolve(),
             args.source_dir.resolve(),
             args.output.resolve(),

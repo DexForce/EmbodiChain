@@ -6,8 +6,8 @@ ExpansionSession accounting and the existing LeRobot writer. ODS remains unchang
 
 ## Draft status
 
-This is the foundation draft on top of Real2Sim #896 and Franka #916; scene/workspace
-#912 has merged. Resume release qualification after those prerequisites merge.
+This foundation draft is synchronized with `main`, including Real2Sim #896,
+Franka #916 and scene/workspace #912. Release qualification remains pending.
 Native Default collection and Task Program Newton runs have positive evidence.
 The tested Newton DROID carton run was rejected by physical-effect/segment checks;
 it is **not qualified**, and no thresholds or source protections were relaxed.

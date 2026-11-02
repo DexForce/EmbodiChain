@@ -1,5 +1,13 @@
 # Trajectory augmentation showcases
 
+## Real2Sim motion prototypes and data collection
+
+The [directional-carton example](real2sim_carton/README.md) rebuilds prototypes from a DROID
+real demonstration using the official carton task templates, refines them, and collects
+spatial, trajectory and time variants through Task Program execution. Launch
+it with `embodichain run-example expansion/trajectory/real2sim_carton`, or use
+its `--prepare-only` output directly with `embodichain run-task`.
+
 ## Interactive pure-trajectory augmentation laboratory
 
 Build one self-contained browser page that compares all implemented trajectory

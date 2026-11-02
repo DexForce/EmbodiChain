@@ -427,11 +427,55 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             target, context, key, request=request
         )
         if place_xpos.ndim == 4:
-            place_xpos = place_xpos[:, -1]
+            if place_xpos.shape[1] != 1:
+                raise ValueError(
+                    "external Place requires a single target pose; "
+                    "ordered waypoints are unsupported"
+                )
+            place_xpos = place_xpos[:, 0]
         release_index = motion.segment_lengths["approach"]
         self._validate_nominal_anchor(
             motion.trajectory, index=release_index, endpoint=endpoint, target=place_xpos
         )
+        final_qpos = motion.trajectory.positions[:, -1, list(endpoint.joint_ids)]
+        final_tcp = self.robot.compute_fk(
+            qpos=final_qpos,
+            name=endpoint.control_part,
+            to_matrix=True,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
+        )
+        if (
+            not isinstance(final_tcp, torch.Tensor)
+            or final_tcp.shape != place_xpos.shape
+            or not bool(torch.isfinite(final_tcp).all())
+        ):
+            raise ValueError("external Place retract FK is unavailable")
+        # The prototype retains its lateral/orientation retreat relation, but
+        # must meet the same requested vertical clearance as native placement.
+        minimum_z = self._lifted_pose(place_xpos, request.skill_options)[:, 2, 3]
+        maximum_z = (
+            torch.full_like(minimum_z, float("inf"))
+            if request.skill_options.max_approach_retract_z is None
+            else torch.clamp_min(
+                torch.full_like(
+                    minimum_z, request.skill_options.max_approach_retract_z
+                ),
+                place_xpos[:, 2, 3],
+            )
+        )
+        if bool(
+            (
+                (final_tcp[:, 2, 3] < minimum_z - 0.002)
+                | (final_tcp[:, 2, 3] > maximum_z + 0.002)
+            ).any()
+        ):
+            raise ValueError(
+                "external Place does not satisfy requested retract clearance"
+            )
         closed = hand.joint_positions(
             GRASP_COMMAND,
             num_envs=context.batch_size,

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Execute every pinned dual-source candidate in an independent B=1 host."""
+"""Execute every real-demonstration candidate in an independent B=1 host."""
 
 from __future__ import annotations
 
@@ -28,11 +28,12 @@ import sys
 import time
 
 import yaml
+from embodichain.utils.config_paths import resolve_config_path
 
 from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
     load_real2sim_tabletop_profile,
 )
-from examples.expansion.trajectory.real2sim.audit import _check_case
+from examples.expansion.trajectory.real2sim_carton._audit import _check_case
 from examples.expansion.trajectory.real2sim_carton.prepare import write_json, write_yaml
 
 __all__: list[str] = []
@@ -40,11 +41,12 @@ __all__: list[str] = []
 
 def run(
     prepared: Path,
-    synthetic: Path,
     output: Path,
     *,
     jobs: int = 2,
     timeout: float = 300.0,
+    task: Path | None = None,
+    profile_path: Path | None = None,
 ) -> Path:
     if not 1 <= jobs <= 3:
         raise ValueError("one to three independent B=1 workers are supported")
@@ -53,10 +55,13 @@ def run(
     output.mkdir(parents=True, exist_ok=False)
     sources = {
         "measured": (
-            prepared / "task.measured.yaml",
-            prepared / "profile.measured.yaml",
+            prepared / "task.measured.yaml" if task is None else task,
+            (
+                prepared / "profile.measured.yaml"
+                if profile_path is None
+                else profile_path
+            ),
         ),
-        "synthetic_reference": (synthetic / "task.yaml", synthetic / "profile.yaml"),
     }
     cases = []
     for origin, (task, path) in sources.items():
@@ -64,6 +69,7 @@ def run(
         if len(profile.layouts) != 13 or len(profile.recipes) != 6:
             raise ValueError("each origin must declare the complete 13 x 6 matrix")
         payload = yaml.safe_load(path.read_text())
+        payload["source_artifacts"] = profile.source_artifacts
         for layout in payload["layouts"]:
             for recipe in profile.recipes:
                 cases.append((origin, task, payload, layout, recipe))
@@ -204,13 +210,13 @@ def run(
         )
     report = dict(
         schema="real2sim-carton-matrix/v1",
-        expected=156,
+        expected=78,
         attempted=len(results),
-        report_complete=len(results) == 156,
+        report_complete=len(results) == 78,
         sources=summaries,
         all_passed=all(item["matrix_complete"] for item in summaries.values()),
         cases=results,
-        scope="Public real motion and independent synthetic reference in a declared cuboid proxy; sampled collision checks; no hardware/dynamics qualification",
+        scope="Public real motion in a declared cuboid proxy; sampled collision checks; no hardware/dynamics qualification",
     )
     path = output / "acceptance-report.json"
     write_json(path, report)
@@ -220,17 +226,23 @@ def run(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prepared", type=Path, required=True)
-    parser.add_argument("--synthetic", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--jobs", type=int, default=2)
     parser.add_argument("--timeout", type=float, default=300.0)
+    parser.add_argument("--task", type=str)
+    parser.add_argument("--profile", type=str)
     args = parser.parse_args()
     path = run(
         args.prepared.resolve(),
-        args.synthetic.resolve(),
         args.output.resolve(),
         jobs=args.jobs,
         timeout=args.timeout,
+        task=None if args.task is None else resolve_config_path(args.task).resolve(),
+        profile_path=(
+            None
+            if args.profile is None
+            else resolve_config_path(args.profile).resolve()
+        ),
     )
     print(path)
     if not json.loads(path.read_text())["all_passed"]:

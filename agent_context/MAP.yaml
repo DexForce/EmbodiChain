@@ -475,11 +475,12 @@ topics:
 - id: data-assets
   title: Data Assets
   aliases: [data assets, data path, asset download, 数据资产, 资产下载, 数据路径]
-  keywords: [get_data_path, get_data_class, EmbodiChainDataset, TabletopFourBases, Real2SimCarton, Real2SimCartonV1, demo assets, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
+  keywords: [get_data_path, get_data_class, _resolve_data_reference, EmbodiChainDataset, TabletopFourBases, Real2SimCarton, Real2SimCartonV1, demo assets, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
     CATEGORY_MODULES, embodichain.assets, ROBOT_ASSETS, 资产注册, download lock, get_registry, DefaultMaterials, list_default_materials, get_default_material_info]
   paths: [topics/data-assets/data-assets.md]
   source_of_truth:
   - embodichain/data/dataset.py
+  - embodichain/data/_references.py
   - embodichain/data/_asset_registry.py
   - extensions/embodichain_robots/_asset_catalog.py
   - embodichain/data/constants.py

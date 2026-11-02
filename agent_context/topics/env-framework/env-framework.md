@@ -140,8 +140,9 @@ dataset persistence are separate contracts; see
 [data pipeline](../data-pipeline/data-pipeline.md).
 
 Source-bound Real2Sim episodes require call-level action tracing and confirmed
-artifact receipts. The ordinary `run-task` recorder rejects them; the explicit
-`--real2sim-profile` tabletop owner uses the qualified synchronous sink and
+artifact receipts. The ordinary `run-task` recorder rejects them; a deployment's
+`real2sim.profile` or explicit `--real2sim-profile` selects the tabletop owner,
+which uses the qualified synchronous sink and
 retains a staged payload if confirmation fails. See
 [Real2Sim motion](../data-pipeline/real2sim.md).
 

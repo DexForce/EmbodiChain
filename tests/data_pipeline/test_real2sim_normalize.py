@@ -161,6 +161,51 @@ def test_prepare_and_load_apply_reader_owned_normalization_budgets(tmp_path) -> 
     assert len(load_prototype(manifest, max_samples=6).unit.timestamps) == 6
 
 
+@pytest.mark.parametrize("bundle_kind", ["trajectory", "prototype"])
+@pytest.mark.parametrize("declared_shape", [(10**12,), (6, 2)])
+def test_bundle_headers_are_checked_before_array_allocation(
+    tmp_path: Path, monkeypatch, bundle_kind: str, declared_shape: tuple[int, ...]
+) -> None:
+    import hashlib
+    import io
+    import json
+    import zipfile
+
+    if bundle_kind == "trajectory":
+        manifest = save_trajectory(_source(), tmp_path / "source")
+        array_name, digest_name = "array_file", "sha256"
+        loader = load_trajectory
+    else:
+        manifest = prepare_prototype(
+            _source(),
+            joints=(JointSpec("arm", "revolute"), JointSpec("finger", "prismatic")),
+            control_dt=0.02,
+            directory=tmp_path / "prototype",
+        )
+        array_name, digest_name = "normalized_file", "normalized_sha256"
+        loader = load_prototype
+    payload = json.loads(manifest.read_text())
+    arrays_path = manifest.parent / payload[array_name]
+    header = io.BytesIO()
+    np.lib.format.write_array_header_1_0(
+        header, dict(descr="<f8", fortran_order=False, shape=declared_shape)
+    )
+    with zipfile.ZipFile(arrays_path, "w") as archive:
+        archive.writestr("qpos.npy", header.getvalue())
+    payload[digest_name] = hashlib.sha256(arrays_path.read_bytes()).hexdigest()
+    manifest.write_text(json.dumps(payload))
+    original_load = np.load
+
+    def bounded_load(path, *args, **kwargs):
+        if Path(path) == arrays_path:
+            pytest.fail("malformed NPY header reached NumPy allocation")
+        return original_load(path, *args, **kwargs)
+
+    monkeypatch.setattr(np, "load", bounded_load)
+    with pytest.raises(ValueError, match="NPY shape"):
+        loader(manifest)
+
+
 def test_real2sim_cli_reports_budget_rejection_before_publishing(
     tmp_path, capsys
 ) -> None:

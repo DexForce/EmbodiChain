@@ -2117,7 +2117,10 @@ def test_configured_nominal_source_preflights_content_and_revision(tmp_path):
         )
 
 
-def test_real2sim_collection_profile_rejects_ambiguous_limits_and_recipes(tmp_path):
+@pytest.mark.parametrize("asset_backed", [False, True])
+def test_real2sim_collection_profile_rejects_ambiguous_limits_and_recipes(
+    tmp_path, monkeypatch, asset_backed
+):
     import yaml
     from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
         load_real2sim_tabletop_profile,
@@ -2154,6 +2157,16 @@ def test_real2sim_collection_profile_rejects_ambiguous_limits_and_recipes(tmp_pa
         "original_recording": {"path": "original.h5", "sha256": "a" * 64},
         "source_evidence": {"path": "source.npz", "sha256": "b" * 64},
     }
+    if asset_backed:
+        from types import SimpleNamespace
+
+        for item in artifacts.values():
+            (tmp_path / item["path"]).write_text("fixture")
+            item["path"] = {"asset": "DemoInputs", "path": item["path"]}
+        monkeypatch.setattr(
+            "embodichain.data.get_data_class",
+            lambda _: lambda: SimpleNamespace(extract_dir=str(tmp_path)),
+        )
     json_path = tmp_path / "profile.json"
     import json
 

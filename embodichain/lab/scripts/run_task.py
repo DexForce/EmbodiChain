@@ -1664,7 +1664,10 @@ def _create_parser() -> argparse.ArgumentParser:
         "--real2sim-profile",
         type=str,
         default=None,
-        help="Inert B=1 tabletop Real2Sim collection profile; source bindings remain in the integration.",
+        help=(
+            "Override the task's real2sim.profile with an inert B=1 tabletop "
+            "collection profile; source bindings remain in the integration."
+        ),
     )
     parser.add_argument(
         "--debug-mode",
@@ -1708,7 +1711,7 @@ def _create_parser() -> argparse.ArgumentParser:
         dest="expansion_dataset_dir",
         type=str,
         default=None,
-        help="Override dataset manager save_path values.",
+        help="Dataset destination; owned by the Real2Sim recorder when selected.",
     )
     parser.add_argument(
         "--expansion-save-video",
@@ -1815,7 +1818,10 @@ def cli(argv: Sequence[str] | None = None) -> None:
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
 
     real2sim_profile = None
-    if getattr(args, "real2sim_profile", None) is not None:
+    real2sim_profile_path = getattr(args, "real2sim_profile", None)
+    if real2sim_profile_path is None:
+        real2sim_profile_path = gym_config.get("real2sim", {}).get("profile")
+    if real2sim_profile_path is not None:
         from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
             load_real2sim_tabletop_profile,
         )
@@ -1833,8 +1839,8 @@ def cli(argv: Sequence[str] | None = None) -> None:
             not isinstance(args.expansion_dataset_dir, str)
             or not args.expansion_dataset_dir.strip()
         ):
-            raise ValueError("--real2sim-profile requires a nonempty --dataset-dir")
-        real2sim_profile = load_real2sim_tabletop_profile(args.real2sim_profile)
+            raise ValueError("Real2Sim collection requires a nonempty --dataset-dir")
+        real2sim_profile = load_real2sim_tabletop_profile(real2sim_profile_path)
         if env_cfg.num_envs != 1:
             raise ValueError("Real2Sim collection requires B=1")
         schedule_size = len(real2sim_profile.layouts) * len(real2sim_profile.recipes)

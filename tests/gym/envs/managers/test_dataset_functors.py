@@ -2704,8 +2704,10 @@ def test_droid_original_evidence_is_required_and_archived_before_receipt(
     recorder.finalize()
 
 
+@pytest.mark.parametrize("observed_geometry", [False, True])
 def test_replay_export_preserves_commit_identity_and_rejects_changed_attachment(
     tmp_path,
+    observed_geometry: bool,
 ) -> None:
     import hashlib
     from dataclasses import replace
@@ -2721,16 +2723,26 @@ def test_replay_export_preserves_commit_identity_and_rejects_changed_attachment(
         target_pose=np.eye(4),
         timestamps=episode.timestamps.numpy(),
     )
-    episode = replace(
-        episode,
-        metadata={
-            **episode.metadata,
-            "real2sim_observed_geometry": dict(
-                path=str(observed),
-                sha256=hashlib.sha256(observed.read_bytes()).hexdigest(),
+    if observed_geometry:
+        from embodichain.lab.sim.motion.expansion import (
+            ValidationCheck,
+            ValidationResult,
+        )
+
+        episode = replace(
+            episode,
+            validation=ValidationResult(
+                episode.validation.checks
+                + (ValidationCheck("observed_collision", "passed"),)
             ),
-        },
-    )
+            metadata={
+                **episode.metadata,
+                "real2sim_observed_geometry": dict(
+                    path=str(observed),
+                    sha256=hashlib.sha256(observed.read_bytes()).hexdigest(),
+                ),
+            },
+        )
     receipt = sink.submit(episode, submission_id=0)
     assert receipt.confirmed, receipt.error
     recorder.finalize()

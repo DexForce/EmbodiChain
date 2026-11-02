@@ -170,6 +170,8 @@ cache
 *.png
 # Curated standalone ARX5 robot documentation illustration.
 !/docs/source/_static/robots/arx5.png
+# Curated Franka bare-arm and explicit-tool documentation renders.
+!/docs/source/_static/robots/franka/*.png
 !/docs/source/_static/robots/eef/*.png
 # Curated Atomic Skills recording posters and comparison overviews.
 !/docs/source/_static/atomic_actions/embodiment_switching/*.png

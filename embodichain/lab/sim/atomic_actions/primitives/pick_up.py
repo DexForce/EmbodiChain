@@ -647,6 +647,23 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         grasp_index = (
             motion.segment_lengths["approach"] + motion.segment_lengths["close"]
         )
+        hand = request.binding.endpoint("primary", "grasp")
+        hand_target = hand.require_target(JointPositionTarget)
+        closed = hand.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        hand_path = motion.trajectory.positions[
+            :, grasp_index - 1 :, list(hand_target.joint_ids)
+        ]
+        if not torch.allclose(
+            hand_path, closed[:, None].expand_as(hand_path), atol=1e-5, rtol=0
+        ):
+            raise ValueError(
+                "external Pick must close before lift and preserve the grasp command"
+            )
         if motion.grasp_pose is None:
             # A qpos-only source supplies no independent pose observation. Its
             # candidate is derived from the robot's FK at the declared anchor.

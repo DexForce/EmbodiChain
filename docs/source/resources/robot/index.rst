@@ -48,9 +48,13 @@ Manufacturers
      - ``FlexivRizon4SCfg``
      - Seven-axis bare arm with Warp RR IK on CPU/CUDA, optional SSIK reference alignment and published Flexiv simulation dynamics.
    * - :doc:`Franka <franka/index>`
+     - :doc:`Franka arms <franka/cfg>`
+     - ``FrankaCfg``
+     - Seven-DOF bare FR3 or original Panda arm; flange TCP and explicit tool assembly.
+   * - :doc:`Franka <franka/index>`
      - :doc:`Franka Panda <franka/panda>`
      - ``FrankaPandaCfg``
-     - Panda arm with the stock Panda hand and numerical FK/IK.
+     - Legacy FR3 bare-arm selector; native-hand deployments use the explicit ``franka_panda`` embodiment.
    * - :doc:`Pollen Robotics <pollen_robotics/index>`
      - :doc:`MicroDuck <pollen_robotics/microduck>`
      - ``MicroDuckCfg``

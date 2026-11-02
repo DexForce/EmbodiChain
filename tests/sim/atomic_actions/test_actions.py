@@ -434,6 +434,8 @@ def _bind_action(
     generator: MotionGenerator,
     action: ActionT,
     control_profiles: dict[str, ControlPartCommandProfile] | None = None,
+    *,
+    env_ids: tuple[int, ...] | None = None,
 ) -> ActionT:
     """Bind one configured action to an engine-owned test backend."""
     if isinstance(action, CoordinatedPickment):
@@ -462,6 +464,7 @@ def _bind_action(
     grasp_generator = _StubGraspPoseGenerator()
     engine = AtomicActionEngine(
         generator,
+        env_ids=env_ids,
         control_profiles=profiles,
         grasp_pose_generators={
             name: grasp_generator
@@ -1212,7 +1215,13 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
     assert placed_task.get_held_object("arm") is None
 
 
-def test_external_pick_transport_place_assemble_without_native_planning() -> None:
+@pytest.mark.parametrize(
+    "invalid_pick_hand",
+    [None, [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 1, 1], [0, 0, 0, 1, 1, 0]],
+)
+def test_external_pick_transport_place_assemble_without_native_planning(
+    invalid_pick_hand,
+) -> None:
     from embodichain.lab.sim.atomic_actions import InstantiatedSkillMotion
     from embodichain.lab.sim.atomic_actions import RecoveryPolicy
 
@@ -1275,6 +1284,17 @@ def test_external_pick_transport_place_assemble_without_native_planning() -> Non
         ),  # This fixture tests assembly with stationary FK.
         recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
     )
+    if invalid_pick_hand is not None:
+        with pytest.raises(ValueError, match="close before lift"):
+            _ACTION_ENGINES[id(pick)].plan(
+                pick_invocation,
+                context,
+                nominal_source=Source(
+                    {"approach": 2, "close": 2, "lift": 2}, invalid_pick_hand, True
+                ),
+            )
+        generator.generate.assert_not_called()
+        return
     pick_plan = _ACTION_ENGINES[id(pick)].plan(
         pick_invocation,
         context,
@@ -1298,11 +1318,23 @@ def test_external_pick_transport_place_assemble_without_native_planning() -> Non
     )
     assert move_plan.plan_success.item()
     assert not move_plan.replannable
+    waypoints = torch.eye(4).repeat(1, 2, 1, 1)
+    waypoints[:, 0, 0, 3] = 0.1  # Required via pose; final pose alone is insufficient.
+    with pytest.raises(ValueError, match="ordered waypoints are unsupported"):
+        _ACTION_ENGINES[id(move)].plan(
+            replace(
+                _invocation(move, HeldObjectPoseGoal(waypoints)),
+                recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
+            ),
+            held_context,
+            nominal_source=Source({"transport": 4}, [1, 1, 1, 1]),
+        )
 
     place = _bind_action(generator, Place())
     place_plan = _ACTION_ENGINES[id(place)].plan(
         replace(
             _invocation(place, PlaceGoal(torch.eye(4))),
+            skill_options=PlaceOptions(lift_height=0.0),  # Stationary FK fixture.
             recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
         ),
         held_context,
@@ -1317,6 +1349,113 @@ def test_external_pick_transport_place_assemble_without_native_planning() -> Non
         ).get_held_object("arm")
         is None
     )
+    generator.generate.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "retract_z,lift_height,cap,multi_waypoint,accepted,env_id",
+    [
+        (0.05, 0.1, None, False, False, 0),
+        (0.1, 0.1, None, False, True, 0),
+        (0.1, 0.1, None, False, True, 1),
+        (0.15, 0.1, None, False, True, 0),
+        (0.05, 0.1, 0.05, False, True, 0),
+        (0.08, 0.1, 0.05, False, False, 0),
+        (0.0, 0.1, -0.1, False, True, 0),
+        (0.1, 0.1, None, True, False, 0),
+    ],
+)
+def test_external_place_preserves_clearance_and_single_pose_contract(
+    retract_z, lift_height, cap, multi_waypoint, accepted, env_id
+) -> None:
+    from embodichain.lab.sim.atomic_actions import (
+        InstantiatedSkillMotion,
+        RecoveryPolicy,
+    )
+
+    generator = _motion_generator()
+    generator.robot.num_instances = env_id + 1
+    get_qpos = generator.robot.get_qpos.side_effect
+    generator.robot.get_qpos.side_effect = lambda name=None: get_qpos(name)[
+        : env_id + 1
+    ]
+    generator.robot.get_qpos_limits.return_value = torch.tensor([-2.0, 2.0]).repeat(
+        env_id + 1, ARM_DOF, 1
+    )
+    generator.robot.get_qvel_limits.side_effect = None
+    generator.robot.get_qvel_limits.return_value = torch.full(
+        (env_id + 1, ARM_DOF), 100.0
+    )
+    generator.generate = Mock(side_effect=AssertionError("native planner must not run"))
+
+    def fk(qpos, **kwargs):
+        assert kwargs.get("env_ids", (0,)) == (env_id,)
+        pose = torch.eye(4).repeat(qpos.shape[0], 1, 1)
+        pose[:, :3, 3] = qpos[:, :3]
+        return pose
+
+    generator.robot.compute_fk.side_effect = fk
+    qpos = torch.zeros(1, ROBOT_DOF)
+    context = PlanningContext(
+        robot=RobotObservation(timestamp=0, qpos=qpos, qvel=qpos.clone()),
+        task=TaskState(
+            batch_size=1,
+            device="cpu",
+            held_objects={
+                "arm": HeldObjectState(
+                    semantics=_semantics(),
+                    object_to_eef=torch.eye(4)[None],
+                    grasp_xpos=torch.eye(4)[None],
+                )
+            },
+        ),
+        scene=SceneSnapshot.empty(),
+        env_ids=torch.tensor([env_id]),
+        control_dt=CONTROL_DT,
+    )
+
+    class Source:
+        def instantiate(self, request, current):
+            positions = torch.zeros(1, 6, ROBOT_DOF)
+            positions[0, -1, 2] = retract_z
+            positions[:, :, ARM_DOF:] = torch.tensor([1, 1, 1, 0, 0, 0])[None, :, None]
+            return InstantiatedSkillMotion(
+                trajectory=TimedTrajectory.from_uniform_step(
+                    positions, env_ids=current.env_ids, step_dt=CONTROL_DT
+                ),
+                success=torch.tensor([True]),
+                segment_lengths={"approach": 2, "release": 2, "retract": 2},
+                initial_qpos=current.robot.qpos,
+                source_id="clearance_fixture",
+                source_revision="1",
+                unit_id="place",
+                origin="synthetic_reference",
+                joint_names=tuple(generator.robot.joint_names),
+            )
+
+    action = _bind_action(generator, Place(), env_ids=(env_id,) if env_id else None)
+    goal = torch.eye(4)
+    if multi_waypoint:
+        goal = goal.repeat(1, 2, 1, 1)
+        goal[:, 0, 0, 3] = 0.1
+    invocation = replace(
+        _invocation(action, PlaceGoal(goal)),
+        skill_options=PlaceOptions(lift_height=lift_height, max_approach_retract_z=cap),
+        motion_policy=MotionPolicy(acceleration_limit=1000.0),
+        recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
+    )
+    if accepted:
+        assert (
+            _ACTION_ENGINES[id(action)]
+            .plan(invocation, context, nominal_source=Source())
+            .plan_success.item()
+        )
+    else:
+        message = "ordered waypoints" if multi_waypoint else "retract clearance"
+        with pytest.raises(ValueError, match=message):
+            _ACTION_ENGINES[id(action)].plan(
+                invocation, context, nominal_source=Source()
+            )
     generator.generate.assert_not_called()
 
 
@@ -1776,6 +1915,49 @@ def test_pick_uses_normalized_prototype_and_rejects_moved_fixed_scene() -> None:
     with pytest.raises(ValueError, match="does not satisfy the TCP targets"):
         _ACTION_ENGINES[id(action)].plan(
             shifted_invocation, changed, nominal_source=hybrid
+        )
+
+    from unittest.mock import patch
+
+    for pose_error_m in (0.0, 0.001):
+        # A TCP inside the FK error tube must not trigger entry IK when
+        # observed joints already match the recorded qpos phase.
+        poses = source.eef_poses.copy()
+        poses[:, 0] += pose_error_m
+        recorded_prototype = build_motion_prototype(
+            normalize_trajectory(
+                replace(
+                    source,
+                    eef_poses=poses,
+                    phases=tuple(
+                        replace(phase, authority="qpos") for phase in source.phases
+                    ),
+                ),
+                joints=tuple(JointSpec(name, "revolute") for name in names),
+                control_dt=CONTROL_DT,
+            )
+        )
+        with (
+            patch.object(
+                generator,
+                "_solve_cartesian_waypoints",
+                side_effect=AssertionError("recorded qpos phases must not require IK"),
+            ),
+            patch.object(
+                generator,
+                "generate",
+                side_effect=AssertionError("recorded entry must not require IK"),
+            ),
+        ):
+            recorded = _ACTION_ENGINES[id(action)].plan(
+                invocation,
+                context,
+                nominal_source=replace(hybrid, prototype=recorded_prototype),
+            )
+        assert recorded.plan_success.item()
+        torch.testing.assert_close(
+            recorded.joint_trajectory.positions[:, :, :ARM_DOF],
+            torch.zeros(1, 6, ARM_DOF),
         )
 
     from embodichain.lab.sim.motion.refinement import MotionRefinementCfg

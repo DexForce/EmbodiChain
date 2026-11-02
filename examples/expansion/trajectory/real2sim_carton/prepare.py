@@ -66,12 +66,22 @@ from embodichain.lab.task_program.integrations.nominal import (
     BoundTaskProgramNominalSources,
 )
 from embodichain_robots.robotiq.two_finger import robotiq85_joint_positions
+from embodichain.utils.config_paths import resolve_config_path
 from embodichain.toolkits.graspkit.box_region import (
     BoxSideGraspRegionCfg,
     project_box_side_grasp,
 )
 
 __all__: list[str] = []
+
+_TASK_CONFIG = "extensions/embodichain_tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml"
+
+
+def task_config() -> Path:
+    """Locate the SDK-owned carton task in a checkout or installed wheel."""
+    return resolve_config_path(_TASK_CONFIG).resolve()
+
+
 ROOT = Path(__file__).resolve().parent
 DT = 1 / 30
 
@@ -106,8 +116,6 @@ def acquire(directory: Path) -> None:
             raise ValueError(f"pinned DROID source differs: {path}")
     if not missing:
         return
-    from embodichain.data import get_data_path
-
     resource = Path(get_data_path("Real2SimCarton/raw"))
     for item in missing:
         original = resource / item["path"]
@@ -127,26 +135,9 @@ def acquire(directory: Path) -> None:
 
 
 def matrix_layouts() -> list[dict]:
-    d = float(np.deg2rad(15))
-    offsets = [
-        ("baseline", [0, 0, 0], [0, 0, 0]),
-        ("object_x_plus", [0.03, 0, 0], [0, 0, 0]),
-        ("object_x_minus", [-0.03, 0, 0], [0, 0, 0]),
-        ("object_y_plus", [0, 0.03, 0], [0, 0, 0]),
-        ("object_y_minus", [0, -0.03, 0], [0, 0, 0]),
-        ("object_yaw_plus", [0, 0, d], [0, 0, 0]),
-        ("object_yaw_minus", [0, 0, -d], [0, 0, 0]),
-        ("target_x_plus", [0, 0, 0], [0.03, 0, 0]),
-        ("target_x_minus", [0, 0, 0], [-0.03, 0, 0]),
-        ("target_yaw_plus", [0, 0, 0], [0, 0, d]),
-        ("target_yaw_minus", [0, 0, 0], [0, 0, -d]),
-        ("combined_a", [0.03, -0.03, d], [-0.03, 0, -d]),
-        ("combined_b", [-0.03, 0.03, -d], [0.03, 0, d]),
-    ]
-    return [
-        dict(id=name, object_xyyaw=obj, target_xyyaw=target)
-        for name, obj, target in offsets
-    ]
+    return yaml.safe_load(
+        (task_config().parent / "real2sim/collection.yaml").read_text()
+    )["layouts"]
 
 
 def make_environment(task: Path):
@@ -379,277 +370,73 @@ def prepare(source_directory: Path, output: Path) -> None:
         project_box_side_grasp(source_grasp @ np.linalg.inv(grasp_frame), x[4:], region)
         @ grasp_frame
     )
-    hint = np.eye(4)
-    hint[:3, :3] = Rotation.from_euler("x", np.pi).as_matrix()
-    fixed_grasp = (
-        project_box_side_grasp(hint @ np.linalg.inv(grasp_frame), x[4:], region)
-        @ grasp_frame
-    )
-    release = np.eye(4)
-    release[2, 3] = support_height / 2 + x[6] / 2 + annotation["release_gap_m"]
-    carry = release.copy()
-    carry[2, 3] += annotation["carry_clearance_m"] - annotation["release_gap_m"]
     calibration = dict(
         world_from_base=np.eye(4).tolist(),
         reported_link_to_tcp=link_to_tcp.tolist(),
         gripper_mapping="Observed DROID width=0.085*(1-g); Robotiq linkage inverse; no command-as-observation substitution",
         revision=annotation["revision"],
     )
-    program = dict(
-        program_id="real2sim_carton_stocking",
-        instruction="Pick the carton and align its front with the marked support region.",
-        targets={
-            "above_worktop": dict(
-                kind="cyclic_pose",
-                values=[
-                    dict(
-                        position=(target_pose @ carry)[:3, 3].tolist(),
-                        quaternion_xyzw=Rotation.from_matrix(target_pose[:3, :3])
-                        .as_quat()
-                        .tolist(),
-                    )
-                ],
+    official = task_config().parent
+    environment = yaml.safe_load((official / "env.yaml").read_text())
+    for uid, pose, size in (
+        ("carton", object_pose, x[4:]),
+        ("worktop", target_pose, [0.65, 0.65, support_height]),
+    ):
+        entry = next(
+            item
+            for kind in ("rigid_object", "background")
+            for item in environment["simulation"][kind]
+            if item["uid"] == uid
+        )
+        if not (
+            np.allclose(entry["shape"]["size"], size, atol=1e-10, rtol=0)
+            and np.allclose(entry["init_pos"], pose[:3, 3], atol=1e-10, rtol=0)
+            and np.allclose(
+                Rotation.from_euler("xyz", entry["init_rot"], degrees=True).as_matrix(),
+                pose[:3, :3],
+                atol=1e-10,
+                rtol=0,
             )
-        },
-        program=dict(
-            kind="sequence",
-            items=[
-                dict(
-                    kind="segment",
-                    name="pick",
-                    steps=dict(kind="invoke", call=dict(kind="pick", object="carton")),
-                    validators=[
-                        dict(kind="object_lifted", object="carton", minimum_lift=0.03)
-                    ],
-                ),
-                dict(
-                    kind="segment",
-                    name="transport",
-                    steps=dict(
-                        kind="invoke",
-                        call=dict(
-                            kind="registered",
-                            call_id="simulation.move_held_object",
-                            arguments=dict(target="above_worktop"),
-                        ),
-                    ),
-                ),
-                dict(
-                    kind="segment",
-                    name="place",
-                    steps=dict(
-                        kind="invoke",
-                        call={
-                            "kind": "place",
-                            "object": "carton",
-                            "on": "marked_support",
-                        },
-                    ),
-                    post=[dict(kind="wait_stable", entity="carton")],
-                    validators=[dict(kind="object_upright", object="carton")],
-                ),
-            ],
-        ),
+        ):
+            raise ValueError(
+                "source registration differs from the SDK-owned physical scene"
+            )
+    (output / "environment.yaml").write_bytes((official / "env.yaml").read_bytes())
+    (output / "program.yaml").write_bytes(
+        (official / "task_program/program.yaml").read_bytes()
     )
-    integration = dict(
-        integration_id="real2sim_carton_v1",
-        program_id=program["program_id"],
-        requires=dict(
-            scene_contract="carton_worktop_v1",
-            embodiment_contract="single_arm_parallel_gripper",
-        ),
-        scene_binding=dict(
-            contract_id="carton_worktop_v1",
-            registry_id="carton_worktop",
-            rigid_objects=[
-                dict(
-                    entity_id="carton",
-                    simulation_uid="carton",
-                    dynamics="dynamic",
-                    semantic_type="carton",
-                    affordances=[
-                        dict(entity_id="carton_grasp", kind="antipodal_grasp")
-                    ],
-                ),
-                dict(
-                    entity_id="worktop",
-                    simulation_uid="worktop",
-                    dynamics="static",
-                    semantic_type="worktop",
-                    affordances=[
-                        dict(
-                            entity_id="marked_support",
-                            kind="support_surface",
-                            native_name="top",
-                            object_target_frame="parent",
-                            object_target_pose=release.reshape(-1).tolist(),
-                        )
-                    ],
-                ),
-            ],
-        ),
-        profile=dict(
-            defaults={
-                name: dict(primary="primary_manipulator")
-                for name in ("pick_up", "move_held_object", "place")
-            },
-            action_options={
-                "pick": dict(
-                    kind="pick_up",
-                    lift_height=annotation["pick_lift_m"],
-                    pre_grasp_distance=0.10,
-                    hand_interp_steps=30,
-                    grasp_settle_steps=10,
-                    grasp_frame_to_eef=Rotation.from_euler("z", -90, degrees=True)
-                    .as_matrix()
-                    .tolist(),
-                ),
-                "simulation.move_held_object": dict(kind="move_held_object"),
-                "place": dict(
-                    kind="place",
-                    hand_interp_steps=30,
-                    release_settle_steps=60,
-                    preserve_current_object_orientation=False,
-                ),
-            },
-            effect_monitors={
-                "pick": dict(
-                    monitor_id="builtin.composite_effect",
-                    revision="1",
-                    params=dict(consecutive_samples=5),
-                ),
-                "place": dict(
-                    monitor_id="builtin.composite_effect",
-                    revision="1",
-                    params=dict(
-                        consecutive_samples=5,
-                        attached_translation_threshold=0.01,
-                        detached_translation_threshold=0.015,
-                    ),
-                ),
-            },
-        ),
-        runtime_services=dict(
-            registered_semantic_lowerers=[
-                dict(
-                    kind="move_held_object",
-                    target_id="above_worktop",
-                    reference_entity_id="worktop",
-                    relative_pose=carry.reshape(-1).tolist(),
-                )
-            ],
-            control_part_evidence=dict(
-                kind="joint_position_constraint",
-                control_parts=["eef"],
-                open_qpos=[0.0] * 6,
-                minimum_displacement=0.02,
-            ),
-        ),
+    policy_path = resolve_config_path(
+        "../../../components/execution_policies/real2sim_verified.yaml",
+        base_dir=official,
     )
-    # The public calibration is a homogeneous grasp-frame-to-TCP transform.
-    grasp_frame = np.eye(4)
-    grasp_frame[:3, :3] = Rotation.from_euler("z", -90, degrees=True).as_matrix()
-    integration["profile"]["action_options"]["pick"]["grasp_frame_to_eef"] = (
-        grasp_frame.reshape(-1).tolist()
+    (output / "execution_policy.yaml").write_bytes(policy_path.read_bytes())
+    integration = yaml.safe_load(
+        (official / "task_program/integration.yaml").read_text()
     )
+    integration["runtime_services"].pop("nominal_motion_sources")
     integration["profile"]["action_options"]["pick"]["fixed_object_to_eef"] = (
         real_grasp.reshape(-1).tolist()
     )
-    native_integration = json.loads(json.dumps(integration))
-    native_integration["profile"]["action_options"]["pick"]["fixed_object_to_eef"] = (
-        fixed_grasp.reshape(-1).tolist()
+    write_yaml(output / "integration.qualification.yaml", integration)
+    task = yaml.safe_load(task_config().read_text())
+    task.update(
+        id="CartonStockingQualification-v1",
+        collection={"target_episodes": 1, "max_attempts": 1},
     )
-    attrs = dict(
-        mass_props=dict(mass=0.05),
-        rigid_props=dict(linear_damping=0.2, angular_damping=0.2),
-        material_props=dict(dynamic_friction=0.97, static_friction=0.99),
+    task.pop("real2sim")
+    task["environment"]["component"] = "environment.yaml"
+    task["embodiment"]["component"] = str(
+        resolve_config_path(
+            task["embodiment"]["component"], base_dir=official
+        ).resolve()
     )
-
-    def body(uid, size, pose, dynamic):
-        return dict(
-            uid=uid,
-            shape=dict(shape_type="Cube", size=size),
-            body_type="dynamic" if dynamic else "static",
-            init_pos=pose[:3, 3].tolist(),
-            init_rot=Rotation.from_matrix(pose[:3, :3])
-            .as_euler("xyz", degrees=True)
-            .tolist(),
-            attrs=attrs,
-        )
-
-    environment = dict(
-        environment_id="real2sim_carton",
-        physics="default",
-        physics_config=dict(physics_dt=1 / 240),
-        max_episode_steps=2400,
-        num_envs=1,
-        arena_space=2.5,
-        simulation=dict(
-            background=[
-                body("worktop", [0.65, 0.65, support_height], target_pose, False)
-            ],
-            rigid_object=[body("carton", x[4:].tolist(), object_pose, True)],
-            rigid_object_group=[],
-            articulation=[],
-        ),
-        env=dict(
-            target_control_frequency=30.0,
-            sim_steps_per_control=8,
-            events={},
-            dataset={},
-            record_trajectory=True,
-            trajectory_auto_save=False,
-        ),
+    task["task_program"] = dict(
+        program="program.yaml",
+        integration="integration.qualification.yaml",
+        execution_policy="execution_policy.yaml",
     )
-    policy = dict(
-        policy_id="carton_verified_v1",
-        preset_id="real2sim_verified",
-        requires=dict(embodiment_contract="single_arm_parallel_gripper"),
-        motion=dict(
-            strategy="ik_interp",
-            velocity_targets="auto",
-            sample_count=100,
-            acceleration_limit=20.0,
-            dynamic_collision_mode="off",
-        ),
-        tracking=dict(kind="timed"),
-        recovery=dict(max_replans=0, max_action_retries=0, action_timeout=120.0),
-        workflow_recovery=dict(max_recovery_attempts=0),
-        runner=dict(
-            minimum_cycle_time=0.0,
-            hold_on_completion=False,
-            hold_during_effect_verification=True,
-        ),
-        effect_assurance="verified",
-    )
-    embodiment = "extensions/embodichain_tasks/configs/components/embodiments/franka_panda_robotiq85.yaml"
-    task = dict(
-        id="Real2SimCarton-v0",
-        environment=dict(component="environment.yaml"),
-        embodiment=dict(component=str(embodiment)),
-        task_program=dict(
-            program="program.yaml",
-            integration="integration.native.yaml",
-            execution_policy="execution_policy.capture.yaml",
-        ),
-        headless=True,
-        renderer="no-render",
-        enable_sensor=False,
-        collection=dict(target_episodes=1, max_attempts=1),
-    )
-    for name, value in (
-        ("environment.yaml", environment),
-        ("program.yaml", program),
-        ("integration.native.yaml", native_integration),
-        ("execution_policy.yaml", policy),
-        ("task.native.yaml", task),
-    ):
-        write_yaml(output / name, value)
-    capture_policy = json.loads(json.dumps(policy))
-    capture_policy["policy_id"] = "carton_independent_reference_capture_v1"
-    capture_policy["motion"]["acceleration_limit"] = 0.5
-    write_yaml(output / "execution_policy.capture.yaml", capture_policy)
-    env = make_environment(output / "task.native.yaml")
+    write_yaml(output / "task.qualification.yaml", task)
+    env = make_environment(output / "task.qualification.yaml")
     try:
         env.reset(seed=0, options={"save_data": False})
         target = env.unwrapped
@@ -698,7 +485,6 @@ def prepare(source_directory: Path, output: Path) -> None:
                 object_pose=source_object.tolist(),
                 target_pose=source_target.tolist(),
                 object_size_m=x[4:].tolist(),
-                fixed_grasp_for_independent_synthetic_capture=fixed_grasp.tolist(),
                 target_yaw_rad=target_yaw,
             ),
             robot=snapshot,
@@ -823,74 +609,12 @@ def prepare(source_directory: Path, output: Path) -> None:
         write_yaml(output / "integration.measured.yaml", integration)
         task["task_program"]["integration"] = "integration.measured.yaml"
         task["task_program"]["execution_policy"] = "execution_policy.yaml"
+        task["id"] = "CartonStockingPanda-v1"
+        task["real2sim"] = {"profile": "profile.measured.yaml"}
+        task["collection"]["target_episodes"] = 6
         write_yaml(output / "task.measured.yaml", task)
-        names = snapshot["joint_names"]
-        profile = dict(
-            kind="tabletop_box_v1",
-            scene_revision="staples_multiview_proxy_v2",
-            object_uid="carton",
-            target_uid="worktop",
-            object_entity_id="carton",
-            target_entity_id="worktop",
-            base_link="arm_base_link",
-            finger_links=[
-                "left_inner_finger_pad",
-                "right_inner_finger_pad",
-                "left_inner_finger",
-                "right_inner_finger",
-            ],
-            finger_joints=target.robot.cfg.control_parts["eef"],
-            closing_directions=[1, 1, -1, 1, 1, -1],
-            gripper_contact=dict(
-                kind="coupled_mimic",
-                driver_joint="finger_joint",
-                measured_coupling_tolerance=0.005,
-                mechanism_contacts=[
-                    ["left_inner_finger", "left_inner_knuckle", 0.012],
-                    ["right_inner_finger", "right_inner_knuckle", 0.023],
-                ],
-            ),
-            source_artifacts=artifacts,
-            contact_depth_m=0.002,
-            base_ground_depth_m=0.0035,
-            velocity_limits=[
-                (
-                    (2.175 if int(name[5:]) <= 4 else 2.61)
-                    if name.startswith("Joint")
-                    else 2.0
-                )
-                for name in names
-            ],
-            acceleration_limits=[
-                (
-                    [15.0, 7.5, 10.0, 12.5, 15.0, 20.0, 20.0][int(name[5:]) - 1]
-                    if name.startswith("Joint")
-                    else 100.0
-                )
-                for name in names
-            ],
-            velocity_limit_origin="original_panda_and_robotiq_urdf",
-            acceleration_limit_origin="FER_joint_limits_from_Franka_FCI_robot_specifications_and_declared_hand_target_budget_100_rad_s2",
-            motion_headroom_fraction=0.95,
-            seed=0,
-            placement_xy_tolerance_m=0.005,
-            placement_yaw_tolerance_deg=3.0,
-            maximum_drift_m=0.003,
-            retime_phase_allowlist={
-                "pick_up": ["approach"],
-                "move_held_object": ["transport"],
-                "place": ["approach"],
-            },
-            layouts=matrix_layouts(),
-            recipes=[
-                "nominal",
-                "joint_7",
-                "joint_11",
-                "task_space",
-                "time_115",
-                "time_130",
-            ],
-        )
+        profile = yaml.safe_load((official / "real2sim/collection.yaml").read_text())
+        profile["source_artifacts"] = artifacts
         write_yaml(output / "profile.measured.yaml", profile)
         single = {**profile, "layouts": matrix_layouts()[:1], "recipes": ["nominal"]}
         write_yaml(output / "profile.measured.single.yaml", single)
