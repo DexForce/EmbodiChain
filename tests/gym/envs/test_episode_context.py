@@ -184,12 +184,17 @@ def test_info_can_omit_provenance_without_disabling_episode_checks(embodied):
             {},
         ),
     )
+    if embodied:
+        env.termination_manager = SimpleNamespace(snapshot=lambda: {"accepted": True})
     get_info = EmbodiedEnv.get_info if embodied else BaseEnv.get_info
     assert "episode_context" in get_info(env)
     env.cfg.episode_context_in_info = False
     with context.check("layout", [1]) as finish:
         finish(accepted=False, reasons="invalid placement")
-    assert "episode_context" not in get_info(env)
+    info = get_info(env)
+    assert "episode_context" not in info
+    if embodied:
+        assert info["task_outcome"] == {"accepted": True}
     assert context.filter_recordable().tolist() == [0, 2, 3]
     assert (
         context.snapshot([1])[0]["rejections"]["layout"]["reason"]
