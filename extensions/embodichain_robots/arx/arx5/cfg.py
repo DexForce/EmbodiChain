@@ -29,7 +29,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     RobotCfg,
 )
-from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
 
@@ -82,7 +82,8 @@ class ARX5Cfg(RobotCfg):
         }
         self.init_qpos = [-2.84, 1.825, 1.743, -1.489, 0.0, -1.266, 0.044, 0.044]
         self.solver_cfg = {
-            "arm": PytorchSolverCfg(
+            "arm": SSIKSolverCfg(
+                geometry_mode="near_parallel",
                 root_link_name="base_link",
                 end_link_name="ee_link",
                 tcp=[

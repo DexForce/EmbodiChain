@@ -25,7 +25,11 @@ from typing import Any
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import AtomicActionEngine, PlanTransform
+from embodichain.lab.sim.atomic_actions import (
+    AtomicActionEngine,
+    NominalMotionSource,
+    PlanTransform,
+)
 from embodichain.lab.sim.atomic_actions.invocation import (
     ActionInvocation,
     ResolvedActionRequest,
@@ -36,6 +40,16 @@ __all__: list[str] = []
 
 INVOCATION_POLICY_REVISION = 6
 POUR_RETURN_POLICY_REVISION = 1
+
+
+def _reject_external_nominal(nominal_source: NominalMotionSource | None) -> None:
+    """Keep external nominal planning from bypassing GenSim adapter policies."""
+    if nominal_source is not None:
+        raise ValueError(
+            "GenSim does not support external nominal motion: that path bypasses "
+            "its invocation-scoped manipulation and recovery policies. Use the "
+            "shared Lab AtomicActionEngine for supported nominal-motion skills."
+        )
 
 
 def motion_sample_declarations(
@@ -375,14 +389,17 @@ class GenSimActionEngine(AtomicActionEngine):
         *,
         eligible_mask: Any = None,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
     ) -> Any:
-        """Use the shared session and retain observed drawer withdrawal lineage."""
+        """Use the shared session; reject unsupported external nominal sources."""
+        _reject_external_nominal(nominal_source)
         selected = tuple(invocations)
         session = super().start(
             selected,
             context,
             eligible_mask=eligible_mask,
             plan_transform=plan_transform,
+            nominal_source=nominal_source,
         )
         for item in selected:
             following = self._articulation_followups.get(item.invocation_id)
@@ -494,7 +511,9 @@ class GenSimActionEngine(AtomicActionEngine):
         context: Any = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
     ) -> Any:
+        _reject_external_nominal(nominal_source)
         from ._search_cost import (
             _COST,
             PLANNING_WALL_SECONDS,
@@ -552,7 +571,10 @@ class GenSimActionEngine(AtomicActionEngine):
                             selected,
                             context,
                             lambda final: self._plan_request_impl(
-                                final, context, plan_transform=plan_transform
+                                final,
+                                context,
+                                plan_transform=plan_transform,
+                                nominal_source=nominal_source,
                             ),
                         )
 
@@ -590,7 +612,9 @@ class GenSimActionEngine(AtomicActionEngine):
         context: Any = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
     ) -> Any:
+        _reject_external_nominal(nominal_source)
         from .motion import cartesian_approach_scope
         from .motion import _velocity_retry_samples
         from .planning_probe import initial_plan_capture

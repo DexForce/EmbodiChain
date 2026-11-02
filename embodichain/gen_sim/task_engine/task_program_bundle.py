@@ -4516,18 +4516,20 @@ def _pour_target_geometry(
 
 def _pour_gripper_radius(embodiment: dict[str, Any] | None, resource: str) -> float:
     """Retain the existing nominal hand reserve, not a collision certificate."""
+    from ._task_program._gripper_reserve import nominal_hand_reserve
+
     if embodiment is None:
         raise ValueError("Pour clearance requires the selected gripper geometry.")
     model = embodiment["skill_profile"]["runtime_services"]["grasp_pose_generators"][
         f"{resource}_eef"
     ]["model"]
+    reserve = nominal_hand_reserve(model["model_id"])
     return float(
         np.linalg.norm(
             [
-                (float(model["max_opening_width"]) + float(model["finger_thickness"]))
-                * 0.5,
-                float(model["finger_width"]) * 0.5,
-                float(model["finger_length"]) * 0.5,
+                (float(model["max_opening_width"]) + reserve.finger_thickness) * 0.5,
+                reserve.finger_width * 0.5,
+                reserve.finger_length * 0.5,
             ]
         )
     )

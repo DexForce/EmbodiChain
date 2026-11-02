@@ -14,6 +14,7 @@
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
+| Bounded interaction pose refinement before expansion | `embodichain/lab/sim/motion/refinement.py`, with numeric fitting in `compute/trajectory/refinement.py`; [Real2Sim boundary](../data-pipeline/real2sim.md) |
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
 | Distinct trajectory variants for fixed waypoints | `embodichain/lab/sim/motion/expansion/variants.py` |
@@ -65,6 +66,11 @@ and backend diagnostics together. Read the
 changing interpolation or output sample counts. Final sampled collision checks
 do not establish continuous collision freedom or derivative compliance.
 
+Joint scene/deployment searches install a context-local cooperative call budget
+through `motion/_budget.py`. Robot IK, motion generation and Atomic planning
+boundaries share that host budget, including retries. See
+[scene feasibility](../scene-expansion/feasibility.md) for quota and evidence scope.
+
 ## Compute and execution ownership
 
 `compute.trajectory` owns pure interpolation, differentiation, resampling and
@@ -89,7 +95,25 @@ substeps; Gym experts use the environment-owned command period and
 [expert execution contract](../env-framework/env-framework.md). Dataset writers
 encode prepared actions rather than retiming a second time.
 
+For Atomic case preparation, preserve the original batched grasp-pool RNG scope.
+An explicitly configured finite position search reuses that pool; an approach
+search constructs one original batched pool per direction. Both freeze successful
+rows independently, while the public grasp screen still raises for unresolved
+rows. Per-row sampler resets and hard approach filtering before NMS/ranking can
+change the selected full-pose population. Freeze the chosen grasp, direction and
+position before evaluating planners, and review population fingerprints when the
+selection law changes. See the benchmark package README for the case options;
+preparation diagnostics and incomplete corpora are not formal quality results.
+MoveHeldObject/Place may explicitly condition goal-local streams on complete
+reference endpoint evidence with `target_candidate_count`; freeze each accepted
+row and retain rejected goals. This changes the population, requires reviewed
+fingerprints, and supplies no path or physical-success certificate.
+
 ## Trajectory augmentation boundary
+
+Real2Sim source templates and protected mapped retiming integrate with this
+boundary; their control-grid, source-permission and host limits are documented
+in [Real2Sim motion](../data-pipeline/real2sim.md).
 
 Scene layout proposals and their Task Program execution adapter belong to
 [scene expansion](../scene-expansion/scene-expansion.md). The trajectory
@@ -124,9 +148,15 @@ state or coverage contracts out of `motion/expansion/`.
 Motion-limit checks are not collision/task-success certification.
 `rotate_grasp_about_object_axis` and `perturb_approach_direction` change TCP
 candidates around a fixed object axis or approach cone; both emit Cartesian
-poses that callers must replan, and neither certifies the contact. Grasp
-grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed by
-Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
+poses that callers must replan, and neither certifies the contact.
+Grasp generation belongs to `embodichain.toolkits.graspkit`, composed by Atomic
+Skills/Task Program rather than embedded in `MotionGenerator`. Its antipodal
+service requires explicit URDF collision geometry at the caller's open joint
+state. Builtin asset/TCP mappings live in `pg_grasp/model_geometry.py`; custom
+hands provide their own geometry. Sampling/collision stays in the canonical
+contact frame, and public poses map once to the declared runtime TCP. Do not
+add a second hand-specific conversion. See the [GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
+for geometry ownership and the finite collision-check scope.
 
 `variants.py` is the common candidate-generation path for joint-space,
 task-space and manipulability-guided expansion; `CandidateCoordinator` supplies
@@ -187,6 +217,19 @@ execution, reset, validation and persistence remain host responsibilities.
 `examples/expansion/trajectory/pure_trajectory_augmentation_showcase.py`
 renders both paths analytically on CPU and records IK residuals, source lineage
 and bridge phases without constructing a simulator.
+`trajectory_augmentation_visualizer.py` is the CPU-only browser overview for
+the implemented trajectory operators: Python calls the production APIs and
+embeds their candidates in a self-contained HTML page. The page uses the
+official Atomic Action example's seven-DoF Franka Panda serial-chain geometry
+for orbitable 3D robot and EEF-path playback. A fixed task object and placement
+target clarify pick-and-place phases without participating in augmentation;
+JavaScript owns playback, drawing, and light/dark/system theme selection using
+the documentation's stored preference. The checked-in generated page lives
+under
+`docs/source/labs/trajectory-augmentation/`; Sphinx copies that directory into
+each versioned documentation build through `html_extra_path`, so the same page
+is published by the existing GitHub Pages workflow. It deliberately excludes
+affordance, contact-point, observation and scene augmentation.
 
 `examples/sim/atomic_action/place.py` is the demonstration host. Shared helpers
 in `examples/sim/atomic_action/support.py` convert the compiled action's named
@@ -241,6 +284,9 @@ optional explicit planner specs and a run-local adapter mapping. It copies calle
 configuration; explicit planners replace the suite list and are enabled.
 `PlannerAdapter` owns build/prepare/plan/close and returns `PlanResult` for
 free-space evaluation; Atomic Skills also require an exposed `MotionGenerator`.
+`registry.planner_configuration_features()` loads built-in registrations without
+constructing backends and reports supported configuration semantics for preflight.
+Runtime request support remains the adapter instance's `capabilities` contract.
 The host owns simulation lifetime, seeded cases, evaluation, and artifacts.
 Canonical case tensors and nested parameters stay independent of adapter
 mutations through untimed copies at capacity, preparation and plan boundaries.
@@ -250,6 +296,11 @@ measured difficulty and batch semantics live in
 Cartesian bases, retain `base_case_id`, and share independent maximum-joint/constrained
 matching in `metrics/_constraints.py`. Homogeneous Joint/FullPose cases keep
 classical input contracts; partial/mixed cases require `masked_constraints`.
+The TOPPRA and cuRobo adapters expose that capability only when their explicit
+`config.masked_constraints` opt-in is enabled, preserving historical populations.
+TOPPRA uses sequential component IK; cuRobo changes native terminal pose criteria.
+Neither consumes inactive pose payloads or Cartesian reference joint witnesses.
+See [planner details](planner-details.md) for component and arm-frame contracts.
 Validation preserves native samples with deterministic joint subdivisions.
 `NeuralPlanOptions.waypoint_modalities` supplies explicit meanings, and
 position-only goals require coincident runtime/policy TCP origins. The public
@@ -267,14 +318,44 @@ promise path following; sampled polyline deviations and native start-error
 quantiles remain diagnostics.
 Geometry validation includes the requested initial joint state. Atomic providers
 declare gripper requirements; typed pose settings flow through generation rather
-than being expanded into private configuration keys. Built-in Atomic suites
+than being expanded into private configuration keys. Object antipodal screening
+samples the pose batch once, then freezes each row's first aligned, independently
+IK-feasible candidate from its own pool; AxisAlign ranks against each row's
+rotation axis. Failed chains do not truncate other rows or change their choices.
+Built-in Atomic suites
 compile and replay on their declared command clock; compiled replay consumes
 arrival intervals on physics ticks and preserves observation segment indices.
 Legacy fixed-sample replay remains explicit in trial metadata. The benchmark
 README and design contract own population and protocol details.
-Run calls serially within a process. Suite resources ship in the wheel; the
-installed CLI dispatches through `embodichain/cli/benchmark.py`. Source launchers
-under `scripts/benchmark/` only forward motion-generation evaluation.
+Run host calls serially within a process. `run_benchmark(workers>1)` isolates
+quality shards with spawned processes after freezing the full input corpus;
+`prepare_case_manifest()` can prepare that corpus without running planners.
+Frozen B=1 Free-space NMG-only replay optionally uses `quality_batch_size` to
+pack compatible requests into a larger simulator. `_quality_batching.py` owns
+packing, valid-prefix recovery and explicit environment-row FK mapping; the
+runner validates original cases separately and preserves their manifest and
+trial identities. Raw endpoint derivatives are recomputed after trimming, and
+retimed zero-dt holds are excluded. A single batch measurement is metadata,
+not a per-case latency. The option composes with spawn workers; Atomic,
+traditional backends and performance replay retain their declared batches.
+The parent validates complete case/method/repeat evidence and recomputes
+aggregates from raw trials. Parallel raw timing is marked contended and excluded
+from timing reports; performance replay stays serial. Planner RNG is
+backend-owned, so frozen-input pairing does not guarantee identical stochastic
+solver outcomes across schedules. Worker thread limits also bound ONNX Runtime
+through the host Torch intra-op setting. Suite resources ship in the wheel;
+the installed CLI dispatches through `embodichain/cli/benchmark.py`. Source
+launchers under `scripts/benchmark/` forward motion-generation evaluation.
+`BenchmarkRunner.run_paired_arm_performance()` delegates to
+`_paired_arm_performance.py` for serial replay of independent two-arm FullPose
+requests captured by a declared TOPPRA reference before candidate measurement.
+Its immutable cache binds source cases, suite protocol and embodiment;
+candidate inputs are copied per call. Classical facade fallback stays sequential,
+while capable NMG configurations additionally report packed dispatch and parity.
+Scoring and a separate warmed memory call sit outside synchronized latency.
+Request replicas do not enter task-quality counts, and native pair success does
+not certify compiled timing or physical execution. The benchmark README owns
+usage, measurement scope and artifact interpretation.
 `tests/benchmark/motion_generation/` covers contracts and lifecycle, while
 `tests/test_benchmark_package.py` builds and installs the wheel outside the checkout.
 

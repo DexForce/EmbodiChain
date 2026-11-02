@@ -162,9 +162,10 @@ def test_cpu_optimized_forward_matches_differentiable_solver(
 
 
 @pytest.mark.parametrize("sampling", [{"sample_count": 33}, {"sample_dt": 0.07}])
+@pytest.mark.parametrize("preserve", [False, True])
 @pytest.mark.parametrize("mode", ["grad_enabled", "no_grad", "inference"])
 def test_cpu_chunks_preserve_padding_failure_and_torch_modes(
-    monkeypatch: pytest.MonkeyPatch, sampling: dict, mode: str
+    monkeypatch: pytest.MonkeyPatch, sampling: dict, mode: str, preserve: bool
 ) -> None:
     # Force two chunks on small inputs. The first chunk is entirely stationary
     # or failed, so its local length is 2 even for quantity=33. The second
@@ -201,10 +202,22 @@ def test_cpu_chunks_preserve_padding_failure_and_torch_modes(
         with monkeypatch.context() as patch:
             patch.setattr(adapter, "_cpu_workers", lambda *args: 1)
             expected = _retime_toppra_warp(
-                points, 1.0, 2.0, path_lengths=lengths, **sampling
+                points,
+                1.0,
+                2.0,
+                path_lengths=lengths,
+                preserve_waypoints=preserve,
+                **sampling,
             )
         monkeypatch.setattr(adapter, "_cpu_workers", lambda *args: 2)
-        actual = _retime_toppra_warp(points, 1.0, 2.0, path_lengths=lengths, **sampling)
+        actual = _retime_toppra_warp(
+            points,
+            1.0,
+            2.0,
+            path_lengths=lengths,
+            preserve_waypoints=preserve,
+            **sampling,
+        )
     assert actual["success"].tolist() == [True, False, True, True]
     for key in actual:
         torch.testing.assert_close(actual[key], expected[key], rtol=0, atol=0)

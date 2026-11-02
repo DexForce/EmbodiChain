@@ -56,6 +56,29 @@ or installed in a higher-level planning runtime.
    ParallelJawGripperModelCfg
    get_parallel_jaw_gripper_model
 
+Box-side grasp regions
+~~~~~~~~~~~~~~~~~~~~~
+
+Rectangular cartons can declare opposed object-Y faces, an inset along object-X
+and a height along object-Z. Projection selects the nearest legal longitudinal
+position and jaw-symmetric orientation to an input anchor. It does not establish
+IK, aperture, collision or physical grasp feasibility; downstream planning must
+check those constraints against the declared gripper geometry.
+
+.. currentmodule:: embodichain.toolkits.graspkit.box_region
+
+.. autosummary::
+   :nosignatures:
+
+   BoxSideGraspRegionCfg
+   project_box_side_grasp
+
+.. autoclass:: BoxSideGraspRegionCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autofunction:: project_box_side_grasp
+
 The :mod:`embodichain.toolkits.graspkit.pg_grasp` module provides a reusable
 antipodal implementation of these contracts. The pipeline consists of three
 stages:
@@ -69,9 +92,10 @@ stages:
 .. currentmodule:: embodichain.toolkits.graspkit.pg_grasp
 
 The application-facing entry point is :class:`AntipodalGraspPoseGenerator`.
-Its configuration separates the physical gripper model, grasp algorithm,
-collision policy, and annotation/cache policy. Mesh-specific sampling and
-collision state remain private implementation details.
+It requires explicit collision geometry at the physical pre-grasp opening.
+Contact-aperture bounds, grasp algorithm, collision policy and annotation/cache
+policy have separate owners. Internal candidates use the canonical contact
+frame; public pose outputs use the geometry's declared runtime TCP.
 
 Its optional region selector filters an empty region's qualified fallback pool
 before cost ranking and top-K. It returns a subset and ranking center, not new
@@ -101,6 +125,8 @@ the Antipodal generator, not the generic grasp-service contract.
    GraspRegionSelector
    ParallelJawGraspCollisionCfg
    GraspAnnotationCfg
+   FixedGripperCollisionGeometry
+   get_parallel_jaw_collision_geometry
    AntipodalSampler
    AntipodalSamplerCfg
    GripperCollisionChecker
@@ -131,6 +157,28 @@ ParallelJawGraspCollisionCfg
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
+
+FixedGripperCollisionGeometry
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This required geometry represents a declared pre-grasp joint state from actual
+URDF collision meshes. The loader preserves
+mesh origins and scales, applies the explicit canonical contact/TCP transform,
+and records asset hashes. It samples finite surfaces; it does not certify
+continuous intersections, closing contact, or full robot/path safety.
+
+.. autoclass:: FixedGripperCollisionGeometry
+   :members:
+
+get_parallel_jaw_collision_geometry
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Resolve a registered hand's actual meshes, open joints and calibrated TCP.
+Asymmetric hands require an explicit side; a TCP override preserves the
+physical geometry while changing returned poses. Custom hands supply their
+own :class:`FixedGripperCollisionGeometry`.
+
+.. autofunction:: get_parallel_jaw_collision_geometry
 
 GraspAnnotationCfg
 ~~~~~~~~~~~~~~~~~~

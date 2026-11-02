@@ -1,0 +1,41 @@
+{
+  "ssik_commit": "4109147f37a7ca3e2516c83853aca583612783f3",
+  "source_module": "ssik.prebuilt.flexiv.rizon4_ik",
+  "source_module_sha256": "16c1734c249261c179098ada3d36581c730e4deee6e4f78ee4ac8824d7118073",
+  "original_sidecar_sha256": "a047bb730836954447ad6dc99a1683db5476d48da82dc3093fbcaaec9cfe3066",
+  "sidecar_sha256": "067f5cf1c57fb93868b09dcac62fd4126c1d00def4bdb15eb8d3bc9b1d302c16",
+  "license": "BSD-3-Clause; ../ssik_LICENSE.txt",
+  "fixed_lock_samples": 16,
+  "locked_joint_zero_based": 2,
+  "chart_correction": {
+    "sample_zero_based": 8,
+    "dh_a_zero_based": 1,
+    "original_m": 0.3963906847887344,
+    "corrected_m": 0.39550600501130195,
+    "derivation": "norm((I - h2*h2.T) @ (p3 + p4)) in normalized original POE coordinates",
+    "reason": "At the zero-lock parallel-axis slice the upstream skew-axis DH chart has a 0.88468 mm common-normal error"
+  },
+  "fk_certificate": {
+    "oracle": "Original pinned KinBody POE versus standard DH composition for every chart",
+    "seed": 20261025,
+    "random_postures_per_slice": 128,
+    "maximum_frobenius_error_per_slice": [
+      8.93690745133565e-16,
+      1.4457564693417308e-15,
+      1.508024561581292e-15,
+      9.29662895680969e-16,
+      1.2595621575575927e-15,
+      1.4900375968040556e-15,
+      1.031727425371074e-15,
+      1.1379786002407855e-15,
+      3.510749282225816e-11,
+      1.0087920413118926e-15,
+      1.0703904539540544e-15,
+      1.0280399282346226e-15,
+      1.3682306324076146e-15,
+      1.2307493251107476e-15,
+      1.2344212295643579e-15,
+      1.2633551730065112e-15
+    ]
+  }
+}

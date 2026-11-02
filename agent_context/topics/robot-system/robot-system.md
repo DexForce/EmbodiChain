@@ -7,10 +7,13 @@
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
 | Available robot configs and variants | `extensions/embodichain_robots/_catalog.py`; `extensions/embodichain_robots/__init__.py` owns lazy exports |
+| Locomotion assets, standing poses, drives and reference frames | `extensions/embodichain_robots/locomotion_profiles.py` reads each vendor/model's `profile.json`; model packages own `cfg.py` and `assets.py` |
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
+| Bare Franka arm selection and explicit tool assembly | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
+| Independent Revo1 hand or shared hand asset names | `extensions/embodichain_robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
@@ -34,6 +37,15 @@ and backward-compatible asset IDs are owned by
 [data assets](../data-assets/data-assets.md). The core
 `embodichain.lab.sim.robots` package exposes only generic dual-arm composition.
 
+EEF models follow the same vendor/model ownership. A standalone hand can be a
+`Robot`, while EEF describes its role when mounted on another robot.
+`BrainCoRevo1` has `left`/`right` variants (right by default), six native active
+joints in `eef`, and four source mimic followers. It declares no serial-chain
+FK/IK or tool TCP. Native identifiers in the model's private `_specs.py` are
+shared with W1; W1's `hand_specs.py` retains installation transforms, assembled
+name mapping and the historical root/end conventions. W1 hand release IDs
+remain adapter versions rather than manufacturer product revisions.
+
 Catalog listing defers robot classes and asset downloads; resolution imports
 one `RobotCfg` subclass and isolates its defaults/overrides. Gym, workspace
 analysis, dual-arm composition, and preview share `embodichain/robot_registry.py`.
@@ -41,6 +53,18 @@ Selectors use exact registered IDs; aliases and `Cfg` suffixes are not accepted.
 An explicit `variant` applies profile defaults before caller overrides, while
 omission preserves existing construction behavior. See
 [catalog contracts](catalogs.md) for entry points, metadata and model profiles.
+
+`FrankaCfg` with `arm_model: panda` supplies the bare original-Panda arm. The
+Robotiq embodiment explicitly adds its tool asset and all linkage followers.
+Its flange mount/TCP must match the source calibration; an
+existing similarly named Franka/FR3 or Panda-Hand configuration is not equivalent.
+Observed aperture mapping does not substitute a full-close actuator command for
+measured linkage positions. See [Real2Sim motion](../data-pipeline/real2sim.md)
+for coupled contact prediction and transfer qualification.
+
+Locomotion presets and pure Torch task contracts share backend-free model
+profiles. For source/contract joint ordering, drive ownership and solver limits,
+see [locomotion model profiles](catalogs.md#locomotion-model-profiles).
 
 `preview-robot` accepts a catalog ID or a standalone JSON/YAML RobotCfg file.
 File `class_type` optionally selects the catalog; local asset paths, including
@@ -79,6 +103,14 @@ Its default TCPs are the `left_ee` / `right_ee` flanges. Select optional hands
 explicitly and configure their tool TCPs independently. V030 preserves source
 arm link names and omits uncalibrated wrist-camera attachments. Its unified
 asset archive keeps component visuals and inertials aligned with the full body.
+The `dexforce_w1_030_pika` task embodiment selects the existing `DexforceW1`
+V030 bare-body preset and appends two Pika tools. Body components, source joint
+groups, FEP solvers and body/arm physics remain preset-owned. The embodiment
+supplies the tool assets, finger groups, TCPs, tool/head drive overrides,
+source-order ready joints and three mounted RGB-D declarations; it uses a
+separate assembly output name. No Pika-specific W1 catalog variant is needed. See the
+[embodiment configuration](../../../extensions/embodichain_tasks/configs/components/embodiments/dexforce_w1_030_pika.yaml)
+and its [usage notes](../../../extensions/embodichain_tasks/configs/components/embodiments/dexforce_w1_030_pika.md).
 
 `DualArmRobotCfg.build_pk_serial_chain()` resolves each solver's root/end
 frames against that arm's source URDF. It translates assembled names back to
@@ -94,7 +126,8 @@ declare capabilities. Custom keys, including `hand`, remain valid and are not
 automatically aliased. URDF component names such as `left_hand` and native link
 or joint names belong to the asset namespace and are independent of this rule.
 
-Panda's default `hand` group is now `eef`; Aloha Mini, Tianji Marvin and the
+Bare Franka presets declare only `arm`; their explicit hand embodiments add
+`eef`. Aloha Mini, Tianji Marvin and the
 official dual-UR5 embodiment use `left_eef` / `right_eef` in place of
 `left_hand` / `right_hand`. Callers of those defaults must update named-part
 queries, drive overrides, endpoint bindings and service keys together. Existing
@@ -121,7 +154,30 @@ against part names (including patterns); it need not configure every part.
 and synchronizes effective robot limits. Check the resolved part and joint
 order before diagnosing an IK algorithm.
 
+Aloha Mini and Marvin use strict Warp SSIK arm defaults on CPU/CUDA; Marvin
+selects seed-local SRS search in both gripper variants. Aloha's torso retains
+its position-only Pytorch solver. Numerical restoration requires a complete
+replacement with the existing root/end/TCP and original Pytorch settings; see
+the [solver guide](../../../docs/source/overview/sim/motion/solvers/ssik_solver.md#selecting-the-numerical-solver).
+ARX5 uses the
+source X5A six-joint `arm` and two
+independent prismatic fingers in `eef`; its simulation and PK share the selected
+URDF. ARX5 defaults to near-parallel Warp SSIK, and Flexiv Rizon4S defaults to
+prepared Warp RR with seed-local search. Both run on CPU/CUDA without the
+official SSIK dependency; the prepared CPU reference artifacts under
+`embodichain_robots/_ssik_artifacts/` are explicit precision-alignment tools.
+These models remain outside strict Warp geometry; see
+[IK mode boundaries](../ik-solvers/ik-solvers.md) before selecting one.
+Typed `SolverCfg` overrides and dictionaries with `class_type` replace
+the selected part's solver; typed inputs are copied.
+Provide complete root/end/TCP configuration for replacements. Partial
+dictionaries without `class_type` update the selected default's attributes.
+
 Robot owns arena/root frame conversion; solvers consume chain-root poses.
+Native root poses are rigid transforms. Single and batch IK use the existing
+`pose_inv` rigid inverse, preserving gradients and avoiding the additional
+CUDA/CPU synchronization of a general matrix inverse. Native state retrieval
+has its own backend synchronization boundary.
 `RobotCfg.from_dict()` resolves configured solver types through
 `embodichain.lab.sim.motion.solvers`. For batch/candidate shapes and continuous
 IK support, read [IK contracts](../ik-solvers/ik-solvers.md). Pose conventions
@@ -192,6 +248,7 @@ metadata. Acceleration budgets and missing-speed fallback belong to the
 | Removed legacy imports and lazy canonical robot imports | `tests/sim/robots/test_imports.py` |
 | Bundled robot package discovery/staging | `tests/test_robot_package.py` |
 | Config merge, W1 versions/TCP round-trips, chain DOFs | `tests/sim/objects/test_robot_cfg.py` |
+| Standalone Revo1 variants, native control/mimic contract and mounted reuse | `tests/sim/robots/test_brainco_revo1.py` |
 | W1 V030 component assembly, source FK agreement and configured FEP branches | `tests/sim/robots/test_dexforce_w1_v030.py` |
 | Dual-arm source/assembled frames and properties | `tests/sim/objects/test_dual_arm.py` |
 | Runtime part/joint/frame behavior | `tests/sim/objects/test_robot.py` |

@@ -45,7 +45,14 @@ capabilities and return a canonical batched ``PlanResult``. Atomic Skills also
 require an exposed ``MotionGenerator`` and the ``atomic_action`` capability.
 
 Calls own their simulation and return structured results after teardown. Run
-calls serially within a process. Install the selected backend and resolve its
+host calls serially within a process. ``workers>1`` uses isolated spawned
+processes for quality throughput; ``worker_threads`` bounds each worker's CPU
+pools. ``prepare_case_manifest()`` freezes inputs without executing a planner.
+Parallel execution retains per-worker artifacts and recomputes full-population
+metrics from raw trials. Performance replay remains serial, and contended
+quality timings are excluded from timing aggregates. Backend-owned randomness
+can change stochastic solver outputs across schedules despite matching inputs.
+Install the selected backend and resolve its
 robot assets as for ordinary EmbodiChain use. The installed command is
 ``embodichain benchmark motion-generation``; the module form is
 ``python -m embodichain_benchmarks.motion_generation``.
@@ -66,10 +73,16 @@ Public entry points
    load_suite
    run_all_benchmarks
    run_benchmark
+   prepare_case_manifest
+   resolve_quality_devices
 
 .. autofunction:: embodichain_benchmarks.motion_generation.run_benchmark
 
+.. autofunction:: embodichain_benchmarks.motion_generation.prepare_case_manifest
+
 .. autofunction:: embodichain_benchmarks.motion_generation.load_suite
+
+.. autofunction:: embodichain_benchmarks.motion_generation.resolve_quality_devices
 
 .. autoclass:: embodichain_benchmarks.motion_generation.BenchmarkRunResult
 
@@ -112,6 +125,7 @@ embodichain_benchmarks.motion_generation.api
 .. autosummary::
 
    run_benchmark
+   prepare_case_manifest
 
 
 embodichain_benchmarks.motion_generation.artifacts
@@ -247,6 +261,18 @@ embodichain_benchmarks.motion_generation.models
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: embodichain_benchmarks.motion_generation.models
+   :members:
+   :undoc-members:
+
+
+embodichain_benchmarks.motion_generation.parallel
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Validate explicit visible CUDA devices before creating quality workers or a
+simulator. The package-level ``resolve_quality_devices`` export is the public
+entry point for external benchmark hosts.
+
+.. automodule:: embodichain_benchmarks.motion_generation.parallel
    :members:
    :undoc-members:
 

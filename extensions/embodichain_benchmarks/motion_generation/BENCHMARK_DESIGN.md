@@ -182,8 +182,8 @@ Contact replay retains target-joint traces and peak signed displacement through
 release/retract/hold as diagnostics. Evaluators use their declared stage windows:
 Press permits spring rebound after a successful press; other articulated skills
 also require their grasp, motion and release stages. A diagnostic peak over the
-whole replay cannot replace those stage criteria. The actual skill stages and
-thresholds are owned by `evaluation.py` and the provider evaluators.
+whole replay cannot replace those stage criteria. Skill stages and thresholds
+are defined in [`evaluation.py`](evaluation.py) and the provider evaluators.
 
 Return one `PhysicalEvaluation` per environment with the same ordered stage
 IDs. Stage status is `passed`, `failed`, `not_reached`, `not_applicable` or
@@ -391,9 +391,11 @@ missing or failed cases visible. No algorithm disappears merely because it
 could not run.
 
 Suite populations/thresholds, case schema and report schema are versioned
-independently. Combine results only under matching suite/protocol definitions;
-latency comparisons additionally need matching hardware, device, dtype and
-batch protocol. NMG CPU characterization is separate from cuRobo CUDA latency.
+independently. Fingerprint physical scoring with the standard version and
+tolerances from [`evaluation.py`](evaluation.py). Combine results only under
+matching suite/protocol definitions; latency comparisons additionally need
+matching hardware, device, dtype and batch protocol. NMG CPU characterization
+is separate from cuRobo CUDA latency.
 Old artifacts must not be relabeled as a new protocol.
 
 ## 9. Future extensions

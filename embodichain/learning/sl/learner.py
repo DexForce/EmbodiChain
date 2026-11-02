@@ -63,6 +63,9 @@ class SupervisedLearner:
         numerical_context: Context factory spanning forward, backward and clipping.
         ddp_find_unused_parameters: Enable graph traversal for objectives that
             omit trainable parameters. Applies only with an initialized group.
+        ddp_broadcast_buffers: Broadcast rank-zero buffers before forwards.
+            Defaults to the existing rank-local policy; explicit reference
+            recipes can request the PyTorch DDP broadcast policy.
 
     Sampling, normalizer updates, learning-rate schedules and model publication
     belong to callers. An update is committed only after optimizer.step succeeds.
@@ -81,6 +84,7 @@ class SupervisedLearner:
         ) = None,
         numerical_context: Callable[[], AbstractContextManager[Any]] | None = None,
         ddp_find_unused_parameters: bool = False,
+        ddp_broadcast_buffers: bool = False,
     ) -> None:
         if not math.isfinite(max_grad_norm) or max_grad_norm < 0:
             raise ValueError("max_grad_norm must be finite and nonnegative")
@@ -92,6 +96,7 @@ class SupervisedLearner:
         self.numerical_context = numerical_context or nullcontext
         self.num_updates = 0
         self.ddp_find_unused_parameters = ddp_find_unused_parameters
+        self.ddp_broadcast_buffers = ddp_broadcast_buffers
         self._ddp: DistributedDataParallel | None = None
         self._distributed_metrics: tuple[str, ...] | None = None
 
@@ -103,7 +108,7 @@ class SupervisedLearner:
                 device_ids=(
                     [context.device.index] if context.device.type == "cuda" else None
                 ),
-                broadcast_buffers=False,
+                broadcast_buffers=self.ddp_broadcast_buffers,
                 find_unused_parameters=self.ddp_find_unused_parameters,
             )
         return context

@@ -1,63 +1,147 @@
-:orphan:
-
 End-effector assets
 ===================
 
-.. currentmodule:: embodichain.data.assets.eef_assets
+Concrete download classes are owned by manufacturer/model modules in the
+bundled ``embodichain_robots`` package. The former core EEF module and
+aggregate class exports have been removed. Asset IDs, URL/checksum identities
+and cache prefixes remain stable. See :doc:`/resources/robot/end_effectors`
+for the import migration table, provenance boundaries and rendered models.
 
-These dataset classes download and extract end-effector URDFs and their mesh
-bundles. Pass a custom ``data_root`` to isolate the cache, or resolve a model
-through ``embodichain.data.get_data_path`` using its dataset name and model path.
+Construct a dataset with optional ``data_root`` to select a cache, or use
+``embodichain.data.get_data_path`` with its stable asset reference. Catalog
+lookup alone does not construct datasets or download files. A download class
+provides an asset; it does not imply a standalone robot or grasping controller.
 
-PikaGripper uses ``PikaGripper/PikaGripper.urdf``. Its root attachment frame is
-``GRIPPER_ROOT_LINK``. ``FINGER1_JOINT`` drives the parallel jaws over 0–0.05 m;
-``FINGER2_JOINT`` follows it through a URDF mimic relationship. The archive
-preserves the DexEChain visual DAE and collision STL meshes.
+embodichain_robots.dh_robotics.pgc_140_50.assets
+------------------------------------------------
+
+.. currentmodule:: embodichain_robots.dh_robotics.pgc_140_50.assets
 
 .. autosummary::
    :nosignatures:
 
    DH_PGC_140_50
-   DH_PGI_140_80
    DH_PGC_140_50_M
-   DH_AG95
-   ZH_CTM2F110
-   BrainCoHandRevo1
-   InspireHand
-   Robotiq
-   Robotiq2F85
-   WheelTecFA2F
-   PikaGripper
 
 .. autoclass:: DH_PGC_140_50
-   :members:
-
-.. autoclass:: DH_PGI_140_80
    :members:
 
 .. autoclass:: DH_PGC_140_50_M
    :members:
 
+embodichain_robots.dh_robotics.pgi_140_80.assets
+------------------------------------------------
+
+.. currentmodule:: embodichain_robots.dh_robotics.pgi_140_80.assets
+
+.. autosummary::
+   :nosignatures:
+
+   DH_PGI_140_80
+
+.. autoclass:: DH_PGI_140_80
+   :members:
+
+embodichain_robots.dh_robotics.ag95.assets
+------------------------------------------
+
+.. currentmodule:: embodichain_robots.dh_robotics.ag95.assets
+
+.. autosummary::
+   :nosignatures:
+
+   DH_AG95
+
 .. autoclass:: DH_AG95
    :members:
+
+embodichain_robots.changingtek.ctm2f110.assets
+----------------------------------------------
+
+.. currentmodule:: embodichain_robots.changingtek.ctm2f110.assets
+
+.. autosummary::
+   :nosignatures:
+
+   ZH_CTM2F110
 
 .. autoclass:: ZH_CTM2F110
    :members:
 
+embodichain_robots.brainco.revo1.assets
+---------------------------------------
+
+.. currentmodule:: embodichain_robots.brainco.revo1.assets
+
+.. autosummary::
+   :nosignatures:
+
+   BrainCoHandRevo1
+
 .. autoclass:: BrainCoHandRevo1
    :members:
+
+embodichain_robots.inspire.hand.assets
+--------------------------------------
+
+.. currentmodule:: embodichain_robots.inspire.hand.assets
+
+.. autosummary::
+   :nosignatures:
+
+   InspireHand
 
 .. autoclass:: InspireHand
    :members:
 
+embodichain_robots.robotiq.assets
+---------------------------------
+
+.. currentmodule:: embodichain_robots.robotiq.assets
+
+.. autosummary::
+   :nosignatures:
+
+   Robotiq
+
 .. autoclass:: Robotiq
    :members:
+
+embodichain_robots.robotiq.robotiq_2f85.assets
+----------------------------------------------
+
+.. currentmodule:: embodichain_robots.robotiq.robotiq_2f85.assets
+
+.. autosummary::
+   :nosignatures:
+
+   Robotiq2F85
 
 .. autoclass:: Robotiq2F85
    :members:
 
+embodichain_robots.wheeltec.fa2f.assets
+---------------------------------------
+
+.. currentmodule:: embodichain_robots.wheeltec.fa2f.assets
+
+.. autosummary::
+   :nosignatures:
+
+   WheelTecFA2F
+
 .. autoclass:: WheelTecFA2F
    :members:
+
+embodichain_robots.agilex.pika.assets
+-------------------------------------
+
+.. currentmodule:: embodichain_robots.agilex.pika.assets
+
+.. autosummary::
+   :nosignatures:
+
+   PikaGripper
 
 .. autoclass:: PikaGripper
    :members:

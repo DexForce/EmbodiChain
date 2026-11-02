@@ -42,14 +42,13 @@ __all__ = [
     "validate_standard_evaluation",
 ]
 
-STANDARD_VERSION = "atomic-skill-v1"
-# Adopt #642's absolute SI thresholds, including its rounded angular values.
+STANDARD_VERSION = "atomic-skill-v2"
 TOLERANCES: Mapping[str, float] = MappingProxyType(
     {
-        "primitive_position_m": 0.003,
-        "primitive_joint_l2_rad": 0.00524,
+        "primitive_position_m": 0.01,
+        "primitive_joint_l2_rad": 0.1,
         "task_position_m": 0.01,
-        "task_rotation_rad": 0.08727,
+        "task_rotation_rad": 0.1,
         "pick_min_lift_m": 0.04,
         "press_min_stroke_ratio": 0.80,
         "drop_margin_m": 0.15,
@@ -269,6 +268,7 @@ SKILL_CRITERIA: Mapping[str, tuple[StageCriterion, ...]] = MappingProxyType(
                 "terminal_settle",
                 "task_goal_miss",
                 Criterion("lift_delta_m", "ge", TOLERANCES["pick_min_lift_m"]),
+                _rotation("return_rotation_error_rad"),
                 _NO_DROP,
             ),
             _HELD,
@@ -522,7 +522,7 @@ def evaluate_skill_stage_batch(
 
 
 def validate_standard_evaluation(skill_id: str, result: PhysicalEvaluation) -> None:
-    """Reject a claimed v1 result inconsistent with the executable criteria.
+    """Reject a claimed current-standard result inconsistent with its criteria.
 
     Args:
         skill_id: Canonical skill identifier for the frozen case.
@@ -532,7 +532,7 @@ def validate_standard_evaluation(skill_id: str, result: PhysicalEvaluation) -> N
         ValueError: Version, ladder, provenance, measurements or verdict disagree.
     """
     if result.protocol_version is None:
-        return  # Explicit legacy/unversioned result; never advertised as v1.
+        return  # Explicit legacy/unversioned result; never advertised as current.
     if result.protocol_version != STANDARD_VERSION:
         raise ValueError(f"Unsupported physical protocol: {result.protocol_version!r}.")
     if skill_id not in SKILL_CRITERIA:

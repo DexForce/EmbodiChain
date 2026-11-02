@@ -34,6 +34,7 @@ from examples.sim.atomic_action.host import (
 )
 from examples.sim.atomic_action.support import (
     create_parallel_jaw_grasp_pose_generator,
+    create_tutorial_robot_cfg,
 )
 from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
@@ -173,6 +174,7 @@ def test_cli_candidate_pool_has_no_hidden_approach_direction_draws() -> None:
     generator = create_parallel_jaw_grasp_pose_generator(
         n_sample=16,
         force_refresh=False,
+        robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur5")),
         approach_direction_samples=args.grasp_approach_samples,
     )
     assert generator.algorithm_cfg.approach_direction_samples == 1

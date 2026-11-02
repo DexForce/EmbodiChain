@@ -75,6 +75,8 @@ from .evidence import (
     PhysicalEvidenceRequest,
 )
 from .engine import AtomicActionEngine, PlanTransform
+from .nominal import NominalMotionSource, InstantiatedSkillMotion
+from .prototype_source import PrototypeMotionProvider
 from .execution import (
     ExecutionEvent,
     ExecutionEventKind,
@@ -212,6 +214,7 @@ from .primitives import (
     Pour,
     PourGoal,
     PourOptions,
+    PourTarget,
     Press,
     PressGoal,
     PressOptions,
@@ -296,6 +299,9 @@ __all__ = [
     "AtomicAction",
     "AtomicActionEngine",
     "PlanTransform",
+    "NominalMotionSource",
+    "InstantiatedSkillMotion",
+    "PrototypeMotionProvider",
     "BUILTIN_ACTION_TYPES",
     "BATCH_INVERSE_KINEMATICS_CAPABILITY",
     "CARTESIAN_POSE_CAPABILITY",
@@ -404,6 +410,7 @@ __all__ = [
     "Pour",
     "PourGoal",
     "PourOptions",
+    "PourTarget",
     "PlannerDiagnostics",
     "PlanningFailure",
     "PlanningContext",

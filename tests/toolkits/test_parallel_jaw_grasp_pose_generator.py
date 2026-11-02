@@ -37,6 +37,7 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGeneratorCfg,
     AntipodalSamplerCfg,
     GraspAnnotationCfg,
+    FixedGripperCollisionGeometry,
     ParallelJawGraspCollisionCfg,
 )
 from embodichain.toolkits.graspkit.pg_grasp._antipodal_backend import (
@@ -108,25 +109,25 @@ def _geometry() -> tuple[torch.Tensor, torch.Tensor]:
     )
 
 
-def _generator(*, force_refresh: bool = False) -> AntipodalGraspPoseGenerator:
+def _generator(
+    *, force_refresh: bool = False, alignment_angle: float | None = None
+) -> AntipodalGraspPoseGenerator:
     return AntipodalGraspPoseGenerator(
         ParallelJawGripperModelCfg(
             model_id="concrete_test_eef",
             min_opening_width=0.004,
             max_opening_width=0.12,
-            finger_length=0.09,
-            finger_width=0.025,
-            finger_thickness=0.008,
-            palm_depth=0.07,
+        ),
+        collision_geometry=FixedGripperCollisionGeometry(
+            torch.zeros((1, 3)), {"grasp_from_tcp": torch.eye(4).tolist()}
         ),
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=321,
             max_candidates=7,
+            approach_alignment_angle=alignment_angle,
         ),
         collision_cfg=ParallelJawGraspCollisionCfg(
-            point_sample_density=0.02,
             max_decomposition_hulls=5,
-            opening_margin=0.003,
             filter_ground_collision=False,
         ),
         annotation_cfg=GraspAnnotationCfg(force_refresh=force_refresh),
@@ -146,12 +147,13 @@ def test_generic_hierarchy_contains_no_concrete_eef_name() -> None:
 @pytest.mark.parametrize(
     ("model_id", "expected"),
     [
-        ("dh_pgi_140_80", (0.005, 0.1, 0.12, 0.04, 0.01, 0.096)),
-        # Versioned URDF limits and collision-mesh extents;
+        ("dh_pgi_140_80", (0.005, 0.1)),
+        # Versioned usable aperture limits; collision geometry is separate.
         # see graspkit/README.md for the source hashes and axis mapping.
-        ("franka_panda_hand", (0.001, 0.08, 0.054, 0.022, 0.027, 0.092)),
-        ("cobotmagic_v100_gripper", (0.001, 0.1, 0.077, 0.056, 0.025, 0.074)),
-        ("tianji_marvin_gripper", (0.001, 0.095, 0.103, 0.043, 0.034, 0.082)),
+        ("franka_panda_hand", (0.001, 0.08)),
+        ("cobotmagic_v100_gripper", (0.001, 0.1)),
+        ("tianji_marvin_gripper", (0.001, 0.095)),
+        ("pika_gripper", (0.001, 0.094)),
     ],
 )
 def test_named_gripper_model_returns_reviewed_geometry(
@@ -163,10 +165,6 @@ def test_named_gripper_model_returns_reviewed_geometry(
     assert (
         model.min_opening_width,
         model.max_opening_width,
-        model.finger_length,
-        model.finger_width,
-        model.finger_thickness,
-        model.palm_depth,
     ) == pytest.approx(expected)
 
 
@@ -177,6 +175,7 @@ def test_named_gripper_model_returns_reviewed_geometry(
         "franka_panda_hand",
         "cobotmagic_v100_gripper",
         "tianji_marvin_gripper",
+        "pika_gripper",
     ],
 )
 def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
@@ -184,7 +183,6 @@ def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
     second = get_parallel_jaw_gripper_model(model_id)
     expected = second.to_dict()
 
-    first.palm_depth = 1.0
     first.max_opening_width = 2.0
 
     assert first is not second
@@ -198,10 +196,6 @@ def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
         ("min_opening_width", -0.001, ValueError),
         ("min_opening_width", 0.08, ValueError),
         ("max_opening_width", float("nan"), ValueError),
-        ("finger_length", float("inf"), ValueError),
-        ("finger_width", 0.0, ValueError),
-        ("finger_thickness", True, TypeError),
-        ("palm_depth", -0.01, ValueError),
     ],
 )
 def test_named_geometry_rejects_invalid_calibration(
@@ -316,11 +310,13 @@ def test_candidate_metadata_preserves_failed_row_sentinel(
     assert torch.isinf(costs).all()
 
 
+@pytest.mark.parametrize("alignment_angle", [None, 0.1])
 def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     backend: type[_Backend],
+    alignment_angle,
 ) -> None:
     vertices, triangles = _geometry()
-    generator = _generator()
+    generator = _generator(alignment_angle=alignment_angle)
     object_poses = torch.eye(4).repeat(2, 1, 1)
 
     success, grasp_poses, opening_widths = generator.get_best_grasp_poses(
@@ -348,9 +344,12 @@ def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     assert sampler_cfg.max_length == 0.12
     assert sampler_cfg.center_mode == "bounds"
     assert configured.options["max_candidates"] == 7
+    assert configured.options["approach_alignment_angle"] == alignment_angle
     assert configured.options["filter_ground_collision"] is False
-    assert collision_cfg.finger_length == 0.09
-    assert collision_cfg.open_check_margin == 0.003
+    assert collision_cfg.max_decomposition_hulls == 5
+    assert isinstance(
+        configured.options["collision_geometry"], FixedGripperCollisionGeometry
+    )
     assert torch.allclose(
         torch.stack(configured.best_directions[:2]),
         torch.tensor([[0.0, 0.0, -1.0], [0.0, -1.0, 0.0]]),
@@ -377,12 +376,13 @@ def test_failed_candidates_receive_infinite_cost_and_refresh_is_service_owned(
     assert backend.instances[0].annotate_calls == 1
 
 
-def test_rejects_collision_margin_outside_gripper_opening() -> None:
-    with pytest.raises(ValueError, match="opening_margin"):
+def test_rejects_missing_collision_geometry_instead_of_using_a_box() -> None:
+    with pytest.raises(TypeError, match="collision_geometry"):
         AntipodalGraspPoseGenerator(
-            ParallelJawGripperModelCfg(max_opening_width=0.05),
-            collision_cfg=ParallelJawGraspCollisionCfg(opening_margin=0.05),
+            ParallelJawGripperModelCfg(), collision_geometry=None
         )
+    with pytest.raises(TypeError, match="finger_length"):
+        ParallelJawGripperModelCfg(finger_length=0.05)
 
 
 def test_backend_cache_key_includes_sampling_and_annotation_policy() -> None:
@@ -401,6 +401,9 @@ def test_backend_cache_key_includes_sampling_and_annotation_policy() -> None:
     generator._interactive_annotation = False
     generator._use_largest_connected_component = True
     changed_component_policy = generator._get_cache_dir(vertices, triangles)
+    generator._sampler_cfg = generator._sampler_cfg.replace(center_mode="centroid")
+    generator._center_mode = "centroid"
+    changed_center_mode = generator._get_cache_dir(vertices, triangles)
 
     assert (
         len(
@@ -409,7 +412,42 @@ def test_backend_cache_key_includes_sampling_and_annotation_policy() -> None:
                 changed_sampler,
                 changed_selection,
                 changed_component_policy,
+                changed_center_mode,
             }
         )
-        == 4
+        == 5
     )
+
+
+@pytest.mark.parametrize("angle", [True, float("nan"), 4.0])
+def test_hard_approach_angle_rejects_non_angle_values(angle) -> None:
+    with pytest.raises((TypeError, ValueError), match="approach_alignment_angle"):
+        AntipodalGraspPoseGeneratorCfg(approach_alignment_angle=angle)
+
+
+def test_box_side_region_projects_hint_onto_opposed_faces_without_oracle() -> None:
+    from dataclasses import replace
+    import numpy as np
+    import pytest
+    from scipy.spatial.transform import Rotation
+    from embodichain.toolkits.graspkit.box_region import (
+        BoxSideGraspRegionCfg,
+        project_box_side_grasp,
+    )
+
+    hint = np.eye(4)
+    canonical = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+    hint[:3, :3] = Rotation.from_euler("z", 12, degrees=True).as_matrix() @ canonical
+    hint[:3, 3] = [0.06, 0.004, 0.008]
+    before = hint.copy()
+    cfg = BoxSideGraspRegionCfg(grasp_height_m=-0.005)
+    result = project_box_side_grasp(hint, np.array([0.10, 0.05, 0.04]), cfg)
+    np.testing.assert_allclose(result[:3, 3], [0.04, 0.0, -0.005], atol=1e-12)
+    np.testing.assert_allclose(result[:3, :3], canonical, atol=1e-12)
+    np.testing.assert_array_equal(hint, before)
+    with pytest.raises(ValueError, match="empty or outside"):
+        project_box_side_grasp(
+            hint, np.array([0.10, 0.05, 0.04]), replace(cfg, grasp_height_m=0.03)
+        )
+    with pytest.raises(ValueError, match="dimensions"):
+        project_box_side_grasp(hint, np.array([0.10, -0.05, 0.04]), cfg)

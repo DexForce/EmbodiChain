@@ -47,6 +47,16 @@ embodichain_robots
 
 Concrete robot configurations, exposed lazily from the bundled robot package.
 
+.. py:class:: embodichain_robots.BrainCoRevo1Cfg
+
+   Standalone fixed-base left/right BrainCo Revo 1 hand. Construct with
+   ``from_dict({"side": "left"})`` or select catalog ID ``BrainCoRevo1`` with
+   variant ``left`` / ``right``; right is the default. ``eef`` has six active
+   joint commands and four additional source mimic followers. The default
+   solver and serial-chain mappings are empty. Drive defaults are simulation
+   values, not manufacturer specifications.
+   See :doc:`/resources/robot/brainco/revo1`.
+
 .. py:class:: embodichain_robots.ARX5Cfg
 
    Configure the X5A arm and its two independently actuated parallel fingers.
@@ -55,6 +65,8 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    opening and approach for parallel-jaw grasp generation.
    The default ready pose unfolds the elbow and wrist, and self-collision is
    enabled. Task-specific IK branch limits belong to the caller's scene.
+   An explicit SSIK CPU reference can use the prepared actual-model artifact;
+   see :doc:`/overview/sim/motion/solvers/ssik_solver`.
 
 .. py:class:: embodichain_robots.AlohaMiniCfg
    :no-index:
@@ -91,7 +103,17 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 
 .. py:class:: embodichain_robots.FrankaPandaCfg
 
-   Configuration for the Franka Emika Panda robot with Panda hand.
+   Legacy selector for the historical bare seven-DOF FR3 arm.
+
+   Compatibility entry retaining the historical FR3 model and legacy
+   ``robot_type`` selector. Mount tools explicitly; new model selections use
+   :class:`embodichain_robots.FrankaCfg`.
+
+.. py:class:: embodichain_robots.FrankaCfg
+
+   Bare seven-DOF Franka configuration selected by ``arm_model``:
+   ``fr3`` (default) or ``panda``. End effectors use ordinary URDF component,
+   control-group, drive and solver-TCP overrides in the embodiment.
 
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
@@ -110,7 +132,7 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    SO101 follower with five arm joints, one actuated jaw, official CAD inertials
    and published STS3215 simulation drives. Both serial chains use the same
    source URDF as simulation; arm IK constrains position.
-   See :doc:`/resources/robot/so101` for frames, units and source limitations.
+   See :doc:`/resources/robot/the_robot_studio/so101` for frames, units and source limitations.
 
 .. automethod:: embodichain_robots.SO101FollowerCfg.from_dict
 
@@ -119,10 +141,10 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 .. py:class:: embodichain_robots.FlexivRizon4SCfg
 
    Seven-axis bare Rizon 4S arm with published Flexiv dynamics, tuned simulation
-   damping and a numerical flange IK solver. Construct with ``from_dict()`` and use
+   damping and a Warp RR flange IK solver on CPU/CUDA. Construct with ``from_dict()`` and use
    ``build_pk_serial_chain()`` for the matching differentiable flange chain.
    Source inertials are preserved; public dynamics are manufacturer-blurred.
-   See :doc:`/resources/robot/flexiv_rizon4s` for units and pinned provenance.
+   See :doc:`/resources/robot/flexiv/rizon4s` for units and pinned provenance.
 
 
 embodichain_robots.alohamini.aloha_mini.cfg
@@ -163,6 +185,30 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
+
+
+embodichain_robots.brainco.revo1
+--------------------------------
+
+.. py:class:: embodichain_robots.brainco.revo1.BrainCoRevo1Cfg
+   :no-index:
+
+   Model-local lazy export of :class:`embodichain_robots.BrainCoRevo1Cfg`.
+   Importing its asset module does not load the configuration class.
+
+
+embodichain_robots.brainco.revo1.cfg
+------------------------------------
+
+.. py:class:: embodichain_robots.brainco.revo1.cfg.BrainCoRevo1Cfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.BrainCoRevo1Cfg`; native model
+   information is shared with the W1 mounting adapter.
+
+.. automethod:: embodichain_robots.brainco.revo1.cfg.BrainCoRevo1Cfg.from_dict
+
+.. automethod:: embodichain_robots.brainco.revo1.cfg.BrainCoRevo1Cfg.build_pk_serial_chain
 
 
 embodichain_robots.dexforce.w1
@@ -305,6 +351,19 @@ embodichain_robots.flexiv.rizon4s.cfg
    An explicit URDF ``fpath`` is shared by simulation and serial-chain FK/IK.
 
 
+embodichain_robots.franka.cfg
+-----------------------------
+
+.. py:class:: embodichain_robots.franka.cfg.FrankaCfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.FrankaCfg`.
+   ``from_dict()`` selects the bare arm model before applying ordinary
+   robot overrides. ``build_pk_serial_chain()`` shares that arm's source URDF;
+   the solver applies the configured mounted-tool TCP once.
+   See :doc:`/resources/robot/franka/cfg` for selections and calibration.
+
+
 embodichain_robots.franka.panda
 -------------------------------
 
@@ -313,7 +372,7 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 .. py:class:: embodichain_robots.franka.panda.FrankaPandaCfg
    :no-index:
 
-   Configuration for the Franka Emika Panda robot with Panda hand.
+   Legacy selector for the historical bare seven-DOF FR3 arm.
 
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
@@ -522,6 +581,10 @@ and cache prefixes while using the shared core download and locking services.
    :no-index:
 
    Dataset class for the Franka robots.
+
+.. autoclass:: embodichain_robots.franka.assets.FrankaPandaArm
+
+.. autofunction:: embodichain_robots.robotiq.two_finger.robotiq85_joint_positions
 
 
 embodichain_robots.the_robot_studio.so101

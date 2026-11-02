@@ -15,3 +15,5 @@ deployments:
     config: task.dual_ur5_dh_pgi_140_80.yaml
   tianji_marvin:
     config: task.tianji_marvin.yaml
+  dexforce_w1_030_pika:
+    config: task.dexforce_w1_030_pika.yaml

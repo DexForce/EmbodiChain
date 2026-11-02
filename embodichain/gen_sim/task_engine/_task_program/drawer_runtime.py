@@ -29,6 +29,7 @@ from embodichain.lab.sim.atomic_actions import (
     GraspGoal,
     HeldObjectPoseGoal,
     JointPositionTarget,
+    NominalMotionSource,
     PickUpOptions,
     PlanTransform,
     PlanningFailure,
@@ -41,7 +42,7 @@ from .drawer_geometry import (
     drawer_containment_report,
     placement_pose_candidates,
 )
-from .invocation_policy import GenSimActionEngine
+from .invocation_policy import GenSimActionEngine, _reject_external_nominal
 
 __all__: list[str] = []
 
@@ -573,7 +574,9 @@ class DrawerPlacementEngine(GenSimActionEngine):
         context: Any = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
     ) -> Any:
+        _reject_external_nominal(nominal_source)
         current = self.initial_context() if context is None else context
         observations = tuple(
             _scope_observation(obs, request) for obs in self._drawer_observations

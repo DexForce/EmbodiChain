@@ -49,7 +49,9 @@ def _case():
         None,
         0.0,
     )
-    delegate = NS(gripper_model=ParallelJawGripperModelCfg())
+    delegate = NS(
+        gripper_model=ParallelJawGripperModelCfg(model_id="robotiq_arg2f_140")
+    )
     task = filters.TaskGraspPoseGenerator(delegate, (rule,))
     wrapped = filters.E6ApproachGraspPoseGenerator(task, frozenset({"handle_geometry"}))
     semantics = ObjectSemantics(

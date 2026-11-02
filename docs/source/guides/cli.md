@@ -268,7 +268,7 @@ embodichain run-task --gym_config config.yaml \
 The Viser panel supports environment visibility, camera-frustum selection, RGB
 preview, and overlay visibility. For supported object types, programmatic
 configuration, remote access, and performance details, see
-:doc:`../overview/sim/viser_visualization`.
+{doc}`../overview/sim/visualization/viser`.
 
 ### Preview Mode
 

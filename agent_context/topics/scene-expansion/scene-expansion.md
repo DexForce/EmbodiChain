@@ -22,6 +22,10 @@ fixed-orientation group certificates preserve their original conservative proxy
 rather than being reinterpreted by the hierarchical sampler. V3 migration retains
 the validated legacy support grids and height rules without re-extraction.
 
+Joint task-conditioned layout/installation search is owned by
+[scene and robot feasibility](feasibility.md). It builds new deployments between
+attempts and retains the fixed-topology B=1 restoration boundary within each host.
+
 ## Entry points
 
 | Request | Owner |

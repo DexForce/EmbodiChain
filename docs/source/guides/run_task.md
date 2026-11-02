@@ -210,7 +210,7 @@ created by `record_camera_data` under **Record cameras** from configured
 observation sensors under **Sensor cameras**.
 Limit the published batch with `--viser-env-ids`, and tune scene, image, or
 soft-body publication rates with the corresponding `--viser-*-fps` options. See
-{doc}`/overview/sim/viser_visualization` for browser controls and remote-access
+{doc}`/overview/sim/visualization/viser` for browser controls and remote-access
 details.
 
 ## Run and record

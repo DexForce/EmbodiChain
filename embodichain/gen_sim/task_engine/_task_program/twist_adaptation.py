@@ -22,6 +22,8 @@ from collections.abc import Mapping
 import math
 from typing import Any, TYPE_CHECKING
 
+from ._gripper_reserve import nominal_hand_reserve
+
 if TYPE_CHECKING:
     from .twist_binding import TwistRoute
 
@@ -60,15 +62,16 @@ def select_twist_scale(
         "grasp_pose_generators"
     ][f"{route.arm}_eef"]
     model = generator["model"]
+    reserve = nominal_hand_reserve(model["model_id"])
     calibration = GRIPPER_COLLISION_CALIBRATIONS.get(model.get("model_id"))
     values = {
         "source_scale": route.binding.scale,
         "source_grip_depth": route.binding.grip_depth,
         "source_grip_width": route.binding.grip_width,
-        "finger_thickness": model["finger_thickness"],
+        "finger_thickness": reserve.finger_thickness,
         "minimum_opening_width": model["min_opening_width"],
         "maximum_opening_width": model["max_opening_width"],
-        "opening_margin": generator["opening_margin"],
+        "opening_margin": reserve.opening_margin,
     }
     if any(
         type(value) not in (int, float) or not math.isfinite(value)

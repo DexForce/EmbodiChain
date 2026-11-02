@@ -53,8 +53,12 @@ Checklist
    ``embodichain_robots/__init__.py`` and its ID, class import path, defaults,
    and control metadata in ``embodichain_robots/_catalog.py``. External packages
    advertise a catalog through an ``embodichain.robots`` entry point.
-9. **Add documentation** — ``docs/source/resources/robot/<name>.md`` + update
-   ``resources/robot/index.rst``.
+9. **Add documentation** — create
+   ``docs/source/resources/robot/<vendor>/<model>.md`` and include it in the
+   owning vendor's ``index.rst`` and the Supported Robots overview. Reuse the
+   source namespace; community projects with an unknown manufacturer use their
+   project namespace. Add an index for a new vendor or project and link it from
+   ``resources/robot/index.rst``. Generic composition remains separate.
 10. **Test** — a ``__main__`` smoke test + the DOF drift guard + ``preview-asset`` CLI.
 
 Refresh the editable install after changing package entry-point metadata, then

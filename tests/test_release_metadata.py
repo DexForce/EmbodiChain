@@ -94,6 +94,44 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
     }
 
 
+@pytest.mark.parametrize("nested", [False, True])
+def test_new_extension_package_is_discovered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool
+) -> None:
+    extensions = tmp_path / "extensions"
+    project = extensions / "embodichain_example"
+    package = project / "embodichain_example" if nested else project
+    (package / "feature").mkdir(parents=True)
+    (package / "__init__.py").touch()
+    (package / "feature" / "__init__.py").touch()
+    monkeypatch.setattr(package_setup, "THIS_DIR", tmp_path)
+    monkeypatch.setattr(package_setup, "EXTENSIONS_DIR", extensions)
+
+    assert {"embodichain_example", "embodichain_example.feature"} <= set(get_packages())
+    assert (
+        get_package_dir()["embodichain_example"]
+        == package.relative_to(tmp_path).as_posix()
+    )
+
+
+@pytest.mark.parametrize("layout", ["missing", "ambiguous", "invalid_name"])
+def test_invalid_extension_layout_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str
+) -> None:
+    extensions = tmp_path / "extensions"
+    name = "embodichain_bad-name" if layout == "invalid_name" else "embodichain_example"
+    project = extensions / name
+    project.mkdir(parents=True)
+    if layout == "ambiguous":
+        (project / "__init__.py").touch()
+        (project / name).mkdir()
+        (project / name / "__init__.py").touch()
+    monkeypatch.setattr(package_setup, "EXTENSIONS_DIR", extensions)
+
+    with pytest.raises(ValueError, match="extension package name|package layout"):
+        get_packages()
+
+
 def test_project_metadata_has_no_direct_dependencies() -> None:
     project = _read_project_metadata()["project"]
     requirements = list(project["dependencies"])

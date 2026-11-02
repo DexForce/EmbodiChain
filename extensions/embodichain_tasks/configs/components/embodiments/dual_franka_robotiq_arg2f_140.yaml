@@ -215,17 +215,17 @@ skill_profile:
         approach_direction_samples: 4
         max_candidates: 500
         center_mode: centroid
-        opening_margin: 0.003
-        point_sample_density: 0.012
+        point_spacing: 0.012
+        root_from_tcp:
+          - [0.0, -1.0, 0.0, 0.0]
+          - [1.0, 0.0, 0.0, 0.0]
+          - [0.0, 0.0, 1.0, 0.2]
+          - [0.0, 0.0, 0.0, 1.0]
         filter_ground_collision: false
         model:
           model_id: robotiq_arg2f_140
           min_opening_width: 0.002
           max_opening_width: 0.15
-          finger_length: 0.13
-          finger_width: 0.03
-          finger_thickness: 0.01
-          palm_depth: 0.08
       right_eef:
         kind: antipodal_parallel_jaw
         sample_count: 10000
@@ -233,17 +233,17 @@ skill_profile:
         approach_direction_samples: 4
         max_candidates: 500
         center_mode: centroid
-        opening_margin: 0.003
-        point_sample_density: 0.012
+        point_spacing: 0.012
+        root_from_tcp:
+          - [0.0, -1.0, 0.0, 0.0]
+          - [1.0, 0.0, 0.0, 0.0]
+          - [0.0, 0.0, 1.0, 0.2]
+          - [0.0, 0.0, 0.0, 1.0]
         filter_ground_collision: false
         model:
           model_id: robotiq_arg2f_140
           min_opening_width: 0.002
           max_opening_width: 0.15
-          finger_length: 0.13
-          finger_width: 0.03
-          finger_thickness: 0.01
-          palm_depth: 0.08
     control_part_evidence:
       kind: joint_position_constraint
       control_parts: [left_eef, right_eef]

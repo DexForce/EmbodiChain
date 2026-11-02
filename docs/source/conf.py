@@ -110,6 +110,7 @@ html_sidebars = {
 
 html_theme = "sphinx_book_theme"
 html_static_path = ["_static"]
+html_extra_path = ["labs"]
 # Don't include version-redirect.js automatically - we add it manually to root
 html_js_files = []
 # html_logo = "_static/logo_e.png"
@@ -118,12 +119,40 @@ html_js_files = []
 # Use empty string to use relative paths from the build directory
 html_baseurl = ""
 
+# Keep published URLs working after documentation reorganizations.
+doc_redirects = {
+    "features/interaction/index": "overview/sim/visualization/index",
+    "features/interaction/window": "overview/sim/visualization/window",
+    "features/interaction/gizmo": "overview/sim/visualization/gizmo",
+    "features/interaction/preview_asset": "guides/preview_asset",
+    "overview/sim/viser_visualization": "overview/sim/visualization/viser",
+    "resources/robot/anymal_c": "resources/robot/anybotics/anymal_c",
+    "resources/robot/microduck": "resources/robot/pollen_robotics/microduck",
+    "resources/robot/unitree_g1": "resources/robot/unitree/g1",
+    "resources/robot/unitree_go1": "resources/robot/unitree/go1",
+    "resources/robot/unitree_go2": "resources/robot/unitree/go2",
+    "resources/robot/unitree_h1_2": "resources/robot/unitree/h1_2",
+    "resources/robot/cobotmagic": "resources/robot/agilex/cobotmagic",
+    "resources/robot/arx5": "resources/robot/arx/arx5",
+    "resources/robot/dexforce_w1": "resources/robot/dexforce/w1",
+    "resources/robot/flexiv_rizon4s": "resources/robot/flexiv/rizon4s",
+    "resources/robot/franka_panda": "resources/robot/franka/panda",
+    "resources/robot/so101": "resources/robot/the_robot_studio/so101",
+    "resources/robot/tianji_marvin": "resources/robot/tianji/marvin",
+    "resources/robot/ur_robot": "resources/robot/universal_robots/ur_robot",
+    "resources/robot/aloha_mini": "resources/robot/alohamini/aloha_mini",
+}
+html_additional_pages = {
+    old_docname: "doc_redirect.html" for old_docname in doc_redirects
+}
+
 # HTML context for better path handling
 html_context = {
     "github_user": "dexforce",
     "github_repo": "EmbodiChain",
     "github_version": "main",
     "doc_path": "docs/source",
+    "doc_redirects": doc_redirects,
 }
 
 html_theme_options = {

@@ -35,7 +35,13 @@ Edit: import export → validate graph/typed edit plan → generate additions
 Task Engine `prepare`/`run-all --robot-profile` selects `dual_franka`,
 `dual_ur10` or `dual_tianji`; `tianji_marvin` remains a compatible selector alias
 without changing existing serialized model IDs or frozen-reference receipts.
-The latter two robots retain the canonical complete Robotiq hands. Marvin uses
+The latter two robots retain the canonical complete Robotiq hands. Grasp services
+use GraspKit's fixed-opening URDF collision geometry with explicit TCP transforms;
+removed box-geometry fields are rejected by the shared configuration decoder.
+GenSim's `_task_program/_gripper_reserve.py` owns nominal Robotiq clearance and
+scale reserves separately; those heuristics do not certify mesh clearance.
+Bundles authored with the removed fields require regeneration and new identity.
+Marvin uses
 its registered bare whole-body asset, not two copies of that robot.
 Marvin's coincident solver roots are not shoulder locations: spatial hints use
 the first controlled joint's fixed parent chain and origin. Its complete body
@@ -72,6 +78,11 @@ generator and numerical utilities, and keep the existing URDF speed,
 collision, release and stability gates, and do not claim the newer acceleration
 budget. Explicit authored motion limits require `lab.motion_limits/v1`; bundles
 without the contract keep that shared path. Native runs save `motion_contract.json`.
+The GenSim and drawer engines accept the shared `nominal_source` keyword only
+when it is `None`: external nominal trajectories would bypass their invocation
+policies and are rejected before planning or session creation. Use shared Lab
+skills for supported external nominal motion; generated bundles retain their
+declared GenSim planning path.
 Generated MoveHeldObject, Pour and Place use the shared bound grasp-command
 behavior. GenSim binds legacy `lab.motion_limits/v1` alignment occurrences to
 measured hand targets through `_task_program/held_command.py`; sampled-velocity

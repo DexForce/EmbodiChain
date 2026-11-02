@@ -41,13 +41,38 @@ class Regression:
         return LossResult((model(batch.inputs) - batch.targets).square().mean())
 
 
-def build(path):
+def build(path, *, sequence=False):
     torch.manual_seed(42)
     model = torch.nn.Sequential(
         torch.nn.Linear(2, 8), torch.nn.Dropout(0.2), torch.nn.Linear(8, 1)
     )
     x = torch.arange(40, dtype=torch.float32).view(20, 2) / 40
     data = TensorBatchSource(SupervisedBatch(x, x.sum(-1, keepdim=True)))
+    if sequence:
+        from tensordict import TensorDict
+        from embodichain.data_pipeline.datasets import TensorDataSource, SequenceSpecCfg
+        from embodichain.learning.sl import SequenceBatchSource
+
+        data = SequenceBatchSource(
+            TensorDataSource(
+                TensorDict(
+                    {
+                        "obs": x.reshape(4, 5, 2),
+                        "actions": x.sum(-1, keepdim=True).reshape(4, 5, 1),
+                        "valid": torch.ones(4, 5, dtype=torch.bool),
+                    },
+                    [4, 5],
+                ),
+                schema={"action": {"semantics": "toy-sum-target", "step_dt": 0.1}},
+                source_id="toy-resident",
+            ),
+            SequenceSpecCfg(2, 2),
+            encoder=lambda context: SupervisedBatch(
+                context["obs"][:, 1], context["actions"][:, 1]
+            ),
+            encoder_version="current-to-sum-v1",
+            immutable=True,
+        )
     learner = SupervisedLearner(
         model, Regression(), torch.optim.Adam(model.parameters(), lr=0.01)
     )
@@ -59,19 +84,23 @@ def build(path):
     )
 
 
-def test_resume_reproduces_dropout_optimizer_and_sampling(tmp_path):
-    full = build(tmp_path / "full")
+@pytest.mark.parametrize("sequence", [False, True])
+def test_resume_reproduces_dropout_optimizer_and_sampling(tmp_path, sequence):
+    full = build(tmp_path / "full", sequence=sequence)
     full.fit()
     expected = copy.deepcopy(full.learner.state_dict())
-    split = build(tmp_path / "split")
+    split = build(tmp_path / "split", sequence=sequence)
     split.fit(stop_after=7)
-    resumed = build(tmp_path / "resumed")
+    resumed = build(tmp_path / "resumed", sequence=sequence)
     resumed.resume(tmp_path / "split/last.pt")
     resumed.fit()
     for key, value in expected["model"].items():
         torch.testing.assert_close(
             value, resumed.learner.model.state_dict()[key], rtol=0, atol=0
         )
+    torch.testing.assert_close(
+        resumed.learner.state_dict()["optimizer"], expected["optimizer"], rtol=0, atol=0
+    )
     combined = (tmp_path / "split/metrics.jsonl").read_text() + (
         tmp_path / "resumed/metrics.jsonl"
     ).read_text()
@@ -113,7 +142,7 @@ def test_source_snapshots_and_sampled_batches_own_storage():
 
 
 def test_sl_import_does_not_load_simulation():
-    code = "import sys; import embodichain.learning.sl; assert not any(k.startswith(('dexsim', 'embodichain.lab', 'embodichain.learning.rl')) for k in sys.modules)"
+    code = "import sys; import embodichain.learning.sl; assert not any(k.startswith(('dexsim', 'embodichain.lab', 'embodichain.learning.rl', 'embodichain.data_pipeline', 'lerobot')) for k in sys.modules); from embodichain.learning.sl import SequenceBatchSource; assert not any(k.startswith(('dexsim', 'embodichain.lab', 'embodichain.data_pipeline.engine', 'lerobot')) for k in sys.modules)"
     subprocess.run([sys.executable, "-c", code], check=True)
 
 

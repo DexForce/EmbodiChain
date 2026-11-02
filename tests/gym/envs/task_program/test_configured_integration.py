@@ -335,6 +335,100 @@ def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
     )
 
 
+def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
+    tmp_path: Path,
+) -> None:
+    """A relative selector patches tuning while retaining the policy contract."""
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    physical = _physical_components(path, config)
+    program, task, base_policy = _resolve_task_program_components(
+        config["task_program"], base_dir=path.parent
+    )
+    from embodichain.utils.utility import save_config
+
+    save_config(tmp_path / "policy.yaml", base_policy)
+    save_config(tmp_path / "integration.yaml", task)
+    original = (tmp_path / "policy.yaml").read_bytes()
+    selection = {
+        "program": str(program),
+        "integration": "integration.yaml",
+        "execution_policy": {
+            "component": "policy.yaml",
+            "overrides": {
+                "motion": {
+                    "sample_count": 160,
+                    "velocity_limit": 0.35,
+                    "acceleration_limit": 0.4,
+                    "dynamic_collision_mode": "off",
+                },
+                "recovery": {
+                    "action_timeout": 90.0,
+                    "goal_rotation_threshold": 0.75,
+                },
+            },
+        },
+    }
+    deployment = _load_configured_task_program_deployment(
+        task_program=selection,
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=tmp_path,
+    )
+    preset = deployment.integration.registration.robot_profile_binding.presets[0]
+    assert preset.motion_policy.sample_count == 160
+    assert preset.motion_policy.velocity_limit == 0.35
+    assert preset.motion_policy.acceleration_limit == 0.4
+    assert preset.motion_policy.dynamic_collision_mode.value == "off"
+    assert preset.recovery_policy.action_timeout == 90.0
+    assert preset.recovery_policy.goal_rotation_threshold == 0.75
+    assert preset.recovery_policy.max_replans == 3
+    assert preset.effect_assurance.value == "verified"
+    assert deployment.planner_config == {"type": "toppra", "config": {}}
+    assert (tmp_path / "policy.yaml").read_bytes() == original
+    _, _, unmodified = _resolve_task_program_components(
+        config["task_program"], base_dir=path.parent
+    )
+    assert unmodified == base_policy
+
+
+@pytest.mark.parametrize(
+    "overrides,error,message",
+    (
+        (
+            {"effect_assurance": "projected"},
+            ValueError,
+            "unsupported fields.*effect_assurance",
+        ),
+        (
+            {"motion": {"strategy": "ik_interp"}},
+            ValueError,
+            "unsupported fields.*strategy",
+        ),
+        ({"motion": {"velocity_limit": float("nan")}}, ValueError, "velocity_limit"),
+        ({"motion": {"sample_count": True}}, ValueError, "sample_count"),
+        (
+            {"motion": {"dynamic_collision_mode": "disabled"}},
+            ValueError,
+            "dynamic_collision_mode",
+        ),
+        ({"recovery": {"action_timeout": 0.0}}, ValueError, "action_timeout"),
+        (None, TypeError, "overrides must be a mapping"),
+    ),
+)
+def test_execution_policy_overrides_are_closed_and_use_existing_value_validation(
+    overrides: object, error: type[Exception], message: str
+) -> None:
+    """Deployment tuning cannot replace semantics or bypass typed decoders."""
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    config["task_program"]["execution_policy"] = {
+        "component": "../../../components/execution_policies/motion_gen_verified.yaml",
+        "overrides": overrides,
+    }
+    with pytest.raises(error, match=message):
+        _resolve_task_program_components(config["task_program"], base_dir=path.parent)
+
+
 def test_planner_policy_decoder_validates_backend_and_options() -> None:
     """Planner backends remain closed while typed options stay configurable."""
     assert _decode_planner_config(
@@ -395,8 +489,8 @@ def test_single_task_program_composes_with_ur5_and_franka(
     assert franka.selection.robot_profile == "franka_panda"
 
 
-def test_shared_embodiment_keeps_task_grasp_override_local() -> None:
-    """Drawer-specific clearance does not mutate the shared embodiment."""
+def test_shared_embodiment_uses_actual_hand_geometry_without_box_overrides() -> None:
+    """Tasks share actual hand geometry instead of obsolete scalar box margins."""
     repeated_config = _gym_config("repeated_pick_place")
     drawer_config = _gym_config("open_drawer")
     repeated = _integration_payload("repeated_pick_place")
@@ -421,8 +515,9 @@ def test_shared_embodiment_keeps_task_grasp_override_local() -> None:
     )
     assert "task_program" not in repeated_environment
     assert "task_program" not in drawer_environment
-    assert repeated_generator["opening_margin"] == pytest.approx(0.002)
-    assert drawer_generator["opening_margin"] == pytest.approx(0.03)
+    assert repeated_generator["point_spacing"] == pytest.approx(0.012)
+    assert drawer_generator == repeated_generator
+    assert "opening_margin" not in drawer_generator
 
 
 def test_task_rejects_embodiment_with_an_incompatible_contract() -> None:
@@ -1473,14 +1568,14 @@ def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
 
     assert factory.model_id == "dh_pgi_140_80"
     assert factory.min_opening_width == pytest.approx(0.005)
-    assert factory.palm_depth == pytest.approx(0.096)
+    assert factory.max_opening_width == pytest.approx(0.1)
     assert factory.sample_count is None
     assert factory.approach_deviation_angle is None
     assert factory.approach_direction_samples is None
     assert factory.max_candidates is None
     assert factory.center_mode is None
-    assert factory.opening_margin is None
-    assert factory.point_sample_density is None
+    assert factory.point_spacing == pytest.approx(0.012)
+    assert factory.root_from_tcp is None
     assert factory.filter_ground_collision is None
     assert factory.force_refresh is None
     assert not hasattr(factory, "viser_port")
@@ -1503,8 +1598,10 @@ def test_grasp_generator_factory_defers_to_toolkit_policy_defaults() -> None:
     assert generator.algorithm_cfg.approach_direction_samples == 4
     assert generator.algorithm_cfg.max_candidates == 50
     assert generator.algorithm_cfg.center_mode == "bounds"
-    assert generator.collision_cfg.opening_margin == pytest.approx(0.01)
-    assert generator.collision_cfg.point_sample_density == pytest.approx(0.01)
+    assert generator.collision_geometry.provenance["point_spacing_m"] == pytest.approx(
+        0.012
+    )
+    assert generator.collision_geometry.provenance["model_id"] == "dh_pgi_140_80"
     assert generator.collision_cfg.filter_ground_collision is True
     assert generator.annotation_cfg.selection_mode == "whole_mesh"
     assert generator.annotation_cfg.force_refresh is False
@@ -1530,48 +1627,49 @@ def test_grasp_generator_decodes_candidate_search_policy() -> None:
     assert generator.algorithm_cfg.center_mode == "centroid"
 
 
-def test_grasp_generator_inline_model_uses_geometry_defaults() -> None:
-    """Custom inline models only override geometry that differs from defaults."""
-    factory = _decode_grasp_generator(
-        {
-            "kind": "antipodal_parallel_jaw",
-            "model": {
-                "model_id": "custom_parallel_jaw",
-                "palm_depth": 0.09,
-            },
-        },
-        path="generator",
-    )
+@pytest.mark.parametrize("field", ["opening_margin", "point_sample_density"])
+def test_grasp_generator_rejects_removed_box_collision_fields(field: str) -> None:
+    with pytest.raises(ValueError, match=f"unsupported fields.*{field}"):
+        _decode_grasp_generator(
+            {"kind": "antipodal_parallel_jaw", "model": "dh_pgi_140_80", field: 0.01},
+            path="generator",
+        )
 
-    assert factory.model_id == "custom_parallel_jaw"
-    assert factory.min_opening_width == pytest.approx(0.001)
-    assert factory.max_opening_width == pytest.approx(0.1)
-    assert factory.finger_length == pytest.approx(0.08)
-    assert factory.finger_width == pytest.approx(0.03)
-    assert factory.finger_thickness == pytest.approx(0.01)
-    assert factory.palm_depth == pytest.approx(0.09)
+
+def test_inline_builtin_aperture_matches_registered_model_and_rejects_unknown() -> None:
+    payload = {
+        "kind": "antipodal_parallel_jaw",
+        "model": {"model_id": "franka_panda_hand"},
+    }
+    factory = _decode_grasp_generator(payload, path="generator")
+    assert factory.min_opening_width == 0.001
+    assert factory.max_opening_width == 0.08
+    payload["model"] = {"model_id": "custom"}
+    with pytest.raises(
+        ValueError,
+        match="unknown parallel-jaw gripper model",
+    ):
+        _decode_grasp_generator(payload, path="generator")
 
 
 @pytest.mark.parametrize(
-    ("relative_path", "control_part", "model_id", "opening_margin"),
+    ("relative_path", "control_part", "model_id"),
     [
         (
             "repeated_pick_place/task.franka.yaml",
             "eef",
             "franka_panda_hand",
-            0.01,
         ),
-        ("open_drawer/task.franka.yaml", "eef", "franka_panda_hand", 0.03),
+        ("open_drawer/task.franka.yaml", "eef", "franka_panda_hand"),
         (
             "tableware/pour_water/task.cobotmagic.yaml",
             "right_eef",
             "cobotmagic_v100_gripper",
-            0.01,
         ),
     ],
 )
 def test_embodiment_grasp_defaults_reach_composed_deployments(
-    relative_path: str, control_part: str, model_id: str, opening_margin: float
+    relative_path: str, control_part: str, model_id: str
 ) -> None:
     """Embodiments select geometry; tasks can still override collision policy."""
     path = _CONFIG_DIRECTORY / relative_path
@@ -1588,9 +1686,8 @@ def test_embodiment_grasp_defaults_reach_composed_deployments(
 
     assert generator.gripper_model.model_id == model_id
     assert generator.algorithm_cfg == AntipodalGraspPoseGeneratorCfg()
-    assert generator.collision_cfg == ParallelJawGraspCollisionCfg(
-        opening_margin=opening_margin
-    )
+    assert generator.collision_cfg == ParallelJawGraspCollisionCfg()
+    assert generator.collision_geometry.provenance["model_id"] == model_id
     assert generator.annotation_cfg == GraspAnnotationCfg()
     assert factory() is not generator
 
@@ -1636,9 +1733,13 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     assert commands == {"open": [0.0, 0.0], "grasp": [-0.05, -0.05]}
     services = profile["runtime_services"]["grasp_pose_generators"]
     assert set(services) == {"left_eef", "right_eef"}
-    assert services[f"{side}_eef"] == {
+    declaration = services[f"{side}_eef"]
+    assert {
+        key: value for key, value in declaration.items() if key != "root_from_tcp"
+    } == {
         "kind": "antipodal_parallel_jaw",
         "model": "tianji_marvin_gripper",
+        "side": side,
     }
     deployment = _load_configured_task_program_deployment(
         task_program=physical.config["task_program"],
@@ -1656,6 +1757,46 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     factory = delegate._grasp_pose_generator_factories[f"{side}_eef"]
     generator = factory()
     assert generator.gripper_model.model_id == "tianji_marvin_gripper"
+    assert generator.collision_geometry.provenance["side"] == side
+    assert (
+        generator.collision_geometry.provenance["root_link"] == f"{side}_hand_base_link"
+    )
+    # Resolve the real rounded URDF tool joint and this deployment's solver
+    # override independently; the model's default TCP differs from this one.
+    import xml.etree.ElementTree as ET
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+    from embodichain.data import get_data_path
+    from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+        get_parallel_jaw_collision_geometry,
+    )
+
+    origin = ET.parse(get_data_path("TianjiMarvin/robot_with_ee_acd.urdf")).find(
+        f"./joint[@name='{side.upper()}_HAND_TOOL']/origin"
+    )
+    root_from_tool = np.eye(4)
+    root_from_tool[:3, :3] = Rotation.from_euler(
+        "xyz", np.fromstring(origin.attrib["rpy"], sep=" ")
+    ).as_matrix()
+    root_from_tool[:3, 3] = np.fromstring(origin.attrib["xyz"], sep=" ")
+    root_from_tcp = root_from_tool @ np.asarray(robot.solver_cfg[f"{side}_arm"].tcp)
+    np.testing.assert_allclose(
+        declaration["root_from_tcp"], root_from_tcp, rtol=0, atol=1e-12
+    )
+    geometry = generator.collision_geometry
+    default = get_parallel_jaw_collision_geometry("tianji_marvin_gripper", side=side)
+    torch.testing.assert_close(geometry.points, default.points, rtol=0, atol=1e-8)
+    canonical = torch.eye(4, dtype=torch.float64).unsqueeze(0)
+    actual_pose = geometry.canonical_to_tcp_poses(canonical)[0].numpy()
+    np.testing.assert_allclose(
+        np.asarray(geometry.provenance["root_from_contact_frame"]) @ actual_pose,
+        root_from_tcp,
+        rtol=0,
+        atol=1e-12,
+    )
+    assert not np.allclose(
+        actual_pose, default.canonical_to_tcp_poses(canonical)[0].numpy()
+    )
     assert generator.algorithm_cfg == AntipodalGraspPoseGeneratorCfg()
     assert generator.collision_cfg == ParallelJawGraspCollisionCfg()
     assert generator.annotation_cfg == GraspAnnotationCfg()
@@ -2233,6 +2374,48 @@ def test_pour_dwell_duration_decodes() -> None:
     assert options.dwell_duration == pytest.approx(0.75)
 
 
+def test_configured_pour_target_lowers_live_geometry_and_is_closed() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_registered_lowerer,
+    )
+
+    source = torch.eye(4)
+    source[2, 3] = 0.07
+    receiver = torch.eye(4)
+    receiver[2, 3] = 0.04
+    payload = {
+        "kind": "pour",
+        "object_id": "bottle",
+        "target": {
+            "receiver_id": "cup",
+            "source_mouth_pose": source.flatten().tolist(),
+            "receiver_mouth_pose": receiver.flatten().tolist(),
+            "receiver_radius": 0.03,
+            "mouth_radius": 0.01,
+        },
+    }
+    factory = _decode_registered_lowerer(payload, path="lowerer")
+    result = _PourLowerer("bottle", target=factory.target).lower(
+        RegisteredSemanticCall(
+            call_id="simulation.pour", arguments={"object": "bottle"}
+        ),
+        context=None,
+        bound=None,
+        option_template=PourOptions(),
+    )
+    assert result.goal.target.receiver_pose.entity_id == "cup"
+    torch.testing.assert_close(result.goal.target.receiver_pose.relative_pose, receiver)
+    torch.testing.assert_close(result.goal.target.source_mouth_pose, source)
+    invalid = deepcopy(payload)
+    invalid["target"]["world_bottle_pose"] = source.flatten().tolist()
+    with pytest.raises(ValueError, match="unsupported fields"):
+        _decode_registered_lowerer(invalid, path="lowerer")
+    invalid = deepcopy(payload)
+    invalid["target"]["receiver_id"] = "bottle"
+    with pytest.raises(ValueError, match="distinct"):
+        _decode_registered_lowerer(invalid, path="lowerer")
+
+
 @pytest.mark.parametrize("value", [-0.1, float("inf")])
 def test_pour_dwell_duration_rejects_negative_or_nonfinite_values(
     value: float,
@@ -2483,3 +2666,187 @@ def test_motion_limits_reach_explicit_blended_planner_options(
     )
     assert TrapezoidalPlanOptions().constraints["velocity"] is None
     assert TrapezoidalPlanOptions().constraints["acceleration"] is None
+
+
+def test_configured_nominal_source_preflights_content_and_revision(tmp_path):
+    import hashlib
+    import numpy as np
+
+    from embodichain.data_pipeline.real2sim import (
+        JointSpec,
+        PhaseAnnotation,
+        Real2SimTrajectory,
+        prepare_prototype,
+    )
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_runtime_services,
+    )
+
+    source = Real2SimTrajectory(
+        source_id="synthetic",
+        source_revision="1",
+        unit_id="pick",
+        skill_id="pick_up",
+        origin="synthetic_reference",
+        joint_names=("arm",),
+        joint_units=("rad",),
+        qpos=np.zeros((6, 1)),
+        timestamps=np.arange(6) * 0.02,
+        time_unit="s",
+        phases=(
+            PhaseAnnotation("approach", 0, 2, "free", "object"),
+            PhaseAnnotation("close", 2, 4, "contact", "object"),
+            PhaseAnnotation("lift", 4, 6, "hold", "gravity"),
+        ),
+        object_pose=np.eye(4),
+    )
+    manifest = prepare_prototype(
+        source,
+        joints=(JointSpec("arm", "revolute"),),
+        control_dt=0.02,
+        directory=tmp_path / "prototype",
+    )
+    declaration = {
+        "call_index": 0,
+        "program_fingerprint": "a" * 64,
+        "provider_id": "real2sim.prototype",
+        "revision": "1",
+        "prototype_manifest": str(manifest),
+        "prototype_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        "object_entity_id": "cube",
+    }
+    services = _decode_runtime_services({"nominal_motion_sources": [declaration]})
+    assert services.nominal_motion_sources[0].call_index == 0
+    refined = _decode_runtime_services(
+        {
+            "nominal_motion_sources": [
+                {
+                    **declaration,
+                    "authority": "eef_pose",
+                    "refinement": {
+                        "max_translation_m": 0.015,
+                        "project_pick_lift": True,
+                    },
+                }
+            ]
+        }
+    )
+    assert refined.nominal_motion_sources[0].refinement.max_translation_m == 0.015
+    assert refined.nominal_motion_sources[0].refinement.project_pick_lift is True
+    with pytest.raises(ValueError, match="eef_pose authority"):
+        _decode_runtime_services(
+            {"nominal_motion_sources": [{**declaration, "refinement": {}}]}
+        )
+    with pytest.raises(ValueError, match="unknown|unexpected|unsupported"):
+        _decode_runtime_services(
+            {
+                "nominal_motion_sources": [
+                    {
+                        **declaration,
+                        "authority": "eef_pose",
+                        "refinement": {"silently_change_time": True},
+                    }
+                ]
+            }
+        )
+    with pytest.raises(ValueError, match="unknown provider or revision"):
+        _decode_runtime_services(
+            {"nominal_motion_sources": [{**declaration, "revision": "2"}]}
+        )
+    with pytest.raises(ValueError, match="changed"):
+        _decode_runtime_services(
+            {"nominal_motion_sources": [{**declaration, "prototype_sha256": "b" * 64}]}
+        )
+
+
+@pytest.mark.parametrize("asset_backed", [False, True])
+def test_real2sim_collection_profile_rejects_ambiguous_limits_and_recipes(
+    tmp_path, monkeypatch, asset_backed
+):
+    import yaml
+    from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
+        load_real2sim_tabletop_profile,
+    )
+
+    payload = {
+        "kind": "tabletop_box_v1",
+        "scene_revision": "scene-v1",
+        "object_uid": "cube",
+        "target_uid": "platform",
+        "object_entity_id": "cube",
+        "target_entity_id": "platform",
+        "base_link": "base",
+        "finger_links": ["finger"],
+        "finger_joints": ["finger_joint"],
+        "closing_directions": [1],
+        "velocity_limits": [1.0, 2.0],
+        "velocity_limit_origin": "simulated",
+        "acceleration_limits": [1.0, 2.0],
+        "acceleration_limit_origin": "simulated",
+        "layouts": [
+            {"id": "baseline", "object_xyyaw": [0, 0, 0], "target_xyyaw": [0, 0, 0]}
+        ],
+        "recipes": ["nominal", "time_130"],
+    }
+    path = tmp_path / "profile.yaml"
+    path.write_text(yaml.safe_dump(payload))
+    profile = load_real2sim_tabletop_profile(path)
+    assert profile.recipes == ("nominal", "time_130")
+    assert profile.layouts[0]["object_xyyaw"] == (0.0, 0.0, 0.0)
+    assert profile.motion_headroom_fraction is None
+
+    artifacts = {
+        "original_recording": {"path": "original.h5", "sha256": "a" * 64},
+        "source_evidence": {"path": "source.npz", "sha256": "b" * 64},
+    }
+    if asset_backed:
+        from types import SimpleNamespace
+
+        for item in artifacts.values():
+            (tmp_path / item["path"]).write_text("fixture")
+            item["path"] = {"asset": "DemoInputs", "path": item["path"]}
+        monkeypatch.setattr(
+            "embodichain.data.get_data_class",
+            lambda _: lambda: SimpleNamespace(extract_dir=str(tmp_path)),
+        )
+    json_path = tmp_path / "profile.json"
+    import json
+
+    json_path.write_text(
+        json.dumps(
+            {
+                **payload,
+                "source_artifacts": {0: artifacts},
+                "retime_phase_allowlist": {"place": ["approach"]},
+            }
+        )
+    )
+    decoded = load_real2sim_tabletop_profile(json_path)
+    assert list(decoded.source_artifacts) == [0]
+    assert decoded.source_artifacts[0]["original_recording"]["path"] == str(
+        tmp_path / "original.h5"
+    )
+    assert decoded.retime_phase_allowlist == {"place": ("approach",)}
+    for keys in ({"00": artifacts}, {0: artifacts, "0": artifacts}, {True: artifacts}):
+        path.write_text(yaml.safe_dump({**payload, "source_artifacts": keys}))
+        with pytest.raises(ValueError, match="call indices"):
+            load_real2sim_tabletop_profile(path)
+
+    path.write_text(yaml.safe_dump({**payload, "motion_headroom_fraction": 0.95}))
+    assert load_real2sim_tabletop_profile(path).motion_headroom_fraction == 0.95
+    for invalid in (True, 0, 1):
+        path.write_text(
+            yaml.safe_dump({**payload, "motion_headroom_fraction": invalid})
+        )
+        with pytest.raises(ValueError, match="motion_headroom_fraction"):
+            load_real2sim_tabletop_profile(path)
+
+    path.write_text(yaml.safe_dump({**payload, "acceleration_limits": [True, 2.0]}))
+    with pytest.raises(ValueError, match="cannot be booleans"):
+        load_real2sim_tabletop_profile(path)
+    path.write_text(yaml.safe_dump({**payload, "recipes": ["nominal", "nominal"]}))
+    with pytest.raises(ValueError, match="duplicate"):
+        load_real2sim_tabletop_profile(path)
+    path.write_text(yaml.safe_dump({**payload, "unexpected": 1}))
+    with pytest.raises(ValueError, match="unknown Real2Sim profile field"):
+        load_real2sim_tabletop_profile(path)

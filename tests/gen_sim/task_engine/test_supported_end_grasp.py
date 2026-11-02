@@ -28,6 +28,9 @@ from embodichain.toolkits.graspkit.pg_grasp._antipodal_backend import (
 from embodichain.toolkits.graspkit.pg_grasp.pose_generator import (
     AntipodalGraspPoseGenerator,
 )
+from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
+    FixedGripperCollisionGeometry,
+)
 from embodichain.gen_sim.task_engine._task_program.supported_end import (
     for_axis_region,
     select_supported_end,
@@ -47,15 +50,14 @@ def backend(*, center_mode="centroid", body=None):
     offset = torch.tensor([0.05, 0.0, 0.0])
     result._hit_point_pairs = torch.stack((centers - offset, centers + offset), 1)
     result._max_deviation_angle = 0.35
+    result._approach_alignment_angle = None
     result._approach_direction_samples = 4
     result._max_candidates = 500
     result._filter_ground_collision = False
     result._collision_checker = Mock()
-    result._collision_checker.query.side_effect = (
-        lambda _object, poses, _widths, **kwargs: (
-            poses[:, 2, 3] > 0.9,
-            torch.zeros(len(poses)),
-        )
+    result._collision_checker.query.side_effect = lambda _object, poses, **kwargs: (
+        poses[:, 2, 3] > 0.9,
+        torch.zeros(len(poses)),
     )
     result._antipodal_sampler = Mock()
     result._antipodal_sampler.sample.side_effect = AssertionError(
@@ -142,11 +144,9 @@ def test_support_domain_is_computed_before_top_k():
 
 def test_all_static_rejected_never_reinterprets_invalid_pairs():
     instance = backend()
-    instance._collision_checker.query.side_effect = (
-        lambda _object, poses, _widths, **kwargs: (
-            torch.ones(len(poses), dtype=torch.bool),
-            torch.zeros(len(poses)),
-        )
+    instance._collision_checker.query.side_effect = lambda _object, poses, **kwargs: (
+        torch.ones(len(poses), dtype=torch.bool),
+        torch.zeros(len(poses)),
     )
     assert query(instance, "supported_end")[0] is False
     assert instance._collision_checker.query.call_count == 2
@@ -185,7 +185,12 @@ def test_unknown_policy_fails_before_candidate_processing(policy):
 def test_service_policy_is_per_call_and_default_preserves_legacy_keyword_shape(
     method, policy
 ):
-    generator = AntipodalGraspPoseGenerator(ParallelJawGripperModelCfg())
+    generator = AntipodalGraspPoseGenerator(
+        ParallelJawGripperModelCfg(),
+        collision_geometry=FixedGripperCollisionGeometry(
+            torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
+        ),
+    )
     prepared = Mock(device=torch.device("cpu"))
     prepared.get_valid_grasp_poses.return_value = (
         True,
@@ -233,6 +238,47 @@ def test_region_selector_sees_only_collision_qualified_candidates_before_top_k()
     assert len(observed) == 1
 
 
+def test_hard_alignment_preserves_contact_pair_identity_for_region_selection(
+    monkeypatch,
+):
+    instance = backend()
+    instance._approach_alignment_angle = 0.05
+    instance._approach_direction_samples = 1
+
+    def proposals(_axes, _approach, centers):
+        poses = torch.eye(4).repeat(len(centers), 1, 1)
+        poses[:, :3, 3] = centers
+        downward = centers[:, 2] >= 0.5
+        poses[downward, 1, 1] = -1
+        poses[downward, 2, 2] = -1
+        return poses
+
+    monkeypatch.setattr(
+        _AntipodalMeshBackend,
+        "_grasp_pose_from_approach_direction",
+        staticmethod(proposals),
+    )
+    observed = []
+
+    def selector(**values):
+        # Each surviving pose must still identify its own original contacts,
+        # even when hard eligibility removed earlier candidate rows.
+        torch.testing.assert_close(
+            values["centers"], values["pair_centers"][values["pair_ids"]]
+        )
+        observed.append(values["centers"])
+        return select_supported_end(**values)
+
+    success, poses, _, _ = instance.get_valid_grasp_poses(
+        torch.eye(4),
+        torch.tensor([0.0, 0.0, -1.0]),
+        obj_longest_axis=torch.tensor([0.0, 0.0, 1.0]),
+        axis_region_selector=selector,
+    )
+    assert success and len(observed) == 1
+    assert (poses[:, 2, 3] > 0.55).all()
+
+
 @pytest.mark.parametrize("invalid", ["mask_shape", "mask_dtype", "center_nonfinite"])
 def test_region_selector_rejects_invalid_selection(invalid):
     instance = backend()
@@ -265,7 +311,12 @@ def test_adaptive_sampling_preserves_region_policy_diagnostics(policy):
     from embodichain.lab.sim.atomic_actions import AntipodalAffordance
 
     prepared = backend()
-    generator = AntipodalGraspPoseGenerator(ParallelJawGripperModelCfg())
+    generator = AntipodalGraspPoseGenerator(
+        ParallelJawGripperModelCfg(),
+        collision_geometry=FixedGripperCollisionGeometry(
+            torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
+        ),
+    )
     generator._backend = Mock(return_value=prepared)
     affordance = AntipodalAffordance(
         mesh_vertices=prepared.vertices,

@@ -88,8 +88,9 @@ def test_runtime_threads_leave_gpu_and_batch_policy_unchanged(
         ([[0.01, 0.01], [0.01, 0.01]], [True, True]),
     ],
 )
+@pytest.mark.parametrize("drawer", [False, True])
 def test_initial_velocity_gate_masks_real_session_before_dispatch(
-    monkeypatch, targets, expected
+    monkeypatch, targets, expected, drawer
 ):
     from embodichain.lab.sim.atomic_actions import (
         ActionInvocation,
@@ -105,6 +106,9 @@ def test_initial_velocity_gate_masks_real_session_before_dispatch(
     from embodichain.gen_sim.task_engine._task_program import planning_probe
     from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
         GenSimActionEngine,
+    )
+    from embodichain.gen_sim.task_engine._task_program.drawer_runtime import (
+        DrawerPlacementEngine,
     )
 
     class FixtureAction(AtomicAction[JointPositionGoal, ActionOptions]):
@@ -143,7 +147,11 @@ def test_initial_velocity_gate_masks_real_session_before_dispatch(
     robot.get_joint_ids.return_value = [0, 1]
     generator = Mock(robot=robot, device=torch.device("cpu"))
     generator.planner.cfg.planner_type = "fixture"
-    engine = GenSimActionEngine(generator, load_builtins=False)
+    engine = (
+        DrawerPlacementEngine(generator, load_builtins=False, drawer_observations=())
+        if drawer
+        else GenSimActionEngine(generator, load_builtins=False)
+    )
     engine.register(FixtureAction())
     request_id = "test/segment-0:0"
     invocation = ActionInvocation(
@@ -191,6 +199,58 @@ def test_initial_velocity_gate_masks_real_session_before_dispatch(
         assert not session.plan_attempts[0].plan.diagnostics.failure.retryable
     assert not session.task_state.held_objects
     assert planning_probe.initial_plan_capture(request_id) is None
+
+
+@pytest.mark.parametrize("drawer", [False, True])
+@pytest.mark.parametrize("entry", ["start", "plan"])
+def test_external_nominal_motion_is_rejected_before_gensim_execution(
+    monkeypatch, drawer, entry
+):
+    from embodichain.lab.sim.atomic_actions import (
+        ActionInvocation,
+        AtomicActionEngine,
+        JointPositionGoal,
+    )
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        GenSimActionEngine,
+    )
+    from embodichain.gen_sim.task_engine._task_program.drawer_runtime import (
+        DrawerPlacementEngine,
+    )
+
+    robot = Mock(device=torch.device("cpu"), dof=2, control_parts={"all": object()})
+    robot.get_qpos.return_value = torch.zeros(1, 2)
+    robot.get_qvel.return_value = torch.zeros(1, 2)
+    robot.get_joint_ids.return_value = [0, 1]
+    generator = Mock(robot=robot, device=torch.device("cpu"))
+    generator.planner.cfg.planner_type = "fixture"
+    engine = (
+        DrawerPlacementEngine(generator, drawer_observations=())
+        if drawer
+        else GenSimActionEngine(generator)
+    )
+    invocation = ActionInvocation(
+        skill_id="move_joints",
+        goal=JointPositionGoal(torch.zeros(1, 2)),
+        binding=engine.bind_control_parts(
+            "move_joints", {"primary": {"motion": "all"}}
+        ),
+    )
+    source = SimpleNamespace(instantiate=Mock())
+    start = Mock(side_effect=AssertionError("No session may be created."))
+    plan = Mock(side_effect=AssertionError("No action may be planned."))
+    monkeypatch.setattr(AtomicActionEngine, "start", start)
+    monkeypatch.setattr(engine.actions["move_joints"], "plan", plan)
+    context = engine.initial_context(control_dt=0.04)
+    with pytest.raises(ValueError, match="GenSim does not support external nominal"):
+        getattr(engine, entry)(
+            (invocation,) if entry == "start" else invocation,
+            context,
+            nominal_source=source,
+        )
+    start.assert_not_called()
+    plan.assert_not_called()
+    source.instantiate.assert_not_called()
 
 
 @pytest.mark.parametrize("error", [RuntimeError, KeyboardInterrupt])

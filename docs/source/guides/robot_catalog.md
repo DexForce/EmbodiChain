@@ -152,7 +152,7 @@ w1_bare_cfg = resolve_robot_cfg(
 )
 ```
 
-See {doc}`/resources/robot/dexforce_w1` for hardware releases and calibration.
+See {doc}`/resources/robot/dexforce/w1` for hardware releases and calibration.
 
 ## Register a Third-party Catalog
 

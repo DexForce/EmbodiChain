@@ -31,7 +31,6 @@ from embodichain.learning.rl.policy_evaluation.camera import PolicyViewerCameraC
 from embodichain.lab.sim.types import EnvObs
 from embodichain.utils.math import quat_apply, quat_apply_inverse
 
-from .._robot import apply_task_joint_drive_properties
 from .contracts._math import constant
 
 __all__ = ["EmbodiChainVelocityEnv"]
@@ -112,7 +111,6 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
                 }
                 for name, value in mapping.items():
                     term_cfg.params.setdefault(name, value)
-            apply_task_joint_drive_properties(cfg.robot, self.velocity_task_config)
             if self.explicit_pd_effort_control:
                 cfg.robot.joint_drive_props.stiffness = 0.0
                 cfg.robot.joint_drive_props.damping = 0.0

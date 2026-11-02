@@ -56,6 +56,7 @@ from embodichain.lab.sim.atomic_actions import (
     Pour,
     PourGoal,
     PourOptions,
+    PourTarget,
     PushObject,
     PushObjectGoal,
     PushObjectOptions,
@@ -362,17 +363,14 @@ class _AntipodalGraspPoseGeneratorFactory:
     model_id: str
     min_opening_width: float
     max_opening_width: float
-    finger_length: float
-    finger_width: float
-    finger_thickness: float
-    palm_depth: float
+    point_spacing: float = 0.012
+    side: str | None = None
+    root_from_tcp: tuple[float, ...] | None = None
     sample_count: int | None = None
     approach_deviation_angle: float | None = None
     approach_direction_samples: int | None = None
     max_candidates: int | None = None
     center_mode: str | None = None
-    opening_margin: float | None = None
-    point_sample_density: float | None = None
     filter_ground_collision: bool | None = None
     force_refresh: bool | None = None
 
@@ -385,6 +383,10 @@ class _AntipodalGraspPoseGeneratorFactory:
             GraspAnnotationCfg,
             ParallelJawGraspCollisionCfg,
         )
+        from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+            get_parallel_jaw_collision_geometry,
+        )
+        import numpy as np
 
         algorithm_kwargs: dict[str, object] = {}
         if self.sample_count is not None:
@@ -401,10 +403,6 @@ class _AntipodalGraspPoseGeneratorFactory:
             algorithm_kwargs["center_mode"] = self.center_mode
 
         collision_kwargs: dict[str, object] = {}
-        if self.opening_margin is not None:
-            collision_kwargs["opening_margin"] = self.opening_margin
-        if self.point_sample_density is not None:
-            collision_kwargs["point_sample_density"] = self.point_sample_density
         if self.filter_ground_collision is not None:
             collision_kwargs["filter_ground_collision"] = self.filter_ground_collision
 
@@ -417,10 +415,16 @@ class _AntipodalGraspPoseGeneratorFactory:
                 model_id=self.model_id,
                 min_opening_width=self.min_opening_width,
                 max_opening_width=self.max_opening_width,
-                finger_length=self.finger_length,
-                finger_width=self.finger_width,
-                finger_thickness=self.finger_thickness,
-                palm_depth=self.palm_depth,
+            ),
+            collision_geometry=get_parallel_jaw_collision_geometry(
+                self.model_id,
+                point_spacing=self.point_spacing,
+                side=self.side,
+                root_from_tcp=(
+                    None
+                    if self.root_from_tcp is None
+                    else np.asarray(self.root_from_tcp).reshape(4, 4)
+                ),
             ),
             algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm_kwargs),
             collision_cfg=ParallelJawGraspCollisionCfg(**collision_kwargs),
@@ -1284,6 +1288,33 @@ class _CoordinatedTransportLowererFactory(RegisteredSemanticLowererFactory):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _PourTargetBinding:
+    """Trusted source/receiver geometry for a targeted pouring call."""
+
+    receiver_id: str
+    source_mouth_pose: tuple[float, ...]
+    receiver_mouth_pose: tuple[float, ...]
+    receiver_radius: float
+    mouth_radius: float
+
+    def __post_init__(self) -> None:
+        _identifier(self.receiver_id, field_name="receiver_id")
+        self.make_target()
+
+    def make_target(self) -> PourTarget:
+        """Own the geometry and resolve the opening anew for each plan."""
+        return PourTarget(
+            receiver_pose=SceneEntityPose(
+                self.receiver_id,
+                relative_pose=torch.tensor(self.receiver_mouth_pose).reshape(4, 4),
+            ),
+            source_mouth_pose=torch.tensor(self.source_mouth_pose).reshape(4, 4),
+            receiver_radius=self.receiver_radius,
+            mouth_radius=self.mouth_radius,
+        )
+
+
 class _PourLowerer(RegisteredSemanticLowerer):
     """Lower one configured held-object pouring request."""
 
@@ -1294,6 +1325,7 @@ class _PourLowerer(RegisteredSemanticLowerer):
         self,
         object_id: str,
         internal_axis: tuple[float, float, float] = (1.0, 0.0, 0.0),
+        target: _PourTargetBinding | None = None,
     ) -> None:
         self._object_id = _identifier(object_id, field_name="object_id")
         axis = torch.tensor(internal_axis, dtype=torch.float32)
@@ -1303,6 +1335,7 @@ class _PourLowerer(RegisteredSemanticLowerer):
         if magnitude <= 1.0e-6:
             raise ValueError("internal_axis must be non-zero.")
         self._internal_axis = axis / magnitude
+        self._target = target
 
     def lower(
         self,
@@ -1317,7 +1350,11 @@ class _PourLowerer(RegisteredSemanticLowerer):
         if type(option_template) is not PourOptions:
             raise TypeError("Configured Pour requires an exact PourOptions template.")
         self._validate_call(call)
-        return SemanticLowering(goal=PourGoal())
+        return SemanticLowering(
+            goal=PourGoal(
+                target=None if self._target is None else self._target.make_target()
+            )
+        )
 
     def pick_lookahead_targets(
         self,
@@ -1331,6 +1368,10 @@ class _PourLowerer(RegisteredSemanticLowerer):
         self._validate_call(call)
         if picked_object.entity_id != self._object_id:
             return None
+        if self._target is not None:
+            # The mouth-controlled path depends on the actual held transform;
+            # it is checked by Pour after pickup, not replaced by fixed poses.
+            return ()
         if (
             previous_target is None
             or type(previous_target.pose) is not SceneEntityPose
@@ -1379,9 +1420,14 @@ class _PourLowererFactory(RegisteredSemanticLowererFactory):
     target_descriptor: ClassVar[SkillDescriptor] = Pour.descriptor()
 
     object_id: str
+    target: _PourTargetBinding | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.object_id, field_name="object_id")
+        if self.target is not None and type(self.target) is not _PourTargetBinding:
+            raise TypeError("target must be a configured pouring target.")
+        if self.target is not None and self.target.receiver_id == self.object_id:
+            raise ValueError("Pour source and receiving object must be distinct.")
 
     def create(
         self,
@@ -1407,14 +1453,25 @@ class _PourLowererFactory(RegisteredSemanticLowererFactory):
             object_ref,
             affordance=grasp_ref,
         )
-        if not isinstance(semantics.affordance, AxisAlignAffordance):
+        if self.target is None and not isinstance(
+            semantics.affordance, AxisAlignAffordance
+        ):
             raise TypeError(
                 "Configured Pour requires an AxisAlignAffordance grasp payload."
             )
-        internal_axis = semantics.affordance.internal_axis.detach().cpu().tolist()
+        internal_axis = (
+            semantics.affordance.internal_axis.detach().cpu().tolist()
+            if isinstance(semantics.affordance, AxisAlignAffordance)
+            else [1.0, 0.0, 0.0]
+        )
+        if self.target is not None:
+            scene_registry.resolve(
+                self.target.receiver_id, expected_type=SceneObjectRef
+            )
         return _PourLowerer(
             self.object_id,
             tuple(float(value) for value in internal_axis),
+            self.target,
         )
 
 

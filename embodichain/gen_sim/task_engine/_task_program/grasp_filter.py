@@ -38,6 +38,7 @@ from embodichain.lab.task_program.semantics import (
 from embodichain.utils import logger
 from embodichain.utils.math import pose_inv
 from .e6_clearance import HandClearance
+from ._gripper_reserve import nominal_hand_reserve
 
 if TYPE_CHECKING:
     from embodichain.toolkits.graspkit.pg_grasp.pose_generator import (
@@ -110,6 +111,7 @@ def accepted_candidates(
         projected = object_to_grasp[:, :3, 3] @ poses.new_tensor(rule.local_axis)
         accepted &= projected > rule.midpoint
     if rule.release_pose is not None:
+        reserve = nominal_hand_reserve(model.model_id)
         final_grasp = (
             poses.new_tensor(rule.release_pose).reshape(4, 4) @ object_to_grasp
         )
@@ -118,9 +120,12 @@ def accepted_candidates(
             [
                 [side * opening + dx, dy, dz]
                 for side in (-1.0, 1.0)
-                for dx in (-0.5 * model.finger_thickness, 0.5 * model.finger_thickness)
-                for dy in (-0.5 * model.finger_width, 0.5 * model.finger_width)
-                for dz in (-0.5 * model.finger_length, 0.5 * model.finger_length)
+                for dx in (
+                    -0.5 * reserve.finger_thickness,
+                    0.5 * reserve.finger_thickness,
+                )
+                for dy in (-0.5 * reserve.finger_width, 0.5 * reserve.finger_width)
+                for dz in (-0.5 * reserve.finger_length, 0.5 * reserve.finger_length)
             ]
         )
         world = (

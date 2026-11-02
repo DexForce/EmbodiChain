@@ -221,11 +221,68 @@ class PlanResult:
     assess heterogeneous limits.
     """
 
+    policy_rollout_positions: torch.Tensor | None = None
+    """Original policy joint states ``(B, S, DOF)``, before output retiming.
+
+    Sample zero is the requested initial state. Subsequent samples correspond
+    to one policy control step each; output interpolation never changes this
+    trace. Non-policy planners leave both rollout fields unavailable.
+    """
+
+    policy_rollout_lengths: torch.Tensor | None = None
+    """Valid prefix lengths ``(B,)``, including sample zero and excluding holds.
+
+    Batched rows may finish at different steps. The remaining terminal holds
+    are padding and must not establish later constraint arrivals.
+    """
+
+    waypoint_indices: torch.Tensor | None = None
+    """Ordered target arrival indices in output positions, ``(B, K)``.
+
+    Each column is a distinct target visit, including repeated target values.
+    Unreached or unavailable visits use -1; terminal padding is not an arrival.
+    """
+
+    policy_waypoint_indices: torch.Tensor | None = None
+    """Original policy arrival indices before retiming, using the same target order."""
+
+    policy_batching: dict[str, int] | None = None
+    """Optional shared-policy inference dimensions and call count.
+
+    ``scene_batch_size`` is the number of independent environments;
+    ``control_part_count`` is the number of packed manipulators. Their product
+    is ``actor_batch_size``. ``policy_forward_calls`` counts shared inference
+    calls for the group, not a separate latency or count for each result.
+    """
+
     def __post_init__(self) -> None:
-        """Validate the explicit trajectory-timing contract."""
+        """Validate trajectory timing and optional original policy traces."""
+        rollout, lengths = self.policy_rollout_positions, self.policy_rollout_lengths
+        if rollout is not None or lengths is not None:
+            if not isinstance(rollout, torch.Tensor) or rollout.dim() != 3:
+                raise ValueError(
+                    "Policy rollout positions must have shape (B, S, DOF)."
+                )
+            if (
+                not isinstance(lengths, torch.Tensor)
+                or lengths.shape != rollout.shape[:1]
+                or lengths.dtype not in (torch.int32, torch.int64)
+                or lengths.device != rollout.device
+                or bool(((lengths < 1) | (lengths > rollout.shape[1])).any())
+            ):
+                raise ValueError("Policy rollout lengths must identify valid prefixes.")
+            if self.positions is not None and (
+                rollout.shape[::2] != self.positions.shape[::2]
+                or rollout.device != self.positions.device
+            ):
+                raise ValueError(
+                    "Policy rollout must match the output batch, DoF and device."
+                )
         if self.positions is None:
             if self.dt is not None:
                 raise ValueError("PlanResult timing requires positions.")
+            if self.waypoint_indices is not None:
+                raise ValueError("Output arrivals require positions.")
             return
         if not isinstance(self.positions, torch.Tensor) or self.positions.dim() != 3:
             raise ValueError("PlanResult.positions must have shape (B, N, DOF).")
@@ -242,6 +299,34 @@ class PlanResult:
             raise ValueError("PlanResult.dt and positions must share a device.")
         if not torch.isfinite(self.dt).all() or (self.dt < 0).any():
             raise ValueError("PlanResult.dt must contain finite non-negative values.")
+        for name, indices, source, valid_lengths in (
+            ("waypoint_indices", self.waypoint_indices, self.positions, None),
+            ("policy_waypoint_indices", self.policy_waypoint_indices, rollout, lengths),
+        ):
+            if indices is None:
+                continue
+            if (
+                source is None
+                or not isinstance(indices, torch.Tensor)
+                or indices.ndim != 2
+                or indices.shape[0] != source.shape[0]
+                or indices.dtype not in (torch.int32, torch.int64)
+                or indices.device != source.device
+            ):
+                raise ValueError(
+                    f"{name} requires integer (B, K) on its source device."
+                )
+            limit = source.shape[1] if valid_lengths is None else valid_lengths[:, None]
+            valid = indices >= 0
+            if bool(((indices < -1) | (indices >= limit)).any()) or bool(
+                (
+                    valid[:, 1:]
+                    & (~valid[:, :-1] | (indices[:, 1:] <= indices[:, :-1]))
+                ).any()
+            ):
+                raise ValueError(
+                    f"{name} must be a strictly ordered prefix followed by -1."
+                )
 
     @property
     def duration(self) -> torch.Tensor | None:

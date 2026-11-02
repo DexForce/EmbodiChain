@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import os
+import math
 import open3d as o3d
 import time
 import torch
@@ -46,11 +47,12 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
     GripperCollisionCfg,
 )
 from embodichain.utils.math import get_pc_center_box
+from .fixed_geometry import FixedGripperCollisionGeometry
 
 GRASP_ANNOTATOR_CACHE_DIR = (
     Path.home() / ".cache" / "embodichain" / "grasp_annotator_cache"
 )
-_CACHE_VERSIONS = {"bounds": "v0.0.3", "centroid": "v0.0.2"}
+_CACHE_VERSIONS = {"bounds": "v0.0.4", "centroid": "v0.0.4"}
 
 
 __all__: list[str] = []
@@ -81,6 +83,7 @@ class _AntipodalMeshBackend:
         *,
         sampler_cfg: AntipodalSamplerCfg,
         collision_cfg: GripperCollisionCfg,
+        collision_geometry: FixedGripperCollisionGeometry,
         max_deviation_angle: float,
         approach_direction_samples: int,
         max_candidates: int,
@@ -88,6 +91,7 @@ class _AntipodalMeshBackend:
         viser_port: int,
         use_largest_connected_component: bool,
         filter_ground_collision: bool,
+        approach_alignment_angle: float | None = None,
     ) -> None:
         """Initialize the private backend for one target-local mesh.
 
@@ -95,7 +99,8 @@ class _AntipodalMeshBackend:
             vertices: Vertex positions with shape ``(V, 3)``.
             triangles: Triangle indices with shape ``(F, 3)``.
             sampler_cfg: Configuration for antipodal contact sampling.
-            collision_cfg: Physical collision-checker configuration.
+            collision_cfg: Target-object decomposition configuration.
+            collision_geometry: Actual surfaces in the canonical contact frame.
             max_deviation_angle: Maximum approach-axis deviation in radians.
             approach_direction_samples: Number of approach variants per pair.
             max_candidates: Maximum number of ranked candidates to retain.
@@ -104,6 +109,8 @@ class _AntipodalMeshBackend:
             use_largest_connected_component: Whether to retain only the largest
                 component of an interactive selection.
             filter_ground_collision: Whether to reject ground collisions.
+            approach_alignment_angle: Optional hard TCP-Z angle in radians,
+                applied before deduplication, collision checks and ranking.
         """
         self.device = vertices.device
         self.vertices = vertices
@@ -118,10 +125,12 @@ class _AntipodalMeshBackend:
             object_mesh_verts=vertices,
             object_mesh_faces=triangles,
             cfg=collision_cfg,
+            collision_geometry=collision_geometry,
         )
         self._sampler_cfg = sampler_cfg
         self._center_mode = sampler_cfg.center_mode
         self._max_deviation_angle = max_deviation_angle
+        self._approach_alignment_angle = approach_alignment_angle
         self._approach_direction_samples = approach_direction_samples
         self._max_candidates = max_candidates
         self._interactive_annotation = interactive_annotation
@@ -334,6 +343,7 @@ class _AntipodalMeshBackend:
         sampler_signature = (
             f"{sampler_cfg.n_sample}|{sampler_cfg.max_angle:.17g}|"
             f"{sampler_cfg.min_length:.17g}|{sampler_cfg.max_length:.17g}|"
+            f"center={sampler_cfg.center_mode}|"
             f"partial={self._interactive_annotation}|"
             f"largest={self._use_largest_connected_component}"
         ).encode("utf-8")
@@ -813,6 +823,18 @@ class _AntipodalMeshBackend:
         valid_open_lengths = valid_open_lengths.repeat(len(directions))
         valid_pair_ids = pair_ids[valid_mask].repeat(len(directions))
 
+        # Apply hard eligibility before a nearby ineligible representative can
+        # suppress a legal pose or occupy the returned candidate budget.
+        if self._approach_alignment_angle is not None:
+            alignment = (valid_grasp_poses[:, :3, 2] * approach_direction).sum(dim=-1)
+            eligible = alignment >= math.cos(self._approach_alignment_angle)
+            if not bool(eligible.any().item()):
+                return empty()
+            valid_grasp_poses = valid_grasp_poses[eligible]
+            valid_centers = valid_centers[eligible]
+            valid_open_lengths = valid_open_lengths[eligible]
+            valid_pair_ids = valid_pair_ids[eligible]
+
         # Compress near-identical candidates before the more expensive
         # collision query. Keep the per-pose metadata aligned with NMS output.
         valid_grasp_poses, nms_indices = pose_nms(
@@ -827,7 +849,6 @@ class _AntipodalMeshBackend:
         is_colliding, max_penetration = self._collision_checker.query(
             object_pose,
             valid_grasp_poses,
-            valid_open_lengths,
             is_filter_ground_collision=self._filter_ground_collision,
             is_visual=visualize_collision,
             collision_threshold=0.0,
@@ -858,7 +879,9 @@ class _AntipodalMeshBackend:
         positive_angle = torch.abs(torch.acos(cos_angle))
         angle_cost = torch.abs(positive_angle - 0.5 * torch.pi) / (0.5 * torch.pi)
         center_distance = torch.norm(valid_centers - mesh_center, dim=-1)
-        center_cost = center_distance / center_distance.max()
+        center_cost = center_distance / center_distance.max().clamp_min(
+            torch.finfo(center_distance.dtype).eps
+        )
         length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
         total_cost = 0.25 * angle_cost + 0.25 * length_cost + 0.5 * center_cost
 

@@ -48,7 +48,8 @@ dependencies = [
   "black==26.10.1",
   "fvcore",
   "h5py",
-  "tensordict",
+  # Keep the tested 0.13 baseline; 0.15+ requires a newer torch stack.
+  "tensordict>=0.13,<0.15",
   "viser==1.0.21",
   "lerobot>=0.4.4,<0.5",
   # torch 2.7 compatibility; newer TorchCodec releases target newer torch ABIs.
@@ -56,6 +57,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+rigidformer = [
+  "einops>=0.8.1",
+  "roma==1.5.4",
+  "pyarrow>=15",
+  "trimesh>=4.9",
+]
 policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
   "onnxruntime-gpu>=1.20,<1.27",

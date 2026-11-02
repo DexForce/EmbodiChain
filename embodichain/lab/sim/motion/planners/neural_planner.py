@@ -28,6 +28,7 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     BasePlannerCfg,
     PlanOptions,
     _infer_batch_size,
+    _check_batch_consistency,
     validate_plan_options,
 )
 from embodichain.lab.sim.motion.planners.utils import (
@@ -192,7 +193,16 @@ class _WaypointObservationLayout:
 class _OnnxPolicy:
     """Small ONNX Runtime wrapper that keeps NMG model code out of EmbodiChain."""
 
-    def __init__(self, path: Path, providers: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        path: Path,
+        providers: list[str] | None = None,
+        *,
+        cuda_use_tf32: bool | None = None,
+        device: torch.device | None = None,
+    ) -> None:
+        if cuda_use_tf32 is not None and type(cuda_use_tf32) is not bool:
+            raise TypeError("onnx_cuda_use_tf32 must be a bool or None.")
         try:
             import onnxruntime as ort
         except ImportError as exc:
@@ -202,9 +212,40 @@ class _OnnxPolicy:
             ) from exc
 
         options = ort.SessionOptions()
+        # Respect the host's CPU budget, including isolated benchmark workers;
+        # ORT's default otherwise creates its own machine-sized thread pool.
+        options.intra_op_num_threads = torch.get_num_threads()
+        options.inter_op_num_threads = 1
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        cuda_options = {}
+        if device is not None and device.type == "cuda":
+            # ORT otherwise defaults to device 0 independently of Torch's
+            # current device. These are process-local CUDA ordinals.
+            cuda_options["device_id"] = str(
+                torch.cuda.current_device() if device.index is None else device.index
+            )
+        if cuda_use_tf32 is not None:
+            cuda_options["use_tf32"] = "1" if cuda_use_tf32 else "0"
+        provider_kwargs = {}
+        if cuda_options:
+            if providers is None:
+                # Explicit CUDA settings use the CUDA/CPU path; do not enable
+                # every available EP (for example TensorRT).
+                available = ort.get_available_providers()
+                providers = [
+                    name
+                    for name in ("CUDAExecutionProvider", "CPUExecutionProvider")
+                    if name in available
+                ]
+            provider_kwargs["provider_options"] = [
+                dict(cuda_options) if name == "CUDAExecutionProvider" else {}
+                for name in providers
+            ]
         self.session = ort.InferenceSession(
-            str(path), sess_options=options, providers=providers
+            str(path), sess_options=options, providers=providers, **provider_kwargs
+        )
+        logger.log_info(
+            "NMG ONNX execution providers: " + ", ".join(self.session.get_providers())
         )
         inputs = self.session.get_inputs()
         outputs = self.session.get_outputs()
@@ -299,6 +340,13 @@ class NeuralPlannerCfg(BasePlannerCfg):
     control_part: str | None = None
     """Robot control part used for FK and qpos, e.g. 'left_arm'."""
 
+    batch_control_parts: bool = False
+    """Pack independent named-arm requests into one shared policy batch.
+
+    Each arm keeps its original joints, FK frame, targets and termination state.
+    This opt-in combines inference rows; it does not couple collision planning.
+    """
+
     max_steps: int = 240
     """Maximum closed-loop kinematic rollout steps."""
 
@@ -333,10 +381,32 @@ class NeuralPlannerCfg(BasePlannerCfg):
     """Maximum absolute per-joint arrival error in radians (L-infinity)."""
 
     onnx_providers: list[str] | None = None
-    """Optional ONNX Runtime execution-provider priority list."""
+    """Optional ONNX Runtime execution-provider priority list.
+
+    The CUDA provider follows the runtime robot's local CUDA device ordinal.
+    """
+
+    onnx_cuda_use_tf32: bool | None = None
+    """Optional explicit TF32 setting for the ONNX CUDA execution provider.
+
+    ``None`` preserves provider defaults; ``False`` requires FP32 CUDA matrix
+    arithmetic to reduce numerical changes between actor batch sizes. CPU
+    provider options are unchanged. With an explicit setting and no provider
+    list, use available CUDA/CPU providers in that order.
+    """
 
     policy_frame_from_world: list[list[float]] | None = None
     """Optional left transform ``policy_T_world`` for runtime poses."""
+
+    policy_frame_from_world_by_control_part: dict[str, list[list[float]]] | None = None
+    """Optional explicit policy-base transforms for each controlled arm.
+
+    A shared single-arm policy can serve a fixed-base dual-arm assembly when
+    every arm's world poses are mapped into that arm's training frame. When
+    configured, every requested control part must have an entry; no arm falls
+    back to another arm's frame. The global transform remains the single-arm
+    default when this mapping is omitted.
+    """
 
     runtime_tcp_from_policy_tcp: list[list[float]] | None = None
     """Optional right transform ``runtime_tcp_T_policy_tcp`` for runtime poses.
@@ -370,6 +440,13 @@ class NeuralPlannerCfg(BasePlannerCfg):
     value per controlled joint. Retiming resamples the path, so it changes the
     reported positions and poses as well as the timing, and it cannot reduce
     the path's own jerk -- only the duration over which it is traversed.
+    """
+
+    preserve_waypoint_arrivals: bool = False
+    """Retain target visits through retiming and host control-grid conversion.
+
+    Solved timing uses rest-to-rest phases at every declared target, preserving
+    each phase's original samples. These semantic stops can increase duration.
     """
 
 
@@ -411,9 +488,16 @@ class NeuralPlanner(BasePlanner):
         super().__init__(cfg)
 
         self.cfg: NeuralPlannerCfg = cfg
+        if type(cfg.preserve_waypoint_arrivals) is not bool:
+            raise TypeError("preserve_waypoint_arrivals must be boolean")
         if cfg.onnx_model_path is MISSING or not str(cfg.onnx_model_path):
             logger.log_error("onnx_model_path is required", ValueError)
         self._load_onnx_model(Path(cfg.onnx_model_path))
+
+    @property
+    def supports_multi_part(self) -> bool:
+        """Whether independent arm requests share one policy inference batch."""
+        return bool(getattr(self.cfg, "batch_control_parts", False))
 
     def default_plan_options(self) -> NeuralPlanOptions:
         return NeuralPlanOptions()
@@ -455,7 +539,12 @@ class NeuralPlanner(BasePlanner):
         self._rot_eps = float(self.cfg.rot_eps)
         self._joint_eps = float(self.cfg.joint_eps)
         self._intermediate_orientation = bool(self.cfg.intermediate_orientation)
-        self._policy = _OnnxPolicy(model_path, self.cfg.onnx_providers)
+        self._policy = _OnnxPolicy(
+            model_path,
+            self.cfg.onnx_providers,
+            cuda_use_tf32=self.cfg.onnx_cuda_use_tf32,
+            device=self.device,
+        )
         self._obs_dim = self._policy.obs_dim
         output_dim = getattr(self._policy, "output_dim", self._action_dim)
         if output_dim != self._action_dim:
@@ -475,6 +564,16 @@ class NeuralPlanner(BasePlanner):
         self._runtime_tcp_from_policy_tcp = self._as_transform(
             self.cfg.runtime_tcp_from_policy_tcp, "runtime_tcp_from_policy_tcp"
         )
+        self._policy_frames_by_control_part = {
+            part: self._as_transform(
+                value, f"policy_frame_from_world_by_control_part[{part!r}]"
+            )
+            for part, value in (
+                self.cfg.policy_frame_from_world_by_control_part or {}
+            ).items()
+        }
+        if self.cfg.policy_frame_from_world_by_control_part == {}:
+            raise ValueError("policy_frame_from_world_by_control_part cannot be empty.")
         expected_obs_dim = self._observation_layout.dim
         if self._obs_dim != expected_obs_dim:
             raise ValueError(
@@ -507,9 +606,21 @@ class NeuralPlanner(BasePlanner):
             raise ValueError(f"{name} must have shape (4, 4), got {transform.shape}.")
         return transform
 
-    def _to_policy_frame(self, xpos: torch.Tensor) -> torch.Tensor:
-        """Map runtime-world TCP poses to the NMG training base and TCP frame."""
-        left = self._policy_frame_from_world.expand(xpos.shape[0], -1, -1)
+    def _to_policy_frame(
+        self, xpos: torch.Tensor, control_part: str | None = None
+    ) -> torch.Tensor:
+        """Map runtime-world TCP poses to the selected arm's training frame."""
+        frames = getattr(self, "_policy_frames_by_control_part", {})
+        if frames:
+            part = control_part or self.cfg.control_part
+            if part not in frames:
+                raise ValueError(
+                    f"No NMG policy-frame transform for control part {part!r}."
+                )
+            transform = frames[part]
+        else:
+            transform = self._policy_frame_from_world
+        left = transform.expand(xpos.shape[0], -1, -1)
         right = self._runtime_tcp_from_policy_tcp.expand(xpos.shape[0], -1, -1)
         return torch.bmm(torch.bmm(left, xpos), right)
 
@@ -557,6 +668,114 @@ class NeuralPlanner(BasePlanner):
                 ValueError,
             )
 
+        return self._plan_groups([(control_part, target_states, options)])[control_part]
+
+    @torch.no_grad()
+    def plan_multi_part(
+        self,
+        target_states: Mapping[str, list[PlanState]],
+        options: Mapping[str, NeuralPlanOptions],
+    ) -> dict[str, PlanResult]:
+        """Plan independent manipulators with one shared policy inference batch.
+
+        The actor batch is arm-major: all ``B`` scene rows for the first part,
+        then all ``B`` rows for the next part. Robot FK always receives the
+        original scene batch for its named arm. Arms may have different goal
+        counts and rollout budgets; completed or exhausted rows hold independently.
+
+        Args:
+            target_states: Ordered targets for each explicitly named control part.
+                Every part must contain the same environment batch size ``B``.
+            options: Matching per-part start states and native neural options.
+                An explicit ``control_part`` must match its mapping key.
+
+        Returns:
+            One ordinary ``B``-row result per part, with original world-frame
+            poses and independently validated raw or retimed trajectories.
+            ``policy_batching`` describes the shared inference work.
+
+        Raises:
+            ValueError: If batching is disabled, keys or scene batches disagree,
+                a request is empty, or a policy's fixed batch cannot hold the group.
+        """
+        if not self.supports_multi_part:
+            raise ValueError(
+                "Neural multi-part planning requires batch_control_parts=True."
+            )
+        if not target_states or set(target_states) != set(options):
+            raise ValueError(
+                "Multi-part targets and options need identical non-empty keys."
+            )
+        groups = []
+        for part, targets in target_states.items():
+            if not isinstance(part, str) or not part:
+                raise ValueError(
+                    "Multi-part keys must be non-empty control-part names."
+                )
+            option = options[part]
+            if not isinstance(option, NeuralPlanOptions):
+                raise TypeError(
+                    "Multi-part neural planning requires NeuralPlanOptions."
+                )
+            if option.control_part not in (None, part):
+                raise ValueError("Multi-part option.control_part must match its key.")
+            if not targets:
+                raise ValueError(
+                    f"Multi-part target list for {part!r} cannot be empty."
+                )
+            groups.append((part, targets, option))
+        return self._plan_groups(groups)
+
+    def _plan_groups(
+        self, groups: list[tuple[str, list[PlanState], NeuralPlanOptions]]
+    ) -> dict[str, PlanResult]:
+        """Run single-arm and packed-arm requests through the same rollout."""
+        parsed = []
+        initial = []
+        bounds = []
+        budgets = []
+        batch_size = None
+        robot_batch = getattr(self.robot, "num_instances", None)
+        for part, targets, option in groups:
+            size = _check_batch_consistency(targets, robot_batch, robot_batch)
+            if batch_size is not None and size != batch_size:
+                raise ValueError(
+                    "All packed control parts must have the same scene batch."
+                )
+            batch_size = size
+            values = self._parse_waypoints(targets, option.waypoint_modalities, part)
+            qpos = self._initial_qpos(part, option.start_qpos)
+            if qpos.shape[0] != size:
+                raise ValueError("start_qpos must match the target scene batch.")
+            if len(groups) > 1 and qpos.shape[-1] != self._action_dim:
+                raise ValueError(
+                    "Packed control parts must match the policy joint count."
+                )
+            limits = self.robot.get_qpos_limits(name=part)[0].to(self.device)
+            lower = limits[: self._action_dim, 0]
+            upper = limits[: self._action_dim, 1]
+            budget = int(option.max_steps or self._max_steps)
+            if budget < 1:
+                raise ValueError("Neural rollout max_steps must be positive.")
+            parsed.append(values)
+            initial.append(qpos)
+            bounds.append((lower, upper))
+            budgets.append(budget)
+
+        assert batch_size is not None
+        b = batch_size
+        actor_batch = b * len(groups)
+        fixed_batch = getattr(self._policy, "fixed_batch_size", None)
+        if len(groups) > 1 and fixed_batch is not None and fixed_batch != actor_batch:
+            raise ValueError(
+                f"Packed arms require actor batch {actor_batch}, but the ONNX policy "
+                f"has fixed batch {fixed_batch}. Export a dynamic-batch policy."
+            )
+        qpos = torch.cat(initial, dim=0)
+        lower = torch.cat([value[0].expand(b, -1) for value in bounds])
+        upper = torch.cat([value[1].expand(b, -1) for value in bounds])
+        # All arms use one observation schema, so padded capacities match even
+        # when their valid constraint counts or modalities differ.
         (
             waypoints_pos,
             waypoints_quat,
@@ -565,116 +784,190 @@ class NeuralPlanner(BasePlanner):
             pos_mask,
             rot_mask,
             joint_mask,
-            episode_k,
-        ) = self._parse_waypoints(target_states, options.waypoint_modalities)
-        qpos = self._initial_qpos(control_part, options.start_qpos)
-        b = qpos.shape[0]
-        limits = self.robot.get_qpos_limits(name=control_part)[0].to(self.device)
-        lower = limits[: self._action_dim, 0]
-        upper = limits[: self._action_dim, 1]
+        ) = [torch.cat([values[index] for values in parsed]) for index in range(7)]
+        episode_k = torch.cat(
+            [
+                torch.full((b,), values[7], device=self.device, dtype=torch.long)
+                for values in parsed
+            ]
+        )
+        step_limits = torch.cat(
+            [
+                torch.full((b,), budget, device=self.device, dtype=torch.long)
+                for budget in budgets
+            ]
+        )
+        slices = [slice(index * b, (index + 1) * b) for index in range(len(groups))]
 
-        last_action = torch.zeros(b, self._action_dim, device=self.device)
-        active_idx = torch.zeros(b, dtype=torch.long, device=self.device)
+        def forward_kinematics(
+            packed_qpos: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            world = [
+                self._fk_matrix(packed_qpos[rows], part)
+                for rows, (part, _, _) in zip(slices, groups)
+            ]
+            local = [
+                self._policy_pose_xyzw(pose, part)
+                for pose, (part, _, _) in zip(world, groups)
+            ]
+            return torch.cat(world), torch.cat(local)
+
+        last_action = torch.zeros(actor_batch, self._action_dim, device=self.device)
+        active_idx = torch.zeros(actor_batch, dtype=torch.long, device=self.device)
+        arrival_indices = torch.full(
+            (actor_batch, self._num_waypoints), -1, dtype=torch.long, device=self.device
+        )
         positions = [qpos.clone()]
-        xpos_list = [self._fk_matrix(qpos, control_part)]
-        converged = torch.zeros(b, dtype=torch.bool, device=self.device)
-        path_lengths = torch.ones(b, dtype=torch.int32, device=self.device)
-        max_steps = int(options.max_steps or self._max_steps)
-
-        with torch.no_grad():
-            for _ in range(max_steps):
-                ee_pose = self._fk_pose_xyzw(qpos, control_part)
-                obs = self._build_obs(
-                    qpos[:, : self._action_dim],
-                    ee_pose,
-                    waypoints_pos,
-                    waypoints_quat,
-                    waypoints_joint,
-                    valid_mask,
-                    pos_mask,
-                    rot_mask,
-                    joint_mask,
-                    active_idx,
-                    last_action,
-                )
-                action = self._policy(obs).clamp(-1.0, 1.0)
-                # Hold converged envs: zero their action so qpos does not drift.
-                # `converged` reflects state up to the end of the previous step, so
-                # once an env converged at the end of step N its action is masked
-                # from step N+1 onward.
-                not_converged = ~converged
-                action = torch.where(
-                    not_converged.unsqueeze(-1), action, torch.zeros_like(action)
-                )
-                qpos[:, : self._action_dim] += action * float(self.cfg.action_scale)
-                qpos[:, : self._action_dim] = torch.clamp(
-                    qpos[:, : self._action_dim], lower, upper
-                )
-                last_action = torch.where(
-                    not_converged.unsqueeze(-1), action, last_action
-                )
-                positions.append(qpos.clone())
-                xpos_list.append(self._fk_matrix(qpos, control_part))
-                path_lengths += not_converged.to(path_lengths.dtype)
-
-                ee_pose = self._fk_pose_xyzw(qpos, control_part)
-                reached = self._is_active_reached(
-                    qpos[:, : self._action_dim],
-                    ee_pose,
-                    waypoints_pos,
-                    waypoints_quat,
-                    waypoints_joint,
-                    pos_mask,
-                    rot_mask,
-                    joint_mask,
-                    active_idx,
-                )
-                active_idx = torch.where(reached, active_idx + 1, active_idx)
-                converged = converged | (active_idx >= episode_k)
-                if converged.all():
-                    break
-
-        positions_t = torch.stack(positions)
-        xpos_t = torch.stack(xpos_list)
-        dt = torch.full(
-            (positions_t.shape[0],),
-            float(self.cfg.dt),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        dt = dt.unsqueeze(0).expand(b, -1).clone()
-        dt[:, 0] = 0.0
-        positions_t = positions_t.permute(1, 0, 2)
-        xpos_t = xpos_t.permute(1, 0, 2, 3)
-        success = active_idx >= episode_k
-        if self.cfg.constraints is not None:
-            return self._retimed_result(
-                success,
-                positions_t,
-                control_part,
-                path_lengths=path_lengths,
-                waypoints=(
-                    waypoints_pos,
-                    waypoints_quat,
-                    waypoints_joint,
-                    pos_mask,
-                    rot_mask,
-                    joint_mask,
-                ),
-                episode_k=episode_k,
-                qpos_limits=(lower, upper),
+        world_pose, ee_pose = forward_kinematics(qpos)
+        xpos_list = [world_pose]
+        converged = torch.zeros(actor_batch, dtype=torch.bool, device=self.device)
+        path_lengths = torch.ones(actor_batch, dtype=torch.int32, device=self.device)
+        forward_calls = 0
+        for step in range(max(budgets)):
+            obs = self._build_obs(
+                qpos[:, : self._action_dim],
+                ee_pose,
+                waypoints_pos,
+                waypoints_quat,
+                waypoints_joint,
+                valid_mask,
+                pos_mask,
+                rot_mask,
+                joint_mask,
+                active_idx,
+                last_action,
             )
-        velocities_t, accelerations_t = self._compute_vel_acc_via_finite_diff(
-            positions_t, dt
-        )
-        return PlanResult(
-            success=success,
-            positions=positions_t,
-            velocities=velocities_t,
-            accelerations=accelerations_t,
-            xpos_list=xpos_t,
-            dt=dt,
-        )
+            action = self._policy(obs).clamp(-1.0, 1.0)
+            forward_calls += 1
+            active = ~converged & (step < step_limits)
+            action = torch.where(active.unsqueeze(-1), action, torch.zeros_like(action))
+            qpos[:, : self._action_dim] += action * float(self.cfg.action_scale)
+            qpos[:, : self._action_dim] = torch.clamp(
+                qpos[:, : self._action_dim], lower, upper
+            )
+            last_action = torch.where(active.unsqueeze(-1), action, last_action)
+            positions.append(qpos.clone())
+            world_pose, ee_pose = forward_kinematics(qpos)
+            xpos_list.append(world_pose)
+            path_lengths += active.to(path_lengths.dtype)
+            reached = active & self._is_active_reached(
+                qpos[:, : self._action_dim],
+                ee_pose,
+                waypoints_pos,
+                waypoints_quat,
+                waypoints_joint,
+                pos_mask,
+                rot_mask,
+                joint_mask,
+                active_idx,
+            )
+            arrival_slot = active_idx.clamp(max=self._num_waypoints - 1)[:, None]
+            arrival_indices.scatter_(
+                1,
+                arrival_slot,
+                torch.where(
+                    reached[:, None], step + 1, arrival_indices.gather(1, arrival_slot)
+                ),
+            )
+            active_idx = torch.where(reached, active_idx + 1, active_idx)
+            converged |= active_idx >= episode_k
+            if (converged | (step + 1 >= step_limits)).all():
+                break
+
+        positions_t = torch.stack(positions, dim=1)
+        xpos_t = torch.stack(xpos_list, dim=1)
+        batching = {
+            "scene_batch_size": b,
+            "control_part_count": len(groups),
+            "actor_batch_size": actor_batch,
+            "policy_forward_calls": forward_calls,
+        }
+        results = {}
+        for index, (part, _, _) in enumerate(groups):
+            rows = slices[index]
+            lengths = path_lengths[rows]
+            # Remove another arm's terminal padding before timing or reporting.
+            # This is one host read per part after the shared rollout, not per step.
+            count = int(lengths.max().item())
+            arm_positions = positions_t[rows, :count]
+            success = converged[rows]
+            arm_arrivals = arrival_indices[rows, : parsed[index][7]]
+            from embodichain.compute.trajectory._trace import (
+                _record_trajectory,
+                _tracing_enabled,
+            )
+
+            if _tracing_enabled():
+                native_dt = torch.full_like(arm_positions[..., 0], float(self.cfg.dt))
+                native_dt[:, 0] = 0
+                _record_trajectory(
+                    "native_policy",
+                    control_part=part,
+                    positions=arm_positions,
+                    dt=native_dt,
+                    valid_lengths=lengths,
+                    arrival_indices=arm_arrivals,
+                    target_positions=parsed[index][0],
+                    target_rotations=parsed[index][1],
+                    target_joints=parsed[index][2],
+                    position_mask=parsed[index][4],
+                    rotation_mask=parsed[index][5],
+                    joint_mask=parsed[index][6],
+                )
+            if self.cfg.constraints is not None:
+                result = self._retimed_result(
+                    success,
+                    arm_positions,
+                    part,
+                    path_lengths=lengths,
+                    waypoints=(
+                        parsed[index][0],
+                        parsed[index][1],
+                        parsed[index][2],
+                        parsed[index][4],
+                        parsed[index][5],
+                        parsed[index][6],
+                    ),
+                    episode_k=parsed[index][7],
+                    qpos_limits=bounds[index],
+                    arrival_indices=arm_arrivals,
+                )
+            else:
+                dt = torch.full(
+                    arm_positions.shape[:2],
+                    float(self.cfg.dt),
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+                dt[:, 0] = 0.0
+                velocities, accelerations = self._compute_vel_acc_via_finite_diff(
+                    arm_positions, dt
+                )
+                result = PlanResult(
+                    success=success,
+                    positions=arm_positions,
+                    velocities=velocities,
+                    accelerations=accelerations,
+                    xpos_list=xpos_t[rows, :count],
+                    dt=dt,
+                    policy_rollout_positions=arm_positions,
+                    policy_rollout_lengths=lengths,
+                    waypoint_indices=(
+                        arm_arrivals if self.cfg.preserve_waypoint_arrivals else None
+                    ),
+                )
+            result.policy_waypoint_indices = arm_arrivals
+            _record_trajectory(
+                "planner_output",
+                control_part=part,
+                positions=result.positions,
+                dt=result.dt,
+                arrival_indices=result.waypoint_indices,
+                success=result.success,
+            )
+            result.policy_batching = dict(batching)
+            results[part] = result
+        return results
 
     def _retimed_result(
         self,
@@ -686,17 +979,13 @@ class NeuralPlanner(BasePlanner):
         waypoints: tuple[torch.Tensor, ...],
         episode_k: int,
         qpos_limits: tuple[torch.Tensor, torch.Tensor],
+        arrival_indices: torch.Tensor,
     ) -> PlanResult:
         """Re-parameterize the rollout path under the configured limits.
 
-        Retiming fits a spline through the rollout samples and resamples it, so
-        the returned trajectory is not the one the rollout verified. Success is
-        therefore re-derived from the samples actually returned rather than
-        carried over: the resampled grid can step past a waypoint the rollout
-        stopped on, and a spline through samples clamped at a joint limit can
-        overshoot that limit between them. A row is reported as successful only
-        when its returned trajectory parameterizes, moves in nonzero time,
-        stays inside the joint limits, and still reaches every waypoint.
+        Recheck the returned samples for legal joint positions, nonzero timing
+        on moving rows, and strictly ordered target visits. Explicit arrival
+        preservation adds rest boundaries at the policy's declared visits.
 
         Args:
             success: Per-env rollout convergence of shape ``(B,)``.
@@ -709,17 +998,13 @@ class NeuralPlanner(BasePlanner):
                 :meth:`_parse_waypoints`.
             episode_k: Number of waypoints this episode must reach.
             qpos_limits: Lower and upper joint-position limits.
+            arrival_indices: Ordered policy target visits before retiming.
 
         Returns:
             PlanResult with solved timing, derivatives and recomputed poses.
         """
         from .toppra_planner import retime_joint_paths
 
-        # Sample the solved trajectory on the configured control period rather
-        # than on the rollout's step count. The rollout emits however many
-        # steps it happened to take, which is far too coarse once the duration
-        # stretches: a waypoint the rollout stopped on then falls between two
-        # output samples and is reported as missed.
         retimed = retime_joint_paths(
             positions,
             constraints=dict(self.cfg.constraints),
@@ -727,6 +1012,9 @@ class NeuralPlanner(BasePlanner):
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=float(self.cfg.dt),
             device=self.device,
+            arrival_indices=(
+                arrival_indices if self.cfg.preserve_waypoint_arrivals else None
+            ),
         )
         retimed_positions = retimed.positions
         # One batched FK over every sample; the waypoint re-check reuses it.
@@ -737,9 +1025,16 @@ class NeuralPlanner(BasePlanner):
         success = success & self._retimed_is_executable(
             retimed_positions, retimed.dt, qpos_limits
         )
-        success = success & self._retimed_reaches_waypoints(
-            retimed_positions, poses, waypoints, episode_k
+        retimed_lengths = (retimed.dt > 0).sum(dim=1) + 1
+        arrivals = self._retimed_waypoint_indices(
+            retimed_positions,
+            poses,
+            waypoints,
+            episode_k,
+            control_part,
+            valid_lengths=retimed_lengths,
         )
+        success = success & (arrivals >= 0).all(dim=1)
         return PlanResult(
             success=success,
             positions=retimed_positions,
@@ -747,6 +1042,13 @@ class NeuralPlanner(BasePlanner):
             accelerations=retimed.accelerations,
             xpos_list=poses,
             dt=retimed.dt,
+            policy_rollout_positions=positions,
+            policy_rollout_lengths=path_lengths,
+            waypoint_indices=(
+                retimed.waypoint_indices
+                if self.cfg.preserve_waypoint_arrivals
+                else None
+            ),
         )
 
     def _retimed_is_executable(
@@ -755,14 +1057,7 @@ class NeuralPlanner(BasePlanner):
         dt: torch.Tensor,
         qpos_limits: tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
-        """Return whether each retimed row has real timing and legal positions.
-
-        The shared retiming kernel returns a zero-duration result for a path
-        whose endpoints nearly coincide, which would claim a move with no time
-        to execute it. Spline interpolation through samples the rollout clamped
-        at a joint limit can also overshoot that limit between them, since the
-        fit sees only the sampled values.
-        """
+        """Return whether moving rows have positive duration and legal positions."""
         lower, upper = qpos_limits
         arm = positions[..., : self._action_dim]
         moves = (arm - arm[:, :1]).abs().amax(dim=(1, 2)) > 1.0e-9
@@ -776,8 +1071,27 @@ class NeuralPlanner(BasePlanner):
         poses: torch.Tensor,
         waypoints: tuple[torch.Tensor, ...],
         episode_k: int,
+        control_part: str | None = None,
     ) -> torch.Tensor:
-        """Return whether each retimed row still reaches every waypoint in order.
+        """Check distinct ordered visits on the actual returned sample grid."""
+        return (
+            self._retimed_waypoint_indices(
+                positions, poses, waypoints, episode_k, control_part
+            )
+            >= 0
+        ).all(dim=1)
+
+    def _retimed_waypoint_indices(
+        self,
+        positions: torch.Tensor,
+        poses: torch.Tensor,
+        waypoints: tuple[torch.Tensor, ...],
+        episode_k: int,
+        control_part: str | None = None,
+        *,
+        valid_lengths: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return each target's arrival index, or -1 when not reached.
 
         Applies the rollout's own arrival test to the resampled grid, so a
         trajectory that passes a waypoint only between output samples is not
@@ -785,9 +1099,9 @@ class NeuralPlanner(BasePlanner):
 
         The test runs once per waypoint over every sample at once rather than
         once per sample, so its cost does not grow with the solved duration
-        and nothing synchronizes with the host inside the loop. Order follows
-        the rollout with nondecreasing arrival indices, so targets independently
-        satisfied by one stationary sample do not require duplicate output.
+        and nothing synchronizes with the host inside the loop. Distinct target
+        visits require strictly increasing sample indices, matching the rollout
+        and canonical validation even for identical stationary targets.
         """
         (
             waypoints_pos,
@@ -799,7 +1113,7 @@ class NeuralPlanner(BasePlanner):
         ) = waypoints
         batch, samples = positions.shape[:2]
         flat_joint = positions[..., : self._action_dim].flatten(0, 1)
-        flat_pose = self._policy_pose_xyzw(poses.flatten(0, 1))
+        flat_pose = self._policy_pose_xyzw(poses.flatten(0, 1), control_part)
         per_sample = lambda tensor: tensor.repeat_interleave(samples, dim=0)
         targets = tuple(
             per_sample(tensor)
@@ -816,6 +1130,7 @@ class NeuralPlanner(BasePlanner):
         # Sample at which the previous waypoint was first reached; -1 before
         # the first, and `samples` once a row has missed one.
         reached_at = torch.full((batch,), -1, dtype=torch.long, device=self.device)
+        arrivals = []
         for waypoint in range(episode_k):
             active = torch.full(
                 (batch * samples,), waypoint, dtype=torch.long, device=self.device
@@ -823,14 +1138,20 @@ class NeuralPlanner(BasePlanner):
             reached = self._is_active_reached(
                 flat_joint, flat_pose, *targets, active
             ).view(batch, samples)
-            eligible = reached & (sample_index >= reached_at.unsqueeze(-1))
+            eligible = reached & (sample_index > reached_at.unsqueeze(-1))
+            if valid_lengths is not None:
+                eligible &= sample_index < valid_lengths[:, None]
             reached_at = torch.where(
                 eligible, sample_index, torch.full_like(sample_index, samples)
             ).amin(dim=-1)
-        return reached_at < samples
+            arrivals.append(torch.where(reached_at < samples, reached_at, -1))
+        return torch.stack(arrivals, dim=1)
 
     def _parse_waypoints(
-        self, target_states: list[PlanState], modalities: list[str] | None = None
+        self,
+        target_states: list[PlanState],
+        modalities: list[str] | None = None,
+        control_part: str | None = None,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -885,7 +1206,7 @@ class NeuralPlanner(BasePlanner):
                 )
                 if xpos.dim() == 2:
                     xpos = xpos.unsqueeze(0)
-                policy_xpos = self._to_policy_frame(xpos)
+                policy_xpos = self._to_policy_frame(xpos, control_part)
                 waypoint_pos[:, idx] = policy_xpos[:, :3, 3]
                 # ``quat_from_matrix`` already returns EmbodiChain's public
                 # ``xyzw`` convention.  Do not pass it through ``convert_quat``:
@@ -959,13 +1280,11 @@ class NeuralPlanner(BasePlanner):
     def _fk_matrix(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
         return self.robot.compute_fk(qpos=qpos, name=control_part, to_matrix=True)
 
-    def _fk_pose_xyzw(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
-        """Return the policy-frame FK pose as ``xyz + xyzw``."""
-        return self._policy_pose_xyzw(self._fk_matrix(qpos, control_part))
-
-    def _policy_pose_xyzw(self, fk_matrix: torch.Tensor) -> torch.Tensor:
+    def _policy_pose_xyzw(
+        self, fk_matrix: torch.Tensor, control_part: str | None = None
+    ) -> torch.Tensor:
         """Map ``(M, 4, 4)`` runtime TCP poses to policy-frame ``xyz + xyzw``."""
-        fk = self._to_policy_frame(fk_matrix)
+        fk = self._to_policy_frame(fk_matrix, control_part)
         pos = fk[:, :3, 3]
         # ``quat_from_matrix`` is an EmbodiChain ``xyzw`` producer; converting
         # it again would turn a valid pose into a different rotation.

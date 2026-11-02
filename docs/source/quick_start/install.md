@@ -358,7 +358,7 @@ and forward the port:
 ssh -N -L 8080:127.0.0.1:8080 user@worker-host
 ```
 
-See [Browser visualization with Viser](../overview/sim/viser_visualization.md)
+See [Browser visualization with Viser](../overview/sim/visualization/viser.md)
 for supported objects, camera preview, update-rate options, and remote-access
 guidance.
 
@@ -380,5 +380,5 @@ Press `Ctrl+C` to stop; the script cleans up the simulation on exit.
 
 - [Quick Start Tutorial](../tutorial/index.rst)
 - [Simulation Manager](../overview/sim/sim_manager.md)
-- [Browser visualization with Viser](../overview/sim/viser_visualization.md)
+- [Browser visualization with Viser](../overview/sim/visualization/viser.md)
 - [Build documentation](docs.md)

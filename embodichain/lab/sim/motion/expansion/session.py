@@ -704,11 +704,12 @@ class ExpansionSession:
         ):
             raise ValueError("Episode and commit IDs must match the candidate attempt.")
         attempt.rollout_validation = _validation_summary(episode.validation)
-        if episode.action_representation != "qpos" or episode.actions.shape[1] != len(
-            attempt.joint_names
-        ):
+        if episode.action_representation not in {
+            "qpos",
+            "joint_position",
+        } or episode.actions.shape[1] != len(attempt.joint_names):
             raise ValueError(
-                "Episode actions must use full-joint qpos labels in candidate joint order."
+                "Episode actions must use full-joint qpos or joint_position commands in candidate joint order."
             )
         if not self._validation_passes(episode.validation, rollout=True):
             self.release(episode.identity, reason="rollout_validation_failed")

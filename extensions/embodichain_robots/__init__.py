@@ -26,27 +26,43 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
+    "UnitreeGo1Cfg",
+    "UnitreeGo2Cfg",
+    "UnitreeG1Cfg",
+    "UnitreeH12Cfg",
+    "ANYmalCCfg",
+    "MicroDuckCfg",
     "ARX5Cfg",
     "AlohaMiniCfg",
     "TianjiMarvinCfg",
     "DexforceW1Cfg",
     "CobotMagicCfg",
+    "FrankaCfg",
     "FrankaPandaCfg",
     "FlexivRizon4SCfg",
     "URRobotCfg",
     "SO101FollowerCfg",
+    "BrainCoRevo1Cfg",
 ]
 
 _EXPORTS = {
+    "UnitreeGo1Cfg": ".unitree.go1",
+    "UnitreeGo2Cfg": ".unitree.go2",
+    "UnitreeG1Cfg": ".unitree.g1",
+    "UnitreeH12Cfg": ".unitree.h1_2",
+    "ANYmalCCfg": ".anybotics.anymal_c",
+    "MicroDuckCfg": ".pollen_robotics.microduck",
     "ARX5Cfg": ".arx.arx5",
     "AlohaMiniCfg": ".alohamini.aloha_mini",
     "TianjiMarvinCfg": ".tianji.marvin",
     "DexforceW1Cfg": ".dexforce.w1",
     "CobotMagicCfg": ".agilex.cobotmagic",
+    "FrankaCfg": ".franka.cfg",
     "FrankaPandaCfg": ".franka.panda",
     "FlexivRizon4SCfg": ".flexiv.rizon4s",
     "URRobotCfg": ".universal_robots.ur_robot",
     "SO101FollowerCfg": ".the_robot_studio.so101",
+    "BrainCoRevo1Cfg": ".brainco.revo1",
 }
 
 

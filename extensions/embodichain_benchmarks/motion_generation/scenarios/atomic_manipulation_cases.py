@@ -43,6 +43,7 @@ from ..contracts import ReplayObservationWindow
 from ..config import SuiteCfg, TrackCfg
 from ..models import BenchmarkCase
 from .atomic_objects import AtomicObjectHandle
+from ._atomic_targets import _held_target_reference
 from .atomic_evaluation import (
     MoveHeldObjectEvaluator,
     PickUpEvaluator,
@@ -50,7 +51,6 @@ from .atomic_evaluation import (
 )
 from .atomic_case_utils import (
     TOP_DOWN_ROTATION,
-    apply_target_rotation_randomization,
     atomic_case_id,
     canonical_case_qpos,
     case_name,
@@ -510,36 +510,6 @@ class MoveHeldObjectCases(HeldObjectCases):
             table_object_pose,
         ) = self._prepare_start(scenario, config, seed=seed)
         lift_height = float(config.get("lift_height_m", 0.16))
-        # The preceding PickUp lifts the object from the settled table pose;
-        # derive the transport target from that same pose rather than from the
-        # legacy pre-held offset.
-        target_object = table_object_pose.clone()
-        target_object[:, :3, 3] += randomized_vector_batch(
-            float_vector(
-                config.get("target_object_offset_m"),
-                name="target_object_offset_m",
-                length=3,
-                default=(0.08, 0.08, 0.04),
-            ),
-            config,
-            jitter_name="target_object_offset_jitter_m",
-            seed=seed,
-            stream=311,
-            batch_size=object_pose.shape[0],
-            dtype=object_pose.dtype,
-            device=object_pose.device,
-        )
-        apply_target_rotation_randomization(
-            target_object,
-            config,
-            seed=seed,
-            stream=312,
-        )
-        # The object is now picked from the table and lifted before the
-        # transport action.  Express the transport target relative to that
-        # lifted state instead of the old teleported held-object pose.
-        target_object[:, 2, 3] += lift_height
-        target_eef = torch.bmm(target_object, object_to_eef)
         approach_direction = torch.tensor(
             config.get("approach_direction", [0.0, 0.0, -1.0]),
             dtype=grasp_pose.dtype,
@@ -566,7 +536,19 @@ class MoveHeldObjectCases(HeldObjectCases):
         start_qpos, full_start_qpos = snapshot_case_qpos(
             scenario.robot, scenario.control_part
         )
-        references = scenario.solve_reference_qpos(start_qpos, target_eef[:, None])
+        target_object, targets, references, target_selection = _held_target_reference(
+            scenario,
+            config,
+            seed=seed,
+            start=start_qpos,
+            table_object_pose=table_object_pose,
+            object_to_eef=object_to_eef,
+            translation_stream=311,
+            rotation_stream=312,
+            default_offset=(0.08, 0.08, 0.04),
+            height=lift_height,
+            waypoint_heights=(0.0,),
+        )
         name = case_name(config)
         return BenchmarkCase(
             suite_version=suite.suite_version,
@@ -585,7 +567,7 @@ class MoveHeldObjectCases(HeldObjectCases):
             path_shape="pick_up_then_held_object_transport",
             start_state_bin="pre_pick",
             start_qpos=start_qpos,
-            target_waypoints=target_eef[:, None],
+            target_waypoints=targets,
             reference_qpos=references,
             robot_id=suite.robot.id,
             skill_id=self.skill_id,
@@ -594,6 +576,7 @@ class MoveHeldObjectCases(HeldObjectCases):
             primary_success="physical_skill_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
+                **target_selection,
                 **self._held_parameters(handle, object_pose, grasp_pose, object_to_eef),
                 "object_initial_pose": table_object_pose.detach().cpu().tolist(),
                 "sample_count": int(config.get("sample_count", 80)),
@@ -685,34 +668,6 @@ class PlaceCases(HeldObjectCases):
             object_to_eef,
             table_object_pose,
         ) = self._prepare_start(scenario, config, seed=seed)
-        target_object = table_object_pose.clone()
-        target_object[:, :3, 3] += randomized_vector_batch(
-            float_vector(
-                config.get("target_object_offset_m"),
-                name="target_object_offset_m",
-                length=3,
-                default=(0.10, 0.10, 0.0),
-            ),
-            config,
-            jitter_name="target_object_offset_jitter_m",
-            seed=seed,
-            stream=321,
-            batch_size=object_pose.shape[0],
-            dtype=object_pose.dtype,
-            device=object_pose.device,
-        )
-        apply_target_rotation_randomization(
-            target_object,
-            config,
-            seed=seed,
-            stream=322,
-        )
-        release = torch.bmm(target_object, object_to_eef)
-        lift_height = float(config.get("retract_height_m", 0.10))
-        approach = release.clone()
-        approach[:, 2, 3] += lift_height
-        retract = approach.clone()
-        targets = torch.stack([approach, release, retract], dim=1)
         approach_direction = torch.tensor(
             config.get("approach_direction", [0.0, 0.0, -1.0]),
             dtype=grasp_pose.dtype,
@@ -738,7 +693,21 @@ class PlaceCases(HeldObjectCases):
         start_qpos, full_start_qpos = snapshot_case_qpos(
             scenario.robot, scenario.control_part
         )
-        references = scenario.solve_reference_qpos(start_qpos, targets)
+        lift_height = float(config.get("retract_height_m", 0.10))
+        target_object, targets, references, target_selection = _held_target_reference(
+            scenario,
+            config,
+            seed=seed,
+            start=start_qpos,
+            table_object_pose=table_object_pose,
+            object_to_eef=object_to_eef,
+            translation_stream=321,
+            rotation_stream=322,
+            default_offset=(0.10, 0.10, 0.0),
+            height=0.0,
+            waypoint_heights=(lift_height, 0.0, lift_height),
+        )
+        release = targets[:, 1]
         name = case_name(config)
         return BenchmarkCase(
             suite_version=suite.suite_version,
@@ -766,6 +735,7 @@ class PlaceCases(HeldObjectCases):
             primary_success="physical_skill_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
+                **target_selection,
                 **self._held_parameters(handle, object_pose, grasp_pose, object_to_eef),
                 # The replay starts with the cube on the table.  PickUp is
                 # compiled as the first action of this Place case, so the

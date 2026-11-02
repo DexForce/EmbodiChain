@@ -899,6 +899,7 @@ def _bridge(
     validator_port: object | None = None,
     parallel_safety_validator: object | None = None,
     runner_cfg: ExecutionRunnerCfg | None = None,
+    isolate_policy_sessions: bool = False,
 ) -> tuple[TaskProgramDemoBridge, _FakeRuntime, EnvironmentStepClock]:
     clock = EnvironmentStepClock(STEP_DT)
     encoder = RuntimeCommandFrameEncoder(
@@ -915,8 +916,100 @@ def _bridge(
         validator_port=validator_port,
         runner_cfg=runner_cfg,
         parallel_safety_validator=parallel_safety_validator,
+        isolate_policy_sessions=isolate_policy_sessions,
     )
     return bridge, runtime, clock
+
+
+def test_bridge_gives_shared_policy_and_validator_one_fresh_session() -> None:
+    class SharedPort(_PostPolicyPort, _ValidatorPort):
+        def __init__(self) -> None:
+            _PostPolicyPort.__init__(self, torch.zeros(BATCH_SIZE, ROBOT_DOF))
+            _ValidatorPort.__init__(self, torch.ones(BATCH_SIZE, dtype=torch.bool))
+            self.sessions = []
+
+        def new_task_program_session(self):
+            session = SharedPort()
+            self.sessions.append(session)
+            return session
+
+    port = SharedPort()
+    native, _, _ = _bridge(duration=STEP_DT, post_policy_port=port, validator_port=port)
+    assert native._post_policy_port is native._validator_port is port
+    first, _, _ = _bridge(
+        duration=STEP_DT,
+        post_policy_port=port,
+        validator_port=port,
+        isolate_policy_sessions=True,
+    )
+    second, _, _ = _bridge(
+        duration=STEP_DT,
+        post_policy_port=port,
+        validator_port=port,
+        isolate_policy_sessions=True,
+    )
+    assert len(port.sessions) == 2
+    assert first._post_policy_port is first._validator_port is port.sessions[0]
+    assert second._post_policy_port is second._validator_port is port.sessions[1]
+    assert first._validator_port is not second._validator_port
+
+
+def test_execution_trace_records_only_consumed_actions_and_rejects_unknown_frames() -> (
+    None
+):
+    bridge = TaskProgramDemoBridge.__new__(TaskProgramDemoBridge)
+    bridge._clock = EnvironmentStepClock(0.1)
+    bridge._execution_trace = []
+    lifecycle = bridge_module._SegmentLifecycle()
+    action = ControllerAction(
+        torch.zeros(1, 1),
+        metadata={
+            "bridge_action_kind": "runtime_command",
+            "plan_reference": {
+                "call_index": 0,
+                "plan_index": 3,
+                "invocation_id": "pick",
+            },
+        },
+    )
+    pending = bridge._yield_and_advance(action, lifecycle)
+    next(pending)
+    assert bridge.execution_trace == ()
+    with pytest.raises(StopIteration):
+        next(pending)
+    assert bridge.execution_trace == (
+        {
+            "step": 0,
+            "call_index": 0,
+            "plan_index": 3,
+            "invocation_id": "pick",
+            "kind": "runtime_command",
+        },
+    )
+
+    post_policy = ControllerAction(
+        torch.zeros(1, 1),
+        metadata={
+            "bridge_action_kind": "program_post_policy",
+            "plan_reference": {
+                "call_index": 0,
+                "plan_index": 3,
+                "invocation_id": "pick",
+            },
+        },
+    )
+    bridge._record_consumed_action(post_policy)
+    assert bridge.execution_trace[-1]["plan_index"] == -1
+
+    unknown = bridge._yield_and_advance(
+        ControllerAction(
+            torch.zeros(1, 1), metadata={"bridge_action_kind": "runtime_command"}
+        ),
+        bridge_module._SegmentLifecycle(),
+    )
+    next(unknown)
+    with pytest.raises(TaskProgramBridgeError, match="no plan reference"):
+        next(unknown)
 
 
 def test_bridge_without_expansion_provider_has_no_records() -> None:

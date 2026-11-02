@@ -94,4 +94,13 @@ documentation. CI runs this same checker after style checks and before tests.
    :maxdepth: 2
 
    robot_catalogs
+   data/eef_assets
    model_catalogs
+   model_rigidformer
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Locomotion robots
+
+   locomotion_robots

@@ -41,6 +41,7 @@ from embodichain.lab.task_program.semantics import (
     SemanticCallDescriptor,
     SkillPolicyPreset,
 )
+from ._gripper_reserve import nominal_hand_reserve
 
 __all__: list[str] = []
 
@@ -70,16 +71,17 @@ def _clearance_poses(
 def _object_clearance_height(
     current: torch.Tensor, object_pose: torch.Tensor, vertices: torch.Tensor, model: Any
 ) -> torch.Tensor:
-    """Clear the object's top with the whole open parallel-jaw model envelope."""
-    half_open = model.max_opening_width / 2 + model.finger_thickness
+    """Apply the task's nominal release reserve, alongside mesh collision gates."""
+    reserve = nominal_hand_reserve(model.model_id)
+    half_open = model.max_opening_width / 2 + reserve.finger_thickness
     corners = current.new_tensor(
         [
             [x, y, z]
             for x in (-half_open, half_open)
-            for y in (-model.finger_width / 2, model.finger_width / 2)
+            for y in (-reserve.finger_width / 2, reserve.finger_width / 2)
             for z in (
-                -model.finger_length / 2 - model.palm_depth,
-                model.finger_length / 2,
+                -reserve.finger_length / 2 - reserve.palm_depth,
+                reserve.finger_length / 2,
             )
         ]
     )
