@@ -838,6 +838,30 @@ class BaseEnv(gym.Env):
         """
         return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
+    def _get_termination_flags(
+        self, obs: EnvObs, info: Dict[str, Any]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Resolve Gym flags after advancing this transition's elapsed steps.
+
+        Hosts with conditions evaluated before rewards can return their cached
+        flags here. The default keeps the legacy info and truncation contract.
+        """
+        terminated = torch.logical_or(
+            info.get(
+                "success",
+                torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
+            ),
+            info.get(
+                "fail",
+                torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
+            ),
+        )
+        truncated = self.check_truncated(obs=obs, info=info)
+        truncated = truncated | (self._elapsed_steps >= self.max_episode_steps)
+        if self.cfg.ignore_terminations:
+            terminated[:] = False
+        return terminated, truncated
+
     def _extend_reward(
         self,
         rewards: torch.Tensor,
@@ -1114,21 +1138,7 @@ class BaseEnv(gym.Env):
 
             self._elapsed_steps += 1
 
-            terminateds = torch.logical_or(
-                info.get(
-                    "success",
-                    torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
-                ),
-                info.get(
-                    "fail",
-                    torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
-                ),
-            )
-            truncateds = self.check_truncated(obs=obs, info=info)
-            truncateds = truncateds | (self._elapsed_steps >= self.max_episode_steps)
-
-            if self.cfg.ignore_terminations:
-                terminateds[:] = False
+            terminateds, truncateds = self._get_termination_flags(obs, info)
 
             dones = terminateds | truncateds
 

@@ -1,6 +1,5 @@
 Public API Supplement
-=====================
-
+==============
 .. This page is maintained by the update-api-docs agent skill.
    docs/scripts/check_api_docs.py reads it but never writes it.
 
@@ -63,6 +62,15 @@ EmbodiChain data cache.
    RubiksCube
    ScoopIceNewEnv
    TabletopFourBases
+   Real2SimCarton
+
+``Real2SimCarton`` downloads a checksum-pinned original DROID episode, manual
+annotations, two motion-prototype sources and estimated physical proxies. Its
+revision-specific cache verifies extracted files. Measured DROID derivatives
+retain CC BY 4.0; the bundle is not a generated training dataset or hardware
+qualification.
+
+.. autoclass:: Real2SimCarton
 
 embodichain.data.assets.materials
 ------------------------------------
@@ -786,6 +794,9 @@ per environment. Stable region occupancy does not establish gripper detachment.
 
 .. autosummary::
 
+   ConditionResult
+   evaluate_near_target
+   evaluate_below_height
    GoalRegionCfg
    OrderedPlacementObjectiveCfg
    MeasuredRigidObjectState
@@ -2567,6 +2578,15 @@ embodichain.toolkits.graspkit.pg_grasp.collision_checker
    ConvexCollisionCheckerCfg
    ConvexCollisionChecker
 
+embodichain.toolkits.graspkit.pg_grasp.fixed_geometry
+---------------------------------------------------
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.fixed_geometry
+
+.. autosummary::
+
+   FixedGripperCollisionGeometry
+
 embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
 ----------------------------------------------------------------
 
@@ -2576,7 +2596,16 @@ embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
 
    GripperCollisionCfg
    GripperCollisionChecker
-   box_surface_grid
+
+embodichain.toolkits.graspkit.pg_grasp.model_geometry
+---------------------------------------------------
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.model_geometry
+
+.. autosummary::
+   :nosignatures:
+
+   get_parallel_jaw_collision_geometry
 
 embodichain.toolkits.graspkit.scripts.annotate_grasp
 ----------------------------------------------------
@@ -2834,3 +2863,114 @@ Asset generalization contracts
    :maxdepth: 2
 
    asset_generalization
+
+Real-to-simulation motion prototypes
+------------------------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   real2sim
+
+embodichain.lab.gym.envs.managers.cfg
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.cfg
+
+Manager configuration binds named functors and explicit scene entities. RL condition groups aggregate success with conjunction, failure and truncation with disjunction.
+
+.. autosummary::
+
+   FunctorCfg
+   ConditionCfg
+   RLTaskCfg
+   EventCfg
+   ObservationCfg
+   SceneEntityCfg
+   RewardCfg
+   ActionTermCfg
+   DatasetFunctorCfg
+
+.. autoclass:: FunctorCfg
+   :members:
+
+.. autoclass:: ConditionCfg
+   :members:
+
+.. autoclass:: RLTaskCfg
+   :members:
+
+.. autoclass:: EventCfg
+   :members:
+
+.. autoclass:: ObservationCfg
+   :members:
+
+.. autoclass:: SceneEntityCfg
+   :members:
+
+.. autoclass:: RewardCfg
+   :members:
+
+.. autoclass:: ActionTermCfg
+   :members:
+
+.. autoclass:: DatasetFunctorCfg
+   :members:
+
+
+embodichain.lab.gym.envs.managers.conditions
+--------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.conditions
+
+Measured manipulation functors bind rigid objects and validate geometric parameters at construction. Calls read live physical state and reset-owned virtual targets. Missing target contexts fail explicitly.
+
+.. autosummary::
+
+   object_near_target
+   object_below_height
+
+.. autoclass:: object_near_target
+   :members:
+   :special-members: __call__
+
+.. autoclass:: object_below_height
+   :members:
+   :special-members: __call__
+
+
+embodichain.lab.gym.envs.managers.termination_manager
+-----------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.termination_manager
+
+The termination manager combines condition measurements with a host-supplied time limit once per control transition. It owns the cached Gym flags and task acceptance, resets selected rows and publishes owned snapshots without resampling.
+
+.. autosummary::
+
+   TerminationManager
+
+.. autoclass:: TerminationManager
+   :members:
+
+
+embodichain.lab.gym.envs.objectives.conditions
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.objectives.conditions
+
+Typed physical predicates provide shared distance and height measurements for RL and Task Program adapters. Invalid evidence never satisfies a condition.
+
+.. autosummary::
+
+   ConditionResult
+   evaluate_near_target
+   evaluate_below_height
+
+.. autoclass:: ConditionResult
+   :members:
+
+.. autofunction:: evaluate_near_target
+
+.. autofunction:: evaluate_below_height

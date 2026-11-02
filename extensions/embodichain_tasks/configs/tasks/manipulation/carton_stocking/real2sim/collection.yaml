@@ -1,0 +1,240 @@
+kind: tabletop_box_v1
+scene_revision: staples_multiview_proxy_v2
+object_uid: carton
+target_uid: worktop
+object_entity_id: carton
+target_entity_id: worktop
+base_link: arm_base_link
+finger_links:
+- left_inner_finger_pad
+- right_inner_finger_pad
+- left_inner_finger
+- right_inner_finger
+finger_joints:
+- finger_joint
+- left_inner_knuckle_joint
+- left_inner_finger_joint
+- right_outer_knuckle_joint
+- right_inner_knuckle_joint
+- right_inner_finger_joint
+closing_directions:
+- 1
+- 1
+- -1
+- 1
+- 1
+- -1
+gripper_contact:
+  kind: coupled_mimic
+  driver_joint: finger_joint
+  measured_coupling_tolerance: 0.005
+  mechanism_contacts:
+  - - left_inner_finger
+    - left_inner_knuckle
+    - 0.012
+  - - right_inner_finger
+    - right_inner_knuckle
+    - 0.023
+source_artifacts:
+  0:
+    original_recording:
+      path:
+        asset: Real2SimCarton
+        path: raw/trajectory.h5
+      sha256: c9ec0a39223a6f1f6e07ea90de8058a7689362799db1dc425db4acef89af0ad0
+    source_evidence:
+      path:
+        asset: Real2SimCarton
+        path: evidence/measured/0.npz
+      sha256: 12ad124ccf214befe4956d4bdae24b6ed46f4f2680c43e26e43c53dd16747cc2
+  1:
+    original_recording:
+      path:
+        asset: Real2SimCarton
+        path: raw/trajectory.h5
+      sha256: c9ec0a39223a6f1f6e07ea90de8058a7689362799db1dc425db4acef89af0ad0
+    source_evidence:
+      path:
+        asset: Real2SimCarton
+        path: evidence/measured/1.npz
+      sha256: 76e9de2d146bfd4a016a81045fa7c8ed51cc3484ab5e55feb154a1140d97a82d
+  2:
+    original_recording:
+      path:
+        asset: Real2SimCarton
+        path: raw/trajectory.h5
+      sha256: c9ec0a39223a6f1f6e07ea90de8058a7689362799db1dc425db4acef89af0ad0
+    source_evidence:
+      path:
+        asset: Real2SimCarton
+        path: evidence/measured/2.npz
+      sha256: a9388f586f2889defab964f3a4ee27c1fc4304773ab4aa0ef66bd1c547350575
+contact_depth_m: 0.002
+base_ground_depth_m: 0.0035
+velocity_limits:
+- 2.175
+- 2.175
+- 2.175
+- 2.175
+- 2.61
+- 2.61
+- 2.61
+- 2.0
+- 2.0
+- 2.0
+- 2.0
+- 2.0
+- 2.0
+acceleration_limits:
+- 15.0
+- 7.5
+- 10.0
+- 12.5
+- 15.0
+- 20.0
+- 20.0
+- 100.0
+- 100.0
+- 100.0
+- 100.0
+- 100.0
+- 100.0
+velocity_limit_origin: original_panda_and_robotiq_urdf
+acceleration_limit_origin: FER_joint_limits_from_Franka_FCI_robot_specifications_and_declared_hand_target_budget_100_rad_s2
+motion_headroom_fraction: 0.95
+seed: 0
+placement_xy_tolerance_m: 0.005
+placement_yaw_tolerance_deg: 3.0
+maximum_drift_m: 0.003
+retime_phase_allowlist:
+  pick_up:
+  - approach
+  move_held_object:
+  - transport
+  place:
+  - approach
+layouts:
+- id: baseline
+  object_xyyaw:
+  - 0
+  - 0
+  - 0
+  target_xyyaw:
+  - 0
+  - 0
+  - 0
+- id: object_x_plus
+  object_xyyaw:
+  - 0.03
+  - 0
+  - 0
+  target_xyyaw:
+  - 0
+  - 0
+  - 0
+- id: object_x_minus
+  object_xyyaw:
+  - -0.03
+  - 0
+  - 0
+  target_xyyaw:
+  - 0
+  - 0
+  - 0
+- id: object_y_plus
+  object_xyyaw:
+  - 0
+  - 0.03
+  - 0
+  target_xyyaw:
+  - 0
+  - 0
+  - 0
+- id: object_y_minus
+  object_xyyaw:
+  - 0
+  - -0.03
+  - 0
+  target_xyyaw:
+  - 0
+  - 0
+  - 0
+- id: object_yaw_plus
+  object_xyyaw:
+  - 0
+  - 0
+  - 0.2617993877991494
+  target_xyyaw:
+  - 0
+  - 0
+  - 0
+- id: object_yaw_minus
+  object_xyyaw:
+  - 0
+  - 0
+  - -0.2617993877991494
+  target_xyyaw:
+  - 0
+  - 0
+  - 0
+- id: target_x_plus
+  object_xyyaw:
+  - 0
+  - 0
+  - 0
+  target_xyyaw:
+  - 0.03
+  - 0
+  - 0
+- id: target_x_minus
+  object_xyyaw:
+  - 0
+  - 0
+  - 0
+  target_xyyaw:
+  - -0.03
+  - 0
+  - 0
+- id: target_yaw_plus
+  object_xyyaw:
+  - 0
+  - 0
+  - 0
+  target_xyyaw:
+  - 0
+  - 0
+  - 0.2617993877991494
+- id: target_yaw_minus
+  object_xyyaw:
+  - 0
+  - 0
+  - 0
+  target_xyyaw:
+  - 0
+  - 0
+  - -0.2617993877991494
+- id: combined_a
+  object_xyyaw:
+  - 0.03
+  - -0.03
+  - 0.2617993877991494
+  target_xyyaw:
+  - -0.03
+  - 0
+  - -0.2617993877991494
+- id: combined_b
+  object_xyyaw:
+  - -0.03
+  - 0.03
+  - -0.2617993877991494
+  target_xyyaw:
+  - 0.03
+  - 0
+  - 0.2617993877991494
+recipes:
+- nominal
+- joint_7
+- joint_11
+- task_space
+- time_115
+- time_130

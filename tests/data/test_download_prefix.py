@@ -38,6 +38,7 @@ import json
 from embodichain.data import dataset
 from embodichain.data.assets import CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots
 from embodichain.data.assets.w1_assets import DexforceW1V030
+from embodichain_robots.agilex.pika.assets import PikaGripper
 
 urls = {}
 
@@ -49,7 +50,7 @@ def capture(self, prefix, descriptor, path):
     raise Captured  # stop before anything is downloaded
 
 dataset.EmbodiChainDataset.__init__ = capture
-for cls in (CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots, DexforceW1V030):
+for cls in (CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots, DexforceW1V030, PikaGripper):
     try:
         cls()
     except Captured:
@@ -107,6 +108,10 @@ def test_download_prefix_gets_a_trailing_slash(monkeypatch, reload_constants) ->
 @pytest.mark.parametrize("prefix", [MIRROR, MIRROR.rstrip("/")])
 def test_assets_download_from_the_configured_prefix(prefix: str) -> None:
     urls = _consumer_urls(prefix)
+    assert urls["PikaGripper"] == [
+        f"{MIRROR}eef_assets/PikaGripper.zip",
+        f"{HF_PREFIX}eef_assets/PikaGripper.zip",
+    ]
     assert urls["CobotMagicArm"] == [f"{MIRROR}robot_assets/CobotMagicArmV4.zip"]
     # Locomotion tries the configured source first and keeps the Hub as fallback.
     assert urls["UnitreeGo2Locomotion"] == [
@@ -136,3 +141,4 @@ def test_assets_do_not_repeat_the_hub_url() -> None:
         f"{HF_PREFIX}robot_assets/UniversalRobots_v4.zip"
     ]
     assert urls["FlexivRizon4S_v1"] == [f"{HF_PREFIX}robot_assets/FlexivRizon4S_v1.zip"]
+    assert urls["PikaGripper"] == [f"{HF_PREFIX}eef_assets/PikaGripper.zip"]

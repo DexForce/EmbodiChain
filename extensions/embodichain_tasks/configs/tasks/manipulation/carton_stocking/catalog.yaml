@@ -1,0 +1,14 @@
+task_key: carton_stocking
+title: Directional Carton Stocking
+summary: Retarget, refine and augment a real Panda/Robotiq demonstration to place
+  a carton with a requested position and yaw.
+tags:
+- pick_place
+- single_arm
+- task_program
+- real2sim
+- trajectory_expansion
+default_deployment: panda
+deployments:
+  panda:
+    config: task.panda.yaml

@@ -18,8 +18,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import open3d as o3d
 import os
+from pathlib import Path
+from typing import ClassVar
 
 from embodichain.data.dataset import EmbodiChainDataset
 from embodichain.data.constants import (
@@ -36,6 +40,7 @@ __all__ = [
     "RubiksCube",
     "ScoopIceNewEnv",
     "TabletopFourBases",
+    "Real2SimCarton",
 ]
 
 
@@ -164,3 +169,82 @@ class TabletopFourBases(EmbodiChainDataset):
         descriptor = o3d.data.DataDescriptor(urls, "103d891625d1f9f90e1393d048ea87c2")
         root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
         super().__init__(type(self).__name__, descriptor, root)
+
+
+class Real2SimCarton(EmbodiChainDataset):
+    """Pinned real and synthetic inputs for the directional-carton demo.
+
+    ``raw/`` contains one unchanged DROID episode and three original videos;
+    ``annotations/``, ``inputs/`` and ``evidence/`` retain manual labels, frozen
+    motion prototypes and typed state/command evidence. ``scene/`` contains
+    metre-scale estimated cuboid proxies. The bundle creates no collection
+    identity and includes no generated training episodes. DROID files and
+    derivatives retain CC BY 4.0; independently synthetic data is Apache-2.0.
+
+    Args:
+        data_root: Optional root for the standard locked download cache.
+
+    Raises:
+        ValueError: The pinned archive, manifest or an extracted file differs.
+    """
+
+    cache_prefix: ClassVar[str] = "Real2SimCartonV1"
+    """Immutable revision-specific cache entry used by the download CLI."""
+    _archive_name: ClassVar[str] = "real2sim_carton_v1.zip"
+    _revision: ClassVar[str] = "3c340238f6acc29a50272c33f79264764d0704ff"
+    _archive_md5: ClassVar[str] = "cef38008a3bae2d17a422bf2698cb4fb"
+    _archive_sha256: ClassVar[str] = (
+        "169fff766e6c9e4af1ef3b890a52203867e75fd60f20c4ee5dedb0f6fcf6a11a"
+    )
+    _manifest_sha256: ClassVar[str] = (
+        "f29a4a60f14ba450a251d2ddd3642bfc73e2e3e383a211bea3f0ac3fa3084d06"
+    )
+
+    def __init__(self, data_root: str | None = None) -> None:
+        filename = "demo/real2sim_carton/" + self._archive_name
+        hub_prefix = (
+            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/"
+            + self._revision
+            + "/"
+        )
+        prefix = EMBODICHAIN_DOWNLOAD_PREFIX.replace(
+            "/resolve/main/", f"/resolve/{self._revision}/", 1
+        )
+        urls = [prefix + filename]
+        if prefix != hub_prefix:
+            urls.append(hub_prefix + filename)
+        descriptor = o3d.data.DataDescriptor(urls, self._archive_md5)
+        root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        super().__init__(self.cache_prefix, descriptor, root)
+        if (
+            self._digest(Path(self.download_dir) / self._archive_name)
+            != self._archive_sha256
+        ):
+            raise ValueError("Real2SimCarton archive differs from its pinned SHA-256")
+        self._verify_files(Path(self.extract_dir))
+
+    @staticmethod
+    def _digest(path: Path) -> str:
+        checksum = hashlib.sha256()
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                checksum.update(block)
+        return checksum.hexdigest()
+
+    @classmethod
+    def _verify_files(cls, root: Path) -> None:
+        root = root.resolve()
+        manifest = root / "manifest.json"
+        if not manifest.is_file() or cls._digest(manifest) != cls._manifest_sha256:
+            raise ValueError("Real2SimCarton resource manifest is missing or changed")
+        for entry in json.loads(manifest.read_text(encoding="utf-8"))["files"]:
+            path = (root / entry["path"]).resolve()
+            if (
+                root not in path.parents
+                or not path.is_file()
+                or path.stat().st_size != entry["size"]
+                or cls._digest(path) != entry["sha256"]
+            ):
+                raise ValueError(
+                    f"Real2SimCarton resource is missing or changed: {entry['path']}"
+                )

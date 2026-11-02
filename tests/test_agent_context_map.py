@@ -121,6 +121,8 @@ def test_representative_queries_route_against_the_repository_map() -> None:
         "Newton physics backend config 在哪里？": ["simulation-system"],
         "可微环境 APG 如何重置？": ["differentiable-env"],
         "可微 IK layer 的梯度": ["learning-layers"],
+        "可微 FK layer 的梯度": ["learning-layers"],
+        "DifferentiableFKLayer": ["learning-layers"],
         "DifferentiableIKLayer": ["learning-layers"],
         "sim.scene 的场景布局服务在哪里？": ["scene-services"],
         "程序化场景如何生成？": ["scene-services"],

@@ -207,6 +207,8 @@ class BaseSolver(metaclass=ABCMeta):
         self.tcp_xpos = np.eye(4)
 
         self.pk_serial_chain = kwargs.get("pk_serial_chain", None)
+        if self.pk_serial_chain is not None:
+            self.compiled_fk = self.pk_serial_chain.forward_kinematics_tensor
         if self.pk_serial_chain is None:
             self.pk_serial_chain = create_pk_serial_chain(
                 urdf_path=self.urdf_path,

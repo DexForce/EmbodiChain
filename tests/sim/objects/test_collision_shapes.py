@@ -137,3 +137,44 @@ def test_disabled_contact_response_keeps_planner_geometry() -> None:
     assert len(shapes) == 1
     assert shapes[0].shape_type == RigidBodyShape.BOX
     assert shapes[0].half_extents.tolist() == pytest.approx([0.1, 0.2, 0.3])
+
+
+def test_articulation_link_collision_reads_native_physical_shape_not_render_mesh():
+    from embodichain.lab.sim.objects.backends import (
+        collision_shapes_from_articulation_link,
+    )
+
+    geometry = _box_geometry([0.1, 0.2, 0.3])
+    native = SimpleNamespace(
+        get_physical_body=lambda name: (
+            _FakePhysicalBody([geometry]) if name == "arm" else None
+        )
+    )
+    entity = SimpleNamespace(native=lambda: native)
+    shapes = collision_shapes_from_articulation_link(entity, "arm", object_uid="robot")
+    assert shapes[0].shape_type == RigidBodyShape.BOX
+    assert shapes[0].half_extents.tolist() == pytest.approx([0.1, 0.2, 0.3])
+    assert (
+        collision_shapes_from_articulation_link(entity, "empty", object_uid="robot")
+        == []
+    )
+
+
+def test_articulation_link_collision_reads_newton_named_physical_mesh():
+    import numpy as np
+    from embodichain.lab.sim.objects.backends import (
+        collision_shapes_from_articulation_link,
+    )
+
+    vertices = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    triangles = np.array([[0, 1, 2]])
+    entity = SimpleNamespace(
+        native=lambda: None,
+        _physics_binding=SimpleNamespace(
+            get_collision_mesh=lambda name: (vertices, triangles)
+        ),
+    )
+    shapes = collision_shapes_from_articulation_link(entity, "arm", object_uid="robot")
+    vertices[:] = 99
+    assert shapes[0].vertices[1, 0] == 1
+    assert shapes[0].triangles.tolist() == [[0, 1, 2]]

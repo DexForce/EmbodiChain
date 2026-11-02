@@ -25,6 +25,9 @@ from types import MappingProxyType
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
+from embodichain_robots.brainco.revo1._specs import get_side_spec
+from embodichain_robots.dh_robotics.pgc_140_50._specs import get_asset_spec
+
 from .types import (
     DexforceW1ArmSide,
     DexforceW1HandBrand,
@@ -116,23 +119,13 @@ def normalize_w1_hand_mappings(
 
 
 def _brainco_side(side: DexforceW1ArmSide) -> W1HandSideSpec:
-    prefix = "LEFT" if side == DexforceW1ArmSide.LEFT else "RIGHT"
-    side_name = "Left" if side == DexforceW1ArmSide.LEFT else "Right"
+    spec = get_side_spec(side.value)
     rotation = (90.0, 0.0, 180.0 if side == DexforceW1ArmSide.LEFT else 0.0)
     return W1HandSideSpec(
-        urdf_path=(
-            f"BrainCoHandRevo1/BrainCo{side_name}Hand/" f"BrainCo{side_name}Hand.urdf"
-        ),
-        joint_names=(
-            f"{prefix}_HAND_THUMB1",
-            f"{prefix}_HAND_THUMB2",
-            f"{prefix}_HAND_INDEX",
-            f"{prefix}_HAND_MIDDLE",
-            f"{prefix}_HAND_RING",
-            f"{prefix}_HAND_PINKY",
-        ),
-        end_link_name=f"{side.value}_hand_base",
-        root_link_name=f"{side.value}_thumb_dist",
+        urdf_path=spec.urdf_path,
+        joint_names=spec.joint_names,
+        end_link_name=spec.base_link_name,
+        root_link_name=spec.reference_link_name,
         attach_xpos=_attach_xpos(rotation),
     )
 
@@ -141,23 +134,14 @@ def _dh_gripper_side(
     side: DexforceW1ArmSide,
     modified: bool,
 ) -> W1HandSideSpec:
-    prefix = "LEFT" if side == DexforceW1ArmSide.LEFT else "RIGHT"
-    suffix = "_M" if modified else ""
-    joint_suffixes = (
-        ("FINGER1", "FINGER2")
-        if modified
-        else (
-            "FINGER1_JOINT",
-            "FINGER2_JOINT",
-        )
-    )
+    spec = get_asset_spec(modified)
+    prefix = side.value.upper()
     return W1HandSideSpec(
-        urdf_path=f"DH_PGC_140_50{suffix}/DH_PGC_140_50{suffix}.urdf",
-        joint_names=tuple(f"{prefix}_{name}" for name in joint_suffixes),
-        end_link_name=f"{side.value}_base_link_1",
-        root_link_name=(
-            f"{side.value}_finger2" if modified else f"{side.value}_finger2_link"
-        ),
+        urdf_path=spec.urdf_path,
+        joint_names=tuple(f"{prefix}_{name.upper()}" for name in spec.joint_names),
+        # Preserve W1's historical assembled base and root/end conventions.
+        end_link_name=f"{side.value}_{spec.base_link_name}_1",
+        root_link_name=f"{side.value}_{spec.reference_link_name}",
         attach_xpos=_attach_xpos(
             (0.0, 0.0, 90.0),
             (0.0, 0.0, 0.0 if modified else 0.015),

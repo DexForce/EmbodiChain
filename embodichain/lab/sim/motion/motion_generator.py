@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.motion._budget import _planning_call
+
 import math
 from collections.abc import Callable, Mapping
 from copy import deepcopy
@@ -608,6 +610,7 @@ class MotionGenerator:
         cls = self._support_planner_dict[planner_type][0](cfg=planner_cfg)
         return cls
 
+    @_planning_call("planning")
     def generate(
         self,
         target_states: list[PlanState],
@@ -659,6 +662,88 @@ class MotionGenerator:
         else:
             raw_result = self._generate_with_planner(target_states, options)
         return self._normalize_plan_result(raw_result, target_states, options)
+
+    @property
+    def supports_multi_part(self) -> bool:
+        """Whether this configured backend packs independent control parts."""
+        return getattr(self.planner, "supports_multi_part", False) is True
+
+    def generate_multi_part(
+        self,
+        target_states: Mapping[str, list[PlanState]],
+        options: Mapping[str, MotionGenOptions],
+    ) -> dict[str, PlanResult]:
+        """Plan independent named-part requests while preserving scene batches.
+
+        A capable, explicitly enabled backend may pack the parts into one policy
+        batch. Other backends use the existing single-part path in mapping order.
+        The caller owns dependencies and execution synchronization: this method
+        never infers that two requests can execute concurrently.
+
+        Args:
+            target_states: Part names mapped to independent ordered waypoints.
+            options: The same part names mapped to their start states and options.
+
+        Returns:
+            One normalized result per named part, each retaining its original
+            environment batch, timing and success mask.
+
+        Raises:
+            ValueError: If part names, requests or explicit control parts disagree.
+        """
+        if not target_states or target_states.keys() != options.keys():
+            raise ValueError(
+                "Multi-part targets and options require matching nonempty keys."
+            )
+        resolved = {}
+        for part, states in target_states.items():
+            if not isinstance(part, str) or not part or not states:
+                raise ValueError(
+                    "Each multi-part request requires a name and waypoints."
+                )
+            opts = deepcopy(options[part])
+            if opts.control_part is not None and opts.control_part != part:
+                raise ValueError("Multi-part options.control_part must match its key.")
+            opts.control_part = part
+            opts.__post_init__()
+            resolved[part] = opts
+        if not self.supports_multi_part or any(
+            opts.strategy != "motion_gen" for opts in resolved.values()
+        ):
+            return {
+                part: self.generate(states, resolved[part])
+                for part, states in target_states.items()
+            }
+        planner_options = {}
+        for part, states in target_states.items():
+            move_types = {state.move_type for state in states}
+            if len(move_types) > 1 and not self.supports_heterogeneous_waypoints:
+                raise ValueError(
+                    "This backend does not support heterogeneous waypoints."
+                )
+            if any(not self.planner.supports_move_type(move) for move in move_types):
+                raise ValueError(
+                    "Multi-part planning requires native target-type support."
+                )
+            opts = resolved[part]
+            planner_options[part] = self.planner.with_motion_context(
+                self.resolve_plan_options(
+                    opts.plan_opts,
+                    sample_count=opts.sample_count,
+                    velocity_limit=opts.velocity_limit,
+                    acceleration_limit=opts.acceleration_limit,
+                ),
+                start_qpos=opts.start_qpos,
+                control_part=part,
+            )
+            opts.plan_opts = planner_options[part]
+        results = self.planner.plan_multi_part(target_states, planner_options)
+        if results.keys() != target_states.keys():
+            raise ValueError("Multi-part planner returned different control-part keys.")
+        return {
+            part: self._normalize_plan_result(results[part], states, resolved[part])
+            for part, states in target_states.items()
+        }
 
     def _generate_with_planner(
         self,
@@ -1521,6 +1606,7 @@ class MotionGenerator:
         velocities = normalize_derivative(result.velocities, "velocities")
         accelerations = normalize_derivative(result.accelerations, "accelerations")
         constraint_report = None if resampled else result.constraint_report
+        waypoint_indices = None if resampled else result.waypoint_indices
         preserve_failed_positions = (
             getattr(self.planner, "preserve_failed_plan_positions", False) is True
         )
@@ -1536,6 +1622,8 @@ class MotionGenerator:
                 start_qpos.to(dtype=positions.dtype).unsqueeze(1).expand_as(positions)
             )
             positions = torch.where(success[:, None, None], positions, held)
+            if waypoint_indices is not None:
+                waypoint_indices = torch.where(success[:, None], waypoint_indices, -1)
             if velocities is not None:
                 velocities = torch.where(
                     success[:, None, None],
@@ -1569,6 +1657,9 @@ class MotionGenerator:
             constraint_report=constraint_report,
             policy_rollout_positions=result.policy_rollout_positions,
             policy_rollout_lengths=result.policy_rollout_lengths,
+            policy_batching=result.policy_batching,
+            waypoint_indices=waypoint_indices,
+            policy_waypoint_indices=result.policy_waypoint_indices,
         )
 
     def _runtime_device(self) -> torch.device:

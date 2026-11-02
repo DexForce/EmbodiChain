@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import torch
 import pytest
 
@@ -49,9 +51,13 @@ def _make_analytic_ur_solver(
         ik_nearest_weight=weights,
         user_qpos_limits=limits.tolist(),
     )
-    # The analytical IK path never accesses the serial chain; explicit limits
-    # bypass the only chain-dependent setup needed by these tests.
-    return cfg.init_solver(device=torch.device(device), pk_serial_chain=object())
+    # BaseSolver binds the supplied FK callable during initialization. These
+    # analytic IK tests must not evaluate it or load model assets.
+    chain = Mock(spec_set=["forward_kinematics_tensor"])
+    chain.forward_kinematics_tensor.side_effect = AssertionError(
+        "analytic UR IK must not evaluate serial-chain FK"
+    )
+    return cfg.init_solver(device=torch.device(device), pk_serial_chain=chain)
 
 
 def _ur_dh_poses(solver: URSolver, qpos: torch.Tensor) -> torch.Tensor:

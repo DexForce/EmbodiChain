@@ -379,22 +379,6 @@ def write_markdown_report(
         )
         lines.extend(_format_table(leaderboard, _VIEW_LEADERBOARD_COLUMNS))
         lines.append("")
-        if view == "motion_planning":
-            lines.extend(
-                [
-                    "### Common Joint / FullPose comparison",
-                    "",
-                    "This table uses only homogeneous Joint and FullPose requests. Partial and mixed constraints remain in the detailed coverage tables.",
-                    "",
-                ]
-            )
-            lines.extend(
-                _format_table(
-                    aggregates.get("motion_planning_common_leaderboard", []),
-                    _VIEW_LEADERBOARD_COLUMNS,
-                )
-            )
-            lines.append("")
     domain_rows = aggregates.get("generalization", [])
     if domain_rows:
         lines.extend(

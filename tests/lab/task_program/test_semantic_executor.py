@@ -941,6 +941,7 @@ def _system(
     runtime_runner_cfg: ExecutionRunnerCfg | None = None,
     install_effect_monitor: bool = True,
     plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+    nominal_source_factory=None,
 ) -> _System:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -979,6 +980,7 @@ def _system(
         clock=clock,
         runner_cfg=runtime_runner_cfg,
         plan_transform_factory=plan_transform_factory,
+        nominal_source_factory=nominal_source_factory,
     )
     return _System(
         runtime,
@@ -1026,6 +1028,33 @@ def test_executor_without_transform_factory_is_unchanged() -> None:
 
     assert result.status is SemanticExecutionStatus.RUNNING
     assert system.action.plan_count == 1
+
+
+def test_executor_selects_nominal_source_before_native_planning() -> None:
+    class Source:
+        def instantiate(self, request, context):
+            raise AssertionError("unsupported skill should reject before source use")
+
+    class Factory:
+        def __init__(self):
+            self.requests = []
+
+        def create_nominal_source(self, request, *, engine):
+            self.requests.append(request)
+            return Source()
+
+    factory = Factory()
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+        nominal_source_factory=factory,
+    )
+    result = system.runtime.start(_call("generation"), workflow_id="nominal-workflow")
+    assert result.status is SemanticExecutionStatus.FAILED
+    assert "does not support external nominal" in result.message
+    assert factory.requests[0].workflow_id == "nominal-workflow"
+    assert factory.requests[0].analysis_call_index == 0
+    assert system.action.plan_count == 0
 
 
 def _workflow_recovery_system(
@@ -1117,6 +1146,42 @@ def test_runtime_analyzes_once_and_uses_one_fresh_session_per_call(
     assert len(system.collector.calls) == 2
     assert system.compiler.ground_timestamps[1] > system.compiler.ground_timestamps[0]
     assert system.observation.calls == 4
+
+
+def test_verified_call_without_effect_completes_without_a_monitor() -> None:
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+    )
+    native = system.action._plan
+    system.action._plan = lambda request, context: replace(native(request, context), expected_effects=StateDelta(), effect_verification=None)  # type: ignore[method-assign]
+    result = system.runtime.start(_call("no_effect"))
+    system.runtime._grounded.analyzed.effect_assurance = EffectAssurance.VERIFIED
+    for _ in range(5):
+        if result.status is not SemanticExecutionStatus.RUNNING:
+            break
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+    assert result.status is SemanticExecutionStatus.COMPLETED
+    assert system.collector.calls == []
+
+
+def test_verified_unmonitored_effect_fails_without_projecting_state() -> None:
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+    )
+    result = system.runtime.start(_call("unexpected_effect"))
+    system.runtime._grounded.analyzed.effect_assurance = EffectAssurance.VERIFIED
+    for _ in range(5):
+        if result.status is not SemanticExecutionStatus.RUNNING:
+            break
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+    assert result.status is SemanticExecutionStatus.FAILED
+    assert result.task_state.get_articulation_joint_state("fixture", "joint") is None
 
 
 def test_runtime_projects_planned_effect_when_grounded_call_has_no_monitor() -> None:

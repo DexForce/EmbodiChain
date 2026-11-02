@@ -1,0 +1,28 @@
+{
+  "files": {
+    "src/data/gpu_augmentation.py": "944ddafab989467755a5efd8306a939e1370e191ccd9457f3d5885dd7508e8e4",
+    "src/data/multi_dataloader.py": "0ba2cc56a994ed4fd03f196c0921d5f4ab536b9fc7b68b481531f1ebfab08f8c",
+    "src/data/object_scale.py": "e68ba74455e92b23e14a067d3cdacc5daaf713596e137883c11a0e812e215d6d",
+    "src/data/partial_view.py": "e0c9c36d385bae969f3a7c32ebba16469360a67735bad10abd744981337b5ac6",
+    "src/data/scene_frames.py": "e11b454bf29a631a182618892d02ecbe3117c24e91a365b4ed64bd5407bffdee",
+    "src/data/shape_completion.py": "7bf093e54b687e8ccaa10ef384aaab5962350e0d3c5287b302c6cff0cf9691f7",
+    "src/models/anchor_vertex_pooling.py": "4162975292918bf7a91d3f3cd4542d07f16062cba245511c306a4131ccf0fe8b",
+    "src/models/decoder.py": "4d8d2152f09b2ebbc04747ad426ff6e81db689e7a39290477e09234bee569ec5",
+    "src/models/encoder.py": "4764f3ff377708b128e42a403eae573ff2e5dc6a139eab7aa7948a13b43d9a49",
+    "src/models/geometry_encoders.py": "78b2007a54d8e3b8ae55bb234dc5dffac601e065b717d17ec66002c7802ee9ef",
+    "src/models/multi_scale_predictor.py": "8e634f4b745e1458c5f5f48a5da37a985446f40fa1730f07cbac6506dfd937b5",
+    "src/models/physformer_rope.py": "66a0743e4f4eef324694066effa5b9ee7076c02870d240888f8bad611ab492a4",
+    "src/models/predictor.py": "05490a8d6c7bc8915fb758ad9226509713b10bf5c3478431583d0cd215253cbf",
+    "src/models/se3_attention.py": "18117ace2b2e9077bacadcf187a1932cd62c38eb15165f5ab9ef6306ba638a07",
+    "src/models/state.py": "85952c21b7b4cf86a6e01dfac80ef7fd40f78f2093b581f6fc9a376e49af0bfa",
+    "src/models/transform_layer.py": "39acea7d4b35454ff106fed7e047111d7dcd01606af31586efc4ce81239700c5",
+    "src/train.py": "4e3dab822259bf0d4e06a512ed537d9a7a9a2855eb61434571e42401481166e1",
+    "src/training/evaluator.py": "abb585f50c3d78adb04cfa76a67d65d51d11d2d4d08e1999304e6a0516ce1a86",
+    "src/utils/anchor_rotation.py": "9d732ce7f236330e1da91f83e0046784ede3999b4ab340b1a1c595f160b7bd89",
+    "src/utils/cuda_knn.py": "0db3acf65d76a05feb2fd5c920517f8c3d5804b04bc526c345912c0172b848f4",
+    "src/utils/intersection_handler.py": "9bb9ca50513faf16fab55dac596381e01a447e9dc1ea19a1632ad43a7a0936f8",
+    "src/utils/noise_utils.py": "f85be4e298a26be30c67fc5b91ee5137a3f475851f71aed820537570b03fb34d",
+    "src/utils/weight_ema.py": "f0599c2378f56ff9e6526b9dbc725a280186a5aa4c8c02c6fd38f7212fafbd81"
+  },
+  "revision": "160fe0852c51cffae7b7440452b58d0b49db6df6"
+}

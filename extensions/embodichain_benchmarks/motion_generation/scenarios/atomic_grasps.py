@@ -19,12 +19,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-
 import torch
 
 from embodichain.toolkits.graspkit import (
     GraspPoseGenerator,
     ParallelJawGraspPoseGenerator,
+    ParallelJawGripperModelCfg,
 )
 from embodichain.utils.math import pose_inv
 
@@ -392,14 +392,31 @@ class ActiveCaseGraspPoseGenerator(GraspPoseGenerator):
         )
 
 
-def parallel_jaw_sampler(n_sample: int) -> ParallelJawGraspPoseGenerator:
-    """Build the PGI grasp sampler a self-sampling case compiles with."""
+def parallel_jaw_sampler(
+    n_sample: int,
+    *,
+    gripper_model: ParallelJawGripperModelCfg | None = None,
+    root_from_tcp: Sequence[Sequence[float]] | None = None,
+) -> ParallelJawGraspPoseGenerator:
+    """Build a case sampler with the selected physical hand and runtime TCP.
+
+    Args:
+        n_sample: Number of antipodal contact-pair samples.
+        gripper_model: Mounted hand geometry shared by preparation and replay.
+        root_from_tcp: The bound fixture's calibrated hand-root-to-TCP transform.
+
+    Returns:
+        A sampler configured for the selected hand.
+    """
     from .._atomic_fixtures import (
         create_parallel_jaw_grasp_pose_generator,
     )
 
     return create_parallel_jaw_grasp_pose_generator(
-        n_sample=n_sample, force_refresh=False
+        n_sample=n_sample,
+        force_refresh=False,
+        gripper_model=gripper_model,
+        root_from_tcp=root_from_tcp,
     )
 
 
