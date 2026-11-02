@@ -243,6 +243,14 @@ the shared entry point below; it resamples the path, so positions and poses
 change with the timing, and it cannot reduce the path's own jerk. Default
 remains `None`, which preserves the nominal-timing behavior.
 
+Models declaring `request_motion_limits_v1` require complete positive
+`NeuralPlanOptions.motion_limits`. The public resolver's effective values feed
+both model-recorded normalization references and retiming; the shared planner
+configuration is never mutated. Legacy models reject this new option.
+`PlanResult.motion_limit_provenance` and `motion_validation` expose separate
+request, geometry and timing evidence. Existing arrival preservation, tracing
+and clock semantics remain owned by the selected planner configuration.
+
 `PlanResult.policy_rollout_positions` and `policy_rollout_lengths` retain the
 original policy states and per-row valid prefixes before retiming. Sample zero
 is the initial state; padded terminal holds do not represent further controls.

@@ -85,3 +85,20 @@ dependency and does not change the retiming solver.
 .. autofunction:: resolve_motion_limits
 
 .. autofunction:: parse_motion_limits
+
+Neural request conditioning
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``NeuralPlanOptions.motion_limits`` carries a complete request for models whose
+ONNX metadata declares ``request_motion_limits_v1``. The same resolved vectors
+condition the policy and retime the native path. References come from the model
+metadata and remain fixed across requests. Neutral control models use the same
+layout with zero payloads. Old models reject this option; their existing
+``NeuralPlannerCfg.constraints`` postprocessing remains unchanged.
+
+ONNX contains the actor, not TOPPRA. Results preserve native samples, target
+visits and solved timing. ``motion_limit_provenance`` retains effective values
+and controlled order; ``motion_validation`` separates native completion, solver,
+sampled geometry and timing checks. These fields do not certify continuous
+collision freedom or actuator dynamics. Existing interpolation/arrival settings
+are preserved; changing them requires a separate evaluation.

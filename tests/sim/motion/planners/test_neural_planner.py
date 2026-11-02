@@ -2115,3 +2115,103 @@ def test_retimed_rollout_retains_limit_waypoints_on_a_coarse_clock(
     assert result.dt[0, 1:].min() > 0
     assert result.velocities.abs().max() <= 2.0 + 1e-8
     assert result.accelerations.abs().max() <= 4.0 + 1e-8
+
+
+@pytest.mark.parametrize("conditioned", [True, False, None])
+def test_request_limits_reach_policy_and_retimer_without_mutating_cfg(
+    tmp_path, monkeypatch, conditioned
+):
+    from embodichain.lab.sim.motion.planners.utils import PlanResult
+
+    layout = neural_planner_module._WaypointObservationLayout(
+        5,
+        7,
+        True,
+        motion_limit_tokens=conditioned is not None,
+        motion_limit_conditioned=conditioned,
+        velocity_reference=(2.0,) * 7,
+        acceleration_reference=(1.0,) * 7,
+    )
+
+    class ConditionalPolicy(FakeOnnxPolicy):
+        obs_dim = layout.dim
+        observation_metadata = layout.onnx_metadata
+
+    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", ConditionalPolicy)
+    fake_sim = FakeSimulationManager()
+    fake_sim.robot.joint_names = [f"joint{i}" for i in range(7)]
+    fake_sim.robot.control_parts = {"main_arm": fake_sim.robot.joint_names}
+    fake_sim.robot.get_joint_ids = lambda name: list(range(7))
+    fake_sim.robot.get_qvel_limits = lambda joint_ids: torch.full((1, 7), 2.0)
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            control_part="main_arm",
+            max_steps=2,
+        )
+    )
+    seen = []
+
+    def retime(positions, *, constraints, **kwargs):
+        seen.append(constraints)
+        q = positions.clone()
+        dt = torch.ones_like(q[..., 0])
+        dt[:, 0] = 0
+        return PlanResult(
+            success=torch.ones(len(q), dtype=torch.bool),
+            positions=q,
+            velocities=torch.zeros_like(q),
+            accelerations=torch.zeros_like(q),
+            dt=dt,
+        )
+
+    monkeypatch.setattr(
+        "embodichain.lab.sim.motion.planners.toppra_planner.retime_joint_paths", retime
+    )
+    request = {"velocity": [3.0] * 7, "acceleration": [1.5] * 7}
+    if conditioned is None:
+        with pytest.raises(ValueError, match="Legacy ONNX models"):
+            planner.plan(
+                [PlanState(qpos=torch.zeros(1, 7))],
+                NeuralPlanOptions(control_part="main_arm", motion_limits=request),
+            )
+        assert planner.cfg.constraints is None
+        return
+    result = planner.plan(
+        [PlanState(qpos=torch.zeros(1, 7))],
+        NeuralPlanOptions(control_part="main_arm", motion_limits=request),
+    )
+    assert planner.cfg.constraints is None
+    assert seen and seen[0]["velocity"].eq(2).all()
+    obs = planner._policy.last_obs
+    expected = torch.full((1, 7), 1.0 if conditioned else 0.0)
+    torch.testing.assert_close(obs[:, layout.slices["velocity_limit"]], expected)
+    torch.testing.assert_close(
+        obs[:, layout.slices["acceleration_limit"]],
+        torch.full((1, 7), 1.5 if conditioned else 0.0),
+    )
+    assert result.motion_limit_provenance["velocity"] == [2.0] * 7
+    assert result.motion_validation["timing_valid"].all()
+    with pytest.raises(ValueError, match="complete request"):
+        planner.plan(
+            [PlanState(qpos=torch.zeros(1, 7))],
+            NeuralPlanOptions(control_part="main_arm"),
+        )
+
+    if conditioned:
+        ConditionalPolicy.observation_metadata = dict(layout.onnx_metadata)
+        del ConditionalPolicy.observation_metadata["nmg.velocity_reference"]
+        with pytest.raises(ValueError, match="fixed motion-limit reference"):
+            NeuralPlanner(
+                NeuralPlannerCfg(
+                    robot_uid="fake_robot",
+                    onnx_model_path=_create_fake_onnx_model(tmp_path),
+                    control_part="main_arm",
+                )
+            )

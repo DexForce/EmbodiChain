@@ -1660,6 +1660,8 @@ class MotionGenerator:
             policy_batching=result.policy_batching,
             waypoint_indices=waypoint_indices,
             policy_waypoint_indices=result.policy_waypoint_indices,
+            motion_limit_provenance=result.motion_limit_provenance,
+            motion_validation=None if resampled else result.motion_validation,
         )
 
     def _runtime_device(self) -> torch.device:

@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import MISSING, dataclass
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Mapping
 import numpy as np
@@ -75,6 +76,10 @@ class _WaypointObservationLayout:
     use_relative_obs: bool
     canonicalize_quat_obs: bool = True
     joint_periodic_features: bool = False
+    motion_limit_tokens: bool = False
+    motion_limit_conditioned: bool = True
+    velocity_reference: tuple[float, ...] = ()
+    acceleration_reference: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
         if self.num_waypoints < 1 or self.num_controlled_joints < 1:
@@ -108,6 +113,14 @@ class _WaypointObservationLayout:
             )
         if self.joint_periodic_features:
             widths.extend((("joint_sin", j), ("joint_cos", j)))
+        if self.motion_limit_tokens:
+            widths.extend(
+                (
+                    ("velocity_limit", j),
+                    ("acceleration_limit", j),
+                    ("motion_limit_mask", 2 * j),
+                )
+            )
         return tuple(widths)
 
     @property
@@ -142,6 +155,13 @@ class _WaypointObservationLayout:
         }
         if self.joint_periodic_features:
             payload["joint_periodic_encoding"] = "sin_cos_radians"
+        if self.motion_limit_tokens:
+            payload["motion_limits"] = {
+                "schema": "request_motion_limits_v1",
+                "conditioned": self.motion_limit_conditioned,
+                "velocity_reference": self.velocity_reference,
+                "acceleration_reference": self.acceleration_reference,
+            }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
 
@@ -159,6 +179,19 @@ class _WaypointObservationLayout:
         }
         if self.joint_periodic_features:
             metadata["nmg.joint_periodic_encoding"] = "sin_cos_radians"
+        if self.motion_limit_tokens:
+            metadata.update(
+                {
+                    "nmg.motion_limits_schema": "request_motion_limits_v1",
+                    "nmg.motion_limits_conditioned": str(
+                        self.motion_limit_conditioned
+                    ).lower(),
+                    "nmg.velocity_reference": json.dumps(list(self.velocity_reference)),
+                    "nmg.acceleration_reference": json.dumps(
+                        list(self.acceleration_reference)
+                    ),
+                }
+            )
         return metadata
 
     def concatenate(self, blocks: Mapping[str, torch.Tensor]) -> torch.Tensor:
@@ -457,6 +490,8 @@ class NeuralPlanOptions(PlanOptions):
     max_steps: int | None = None
     waypoint_modalities: list[str] | None = None
     """Optional explicit joint/position/orientation/pose semantics per waypoint."""
+    motion_limits: dict[str, float | list[float]] | None = None
+    """Complete positive request-level limits for a motion-conditioned model."""
 
 
 class NeuralPlanner(BasePlanner):
@@ -551,12 +586,41 @@ class NeuralPlanner(BasePlanner):
             raise ValueError(
                 f"ONNX output has {output_dim} joints, expected {self._action_dim}."
             )
+        metadata = self._policy.observation_metadata
+        schema = metadata.get("nmg.motion_limits_schema")
+        if schema not in (None, "request_motion_limits_v1"):
+            raise ValueError("Unsupported motion-limit model schema")
+        self._motion_limit_tokens = schema is not None
+        self._motion_limit_conditioned = True
+        self._velocity_reference = self._acceleration_reference = ()
+        if self._motion_limit_tokens:
+            flag = metadata.get("nmg.motion_limits_conditioned")
+            if flag not in ("true", "false"):
+                raise ValueError("Missing motion-limit conditioning semantics")
+            self._motion_limit_conditioned = flag == "true"
+            for name in ("velocity", "acceleration"):
+                reference = tuple(
+                    json.loads(metadata.get(f"nmg.{name}_reference", "[]"))
+                )
+                if len(reference) != self._action_dim or any(
+                    isinstance(x, bool)
+                    or not isinstance(x, (int, float))
+                    or not math.isfinite(x)
+                    or x <= 0
+                    for x in reference
+                ):
+                    raise ValueError("Missing or invalid fixed motion-limit reference")
+                setattr(self, f"_{name}_reference", reference)
         self._observation_layout = _WaypointObservationLayout(
             self._num_waypoints,
             self._action_dim,
             self._use_relative_obs,
             self._canonicalize_quat_obs,
             self._joint_periodic_features,
+            self._motion_limit_tokens,
+            self._motion_limit_conditioned,
+            self._velocity_reference,
+            self._acceleration_reference,
         )
         self._policy_frame_from_world = self._as_transform(
             self.cfg.policy_frame_from_world, "policy_frame_from_world"
@@ -734,6 +798,7 @@ class NeuralPlanner(BasePlanner):
         initial = []
         bounds = []
         budgets = []
+        request_limits = []
         batch_size = None
         robot_batch = getattr(self.robot, "num_instances", None)
         for part, targets, option in groups:
@@ -757,6 +822,27 @@ class NeuralPlanner(BasePlanner):
             budget = int(option.max_steps or self._max_steps)
             if budget < 1:
                 raise ValueError("Neural rollout max_steps must be positive.")
+            resolved = None
+            if getattr(self, "_motion_limit_tokens", False):
+                if option.motion_limits is None:
+                    raise ValueError(
+                        "New motion-limit models require complete request limits"
+                    )
+                from ..limits import resolve_motion_limits
+
+                resolved = resolve_motion_limits(
+                    self.robot,
+                    option.motion_limits,
+                    dof=self._action_dim,
+                    control_part=part,
+                    batch_size=size,
+                    device=self.device,
+                )
+            elif option.motion_limits is not None:
+                raise ValueError(
+                    "Legacy ONNX models cannot accept conditioned requests; use explicit cfg postprocessing"
+                )
+            request_limits.append(resolved)
             parsed.append(values)
             initial.append(qpos)
             bounds.append((lower, upper))
@@ -812,6 +898,24 @@ class NeuralPlanner(BasePlanner):
             ]
             return torch.cat(world), torch.cat(local)
 
+        motion_blocks = None
+        if getattr(self, "_motion_limit_tokens", False):
+            motion_blocks = {}
+            for name in ("velocity", "acceleration"):
+                reference = torch.tensor(
+                    getattr(self, f"_{name}_reference"), device=self.device
+                )
+                payload = torch.cat(
+                    [getattr(value, name).expand(b, -1) for value in request_limits]
+                )
+                motion_blocks[name + "_limit"] = (
+                    payload / reference
+                    if self._motion_limit_conditioned
+                    else torch.zeros_like(payload)
+                )
+            motion_blocks["motion_limit_mask"] = torch.ones(
+                actor_batch, 2 * self._action_dim, device=self.device
+            )
         last_action = torch.zeros(actor_batch, self._action_dim, device=self.device)
         active_idx = torch.zeros(actor_batch, dtype=torch.long, device=self.device)
         arrival_indices = torch.full(
@@ -836,6 +940,7 @@ class NeuralPlanner(BasePlanner):
                 joint_mask,
                 active_idx,
                 last_action,
+                motion_limit_blocks=motion_blocks,
             )
             action = self._policy(obs).clamp(-1.0, 1.0)
             forward_calls += 1
@@ -914,7 +1019,7 @@ class NeuralPlanner(BasePlanner):
                     rotation_mask=parsed[index][5],
                     joint_mask=parsed[index][6],
                 )
-            if self.cfg.constraints is not None:
+            if self.cfg.constraints is not None or request_limits[index] is not None:
                 result = self._retimed_result(
                     success,
                     arm_positions,
@@ -931,6 +1036,11 @@ class NeuralPlanner(BasePlanner):
                     episode_k=parsed[index][7],
                     qpos_limits=bounds[index],
                     arrival_indices=arm_arrivals,
+                    constraints=(
+                        None
+                        if request_limits[index] is None
+                        else request_limits[index].constraints
+                    ),
                 )
             else:
                 dt = torch.full(
@@ -965,6 +1075,19 @@ class NeuralPlanner(BasePlanner):
                 arrival_indices=result.waypoint_indices,
                 success=result.success,
             )
+            if request_limits[index] is not None:
+                result.motion_limit_provenance = request_limits[index].metadata()
+                result.motion_limit_provenance["conditioned"] = (
+                    self._motion_limit_conditioned
+                )
+                result.motion_limit_provenance["controlled_joint_names"] = [
+                    self.robot.joint_names[j] for j in self.robot.get_joint_ids(part)
+                ]
+                result.motion_validation = {
+                    "native_task_complete": converged[rows].clone(),
+                    "retimed_overall_success": result.success.clone(),
+                    **(result.motion_validation or {}),
+                }
             result.policy_batching = dict(batching)
             results[part] = result
         return results
@@ -980,6 +1103,7 @@ class NeuralPlanner(BasePlanner):
         episode_k: int,
         qpos_limits: tuple[torch.Tensor, torch.Tensor],
         arrival_indices: torch.Tensor,
+        constraints: Mapping[str, object] | None = None,
     ) -> PlanResult:
         """Re-parameterize the rollout path under the configured limits.
 
@@ -1007,7 +1131,9 @@ class NeuralPlanner(BasePlanner):
 
         retimed = retime_joint_paths(
             positions,
-            constraints=dict(self.cfg.constraints),
+            constraints=dict(
+                self.cfg.constraints if constraints is None else constraints
+            ),
             path_lengths=path_lengths,
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=float(self.cfg.dt),
@@ -1021,7 +1147,9 @@ class NeuralPlanner(BasePlanner):
         poses = self.robot.compute_batch_fk(
             qpos=retimed_positions, name=control_part, to_matrix=True
         )
-        success = success & retimed.success.to(success.device)
+        native_success = success.clone()
+        solver_success = retimed.success.to(success.device)
+        success = success & solver_success
         success = success & self._retimed_is_executable(
             retimed_positions, retimed.dt, qpos_limits
         )
@@ -1035,7 +1163,7 @@ class NeuralPlanner(BasePlanner):
             valid_lengths=retimed_lengths,
         )
         success = success & (arrivals >= 0).all(dim=1)
-        return PlanResult(
+        result = PlanResult(
             success=success,
             positions=retimed_positions,
             velocities=retimed.velocities,
@@ -1050,6 +1178,36 @@ class NeuralPlanner(BasePlanner):
                 else None
             ),
         )
+
+        if constraints is not None:
+            sample_valid = (
+                torch.arange(retimed_positions.shape[1], device=self.device)[None]
+                < retimed_lengths[:, None]
+            )
+            timing_valid = torch.isfinite(retimed.dt).all(-1) & (retimed.dt >= 0).all(
+                -1
+            )
+            for field, name in (
+                (retimed.velocities, "velocity"),
+                (retimed.accelerations, "acceleration"),
+            ):
+                cap = torch.as_tensor(
+                    constraints[name], device=field.device, dtype=field.dtype
+                )
+                valid = torch.isfinite(field) & (field.abs() <= cap * (1 + 1e-5))
+                timing_valid &= (valid.all(-1) | ~sample_valid).all(-1)
+            geometry_valid = (arrivals >= 0).all(dim=1)
+            result.success = result.success & timing_valid & geometry_valid
+            result.motion_validation = {
+                "native_task_complete": native_success,
+                "retime_solved": solver_success,
+                "retimed_geometry_passed": geometry_valid,
+                "timing_valid": timing_valid,
+                "sampled_bounds_and_clock_valid": self._retimed_is_executable(
+                    retimed_positions, retimed.dt, qpos_limits
+                ),
+            }
+        return result
 
     def _retimed_is_executable(
         self,
@@ -1306,6 +1464,8 @@ class NeuralPlanner(BasePlanner):
         joint_mask: torch.Tensor,
         active_idx: torch.Tensor,
         last_action: torch.Tensor,
+        *,
+        motion_limit_blocks: Mapping[str, torch.Tensor] | None = None,
     ) -> torch.Tensor:
         b = joint_pos.shape[0]
         active_idx_clamped = torch.clamp(active_idx, max=self._num_waypoints - 1)
@@ -1375,6 +1535,10 @@ class NeuralPlanner(BasePlanner):
                 getattr(self, "_joint_periodic_features", False),
             ),
         )
+        if getattr(self, "_motion_limit_tokens", False):
+            if motion_limit_blocks is None:
+                raise ValueError("Motion-limit observation requires a resolved request")
+            obs_blocks.update(motion_limit_blocks)
         obs = layout.concatenate(obs_blocks)
         if obs.shape[-1] != self._obs_dim:
             raise ValueError(
