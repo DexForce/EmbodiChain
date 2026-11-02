@@ -466,7 +466,10 @@ def test_compute_fk_rejects_named_qpos_for_serial_chain():
 
 
 @pytest.mark.no_sim
-def test_get_parent_joint_chain_returns_backend_neutral_child_to_root_values():
+@pytest.mark.parametrize("array_limits", [False, True])
+def test_get_parent_joint_chain_returns_backend_neutral_child_to_root_values(
+    array_limits: bool,
+) -> None:
     articulation = object.__new__(Articulation)
     articulation._data = SimpleNamespace(link_names=["body", "door", "door_handle"])
     fixed_origin = torch.eye(4).numpy()
@@ -477,8 +480,8 @@ def test_get_parent_joint_chain_returns_backend_neutral_child_to_root_values():
         child_link_name="door_handle",
         origin_pose=fixed_origin,
         axis=torch.zeros(3).numpy(),
-        lower_limit=0.0,
-        upper_limit=0.0,
+        lower_limit=np.asarray([0.0], dtype=np.float32) if array_limits else 0.0,
+        upper_limit=np.asarray([0.0], dtype=np.float32) if array_limits else 0.0,
     )
     hinge = SimpleNamespace(
         name="door_hinge",
@@ -487,8 +490,8 @@ def test_get_parent_joint_chain_returns_backend_neutral_child_to_root_values():
         child_link_name="door",
         origin_pose=torch.eye(4).numpy(),
         axis=torch.tensor([0.0, 0.0, 1.0]).numpy(),
-        lower_limit=0.0,
-        upper_limit=2.0,
+        lower_limit=np.asarray([0.0], dtype=np.float32) if array_limits else 0.0,
+        upper_limit=np.asarray([2.0], dtype=np.float32) if array_limits else 2.0,
     )
     joint_infos = {fixed.name: fixed, hinge.name: hinge}
 

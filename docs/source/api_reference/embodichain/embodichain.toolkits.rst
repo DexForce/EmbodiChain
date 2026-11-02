@@ -97,6 +97,23 @@ Contact-aperture bounds, grasp algorithm, collision policy and annotation/cache
 policy have separate owners. Internal candidates use the canonical contact
 frame; public pose outputs use the geometry's declared runtime TCP.
 
+Its optional region selector filters an empty region's qualified fallback pool
+before cost ranking and top-K. It returns a subset and ranking center, not new
+poses, and cannot bypass collision qualification. This capability belongs to
+the Antipodal generator, not the generic grasp-service contract.
+
+.. autoclass:: GraspRegionSelector
+   :members:
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.pose_generator
+
+.. autosummary::
+   :nosignatures:
+
+   GraspRegionSelector
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp
+
 .. autosummary::
    :nosignatures:
 
@@ -105,6 +122,7 @@ frame; public pose outputs use the geometry's declared runtime TCP.
    ParallelJawGripperModelCfg
    AntipodalGraspPoseGenerator
    AntipodalGraspPoseGeneratorCfg
+   GraspRegionSelector
    ParallelJawGraspCollisionCfg
    GraspAnnotationCfg
    FixedGripperCollisionGeometry

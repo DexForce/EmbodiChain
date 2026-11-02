@@ -1,0 +1,32 @@
+policy_id: dual_arm_trajectory_open_loop_v1
+preset_id: trajectory
+
+requires:
+  embodiment_contract: dual_arm_parallel_gripper
+
+motion:
+  strategy: ik_interp
+  sample_count: 120
+  dynamic_collision_mode: "off"
+
+tracking:
+  kind: timed
+
+recovery:
+  max_replans: 2
+  max_action_retries: 2
+  goal_translation_threshold: 0.05
+  # Generated antipodal objects may roll in place while remaining inside the
+  # gripper's translational capture range. Translation remains the invalidation
+  # authority for this open-loop profile.
+  goal_rotation_threshold: 3.2
+
+workflow_recovery:
+  max_recovery_attempts: 0
+
+runner:
+  minimum_cycle_time: 0.0
+  hold_on_completion: false
+  hold_during_effect_verification: false
+
+effect_assurance: projected

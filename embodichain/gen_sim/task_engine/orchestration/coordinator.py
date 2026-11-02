@@ -1,0 +1,522 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Task-owned preparation ending at the canonical Task Program boundary."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass, replace
+import json
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .._task_program.physical_inputs import FrozenPhysicalInput
+
+from embodichain.gen_sim.task_engine import (
+    TaskAgent,
+    TaskCandidateSet,
+    validate_scene_output_separation,
+    validate_task_candidate_set,
+)
+from embodichain.gen_sim.task_engine.semantic_graph import (
+    SemanticTaskGraph,
+    semantic_task_graph_hash,
+)
+from embodichain.gen_sim.task_engine.semantic_planner import (
+    SemanticTaskPlanner,
+    UnsupportedSemanticCapabilityError,
+)
+from embodichain.gen_sim.task_engine.task_program_bundle import (
+    TaskProgramBundlePaths,
+    generate_task_program_bundle,
+)
+from .._task_program.policy_selection import select_manipulation_policy
+
+from .artifacts import (
+    ArtifactTransaction,
+    TaskEngineArtifactPaths,
+    task_engine_artifact_paths,
+    write_preparation_failure,
+    write_task_engine_artifacts,
+)
+from .scene_adapter import SceneAdaptation, SceneAdapter
+from .scene_source import SceneSourceRef
+
+__all__ = ["PreparationResult", "TaskEngineCoordinator"]
+
+_PREPARATION_FAILURE_SCHEMA = "semantic_task_preparation_failure/v1"
+
+
+@dataclass(frozen=True, slots=True)
+class PreparationResult:
+    """Published result of one Task -> Scene -> Semantic Skill preparation."""
+
+    status: str
+    output_dir: Path
+    candidate_set: TaskCandidateSet
+    adaptation: SceneAdaptation
+    artifacts: TaskEngineArtifactPaths
+    semantic_task_graph: SemanticTaskGraph | None = None
+    generated_paths: TaskProgramBundlePaths | None = None
+    planning_attempts: tuple[dict[str, Any], ...] = ()
+
+    @property
+    def bound(self) -> bool:
+        """Return whether a fingerprint-bound Task Program bundle was published."""
+        return self.status == "bound"
+
+    @property
+    def selected_candidate_id(self) -> str | None:
+        """Return the selected candidate identity, if one was bound."""
+        return self.adaptation.selected_candidate_id
+
+
+class TaskEngineCoordinator:
+    """Interpret and bind tasks without owning physical action construction."""
+
+    def __init__(
+        self,
+        *,
+        task_agent: TaskAgent | None = None,
+        scene_adapter: SceneAdapter | None = None,
+        semantic_planner: SemanticTaskPlanner | None = None,
+    ) -> None:
+        self.task_agent = task_agent or TaskAgent()
+        self.scene_adapter = scene_adapter or SceneAdapter()
+        self.semantic_planner = semantic_planner or SemanticTaskPlanner()
+
+    def prepare(
+        self,
+        task_id: str,
+        instruction: str,
+        source: SceneSourceRef | str | Path,
+        output_dir: str | Path,
+        *,
+        model: str | None = None,
+        candidate_count: int = 3,
+        overwrite: bool = False,
+        planning_mode: str = "offline",
+        max_episodes: int | None = None,
+        max_episode_steps: int | None = None,
+        fit_grasp_assets: bool = False,
+        twist_mass_source: bool = False,
+        runtime_profile: str = "default",
+        experimental_open_release: bool | None = None,
+        native_pick_exploration: bool = False,
+        press_extra_distance: float | None = None,
+        candidate_set: TaskCandidateSet | Mapping[str, Any] | None = None,
+        force_most_likely: bool = False,
+        final_inspection: Mapping[str, Any] | None = None,
+        physical_input: FrozenPhysicalInput | None = None,
+    ) -> PreparationResult:
+        """Publish a graph and configured Task Program as one transaction.
+
+        Robot part routing, action options, grounding, physical effects, and
+        command execution remain owned by the selected Task Program integration.
+        """
+        from ..experiment_policy import validate_profile
+
+        validate_profile(runtime_profile)
+        from .._task_program.press_binding import validate_extra_press_distance
+
+        validate_extra_press_distance(press_extra_distance)
+        if (
+            experimental_open_release is not None
+            and type(experimental_open_release) is not bool
+        ):
+            raise TypeError("experimental_open_release must be a boolean or None.")
+        normalized_source = self._coerce_source(source)
+        from ..experiment_policy import validate_native_pick_exploration
+
+        validate_native_pick_exploration(
+            native_pick_exploration, normalized_source.robot_profile
+        )
+        selected_physical = physical_input or getattr(
+            self.scene_adapter, "physical_input", None
+        )
+        if selected_physical is not None:
+            if native_pick_exploration:
+                raise ValueError(
+                    "Selected physical input forbids native_pick_exploration."
+                )
+            selected_physical.assert_unchanged()
+            output = Path(output_dir).expanduser().resolve()
+            inputs = [Path(name).resolve() for name in selected_physical.input_files]
+            references = [
+                item.parent
+                for item in inputs
+                if item.name == "task_program_deployment.yaml"
+            ]
+            if any(item.is_relative_to(output) for item in inputs) or any(
+                output.is_relative_to(root) for root in references
+            ):
+                raise ValueError("Selected physical input and output must not overlap.")
+            if fit_grasp_assets or twist_mass_source:
+                raise ValueError("Selected physical input forbids physical adaptation.")
+            for name, value in (
+                ("max_episodes", max_episodes),
+                ("max_episode_steps", max_episode_steps),
+            ):
+                if value is not None and value != selected_physical.deployment[name]:
+                    raise ValueError(f"Selected physical input owns {name}.")
+            if final_inspection is None:
+                from ..scene.final_inspection import inspect_final_scene
+
+                final_inspection = inspect_final_scene(
+                    selected_physical.scene,
+                    revision_id=selected_physical.physical_digest,
+                )
+        validate_scene_output_separation(normalized_source.path, output_dir)
+        with ArtifactTransaction(output_dir, overwrite=overwrite) as transaction:
+            staging = transaction.staging_dir
+            assert staging is not None
+            if candidate_set is None:
+                normalized_candidates = self.task_agent.generate(
+                    task_id,
+                    instruction,
+                    model=model,
+                    candidate_count=candidate_count,
+                )
+            else:
+                normalized_candidates = validate_task_candidate_set(candidate_set)
+                if normalized_candidates["task_id"] != str(task_id).strip():
+                    raise ValueError("TaskCandidateSet.task_id must match task_id.")
+                if normalized_candidates["instruction"] != str(instruction).strip():
+                    raise ValueError(
+                        "TaskCandidateSet.instruction must match instruction."
+                    )
+            from ..task_spec import task_spec_from_candidate
+
+            specifications = {
+                candidate["candidate_id"]: task_spec_from_candidate(candidate)
+                for candidate in normalized_candidates["candidates"]
+            }
+
+            adaptation_kwargs: dict[str, Any] = {"force_most_likely": force_most_likely}
+            if final_inspection is not None:
+                adaptation_kwargs["final_inspection"] = final_inspection
+            if selected_physical is not None:
+                adaptation_kwargs["physical_input"] = selected_physical
+            adaptation = self.scene_adapter.adapt(
+                normalized_candidates,
+                normalized_source,
+                **adaptation_kwargs,
+            )
+            status = str(adaptation.binding_report["status"])
+            self._write_audit_artifacts(
+                staging,
+                candidate_set=normalized_candidates,
+                adaptation=adaptation,
+                final_inspection=final_inspection,
+            )
+            if status != "bound":
+                published = transaction.commit()
+                return PreparationResult(
+                    status=status,
+                    output_dir=published,
+                    candidate_set=deepcopy(normalized_candidates),
+                    adaptation=adaptation,
+                    artifacts=task_engine_artifact_paths(published),
+                )
+
+            selected = adaptation.selected_candidate
+            role_bindings = adaptation.role_bindings
+            if selected is None or role_bindings is None:
+                raise ValueError(
+                    "A bound SceneAdaptation must include a selected candidate and "
+                    "RoleBindings."
+                )
+            planning_attempt = {
+                "candidate_id": str(selected["candidate_id"]),
+                "planner_route": str(planning_mode),
+                "status": "running",
+            }
+            planning_attempts = []
+            try:
+                planner = self.semantic_planner
+                from ..robot_profiles import _NEW_PROFILES, _profile_lateral_positions
+
+                robot_profile = str(adaptation.scene_manifest["robot_profile"])
+                lateral_positions = _profile_lateral_positions(
+                    robot_profile,
+                    (
+                        adaptation.physical_input.embodiment
+                        if robot_profile in _NEW_PROFILES
+                        and adaptation.physical_input is not None
+                        else None
+                    ),
+                )
+                if runtime_profile != "default" or lateral_positions is not None:
+                    from copy import copy
+
+                    planner = copy(planner)
+                if runtime_profile != "default":
+                    planner.reuse_pour_resource = True
+                if lateral_positions is not None:
+                    planner.resource_lateral_positions = lateral_positions
+                alternatives = sorted(
+                    (
+                        item
+                        for item in normalized_candidates["candidates"]
+                        if item["candidate_id"] != selected["candidate_id"]
+                        and item["candidate_id"] in adaptation.candidate_bindings
+                    ),
+                    key=lambda item: -int(item["vote_count"]),
+                )
+                for candidate in [selected, *alternatives]:
+                    candidate_id = str(candidate["candidate_id"])
+                    bindings = adaptation.candidate_bindings.get(candidate_id)
+                    if bindings is None:
+                        bindings = role_bindings
+                    planning_attempt = {
+                        "candidate_id": candidate_id,
+                        "planner_route": str(planning_mode),
+                        "status": "running",
+                    }
+                    planning_attempts.append(planning_attempt)
+                    try:
+                        plan = planner.plan_spec(
+                            candidate,
+                            bindings,
+                            adaptation.prepared_scene.planner_objects,
+                            task_spec=specifications[candidate_id],
+                            planner_route=planning_mode,
+                        )
+                    except (
+                        TypeError,
+                        ValueError,
+                        UnsupportedSemanticCapabilityError,
+                    ) as exc:
+                        planning_attempt.update(
+                            status="failed", error=_error_record(exc)
+                        )
+                        last_error = exc
+                        continue
+                    if candidate_id != selected["candidate_id"]:
+                        report = deepcopy(adaptation.binding_report)
+                        report.update(
+                            selected_candidate_id=candidate_id,
+                            selection_reason="preflight_bindable_fallback",
+                        )
+                        adaptation = replace(
+                            adaptation,
+                            selected_candidate=deepcopy(candidate),
+                            role_bindings=deepcopy(bindings),
+                            binding_report=report,
+                        )
+                        selected = candidate
+                        self._write_audit_artifacts(
+                            staging,
+                            candidate_set=normalized_candidates,
+                            adaptation=adaptation,
+                            final_inspection=final_inspection,
+                        )
+                    break
+                else:
+                    raise last_error
+                graph = plan.graph
+
+                is_twist = any(node["task_type"] == "E8" for node in graph["nodes"])
+                height = (
+                    0.001 if is_twist and adaptation.physical_input is None else None
+                )
+                extra = {"twist_support_lift_m": height} if height is not None else {}
+                if runtime_profile != "default":
+                    extra["runtime_profile"] = runtime_profile
+                if experimental_open_release is not None:
+                    extra["experimental_open_release"] = experimental_open_release
+                if native_pick_exploration:
+                    extra["native_pick_exploration"] = True
+                if press_extra_distance is not None:
+                    extra["press_extra_distance"] = press_extra_distance
+                if twist_mass_source:
+                    extra["twist_mass_source"] = True
+                if str(adaptation.scene_manifest["robot_profile"]) in {
+                    "dual_franka",
+                    "dual_franka_robotiq_arg2f_140",
+                }:
+                    selection = select_manipulation_policy(
+                        graph,
+                        plan.candidate,
+                        adaptation.prepared_scene,
+                        runtime_profile=runtime_profile,
+                    )
+                    extra.update(selection)
+                    (staging / "manipulation_policy_selection.json").write_text(
+                        json.dumps(
+                            {
+                                "schema_version": "gen_sim.manipulation-policy-selection/v1",
+                                "source": "typed_unconstrained_rigid_inside_recipe",
+                                "selected_calls": selection,
+                                "physical_input_modified": False,
+                            },
+                            indent=2,
+                            ensure_ascii=False,
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                if any(n["task_type"] == "E3" for n in graph["nodes"]):
+                    from .._task_program.pour_continuation import (
+                        supports_ordinary_pour,
+                    )
+
+                    if supports_ordinary_pour(graph, plan.candidate):
+                        extra["pour_geometry_revision"] = (
+                            2 if runtime_profile != "default" else 1
+                        )
+                        if runtime_profile != "default":
+                            extra["pour_proxy_position_tolerance_m"] = 0.02
+                graph, generated = generate_task_program_bundle(
+                    graph,
+                    adaptation.physical_input or adaptation.prepared_scene,
+                    staging,
+                    robot_profile=str(adaptation.scene_manifest["robot_profile"]),
+                    max_episodes=max_episodes,
+                    max_episode_steps=max_episode_steps,
+                    fit_grasp_assets=fit_grasp_assets,
+                    verify_pick_phases=True,
+                    task_spec=plan.task_spec,
+                    task_candidate=plan.candidate,
+                    role_bindings=plan.role_bindings,
+                    step_lineage=plan.lineage,
+                    **extra,
+                )
+            except (TypeError, ValueError, UnsupportedSemanticCapabilityError) as exc:
+                planning_attempt["status"] = "failed"
+                planning_attempt["error"] = _error_record(exc)
+                if not planning_attempts:
+                    planning_attempts.append(planning_attempt)
+                write_preparation_failure(
+                    staging,
+                    {
+                        "schema_version": _PREPARATION_FAILURE_SCHEMA,
+                        "task_id": str(normalized_candidates["task_id"]),
+                        "status": "unsupported_semantic_capability",
+                        "selected_candidate_id": str(selected["candidate_id"]),
+                        "attempts": deepcopy(planning_attempts),
+                    },
+                )
+                published = transaction.commit()
+                return PreparationResult(
+                    status="planning_failed",
+                    output_dir=published,
+                    candidate_set=deepcopy(normalized_candidates),
+                    adaptation=adaptation,
+                    artifacts=task_engine_artifact_paths(published),
+                    planning_attempts=tuple(deepcopy(planning_attempts)),
+                )
+
+            planning_attempt.update(
+                {
+                    "status": "preflight_succeeded",
+                    "semantic_task_graph_hash": semantic_task_graph_hash(graph),
+                    "semantic_call_count": len(graph["nodes"]),
+                    "integration_fingerprint": graph["integration_fingerprint"],
+                    "task_spec_semantic_hash": plan.task_spec.semantic_hash,
+                    "semantic_graph_validation": "semantic_graph_validation.json",
+                }
+            )
+            _write_json(
+                staging / "planner_report.json",
+                {**planning_attempt, "attempts": planning_attempts},
+            )
+            self._write_selected_candidate_artifacts(staging, selected)
+            published = transaction.commit()
+            return PreparationResult(
+                status="bound",
+                output_dir=published,
+                candidate_set=deepcopy(normalized_candidates),
+                adaptation=adaptation,
+                artifacts=task_engine_artifact_paths(published),
+                semantic_task_graph=deepcopy(graph),
+                generated_paths=_published_paths(generated, published),
+                planning_attempts=tuple(deepcopy(planning_attempts)),
+            )
+
+    def _coerce_source(self, source: SceneSourceRef | str | Path) -> SceneSourceRef:
+        if isinstance(source, SceneSourceRef):
+            return source
+        return SceneSourceRef(
+            source,
+            robot_profile=self.scene_adapter.robot_profile,
+        )
+
+    @staticmethod
+    def _write_audit_artifacts(
+        output_dir: Path,
+        *,
+        candidate_set: TaskCandidateSet,
+        adaptation: SceneAdaptation,
+        final_inspection: Mapping[str, Any] | None,
+    ) -> None:
+        write_task_engine_artifacts(
+            output_dir,
+            candidate_set=candidate_set,
+            scene_manifest=(
+                adaptation.scene_manifest
+                if adaptation.binding_report["status"] == "bound"
+                else None
+            ),
+            role_bindings=adaptation.role_bindings,
+            binding_report=adaptation.binding_report,
+            static_scene_manifest=adaptation.static_scene_manifest,
+            conservative_scene_graph=adaptation.conservative_scene_graph,
+            final_scene_inspection=final_inspection,
+        )
+
+    @staticmethod
+    def _write_selected_candidate_artifacts(
+        output_dir: Path,
+        selected: Mapping[str, Any],
+    ) -> None:
+        _write_json(output_dir / "task_draft.json", selected["draft"])
+        _write_json(output_dir / "scene_request.json", selected["scene_request"])
+        _write_json(output_dir / "success_spec.json", selected["success_spec"])
+
+
+def _published_paths(
+    paths: TaskProgramBundlePaths,
+    published: Path,
+) -> TaskProgramBundlePaths:
+    def target(path: Path) -> Path:
+        return published / path.relative_to(paths.root)
+
+    return TaskProgramBundlePaths(
+        root=published,
+        deployment=target(paths.deployment),
+        program=target(paths.program),
+        integration=target(paths.integration),
+        scene=target(paths.scene),
+        embodiment=target(paths.embodiment),
+        execution_policy=target(paths.execution_policy),
+        semantic_task_graph=target(paths.semantic_task_graph),
+        integration_fingerprint=target(paths.integration_fingerprint),
+    )
+
+
+def _write_json(path: Path, value: Any) -> None:
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _error_record(error: Exception) -> dict[str, str]:
+    return {"type": type(error).__name__, "message": str(error)}

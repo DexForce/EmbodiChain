@@ -37,6 +37,7 @@ __all__ = [
     "GripperCollisionCfg",
     "GripperCollisionChecker",
     "GraspPoseGenerator",
+    "GraspRegionSelector",
     "ParallelJawGraspPoseGenerator",
     "ParallelJawGraspCollisionCfg",
     "ParallelJawGripperModelCfg",

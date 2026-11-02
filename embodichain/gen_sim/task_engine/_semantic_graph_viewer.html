@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:; img-src data: blob:; media-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>GenSim · Task Graph</title>
+<style>__VIEWER_STYLE__</style>
+</head>
+<body>
+<!-- ISC License
+
+Copyright (c) 2026 Lucide Icons and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+- --
+
+The following Lucide icons are derived from the Feather project:
+
+airplay, alert-circle, alert-octagon, alert-triangle, aperture, arrow-down-circle, arrow-down-left, arrow-down-right, arrow-down, arrow-left-circle, arrow-left, arrow-right-circle, arrow-right, arrow-up-circle, arrow-up-left, arrow-up-right, arrow-up, at-sign, calendar, cast, check, chevron-down, chevron-left, chevron-right, chevron-up, chevrons-down, chevrons-left, chevrons-right, chevrons-up, circle, clipboard, clock, code, columns, command, compass, corner-down-left, corner-down-right, corner-left-down, corner-left-up, corner-right-down, corner-right-up, corner-up-left, corner-up-right, crosshair, database, divide-circle, divide-square, dollar-sign, download, external-link, feather, frown, hash, headphones, help-circle, info, italic, key, layout, life-buoy, link-2, link, loader, lock, log-in, log-out, maximize, meh, minimize, minimize-2, minus-circle, minus-square, minus, monitor, moon, more-horizontal, more-vertical, move, music, navigation-2, navigation, octagon, pause-circle, percent, plus-circle, plus-square, plus, power, radio, rss, search, server, share, shopping-bag, sidebar, smartphone, smile, square, table-2, tablet, target, terminal, trash-2, trash, triangle, tv, type, upload, x-circle, x-octagon, x-square, x, zoom-in, zoom-out
+
+The MIT License (MIT) (for the icons listed above)
+
+Copyright (c) 2013-present Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="i-Workflow" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/></symbol><symbol id="i-Box" viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></symbol><symbol id="i-Timer" viewBox="0 0 24 24"><line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/></symbol><symbol id="i-CircleCheck" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol><symbol id="i-CircleAlert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol><symbol id="i-CircleX" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol><symbol id="i-Clock3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6h4"/></symbol><symbol id="i-Layers" viewBox="0 0 24 24"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></symbol><symbol id="i-GitBranch" viewBox="0 0 24 24"><path d="M15 6a9 9 0 0 0-9 9V3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></symbol><symbol id="i-Cpu" viewBox="0 0 24 24"><path d="M12 20v2"/><path d="M12 2v2"/><path d="M17 20v2"/><path d="M17 2v2"/><path d="M2 12h2"/><path d="M2 17h2"/><path d="M2 7h2"/><path d="M20 12h2"/><path d="M20 17h2"/><path d="M20 7h2"/><path d="M7 20v2"/><path d="M7 2v2"/><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8" y="8" width="8" height="8" rx="1"/></symbol><symbol id="i-Hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></symbol><symbol id="i-Coffee" viewBox="0 0 24 24"><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/></symbol><symbol id="i-Bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol><symbol id="i-Move" viewBox="0 0 24 24"><path d="M12 2v20"/><path d="m15 19-3 3-3-3"/><path d="m19 9 3 3-3 3"/><path d="M2 12h20"/><path d="m5 9-3 3 3 3"/><path d="m9 5 3-3 3 3"/></symbol><symbol id="i-ArrowDownToLine" viewBox="0 0 24 24"><path d="M12 17V3"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></symbol><symbol id="i-ArrowUpFromLine" viewBox="0 0 24 24"><path d="m18 9-6-6-6 6"/><path d="M12 3v14"/><path d="M5 21h14"/></symbol><symbol id="i-Undo2" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol><symbol id="i-ZoomIn" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/></symbol><symbol id="i-ZoomOut" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="8" x2="14" y1="11" y2="11"/></symbol><symbol id="i-Maximize" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></symbol><symbol id="i-Search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></symbol><symbol id="i-ChevronRight" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol><symbol id="i-X" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol><symbol id="i-FileJson" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1"/><path d="M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1"/></symbol><symbol id="i-Download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol><symbol id="i-PanelRightClose" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/></symbol><symbol id="i-ExternalLink" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol><symbol id="i-Image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></symbol><symbol id="i-ShieldCheck" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol><symbol id="i-ShieldAlert" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol><symbol id="i-ListTree" viewBox="0 0 24 24"><path d="M8 5h13"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="M3 10a2 2 0 0 0 2 2h3"/><path d="M3 5v12a2 2 0 0 0 2 2h3"/></symbol><symbol id="i-Play" viewBox="0 0 24 24"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></symbol><symbol id="i-Check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol><symbol id="i-ArrowRight" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol><symbol id="i-Eye" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol><symbol id="i-RotateCcw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol><symbol id="i-SlidersHorizontal" viewBox="0 0 24 24"><path d="M10 5H3"/><path d="M12 19H3"/><path d="M14 3v4"/><path d="M16 17v4"/><path d="M21 12h-9"/><path d="M21 19h-5"/><path d="M21 5h-7"/><path d="M8 10v4"/><path d="M8 12H3"/></symbol></defs></svg>
+<header class="topbar">
+  <a class="brand" href="#"><svg class="icon"><use href="#i-Workflow"/></svg><span>GenSim</span></a>
+  <div class="breadcrumb"><span data-i18n="graph">任务语义图</span><svg class="icon"><use href="#i-ChevronRight"/></svg><strong id="breadcrumb-task"></strong></div>
+  <div class="header-tools">
+    <span id="archive-label" class="archive-label"></span>
+    <div class="languages" role="group" data-aria="language"><button data-language="zh" aria-pressed="true" lang="zh-CN">中</button><button data-language="en" aria-pressed="false" lang="en">EN</button></div>
+    <button id="overview" class="icon-button" data-title="identity"><svg class="icon"><use href="#i-FileJson"/></svg></button>
+  </div>
+</header>
+<section class="run-heading">
+  <div class="run-title"><div><span class="eyebrow">GENSIM / TASK ENGINE</span><h1 id="task-title"></h1></div><div id="run-status" class="status-line"></div></div>
+  <details id="instruction-expand" open><summary class="mobile-only" data-i18n="instructionLabel">任务指令</summary><p id="instruction"></p></details>
+  <span id="translation-status" class="caption"></span>
+  <details id="original-instruction"><summary data-i18n="originalInstruction">原始指令</summary><p id="original-instruction-text"></p></details>
+  <div id="run-meta" class="run-meta"></div>
+</section>
+<section id="metrics" class="metrics" data-aria="summary"></section>
+<main class="workspace">
+  <div class="main-pane">
+    <section class="asset-band"><div class="section-head"><h2><span class="section-number">01</span><span data-i18n="assets">关联资产</span></h2><span class="section-note" id="asset-count"></span></div><div id="assets" class="assets"></div></section>
+    <section class="graph-section">
+      <div class="section-head"><h2><span class="section-number">02</span><span data-i18n="dependencies">执行依赖</span></h2><span class="section-note" id="visibility"></span></div>
+      <div class="graph-bar">
+        <div class="segmented" role="group" data-aria="graphView"><button id="mode-groups" aria-pressed="true"><svg class="icon"><use href="#i-GitBranch"/></svg><span data-i18n="stages">阶段</span></button><button id="mode-calls" aria-pressed="false"><svg class="icon"><use href="#i-ListTree"/></svg><span data-i18n="calls">调用</span></button></div>
+        <label class="search"><svg class="icon"><use href="#i-Search"/></svg><input id="search" type="search" data-placeholder="search" data-aria="search"></label>
+        <select id="environment" data-aria="environment"></select>
+        <select id="status-filter" data-aria="statusFilter"><option value="all" data-i18n="allStates">全部状态</option><option value="succeeded" data-i18n="passed">通过</option><option value="failed" data-i18n="failed">失败</option><option value="unknown" data-i18n="unknown">未验证</option></select>
+        <div class="graph-tools"><button id="zoom-out" class="icon-button" data-title="zoomOut"><svg class="icon"><use href="#i-ZoomOut"/></svg></button><output id="zoom">100%</output><button id="zoom-in" class="icon-button" data-title="zoomIn"><svg class="icon"><use href="#i-ZoomIn"/></svg></button><button id="fit" class="icon-button" data-title="fit"><svg class="icon"><use href="#i-Maximize"/></svg></button><button id="reset" class="icon-button" data-title="reset"><svg class="icon"><use href="#i-RotateCcw"/></svg></button><span class="divider"></span><button id="export-svg" class="icon-button" data-title="exportSvg"><svg class="icon"><use href="#i-Download"/></svg></button><button id="export-json" class="icon-button" data-title="exportJson"><svg class="icon"><use href="#i-FileJson"/></svg></button></div>
+      </div>
+      <div class="canvas-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" data-aria="dependencyGraph"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9" fill="none" stroke="#3C5E86" stroke-width="1.5"/></marker></defs><g id="world"><g id="lanes"></g><g id="edges"></g><g id="nodes"></g></g></svg></div>
+      <div class="graph-legend"><span><i></i><span data-i18n="dependency">依赖关系</span></span><span><i class="selected-line"></i><span data-i18n="selection">当前选择</span></span><span class="legend-note" data-i18n="orderNote">依赖顺序，不是等比例时间轴</span></div>
+    </section>
+    <section class="goals"><div class="section-head"><h2><span class="section-number">03</span><span data-i18n="finalGoals">终态目标</span></h2><span id="goal-summary" class="section-note"></span></div><div id="goal-list" class="goal-list"></div></section>
+  </div>
+  <aside id="inspector" class="inspector" data-aria="inspector">
+    <div class="inspector-top"><span class="eyebrow" data-i18n="inspector">证据详情</span><button id="close-detail" class="icon-button mobile-only" data-title="close"><svg class="icon"><use href="#i-X"/></svg></button><svg class="icon desktop-only"><use href="#i-SlidersHorizontal"/></svg></div>
+    <div id="detail"></div>
+    <section id="recording" class="recording"><div class="section-head"><h3 data-i18n="recording">运行记录</h3><a id="video-link" target="_blank" rel="noopener" data-title="openVideo"><svg class="icon"><use href="#i-ExternalLink"/></svg></a></div><video id="video" controls preload="metadata" playsinline data-aria="recording"></video><p id="recording-caption" class="caption"></p></section>
+  </aside>
+</main>
+<footer><span id="identity"></span><button id="provenance" data-i18n="identity">运行身份与原始数据</button><span data-i18n="unchanged">原始图与验收数据保持不变</span></footer>
+<dialog id="asset-dialog"><div class="modal-head"><h2 id="modal-title"></h2><button id="modal-close" class="icon-button" data-title="close"><svg class="icon"><use href="#i-X"/></svg></button></div><div class="segmented media-tabs"><button id="asset-render" data-i18n="render" aria-pressed="true">GLB 渲染</button><button id="asset-cutout" data-i18n="cutout" aria-pressed="false">源图裁切</button></div><img id="modal-image" alt=""><p id="modal-source" class="caption"></p></dialog>
+<script id="graph-data" type="application/json">__GRAPH_DATA__</script>
+<script id="font-license-data" type="application/json">__FONT_LICENSES__</script>
+<script>__VIEWER_SCRIPT__</script>
+</body>
+</html>

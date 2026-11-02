@@ -40,7 +40,10 @@ segment lifecycle completes normally.
 Sequential segments reuse one static workflow analysis per uninterrupted
 sequential stretch; parallel barriers stop this reuse across branches. Each
 executed call still grounds from a fresh observation and checks compiler/catalog
-ownership. Runtime results capture an append-only history prefix and materialize
+ownership. Cached analysis indices are separate from execution occurrence IDs:
+grounding receives the segment workflow and local call identity before creating
+effect specs, guards and gates. Recovery calls keep an independent namespace.
+Runtime results capture an append-only history prefix and materialize
 independent history tuples when read or serialized, keeping history copying out
 of status-only control steps. Synchronous observer or clock failures abort through
 the runner's cancel-then-hold boundary and retain any safe-stop failure details.
@@ -97,6 +100,13 @@ integration must provide exactly one matching lowerer factory and fingerprint
 its call ID, revision, and target Atomic Skill descriptor. Use this extension
 to expose shared Atomic Skills; do not place task-local motion generators in a
 lowerer.
+
+Registered held effects remain terminal-only unless the lowerer explicitly
+declares an acquisition boundary and retention segments. The canonical compiler
+then binds the existing pre-motion gate and planned-effect holding guard to that
+effect's exact expectation and resource; missing verified monitoring is rejected.
+Only one phased held relation is supported per registered call. This does not
+infer phases from a skill name or certify other transport/release segments.
 
 ## MLLM boundary
 

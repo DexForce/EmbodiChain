@@ -1,0 +1,1681 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Parallel Task Engine workflow with bounded, fully audited recovery."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from copy import copy, deepcopy
+from dataclasses import dataclass
+from datetime import datetime
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+from time import perf_counter
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from ._task_program.physical_inputs import FrozenPhysicalInput
+
+from embodichain.gen_sim.task_engine.reporting import (
+    EXECUTION_REPORT_FILENAME,
+    validate_execution_report,
+)
+from embodichain.utils.utility import load_config
+
+from .agent import TaskAgent
+from .config import (
+    TaskEngineExecutionCfg,
+    TaskEnginePlanningCfg,
+    TaskEngineWorkflowCfg,
+    load_task_engine_config,
+)
+from .contracts import canonical_hash
+from .orchestration.artifacts import ArtifactTransaction
+from .orchestration.coordinator import PreparationResult, TaskEngineCoordinator
+from .orchestration.scene_adapter import (
+    SceneAdapter,
+    SceneAdapterProtocolError,
+)
+from .orchestration.scene_source import SceneSourceRef
+from .semantic_planner import UnsupportedSemanticCapabilityError
+from .scene_backend import (
+    SceneAnalysis,
+    SceneEngineBackend,
+    SceneRevision,
+)
+from .state_machine import (
+    TaskEngineState,
+    WorkflowStage,
+    complete_stage,
+    fail_stage,
+    initial_state,
+    start_stage,
+)
+from .workflow_contracts import TaskRunRequest, validate_task_run_request
+
+__all__ = [
+    "TASK_ENGINE_RUN_MANIFEST_SCHEMA",
+    "ActionExecutor",
+    "SubprocessActionExecutor",
+    "TaskEngineRunResult",
+    "TaskEngineWorkflow",
+]
+
+TASK_ENGINE_RUN_MANIFEST_SCHEMA: Final = "embodichain.task-engine-run/v1"
+ActionExecutor = Callable[..., Mapping[str, Any]]
+
+
+@dataclass(frozen=True)
+class TaskEngineRunResult:
+    """Published outcome of one isolated cross-engine workflow run."""
+
+    status: str
+    output_dir: Path
+    manifest_path: Path
+    state_path: Path
+    final_bundle: Path | None
+    failure_class: str | None = None
+
+    @property
+    def succeeded(self) -> bool:
+        """Return whether real simulator execution met the configured policy."""
+        return self.status == "succeeded"
+
+
+class SubprocessActionExecutor:
+    """Execute a prepared bundle through Task Engine's private runner."""
+
+    def __call__(
+        self,
+        bundle: str | Path,
+        output_root: str | Path,
+        *,
+        seed: int,
+        num_envs: int,
+        dataset_saving: bool = False,
+        failure_policy: str = "stop",
+        open_window: bool = False,
+        acceptance_mode: str = "strict",
+    ) -> Mapping[str, Any]:
+        """Execute one task, isolating E8 resource retries from physical results.
+
+        Args:
+            bundle: Prepared Task Program bundle.
+            output_root: Fresh logical execution directory.
+            seed: Simulator random seed, unchanged on resource retries.
+            num_envs: Number of vectorized scene replicas.
+            dataset_saving: Whether to enable the Gym dataset recorder.
+            failure_policy: Whether failed dependencies stop downstream execution.
+            open_window: Whether to open the native execution window.
+
+        Returns:
+            Validated physical report from a non-interrupted execution.
+        """
+        if failure_policy not in {"stop", "continue"}:
+            raise ValueError("failure_policy must be 'stop' or 'continue'.")
+        if not isinstance(open_window, bool):
+            raise TypeError("open_window must be a boolean.")
+        acceptance_options = (
+            {"acceptance_mode": acceptance_mode} if acceptance_mode != "strict" else {}
+        )
+        from .orchestration.execution_resources import _is_twist_bundle
+
+        bundle_root = Path(bundle).expanduser().resolve()
+        if not _is_twist_bundle(bundle_root):
+            return self._execute(
+                bundle,
+                output_root,
+                seed=seed,
+                num_envs=num_envs,
+                dataset_saving=dataset_saving,
+                failure_policy=failure_policy,
+                open_window=open_window,
+                **acceptance_options,
+            )
+        from .orchestration.execution_resources import (
+            ResourceAdmissionError,
+            ResourceInterruptionError,
+            wait_for_competitors,
+        )
+
+        output = Path(output_root).expanduser().resolve()
+        output.mkdir(parents=True, exist_ok=False)
+        attempts = []
+        for index in range(1, 4):
+            execution = output / "resource_attempts" / f"attempt_{index:04d}"
+            try:
+                report = self._execute(
+                    bundle_root,
+                    execution,
+                    seed=seed,
+                    num_envs=num_envs,
+                    dataset_saving=dataset_saving,
+                    failure_policy=failure_policy,
+                    open_window=open_window,
+                    **acceptance_options,
+                )
+            except ResourceAdmissionError as error:
+                attempts.append(
+                    {
+                        "attempt": index,
+                        "status": "resource_not_admitted",
+                        "receipt": str(error.receipt_path),
+                        "reason": error.reason,
+                    }
+                )
+                _write_json(output / "resource_attempts.json", attempts)
+                raise
+            except ResourceInterruptionError as error:
+                attempts.append(
+                    {
+                        "attempt": index,
+                        "status": "resource_interrupted",
+                        "receipt": str(error.receipt_path),
+                    }
+                )
+                _write_json(output / "resource_attempts.json", attempts)
+                if index == 3:
+                    raise
+                wait_for_competitors(error)
+                continue
+            attempts.append(
+                {
+                    "attempt": index,
+                    "status": "completed",
+                    "report_status": report["status"],
+                    "execution_root": str(execution),
+                }
+            )
+            _write_json(output / "resource_attempts.json", attempts)
+            _write_json(
+                output / "execution_selection.json",
+                {"selected_execution_root": str(execution), "resource_attempt": index},
+            )
+            for path in execution.iterdir():
+                if path.is_file():
+                    shutil.copy2(path, output / path.name)
+            if (execution / "videos").is_dir():
+                shutil.copytree(execution / "videos", output / "videos")
+            return report
+        raise RuntimeError("E8 resource attempt loop ended without a report.")
+
+    def _execute(
+        self,
+        bundle: str | Path,
+        output_root: str | Path,
+        *,
+        seed: int,
+        num_envs: int,
+        dataset_saving: bool = False,
+        failure_policy: str = "stop",
+        open_window: bool = False,
+        acceptance_mode: str = "strict",
+    ) -> Mapping[str, Any]:
+        """Run one simulator attempt and preserve its report and trajectory.
+
+        Args:
+            bundle: Prepared Task Program bundle.
+            output_root: Fresh directory for this execution attempt.
+            seed: Simulator random seed.
+            num_envs: Number of vectorized scene replicas.
+            dataset_saving: Whether to enable the Gym project's dataset recorder.
+            failure_policy: Must be ``"stop"``; diagnostic continuation is unsupported.
+            open_window: Whether to open the native DexSim execution window.
+
+        Returns:
+            Validated Task Program execution report.
+        """
+        bundle_root = Path(bundle).expanduser().resolve()
+        attempt_root = Path(output_root).expanduser().resolve()
+        if failure_policy != "stop":
+            raise ValueError(
+                "Only failure_policy='stop' is supported; diagnostic continuation is unavailable."
+            )
+        if not isinstance(open_window, bool):
+            raise TypeError("open_window must be a boolean.")
+        attempt_root.mkdir(parents=True, exist_ok=False)
+        command = [
+            sys.executable,
+            "-u",
+            "-m",
+            "embodichain.gen_sim.task_engine._bundle_runner",
+            "--bundle",
+            bundle_root.as_posix(),
+            "--execution-output",
+            attempt_root.as_posix(),
+            "--num_envs",
+            str(num_envs),
+            "--seed",
+            str(seed),
+        ]
+        if not open_window:
+            command.extend(
+                [
+                    "--headless",
+                    "--renderer",
+                    _headless_renderer_for_bundle(bundle_root),
+                ]
+            )
+        if not dataset_saving:
+            command.append("--filter_dataset_saving")
+        command.extend(["--failure-policy", failure_policy])
+        if acceptance_mode not in {"strict", "experiment"}:
+            raise ValueError("Unknown execution acceptance mode.")
+        if acceptance_mode != "strict":
+            command.extend(["--acceptance-mode", acceptance_mode])
+        log_path = attempt_root / "action.log"
+        print(
+            "[Task Engine] Starting "
+            f"{attempt_root.name}: seed={seed}, num_envs={num_envs}, "
+            f"dataset_saving={dataset_saving}, open_window={open_window}, "
+            f"failure_policy={failure_policy}",
+            flush=True,
+        )
+        from .orchestration.execution_resources import _is_twist_bundle
+
+        if _is_twist_bundle(bundle_root):
+            from .orchestration.execution_resources import run_e8_process
+
+            completed = run_e8_process(command, log_path, emit=_write_terminal_chunk)
+        else:
+            completed = _run_streaming_process(command, log_path)
+        print(
+            f"[Task Engine] Completed {attempt_root.name}: "
+            f"returncode={completed.returncode}",
+            flush=True,
+        )
+        report_path = attempt_root / EXECUTION_REPORT_FILENAME
+        process_record = {
+            "command": command,
+            "returncode": completed.returncode,
+            "combined_log": log_path.name,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+        }
+        _write_json(attempt_root / "process.json", process_record)
+        if not report_path.is_file():
+            raise RuntimeError(
+                "Task Program execution did not publish execution_report.json; "
+                f"returncode={completed.returncode}."
+            )
+        report = validate_execution_report(_read_json(report_path))
+        rejected_before_execution = (
+            report["status"] == "rejected"
+            and report["runtime_result"] is None
+            and all(
+                row["success"] is False
+                and row["terminal_reason"] == "initial_plan_rejected"
+                for row in report["environments"]
+            )
+        )
+        trajectory_copy = _copy_trajectory_record(report, attempt_root)
+        if (
+            report["semantic_call_count"] > 0
+            and trajectory_copy is None
+            and not rejected_before_execution
+        ):
+            raise RuntimeError(
+                "Task Program report did not expose a readable trajectory record."
+            )
+        _write_json(
+            attempt_root / "execution_attempt.json",
+            {
+                "seed": seed,
+                "num_envs": num_envs,
+                "dataset_saving": dataset_saving,
+                "failure_policy": failure_policy,
+                "returncode": completed.returncode,
+                "trajectory_copy": trajectory_copy,
+                "report": report,
+            },
+        )
+        return report
+
+
+def _run_streaming_process(
+    command: list[str],
+    log_path: str | Path,
+) -> subprocess.CompletedProcess[str]:
+    """Run a child while teeing its combined output to the terminal and disk.
+
+    Args:
+        command: Argument vector passed directly to the child process.
+        log_path: File receiving the exact combined stdout and stderr bytes.
+
+    Returns:
+        Completed process metadata with a decoded copy of the combined output.
+    """
+    resolved_log = Path(log_path).expanduser().resolve()
+    resolved_log.parent.mkdir(parents=True, exist_ok=True)
+    captured = bytearray()
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        with resolved_log.open("wb") as log_stream:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=0,
+            )
+            assert process.stdout is not None
+            while True:
+                chunk = process.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                captured.extend(chunk)
+                log_stream.write(chunk)
+                log_stream.flush()
+                _write_terminal_chunk(chunk)
+            returncode = process.wait()
+    except BaseException:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        raise
+    output = captured.decode("utf-8", errors="replace")
+    return subprocess.CompletedProcess(
+        args=command,
+        returncode=returncode,
+        stdout=output,
+        stderr="",
+    )
+
+
+def _headless_renderer_for_bundle(bundle: Path) -> str:
+    """Select the stable headless renderer for the bundle's interaction family.
+
+    Fast-RT currently hits a native ``OptiXMaterialMgr`` assertion while
+    importing some articulated E8 scenes.  Hybrid preserves the same physics
+    and recording contract while avoiding that renderer-only material path.
+    Other task families retain the historical fast-rt default.
+    """
+    program_path = bundle / "task_program/program.yaml"
+    if not program_path.is_file():
+        return "fast-rt"
+    program = load_config(program_path)
+    items = program.get("program", {}).get("items", ())
+    for item in items:
+        call = item.get("steps", {}).get("call", {})
+        if call.get("call_id") == "gen_sim.twist" or call.get("call_id", "").startswith(
+            "gen_sim.twist."
+        ):
+            return "hybrid"
+    return "fast-rt"
+
+
+def _write_terminal_chunk(chunk: bytes) -> None:
+    """Best-effort write of raw child output to the parent terminal."""
+    try:
+        stream = getattr(sys.stdout, "buffer", None)
+        if stream is not None:
+            stream.write(chunk)
+            stream.flush()
+            return
+        sys.stdout.write(chunk.decode("utf-8", errors="replace"))
+        sys.stdout.flush()
+    except (BrokenPipeError, OSError, ValueError):
+        return
+
+
+class TaskEngineWorkflow:
+    """Run Scene and Action work concurrently under Task Engine ownership."""
+
+    def __init__(
+        self,
+        *,
+        task_agent: TaskAgent | None = None,
+        scene_adapter: SceneAdapter | None = None,
+        coordinator: TaskEngineCoordinator | None = None,
+        scene_backend: SceneEngineBackend | None = None,
+        action_executor: ActionExecutor | None = None,
+    ) -> None:
+        self.task_agent = task_agent or TaskAgent()
+        self.scene_adapter = scene_adapter or SceneAdapter()
+        self._owns_coordinator = coordinator is None
+        self.coordinator = coordinator or TaskEngineCoordinator(
+            task_agent=self.task_agent,
+            scene_adapter=self.scene_adapter,
+        )
+        self.scene_backend = scene_backend or SceneEngineBackend()
+        self.action_executor = action_executor or SubprocessActionExecutor()
+
+    def run(
+        self,
+        request: TaskRunRequest | Mapping[str, Any],
+        *,
+        workflow_cfg: TaskEngineWorkflowCfg | None = None,
+        planning_cfg: TaskEnginePlanningCfg | None = None,
+        execution_cfg: TaskEngineExecutionCfg | None = None,
+        config_path: str | Path | None = None,
+        model: str | None = None,
+        base_seed: int = 0,
+        dataset_saving: bool = False,
+        failure_policy: str = "stop",
+        open_window: bool = False,
+        run_id: str | None = None,
+        created_at: datetime | None = None,
+        overwrite: bool = False,
+        execute: bool = True,
+    ) -> TaskEngineRunResult:
+        """Run all stages and publish success only after simulator acceptance.
+
+        Args:
+            request: One of the four image/project plus optional-edit inputs.
+            workflow_cfg: Optional retry and concurrency configuration.
+            planning_cfg: Optional interpretation and bundle generation defaults.
+            execution_cfg: Optional vectorized success policy.
+            config_path: YAML used for omitted workflow or execution config.
+            model: Optional Task and grounding model override.
+            base_seed: First audited scene and action attempt seed.
+            dataset_saving: Whether Action attempts may initialize dataset recording.
+            failure_policy: Must be ``"stop"``; diagnostic continuation is unsupported.
+            open_window: Whether simulator attempts open the native DexSim window.
+            run_id: Optional externally allocated run identifier.
+            created_at: Optional timezone-aware run creation timestamp.
+            overwrite: Whether to atomically replace an existing run directory.
+            execute: Whether to execute the prepared bundle in the simulator.
+
+        Returns:
+            Published run status, manifest, state audit, and final bundle path.
+        """
+        started_at = perf_counter()
+        normalized = validate_task_run_request(request)
+        if not isinstance(dataset_saving, bool):
+            raise TypeError("dataset_saving must be a boolean.")
+        if not isinstance(open_window, bool):
+            raise TypeError("open_window must be a boolean.")
+        if failure_policy != "stop":
+            raise ValueError(
+                "Only failure_policy='stop' is supported; diagnostic continuation is unavailable."
+            )
+        if workflow_cfg is None or planning_cfg is None or execution_cfg is None:
+            loaded_workflow, loaded_planning, loaded_execution = (
+                load_task_engine_config(config_path)
+            )
+            workflow_cfg = workflow_cfg or loaded_workflow
+            planning_cfg = planning_cfg or loaded_planning
+            execution_cfg = execution_cfg or loaded_execution
+        if planning_cfg.native_pick_exploration:
+            from .experiment_policy import validate_native_pick_exploration
+
+            validate_native_pick_exploration(True, self.scene_adapter.robot_profile)
+            if execute and execution_cfg.acceptance_mode != "experiment":
+                raise ValueError(
+                    "Native Pick exploration requires experiment acceptance mode."
+                )
+        effective_candidate_count = planning_cfg.candidate_count
+        effective_run_id = str(run_id or Path(normalized["output_dir"]).name).strip()
+        if not effective_run_id or Path(effective_run_id).name != effective_run_id:
+            raise ValueError("run_id must be one non-empty path component.")
+        effective_created_at = created_at or datetime.now().astimezone()
+        if (
+            effective_created_at.tzinfo is None
+            or effective_created_at.utcoffset() is None
+        ):
+            raise ValueError("created_at must include a timezone.")
+        run_metadata = {
+            "_started_at": started_at,
+            "_display_model": model,
+            "run_id": effective_run_id,
+            "created_at": effective_created_at.isoformat(),
+            "dataset_saving": bool(dataset_saving),
+            "failure_policy": str(failure_policy),
+        }
+        state = initial_state(normalized)
+        attempts: list[dict[str, Any]] = []
+        output_dir = Path(normalized["output_dir"])
+        physical_input = None
+        physical_selection = None
+        if planning_cfg.physical_reference is not None:
+            physical_input, physical_selection = _load_physical_reference(
+                normalized, planning_cfg, self.scene_adapter.robot_profile
+            )
+
+        with ArtifactTransaction(output_dir, overwrite=overwrite) as transaction:
+            staging = transaction.staging_dir
+            assert staging is not None
+            # Keep audit ownership local to this run, including early binding failures.
+            scene_adapter = copy(self.scene_adapter)
+            scene_adapter.audit_dir = staging / "binding_audit"
+            if physical_input is not None:
+                scene_adapter.physical_input = physical_input
+                _write_json(
+                    staging / "selected_physical_input.json", physical_selection
+                )
+            coordinator = self.coordinator
+            if self._owns_coordinator:
+                coordinator = copy(coordinator)
+                coordinator.scene_adapter = scene_adapter
+            analysis_root = staging / "scene_analysis"
+            state = start_stage(state, WorkflowStage.TASK_CANDIDATES)
+            state = start_stage(state, WorkflowStage.SCENE_PREPARATION)
+            with ThreadPoolExecutor(
+                max_workers=workflow_cfg.max_parallel_workers,
+                thread_name_prefix="task-engine-input",
+            ) as executor:
+                candidate_future = executor.submit(
+                    self.task_agent.generate,
+                    normalized["task_id"],
+                    normalized["task_instruction"],
+                    model,
+                    effective_candidate_count,
+                )
+                analysis_future = executor.submit(
+                    self.scene_backend.analyze,
+                    normalized,
+                    analysis_root,
+                )
+                try:
+                    candidate_set = candidate_future.result()
+                    _write_json(staging / "task_candidate_set.json", candidate_set)
+                except Exception as exc:
+                    analysis_future.cancel()
+                    # A running worker can still write to staging after cancellation.
+                    # Finish its writes before publishing or cleaning that directory.
+                    try:
+                        analysis_future.result()
+                    except Exception:
+                        pass
+                    state = fail_stage(
+                        state,
+                        WorkflowStage.TASK_CANDIDATES,
+                        reason=str(exc),
+                    )
+                    return self._publish(
+                        transaction,
+                        staging,
+                        normalized,
+                        workflow_cfg,
+                        planning_cfg,
+                        execution_cfg,
+                        run_metadata,
+                        state,
+                        attempts,
+                        status="failed",
+                        failure_class="task_generation",
+                    )
+                state = complete_stage(state, WorkflowStage.TASK_CANDIDATES)
+                try:
+                    analysis = analysis_future.result()
+                except Exception as exc:
+                    state = fail_stage(
+                        state,
+                        WorkflowStage.SCENE_PREPARATION,
+                        reason=str(exc),
+                    )
+                    return self._publish(
+                        transaction,
+                        staging,
+                        normalized,
+                        workflow_cfg,
+                        planning_cfg,
+                        execution_cfg,
+                        run_metadata,
+                        state,
+                        attempts,
+                        status="failed",
+                        failure_class="scene_analysis",
+                    )
+            state = complete_stage(state, WorkflowStage.SCENE_PREPARATION)
+            _write_json(
+                staging / "binding_audit" / "source.json",
+                {
+                    "source": analysis.source.as_posix(),
+                    "source_config_sha256": (
+                        analysis.source_fingerprint.config_sha256
+                        if analysis.source_fingerprint is not None
+                        else None
+                    ),
+                    "source_fingerprint": (
+                        analysis.source_fingerprint.to_dict()
+                        if analysis.source_fingerprint is not None
+                        else None
+                    ),
+                },
+            )
+
+            state = start_stage(state, WorkflowStage.CANDIDATE_SELECTION)
+            try:
+                selection = self.scene_backend.select(
+                    analysis,
+                    candidate_set,
+                    scene_adapter,
+                    force_most_likely=False,
+                )
+            except SceneAdapterProtocolError as exc:
+                state = fail_stage(
+                    state,
+                    WorkflowStage.CANDIDATE_SELECTION,
+                    reason=str(exc),
+                )
+                return self._publish(
+                    transaction,
+                    staging,
+                    normalized,
+                    workflow_cfg,
+                    planning_cfg,
+                    execution_cfg,
+                    run_metadata,
+                    state,
+                    attempts,
+                    status="failed",
+                    failure_class="candidate_selection",
+                )
+            except Exception as exc:
+                state = fail_stage(
+                    state,
+                    WorkflowStage.CANDIDATE_SELECTION,
+                    reason=str(exc),
+                )
+                return self._publish(
+                    transaction,
+                    staging,
+                    normalized,
+                    workflow_cfg,
+                    planning_cfg,
+                    execution_cfg,
+                    run_metadata,
+                    state,
+                    attempts,
+                    status="failed",
+                    failure_class="internal_error",
+                )
+            _write_json(
+                staging / "initial_binding_report.json", selection.binding_report
+            )
+            if selection.selected_candidate is None:
+                state = fail_stage(
+                    state,
+                    WorkflowStage.CANDIDATE_SELECTION,
+                    reason=str(selection.binding_report["selection_reason"]),
+                )
+                return self._publish(
+                    transaction,
+                    staging,
+                    normalized,
+                    workflow_cfg,
+                    planning_cfg,
+                    execution_cfg,
+                    run_metadata,
+                    state,
+                    attempts,
+                    status="input_conflict",
+                    failure_class="unbound_scene_reference",
+                )
+            state = complete_stage(state, WorkflowStage.CANDIDATE_SELECTION)
+
+            state = start_stage(state, WorkflowStage.UNBOUND_ACTION)
+            state = start_stage(state, WorkflowStage.SCENE_FINALIZATION)
+
+            unbound_plan: Mapping[str, Any] | None = None
+            unbound_error: Exception | None = None
+            scene_error: Exception | None = None
+            inspection_error = False
+            preparation_error: Exception | None = None
+            preparation: PreparationResult | None = None
+            scene_attempt_limit = 1
+            for scene_index in range(1, scene_attempt_limit + 1):
+                inspection_error = False
+                scene_seed = int(base_seed) + scene_index - 1
+                attempt_root = staging / "attempts" / f"scene_{scene_index:04d}"
+                attempt_root.mkdir(parents=True)
+                attempt = {
+                    "scene_attempt": scene_index,
+                    "scene_seed": scene_seed,
+                    "status": "running",
+                    "scene_revision": None,
+                    "final_inspection": None,
+                    "unbound_action_plan": None,
+                    "final_unbound_action_plan": None,
+                    "unbound_transition": None,
+                    "preparation": None,
+                    "planning_attempts": [],
+                    "action_attempts": [],
+                    "parallel_errors": [],
+                    "error": None,
+                }
+                attempts.append(attempt)
+                revision: SceneRevision | None = None
+                try:
+                    if unbound_plan is None:
+                        try:
+                            unbound_plan = _semantic_draft(selection.selected_candidate)
+                        except (TypeError, ValueError) as exc:
+                            unbound_error = exc
+                    try:
+                        scene_error = None
+                        revision = self.scene_backend.materialize(
+                            analysis,
+                            normalized,
+                            attempt_root / "scene_revision",
+                            seed=scene_seed,
+                        )
+                    except Exception as exc:
+                        scene_error = exc
+                    if unbound_error is not None:
+                        raise unbound_error
+                    if state.stages[WorkflowStage.UNBOUND_ACTION].value == "running":
+                        state = complete_stage(state, WorkflowStage.UNBOUND_ACTION)
+                    if scene_error is not None:
+                        raise scene_error
+                    scene_error = None
+                except Exception as exc:
+                    if revision is not None:
+                        attempt["scene_revision"] = _revision_record(revision)
+                        state = _complete_materialized_scene(
+                            state,
+                            has_edit=normalized["scene_edit_prompt"] is not None,
+                        )
+                    if unbound_error is not None:
+                        attempt["status"] = "unbound_action_failed"
+                        attempt["error"] = _error_record(unbound_error)
+                        if scene_error is not None:
+                            attempt["parallel_errors"].append(
+                                {
+                                    "branch": "scene",
+                                    **_error_record(scene_error),
+                                }
+                            )
+                        _write_json(attempt_root / "attempt.json", attempt)
+                        break
+                    scene_error = exc
+                    if unbound_plan is not None:
+                        attempt["unbound_action_plan"] = deepcopy(dict(unbound_plan))
+                        _write_json(
+                            attempt_root / "unbound_action_plan.json", unbound_plan
+                        )
+                    attempt["status"] = "scene_failed"
+                    attempt["error"] = _error_record(exc)
+                    _write_json(attempt_root / "attempt.json", attempt)
+                    break
+
+                attempt["scene_revision"] = _revision_record(revision)
+                attempt["unbound_action_plan"] = deepcopy(dict(unbound_plan))
+                _write_json(attempt_root / "unbound_action_plan.json", unbound_plan)
+                state = _complete_materialized_scene(
+                    state,
+                    has_edit=normalized["scene_edit_prompt"] is not None,
+                )
+                if state.stages[WorkflowStage.FINAL_INSPECTION].value == "pending":
+                    state = start_stage(state, WorkflowStage.FINAL_INSPECTION)
+                try:
+                    if physical_input is None:
+                        final_inspection = self.scene_backend.inspect(
+                            revision,
+                            attempt_root / "final_scene_inspection.json",
+                        )
+                    else:
+                        from .scene.final_inspection import inspect_final_scene
+
+                        physical_input.assert_unchanged()
+                        final_inspection = inspect_final_scene(
+                            physical_input.scene,
+                            revision_id=physical_input.physical_digest,
+                        )
+                        _write_json(
+                            attempt_root / "final_scene_inspection.json",
+                            final_inspection,
+                        )
+                except Exception as exc:
+                    scene_error = exc
+                    inspection_error = True
+                    attempt["status"] = "scene_inspection_failed"
+                    attempt["error"] = _error_record(exc)
+                    _write_json(attempt_root / "attempt.json", attempt)
+                    break
+                attempt["final_inspection"] = deepcopy(dict(final_inspection))
+                if state.stages[WorkflowStage.FINAL_INSPECTION].value == "running":
+                    state = complete_stage(state, WorkflowStage.FINAL_INSPECTION)
+
+                bundle_root = attempt_root / "bundle"
+                try:
+                    preparation = coordinator.prepare(
+                        normalized["task_id"],
+                        normalized["task_instruction"],
+                        SceneSourceRef(
+                            revision.source,
+                            robot_profile=self.scene_adapter.robot_profile,
+                        ),
+                        bundle_root,
+                        model=model,
+                        candidate_count=effective_candidate_count,
+                        planning_mode=planning_cfg.planning_mode,
+                        max_episodes=planning_cfg.max_episodes,
+                        max_episode_steps=planning_cfg.max_episode_steps,
+                        fit_grasp_assets=planning_cfg.fit_grasp_assets,
+                        **(
+                            {"twist_mass_source": True}
+                            if planning_cfg.twist_mass_source
+                            else {}
+                        ),
+                        **(
+                            {"physical_input": physical_input}
+                            if physical_input is not None
+                            else {}
+                        ),
+                        **(
+                            {"runtime_profile": planning_cfg.runtime_profile}
+                            if planning_cfg.runtime_profile != "default"
+                            else {}
+                        ),
+                        **(
+                            {
+                                "experimental_open_release": planning_cfg.experimental_open_release
+                            }
+                            if planning_cfg.experimental_open_release is not None
+                            else {}
+                        ),
+                        candidate_set=candidate_set,
+                        **(
+                            {"native_pick_exploration": True}
+                            if planning_cfg.native_pick_exploration
+                            else {}
+                        ),
+                        **(
+                            {"press_extra_distance": planning_cfg.press_extra_distance}
+                            if planning_cfg.press_extra_distance is not None
+                            else {}
+                        ),
+                        force_most_likely=False,
+                        final_inspection=final_inspection,
+                    )
+                except Exception as exc:
+                    preparation_error = exc
+                    attempt["status"] = "preparation_error"
+                    attempt["error"] = _error_record(exc)
+                    _write_json(attempt_root / "attempt.json", attempt)
+                    break
+                attempt["preparation"] = preparation.status
+                attempt["planning_attempts"] = deepcopy(
+                    list(preparation.planning_attempts)
+                )
+                if preparation.status == "bound":
+                    attempt["status"] = "prepared"
+                    _write_json(attempt_root / "attempt.json", attempt)
+                    break
+                attempt["status"] = "preparation_failed"
+                attempt["error"] = {
+                    "type": "PreparationFailure",
+                    "message": preparation.status,
+                }
+                _write_json(attempt_root / "attempt.json", attempt)
+
+            if preparation is None or preparation.status != "bound":
+                failure_class = (
+                    "action_capability"
+                    if unbound_error is not None
+                    or isinstance(preparation_error, UnsupportedSemanticCapabilityError)
+                    else (
+                        "preparation_error"
+                        if preparation_error is not None
+                        else _preparation_failure_class(
+                            preparation,
+                            scene_error=scene_error,
+                            analysis=analysis,
+                            request=normalized,
+                        )
+                    )
+                )
+                failed_stage = (
+                    WorkflowStage.FINAL_INSPECTION
+                    if inspection_error
+                    else (
+                        WorkflowStage.UNBOUND_ACTION
+                        if unbound_error is not None
+                        else _failure_stage(failure_class, normalized)
+                    )
+                )
+                if state.stages[failed_stage].value in {
+                    "pending",
+                    "running",
+                    "succeeded",
+                }:
+                    state = fail_stage(
+                        state,
+                        failed_stage,
+                        reason=(
+                            str(unbound_error)
+                            if unbound_error is not None
+                            else (
+                                str(preparation_error)
+                                if preparation_error is not None
+                                else (
+                                    str(scene_error)
+                                    if scene_error is not None
+                                    else (
+                                        preparation.status
+                                        if preparation is not None
+                                        else failure_class
+                                    )
+                                )
+                            )
+                        ),
+                    )
+                return self._publish(
+                    transaction,
+                    staging,
+                    normalized,
+                    workflow_cfg,
+                    planning_cfg,
+                    execution_cfg,
+                    run_metadata,
+                    state,
+                    attempts,
+                    status=(
+                        "input_conflict"
+                        if failure_class == "input_conflict"
+                        else "failed"
+                    ),
+                    failure_class=failure_class,
+                )
+
+            final_candidate_id = preparation.selected_candidate_id
+            if not isinstance(final_candidate_id, str) or not final_candidate_id:
+                raise ValueError(
+                    "A bound preparation must select one non-empty candidate ID."
+                )
+            final_candidate = next(
+                item
+                for item in candidate_set["candidates"]
+                if item["candidate_id"] == final_candidate_id
+            )
+            # Reuse the specification consumed during planning; do not regenerate
+            # a second normative identity after final binding.
+            prepared_spec_path = preparation.output_dir / "task_spec.json"
+            if not prepared_spec_path.is_file():
+                _write_json(
+                    staging / "task_spec_error.json",
+                    {
+                        "error_type": "legacy_bundle_without_task_spec",
+                        "message": "No normative companion was provided by preparation.",
+                    },
+                )
+            else:
+                _write_json(staging / "task_spec.json", _read_json(prepared_spec_path))
+            selected_attempt = attempts[-1]
+            final_unbound = _semantic_draft(final_candidate)
+            selected_attempt["final_unbound_action_plan"] = deepcopy(
+                dict(final_unbound)
+            )
+            selected_attempt["unbound_transition"] = {
+                "initial_candidate_id": str(unbound_plan["candidate_id"]),
+                "initial_hash": canonical_hash(unbound_plan),
+                "final_candidate_id": final_candidate_id,
+                "final_hash": canonical_hash(final_unbound),
+                "changed": final_unbound != unbound_plan,
+            }
+            _write_json(
+                preparation.output_dir.parent / "final_unbound_action_plan.json",
+                final_unbound,
+            )
+            _write_json(
+                preparation.output_dir.parent / "attempt.json",
+                selected_attempt,
+            )
+
+            for stage in (
+                WorkflowStage.FINAL_BINDING,
+                WorkflowStage.STATIC_FEASIBILITY,
+                WorkflowStage.GROUNDED_ACTION,
+            ):
+                state = start_stage(state, stage)
+                state = complete_stage(state, stage)
+            if not execute:
+                final_root = staging / "final"
+                final_bundle = final_root / "bundle"
+                final_root.mkdir()
+                shutil.copytree(preparation.output_dir, final_bundle)
+                selected_attempt["status"] = "prepared"
+                _write_json(
+                    preparation.output_dir.parent / "attempt.json",
+                    selected_attempt,
+                )
+                _write_json(
+                    final_root / "selection.json",
+                    {
+                        "scene_attempt": selected_attempt["scene_attempt"],
+                        "candidate_id": final_candidate_id,
+                        "action_attempt": None,
+                        "execution_report": None,
+                    },
+                )
+                return self._publish(
+                    transaction,
+                    staging,
+                    normalized,
+                    workflow_cfg,
+                    planning_cfg,
+                    execution_cfg,
+                    run_metadata,
+                    state,
+                    attempts,
+                    status="prepared",
+                    failure_class=None,
+                    final_bundle=final_bundle,
+                )
+            state = start_stage(state, WorkflowStage.EXECUTION)
+            scene_attempt_root = preparation.output_dir.parent
+
+            successful_report: Mapping[str, Any] | None = None
+            successful_action_root: Path | None = None
+            successful_action_index: int | None = None
+            execution_failure_class = "action_execution"
+            success_terms = _bundle_success_terms(preparation.output_dir)
+            for action_index in range(1, workflow_cfg.max_action_attempts + 1):
+                action_seed = int(base_seed) + action_index - 1
+                action_root = (
+                    scene_attempt_root
+                    / "action_attempts"
+                    / f"action_{action_index:04d}"
+                )
+                action_record: dict[str, Any] = {
+                    "action_attempt": action_index,
+                    "seed": action_seed,
+                    "status": "running",
+                    "successful_environments": 0,
+                    "required_successes": execution_cfg.required_successes,
+                    "error": None,
+                }
+                try:
+                    execution_options = {
+                        "seed": action_seed,
+                        "num_envs": execution_cfg.num_envs,
+                        "dataset_saving": bool(dataset_saving),
+                        "failure_policy": failure_policy,
+                    }
+                    if execution_cfg.acceptance_mode != "strict":
+                        execution_options["acceptance_mode"] = (
+                            execution_cfg.acceptance_mode
+                        )
+                    if open_window:
+                        execution_options["open_window"] = True
+                    report = self.action_executor(
+                        preparation.output_dir, action_root, **execution_options
+                    )
+                    successes = _environment_successes(
+                        report,
+                        required_semantic_steps=success_terms,
+                        bundle=preparation.output_dir,
+                        acceptance_mode=execution_cfg.acceptance_mode,
+                    )
+                    if len(successes) != execution_cfg.num_envs:
+                        raise ValueError(
+                            "Execution report environment count does not match "
+                            "TaskEngineExecutionCfg.num_envs."
+                        )
+                    action_record["successful_environments"] = sum(successes)
+                    accepted = (
+                        str(report.get("status")) not in {"rejected", "aborted"}
+                        and sum(successes) >= execution_cfg.required_successes
+                    )
+                    action_record["status"] = "succeeded" if accepted else "failed"
+                    _write_json(action_root / "task_engine_attempt.json", action_record)
+                    selected_attempt["action_attempts"].append(deepcopy(action_record))
+                    if accepted:
+                        successful_report = deepcopy(dict(report))
+                        successful_action_root = action_root
+                        successful_action_index = action_index
+                        break
+                except Exception as exc:
+                    action_record["status"] = "failed"
+                    action_record["error"] = _error_record(exc)
+                    from .orchestration.execution_resources import (
+                        ResourceAdmissionError,
+                        ResourceInterruptionError,
+                    )
+
+                    resource_interrupted = isinstance(
+                        exc, (ResourceInterruptionError, ResourceAdmissionError)
+                    )
+                    if resource_interrupted:
+                        action_record["status"] = (
+                            "resource_not_admitted"
+                            if isinstance(exc, ResourceAdmissionError)
+                            else "resource_interrupted"
+                        )
+                        execution_failure_class = "execution_resources"
+                    action_root.mkdir(parents=True, exist_ok=True)
+                    _write_json(action_root / "task_engine_attempt.json", action_record)
+                    selected_attempt["action_attempts"].append(deepcopy(action_record))
+                    if resource_interrupted:
+                        break
+                _write_json(scene_attempt_root / "attempt.json", selected_attempt)
+
+            if successful_report is None:
+                selected_attempt["status"] = "execution_failed"
+                _write_json(scene_attempt_root / "attempt.json", selected_attempt)
+                state = fail_stage(
+                    state,
+                    WorkflowStage.EXECUTION,
+                    reason=(
+                        "E8 execution could not satisfy the available-memory policy."
+                        if execution_failure_class == "execution_resources"
+                        else "All bounded Task Program execution attempts failed."
+                    ),
+                )
+                return self._publish(
+                    transaction,
+                    staging,
+                    normalized,
+                    workflow_cfg,
+                    planning_cfg,
+                    execution_cfg,
+                    run_metadata,
+                    state,
+                    attempts,
+                    status="failed",
+                    failure_class=execution_failure_class,
+                )
+
+            selected_attempt["status"] = "succeeded"
+            _write_json(scene_attempt_root / "attempt.json", selected_attempt)
+            state = complete_stage(state, WorkflowStage.EXECUTION)
+            final_root = staging / "final"
+            final_bundle = final_root / "bundle"
+            final_root.mkdir()
+            shutil.copytree(preparation.output_dir, final_bundle)
+            _write_json(
+                final_root / "selection.json",
+                {
+                    "scene_attempt": selected_attempt["scene_attempt"],
+                    "candidate_id": final_candidate_id,
+                    "action_attempt": successful_action_index,
+                    "execution_report": successful_report,
+                    "success_spec_steps": list(success_terms),
+                },
+            )
+            return self._publish(
+                transaction,
+                staging,
+                normalized,
+                workflow_cfg,
+                planning_cfg,
+                execution_cfg,
+                run_metadata,
+                state,
+                attempts,
+                status="succeeded",
+                failure_class=None,
+                final_bundle=final_bundle,
+            )
+
+    @staticmethod
+    def _publish(
+        transaction: ArtifactTransaction,
+        staging: Path,
+        request: Mapping[str, Any],
+        workflow_cfg: TaskEngineWorkflowCfg,
+        planning_cfg: TaskEnginePlanningCfg,
+        execution_cfg: TaskEngineExecutionCfg,
+        run_metadata: Mapping[str, Any],
+        state: TaskEngineState,
+        attempts: Sequence[Mapping[str, Any]],
+        *,
+        status: str,
+        failure_class: str | None,
+        final_bundle: Path | None = None,
+    ) -> TaskEngineRunResult:
+        state_path = staging / "workflow_state.json"
+        manifest_path = staging / "run_manifest.json"
+        task_spec_path = staging / "task_spec.json"
+        task_spec_manifest = None
+        if task_spec_path.is_file():
+            task_spec = _read_json(task_spec_path)
+            if isinstance(task_spec, Mapping):
+                task_spec_manifest = {
+                    "path": task_spec_path.name,
+                    "semantic_hash": task_spec.get("semantic_hash"),
+                    "bundle_companions": (
+                        None
+                        if final_bundle is None
+                        else {
+                            "task_spec": (final_bundle / "task_spec.json")
+                            .relative_to(staging)
+                            .as_posix(),
+                            "coverage": (
+                                final_bundle / "semantic_graph_validation.json"
+                            )
+                            .relative_to(staging)
+                            .as_posix(),
+                            "html": (final_bundle / "semantic_graph.html")
+                            .relative_to(staging)
+                            .as_posix(),
+                        }
+                    ),
+                }
+        _write_json(state_path, state.to_dict())
+        _write_json(
+            manifest_path,
+            {
+                "schema_version": TASK_ENGINE_RUN_MANIFEST_SCHEMA,
+                "run_id": run_metadata["run_id"],
+                "created_at": run_metadata["created_at"],
+                "output_root": Path(request["output_dir"]).parent.as_posix(),
+                "run_dir": Path(request["output_dir"]).as_posix(),
+                "status": status,
+                "failure_class": failure_class,
+                "task_spec": task_spec_manifest,
+                "request": deepcopy(dict(request)),
+                "configuration": {
+                    "workflow": {
+                        "max_parallel_workers": workflow_cfg.max_parallel_workers,
+                        "max_action_attempts": workflow_cfg.max_action_attempts,
+                    },
+                    "planning": {
+                        **(
+                            {"press_extra_distance": planning_cfg.press_extra_distance}
+                            if planning_cfg.press_extra_distance is not None
+                            else {}
+                        ),
+                        "candidate_count": planning_cfg.candidate_count,
+                        "planning_mode": planning_cfg.planning_mode,
+                        "max_episodes": planning_cfg.max_episodes,
+                        "max_episode_steps": planning_cfg.max_episode_steps,
+                        "fit_grasp_assets": planning_cfg.fit_grasp_assets,
+                        **(
+                            {"physical_reference": planning_cfg.physical_reference}
+                            if planning_cfg.physical_reference is not None
+                            else {}
+                        ),
+                        **(
+                            {"runtime_profile": planning_cfg.runtime_profile}
+                            if planning_cfg.runtime_profile != "default"
+                            else {}
+                        ),
+                        **(
+                            {
+                                "experimental_open_release": planning_cfg.experimental_open_release
+                            }
+                            if planning_cfg.experimental_open_release is not None
+                            else {}
+                        ),
+                        **(
+                            {"native_pick_exploration": True}
+                            if planning_cfg.native_pick_exploration
+                            else {}
+                        ),
+                        **(
+                            {"twist_mass_source": True}
+                            if planning_cfg.twist_mass_source
+                            else {}
+                        ),
+                    },
+                    "execution": {
+                        "num_envs": execution_cfg.num_envs,
+                        "success_policy": execution_cfg.success_policy,
+                        "min_successful_envs": execution_cfg.min_successful_envs,
+                        **(
+                            {"acceptance_mode": execution_cfg.acceptance_mode}
+                            if execution_cfg.acceptance_mode != "strict"
+                            else {}
+                        ),
+                        "dataset_saving": bool(run_metadata["dataset_saving"]),
+                        "failure_policy": str(run_metadata["failure_policy"]),
+                    },
+                },
+                "attempts": deepcopy(list(attempts)),
+                "final_bundle": (
+                    None if final_bundle is None else final_bundle.as_posix()
+                ),
+            },
+        )
+        published = transaction.commit()
+
+        from .semantic_graph_html import _finalize_run_html
+
+        _finalize_run_html(
+            published,
+            bundle=None if final_bundle is None else published / "final" / "bundle",
+            translate=True,
+            model=run_metadata.get("_display_model"),
+            summary={
+                "task_id": request["task_id"],
+                "run_id": run_metadata["run_id"],
+                "created_at": run_metadata["created_at"],
+                "status": status,
+                "elapsed_seconds": round(
+                    perf_counter() - run_metadata["_started_at"], 3
+                ),
+                "elapsed_scope": "Workflow wall time through publication, excluding graph presentation",
+            },
+        )
+        return TaskEngineRunResult(
+            status=status,
+            output_dir=published,
+            manifest_path=published / manifest_path.name,
+            state_path=published / state_path.name,
+            final_bundle=(
+                None if final_bundle is None else published / "final" / "bundle"
+            ),
+            failure_class=failure_class,
+        )
+
+
+def _complete_materialized_scene(
+    state: TaskEngineState,
+    *,
+    has_edit: bool,
+) -> TaskEngineState:
+    if has_edit and state.stages[WorkflowStage.SCENE_EDIT].value == "running":
+        state = complete_stage(state, WorkflowStage.SCENE_EDIT)
+        state = start_stage(state, WorkflowStage.SCENE_FINALIZATION)
+    if state.stages[WorkflowStage.SCENE_FINALIZATION].value == "running":
+        state = complete_stage(state, WorkflowStage.SCENE_FINALIZATION)
+    return state
+
+
+def _load_physical_reference(
+    request: TaskRunRequest,
+    planning: TaskEnginePlanningCfg,
+    robot_profile: str,
+) -> tuple[FrozenPhysicalInput, dict[str, Any]]:
+    """Select and pin one explicit model before any model or grounding calls."""
+    from ._task_program.physical_inputs import load_frozen_physical_input
+    from .orchestration.source_scene import prepare_scene
+
+    if request["image_path"] is not None or request["scene_edit_prompt"] is not None:
+        raise ValueError("physical_reference requires an existing, unedited scene.")
+    reference = Path(planning.physical_reference).expanduser().resolve()
+    output = Path(request["output_dir"]).expanduser().resolve()
+    if reference.is_relative_to(output) or output.is_relative_to(reference):
+        raise ValueError("physical_reference and output must not overlap.")
+    source = prepare_scene(request["gym_project"])
+    physical = load_frozen_physical_input(
+        source, reference, robot_profile=robot_profile
+    )
+    for name in ("max_episodes", "max_episode_steps"):
+        if getattr(planning, name) != physical.deployment[name]:
+            raise ValueError(
+                f"physical_reference owns {name}; configure its exact value."
+            )
+    if planning.fit_grasp_assets or planning.twist_mass_source:
+        raise ValueError("physical_reference forbids physical adaptation.")
+    fields = ("init_pos", "init_rot", "init_local_pose", "body_scale", "attrs")
+
+    def objects(scene: Any) -> dict[str, Any]:
+        return {
+            item["uid"]: item
+            for item in (*scene.background, *scene.rigid_objects, *scene.articulations)
+        }
+
+    initial, selected = objects(source), objects(physical.scene)
+    differences = {
+        uid: [
+            name
+            for name in fields
+            if canonical_hash(initial[uid].get(name))
+            != canonical_hash(selected[uid].get(name))
+        ]
+        for uid in initial
+    }
+    return physical, {
+        "schema_version": "gen_sim.physical-selection/v1",
+        "reference_bundle": str(reference),
+        "source_config": str(source.source_config_path),
+        "original_scene_equivalence": "not_claimed_explicit_physical_input",
+        "historical_identity": (
+            "existing_manifest_verified"
+            if (reference / "physical_input.json").is_file()
+            else "legacy_input_pinned_now_not_historical_success_certification"
+        ),
+        "changed_instance_fields": {
+            uid: names for uid, names in differences.items() if names
+        },
+        "source_asset_sha256": dict(source.asset_hashes),
+        "selected_asset_sha256": dict(physical.scene.asset_hashes),
+        "joint_drive_props": deepcopy(
+            physical.embodiment["simulation"].get("joint_drive_props")
+        ),
+        "physical_input": physical.manifest(),
+    }
+
+
+def _preparation_failure_class(
+    preparation: PreparationResult | None,
+    *,
+    scene_error: Exception | None,
+    analysis: SceneAnalysis,
+    request: Mapping[str, Any],
+) -> str:
+    if scene_error is not None:
+        return "scene_materialization"
+    if preparation is None:
+        return "scene_materialization"
+    if preparation.status == "planning_failed":
+        return "action_capability"
+    if preparation.status in {"ambiguous", "unsatisfied"}:
+        return "input_conflict"
+    return "preparation"
+
+
+def _failure_stage(
+    failure_class: str,
+    request: Mapping[str, Any],
+) -> WorkflowStage:
+    if failure_class == "action_capability":
+        return WorkflowStage.GROUNDED_ACTION
+    if failure_class == "preparation_error":
+        return WorkflowStage.FINAL_BINDING
+    if failure_class == "input_conflict":
+        return WorkflowStage.FINAL_BINDING
+    if failure_class in {
+        "scene_infeasible",
+        "read_only_scene_infeasible",
+        "terminal_feasibility",
+    }:
+        return WorkflowStage.STATIC_FEASIBILITY
+    if failure_class == "scene_materialization":
+        return (
+            WorkflowStage.SCENE_EDIT
+            if request["scene_edit_prompt"] is not None
+            else WorkflowStage.SCENE_FINALIZATION
+        )
+    return WorkflowStage.GROUNDED_ACTION
+
+
+def _environment_successes(
+    report: Mapping[str, Any],
+    *,
+    required_semantic_steps: Sequence[str] = (),
+    bundle: Path | None = None,
+    acceptance_mode: str = "strict",
+) -> list[bool]:
+    environments = report.get("environments")
+    if not isinstance(environments, Sequence) or isinstance(environments, (str, bytes)):
+        raise ValueError("Execution report environments must be a sequence.")
+    values = []
+    for item in environments:
+        if not isinstance(item, Mapping) or not isinstance(item.get("success"), bool):
+            raise ValueError("Every execution environment requires boolean success.")
+        success = bool(item["success"])
+        if required_semantic_steps:
+            semantics = item.get("semantic_success")
+            if not isinstance(semantics, Mapping):
+                success = False
+            else:
+                success = success and all(
+                    semantics.get(step_id) is True
+                    for step_id in required_semantic_steps
+                )
+        values.append(success)
+    if not values:
+        raise ValueError("Execution report must contain at least one environment.")
+    if acceptance_mode == "experiment":
+        from .experiment_policy import program_completion_mask
+
+        runtime = report.get("runtime_result") or {}
+        measured = program_completion_mask(runtime, len(values))
+        if (
+            runtime.get("acceptance_mode") != "experiment"
+            or report.get("failure") is not None
+        ):
+            return [False] * len(values)
+        return [a and b for a, b in zip(values, measured, strict=True)]
+    if acceptance_mode != "strict":
+        raise ValueError("Unknown acceptance mode.")
+    if bundle is not None and (bundle / "task_spec.json").exists():
+        from .semantic_graph_validation import (
+            verify_graph_contract,
+            _validate_runtime_evaluation,
+        )
+        from embodichain.gen_sim.task_spec import TaskSpec
+
+        graph = _read_json(bundle / "semantic_task_graph.json")
+        contract = verify_graph_contract(bundle, graph)
+        evaluation = (report.get("runtime_result") or {}).get("task_spec_evaluation")
+        if not isinstance(evaluation, Mapping) or contract is None:
+            return [False] * len(values)
+        _validate_runtime_evaluation(
+            evaluation,
+            TaskSpec.from_dict(_read_json(bundle / "task_spec.json")),
+            graph,
+            [row["env_id"] for row in environments],
+            contract=contract,
+        )
+        rows = evaluation["environments"]
+        values = [
+            success
+            and row.get("certificate_ready") is True
+            and row.get("status") == "satisfied"
+            for success, row in zip(values, rows, strict=True)
+        ]
+    return values
+
+
+def _bundle_success_terms(bundle: Path) -> tuple[str, ...]:
+    path = bundle / "success_spec.json"
+    if not path.is_file():
+        return ()
+    try:
+        value = _read_json(path)
+        terms = value.get("terms")
+        strict = isinstance(value.get("schema_version"), str)
+        if not isinstance(terms, Sequence) or isinstance(terms, (str, bytes)):
+            if strict:
+                raise ValueError("Task Program bundle has no valid SuccessSpec terms.")
+            return ()
+        result = tuple(
+            str(item["step_id"])
+            for item in terms
+            if isinstance(item, Mapping) and isinstance(item.get("step_id"), str)
+        )
+        if len(result) != len(terms) or (strict and not result):
+            if strict:
+                raise ValueError("Task Program bundle SuccessSpec terms are invalid.")
+            return ()
+        return result
+    except OSError:
+        return ()
+
+
+def _semantic_draft(candidate: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a scene-independent call-coverage draft without physical actions."""
+    draft = candidate.get("draft")
+    if not isinstance(draft, Mapping):
+        raise TypeError("TaskCandidate.draft must be a mapping.")
+    steps = draft.get("steps")
+    if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes)):
+        raise TypeError("TaskDraft.steps must be a sequence.")
+    supported = {"E1", "E2", "E3", "E4", "E5", "E6", "E8", "E9"}
+    unsupported = sorted(
+        {
+            str(step.get("task_type"))
+            for step in steps
+            if isinstance(step, Mapping) and str(step.get("task_type")) not in supported
+        }
+    )
+    if unsupported:
+        raise UnsupportedSemanticCapabilityError(
+            "Phase-one Semantic Skill planning does not support task types "
+            f"{unsupported}."
+        )
+    return {
+        "schema_version": "semantic_task_plan_draft/v1",
+        "task_id": str(draft.get("task_id")),
+        "candidate_id": str(candidate.get("candidate_id")),
+        "steps": [
+            {
+                "id": str(step["id"]),
+                "task_type": str(step["task_type"]),
+                "depends_on": [str(value) for value in step["depends_on"]],
+            }
+            for step in steps
+            if isinstance(step, Mapping)
+        ],
+    }
+
+
+def _copy_trajectory_record(report: Mapping[str, Any], output_root: Path) -> str | None:
+    raw = report.get("record_dir")
+    if not isinstance(raw, str) or not raw:
+        return None
+    source = Path(raw).expanduser().resolve()
+    if not source.is_dir():
+        return None
+    destination = output_root / "trajectory"
+    if source == destination or destination in source.parents:
+        return source.as_posix()
+    shutil.copytree(source, destination)
+    return destination.as_posix()
+
+
+def _revision_record(revision: SceneRevision) -> dict[str, Any]:
+    return {
+        "source": revision.source.as_posix(),
+        "output_root": (
+            None if revision.output_root is None else revision.output_root.as_posix()
+        ),
+        "revision_id": revision.revision_id,
+        "seed": revision.seed,
+        "edit_plan": deepcopy(revision.edit_plan),
+        "source_fingerprint": (
+            None
+            if revision.source_fingerprint is None
+            else revision.source_fingerprint.to_dict()
+        ),
+    }
+
+
+def _error_record(error: Exception) -> dict[str, str]:
+    return {
+        "type": type(error).__name__,
+        "failure_type": "terminal",
+        "message": str(error),
+    }
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"JSON artifact must contain an object: {path}")
+    return value
+
+
+def _write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
