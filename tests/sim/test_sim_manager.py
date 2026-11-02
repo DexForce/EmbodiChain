@@ -317,6 +317,9 @@ class FakeWorld:
     def update(self, physics_dt: float) -> None:
         self.physics_updates.append(physics_dt)
 
+    def _flush_render_updates(self) -> int:
+        return 0
+
     def enable_entity_gizmo(self, config: object | None = None) -> object:
         self.entity_gizmo_configs.append(config)
         if self.entity_gizmo is None:
@@ -2357,23 +2360,45 @@ def test_prepare_retries_render_state_sync_without_recommit() -> None:
     sim._world.update.assert_not_called()
 
 
-def test_sync_render_state_publishes_current_state_without_stepping() -> None:
-    """Explicit publication must refresh render state without advancing physics."""
+@pytest.mark.parametrize("renderer", ["hybrid", "no-render"])
+def test_sync_render_state_publishes_current_state_without_stepping(renderer) -> None:
+    """Explicit publication makes staged states visible without a physics step."""
     result = MagicMock()
     spawn_scene = MagicMock()
     spawn_scene.builder.is_finalized = True
     spawn_scene.builder.result = result
-    sync_render_state = MagicMock()
-
+    staged, visible = {}, {}
     sim = object.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(render_cfg=RenderCfg(renderer=renderer))
     sim._spawn_scene = spawn_scene
     sim._world = MagicMock()
-    sim.physics = SimpleNamespace(sync_render_state=sync_render_state)
+    sim._render_state_published = False
+    sim.physics = SimpleNamespace(
+        sync_render_state=lambda _result: staged.update(robot=3)
+    )
+    sim._refresh_marker_attachments = lambda: staged.update(marker=7)
 
+    def publish():
+        visible.update(staged)
+        return 0
+
+    sim._world._flush_render_updates.side_effect = publish
     sim.sync_render_state()
 
-    sync_render_state.assert_called_once_with(result)
+    assert visible == ({"robot": 3, "marker": 7} if renderer == "hybrid" else {})
+    assert sim._render_state_published is True
     sim._world.update.assert_not_called()
+
+
+def test_failed_native_render_publication_remains_retryable() -> None:
+    sim, _, _, _, _ = _make_render_frame_sim()
+    sim._world._flush_render_updates = MagicMock(side_effect=[-1, 0])
+    sim._render_state_published = False
+    with pytest.raises(RuntimeError, match="Native render-state publication failed"):
+        sim.sync_render_state()
+    assert sim._render_state_published is False
+    sim.sync_render_state()
+    assert sim._render_state_published is True
 
 
 def test_add_camera_uses_owning_manager_render_context(

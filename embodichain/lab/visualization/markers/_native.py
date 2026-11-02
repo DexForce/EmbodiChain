@@ -200,7 +200,7 @@ class NativeMarkerRenderer:
                     else {}
                 ),
             ),
-            render_mode="visual" if scene_lighting else "overlay",
+            render_mode="scene" if scene_lighting else "overlay",
             cast_shadow=False,
             pickable=False,
             material=material,

@@ -180,8 +180,10 @@ def _exercise_marker_rendering(sim):
     camera.open_camera()
     camera.look_at([0, 0, 3], [0, 0, 1], [0, 1, 0])
 
+    sim.prepare()
+
     def render():
-        world._flush_render_updates()
+        sim.sync_render_state()
         camera.render()
         return np.array(camera.get_rgb_map()[..., :3], copy=True)
 
@@ -223,6 +225,9 @@ def _exercise_marker_rendering(sim):
         np.count_nonzero(green[..., 1].astype(float) > green[..., 0].astype(float) + 20)
         > 20
     )
+    group.update(translations=[[2, 0, 1]])
+    moved = render().astype(float)
+    assert np.count_nonzero(moved[..., 1] > moved[..., 0] + 20) < 5
     for offset in (0.1, 0.2, 0.3):
         group.update(translations=[[offset, 0, 1]])
         assert arena.get_actor_num() == count + 1

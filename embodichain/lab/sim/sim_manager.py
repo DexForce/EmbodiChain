@@ -1860,10 +1860,12 @@ class SimulationManager:
         """Publish current physics state to render resources without stepping.
 
         Use this after direct state writes, such as an environment reset, and
-        before reading cameras or publishing a visualization frame.
+        before reading cameras or publishing a visualization frame. Native
+        render uploads, including marker edits, complete before this returns.
 
         Raises:
-            RuntimeError: If the Spawn scene has not been prepared.
+            RuntimeError: If the Spawn scene has not been prepared or native
+                render publication fails.
         """
         result = self.spawn_result
         if result is None:
@@ -1872,6 +1874,10 @@ class SimulationManager:
             )
         self.physics.sync_render_state(result)
         self._refresh_marker_attachments()
+        if self.has_native_renderer:
+            status = self._world._flush_render_updates()
+            if status < 0:
+                raise RuntimeError(f"Native render-state publication failed: {status}.")
         if getattr(self, "_render_state_published", None) is not None:
             self._render_state_published = True
 

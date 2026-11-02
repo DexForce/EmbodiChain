@@ -29,9 +29,8 @@ from embodichain.lab.visualization.markers import _native
 from embodichain.lab.visualization.markers._native import NativeMarkerRenderer
 
 
-# These explicit SDK stand-ins keep consumer transactions testable with the
-# released DexSim wheel. Actual descriptor/native compatibility is covered by
-# the GPU integration tests and DexSim's own contract tests, not this fake.
+# Explicit descriptors isolate consumer transactions from native allocation.
+# Scene validates the public SDK render modes before creating a handle.
 @dataclass
 class _SdkGeometryDesc:
     vertices: np.ndarray
@@ -161,6 +160,9 @@ class Scene:
     def add_mesh_object(self, desc, *, arena_name="default"):
         assert arena_name == "default"
         assert isinstance(desc, _SdkMeshObjectDesc)
+        for render in desc.renders:
+            if render.render_mode not in ("scene", "overlay"):
+                raise ValueError("render_mode must be scene or overlay")
         if self.fail:
             raise RuntimeError("upload failed")
         self.created += 1
@@ -448,7 +450,7 @@ def test_scene_lighting_preserves_material_and_switches_at_transparency():
     renderer.publish("g", (snapshot,))
     opaque = next(iter(scene.handles.values()))
     render = opaque.desc.renders[0]
-    assert render.render_mode == "visual"
+    assert render.render_mode == "scene"
     assert render.material.metallic == 0.6
     assert render.material.roughness == 0.23
     renderer.publish("g", (replace(snapshot, color=(0.15, 0.8, 0.4, 0.4)),))
