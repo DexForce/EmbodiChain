@@ -135,11 +135,13 @@ CUDA_VISIBLE_DEVICES=0 embodichain run-example learning/motion_tracking/replay.p
 ```
 
 Replay displays the recorded policy states with a scene robot, a green reference
-robot marker, red policy tracking points and green reference tracking points. The trajectory archive stores
-both states and their matched reference, joint names and tracked-link names.
+robot marker with scene lighting, red policy tracking points and green reference
+tracking points. The trajectory archive stores both states and their matched
+reference, joint names and tracked-link names.
 Playback writes the recorded root and joint states through the robot API and
-synchronizes rendering without advancing physics. Reference and tracking markers
-use the overlay layer. On Linux without a display, the entry selects SDL offscreen
+synchronizes rendering without advancing physics. The opaque reference robot uses
+scene lighting; tracking points and floor traces use the overlay layer. On Linux
+without a display, the entry selects SDL offscreen
 initialization; an explicitly configured SDL video driver is preserved.
 
 Create a labelled multi-clip video from the full evaluation archive:
@@ -153,7 +155,13 @@ CUDA_VISIBLE_DEVICES=0 embodichain run-example learning/motion_tracking/replay.p
 
 `--resolution 1920 1080`, `--spp 8` and `--denoising dlss` control rendering.
 The playlist concatenates independently evaluated clips; each segment shows its
-clip name and reference time.
+clip name, reference time and the next clip countdown. The upper-left World XY
+panel uses fixed bounds for each recorded clip and occupies 300 × 350 pixels at
+1080p. The panel and ground traces show three seconds of executed motion and two
+seconds of future reference in world coordinates. The green robot and reference
+tracking points align heading and horizontal root position for body-pose comparison.
+The panel reports world root XY error and aligned tracked-link RMS position error
+in centimetres.
 
 ## Check world-model predictions
 

@@ -111,7 +111,14 @@ def _load(args: argparse.Namespace) -> dict:
             if not np.isfinite(actual).all() or not np.isfinite(target).all():
                 raise ValueError(f"Clip {name!r} contains a non-finite recorded state.")
             clips.append(
-                {"name": name, "state": actual, "reference": target, "start": first}
+                {
+                    "name": name,
+                    "state": actual,
+                    "reference": target,
+                    "world_actual": np.asarray(state[:length, index, :2]).copy(),
+                    "world_reference": np.asarray(reference[:length, index, :2]).copy(),
+                    "start": first,
+                }
             )
     return {"clips": clips, "joint_names": joints, "tracked_links": tracked, "dt": dt}
 
@@ -136,59 +143,87 @@ def _poses(tree, states):
     return result
 
 
-def _caption(
-    image, *, clip, local_frame, segment, schedule, actual_xy, reference_xy, dt, font
-):
-    import numpy as np
+def _caption(image, *, clip, local_frame, segment, schedule, dt):
     from PIL import ImageDraw
+    from _replay_hud import load_font
 
     draw = ImageDraw.Draw(image)
     width, height = image.size
-    band = max(40, height // 18)
-    draw.rectangle((0, 0, width, band), fill="#172638")
-    source_time = (clip["start"] + local_frame + 1) * dt
-    error = float(np.linalg.norm(actual_xy[local_frame] - reference_xy[local_frame]))
-    draw.text(
-        (16, 8),
-        f"{clip['name']} | {source_time:.2f} s | root XY error {error:.3f} m",
-        font=font,
-        fill="white",
+    scale = min(width / 1920, height / 1080)
+
+    def xy(x, y):
+        return round(x * scale), round(y * scale)
+
+    font, small = load_font(max(1, round(23 * scale))), load_font(
+        max(1, round(19 * scale))
     )
-    draw.rectangle((0, height - band, width, height), fill="#172638")
+    header, footer = round(54 * scale), round(86 * scale)
+    draw.rectangle((0, 0, width, header), fill="#18232e")
+    source_time = (clip["start"] + local_frame + 1) * dt
     draw.text(
-        (16, height - band + 6),
-        "Recorded policy: red points | Reference: green robot and points",
+        xy(20, 13),
+        f"G1 | {clip['name']} | source {source_time:.2f} s",
         font=font,
-        fill="white",
+        fill="#f2f6f8",
+    )
+    draw.text(
+        (width - xy(20, 0)[0], xy(0, 15)[1]),
+        "EmbodiChain + FastRT",
+        font=small,
+        fill="#b9c9d3",
+        anchor="ra",
+    )
+    top = height - footer
+    draw.rectangle((0, top, width, height), fill="#18232e")
+    draw.text(
+        (xy(20, 0)[0], top + xy(0, 10)[1]),
+        f"Clip {segment + 1}/{len(schedule)}: {clip['name']}",
+        font=font,
+        fill="#f2f6f8",
+    )
+    remaining = (schedule[segment]["frames"] - local_frame - 1) * dt
+    next_label = "Next clip" if segment + 1 < len(schedule) else "End"
+    draw.text(
+        (width - xy(20, 0)[0], top + xy(0, 13)[1]),
+        f"{next_label} in {remaining:.1f} s",
+        font=small,
+        fill="#b9c9d3",
+        anchor="ra",
+    )
+    draw.text(
+        (xy(20, 0)[0], top + xy(0, 42)[1]),
+        "Tracking | independent evaluation clips",
+        font=small,
+        fill="#93d5b0",
+    )
+    draw.text(
+        (width - xy(20, 0)[0], top + xy(0, 42)[1]),
+        "Red: policy points   Green: reference points / robot",
+        font=small,
+        fill="#b9c9d3",
+        anchor="ra",
     )
     total = sum(item["frames"] for item in schedule)
-    offset = 0
+    offset, margin = 0, xy(20, 0)[0]
     for index, item in enumerate(schedule):
-        left, right = width * offset / total, width * (offset + item["frames"]) / total
+        left = margin + (width - 2 * margin) * offset / total
+        right = margin + (width - 2 * margin) * (offset + item["frames"]) / total
         draw.rectangle(
-            (left, height - 7, right, height),
-            fill="#40bd83" if index == segment else "#58718c",
+            (left, height - xy(0, 12)[1], right - 2, height - xy(0, 8)[1]),
+            fill="#426075",
         )
+        completed = (
+            item["frames"]
+            if index < segment
+            else local_frame + 1 if index == segment else 0
+        )
+        if completed:
+            end = left + (right - left) * completed / item["frames"]
+            draw.rectangle(
+                (left, height - xy(0, 12)[1], max(left, end - 1), height - xy(0, 8)[1]),
+                fill="#62c697",
+            )
         offset += item["frames"]
-    # Show unaligned world paths separately from the heading-aligned body markers.
-    size = min(width // 5, height // 3)
-    box = (width - size - 18, band + 14, width - 18, band + size + 14)
-    draw.rectangle(box, fill="#f4f7fb", outline="#8795a4", width=2)
-    paths = np.concatenate((actual_xy, reference_xy), axis=0)
-    low, high = paths.min(0), paths.max(0)
-    span = max(float((high - low).max()), 0.5)
-    center = (high + low) / 2
-    for path, color in ((actual_xy, "#db3636"), (reference_xy, "#16a668")):
-        sample = path[: local_frame + 1 : max(1, len(path) // 200)]
-        xy = (sample - center) / span * (size - 24)
-        pixels = [
-            (float(box[0] + size / 2 + x), float(box[1] + size / 2 - y)) for x, y in xy
-        ]
-        if len(pixels) > 1:
-            draw.line(pixels, fill=color, width=3)
-        if pixels:
-            x, y = pixels[-1]
-            draw.ellipse((x - 3, y - 3, x + 3, y + 3), fill=color)
 
 
 def main() -> None:
@@ -213,7 +248,9 @@ def main() -> None:
     import imageio.v2 as imageio
     import numpy as np
     import torch
-    from PIL import Image, ImageFont
+    from PIL import Image
+    from _replay_hud import TrajectoryHUD
+    from _replay_visuals import FloorTrajectory
     from dexsim import spawn
     from embodichain.compute.kinematics import TreeKinematics
     from embodichain.compute.kinematics.features import heading_rotation
@@ -250,10 +287,6 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     device = torch.device(args.device)
     width, height = args.resolution
-    try:
-        font = ImageFont.truetype("DejaVuSans.ttf", max(18, width // 80))
-    except OSError:
-        font = ImageFont.load_default()
     sim = SimulationManager(
         SimulationManagerCfg(
             num_envs=1,
@@ -281,6 +314,8 @@ def main() -> None:
     robot = None
     robots = []
     balls = []
+    floor_trajectory = None
+    hud_metadata = []
     started = time.perf_counter()
     try:
         grid_texture = args.output.with_suffix(".floor.png")
@@ -356,7 +391,7 @@ def main() -> None:
                         mode="override",
                         color=(0.08, 0.83, 0.24),
                         opacity=1.0,
-                        unlit=True,
+                        unlit=False,
                     ),
                 ),
                 sim,
@@ -400,7 +435,7 @@ def main() -> None:
             macro_block_size=None,
             ffmpeg_params=[
                 "-crf",
-                "18",
+                "16",
                 "-preset",
                 "medium",
                 "-threads",
@@ -435,7 +470,28 @@ def main() -> None:
                 )
                 ghost = aligned.copy()
                 ghost[..., :2, 3] += args.ghost_offset
+                hud = TrajectoryHUD(
+                    clip["world_actual"], clip["world_reference"], dt=dt
+                )
+                hud_metadata.append({"clip": clip["name"], **hud.metadata()})
+                floor_trajectory = FloorTrajectory(
+                    sim, clip["world_reference"], clip["world_actual"], dt=dt
+                )
+                body_error = np.sqrt(
+                    np.mean(
+                        np.sum(
+                            (
+                                poses[0][..., :3, 3][:, tracked]
+                                - aligned[..., :3, 3][:, tracked]
+                            )
+                            ** 2,
+                            axis=-1,
+                        ),
+                        axis=-1,
+                    )
+                )
                 for frame in range(len(actual)):
+                    floor_trajectory.update(clip["start"] + frame)
                     robot.set_state(
                         root_pose=root_pose[frame : frame + 1],
                         qpos=qpos[frame : frame + 1],
@@ -449,11 +505,11 @@ def main() -> None:
                         [
                             actual[frame, 0] + args.ghost_offset[0] / 2,
                             actual[frame, 1] + args.ghost_offset[1] / 2,
-                            0.65,
+                            0.55,
                         ]
                     )
                     camera.look_at(
-                        (center + [2.8, -2.8, 1.6]).tolist(), center.tolist(), [0, 0, 1]
+                        (center + [3.1, -3.1, 1.7]).tolist(), center.tolist(), [0, 0, 1]
                     )
                     sim.sync_render_state()
                     if frame == 0:
@@ -470,15 +526,15 @@ def main() -> None:
                         local_frame=frame,
                         segment=segment,
                         schedule=schedule,
-                        actual_xy=actual[:, :2],
-                        reference_xy=target[:, :2],
                         dt=dt,
-                        font=font,
                     )
+                    hud.draw(image, clip["start"] + frame, float(body_error[frame]))
                     writer.append_data(np.asarray(image))
                     if frames == 0:
                         image.save(args.output.with_suffix(".png"))
                     frames += 1
+                floor_trajectory.close()
+                floor_trajectory = None
         versions = {}
         for name in ("embodichain", "torch", "numpy", "imageio", "warp-lang"):
             versions[name] = importlib.metadata.version(name)
@@ -496,7 +552,14 @@ def main() -> None:
             "floor_grid_spacing_m": 0.5,
             "mode": "saved-state playback",
             "actual_renderer": "scene Robot with source materials",
-            "reference_renderer": "unlit RobotMarkers overlay",
+            "reference_renderer": "opaque green RobotMarkers with scene lighting",
+            "visual_style": "compact-world-xy-floor-trails-v1",
+            "world_xy_hud": hud_metadata,
+            "floor_trajectory": {
+                "history_seconds": 3,
+                "future_seconds": 2,
+                "coordinates": "unaligned world root XY",
+            },
             "schedule": schedule,
             "playlist_boundary": "Each selected clip starts from its recorded evaluation state.",
             "reference_alignment": "Root heading and horizontal position; display-only ghost offset.",
@@ -512,6 +575,8 @@ def main() -> None:
         args.output.with_suffix(".json").write_text(json.dumps(result, indent=2) + "\n")
         print(json.dumps(result, indent=2))
     finally:
+        if floor_trajectory is not None:
+            floor_trajectory.close()
         camera = None
         balls.clear()
         robots.clear()
