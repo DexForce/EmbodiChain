@@ -28,6 +28,7 @@ from .interpolation import (
     interpolate_with_nums,
 )
 from .resampling import resample_with_distance
+from .refinement import PoseRefinementResult, refine_pose_trajectory
 from .timing import (
     differentiate_positions,
     resample_in_time,
@@ -46,4 +47,6 @@ __all__ = [
     "resample_with_distance",
     "sort_and_padding_key_frame",
     "warp_trajectory_qpos",
+    "PoseRefinementResult",
+    "refine_pose_trajectory",
 ]

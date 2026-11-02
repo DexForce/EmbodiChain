@@ -1487,7 +1487,11 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     if getattr(args, "disable_sensor", False):
         merged_config["enable_sensor"] = False
     dataset_dir = getattr(args, "expansion_dataset_dir", None)
-    if dataset_dir is not None:
+    if (
+        dataset_dir is not None
+        and getattr(args, "real2sim_profile", None) is None
+        and "real2sim" not in merged_config
+    ):
         if type(dataset_dir) is not str or not dataset_dir.strip():
             raise ValueError("--dataset-dir must be a nonempty path")
         env_config = merged_config.get("env")
@@ -1684,6 +1688,9 @@ def build_env_cfg_from_args(
 ) -> tuple["EmbodiedEnvCfg", dict, dict]:
     """Build environment configuration from command-line arguments.
 
+    A deployment's ``real2sim.profile`` resolves from its source directory and
+    remains in the returned launcher metadata, outside ``EmbodiedEnvCfg``.
+
     Args:
         args (argparse.Namespace): The parsed command-line arguments.
         gym_config_modifier: Optional callback that mutates the merged gym configuration
@@ -1699,6 +1706,20 @@ def build_env_cfg_from_args(
 
     gym_config_source_path = resolve_config_path(args.gym_config)
     gym_config = load_config(gym_config_source_path)
+    if "real2sim" in gym_config:
+        binding = gym_config["real2sim"]
+        if not isinstance(binding, Mapping) or set(binding) != {"profile"}:
+            raise ValueError("real2sim must declare exactly one profile path")
+        profile = binding["profile"]
+        if not isinstance(profile, str) or not profile.strip():
+            raise ValueError("real2sim.profile must be a nonempty path")
+        gym_config["real2sim"] = {
+            "profile": str(
+                resolve_config_path(
+                    profile, base_dir=gym_config_source_path.parent
+                ).resolve()
+            )
+        }
     if "environment" in gym_config:
         from embodichain.lab.gym.utils._component_composition import (
             _resolve_environment_component,
@@ -1717,6 +1738,7 @@ def build_env_cfg_from_args(
         gym_config_modifier(gym_config)
 
     collection_config = gym_config.pop("collection", None)
+    real2sim_config = gym_config.pop("real2sim", None)
     try:
         cfg: EmbodiedEnvCfg = config_to_cfg(
             gym_config,
@@ -1727,6 +1749,8 @@ def build_env_cfg_from_args(
     finally:
         if collection_config is not None:
             gym_config["collection"] = collection_config
+        if real2sim_config is not None:
+            gym_config["real2sim"] = real2sim_config
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
     if getattr(args, "disable_sensor", False):

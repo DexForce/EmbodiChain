@@ -139,6 +139,13 @@ dataset persistence are separate contracts; see
 [Task Programs](../task-programs/task-programs.md) and
 [data pipeline](../data-pipeline/data-pipeline.md).
 
+Source-bound Real2Sim episodes require call-level action tracing and confirmed
+artifact receipts. The ordinary `run-task` recorder rejects them; a deployment's
+`real2sim.profile` or explicit `--real2sim-profile` selects the tabletop owner,
+which uses the qualified synchronous sink and
+retains a staged payload if confirmation fails. See
+[Real2Sim motion](../data-pipeline/real2sim.md).
+
 Optional physical objectives publish separate measured results; they do not
 change termination, program acceptance or persistence. Read [execution](execution.md)
 for snapshot/reset ordering and expert-versus-replay qualification.

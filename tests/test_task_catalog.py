@@ -420,3 +420,27 @@ def test_agent_relative_config_precedes_cwd_reference(
     (task,) = catalog._load_catalog({"demo": task_root})
     assert catalog._RL in task.deployments[0].capabilities
     assert catalog._RL not in task.deployments[1].capabilities
+
+
+def test_carton_task_has_one_real_source_deployment_without_loading_assets(
+    monkeypatch,
+) -> None:
+    root = (
+        Path(__file__).resolve().parents[1]
+        / "extensions/embodichain_tasks/configs/tasks"
+    )
+
+    def forbidden(*args):
+        raise AssertionError("catalog browsing must not initialize source assets")
+
+    monkeypatch.setattr("embodichain.data.get_data_class", forbidden)
+    task = next(
+        t
+        for t in catalog._load_catalog({"embodichain_tasks": root})
+        if t.qualified_key == "embodichain_tasks:carton_stocking"
+    )
+    assert task.default_deployment == "panda"
+    assert len(task.deployments) == 1
+    assert task.deployments[0].env_id == "CartonStockingPanda-v1"
+    assert task.deployments[0].capabilities == {catalog._TASK_PROGRAM}
+    assert "--dataset-dir ./datasets" in task.deployments[0].command

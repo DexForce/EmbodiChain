@@ -47,6 +47,7 @@ EXPECTED_COMMANDS = {
     "preview-robot",
     "preview-material",
     "preview_lerobot_data",
+    "real2sim",
     "run-task",
     "run-example",
     "run-atomic-action",

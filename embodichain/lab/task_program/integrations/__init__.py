@@ -28,6 +28,10 @@ from .environment import (
 from .expansion import (
     CombinedTaskProgramExpansionFactory,
     TaskProgramExpansionRecord,
+    TaskProgramMappedRetimeFactory,
+    TaskProgramMappedRetimeRecord,
+    TaskProgramSameGridExpansionFactory,
+    TaskProgramSameGridExpansionRecord,
     TaskProgramSourceAdapter,
 )
 from .simulation import (
@@ -96,6 +100,10 @@ __all__ = [
     "TaskProgramSourceAdapter",
     "CombinedTaskProgramExpansionFactory",
     "TaskProgramExpansionRecord",
+    "TaskProgramMappedRetimeFactory",
+    "TaskProgramMappedRetimeRecord",
+    "TaskProgramSameGridExpansionFactory",
+    "TaskProgramSameGridExpansionRecord",
     "TaskProgramRuntimeAssembly",
     "IntegrationFingerprintMismatch",
     "ParallelCommandSafetyValidatorFactory",

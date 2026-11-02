@@ -423,3 +423,31 @@ def test_backend_cache_key_includes_sampling_and_annotation_policy() -> None:
 def test_hard_approach_angle_rejects_non_angle_values(angle) -> None:
     with pytest.raises((TypeError, ValueError), match="approach_alignment_angle"):
         AntipodalGraspPoseGeneratorCfg(approach_alignment_angle=angle)
+
+
+def test_box_side_region_projects_hint_onto_opposed_faces_without_oracle() -> None:
+    from dataclasses import replace
+    import numpy as np
+    import pytest
+    from scipy.spatial.transform import Rotation
+    from embodichain.toolkits.graspkit.box_region import (
+        BoxSideGraspRegionCfg,
+        project_box_side_grasp,
+    )
+
+    hint = np.eye(4)
+    canonical = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+    hint[:3, :3] = Rotation.from_euler("z", 12, degrees=True).as_matrix() @ canonical
+    hint[:3, 3] = [0.06, 0.004, 0.008]
+    before = hint.copy()
+    cfg = BoxSideGraspRegionCfg(grasp_height_m=-0.005)
+    result = project_box_side_grasp(hint, np.array([0.10, 0.05, 0.04]), cfg)
+    np.testing.assert_allclose(result[:3, 3], [0.04, 0.0, -0.005], atol=1e-12)
+    np.testing.assert_allclose(result[:3, :3], canonical, atol=1e-12)
+    np.testing.assert_array_equal(hint, before)
+    with pytest.raises(ValueError, match="empty or outside"):
+        project_box_side_grasp(
+            hint, np.array([0.10, 0.05, 0.04]), replace(cfg, grasp_height_m=0.03)
+        )
+    with pytest.raises(ValueError, match="dimensions"):
+        project_box_side_grasp(hint, np.array([0.10, -0.05, 0.04]), cfg)

@@ -187,3 +187,7 @@ The nominal root-to-TCP is Z=0.15 m, native Y opens, and canonical X opens;
 `root_from_tcp` can explicitly supply another calibrated runtime TCP without
 moving the physical surface points. Actual closing/contact behavior remains
 the execution host's responsibility.
+
+`box_region.project_box_side_grasp()` projects input anchors onto declared
+opposed box-Y faces and chooses the nearest jaw-symmetric orientation. It does
+not establish physical grasp success or read a hidden reference trajectory.

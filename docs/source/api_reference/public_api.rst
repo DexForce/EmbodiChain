@@ -1,6 +1,5 @@
 Public API Supplement
-=====================
-
+==============
 .. This page is maintained by the update-api-docs agent skill.
    docs/scripts/check_api_docs.py reads it but never writes it.
 
@@ -63,6 +62,15 @@ EmbodiChain data cache.
    RubiksCube
    ScoopIceNewEnv
    TabletopFourBases
+   Real2SimCarton
+
+``Real2SimCarton`` downloads a checksum-pinned original DROID episode, manual
+annotations, two motion-prototype sources and estimated physical proxies. Its
+revision-specific cache verifies extracted files. Measured DROID derivatives
+retain CC BY 4.0; the bundle is not a generated training dataset or hardware
+qualification.
+
+.. autoclass:: Real2SimCarton
 
 embodichain.data.assets.materials
 ------------------------------------
@@ -2856,6 +2864,13 @@ Asset generalization contracts
 
    asset_generalization
 
+Real-to-simulation motion prototypes
+------------------------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   real2sim
 
 embodichain.lab.gym.envs.managers.cfg
 -------------------------------------

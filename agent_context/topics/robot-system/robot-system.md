@@ -54,6 +54,14 @@ An explicit `variant` applies profile defaults before caller overrides, while
 omission preserves existing construction behavior. See
 [catalog contracts](catalogs.md) for entry points, metadata and model profiles.
 
+`FrankaCfg` with `arm_model: panda` supplies the bare original-Panda arm. The
+Robotiq embodiment explicitly adds its tool asset and all linkage followers.
+Its flange mount/TCP must match the source calibration; an
+existing similarly named Franka/FR3 or Panda-Hand configuration is not equivalent.
+Observed aperture mapping does not substitute a full-close actuator command for
+measured linkage positions. See [Real2Sim motion](../data-pipeline/real2sim.md)
+for coupled contact prediction and transfer qualification.
+
 Locomotion presets and pure Torch task contracts share backend-free model
 profiles. For source/contract joint ordering, drive ownership and solver limits,
 see [locomotion model profiles](catalogs.md#locomotion-model-profiles).

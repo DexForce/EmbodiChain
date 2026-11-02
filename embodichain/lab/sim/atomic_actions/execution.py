@@ -57,6 +57,7 @@ from .tracking import (
 
 if TYPE_CHECKING:
     from .engine import AtomicActionEngine, PlanTransform
+    from .nominal import NominalMotionSource
 
 
 class ExecutionStatus(str, Enum):
@@ -326,6 +327,7 @@ class ExecutionSession:
         *,
         eligible_mask: torch.Tensor | None = None,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
     ) -> None:
         if not invocations:
             raise ValueError("ExecutionSession requires at least one invocation.")
@@ -334,6 +336,7 @@ class ExecutionSession:
             raise TypeError("plan_transform must be callable or None.")
         self._engine = engine
         self._plan_transform = plan_transform
+        self._nominal_source = nominal_source
         self._requests: tuple[ResolvedActionRequest, ...] = tuple(
             engine._resolve(invocation) for invocation in invocations
         )
@@ -341,6 +344,7 @@ class ExecutionSession:
         self._context = context
         self._invocation_index = 0
         self._waypoint_index = 0
+        self._last_commanded_plan_sample: tuple[str | None, int] | None = None
         self._plan: ActionPlan | None = None
         self._active_targets: dict[
             tuple[str, str],
@@ -406,6 +410,16 @@ class ExecutionSession:
     def status(self) -> ExecutionStatus:
         """Current session status."""
         return self._status
+
+    @property
+    def last_commanded_plan_sample(self) -> tuple[str | None, int] | None:
+        """Return the source plan and waypoint for the latest command tick.
+
+        The value is cleared at each tick and does not imply that a host has
+        consumed the command; controller acknowledgements and Gym steps remain
+        separate boundaries.
+        """
+        return self._last_commanded_plan_sample
 
     @property
     def eligible_mask(self) -> torch.Tensor:
@@ -612,6 +626,7 @@ class ExecutionSession:
             replacement,
             replacement_context,
             plan_transform=self._plan_transform,
+            nominal_source=self._nominal_source,
         )
         self._validate_destination_continuity(
             replacement_plan,
@@ -748,6 +763,7 @@ class ExecutionSession:
         Returns:
             Status, optional command, events, and current verified task state.
         """
+        self._last_commanded_plan_sample = None
         self._context = self._validated_context(context)
         events = self._drain_events()
         if effect_result is not None:
@@ -1107,6 +1123,10 @@ class ExecutionSession:
             terminal_command = plan.commands.frames[-1].with_active_mask(
                 plan.commands.frames[-1].active_mask & terminal_pending
             )
+            self._last_commanded_plan_sample = (
+                plan.invocation_id,
+                plan.commands.frame_count - 1,
+            )
             return self._tick_result(command=terminal_command, events=events)
 
         events.append(
@@ -1177,6 +1197,7 @@ class ExecutionSession:
             request,
             context,
             plan_transform=self._plan_transform,
+            nominal_source=self._nominal_source,
         )
         self._install_plan(plan, context, event_kind)
 
@@ -1838,6 +1859,7 @@ class ExecutionSession:
     ) -> RuntimeCommandFrame:
         """Return one frame and retain its generic typed tracking targets."""
         frame = plan.commands.frames[waypoint_index]
+        self._last_commanded_plan_sample = (plan.invocation_id, waypoint_index)
         frame = frame.with_active_mask(frame.active_mask & active_mask)
         self._last_tracking_frame = (
             None

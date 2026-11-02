@@ -121,6 +121,23 @@ The registered descriptor respects the configured host and falls back to the
 official Hugging Face dataset. The scene tutorial downloads by asset reference
 by default and accepts local exports through `--source`.
 
+`Real2SimCarton` resolves the immutable `demo/real2sim_carton/real2sim_carton_v1.zip`
+into the revision-specific `Real2SimCartonV1` cache. It includes one original
+DROID record, manual annotations, measured/synthetic motion inputs and estimated
+box proxies. The class verifies the archive, trusted manifest and extracted
+file hashes. Original/derived measured resources retain CC BY 4.0; independent
+synthetic resources are Apache-2.0. The example copies raw files into its own
+workspace and requalifies the live model; collections and receipts are not part
+of this shared input cache. Distribution hashes live in the example's
+`resources.lock.json`, while `source.lock.json` preserves original upstream URLs.
+
+The official `carton_stocking` task consumes only the fixed measured inputs.
+`data._references` resolves closed `{asset, path}` references through registered
+asset initialization, rejects root escapes and preserves owner-relative string
+paths. Prototype/evidence consumers still verify their own content hashes.
+The carton asset URLs pin the recorded distribution commit. Catalog browsing
+reads declarations without initializing these resources.
+
 ## Default material resources
 
 `list_default_materials()` and `get_default_material_info()` are exported from
