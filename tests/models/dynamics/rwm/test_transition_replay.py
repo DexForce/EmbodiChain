@@ -125,3 +125,43 @@ def test_memory_budget_and_invalid_sampling_fail_without_waits():
         replay.sample_windows(1, 1)
     with pytest.raises(ValueError, match="nonempty"):
         replay.sample_starts(1, 2)
+
+
+def test_auxiliary_fields_are_aligned_owned_budgeted_and_restorable():
+    fields = {"frame": (None, torch.int64), "policy_action": (1, torch.float32)}
+    replay = TransitionReplay(4, 1, 3, 1, extra_fields=fields)
+    base = TransitionReplay(4, 1, 3, 1)
+    assert replay.allocated_bytes - base.allocated_bytes == 4 * (8 + 4)
+    for step in range(6):
+        action = torch.tensor([[float(step)]], requires_grad=True)
+        replay.append(
+            torch.full((1, 3), float(step)),
+            action + 100,
+            torch.full((1, 3), float(step + 1)),
+            extras={"frame": torch.tensor([step + 1000]), "policy_action": action},
+        )
+    before = replay.state_dict()
+    with pytest.raises(ValueError, match="declared"):
+        replay.append(torch.zeros(1, 3), torch.zeros(1, 1), torch.zeros(1, 3))
+    assert replay.cursor == before["cursor"]
+    restored = TransitionReplay(4, 1, 3, 1, extra_fields=fields)
+    restored.load_state_dict(before)
+    for replay in (replay, restored):
+        sample = replay.sample_windows(16, 2)
+        torch.testing.assert_close(
+            sample["frame"].float(), sample["state"][..., 0] + 1000
+        )
+        torch.testing.assert_close(sample["policy_action"] + 100, sample["action"])
+        assert not sample["policy_action"].requires_grad
+
+
+def test_complete_history_distinguishes_reset_padding_from_overwrite():
+    replay = TransitionReplay(4, 2, 3, 1, seed=9)
+    for step in range(6):
+        _append(replay, step)
+    sample = replay.sample_starts(128, 5)
+    # Only episodes starting at step 4 (env 0) or step 5 (env 1) can supply
+    # complete reset-padded histories; the previous episodes lost their starts.
+    torch.testing.assert_close(
+        sample["history_complete"], sample["start"]["episode_id"] == 1
+    )

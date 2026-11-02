@@ -72,6 +72,20 @@ reader. It measures initial loading rather than per-batch disk reads and does
 not replace recording or offline-inspection tools. See the
 [loading design](../../../docs/architecture/dataset-loading-design.md) for source boundaries.
 
+## Reference motions
+
+`datasets/motion.py` owns `MotionLibrary`: resident root/joint reference states,
+explicit clip boundaries and current/future-frame queries. Portable archives
+record joint order and quaternion convention. CSV preparation calls
+`compute/trajectory/floating.py` for uniform-time resampling and velocity
+estimation. Task environments own reference progress and reset selection;
+world-model transition collection remains with the learning workflow.
+
+`datasets/motion_sampling.py` owns reference-start curriculum statistics. It mixes
+uniform bins, capped low-return softmax and historical low-return weights. Repeated
+bins in one completed-episode batch are averaged before EMA updates. The sampler
+checkpoints motion layout and statistics; the task owns its named sampling RNG.
+
 ## Online worker contract
 
 Shared image buffers are allocated by `init_rollout_buffer_from_config()` in

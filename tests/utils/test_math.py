@@ -21,6 +21,8 @@ import pytest
 import torch
 
 from embodichain.utils.math import (
+    axis_angle_from_quat,
+    axis_angle_to_rotation_matrix,
     convert_quat,
     default_orientation,
     inv_transform,
@@ -35,6 +37,19 @@ from embodichain.utils.math import (
     trans_matrix_to_xyz_quat,
     xyz_quat_to_4x4_matrix,
 )
+
+
+def test_rotation_conversions_have_finite_gradients_at_identity() -> None:
+    vectors = torch.tensor(
+        [[0.0, 0.0, 0.0], [1e-7, -2e-7, 3e-7], [0.2, -0.3, 0.1]],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    assert torch.autograd.gradcheck(axis_angle_to_rotation_matrix, (vectors,))
+    identity = torch.tensor(
+        [[0.0, 0.0, 0.0, 1.0]], dtype=torch.float64, requires_grad=True
+    )
+    assert torch.autograd.gradcheck(axis_angle_from_quat, (identity,))
 
 
 @pytest.mark.parametrize(
@@ -334,3 +349,13 @@ def test_named_quaternion_boundary_helpers_preserve_numpy_backend() -> None:
 
     np.testing.assert_array_equal(quat_xyzw_to_wxyz(xyzw), wxyz)
     np.testing.assert_array_equal(quat_wxyz_to_xyzw(wxyz), xyzw)
+
+
+def test_matrix_quaternion_gradient_at_identity_and_half_turn():
+    """Unselected quaternion candidates keep finite derivatives."""
+    matrices = (
+        torch.stack((torch.eye(3), torch.diag(torch.tensor([1.0, -1.0, -1.0]))))
+        .double()
+        .requires_grad_()
+    )
+    assert torch.autograd.gradcheck(quat_from_matrix, (matrices,))

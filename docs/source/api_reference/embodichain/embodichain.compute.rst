@@ -50,6 +50,7 @@ stationary paths and repeated endpoints remain valid inputs.
 .. autosummary::
 
    retime_joint_paths
+   resample_floating_trajectory
    differentiate_positions
    resample_in_time
    interpolate_with_distance
@@ -183,4 +184,41 @@ compute function and Torch layer; failed solves retain their last iterate.
    :members:
 
 .. automodule:: embodichain.compute.kinematics.types
+   :members:
+
+Floating-root motion computation
+--------------------------------
+
+``TreeKinematics`` evaluates a URDF tree from an explicit joint order and world
+root-origin state. It supports fixed, revolute, continuous and prismatic joints,
+batches arbitrary leading tensor axes and retains input derivatives. Outputs
+include link-origin velocities; simulator center-of-mass velocity conversion
+belongs to the calling environment.
+
+.. currentmodule:: embodichain.compute.kinematics
+
+.. autosummary::
+
+   TreeKinematics
+   LinkKinematics
+   heading_rotation
+   heading_kinematic_features
+
+.. automodule:: embodichain.compute.kinematics.tree
+   :members:
+
+``resample_floating_trajectory`` places a root/joint clip on a fixed frequency
+grid within its source duration. Root quaternions use XYZW shortest-arc SLERP;
+translation and joints use linear interpolation. Returned velocities use
+centered differences and one-sided endpoints, with angular velocity in world
+coordinates.
+
+.. automodule:: embodichain.compute.trajectory.floating
+   :members:
+
+``heading_kinematic_features`` is shared by the full-body tracking task and
+kinematic world model. It combines root height/orientation, local velocities,
+joints and link-origin positions/velocities using an explicit heading convention.
+
+.. automodule:: embodichain.compute.kinematics.features
    :members:

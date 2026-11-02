@@ -45,6 +45,7 @@ Algorithms
 ----------
 
 .. automodule:: embodichain.learning.rl.algo
+   :no-index:
    :members:
    :undoc-members:
    :show-inheritance:

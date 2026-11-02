@@ -127,6 +127,14 @@ class DifferentiableVecEnv(LearningVecEnv, Protocol):
     differentiable internal state and return the current observation without
     resetting or resampling the episode. Finished rows must auto-reset inside
     ``step``, returning the terminal reward/done with the next initial observation.
+
+    Value-bootstrapped algorithms also consume ``info["terminal_observation"]``:
+    a full observation batch captured before auto-reset, with its autograd graph
+    intact. It is required when a row truncates. Optional ``continuation`` gives
+    a differentiable probability in [0, 1]; ``valid`` and ``next_valid`` are
+    boolean data-availability masks at current and successor states. These
+    per-environment tensors have shape ``[num_envs]`` and default to one.
+    Rewards and transition metadata must retain their values until backward.
     """
 
     def detach_state(self) -> DifferentiableObservation:
