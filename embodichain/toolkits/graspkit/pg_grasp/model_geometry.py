@@ -37,6 +37,7 @@ _MODELS = (
     "cobotmagic_v100_gripper",
     "tianji_marvin_gripper",
     "pika_gripper",
+    "robotiq_2f85",
 )
 
 
@@ -58,7 +59,7 @@ def get_parallel_jaw_collision_geometry(
     """Resolve actual open-hand collision surfaces for one supported model.
 
     Args:
-        model_id: One of the five registered physical hand models.
+        model_id: One of the registered physical hand models.
         point_spacing: Maximum triangle-grid edge spacing in metres.
         side: Required ``left`` or ``right`` for asymmetric Marvin assets;
             omitted for the other models.
@@ -98,6 +99,38 @@ def get_parallel_jaw_collision_geometry(
         default_tcp = _pose(xyz=(0, 0, 0.1034))
         canonical = default_tcp @ _pose(rz90)
         calibration = "PandaWithHand fr3_hand_tcp joint; native +Y closes"
+    elif model_id == "robotiq_2f85":
+        asset = "Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf"
+        root = "robotiq_arg2f_base_link"
+        links = (
+            root,
+            "left_outer_knuckle",
+            "left_outer_finger",
+            "left_inner_knuckle",
+            "left_inner_finger",
+            "left_inner_finger_pad",
+            "right_outer_knuckle",
+            "right_outer_finger",
+            "right_inner_knuckle",
+            "right_inner_finger",
+            "right_inner_finger_pad",
+        )
+        joints = {
+            name: 0.0
+            for name in (
+                "finger_joint",
+                "left_inner_knuckle_joint",
+                "left_inner_finger_joint",
+                "right_outer_knuckle_joint",
+                "right_inner_knuckle_joint",
+                "right_inner_finger_joint",
+            )
+        }
+        default_tcp = _pose(xyz=(0, 0, 0.15))
+        canonical = default_tcp @ _pose(rz90)
+        calibration = (
+            "Robotiq 2F-85 fully open collision meshes; native Y opens, tool TCP Z=.15"
+        )
     elif model_id == "dh_pgi_140_80":
         asset = "DH_PGI_140_80/DH_PGI_140_80.urdf"
         root = "gripper_base_link_1"

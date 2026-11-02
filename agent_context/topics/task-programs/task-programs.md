@@ -80,6 +80,15 @@ Atomic plan transform; the bridge exposes immutable
 `TaskProgramExpansionRecord` provenance. Nonmatching calls and episodes
 without a profile keep the ordinary path.
 
+Source-bound bridges request independent session state from the simulation
+post-policy/validator port while retaining its registered scene bindings. This
+isolates lift baselines and policy results across episodes. Native bridges and
+ports without the optional session factory retain their existing ownership.
+
+An optional nominal source is selected separately before Atomic planning and
+is bound to a compiled sequential call occurrence. Its configured declaration
+and verification boundary are described in [Real2Sim motion](../data-pipeline/real2sim.md).
+
 The configured combined transform supplies each selected call's Affordance
 context before planning and delegates trajectory adaptation and rebuilding to
 the shared Atomic plan expansion service. Built-in phase permissions can only
@@ -110,6 +119,10 @@ For a minimal projected workflow, start with
 [repeated pick/place](../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/README.md).
 For measured handover, inspect the selected deployment and execution policy in
 `extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/`.
+For fixed real-motion source binding and qualified expansion, use
+`extensions/embodichain_tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml`.
+It selects three real-source prototypes through verified asset references and
+the existing Real2Sim recorder owner; the example rebuilds sources from the same templates.
 Assurance belongs to that policy, not the task name or backend. Read the
 [environment selection contract](../env-framework/configuration.md#reusable-gym-deployment-components)
 for backend variants: selecting a physical component does not rename a Gym ID.

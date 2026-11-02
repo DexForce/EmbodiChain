@@ -38,6 +38,7 @@ _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
 _PROGRAMS = (
+    Path("tasks/manipulation/carton_stocking/task_program/program.yaml"),
     Path("tasks/manipulation/hand_over/task_program/program.bar.yaml"),
     Path("tasks/manipulation/repeated_pick_place/task_program/program.tabletop.yaml"),
     Path("tasks/manipulation/repeated_pick_place/task_program/program.workbench.yaml"),
@@ -208,6 +209,18 @@ _DUAL_ARM_RESOURCES = {
 
 _RESOURCE_PATHS = frozenset(
     {
+        *(
+            Path("tasks/manipulation/carton_stocking") / name
+            for name in (
+                "README.md",
+                "catalog.yaml",
+                "env.yaml",
+                "task.panda.yaml",
+                "task_program/integration.yaml",
+                "real2sim/collection.yaml",
+            )
+        ),
+        Path("components/execution_policies/real2sim_verified.yaml"),
         *_DUAL_ARM_RESOURCES,
         *_PROGRAMS,
         *_DEPLOYMENTS,

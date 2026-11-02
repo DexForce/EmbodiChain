@@ -157,7 +157,7 @@ Collision meshes under `Collision/`:
 
 ### PikaGripper
 
-Source: `PikaGripper/PikaGripper.urdf`, registered by `eef_assets.PikaGripper`.
+Source: `PikaGripper/PikaGripper.urdf`, registered by `embodichain_robots.agilex.pika.assets.PikaGripper`.
 Archive MD5: `8a9d0779e7dbfa7bf5d4713175df014e`; URDF SHA-256:
 `cb99efefd74f26011c56d5afcf13839c13a5374160fecb02ac02ba9fa172d952`.
 
@@ -175,3 +175,19 @@ These are simulation mesh dimensions, not hardware specifications.
 | `gripper_base_link.STL` | `ac4593d07d4d95436bb125e76df22332414c24f287ff3de0b35c3336cdfca5e6` |
 | `gripper_left_link.STL` | `16de0af984683c4286bf826557c1ea3c40380c64f890969cde5c880726c7474b` |
 | `gripper_right_link.STL` | `0a10906fa2ed940db0de90b0f171db3cc550c8cfd56b83bebd33b9a8955e0b66` |
+
+
+## Robotiq 2F-85
+
+The `robotiq_2f85` aperture model uses a 1 mm planning cutoff and 85 mm maximum
+opening. Full open-hand collision geometry is read from `Robotiq_V2.zip`
+(MD5 `9bcbf92946b200c903938d59323e7b2c`), including all linkage meshes and the
+authored box-shaped rubber pads. It does not fit scalar envelopes to meshes.
+The nominal root-to-TCP is Z=0.15 m, native Y opens, and canonical X opens;
+`root_from_tcp` can explicitly supply another calibrated runtime TCP without
+moving the physical surface points. Actual closing/contact behavior remains
+the execution host's responsibility.
+
+`box_region.project_box_side_grasp()` projects input anchors onto declared
+opposed box-Y faces and chooses the nearest jaw-symmetric orientation. It does
+not establish physical grasp success or read a hidden reference trajectory.

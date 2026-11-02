@@ -216,6 +216,7 @@ class _Deployment:
     agent_refs: tuple[str, ...] = ()
     validation_resource: Traversable | None = None
     validation: Mapping[str, Any] | None = None
+    requires_dataset_dir: bool = False
 
     @property
     def command(self) -> str | None:
@@ -223,7 +224,10 @@ class _Deployment:
             return None
         path = _local_path(self.resource)
         reference = str(path) if path is not None else self.config_ref
-        return f"embodichain run-task --gym_config {shlex.quote(reference)}"
+        command = f"embodichain run-task --gym_config {shlex.quote(reference)}"
+        if self.requires_dataset_dir:
+            command += " --dataset-dir ./datasets"
+        return command
 
 
 @dataclass
@@ -459,7 +463,9 @@ def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
                         resource,
                         _backend(config, resource),
                         _config_embodiment_names(config),
-                        {_TASK_PROGRAM} if "task_program" in config else set(),
+                        ({_TASK_PROGRAM} if "task_program" in config else set())
+                        | ({_RL} if "rl_task" in config else set()),
+                        requires_dataset_dir="real2sim" in config,
                     )
                 )
                 if metadata and "validation" in metadata["deployments"][name]:

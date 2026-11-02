@@ -305,3 +305,12 @@ programs. PourWater uses Hybrid for its glTF asset loader. Other motion checks
 run headlessly without sensors; an additional Hybrid check verified the shared
 UR5 top camera at 960 by 540 pixels. These checks do not qualify every random
 seed, physics backend or sensor configuration.
+
+## Real-demonstration trajectory expansion
+
+`configs/tasks/manipulation/carton_stocking/task.panda.yaml` is a configured
+Panda/Robotiq Task Program with three fixed real-motion prototypes. It runs
+source refinement, protected trajectory/time variants and measured LeRobot
+collection through the standard `run-task` owner. Its catalog exposes one
+Panda deployment; the standard task requires no example-generated configuration.
+See the task README for assets, accepted geometry and the 78-candidate benchmark.

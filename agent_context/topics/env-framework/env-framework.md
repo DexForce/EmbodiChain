@@ -18,7 +18,7 @@ Lightweight RL environments have a separate owner in
 | Robot selector decoding | `robot.class_type` → `embodichain/robot_registry.py`; catalog ownership is in [robot-system](../robot-system/robot-system.md) |
 | Import registration | `embodichain/lab/gym/utils/registration.py`; official task imports under `extensions/embodichain_tasks/embodichain_tasks/` |
 | Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
-| Scene, manager and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
+| Scene, managers, RL outcomes and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
 | Optional measured physical objectives | `embodichain/lab/gym/envs/objectives/`; Gym owns observation/reset hooks independently of expert acceptance |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
@@ -138,6 +138,13 @@ post-policy and validator acceptance. Segment acceptance and append-only
 dataset persistence are separate contracts; see
 [Task Programs](../task-programs/task-programs.md) and
 [data pipeline](../data-pipeline/data-pipeline.md).
+
+Source-bound Real2Sim episodes require call-level action tracing and confirmed
+artifact receipts. The ordinary `run-task` recorder rejects them; a deployment's
+`real2sim.profile` or explicit `--real2sim-profile` selects the tabletop owner,
+which uses the qualified synchronous sink and
+retains a staged payload if confirmation fails. See
+[Real2Sim motion](../data-pipeline/real2sim.md).
 
 Optional physical objectives publish separate measured results; they do not
 change termination, program acceptance or persistence. Read [execution](execution.md)

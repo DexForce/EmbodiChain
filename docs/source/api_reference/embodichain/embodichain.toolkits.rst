@@ -56,6 +56,29 @@ or installed in a higher-level planning runtime.
    ParallelJawGripperModelCfg
    get_parallel_jaw_gripper_model
 
+Box-side grasp regions
+~~~~~~~~~~~~~~~~~~~~~
+
+Rectangular cartons can declare opposed object-Y faces, an inset along object-X
+and a height along object-Z. Projection selects the nearest legal longitudinal
+position and jaw-symmetric orientation to an input anchor. It does not establish
+IK, aperture, collision or physical grasp feasibility; downstream planning must
+check those constraints against the declared gripper geometry.
+
+.. currentmodule:: embodichain.toolkits.graspkit.box_region
+
+.. autosummary::
+   :nosignatures:
+
+   BoxSideGraspRegionCfg
+   project_box_side_grasp
+
+.. autoclass:: BoxSideGraspRegionCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autofunction:: project_box_side_grasp
+
 The :mod:`embodichain.toolkits.graspkit.pg_grasp` module provides a reusable
 antipodal implementation of these contracts. The pipeline consists of three
 stages:

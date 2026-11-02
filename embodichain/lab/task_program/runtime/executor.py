@@ -47,6 +47,7 @@ from embodichain.lab.sim.atomic_actions.requirements import (
     FORWARD_KINEMATICS_CAPABILITY,
 )
 from embodichain.lab.sim.atomic_actions.runner import (
+    CommandOperation,
     CommandSink,
     ExecutionClock,
     ExecutionRunner,
@@ -98,7 +99,11 @@ from .results import (
     _snapshot_event,
     _snapshot_task_state,
 )
-from .expansion import TaskProgramPlanRequest, TaskProgramPlanTransformFactory
+from .expansion import (
+    TaskProgramNominalSourceFactory,
+    TaskProgramPlanRequest,
+    TaskProgramPlanTransformFactory,
+)
 from ..compiler.lowering import (
     GroundedHeldObjectGuard,
     GroundedPhaseEffectGate,
@@ -266,6 +271,7 @@ class SemanticCallExecutor:
         clock: ExecutionClock | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
     ) -> None:
         if not isinstance(compiler, SemanticCallCompiler):
             raise TypeError("compiler must be a SemanticCallCompiler.")
@@ -289,6 +295,12 @@ class SemanticCallExecutor:
                 "plan_transform_factory must implement "
                 "TaskProgramPlanTransformFactory or be None."
             )
+        if nominal_source_factory is not None and not isinstance(
+            nominal_source_factory, TaskProgramNominalSourceFactory
+        ):
+            raise TypeError(
+                "nominal_source_factory must implement TaskProgramNominalSourceFactory or be None."
+            )
         integration = compiler.integration
         engine = integration.engine
         if not isinstance(engine, AtomicActionEngine):
@@ -311,7 +323,9 @@ class SemanticCallExecutor:
         self._clock = clock or MonotonicExecutionClock()
         self._runner_cfg_override = runner_cfg
         self._plan_transform_factory = plan_transform_factory
+        self._nominal_source_factory = nominal_source_factory
         self._step_observer: Callable[[RunnerStep], None] | None = None
+        self._last_sent_plan_reference: tuple[int, str | None, int] | None = None
         self._task_state = _snapshot_task_state(initial_task)
         self._env_ids = torch.arange(
             self._task_state.batch_size,
@@ -421,6 +435,10 @@ class SemanticCallExecutor:
         Returns:
             A new idle semantic runtime for one independent lane.
         """
+        if self._nominal_source_factory is not None:
+            raise ValueError(
+                "nominal source factories do not yet support parallel execution"
+            )
         if not isinstance(command_sink, CommandSink):
             raise TypeError("command_sink must implement CommandSink.")
         initial_state = self.task_state if task_state is None else task_state
@@ -440,6 +458,15 @@ class SemanticCallExecutor:
     def status(self) -> SemanticExecutionStatus:
         """Return the current workflow status."""
         return self._status
+
+    @property
+    def last_sent_plan_reference(self) -> tuple[int, str | None, int] | None:
+        """Return the latest accepted command's call, plan and waypoint IDs.
+
+        This records sink acceptance only. A Gym bridge must separately prove
+        that the buffered action was consumed by ``env.step``.
+        """
+        return self._last_sent_plan_reference
 
     @property
     def result(self) -> SemanticExecutionResult:
@@ -556,20 +583,36 @@ class SemanticCallExecutor:
             verifier = self._effect_verifier
         elif grounded.analyzed.effect_assurance is EffectAssurance.PROJECTED:
             verifier = self._project_unverified_effect
-        else:  # pragma: no cover - compiler rejects this before execution
-            raise RuntimeError(
-                "A verified semantic call reached execution without an effect "
-                "monitor."
-            )
+        else:
+            # Registered calls without symbolic effects legitimately have no
+            # monitor. If their Atomic plan unexpectedly requests verification,
+            # this verifier fails closed instead of projecting an effect.
+            verifier = self._effect_verifier
         guards = grounded.effect_guards
         guard_verifier = self._held_object_guard_verifier if guards else None
         gates = grounded.effect_gates
         gate_verifier = self._phase_effect_gate_verifier if gates else None
+        self._last_sent_plan_reference = None
         runner_step = runner.step(
             effect_verifier=verifier,
             phase_effect_gate_verifier=gate_verifier,
             held_object_guard_verifier=guard_verifier,
         )
+        plan_sample = runner.session.last_commanded_plan_sample
+        if (
+            plan_sample is not None
+            and self._current_call_index is not None
+            and any(
+                dispatch.operation is CommandOperation.SEND
+                and dispatch.acknowledgement.accepted
+                for dispatch in runner_step.dispatches
+            )
+        ):
+            self._last_sent_plan_reference = (
+                self._analysis_call_offset + self._current_call_index,
+                plan_sample[0],
+                plan_sample[1],
+            )
         if self._step_observer is not None:
             try:
                 self._step_observer(runner_step)
@@ -872,6 +915,7 @@ class SemanticCallExecutor:
         self._execution_prefix_length = execution_prefix_length
         self._current_call_index = 0
         self._runner = None
+        self._last_sent_plan_reference = None
         self._grounded = None
         self._active_call = None
         self._active_recovery_item = None
@@ -1036,7 +1080,11 @@ class SemanticCallExecutor:
                     "Grounded semantic call preset must own an ExecutionRunnerCfg."
                 )
         plan_transform = None
-        if self._plan_transform_factory is not None:
+        nominal_source = None
+        if (
+            self._plan_transform_factory is not None
+            or self._nominal_source_factory is not None
+        ):
             if self._workflow_id is None:
                 raise RuntimeError("A grounded call requires an active workflow ID.")
             plan_request = TaskProgramPlanRequest(
@@ -1066,19 +1114,25 @@ class SemanticCallExecutor:
                         "prepare_planning_context() must return PlanningContext."
                     )
                 context = prepared_context
-            plan_transform = self._plan_transform_factory.create_plan_transform(
-                plan_request,
-                engine=self._engine,
-            )
-            if plan_transform is not None and not callable(plan_transform):
-                raise TypeError(
-                    "create_plan_transform() must return a callable or None."
+            if self._plan_transform_factory is not None:
+                plan_transform = self._plan_transform_factory.create_plan_transform(
+                    plan_request,
+                    engine=self._engine,
+                )
+                if plan_transform is not None and not callable(plan_transform):
+                    raise TypeError(
+                        "create_plan_transform() must return a callable or None."
+                    )
+            if self._nominal_source_factory is not None:
+                nominal_source = self._nominal_source_factory.create_nominal_source(
+                    plan_request, engine=self._engine
                 )
         session = self._engine.start(
             (invocation,),
             context,
             eligible_mask=active_mask,
             plan_transform=plan_transform,
+            nominal_source=nominal_source,
         )
         primed = _PrimedObservationProvider(context, self._observation_provider)
         runner = ExecutionRunner(

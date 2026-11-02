@@ -25,21 +25,24 @@ from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
 
 
 @pytest.mark.parametrize(
-    "model,side,root,opened",
+    "model,side,root,opened,parts",
     [
-        ("franka_panda_hand", None, "fr3_hand", 0.04),
-        ("dh_pgi_140_80", None, "gripper_base_link_1", 0.0),
-        ("cobotmagic_v100_gripper", None, "gripper_base", 0.05),
-        ("pika_gripper", None, "GRIPPER_ROOT_LINK", 0.05),
-        ("tianji_marvin_gripper", "left", "left_hand_base_link", 0.0),
-        ("tianji_marvin_gripper", "right", "right_hand_base_link", 0.0),
+        ("franka_panda_hand", None, "fr3_hand", 0.04, 3),
+        ("dh_pgi_140_80", None, "gripper_base_link_1", 0.0, 3),
+        ("cobotmagic_v100_gripper", None, "gripper_base", 0.05, 3),
+        ("pika_gripper", None, "GRIPPER_ROOT_LINK", 0.05, 3),
+        ("tianji_marvin_gripper", "left", "left_hand_base_link", 0.0, 3),
+        ("tianji_marvin_gripper", "right", "right_hand_base_link", 0.0, 3),
+        ("robotiq_2f85", None, "robotiq_arg2f_base_link", 0.0, 11),
     ],
 )
-def test_registered_real_hand_assets_are_complete_and_open(model, side, root, opened):
+def test_registered_real_hand_assets_are_complete_and_open(
+    model, side, root, opened, parts
+):
     geometry = get_parallel_jaw_collision_geometry(model, side=side)
     provenance = geometry.provenance
     assert provenance["root_link"] == root
-    assert len(provenance["parts"]) == 3
+    assert len(provenance["parts"]) == parts
     assert len(provenance["files_sha256"]) >= 3
     assert set(provenance["joint_positions"].values()) == {opened}
     assert len(geometry.points) > 100

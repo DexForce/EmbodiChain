@@ -100,7 +100,7 @@ lives in `_toppra_common.py`. `_toppra.py` is an offline NumPy oracle and must
 not be imported by the runtime planner or Warp adapter.
 Robot-backed planning retains shared speed-cap and control-part resolution,
 including gradients of uncapped requested limits.
-The runtime and reference preserve uniform not-a-knot cubic geometry, the existing waypoint
+Ordinary planner calls and the reference preserve uniform not-a-knot cubic geometry, the existing waypoint
 deduplication tolerance and final knot, and signed velocity/acceleration bounds
 containing rest. Public planner and joint-path retiming outputs retain float64
 sampling precision: narrowing joint positions before differentiating dense
@@ -286,16 +286,53 @@ mixed order and real Franka adapter calls in
 
 ## Retiming and playback
 
+`compute.trajectory.retime_joint_paths()` is the simulation-independent public
+operator with explicit velocity/acceleration inputs. It returns plain tensors
+`(q, qd, qdd, dt, success, lengths)`; duration is `dt.sum(-1)`. Quantity sampling
+has fixed width, while time sampling pads to the maximum valid row length.
+Failures have zero valid length; stationary successes retain two samples.
+This API and `DifferentiableRetimingLayer` retain not-a-knot geometry, including
+the repeated final knot. They share the Warp solver with the planner helper
+below, which explicitly selects PCHIP instead. Both boundaries validate path
+lengths before integer narrowing.
+
 `toppra_planner.py::retime_joint_paths()` is the shared entry point for
 re-parameterizing an already-planned joint path under velocity and acceleration
-limits, used by planners that emit geometry without executable timing. It is
-the planner's own time parameterization. All CPU/CUDA rows run on Warp,
-including single-row calls, so batch size does not change waypoint cleanup
-precision or the helper's float32/float64 output dtype. It resamples
-along the fitted spline, so recompute derived poses from its output rather
-than reusing the input samples. Optional per-row path lengths exclude
-rectangular tail holds from spline fitting; without them, an explicit repeated
-final waypoint retains the historical final-knot geometry.
+limits, used by planners that emit geometry without executable timing. It keeps
+its mapping/enum signature and native-width float64 `PlanResult`, without
+allocating padded learning outputs. It shares
+TOPPRA's interval solver but uses coordinatewise PCHIP: the continuous curve
+stays inside each adjacent pair's position box. C1 joins preserve velocity;
+acceleration can jump, with both sides bounded on segment-aligned cells. Jerk
+and collision freedom are not certified. All distinct input nodes remain in
+order in output, so rollout waypoint arrivals survive retiming. Consecutive
+exact repeats collapse; without timestamps they cannot specify dwell duration.
+TIME samples are uniform within each geometric segment and never exceed the
+requested spacing. QUANTITY keeps its requested count for moving rows and
+fails rows with too many distinct nodes. Ordinary `ToppraPlanner` geometry and
+sampling remain unchanged.
+
+Explicit `arrival_indices` in TIME mode retain distinct semantic visits, even
+at identical configurations, and solve each phase rest-to-rest. This can lengthen
+motion; it is separate from preserving geometric knots. NeuralPlanner opts in
+with `preserve_waypoint_arrivals`. `PlanResult.waypoint_indices` and
+`policy_waypoint_indices` carry output and native visits; missing visits use -1
+and padding never establishes an arrival. Atomic control-grid conversion and
+event splits consume these identities instead of recovering visits by proximity.
+Position-only composite paths encode each declared stop without a stationary
+neighbor as a one-control-period hold, including terminal stops that can become
+interior junctions. This extends those paths by one tick per added hold and
+preserves zero velocity targets when the final composite is differentiated.
+Direct full-robot conversion retains phase velocities without adding these holds.
+Revalidate float32 compiled dynamics after holds and concatenation.
+
+Call-scoped trajectory capture in `compute/trajectory/_trace.py` clones device
+tensors only when enabled. Benchmark hosts own case identities and file export;
+capture is quality diagnostics and must be disabled for performance replay.
+All CPU/CUDA rows run on Warp, including single-row calls. Retiming outputs use
+float64; poses must be recomputed from returned positions. Optional per-row
+path lengths exclude rectangular tail holds. Failed rows remain zero-filled;
+shorter successful rows hold their endpoint with zero derivatives and zero dt.
 
 `compute/trajectory/timing.py` owns time-domain differentiation/resampling and
 `retime_to_control_grid()`. Zero-time position changes are invalid; repeated-time

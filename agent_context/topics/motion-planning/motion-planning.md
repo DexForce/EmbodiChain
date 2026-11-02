@@ -14,6 +14,7 @@
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
+| Bounded interaction pose refinement before expansion | `embodichain/lab/sim/motion/refinement.py`, with numeric fitting in `compute/trajectory/refinement.py`; [Real2Sim boundary](../data-pipeline/real2sim.md) |
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
 | Distinct trajectory variants for fixed waypoints | `embodichain/lab/sim/motion/expansion/variants.py` |
@@ -65,6 +66,11 @@ and backend diagnostics together. Read the
 changing interpolation or output sample counts. Final sampled collision checks
 do not establish continuous collision freedom or derivative compliance.
 
+Joint scene/deployment searches install a context-local cooperative call budget
+through `motion/_budget.py`. Robot IK, motion generation and Atomic planning
+boundaries share that host budget, including retries. See
+[scene feasibility](../scene-expansion/feasibility.md) for quota and evidence scope.
+
 ## Compute and execution ownership
 
 `compute.trajectory` owns pure interpolation, differentiation, resampling and
@@ -104,6 +110,10 @@ row and retain rejected goals. This changes the population, requires reviewed
 fingerprints, and supplies no path or physical-success certificate.
 
 ## Trajectory augmentation boundary
+
+Real2Sim source templates and protected mapped retiming integrate with this
+boundary; their control-grid, source-permission and host limits are documented
+in [Real2Sim motion](../data-pipeline/real2sim.md).
 
 Scene layout proposals and their Task Program execution adapter belong to
 [scene expansion](../scene-expansion/scene-expansion.md). The trajectory

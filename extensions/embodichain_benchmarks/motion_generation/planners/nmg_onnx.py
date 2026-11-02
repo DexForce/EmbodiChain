@@ -52,6 +52,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             "policy_frame_from_world_by_control_part",
             "batch_control_parts",
             "onnx_cuda_use_tf32",
+            "preserve_waypoint_arrivals",
         }
     )
 
@@ -186,6 +187,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             runtime_tcp_from_policy_tcp=values.get("runtime_tcp_from_policy_tcp"),
             dt=float(values.get("dt", 0.01)),
             constraints=self._retiming_constraints() if self.retime else None,
+            preserve_waypoint_arrivals=values.get("preserve_waypoint_arrivals", False),
         )
         self.motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
         self.fixed_batch_size = self.motion_generator.planner._policy.fixed_batch_size

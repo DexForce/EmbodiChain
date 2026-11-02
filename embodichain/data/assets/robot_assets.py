@@ -38,6 +38,7 @@ __all__ = [
     "UniversalRobots",
     "Rokae",
     "Franka",
+    "FrankaPandaArm",
     "Agile",
     "Hans",
     "Aubo",
@@ -452,6 +453,7 @@ _ASSET_EXPORTS = {
     "TianjiMarvin": "embodichain_robots.tianji.marvin.assets",
     "FlexivRizon4S": "embodichain_robots.flexiv.rizon4s.assets",
     "Franka": "embodichain_robots.franka.assets",
+    "FrankaPandaArm": "embodichain_robots.franka.assets",
     "UniversalRobots": "embodichain_robots.universal_robots.assets",
 }
 

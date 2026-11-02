@@ -34,6 +34,7 @@ from embodichain.lab.sim.motion.expansion.operators import (
     retime,
     rotate_grasp_about_object_axis,
     validate_motion_limits,
+    validate_motion_samples,
     via_points,
 )
 
@@ -222,6 +223,26 @@ def test_large_derivatives_return_a_failed_check() -> None:
     )
     assert not result.accepted
     assert result.checks[0].metrics["speed_ratio"] > 1e30
+
+
+def test_raw_motion_samples_report_acceleration_and_reject_invalid_clock() -> None:
+    positions = torch.tensor([[0.0], [0.01], [0.04]], dtype=torch.float64)
+    intervals = torch.tensor([0.0, 0.1, 0.1], dtype=torch.float64)
+    result = validate_motion_samples(
+        positions,
+        intervals,
+        velocity_limits=torch.tensor([1.0]),
+        acceleration_limits=torch.tensor([1.0]),
+    )
+    assert not result.accepted
+    assert result.checks[0].metrics["acceleration_ratio"] == pytest.approx(2.0)
+    with pytest.raises(ValueError, match="positive later intervals"):
+        validate_motion_samples(
+            positions,
+            torch.tensor([0.0, 0.1, 0.0]),
+            velocity_limits=torch.tensor([1.0]),
+            acceleration_limits=torch.tensor([1.0]),
+        )
 
 
 def test_half_precision_derivatives_are_accumulated_in_high_precision() -> None:
