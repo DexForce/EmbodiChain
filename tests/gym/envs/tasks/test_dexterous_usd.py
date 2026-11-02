@@ -129,3 +129,42 @@ def test_snapshot_rejects_per_world_timestep_changes() -> None:
     )
     with pytest.raises(ValueError, match="Nonuniform execution option: timestep"):
         snapshot_execution_model(SimpleNamespace(mj_model=model, mjw_model=remote))
+
+
+def test_dexuni_ownership_includes_free_bodies_and_replicas() -> None:
+    from dexsim.spawn import (
+        ArticulationDesc,
+        MeshObjectDesc,
+        RigidBodyPhysicsDesc,
+        SceneDesc,
+        NewtonPhysicsDesc,
+        CollisionDesc,
+    )
+    from dexsim.types import ActorType
+    from embodichain_tasks.manipulation.dexterous._dexuni_adapter import (
+        _mujoco_articulation_ids,
+    )
+
+    scene = SceneDesc(
+        articulations=[ArticulationDesc(name="hand")],
+        mesh_objects=[
+            MeshObjectDesc(
+                name="cube",
+                physics=RigidBodyPhysicsDesc(actor_type=ActorType.DYNAMIC),
+                collisions=[CollisionDesc()],
+            ),
+            MeshObjectDesc(
+                name="anchor",
+                physics=RigidBodyPhysicsDesc(
+                    actor_type=ActorType.KINEMATIC, newton=NewtonPhysicsDesc(mocap=True)
+                ),
+            ),
+            MeshObjectDesc(
+                name="floor",
+                physics=RigidBodyPhysicsDesc(actor_type=ActorType.STATIC),
+                collisions=[CollisionDesc()],
+            ),
+        ],
+    )
+    assert _mujoco_articulation_ids(scene, 1) == (0, 1, 2)
+    assert _mujoco_articulation_ids(scene, 4) == tuple(range(12))
