@@ -45,6 +45,8 @@ supports full-surface rigid-soft feedback in current DexSim builds. Native
 validation owns compatible contact modes and option combinations. Prescribed kinematic trajectories
 cannot respond to contact reactions. Forward solver expert options through
 `NewtonPhysicsCfg.solver_cfg`; DexSim owns their validation and dispatch.
+The current [DFSPH composition](fluids.md) remains one-way even when DexUni's
+rigid/soft coupling options are set to two-way.
 Articulation gravity compensation and passive damping are separate creation
 settings; see [articulation adapters](articulation-adapters.md).
 `async_sync`, `rigid_transform_sync_mode`, `capture_acquire_timeout` and
