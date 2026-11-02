@@ -67,12 +67,15 @@ def env_factory(
         env._episode_success = torch.zeros(2, dtype=torch.bool)
         env._last_observation = None
         env.ctrl = torch.zeros(2, 1)
-        env.qmap = env.vmap = torch.tensor([0])
-        env.data = SimpleNamespace(qpos=torch.zeros(2, 1), qvel=torch.zeros(2, 1))
+        env.qmap = env.vmap = env.amap = torch.tensor([0])
+        env.data = SimpleNamespace(
+            qpos=torch.zeros(2, 1), qvel=torch.zeros(2, 1), ctrl=torch.zeros(2, 1)
+        )
         env.dexuni_adapter = Mock()
         env.backend = Mock()
         env.mujoco_solver = Mock()
         env.advance_physics = Mock()
+        env._publish_controls = Mock()
         env._state = lambda: None
 
         def task_reset(ids):

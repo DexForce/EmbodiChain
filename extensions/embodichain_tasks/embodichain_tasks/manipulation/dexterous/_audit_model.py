@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import copy
+
 from collections.abc import Mapping, Sequence
 import re
 from typing import Any
@@ -25,7 +27,7 @@ from typing import Any
 import mujoco
 import numpy as np
 
-__all__ = ["audit_model"]
+__all__ = ["audit_model", "snapshot_execution_model"]
 
 
 def _rotation(quat: np.ndarray) -> np.ndarray:
@@ -73,6 +75,92 @@ def _contact_reason(model: Any, first: int, second: int) -> str:
     return "eligible"
 
 
+def snapshot_execution_model(
+    solver: Any, *, derived_cache_report: dict[str, Any] | None = None
+) -> mujoco.MjModel:
+    """Read the active solver parameters into a detached audit model.
+
+    Newton notifications can update device parameters without updating the
+    host MjModel. This initialization-only readback validates homogeneous
+    worlds and never changes either live model.
+    """
+    result = copy.copy(solver.mj_model)
+    remote = getattr(solver, "mjw_model", None)
+    if remote is None:
+        return result
+    for name in dir(result):
+        local = getattr(result, name)
+        device_value = getattr(remote, name, None)
+        if not isinstance(local, np.ndarray) or not hasattr(device_value, "numpy"):
+            continue
+        values = device_value.numpy()
+        if name in {
+            "actuator_acc0",
+            "body_invweight0",
+            "dof_invweight0",
+            "dof_M0",
+            "body_subtreemass",
+            "tendon_invweight0",
+        }:
+            # These solver-computed caches are not authored inputs checked below.
+            # Keep their batch variation visible without treating it as lost USD
+            # metadata; strict rollout comparison validates its output effects.
+            if derived_cache_report is not None and values.size:
+                spread = (
+                    values - values[0]
+                    if values.ndim == local.ndim + 1
+                    else np.zeros_like(values)
+                )
+                derived_cache_report[name] = {
+                    "shape": list(values.shape),
+                    "max_world_spread": float(np.max(np.abs(spread))),
+                }
+            continue
+        if values.shape == local.shape:
+            local[:] = values
+        elif values.ndim == local.ndim + 1 and values.shape[1:] == local.shape:
+            if len(values) and not np.array_equal(
+                values, np.broadcast_to(values[0], values.shape)
+            ):
+                raise ValueError(f"Nonuniform execution model field: {name}")
+            if len(values):
+                local[:] = values[0]
+    for name in (
+        "gravity",
+        "timestep",
+        "integrator",
+        "solver",
+        "iterations",
+        "ls_iterations",
+        "ccd_iterations",
+        "cone",
+        "impratio",
+        "tolerance",
+        "ls_tolerance",
+        "ccd_tolerance",
+        "enableflags",
+        "disableflags",
+    ):
+        value = getattr(remote.opt, name, None)
+        if value is None:
+            continue
+        if hasattr(value, "numpy"):
+            values = value.numpy()
+            shape = np.asarray(getattr(result.opt, name)).shape
+            if values.shape == shape:
+                value = values if shape else values.item()
+            elif values.ndim and values.shape[1:] == shape:
+                if not np.array_equal(values, np.broadcast_to(values[0], values.shape)):
+                    raise ValueError(f"Nonuniform execution option: {name}")
+                value = values[0]
+            else:
+                raise ValueError(
+                    f"Unexpected execution option shape: {name}: {values.shape}"
+                )
+        setattr(result.opt, name, value)
+    return result
+
+
 def audit_model(
     source: Any,
     imported: Any,
@@ -80,6 +168,7 @@ def audit_model(
     actuator_map: Sequence[int],
     body_map: Mapping[str, int],
     *,
+    explicit_collision_filtering: bool = False,
     atol: float = 2e-6,
     rtol: float = 2e-5,
 ) -> dict[str, Any]:
@@ -91,6 +180,8 @@ def audit_model(
         joint_map: Source joint index to imported joint index.
         actuator_map: Imported actuator indices in source actuator order.
         body_map: Source body names to imported body indices.
+        explicit_collision_filtering: Parent exclusions are encoded explicitly;
+            the complete effective geometry-pair graph is still compared.
         atol: Absolute numeric tolerance.
         rtol: Relative numeric tolerance.
 
@@ -116,7 +207,14 @@ def audit_model(
             semantic_a.flat[list(ignored_indices)] = 0
             semantic_b.flat[list(ignored_indices)] = 0
         difference = (
-            float(np.max(np.abs(a.astype(float) - b.astype(float))))
+            float(
+                np.max(
+                    np.abs(
+                        np.where(a == b, 0.0, a.astype(float))
+                        - np.where(a == b, 0.0, b.astype(float))
+                    )
+                )
+            )
             if same_shape and a.size
             else 0.0
         )
@@ -155,11 +253,20 @@ def audit_model(
         "enableflags",
         "disableflags",
     ):
-        compare(
-            f"option.{field}", getattr(source.opt, field), getattr(imported.opt, field)
-        )
+        expected = getattr(source.opt, field)
+        if field == "disableflags" and explicit_collision_filtering:
+            expected = int(expected) | int(mujoco.mjtDisableBit.mjDSBL_FILTERPARENT)
+        compare(f"option.{field}", expected, getattr(imported.opt, field))
+        if field == "disableflags" and explicit_collision_filtering:
+            checks[-1]["raw_matches"] = int(source.opt.disableflags) == int(
+                imported.opt.disableflags
+            )
+            checks[-1][
+                "equivalence_reason"
+            ] = "Parent filtering is represented by explicit exclusions; all effective geometry pairs are checked."
 
     bmap = {0: 0}
+    merged_static_bodies = set()
     for source_id in range(1, source.nbody):
         name = source.body(source_id).name
         if name not in body_map:
@@ -169,6 +276,20 @@ def audit_model(
             continue
         imported_id = body_map[name]
         bmap[source_id] = imported_id
+        if (
+            imported_id == 0
+            and source.body_weldid[source_id] == 0
+            and source.body_mocapid[source_id] < 0
+        ):
+            merged_static_bodies.add(source_id)
+            checks.append(
+                {
+                    "field": f"body[{name}].static_world_merge",
+                    "matches": True,
+                    "equivalence_reason": "Static geometry transforms and contacts are checked in the world frame.",
+                }
+            )
+            continue
         for field in ("body_mass", "body_ipos", "body_pos"):
             ignored = (
                 (0, 1, 2)
@@ -211,8 +332,6 @@ def audit_model(
             "jnt_axis",
             "jnt_limited",
             "jnt_range",
-            "jnt_actfrclimited",
-            "jnt_actfrcrange",
             "jnt_solref",
             "jnt_solimp",
             "jnt_stiffness",
@@ -224,12 +343,6 @@ def audit_model(
                 and not imported.jnt_limited[imported_id]
             ):
                 ignored = (0, 1)
-            if (
-                field == "jnt_actfrcrange"
-                and not source.jnt_actfrclimited[source_id]
-                and not imported.jnt_actfrclimited[imported_id]
-            ):
-                ignored = (0, 1)
             compare(
                 f"joint[{name}].{field}",
                 getattr(source, field)[source_id],
@@ -237,6 +350,25 @@ def audit_model(
                 ignored_indices=ignored,
                 reason="Range is inactive because both limit flags are disabled.",
             )
+        source_force_range = (
+            source.jnt_actfrcrange[source_id]
+            if source.jnt_actfrclimited[source_id]
+            else (-np.inf, np.inf)
+        )
+        imported_force_range = (
+            imported.jnt_actfrcrange[imported_id]
+            if imported.jnt_actfrclimited[imported_id]
+            else (-np.inf, np.inf)
+        )
+        compare(
+            f"joint[{name}].effective_actuator_force_range",
+            source_force_range,
+            imported_force_range,
+        )
+        checks[-1]["source_limit_flag"] = bool(source.jnt_actfrclimited[source_id])
+        checks[-1]["imported_limit_flag"] = bool(
+            imported.jnt_actfrclimited[imported_id]
+        )
         width = (6, 3, 1, 1)[int(source.jnt_type[source_id])]
         sa, ia = int(source.jnt_dofadr[source_id]), int(
             imported.jnt_dofadr[imported_id]
@@ -272,8 +404,19 @@ def audit_model(
         imported.geom_contype | imported.geom_conaffinity
     )
     used: set[int] = set()
+    static_reference = mujoco.MjData(source)
+    mujoco.mj_kinematics(source, static_reference)
     for sid in source_collision:
         name = source.geom(int(sid)).name
+        source_position = source.geom_pos[sid]
+        source_rotation = _rotation(source.geom_quat[sid])
+        source_body = int(source.geom_bodyid[sid])
+        if source_body in merged_static_bodies:
+            body_rotation = static_reference.xmat[source_body].reshape(3, 3)
+            source_position = (
+                static_reference.xpos[source_body] + body_rotation @ source_position
+            )
+            source_rotation = body_rotation @ source_rotation
         candidates = [
             int(i)
             for i in imported_collision
@@ -300,7 +443,7 @@ def audit_model(
                 for i in candidates
                 if imported.geom_type[i] == source.geom_type[sid]
                 and np.allclose(
-                    imported.geom_pos[i], source.geom_pos[sid], atol=atol, rtol=rtol
+                    imported.geom_pos[i], source_position, atol=atol, rtol=rtol
                 )
             ]
             if len(geometric) != 1:
@@ -355,14 +498,14 @@ def audit_model(
                     ignored, reason = (1, 2), "Sphere collision uses only radius."
             compare(
                 f"geom[{name or sid}].{field}",
-                getattr(source, field)[sid],
+                source_position if field == "geom_pos" else getattr(source, field)[sid],
                 getattr(imported, field)[target],
                 ignored_indices=ignored,
                 reason=reason,
             )
         compare(
             f"geom[{name or sid}].rotation",
-            _rotation(source.geom_quat[sid]),
+            source_rotation,
             _rotation(imported.geom_quat[target]),
             ignored_indices=tuple(range(9)) if is_mesh else (),
             reason="Mesh principal frame may change; body-frame vertices are checked.",
@@ -381,7 +524,7 @@ def audit_model(
             vb = imported.mesh_vert[
                 imported_start : imported_start + imported.mesh_vertnum[imported_mesh]
             ]
-            va = va @ _rotation(source.geom_quat[sid]).T + source.geom_pos[sid]
+            va = va @ source_rotation.T + source_position
             vb = (
                 vb @ _rotation(imported.geom_quat[target]).T + imported.geom_pos[target]
             )

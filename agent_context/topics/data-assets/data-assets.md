@@ -256,8 +256,9 @@ model-fidelity metadata are owned by
 `embodichain_benchmarks.assembly.robot_reference`, not the dataset resolver or a
 combined arm/gripper catalog preset.
 
-The five classes in `assets/rl_assets.py` use the same archive cache. The CLI
-adds four robot entries and the `G1RoughTerrains` scene entry, based on each
-class's archive category. The G1 Rough asset does not replace
+The five classes in `assets/rl_assets.py` use the same archive cache. The
+`official_rl` entry point registers four robot entries and the `G1RoughTerrains`
+scene entry through the shared `embodichain.assets` catalog. CLI discovery and
+`get_data_class()` resolve the same class identities. The G1 Rough asset does not replace
 `UnitreeG1Locomotion`; their joint counts and provenance differ. Publication
 status is external to code registration and must be verified before release.

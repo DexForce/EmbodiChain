@@ -47,19 +47,24 @@ ENV_NAMES = {
 }
 
 
-def _named_index(model: Any, kind: str, name: str) -> int:
+def _named_index(
+    model: Any, kind: str, name: str, *, default: int | None = None
+) -> int:
     count = getattr(model, "n" + ("jnt" if kind == "joint" else kind))
     candidates = [
         i
         for i in range(count)
         if getattr(model, kind)(i).name == name
         or getattr(model, kind)(i).name.endswith("_" + name)
+        or getattr(model, kind)(i).name.rsplit("/", 1)[-1] == name
         or (
             kind == "geom"
             and re.sub(r"_\d+$", "", getattr(model, kind)(i).name).split("/")[-1]
             == name
         )
     ]
+    if not candidates and default is not None:
+        return default
     if len(candidates) != 1:
         raise ValueError(f"Cannot resolve {kind} {name!r}: {candidates}")
     return candidates[0]
@@ -74,9 +79,9 @@ def rotate_wxyz(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
 class DexSimManipulationEnv:
     """Expose real DexSim physics through EmbodiChain's vector-env interface.
 
-    The task-local MJCF adapter uses the World-owned backend to retain tendons,
-    passive joints and direct actuators. Native stepping belongs to DexSim;
-    MuJoCo forward calls below only update kinematics after explicit reset.
+    SceneBuilder loads the USD physics model. MJCF supplies task metadata and
+    the import audit reference. DexSim owns simulation stepping; MuJoCo forward
+    calls below update kinematics after explicit reset.
     """
 
     def __init__(
@@ -146,6 +151,11 @@ class DexSimManipulationEnv:
         if task_id in ("M1", "M2", "M3"):
             self.source.opt.ccd_iterations = 10
         self.xml = xml
+        self.usd = xml.parent / "usd" / f"{xml.stem}.usdc"
+        if not self.usd.is_file():
+            raise FileNotFoundError(
+                f"The manipulation asset lacks its USD model: {self.usd}"
+            )
         self.substeps = round(self.ctrl_dt / self.sim_dt)
         observation_spaces = {
             "obs": gym.spaces.Box(
@@ -190,25 +200,26 @@ class DexSimManipulationEnv:
             # large batches. Keep headroom for the 256-contact allocation.
             "njmax": 2048 if task_id == "M3" else 512,
             "nconmax": 256,
+            "deterministic": wp.DeterministicMode.RUN_TO_RUN,
+            "graph_conditional": False,
+            "update_data_interval": 0,
         }
         self.backend_option_overrides = {}
-        if solver_iterations is not None or solver_kind == "dexuni":
-            selected_iterations = solver_iterations or (20, 50)
+        if solver_iterations is not None:
+            selected_iterations = solver_iterations
             for name, value in zip(
                 ("iterations", "ls_iterations"), selected_iterations
             ):
                 self.backend_option_overrides[name] = {
                     "source": solver_options[name],
                     "configured": value,
-                    "reason": (
-                        "Explicit benchmark settings"
-                        if solver_iterations is not None
-                        else "DexUni configuration shared with Unitree validation."
-                    ),
+                    "reason": "Explicit benchmark settings",
                 }
                 solver_options[name] = value
         if solver_kind == "dexuni":
-            solver_cfg = DexUniSolverCfg(mujoco_options=solver_options)
+            solver_cfg = DexUniSolverCfg(
+                mujoco_options=solver_options, mujoco_joints="all"
+            )
         else:
             solver_cfg = MJWarpSolverCfg(**solver_options)
         config.newton_cfg = NewtonCfg(
@@ -223,28 +234,17 @@ class DexSimManipulationEnv:
         self.world = dexsim.World(config)
         self.world.set_manual_update(True)
         self.backend = get_newton_backend(self.world)
-        template = self.backend._create_builder()
-        template.default_shape_cfg.gap = 0.0
-        self.mjcf_import_adapter = {}
-        if solver_kind == "dexuni":
-            from ._dexuni_adapter import import_dexuni_mjcf
-
-            self.mjcf_import_adapter = import_dexuni_mjcf(template, str(xml))
-        else:
-            template.add_mjcf(
-                str(xml),
-                ctrl_direct=True,
-                parse_visuals=False,
-                parse_sites=True,
-                collapse_fixed_joints=False,
-            )
-        for _ in range(num_envs):
-            self.backend.builder.add_world(template)
-        if solver_kind == "dexuni":
-            from ._dexuni_adapter import select_all_articulations
-
-            select_all_articulations(self.backend)
-        self.backend.finalize()
+        builder = dexsim.spawn.SceneBuilder(self.world)
+        builder.add_usd("asset", str(self.usd))
+        self._explicit_collision_filtering = bool(
+            builder.scene_desc.newton
+            and builder.scene_desc.newton.use_explicit_collision_filtering
+        )
+        self._articulation_names = tuple(
+            item.name for item in builder.scene_desc.articulations
+        )
+        builder.replicate(num_envs, spacing=(0.0, 0.0, 0.0))
+        self.scene = builder.finalize()
         self.solver = self.backend.solver
         self.mujoco_solver = self.backend.mujoco_solver
         self.dexuni_adapter = None
@@ -254,22 +254,24 @@ class DexSimManipulationEnv:
             self.dexuni_adapter = DexUniStateAdapter(self.backend)
         self.imported = self.mujoco_solver.mj_model
         self.data = self.mujoco_solver.mjw_data
-        self.option_import_corrections = {
-            name: {
-                "source": float(getattr(self.source.opt, name)),
-                "exported": float(getattr(self.imported.opt, name)),
-            }
-            for name in ("timestep", "disableflags", "enableflags")
-            if getattr(self.source.opt, name) != getattr(self.imported.opt, name)
-        }
-        for name in ("disableflags", "enableflags"):
-            value = int(getattr(self.source.opt, name))
-            setattr(self.imported.opt, name, value)
-            setattr(self.mujoco_solver.mjw_model.opt, name, value)
+        self.option_import_corrections = {}
+        # World.dt owns the step size; Newton's host MjModel keeps the compiler
+        # default until explicitly synchronized for the task model audit.
         self.imported.opt.timestep = self.sim_dt
         wp.to_torch(self.mujoco_solver.mjw_model.opt.timestep).fill_(self.sim_dt)
-        self.backend.invalidate_cuda_graph("source MJCF options restored")
         self._make_mapping()
+        model = self.backend.model
+        joint_world = wp.to_torch(model.joint_world).long()
+        self._reset_field_worlds = {
+            "joint_q": torch.repeat_interleave(
+                joint_world, torch.diff(wp.to_torch(model.joint_q_start)).long()
+            ),
+            "joint_qd": torch.repeat_interleave(
+                joint_world, torch.diff(wp.to_torch(model.joint_qd_start)).long()
+            ),
+            "body_q": wp.to_torch(model.body_world).long(),
+            "body_qd": wp.to_torch(model.body_world).long(),
+        }
         self.reset(seed=seed)
 
     @property
@@ -277,7 +279,12 @@ class DexSimManipulationEnv:
         return self
 
     def _make_mapping(self) -> None:
-        source, imported = self.source, self.imported
+        from ._audit_model import snapshot_execution_model
+
+        derived_cache_report = {}
+        source, imported = self.source, snapshot_execution_model(
+            self.mujoco_solver, derived_cache_report=derived_cache_report
+        )
         for name in ("nq", "nv", "nu", "ntendon"):
             if getattr(source, name) != getattr(imported, name):
                 raise ValueError(
@@ -287,15 +294,18 @@ class DexSimManipulationEnv:
         joint_map = {}
         for j in range(source.njnt):
             name = source.joint(j).name
-            if name:
+            if name and source.jnt_type[j] != mujoco.mjtJoint.mjJNT_FREE:
                 target = _named_index(imported, "joint", name)
             else:
                 body = _named_index(
                     imported, "body", source.body(int(source.jnt_bodyid[j])).name
                 )
-                candidates = np.flatnonzero(imported.jnt_bodyid == body)
+                candidates = np.flatnonzero(
+                    (imported.jnt_bodyid == body)
+                    & (imported.jnt_type == source.jnt_type[j])
+                )
                 if len(candidates) != 1:
-                    raise ValueError("Unnamed joint cannot be resolved unambiguously")
+                    raise ValueError("Root joint cannot be resolved unambiguously")
                 target = int(candidates[0])
             joint_map[j] = target
             width = (7, 4, 1, 1)[int(source.jnt_type[j])]
@@ -324,14 +334,13 @@ class DexSimManipulationEnv:
         self.qmap = torch.tensor(qmap, device=self.device)
         self.vmap = torch.tensor(vmap, device=self.device)
         self.amap = torch.tensor(amap, device=self.device)
-        # Native direct-control slots retain source import order, whereas the
-        # solver may reorder actuators in its compiled MuJoCo model.
-        self.ctrl = wp.to_torch(self.backend.control.mujoco.ctrl).reshape(
-            self.num_envs, -1
-        )
+        self.ctrl = torch.zeros((self.num_envs, source.nu), device=self.device)
+        self._bind_controls()
         self.model_audit = {
+            "solver_derived_cache_variation": derived_cache_report,
             "source": str(self.xml),
-            "mjcf_import_adapter": self.mjcf_import_adapter,
+            "usd_source": str(self.usd),
+            "parameter_source": "Active solver device parameters at initialization.",
             "backend_option_overrides": self.backend_option_overrides,
             "solver_selection": {
                 "requested": self.solver_kind,
@@ -407,64 +416,20 @@ class DexSimManipulationEnv:
                 f"Imported actuator/tendon properties changed: {self.model_audit}"
             )
         self.body_map = {
-            source.body(i).name: _named_index(imported, "body", source.body(i).name)
+            source.body(i).name: _named_index(
+                imported,
+                "body",
+                source.body(i).name,
+                default=(
+                    0
+                    if source.body_weldid[i] == 0 and source.body_mocapid[i] < 0
+                    else None
+                ),
+            )
             for i in range(1, source.nbody)
             if source.body(i).name
         }
-        # Newton 1.7 does not export free-joint damping and adds finite force
-        # limits to originally unlimited joints. Preserve the source arrays in
-        # both MuJoCo representations before any captured physical step.
-        corrections = []
-        correction_fields = [
-            ("dof_damping", vmap),
-            ("jnt_actfrclimited", [joint_map[i] for i in range(source.njnt)]),
-            ("jnt_actfrcrange", [joint_map[i] for i in range(source.njnt)]),
-        ]
-        if self.solver_kind == "dexuni":
-            correction_fields.append(
-                ("jnt_solref", [joint_map[i] for i in range(source.njnt)])
-            )
-        for field, indices in correction_fields:
-            expected = getattr(source, field)
-            actual = getattr(imported, field)
-            difference = float(np.max(np.abs(expected.astype(float) - actual[indices])))
-            if difference:
-                corrections.append({"field": field, "max_abs_error_before": difference})
-                actual[indices] = expected
-                target = wp.to_torch(getattr(self.mujoco_solver.mjw_model, field))
-                values = torch.as_tensor(
-                    expected, device=self.device, dtype=target.dtype
-                )
-                if field == "jnt_actfrclimited":
-                    target[indices] = values
-                else:
-                    target[:, indices] = values
-        for geom_id in range(source.ngeom):
-            name = source.geom(geom_id).name
-            if not name or not (
-                source.geom_contype[geom_id] or source.geom_conaffinity[geom_id]
-            ):
-                continue
-            try:
-                imported_id = _named_index(imported, "geom", name)
-            except ValueError:
-                continue
-            if (
-                abs(source.geom_margin[geom_id] - imported.geom_margin[imported_id])
-                > 1e-8
-            ):
-                corrections.append(
-                    {
-                        "field": f"geom[{name}].margin",
-                        "source": float(source.geom_margin[geom_id]),
-                        "exported": float(imported.geom_margin[imported_id]),
-                    }
-                )
-                imported.geom_margin[imported_id] = source.geom_margin[geom_id]
-                wp.to_torch(self.mujoco_solver.mjw_model.geom_margin)[
-                    :, imported_id
-                ] = source.geom_margin[geom_id]
-        self.model_audit["property_import_corrections"] = corrections
+        self.model_audit["property_import_corrections"] = []
         from ._audit_model import audit_model
 
         audit_source = source
@@ -472,31 +437,13 @@ class DexSimManipulationEnv:
             audit_source = copy.copy(source)
             for name, item in self.backend_option_overrides.items():
                 setattr(audit_source.opt, name, item["configured"])
-        if self.solver_kind == "dexuni":
-            from ._dexuni_adapter import refresh_collision_filters
-
-            mapping_audit = audit_model(
-                audit_source, imported, joint_map, amap, self.body_map
-            )
-            for source_id, imported_id in mapping_audit["collision_geom_map"].items():
-                for field in ("geom_contype", "geom_conaffinity"):
-                    before = int(getattr(imported, field)[imported_id])
-                    expected = int(getattr(source, field)[source_id])
-                    if before != expected:
-                        corrections.append(
-                            {
-                                "field": f"geom[{source.geom(source_id).name}].{field}",
-                                "source": expected,
-                                "exported": before,
-                            }
-                        )
-                        getattr(imported, field)[imported_id] = expected
-            self.model_audit["collision_cache_refresh"] = refresh_collision_filters(
-                self.mujoco_solver
-            )
-            self.backend.invalidate_cuda_graph("source collision filters restored")
         self.model_audit["physical_model"] = audit_model(
-            audit_source, imported, joint_map, amap, self.body_map
+            audit_source,
+            imported,
+            joint_map,
+            amap,
+            self.body_map,
+            explicit_collision_filtering=self._explicit_collision_filtering,
         )
         self.model_audit["physical_model"]["option_reference"] = (
             "Source model with explicit backend_option_overrides."
@@ -512,24 +459,67 @@ class DexSimManipulationEnv:
             raise ValueError(
                 f"Imported physical model differs: {self.model_audit['physical_model']['mismatches']}"
             )
-        if self.task_id == "M3":
-            labels = self.backend.model.joint_label
-            joints = [
-                i
-                for i, label in enumerate(labels)
-                if label == "face_turn"
-                or label.endswith("/face_turn")
-                or label.endswith("_face_turn")
+
+    def _bind_controls(self) -> None:
+        """Bind source actuator order to homogeneous public articulation batches."""
+        self._control_batches = []
+        assigned = set()
+        faces = []
+        for name in self._articulation_names:
+            handles = [
+                self.scene.get_articulation(f"env_{index}/{name}")
+                for index in range(self.num_envs)
             ]
-            if len(joints) != self.num_envs:
-                raise ValueError(f"Expected one passive face joint per world: {joints}")
-            starts = wp.to_torch(self.backend.model.joint_qd_start)
-            self.face_force_indices = starts[
-                torch.tensor(joints, device=self.device)
-            ].long()
-            self.model_audit["face_force_indices"] = (
-                self.face_force_indices.cpu().tolist()
+            batch = self.scene.create_articulation_batch(handles)
+            layouts = batch.joint_layouts_per_articulation[0]
+            offsets, actuators = [], []
+            for layout in layouts:
+                matches = [
+                    aid
+                    for aid in range(self.source.nu)
+                    if self.source.joint(int(self.source.actuator_trnid[aid, 0])).name
+                    == layout.name
+                ]
+                if matches:
+                    if (
+                        len(matches) != 1
+                        or layout.dof_count != 1
+                        or matches[0] in assigned
+                    ):
+                        raise ValueError(
+                            f"Ambiguous USD actuator mapping: {layout.name}"
+                        )
+                    assigned.add(matches[0])
+                    offsets.append(layout.dof_start)
+                    actuators.append(matches[0])
+                if layout.name == "face_turn":
+                    if layout.dof_count != 1:
+                        raise ValueError("The passive cube face must have one DOF")
+                    faces.append((batch, layout.dof_start))
+            if offsets:
+                self._control_batches.append(
+                    (
+                        batch,
+                        torch.tensor(offsets, device=self.device),
+                        torch.tensor(actuators, device=self.device),
+                        torch.zeros(
+                            (self.num_envs, batch.dof_width), device=self.device
+                        ),
+                    )
+                )
+        if assigned != set(range(self.source.nu)):
+            raise ValueError(
+                f"USD actuators are missing: {set(range(self.source.nu)) - assigned}"
             )
+        if self.task_id == "M3":
+            if len(faces) != 1:
+                raise ValueError(f"Expected one passive cube face, got {len(faces)}")
+            self._face_batch, self._face_dof = faces[0]
+
+    def _publish_controls(self) -> None:
+        for batch, offsets, actuators, commands in self._control_batches:
+            commands[:, offsets] = self.ctrl[:, actuators]
+            batch.apply_joint_target_position(commands)
 
     def _site(self, name: str) -> tuple[torch.Tensor, torch.Tensor]:
         source_id = self.source.site(name).id
@@ -600,52 +590,67 @@ class DexSimManipulationEnv:
         wp.to_torch(self.data.qpos)[ids[:, None], self.qmap[None, :]] = qpos
         wp.to_torch(self.data.qvel)[ids[:, None], self.vmap[None, :]] = qvel
         self.ctrl[ids] = ctrl
+        self._publish_controls()
         # Transfer explicitly set coordinates to both DexSim-owned buffers.
         if self.dexuni_adapter is not None:
             self.dexuni_adapter.publish_reset(self.data, ids)
         else:
             for state in (self.backend.state_0, self.backend.state_1):
+                retained = []
+                for name, worlds in self._reset_field_worlds.items():
+                    unselected = ~torch.isin(worlds, ids)
+                    values = wp.to_torch(getattr(state, name))
+                    retained.append((values, unselected, values[unselected].clone()))
                 self.mujoco_solver._update_newton_state(
                     self.backend.model, state, self.data, state_prev=state
                 )
+                for values, unselected, previous in retained:
+                    values[unselected] = previous
         mask = torch.zeros(self.num_envs + 1, dtype=torch.bool, device=self.device)
         mask[ids] = True
         self.backend.clear_solver_state(wp.from_torch(mask))
-        # Recompute positions/sensors without advancing simulation time.
+        # Solver reset clears native controls; restore the selected reset targets
+        # before computing their initial actuator forces and observations.
+        wp.to_torch(self.data.ctrl)[ids[:, None], self.amap[None, :]] = ctrl
+        # Forward updates derived data without advancing time or warm-start state.
         self.mujoco_solver._mujoco_warp.forward(self.mujoco_solver.mjw_model, self.data)
         self.elapsed_steps[ids] = 0
         self._episode_return[ids] = 0
         self._episode_success[ids] = False
         state = self._state()
         if self.task_id in ("M1", "M2"):
-            fresh = self._observation(self.task.observe(state))
+            selected = {
+                key: value[ids]
+                for key, value in self._observation(self.task.observe(state)).items()
+            }
         else:
             selected = self._observation(self.task.observe(state, env_ids=ids))
-            if self._last_observation is None:
-                fresh = {
-                    key: value.new_empty((self.num_envs, value.shape[-1]))
-                    for key, value in selected.items()
-                }
-            else:
-                fresh = {
-                    key: value.clone() for key, value in self._last_observation.items()
-                }
-            for key, value in selected.items():
-                fresh[key][ids] = value
+        if self._last_observation is None:
+            fresh = {
+                key: value.new_empty((self.num_envs, value.shape[-1]))
+                for key, value in selected.items()
+            }
+        else:
+            fresh = {
+                key: value.clone() for key, value in self._last_observation.items()
+            }
+        for key, value in selected.items():
+            fresh[key][ids] = value
         self._last_observation = fresh
         return fresh, {}
 
     def advance_physics(self) -> None:
         """Advance one complete control interval with the configured substeps."""
+        self._publish_controls()
         for _ in range(self.substeps):
             if self.task_id == "M3":
                 # The passive layer detent is updated for each physical substep.
                 state = self._state()
                 face_force = self.task.face_detent(state["qpos"][:, -1])
-                force = wp.to_torch(self.backend.control.joint_f)
-                force.zero_()
-                force[self.face_force_indices] = face_force
-            self.backend.step()
+                self._face_batch.apply_joint_force(
+                    face_force[:, None], dof_ids=[self._face_dof]
+                )
+            self.world.update(self.sim_dt)
 
     def step(
         self, actions: torch.Tensor
@@ -701,5 +706,6 @@ class DexSimManipulationEnv:
 
     def close(self) -> None:
         if not self._closed:
+            self.scene.close()
             self.world.quit()
             self._closed = True
