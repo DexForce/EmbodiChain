@@ -595,6 +595,8 @@ class Robot(Articulation):
         env_ids: Sequence[int] | None = None,
         target: bool = True,
         name: str | None = None,
+        *,
+        clamp_target_qpos: bool = True,
     ) -> None:
         """Set the joint positions (qpos) or target positions for the articulation.
 
@@ -604,6 +606,9 @@ class Robot(Articulation):
             env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
             target (bool): If True, sets target positions for simulation. If False, updates current positions directly.
             name (str | None): The name of the control part to set the qpos for. If None, the default part is used.
+            clamp_target_qpos: Clip position targets to joint limits. False
+                preserves out-of-range PD targets; direct position writes
+                remain clipped.
 
         Raises:
             ValueError: If the length of `env_ids` does not match the length of `qpos`.
@@ -614,6 +619,7 @@ class Robot(Articulation):
                 joint_ids=joint_ids,
                 env_ids=env_ids,
                 target=target,
+                clamp_target_qpos=clamp_target_qpos,
             )
         else:
             if not self.control_parts or name not in self.control_parts:
@@ -629,6 +635,7 @@ class Robot(Articulation):
                 joint_ids=part_joint_ids,
                 env_ids=env_ids,
                 target=target,
+                clamp_target_qpos=clamp_target_qpos,
             )
 
     def get_qpos(self, name: str | None = None, target: bool = False) -> torch.Tensor:

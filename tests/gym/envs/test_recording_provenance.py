@@ -269,3 +269,25 @@ def test_diagnostic_export_does_not_make_rejected_buffers_normal_recordings(tmp_
     with pytest.raises(RuntimeError, match="rejected"):
         EmbodiedEnv.save_trajectory(env, str(tmp_path / "normal.pt"), env_ids=[0])
     assert not (tmp_path / "normal.pt").exists()
+
+
+def test_episode_metadata_rows_preserve_reset_time_context_and_row_isolation():
+    from embodichain.lab.gym.envs.embodied_env import _EpisodeMetadataRows
+
+    template = {"seed": 12, "provenance": {"labels": ["initial"]}, "segments": []}
+    rows = _EpisodeMetadataRows(3, template)
+    original = rows[0]
+    original["segments"].append({"name": "first"})
+    template["seed"] = 35
+    template["provenance"]["labels"].append("reset")
+    rows.reset_rows([0, 2], template)
+    template["seed"] = 99
+    assert [row["seed"] for row in rows] == [35, 12, 35]
+    assert rows[0]["segments"] == [] and rows[1]["segments"] == []
+    assert original["segments"] == [{"name": "first"}]
+    rows[0]["provenance"]["labels"].append("row zero")
+    assert rows[2]["provenance"]["labels"] == ["initial", "reset"]
+    assert len({row["episode_uuid"] for row in rows}) == 3
+    for index, row in enumerate(rows):
+        assert row["env_id"] == index
+        assert row["source_episode_uuid"] == row["episode_uuid"]

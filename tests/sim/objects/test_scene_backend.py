@@ -117,6 +117,7 @@ def test_scene_views_match_installed_dexsim_batch_surface() -> None:
         "fetch_link_pose",
         "fetch_link_linear_velocity",
         "fetch_link_angular_velocity",
+        "apply_link_com_local_pose",
         "compute_kinematics",
     }
     articulation_metadata = {
@@ -1313,14 +1314,18 @@ def test_selected_link_property_writes_preserve_layout_and_errors(
     batch = _ArticulationBatch()
     view = SceneArticulationView(_Scene("newton"), batch, torch.device("cpu"))
     selected = Mock()
-    call = getattr(selected, batch_method)
-    call.return_value = 1
+    call = Mock(return_value=1)
+    setattr(batch if width == 7 else selected, batch_method, call)
     batch.select = Mock(return_value=selected)
     values = torch.arange(width or 1, dtype=torch.float32).reshape(
         (1, 1) if width is None else (1, 1, width)
     )
     getattr(view, method)(values, [1], [0])
-    torch.testing.assert_close(batch.select.call_args.args[0], torch.tensor([1]))
+    if width == 7:
+        batch.select.assert_not_called()
+        torch.testing.assert_close(call.call_args.kwargs["rows"], torch.tensor([1]))
+    else:
+        torch.testing.assert_close(batch.select.call_args.args[0], torch.tensor([1]))
     expected = _batch_pose(values) if width == 7 else values
     torch.testing.assert_close(call.call_args.args[0], expected)
     assert call.call_args.kwargs["link_ids"] == [0]
@@ -1346,3 +1351,51 @@ def test_empty_link_property_selection_is_noop(method: str) -> None:
     }[method]
     getattr(view, method)(torch.empty((1, 0) + width), [1], [])
     batch.select.assert_not_called()
+
+
+def test_spawn_static_friction_uses_live_batch_and_selected_rows(monkeypatch):
+    from embodichain.lab.sim.objects.rigid_object import RigidObject
+
+    values = torch.tensor([[0.3], [0.6], [0.9]])
+
+    class View:
+        def apply_friction(self, data, ids):
+            values[ids.long()] = data
+
+        def fetch_friction(self, out, ids):
+            out.copy_(values[ids.long()])
+
+    factory = Mock(return_value=View())
+    monkeypatch.setattr(SceneRigidBodyView, "from_entities", factory)
+    rigid = RigidObject.__new__(RigidObject)
+    rigid._spawn_result = object()
+    rigid._entities = [object(), object(), object()]
+    rigid._data = None
+    rigid.device = torch.device("cpu")
+    rigid._all_indices = [0, 1, 2]
+    rigid.set_friction(torch.tensor([1.2, 0.4]), env_ids=[2, 0])
+    torch.testing.assert_close(rigid.get_friction(), torch.tensor([0.4, 0.6, 1.2]))
+    first = rigid.get_friction([0])
+    rigid.set_friction(torch.tensor([0.7]), env_ids=[0])
+    torch.testing.assert_close(first, torch.tensor([0.4]))
+    assert factory.call_count == 1
+
+    # Rebinding a facade after a topology rebuild replaces its native batch.
+    from embodichain.lab.sim.objects import rigid_object as rigid_module
+    from embodichain.lab.sim.common import BatchEntity
+
+    class RebuiltScene:
+        world = object()
+
+    monkeypatch.setattr(rigid_module, "Scene", RebuiltScene)
+    monkeypatch.setattr(BatchEntity, "__init__", lambda *args, **kwargs: None)
+    rigid.cfg = SimpleNamespace(body_type="static")
+    rigid._declared_num_instances = 3
+    rigid._apply_spawn_visual_uv = Mock()
+    rigid._initialize_existing_visual_material = Mock()
+    rigid._apply_initial_state = Mock()
+    rebuilt = RebuiltScene()
+    rigid._initialize_spawn_bound(rebuilt)
+    rigid.get_friction([0])
+    assert factory.call_count == 2
+    assert factory.call_args.args[0] is rebuilt

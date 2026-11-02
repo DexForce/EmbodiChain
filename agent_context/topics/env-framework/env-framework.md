@@ -159,7 +159,9 @@ Failed checks remain attached to buffers until the selected rows are consumed
 and a new episode begins. Info and recorder metadata carry owned context snapshots.
 `EnvCfg.episode_context_in_info` defaults to true. Batched RL deployments may
 disable automatic info snapshots while retaining context lifecycle, recorder
-metadata and explicit snapshots. Reset reuses the snapshot from `get_info()`;
+metadata and explicit snapshots. Demo recording retains a reset-time metadata
+template and materializes independent rows on access; row UUIDs and mutable
+segment lists are owned by each episode. Reset reuses the snapshot from `get_info()`;
 overrides that omit it receive one when the option is enabled. The concrete preparation/restore host and
 snapshot limitations belong to [scene expansion](../scene-expansion/scene-expansion.md).
 
