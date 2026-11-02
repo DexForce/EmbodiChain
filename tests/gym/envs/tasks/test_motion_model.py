@@ -324,9 +324,7 @@ def test_physical_episode_metrics_own_storage_across_task_invocations(monkeypatc
     assert not outputs["continuation"].any()
 
 
-def test_configured_model_policy_update_and_checkpoint_share_workflow_resources(
-    tmp_path,
-):
+def test_configured_model_policy_update_shares_workflow_resources():
     from embodichain.learning.rl.algo import build_algo
     from embodichain.learning.rl.differentiable_trainer import (
         DifferentiableTrainer,
@@ -375,27 +373,21 @@ def test_configured_model_policy_update_and_checkpoint_share_workflow_resources(
         "start_provider": provider,
     }
 
-    def build():
-        runtime = build_learning_policy_runtime(
-            config, device=torch.device("cpu"), num_envs=2, resources=resources
-        )
-        algorithm = build_algo(
-            config["algorithm"]["name"],
-            config["algorithm"]["cfg"],
-            runtime.policy,
-            runtime.device,
-        )
-        trainer = DifferentiableTrainer(
-            DifferentiableTrainerCfg(
-                rollout_mode="complete", deterministic_actions=True
-            ),
-            runtime.env,
-            runtime.policy,
-            algorithm,
-        )
-        return runtime, trainer
-
-    runtime, trainer = build()
+    runtime = build_learning_policy_runtime(
+        config, device=torch.device("cpu"), num_envs=2, resources=resources
+    )
+    algorithm = build_algo(
+        config["algorithm"]["name"],
+        config["algorithm"]["cfg"],
+        runtime.policy,
+        runtime.device,
+    )
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(rollout_mode="complete", deterministic_actions=True),
+        runtime.env,
+        runtime.policy,
+        algorithm,
+    )
     assert runtime.env is not source
     assert runtime.env.model is model
     assert runtime.env.motion is source.motion
@@ -418,20 +410,7 @@ def test_configured_model_policy_update_and_checkpoint_share_workflow_resources(
     for old, new in zip(original_model, model.parameters()):
         torch.testing.assert_close(old, new, rtol=0, atol=0)
         assert new.grad is None
-    path = trainer.save_checkpoint(tmp_path / "configured.pt")
-    restored_runtime, restored = build()
-    restored.load_checkpoint(path)
-    assert restored.num_updates == 1 and restored.global_step == 6
-    with frozen_world_model(model):
-        restored.update_once()
-    assert restored.num_updates == 2 and restored.global_step == 12
-    for optimizer in (
-        restored.algorithm.optimizer,
-        restored.algorithm.critic_optimizer,
-    ):
-        assert all(int(value["step"]) == 2 for value in optimizer.state.values())
     runtime.close()
-    restored_runtime.close()
 
 
 def test_configured_tracking_policy_rejects_wrong_task_dimensions():

@@ -91,6 +91,11 @@ def test_history_padding_respects_episode_and_oldest_retained_boundary():
     torch.testing.assert_close(
         starts["history"]["state"][:, -1], starts["start"]["state"]
     )
+    # Only episodes starting at step 4 (env 0) or step 5 (env 1) can supply
+    # complete reset-padded histories; the previous episodes lost their starts.
+    torch.testing.assert_close(
+        starts["history_complete"], starts["start"]["episode_id"] == 1
+    )
 
 
 def test_snapshot_restores_content_boundaries_and_rng_before_mutation():
@@ -153,15 +158,3 @@ def test_auxiliary_fields_are_aligned_owned_budgeted_and_restorable():
         )
         torch.testing.assert_close(sample["policy_action"] + 100, sample["action"])
         assert not sample["policy_action"].requires_grad
-
-
-def test_complete_history_distinguishes_reset_padding_from_overwrite():
-    replay = TransitionReplay(4, 2, 3, 1, seed=9)
-    for step in range(6):
-        _append(replay, step)
-    sample = replay.sample_starts(128, 5)
-    # Only episodes starting at step 4 (env 0) or step 5 (env 1) can supply
-    # complete reset-padded histories; the previous episodes lost their starts.
-    torch.testing.assert_close(
-        sample["history_complete"], sample["start"]["episode_id"] == 1
-    )

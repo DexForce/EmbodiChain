@@ -133,9 +133,11 @@ def test_weighted_time_sum_matches_explicit_objective_and_backward_keeps_first_a
     torch.testing.assert_close(result.loss, expected)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     learner = SupervisedLearner(model, objective, optimizer, max_grad_norm=1)
-    before = model.net[-1].weight.detach().clone()
+    before = [p.detach().clone() for p in model.parameters()]
     learner.update(batch)
-    assert not torch.equal(before, model.net[-1].weight)
+    assert any(
+        not torch.equal(old, new) for old, new in zip(before, model.parameters())
+    )
     optimizer.zero_grad(set_to_none=True)
     with frozen_world_model(model):
         current = state

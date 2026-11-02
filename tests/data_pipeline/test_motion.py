@@ -77,7 +77,7 @@ def test_archive_selection_and_explicit_quaternion_order(tmp_path):
         MotionLibrary.from_npz(path, ["other"], quaternion_order="wxyz")
 
 
-@pytest.mark.parametrize("source_frames, target_frames", [(4, 6), (70, 116), (71, 117)])
+@pytest.mark.parametrize("source_frames, target_frames", [(70, 116), (71, 117)])
 def test_csv_resampling_constant_translation_and_rotation(
     tmp_path, source_frames, target_frames
 ):

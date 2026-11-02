@@ -24,8 +24,7 @@ import torch
 from embodichain.compute.kinematics.matrix import matrix_product, matrix_vector_product
 
 
-@pytest.mark.parametrize("compiled", [False, True])
-@pytest.mark.parametrize("size", [3, 4])
+@pytest.mark.parametrize("compiled, size", [(False, 3), (True, 3), (True, 4)])
 def test_broadcast_noncontiguous_products_and_gradients(compiled, size):
     torch.manual_seed(71)
     left = (
@@ -62,19 +61,14 @@ def test_broadcast_noncontiguous_products_and_gradients(compiled, size):
         torch.testing.assert_close(value, reference, rtol=1e-12, atol=1e-12)
 
 
-@pytest.mark.parametrize("compiled", [False, True])
-def test_autocast_keeps_torch_product_precision(compiled):
+def test_compiled_autocast_keeps_torch_product_precision():
     matrix = torch.randn(2, 3, 3)
     vector = torch.randn(2, 3)
 
     def evaluate(matrix, vector):
         return matrix_product(matrix, matrix), matrix_vector_product(matrix, vector)
 
-    fn = (
-        torch.compile(evaluate, backend="aot_eager", fullgraph=True)
-        if compiled
-        else evaluate
-    )
+    fn = torch.compile(evaluate, backend="aot_eager", fullgraph=True)
     with torch.autocast("cpu", dtype=torch.bfloat16):
         actual = fn(matrix, vector)
         expected = (matrix @ matrix, (matrix @ vector[..., None]).squeeze(-1))

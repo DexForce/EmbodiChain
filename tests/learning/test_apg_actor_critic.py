@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import replace
 
 import pytest
@@ -219,48 +218,6 @@ def test_grouped_observations_and_detach_preserve_state_values():
     algorithm(p).update(rollout)
 
 
-def test_checkpoint_restores_both_optimizers_and_next_update():
-    p = policy()
-    algo = algorithm(p)
-    collector = DifferentiableCollector(LinearEnv(), p, torch.device("cpu"))
-    algo.update(collector.collect(3, deterministic=True))
-    saved_policy, saved_algo = deepcopy(p.state_dict()), deepcopy(algo.state_dict())
-    p2, algo2 = policy(), None
-    p2.load_state_dict(saved_policy)
-    algo2 = algorithm(p2)
-    algo2.load_state_dict(saved_algo)
-    for current_policy, current_algo in ((p, algo), (p2, algo2)):
-        torch.manual_seed(4)
-        current_algo.update(
-            DifferentiableCollector(
-                LinearEnv(), current_policy, torch.device("cpu")
-            ).collect(3, deterministic=True)
-        )
-    for x, y in zip(p.parameters(), p2.parameters()):
-        torch.testing.assert_close(x, y, rtol=0, atol=0)
-    assert algo2.critic_optimizer.state_dict()["state"]
-
-
-def test_public_single_update_records_counters_and_registered_algorithm():
-    p = policy()
-    algo = build_algo(
-        "apg_actor_critic",
-        {"critic_epochs": 1, "critic_minibatches": 1},
-        p,
-        torch.device("cpu"),
-    )
-    trainer = DifferentiableTrainer(
-        DifferentiableTrainerCfg(segment_length=3, deterministic_actions=True),
-        LinearEnv(soft=False),
-        p,
-        algo,
-    )
-    metrics = trainer.update_once()
-    assert trainer.global_step == 3
-    assert trainer.num_updates == len(trainer.train_history) == 1
-    assert metrics["critic_updates"] == 1
-
-
 def test_validity_masks_stop_reward_bootstrap_and_critic_weights():
     p = policy()
     algo = algorithm(p)
@@ -296,26 +253,49 @@ def test_truncation_without_terminal_observation_is_rejected():
         algo.update(rollout)
 
 
-def test_trainer_checkpoint_restores_actor_critic_and_update_counters(tmp_path):
-    p = policy()
-    trainer = DifferentiableTrainer(
-        DifferentiableTrainerCfg(segment_length=3, deterministic_actions=True),
-        LinearEnv(),
-        p,
-        algorithm(p),
-    )
-    trainer.update_once()
+def test_registered_trainer_checkpoint_restores_both_adam_updates(tmp_path):
+    def build():
+        p = policy()
+        algo = build_algo(
+            "apg_actor_critic",
+            {
+                "optimizer": {"name": "adam", "learning_rate": 0.001},
+                "critic_optimizer": {"name": "adam", "learning_rate": 0.001},
+                "critic_epochs": 1,
+                "critic_minibatches": 1,
+            },
+            p,
+            torch.device("cpu"),
+        )
+        return DifferentiableTrainer(
+            DifferentiableTrainerCfg(segment_length=3, deterministic_actions=True),
+            LinearEnv(),
+            p,
+            algo,
+        )
+
+    trainer = build()
+    assert trainer.update_once()["critic_updates"] == 1
+    assert trainer.num_updates == len(trainer.train_history) == 1
+    assert trainer.global_step == 3
     checkpoint = trainer.save_checkpoint(tmp_path / "actor_critic.pt")
-    p2 = policy()
-    restored = DifferentiableTrainer(trainer.cfg, LinearEnv(), p2, algorithm(p2))
+    restored = build()
     restored.load_checkpoint(checkpoint)
     assert restored.num_updates == 1 and restored.global_step == 3
-    assert restored.algorithm.critic_optimizer.state_dict()["state"]
-    for x, y in zip(p.parameters(), p2.parameters()):
+    for name in ("optimizer", "critic_optimizer"):
+        expected = getattr(trainer.algorithm, name).state_dict()
+        actual = getattr(restored.algorithm, name).state_dict()
+        assert actual["state"]
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    for current in (trainer, restored):
+        # Checkpoints resume learning from a fresh environment rollout.
+        current.collector.reset()
+        torch.manual_seed(4)
+        metrics = current.update_once()
+        assert current.num_updates == 2 and current.global_step == 6
+        assert metrics["critic_updates"] == 1 and metrics["skipped_update"] == 0
+    for x, y in zip(trainer.policy.parameters(), restored.policy.parameters()):
         torch.testing.assert_close(x, y, rtol=0, atol=0)
-    metrics = restored.update_once()
-    assert restored.num_updates == 2
-    assert metrics["skipped_update"] == 0
 
 
 def test_rollout_context_freezes_critic_statistics_and_restores_training_mode():
