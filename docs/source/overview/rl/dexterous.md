@@ -58,11 +58,18 @@ and return instead. A numeric zero success rate for the other tasks means no
 evaluated episode met its success criterion. Short training verifies execution
 and checkpoint compatibility, not policy convergence.
 
-The runtime currently contains version-specific MJCF import and compact-state
-adapters for DexSim/Newton. Model audits check imported masses, inertia,
-actuators, tendons and collision masks before stepping. These adapters need
-engine-owned public interfaces before this task collection can be treated as
-a backend-independent release. The local validation versions and publication
+SceneBuilder loads the packaged `usd/*.usdc` physics models and replicates them
+for each environment. MJCF remains in the asset packages as task metadata and
+an independent model-audit reference. Joint targets and passive face torque use
+public articulation batches. The assets require DexSim's retained MuJoCo scene
+metadata support, including fixed tendons, explicit filters and actuator limits.
+
+Model audits compare masses, inertia, actuator and tendon parameters, and the
+complete effective collision graph against the source MJCF. They read active
+device parameters because Newton notifications can leave the host model stale.
+Both solver configurations retain source iteration settings unless explicitly
+overridden. Reset still uses a version-specific MuJoCo coordinate bridge and,
+for DexUni, compact-to-scene maps. Local validation versions and asset publication
 status must accompany a release; short-run checkpoints are not converged policies.
 
 The face-turn task reserves 2048 constraint rows per world. A 512-row budget
