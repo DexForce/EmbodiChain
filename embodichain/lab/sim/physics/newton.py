@@ -284,14 +284,15 @@ class NewtonPhysicsBackend(PhysicsBackend):
     def supports_contact_sensor(self) -> bool:
         # ContactSensor consumes the backend-neutral Scene ContactQuery API,
         # but not every Newton solver/device pair currently publishes that
-        # query. Keep this runtime-sensitive so ``solver_type='auto'`` can be
-        # rechecked after Spawn finalization resolves the concrete solver.
+        # query. Recheck after Spawn finalization resolves the solver and
+        # runtime device for the complete scene.
         solver_type = self.solver_type
         if solver_type is None:
             return True
         solver_type = solver_type.lower()
-        if solver_type.endswith("dexuni"):
-            return False
+        # DexUni exposes ContactQuery geometry. Impulse/friction availability
+        # depends on resolved scene ownership and is reported by each query's
+        # capabilities, rather than rejecting the entire sensor here.
         runtime_device = self._runtime_device
         if runtime_device is None:
             runtime_device = str(getattr(self._manager, "device", ""))

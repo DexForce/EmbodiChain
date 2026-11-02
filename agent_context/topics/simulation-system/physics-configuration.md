@@ -41,8 +41,11 @@ The manual differentiable trajectory requires the external pipeline; see
 
 Capability checks remain explicit: Default owns native rigid constraints and
 Newton deformables are separate. Contact support is rechecked after Newton
-solver resolution; DexUni and MuJoCo-Warp on CPU do not expose the supported
-ContactQuery path. See `physics/` and [sensors](../sensor-system/sensor-system.md).
+solver resolution. DexUni exposes ContactQuery geometry; normal/friction
+impulses depend on resolved scene ownership. Its pure MuJoCo path can report
+impulses, while VBD/coupled queries can be geometry-only. Read the query's
+capabilities rather than inferring force support from the solver name.
+MuJoCo-Warp on CPU does not expose the supported query path. See `physics/` and [sensors](../sensor-system/sensor-system.md).
 
 ## Sparse source physics
 
