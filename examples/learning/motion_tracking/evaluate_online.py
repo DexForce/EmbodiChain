@@ -36,6 +36,7 @@ from embodichain_models.dynamics.rwm.robot_state import pack_robot_state
 from embodichain.lab.gym.utils.registration import build_env
 from embodichain_tasks.locomotion.tracking import g1_motion  # Register physical task.
 from run_metadata import write_run_metadata
+from _configuration import normalize_recipe
 
 
 @torch.no_grad()
@@ -72,6 +73,7 @@ def main() -> None:
     if args.max_steps is not None and args.max_steps < 1:
         parser.error("--max-steps must be positive")
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+    training_config = normalize_recipe(state["config"])["workflow"]
     gym = deepcopy(state.get("evaluation_gym_config", state["gym_config"]))
     gym["num_envs"] = 1
     options = gym["env"]["extensions"]["motion_tracking"]
@@ -191,7 +193,7 @@ def main() -> None:
             "environment_metadata": metadata.name,
             "full_horizon": horizon == full_steps,
             "max_steps": args.max_steps,
-            "training_kind": state["config"]["kind"],
+            "training_kind": training_config["kind"],
             "evaluation": "full-clip physical rollout; fixed reference starts; no observation/action noise",
             "seed": args.seed,
             "evaluation_dataset": {
