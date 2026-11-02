@@ -14,8 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Robotiq model definitions, loaded on demand."""
+"""Robotiq asset definitions and tool specifications, loaded on demand."""
 
 from __future__ import annotations
 
-__all__ = []
+__all__: list[str] = []

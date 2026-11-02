@@ -1,15 +1,104 @@
 embodiment_id: franka_panda_rgb_224
 simulation:
-  class_type: FrankaPanda
-  robot_type: panda
+  class_type: Franka
+  arm_model: fr3
   uid: FrankaPanda
+  urdf_cfg:
+    fname: franka_fr3_panda_hand
+    components:
+    - component_type: hand
+      urdf_path: Franka/Panda/Fr3HandV1.urdf
+      transform:
+      - - 0.7071067811865476
+        - 0.7071067811865475
+        - 0.0
+        - 0.0
+      - - -0.7071067811865475
+        - 0.7071067811865476
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+  control_parts:
+    eef:
+    - fr3_finger_joint1
+    - fr3_finger_joint2
+  init_qpos:
+  - 0.0
+  - -0.569
+  - 0.0
+  - -2.81
+  - 0.0
+  - 3.037
+  - 0.741
+  - 0.04
+  - 0.04
+  joint_drive_props:
+    stiffness:
+      fr3_finger_joint[1-2]: 1000.0
+    damping:
+      fr3_finger_joint[1-2]: 100.0
+    max_effort:
+      fr3_finger_joint[1-2]: 10000.0
+  solver_cfg:
+    arm:
+      tcp:
+      - - 0.7071067811865476
+        - 0.7071067811865475
+        - 0.0
+        - 0.0
+      - - -0.7071067811865475
+        - 0.7071067811865476
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.1034
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+  link_attrs:
+    newton_gripper_contacts:
+      link_names_expr:
+      - fr3_leftfinger|fr3_rightfinger
+      attrs:
+        collision_props:
+          backend: newton
+          condim: 4
+        material_props:
+          backend: newton
+          ke: 40000.0
+          kd: 400.0
+          torsional_friction: 0.1
+          rolling_friction: 0.01
 sensor:
-  - sensor_type: Camera
-    uid: cam_high
-    width: 224
-    height: 224
-    intrinsics: [200.0, 200.0, 112.0, 112.0]
-    extrinsics:
-      eye: [-0.52, -0.48, 0.65]
-      target: [-0.42, -0.08, 0.10]
-      up: [0.0, 0.0, 1.0]
+- sensor_type: Camera
+  uid: cam_high
+  width: 224
+  height: 224
+  intrinsics:
+  - 200.0
+  - 200.0
+  - 112.0
+  - 112.0
+  extrinsics:
+    eye:
+    - -0.52
+    - -0.48
+    - 0.65
+    target:
+    - -0.42
+    - -0.08
+    - 0.1
+    up:
+    - 0.0
+    - 0.0
+    - 1.0

@@ -51,7 +51,6 @@ from embodichain_robots import (
     ARX5Cfg,
     CobotMagicCfg,
     DexforceW1Cfg,
-    FrankaPandaCfg,
     TianjiMarvinCfg,
     URRobotCfg,
 )
@@ -269,7 +268,11 @@ def create_embodiment(args: argparse.Namespace) -> EmbodimentCfg:
     if args.robot in ("ur5", "w1_030"):
         _mount_grippers(args, cfg)
     elif args.robot == "franka":
-        cfg.robot_cfg = FrankaPandaCfg.from_dict({"init_rot": (0, 0, 180)})
+        from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+            _create_franka_native_hand_cfg,
+        )
+
+        cfg.robot_cfg = _create_franka_native_hand_cfg({"init_rot": (0, 0, 180)})
         # Start in the sampled cube grasp's equivalent yaw, keeping the wrist
         # away from its limit and the redundant elbow on one continuous branch.
         cfg.ready_yaws = {"primary": 90.0}

@@ -335,8 +335,8 @@ class _FrankaPgiCfg(RobotCfg):
     gripper on the ``fr3_link8`` flange. The configuration owns the whole
     assembly: the ``arm`` and ``eef`` control parts, the PGI finger drive and
     open initial state, the PGI tool center point, and the Newton fingertip
-    contacts on the PGI finger links. The stock Panda hand settings of
-    :class:`FrankaPandaCfg` do not apply.
+    contacts on the PGI finger links. End-effector settings are owned by this
+    explicit assembly rather than the bare Franka arm preset.
 
     The arm solver and the FK/IK serial chain both end at ``fr3_link8`` on the
     arm URDF used by the assembly. The solver's ``tcp`` gives the PGI tool
@@ -454,6 +454,19 @@ class _FrankaPgiCfg(RobotCfg):
             root_link_name=solver.root_link_name,
         )
         return {"arm": chain}
+
+
+def _create_franka_native_hand_cfg(overrides: dict[str, Any] | None = None) -> RobotCfg:
+    """Resolve the official explicit FR3/hand assembly without creating a Gym."""
+    from embodichain_tasks.configs import get_config_path
+    from embodichain.utils.utility import load_config
+    from embodichain.robot_registry import resolve_robot_cfg
+
+    values = load_config(get_config_path("components/embodiments/franka_panda.yaml"))[
+        "simulation"
+    ]
+    cfg = resolve_robot_cfg(values.pop("class_type"), values)
+    return merge_robot_cfg(cfg, overrides or {})
 
 
 def _create_franka_pgi_cfg(overrides: dict[str, Any]) -> RobotCfg:
@@ -658,7 +671,7 @@ def create_dual_tutorial_robot_cfg(
     ``solver="pytorch"`` explicitly selects numerical IK for any preset.
     UR5 and Franka default to the PGI hand; Handover explicitly selects the
     six-joint Robotiq 2F-140, which UR10 already uses. ``panda_hand`` composes
-    two complete stock PandaWithHand assets, preserving their two finger
+    two bare arms and two authored hand components, preserving their two finger
     joints and native hand TCP instead of attaching a separate PGI hand.
     The Robotiq TCP includes the
     mounting rotation and an independently calibrated tool offset. Control-part
@@ -697,7 +710,7 @@ def create_dual_tutorial_robot_cfg(
             raise ValueError("panda_hand requires robot_type='franka'.")
         if tcp_z is not None:
             raise ValueError("panda_hand uses its native URDF TCP; omit tcp_z.")
-        base_cfg = FrankaPandaCfg.from_dict(
+        base_cfg = _create_franka_native_hand_cfg(
             {"init_rot": list(_FRANKA_TUTORIAL_BASE_ROTATION)}
         )
     else:
@@ -773,21 +786,15 @@ def create_dual_tutorial_robot_cfg(
     # parts. Tutorial robots intentionally keep their gripper as a separate
     # URDF component, so mount one copy on each assembled arm as well.
     cfg.urdf_cfg.fname = urdf_name
-    if native_panda:
-        # No separate hand component is added in this branch; construct the
-        # named assembly so its derived output path also uses ``urdf_name``.
-        cfg.urdf_cfg = URDFCfg(
-            fname=urdf_name,
-            components=[
-                {
-                    "component_type": name,
-                    "urdf_path": component["urdf_path"],
-                    "transform": component["transform"],
-                    **component.get("params", {}),
-                }
-                for name, component in cfg.urdf_cfg.components.items()
-            ],
+    hand_component = base_cfg.urdf_cfg.components["hand"]
+    for side in ("left", "right"):
+        cfg.urdf_cfg.add_component(
+            f"{side}_hand",
+            hand_component["urdf_path"],
+            hand_component["transform"],
+            **hand_component.get("params", {}),
         )
+    if native_panda:
         cfg.link_attrs = {
             "newton_gripper_contacts": _newton_gripper_contacts(
                 [
@@ -797,15 +804,6 @@ def create_dual_tutorial_robot_cfg(
                 ]
             )
         }
-    else:
-        hand_component = base_cfg.urdf_cfg.components["hand"]
-        for side in ("left", "right"):
-            cfg.urdf_cfg.add_component(
-                f"{side}_hand",
-                hand_component["urdf_path"],
-                hand_component["transform"],
-                **hand_component.get("params", {}),
-            )
 
     arm_dof = len(base_cfg.control_parts["arm"])
     base_arm_home = list(base_cfg.init_qpos[:arm_dof])
