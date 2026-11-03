@@ -36,6 +36,7 @@ from embodichain.utils.config_paths import resolve_config_path
 from examples.expansion.trajectory.real2sim_carton._audit import _check_case
 from examples.expansion.trajectory.real2sim_carton.prepare import (
     acquire,
+    require_prepared,
     write_json,
     write_yaml,
 )
@@ -47,8 +48,7 @@ _RECIPES = ("nominal", "joint_7", "joint_11", "task_space", "time_115", "time_13
 def _deployment(
     prepared: Path, output: Path, layouts: list[str] | None, recipes: list[str] | None
 ) -> tuple[Path, Path, int]:
-    if not json.loads((prepared / "qualification.json").read_text())["admitted"]:
-        raise ValueError("the real input must pass qualification before collection")
+    require_prepared(prepared)
     task_path = prepared / "task.measured.yaml"
     original_profile = prepared / "profile.measured.yaml"
     profile = load_real2sim_tabletop_profile(original_profile)
@@ -207,6 +207,7 @@ def main() -> None:
         prepared = args.prepared.resolve()
         if (prepared / "prepared").is_dir():
             prepared /= "prepared"
+        require_prepared(prepared)
         if args.full_matrix:
             acquire(source)
     if not args.full_matrix:
@@ -256,7 +257,10 @@ def main() -> None:
     )
     report = output / "matrix/acceptance-report.json"
     if not report.is_file() or not json.loads(report.read_text())["report_complete"]:
-        raise RuntimeError("the matrix did not report all 78 candidates")
+        raise RuntimeError(
+            f"matrix execution did not produce a complete report (exit code {status}); "
+            f"inspect {output / 'matrix.log'}"
+        )
     execute(
         "replay",
         prefix + "export",

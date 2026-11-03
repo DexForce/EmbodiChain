@@ -214,7 +214,7 @@ def main():
             "embodichain_robots.anybotics.anymal_c": ["profile.json"],
             "embodichain_robots.pollen_robotics.microduck": ["profile.json"],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
-            "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
+            "embodichain.gen_sim.asset_engine.configs": ["*.json"],
             "embodichain_tasks.configs": [
                 "**/*.json",
                 "**/*.yaml",
