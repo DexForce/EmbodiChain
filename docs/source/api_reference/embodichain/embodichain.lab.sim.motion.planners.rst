@@ -17,6 +17,7 @@ embodichain.lab.sim.motion.planners
     MovePart
     MoveType
     PlanResult
+    RejectedMotionCandidate
     PlanState
 
 .. currentmodule:: embodichain.lab.sim.motion.planners
@@ -139,6 +140,14 @@ Utilities
     :members:
     :undoc-members:
     :show-inheritance:
+
+.. autoclass:: RejectedMotionCandidate
+    :members:
+
+Fixed-grid rejection retains the original candidate in
+``PlanResult.rejected_candidate`` while failed executable rows hold the start.
+Use the candidate's positions, arrival intervals and row mask when deciding
+whether a bounded retry is needed; the replacement hold is not an accepted plan.
 
 .. autoclass:: PlanState
     :members:

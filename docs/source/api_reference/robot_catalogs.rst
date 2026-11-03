@@ -664,7 +664,7 @@ embodichain_robots.tianji.marvin.robotiq
    TianjiMarvinRobotiq140Cfg
 
 .. autoclass:: TianjiMarvinRobotiq140Cfg
-   :members:
+   :members: from_dict, build_pk_serial_chain, assembly_directory
 
 .. py:class:: embodichain_robots.tianji.marvin.TianjiMarvinRobotiq140Cfg
    :no-index:

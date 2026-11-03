@@ -32,6 +32,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from embodichain.data_pipeline.real2sim._geometry import (
+    _canonical_robot_geometry_sha256,
+    _robot_geometry_sha256,
+)
+
 __all__ = [
     "BoxCollisionBody",
     "CollisionPhase",
@@ -225,6 +230,10 @@ class SampledRobotCollisionChecker:
     All other robot self pairs and robot/scene pairs are evaluated. Object
     paths are explicit per-sample world poses and are never silently frozen.
 
+    ``geometry_sha256`` identifies named joints and collision content without
+    assembly headers or cache locations. Source validation supports exact v1
+    byte identities and independently pinned aliases for portable rebuilds.
+
     Args:
         urdf_path: Full fixed-base robot URDF including its end effector.
         joint_names: Complete simulator joint order, including mimic joints.
@@ -316,8 +325,6 @@ class SampledRobotCollisionChecker:
                     self_pairs.append((first, second, pair))
         self._self_pairs = tuple(self_pairs)
         self.excluded_self_pairs = tuple(sorted(excluded))
-        digest = hashlib.sha256()
-        digest.update(path.read_bytes())
         primitive_paths = {
             "BOX",
             "SPHERE",
@@ -334,10 +341,12 @@ class SampledRobotCollisionChecker:
                 if item.meshPath and item.meshPath not in primitive_paths
             }
         )
+        legacy = hashlib.sha256(path.read_bytes())
         for mesh in mesh_paths:
-            digest.update(mesh.name.encode("utf-8"))
-            digest.update(hashlib.sha256(mesh.read_bytes()).digest())
-        self.geometry_sha256 = digest.hexdigest()
+            legacy.update(mesh.name.encode("utf-8"))
+            legacy.update(hashlib.sha256(mesh.read_bytes()).digest())
+        self._legacy_geometry_sha256 = legacy.hexdigest()
+        self.geometry_sha256 = _robot_geometry_sha256(path, tuple(mesh_paths))
 
     @property
     def bodies(self) -> tuple[BoxCollisionBody | PlaneCollisionBody, ...]:
@@ -379,9 +388,16 @@ class SampledRobotCollisionChecker:
             recorded = getattr(source, name)
             if recorded is None:
                 raise ValueError(f"source {name} is unverified")
+            if name == "robot_geometry_sha256":
+                # Unknown v1 sources remain usable when their original bytes
+                # still match exactly. Only pinned aliases tolerate rebuilds.
+                if recorded == self._legacy_geometry_sha256:
+                    continue
+                recorded = _canonical_robot_geometry_sha256(recorded)
             if recorded != actual:
                 raise ValueError(
-                    f"source {name} does not match current physical geometry"
+                    f"source {name} does not match current physical geometry: "
+                    f"recorded={getattr(source, name)}, resolved={recorded}, actual={actual}"
                 )
 
     def first_link_body_contact(

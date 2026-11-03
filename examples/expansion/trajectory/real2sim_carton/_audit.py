@@ -28,6 +28,9 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from embodichain.data_pipeline.real2sim import load_prototype
+from embodichain.data_pipeline.real2sim._geometry import (
+    _canonical_robot_geometry_sha256,
+)
 from embodichain.lab.sim.atomic_actions._expansion_phases import FREE_PHASES
 
 __all__: list[str] = []
@@ -486,7 +489,8 @@ def _check_case(
                 source.source_id != call.get("source_id", row["source_id"])
                 or source.source_revision
                 != call.get("source_revision", row["source_revision"])
-                or source.robot_geometry_sha256 != collisions[0]["geometry_sha256"]
+                or _canonical_robot_geometry_sha256(source.robot_geometry_sha256)
+                != _canonical_robot_geometry_sha256(collisions[0]["geometry_sha256"])
                 or source.object_geometry_sha256 is None
                 or (
                     source.target_pose is not None
