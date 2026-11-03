@@ -455,10 +455,11 @@ def main() -> None:
                 qpos = torch.as_tensor(
                     actual[:, 18 : 18 + len(joint_order)][:, joint_order], device=device
                 )
-                relative = actual[:, 3:12].reshape(-1, 3, 3) @ target[:, 3:12].reshape(
-                    -1, 3, 3
-                ).transpose(0, 2, 1)
-                alignment = heading_rotation(torch.from_numpy(relative)).numpy()
+                target_rotation = torch.from_numpy(target[:, 3:12].reshape(-1, 3, 3))
+                alignment = (
+                    heading_rotation(root_rotation)
+                    @ heading_rotation(target_rotation).transpose(-1, -2)
+                ).numpy()
                 root_a, root_r = actual[:, :3].copy(), target[:, :3].copy()
                 root_a[:, 2] = root_r[:, 2] = 0
                 translation = root_a - np.einsum("fij,fj->fi", alignment, root_r)

@@ -19,12 +19,14 @@ the review build. From the repository root, place those wheels in
 RUNTIME_WHEELS="$PWD/runtime-wheels"
 uv venv --python 3.11 .venv-g1
 uv pip install --python .venv-g1/bin/python --torch-backend cu130 \
-  --find-links "$RUNTIME_WHEELS" .
+  --find-links "$RUNTIME_WHEELS" "$RUNTIME_WHEELS"/dexsim_engine-*.whl .
 uv pip check --python .venv-g1/bin/python
 source .venv-g1/bin/activate
 ```
 
-Use an isolated environment for each candidate runtime build. Record the source
+Place one SDK wheel from the review build in `runtime-wheels/`; the explicit
+wheel argument selects that build. Use an isolated environment for each candidate
+runtime build. Record the source
 revision and wheel filenames with the run results. The runtime build must provide
 native libraries compatible with the host's Python, CUDA driver and Linux ABI.
 

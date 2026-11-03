@@ -75,9 +75,7 @@ def _run_g1_state_injection_and_selected_reset(update_data_interval: int) -> Non
     gym = yaml.safe_load(config_path.read_text())
     gym["num_envs"] = 2
     gym["max_episode_steps"] = 2
-    gym["physics_config"]["solver_cfg"]["mujoco_options"][
-        "update_data_interval"
-    ] = update_data_interval
+    gym["physics_config"]["solver_cfg"]["update_data_interval"] = update_data_interval
     options = gym["env"]["extensions"]["motion_tracking"]
     with np.load(archive) as data:
         options["clips"] = data["names"].tolist()[:2]
@@ -256,6 +254,27 @@ def test_tracking_diagnostics_distinguish_alignment_and_failure_conditions():
     assert not reasons["height"].item() and reasons["tilt"].item()
     failed, _ = task.termination(state, ref)
     assert torch.equal(failed, reasons["height"] | reasons["tilt"])
+
+    # Equal headings with different root tilts must not introduce a yaw offset.
+    from embodichain_models.dynamics.rwm.robot_state import rotation_exp
+
+    task, ref = task_and_state()
+    state = {k: v.clone() for k, v in ref.items()}
+    state["rot"] = rotation_exp(
+        torch.tensor([[math.pi / 4, 0.0, 0.0]], dtype=torch.float64)
+    )
+    ref["rot"] = rotation_exp(
+        torch.tensor([[0.0, math.pi / 4, 0.0]], dtype=torch.float64)
+    )
+    state["pos"].requires_grad_()
+    error = task.tracking_errors(state, ref)["body_pos"]
+    torch.testing.assert_close(
+        error, torch.tensor([1 - math.cos(math.pi / 4)], dtype=torch.float64)
+    )
+    gradient = torch.autograd.grad(error.sum(), state["pos"])[0]
+    torch.testing.assert_close(
+        gradient, torch.tensor([[0.0, 0.0, math.sin(math.pi / 4)]], dtype=torch.float64)
+    )
 
 
 @pytest.mark.parametrize("compiled", [False, True])

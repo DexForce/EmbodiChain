@@ -325,6 +325,7 @@ def test_physical_episode_metrics_own_storage_across_task_invocations(monkeypatc
 
 
 def test_configured_model_policy_update_shares_workflow_resources():
+    from embodichain.learning.rl.policies import build_policy
     from embodichain.learning.rl.algo import build_algo
     from embodichain.learning.rl.differentiable_trainer import (
         DifferentiableTrainer,
@@ -333,6 +334,13 @@ def test_configured_model_policy_update_shares_workflow_resources():
     from embodichain.learning.rl.runtime import build_learning_policy_runtime
 
     source, model = make_env()
+    with pytest.raises(ValueError, match="dimensions differ"):
+        build_policy(
+            {"name": "motion_tracking", "cfg": {"action_dim": 29}},
+            source.single_observation_space,
+            source.single_action_space,
+            torch.device("cpu"),
+        )
     task = source.task
     config = {
         "trainer": {
@@ -411,16 +419,3 @@ def test_configured_model_policy_update_shares_workflow_resources():
         torch.testing.assert_close(old, new, rtol=0, atol=0)
         assert new.grad is None
     runtime.close()
-
-
-def test_configured_tracking_policy_rejects_wrong_task_dimensions():
-    from embodichain.learning.rl.policies import build_policy
-
-    source, _ = make_env()
-    with pytest.raises(ValueError, match="dimensions differ"):
-        build_policy(
-            {"name": "motion_tracking", "cfg": {"action_dim": 29}},
-            source.single_observation_space,
-            source.single_action_space,
-            torch.device("cpu"),
-        )

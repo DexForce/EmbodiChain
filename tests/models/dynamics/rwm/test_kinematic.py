@@ -167,8 +167,15 @@ def test_complete_window_adapter_rejects_unusable_physical_transitions():
         replay_supervised_batch(windows, complete_windows=True)
 
 
-def test_checkpoint_rejects_different_kinematic_geometry():
+def test_checkpoint_rejects_different_kinematic_geometry(tmp_path):
     model, _ = model_and_state()
+    path = tmp_path / "world-model.pt"
+    torch.save({"learner": {"model": model.state_dict()}}, path)
+    state = torch.load(path, weights_only=True)["learner"]["model"]
+    restored, _ = model_and_state()
+    restored.load_state_dict(state)
+    for left, right in zip(model.parameters(), restored.parameters()):
+        torch.testing.assert_close(left, right, rtol=0, atol=0)
     other = KinematicWorldModel(URDF.replace('xyz="1 0 0"', 'xyz="2 0 0"'), model.cfg)
     with pytest.raises(ValueError, match="contract"):
-        other.load_state_dict(model.state_dict())
+        other.load_state_dict(state)

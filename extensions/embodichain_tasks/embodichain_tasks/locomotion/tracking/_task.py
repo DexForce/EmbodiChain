@@ -266,8 +266,9 @@ class MotionTrackingTask:
         r = links.rotation.index_select(-3, self.tracked)
         rp = reference_links.position.index_select(-2, self.tracked)
         rr = reference_links.rotation.index_select(-3, self.tracked)
-        alignment = self._heading(
-            matrix_product(state["rot"], reference["rot"].transpose(-1, -2))
+        alignment = matrix_product(
+            self._heading(state["rot"]),
+            self._heading(reference["rot"]).transpose(-1, -2),
         ).unsqueeze(-3)
         anchor = torch.cat(
             (state["pos"][..., :2], reference["pos"][..., 2:3]), -1

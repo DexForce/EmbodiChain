@@ -217,7 +217,7 @@ def main() -> None:
             for step in range(args.collect_steps):
                 before = env.capture_transition_start()
                 reference = env.motion.future(
-                    env.motion_frame, task.future_offsets[:1]
+                    env.motion_frame, task.future_offsets.new_ones(1)
                 )["q"][:, 0]
                 action = (
                     (reference - task.resting_position)

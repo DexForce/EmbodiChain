@@ -321,7 +321,7 @@ class MotionTraining:
         if reference_control:
             task = self.env.task
             reference = self.env.motion.future(
-                self.env.motion_frame, task.future_offsets[:1]
+                self.env.motion_frame, task.future_offsets.new_ones(1)
             )["q"][:, 0]
             action = (
                 (reference - task.resting_position)
@@ -780,7 +780,7 @@ def main() -> None:
                 initial = torch.load(
                     config["wm_checkpoint"],
                     map_location=workflow.env.device,
-                    weights_only=False,
+                    weights_only=True,
                 )
                 learner = (
                     initial["learner"] if "learner" in initial else initial["model"]

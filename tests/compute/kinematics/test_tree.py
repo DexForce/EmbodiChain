@@ -34,6 +34,8 @@ URDF = """<robot name="branched">
 
 
 def test_branched_pose_and_link_origin_velocity():
+    with pytest.raises(ValueError, match="every movable"):
+        TreeKinematics(URDF, ["hinge"])
     kin = TreeKinematics(URDF, ["slide", "hinge"], dtype=torch.float64)
     q = torch.tensor([[0.7, math.pi / 2]], dtype=torch.float64)
     root = torch.zeros(1, 3, dtype=q.dtype)
@@ -85,8 +87,3 @@ def test_tree_gradients_and_arbitrary_batch_axes():
     original = first.detach().clone()
     evaluate(q + 1, dq)
     torch.testing.assert_close(first, original)
-
-
-def test_tree_rejects_incomplete_joint_order():
-    with pytest.raises(ValueError, match="every movable"):
-        TreeKinematics(URDF, ["hinge"])
