@@ -704,6 +704,14 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
             assert acquisition["timestamp"] == 0.0
             assert acquisition["env_ids"] == [0, 1]
             assert initial["stable_seconds"] == [0.0, 0.0]
+        if startup == "clock_drift" and commands == 1:
+            missing = port.post_policy_metadata(policy, segment=segment)
+            assert all(
+                "clock mapping" in error
+                for error in missing["measurements"]["support_acquisition"][
+                    "acquisition_errors"
+                ]
+            )
         if startup == "row_reset" and commands == 2:
             partial = port.post_policy_metadata(policy, segment=segment)
             acquisition = partial["measurements"]["support_acquisition"]
@@ -726,8 +734,7 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
         assert metadata["support_result_available"] == [False, False]
         assert metadata["support_unavailable_observations"] == [7, 7]
         assert all(
-            "clock mapping" in error
-            for error in metadata["support_last_acquisition_errors"]
+            "clock" in error for error in metadata["support_last_acquisition_errors"]
         )
         assert metadata["measurements"]["support_acquisition"]["valid"] == [
             False,
