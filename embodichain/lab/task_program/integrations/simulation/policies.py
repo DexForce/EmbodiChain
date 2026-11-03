@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.lab.sim.sensors.base_sensor import BaseSensor
     from embodichain.lab.sim.sensors.support_observation import (
+        SupportControlClock,
         SupportObservationRegistry,
     )
 
@@ -288,7 +289,7 @@ class SimulationSegmentPolicyPort:
                 sensor_suite=sensor_suite,
             )
 
-    def bind_clock(self, clock: Any) -> None:
+    def bind_clock(self, clock: SupportControlClock) -> None:
         """Bind the existing environment clock for explicitly declared conditions.
 
         Args:

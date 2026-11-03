@@ -32,7 +32,10 @@ from embodichain.lab.sim.scene.planar_observation import NativePlanarPlacement
 from embodichain.lab.task_program.compiler.program import CompiledPostPolicy
 from embodichain.utils.math import pose_inv
 from .stability import SimulationStabilityConditionCfg
-from embodichain.lab.sim.sensors.support_observation import SupportObservationRegistry
+from embodichain.lab.sim.sensors.support_observation import (
+    SupportControlClock,
+    SupportObservationRegistry,
+)
 
 __all__: list[str] = []
 
@@ -119,7 +122,7 @@ class _ConditionStabilityRuntime:
         presets: Mapping[str, SimulationStabilityConditionCfg],
         *,
         step_dt: float,
-        registry: SupportObservationRegistry,
+        registry: SupportObservationRegistry | None,
         sensor_suite: MutableMapping[str, Any] | None,
     ) -> None:
         if not math.isfinite(step_dt) or step_dt <= 0:
@@ -247,9 +250,9 @@ class _ConditionStabilityRuntime:
             sensor_suite[uid] = observer.sensor
             self._support_observers[key] = observer
         self._metadata: dict[int, dict[str, Any]] = {}
-        self._clock: Any = None
+        self._clock: SupportControlClock | None = None
 
-    def bind_clock(self, clock: Any) -> None:
+    def bind_clock(self, clock: SupportControlClock) -> None:
         """Bind strong support readers to the already-owned execution clock."""
         self._require_open()
         if any(
