@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -60,8 +61,49 @@ def test_scene_engine_help_exposes_only_runtime_arguments(
     output = capsys.readouterr().out
     assert "--image" in output
     assert "--output_root" in output
+    assert "--prompt2scene_scene_z_rotation_degrees" not in output
+    assert "--prompt2scene_mesh_x_rotation_degrees" not in output
+    assert "--target_body_scale_mode" not in output
     assert "gen_sim/.env" in output
     assert "--config" not in output
+
+
+@pytest.mark.parametrize(
+    "image,edit_prompt,policy",
+    [
+        ("scene.png", None, None),
+        (None, "move the cup", None),
+        ("scene.png", "move the cup", "policy.yaml"),
+        ("scene.png", None, "policy.yaml"),
+    ],
+)
+def test_scene_engine_main_dispatches_once_with_both_export_options(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    image: str | None,
+    edit_prompt: str | None,
+    policy: str | None,
+) -> None:
+    dispatch = Mock()
+    monkeypatch.setattr(start, "cli_scene_engine", dispatch)
+    output = str(tmp_path / "output")
+    argv = ["--output_root", output]
+    if image is not None:
+        argv.extend(("--image", image))
+    if edit_prompt is not None:
+        argv.extend(("--edit_prompt", edit_prompt))
+    if policy is not None:
+        argv.extend(("--scene-randomization-config", policy))
+
+    start.main(argv)
+
+    dispatch.assert_called_once_with(
+        image,
+        output,
+        edit_prompt=edit_prompt,
+        scene_z_rotation_degrees=180.0,
+        scene_randomization=Path(policy) if policy is not None else None,
+    )
 
 
 def test_scene_engine_cli_forwards_validated_paths(
@@ -70,21 +112,67 @@ def test_scene_engine_cli_forwards_validated_paths(
 ) -> None:
     image_path = tmp_path / "scene.png"
     image_path.write_bytes(b"png")
-    captured: dict[str, Path] = {}
+    captured: dict[str, object] = {}
 
-    def generate_scene(*, image_path: Path, output_root: Path) -> None:
+    def generate_scene(
+        *,
+        image_path: Path,
+        output_root: Path,
+        scene_z_rotation_degrees: float,
+    ) -> None:
         captured["image_path"] = image_path
         captured["output_root"] = output_root
+        captured["scene_z_rotation_degrees"] = scene_z_rotation_degrees
 
     monkeypatch.setattr(start, "generate_scene_from_image", generate_scene)
     output_root = tmp_path / "output"
 
-    start.cli_scene_engine(image_path, output_root)
+    start.cli_scene_engine(
+        image_path,
+        output_root,
+        scene_z_rotation_degrees=180.0,
+    )
 
     assert captured == {
         "image_path": image_path.resolve(),
         "output_root": output_root.resolve(),
+        "scene_z_rotation_degrees": 180.0,
     }
+
+
+def test_scene_engine_main_rejects_removed_direct_glb_options(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "scene.png"
+    image_path.write_bytes(b"png")
+    with pytest.raises(SystemExit) as exc_info:
+        start.main(
+            [
+                "--image",
+                str(image_path),
+                "--output_root",
+                str(tmp_path / "output"),
+                "--target_body_scale_mode",
+                "preserve",
+            ]
+        )
+    assert exc_info.value.code == 2
+
+
+def test_scene_engine_main_rejects_legacy_mesh_x_rotation(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        start.main(
+            [
+                "--output_root",
+                str(tmp_path / "output"),
+                "--prompt2scene_mesh_x_rotation_degrees",
+                "90",
+            ]
+        )
+
+    assert exc_info.value.code == 2
 
 
 def test_scene_engine_cli_edits_existing_output_without_an_image(
@@ -116,7 +204,12 @@ def test_scene_engine_cli_generates_then_edits_when_both_inputs_exist(
     image_path.write_bytes(b"png")
     call_order: list[str] = []
 
-    def generate_scene(*, image_path: Path, output_root: Path) -> None:
+    def generate_scene(
+        *,
+        image_path: Path,
+        output_root: Path,
+        scene_z_rotation_degrees: float,
+    ) -> None:
         call_order.append("generate")
 
     def edit_scene(*, output_root: Path, edit_prompt: str) -> None:
