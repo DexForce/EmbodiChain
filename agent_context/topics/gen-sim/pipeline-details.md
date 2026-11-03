@@ -13,6 +13,10 @@
 3. Scene understanding produces the table/object model and scene graph; geometry and optional
    articulation stages materialize assets; refinement updates placement.
    `SceneExporter.export()` is the durable generation boundary.
+   The staged API in `scene_engine/pipeline/api.py` also persists versioned
+   blueprints before materialization. Articulated generation delegates to
+   `asset_engine/pipeline/articulation.py`; the shared environment parser accepts
+   legacy Scene Engine articulation keys through the Asset Engine loader.
 4. Editing imports `scene_export`, validates the scene and graph, asks the VLM for a typed
    edit plan, generates assets only for additions, applies layout changes, then exports over
    the same portable directory (`edit.py`).
@@ -24,7 +28,7 @@
    `preview-scene --usd-file` imports it directly. The manifest and native
    GLTF/USDC files remain legacy compatibility data. It represents a scene,
    not a complete `EmbodiedEnv` deployment.
-6. The general SimReady CLI is a separate ingest path. `simready_pipeline/cli/start.py` sets
+6. The general SimReady CLI is a separate ingest path. `asset_engine/cli/start.py` sets
    `PYOPENGL_PLATFORM=egl`, builds `JsonStore` and `ParserManager`, then calls
    `ingest_one_asset()`.
 7. Ingest accepts mesh formats for canonicalization and `.urdf`/`.usd` for direct copy. Both

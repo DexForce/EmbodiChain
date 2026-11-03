@@ -34,6 +34,14 @@ import warp as wp
             ["embodichain.lab", "embodichain.gen_sim", "dexsim"],
         ),
         (
+            "embodichain.compute.kinematics.ik_path",
+            ["embodichain.lab", "embodichain.gen_sim", "dexsim"],
+        ),
+        (
+            "embodichain.compute.trajectory.limits",
+            ["embodichain.lab", "embodichain.gen_sim", "dexsim"],
+        ),
+        (
             "embodichain.compute.geometry.rigid",
             ["embodichain.lab", "dexsim"],
         ),

@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "a140633807fff979ccc60135c2f9d8256bf7db2b",
+  "revision": "6edb34ab437593b81b8d5e8d450a1e046ebb4788",
   "source_ref": "HEAD",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
@@ -172,16 +172,16 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/parser/base.py",
+          "path": "embodichain/gen_sim/asset_engine/parser/base.py",
           "symbol": "ParserManager",
-          "start_line": 46,
-          "end_line": 46,
+          "start_line": 48,
+          "end_line": 48,
           "excerpt": "class ParserManager:"
         }
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
+          "docname": "features/generative_sim/asset_engine",
           "label": "SimReady pipeline documentation",
           "source_extension": ".md"
         }
@@ -2547,8 +2547,8 @@
         {
           "path": "embodichain/gen_sim/scene_engine/pipeline/generation/scene_generation.py",
           "symbol": "generate_scene_and_refine",
-          "start_line": 94,
-          "end_line": 94,
+          "start_line": 97,
+          "end_line": 97,
           "excerpt": "def generate_scene_and_refine("
         }
       ],
@@ -2671,8 +2671,8 @@
         {
           "path": "embodichain/gen_sim/scene_engine/pipeline/utils/scene_exporter.py",
           "symbol": "SceneExporter",
-          "start_line": 43,
-          "end_line": 43,
+          "start_line": 49,
+          "end_line": 49,
           "excerpt": "class SceneExporter:"
         }
       ],
@@ -2882,8 +2882,8 @@
         {
           "path": "embodichain/gen_sim/scene_engine/pipeline/generation/scene_understanding.py",
           "symbol": "understand_scene",
-          "start_line": 194,
-          "end_line": 194,
+          "start_line": 254,
+          "end_line": 254,
           "excerpt": "def understand_scene("
         }
       ],
@@ -3006,7 +3006,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 17,
@@ -3015,7 +3015,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
+          "docname": "features/generative_sim/asset_engine",
           "label": "SimReady pipeline documentation",
           "source_extension": ".md"
         }
@@ -4155,7 +4155,7 @@
           "symbol": "<module>",
           "start_line": 52,
           "end_line": 52,
-          "excerpt": "        target=\"embodichain.gen_sim.simready_pipeline.cli.start:main\","
+          "excerpt": "        target=\"embodichain.gen_sim.asset_engine.cli.start:main\","
         }
       ]
     },
@@ -5425,8 +5425,8 @@
         {
           "path": "embodichain/gen_sim/scene_engine/pipeline/generation/scene_generation.py",
           "symbol": "_refine_on_children_bfs",
-          "start_line": 882,
-          "end_line": 884,
+          "start_line": 850,
+          "end_line": 852,
           "excerpt": "        solved_child_xy_by_id = parent_surface_optimizer.optimize(\n            parent_surface_problem\n        )"
         },
         {
@@ -5450,8 +5450,8 @@
         {
           "path": "embodichain/gen_sim/scene_engine/pipeline/generation/scene_generation.py",
           "symbol": "generate_scene_and_refine",
-          "start_line": 155,
-          "end_line": 155,
+          "start_line": 158,
+          "end_line": 158,
           "excerpt": "    simready_processor = SimReadyProcessor("
         }
       ]
@@ -5558,8 +5558,8 @@
         {
           "path": "embodichain/gen_sim/scene_engine/pipeline/generate.py",
           "symbol": "generate_scene_from_image",
-          "start_line": 96,
-          "end_line": 96,
+          "start_line": 112,
+          "end_line": 112,
           "excerpt": "        scene = generate_scene_and_refine("
         }
       ]
@@ -5576,8 +5576,8 @@
         {
           "path": "embodichain/gen_sim/scene_engine/pipeline/generate.py",
           "symbol": "generate_scene_from_image",
-          "start_line": 74,
-          "end_line": 74,
+          "start_line": 90,
+          "end_line": 90,
           "excerpt": "        scene, scene_graph = understand_scene("
         }
       ]
@@ -5612,8 +5612,8 @@
         {
           "path": "embodichain/gen_sim/scene_engine/pipeline/utils/scene_layout_constructor.py",
           "symbol": "SceneLayoutConstructor._optimize_parent_group",
-          "start_line": 275,
-          "end_line": 277,
+          "start_line": 277,
+          "end_line": 279,
           "excerpt": "        solved_child_xy_by_id = self.parent_surface_layout_optimizer.optimize(\n            parent_surface_problem\n        )"
         },
         {
@@ -5707,7 +5707,7 @@
       "scope": "Caller supplies the ParserManager instance.",
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "ingest_one_asset",
           "start_line": 178,
           "end_line": 178,
@@ -5975,24 +5975,6 @@
       ]
     },
     {
-      "id": "static-imports-06051215554a",
-      "source": "simready",
-      "target": "asset-parsers",
-      "relation": "imports",
-      "description": "The selected source module declares an absolute import associated with this target.",
-      "provenance": "static-extracted",
-      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
-      "evidence": [
-        {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
-          "symbol": "<module>",
-          "start_line": 38,
-          "end_line": 38,
-          "excerpt": "from embodichain.gen_sim.simready_pipeline.parser.base import ParserManager"
-        }
-      ]
-    },
-    {
       "id": "static-imports-07f0c7b0d6d3",
       "source": "urdf-assembly",
       "target": "urdf-sensors",
@@ -6241,6 +6223,24 @@
           "start_line": 31,
           "end_line": 31,
           "excerpt": "from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-23e1fa2a2077",
+      "source": "scene-assets",
+      "target": "scene-simready",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/generation/scene_generation.py",
+          "symbol": "<module>",
+          "start_line": 85,
+          "end_line": 88,
+          "excerpt": "from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (\n    SimReadyProcessor,\n    SimReadyProcessorConfig,\n)"
         }
       ]
     },
@@ -7379,24 +7379,6 @@
       ]
     },
     {
-      "id": "static-imports-a2ed85aaf8e4",
-      "source": "scene-assets",
-      "target": "scene-simready",
-      "relation": "imports",
-      "description": "The selected source module declares an absolute import associated with this target.",
-      "provenance": "static-extracted",
-      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
-      "evidence": [
-        {
-          "path": "embodichain/gen_sim/scene_engine/pipeline/generation/scene_generation.py",
-          "symbol": "<module>",
-          "start_line": 82,
-          "end_line": 85,
-          "excerpt": "from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (\n    SimReadyProcessor,\n    SimReadyProcessorConfig,\n)"
-        }
-      ]
-    },
-    {
       "id": "static-imports-a31378055869",
       "source": "robot",
       "target": "solvers",
@@ -7573,6 +7555,24 @@
           "start_line": 84,
           "end_line": 87,
           "excerpt": "from embodichain.lab.gym.envs.task_program.bridge import (\n    EnvironmentStepClock,\n    GymPlanningObservationProvider,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-bd6182c9b6c9",
+      "source": "simready",
+      "target": "asset-parsers",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
+          "symbol": "<module>",
+          "start_line": 38,
+          "end_line": 38,
+          "excerpt": "from embodichain.gen_sim.asset_engine.parser.base import ParserManager"
         }
       ]
     },
@@ -8415,6 +8415,7 @@
         "static-imports-42ede9f875a7",
         "static-imports-0c5f841524c0",
         "static-imports-99dc34e28142",
+        "static-imports-bd6182c9b6c9",
         "static-imports-d313f500fdcd",
         "static-imports-be31086bea22",
         "static-imports-e72a7ecc0074",
@@ -8422,8 +8423,7 @@
         "static-imports-334f6b0d8a08",
         "static-imports-14081e7d8f35",
         "static-imports-083baf21b591",
-        "static-imports-a2ed85aaf8e4",
-        "static-imports-06051215554a",
+        "static-imports-23e1fa2a2077",
         "static-imports-547bae782cdb",
         "static-imports-5deb641ceb25",
         "static-imports-f54bba39306e",
@@ -9199,6 +9199,7 @@
         "scene-services-declares-manager-entities",
         "scene-services-references-manager",
         "scene-recipes-import-expansion-contracts",
+        "static-imports-bd6182c9b6c9",
         "static-imports-d313f500fdcd",
         "static-imports-be31086bea22",
         "static-imports-e72a7ecc0074",
@@ -9206,8 +9207,7 @@
         "static-imports-334f6b0d8a08",
         "static-imports-14081e7d8f35",
         "static-imports-083baf21b591",
-        "static-imports-a2ed85aaf8e4",
-        "static-imports-06051215554a",
+        "static-imports-23e1fa2a2077",
         "static-imports-9bc131d4e099",
         "static-imports-e6f14444a888",
         "static-imports-2b77ea1ae6d0"

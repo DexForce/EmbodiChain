@@ -37,6 +37,23 @@ below. The reusable physical environment variants own none of this Task
 Program metadata, so changing environments does not copy the robot profile and
 changing a compatible embodiment does not rewrite the source program.
 
+## Motion-policy schema migration
+
+The keyword-only `MotionPolicy.interpolation_mode` and `ik_seed_mode` fields
+default to the existing adaptive timing and batched IK behavior. The explicit
+`fixed_grid` mode requires `acceleration_limit: null` and preserves its declared
+sample grid while retaining authored/runtime velocity checks.
+
+Registration fingerprints cover all effective motion-policy fields. Adding these
+fields changes every sealed Task Program registration payload containing a
+`MotionPolicy`, including registrations outside GenSim and those using only
+default modes. Recompose the configuration and regenerate/reseal its runnable
+bundle and compiled integration identity. Preserve old receipts under their old
+identity; editing a stored digest does not validate the new registration.
+
+Execution-registration identity is separate from the normative TaskSpec payload
+and `semantic_hash`. This migration does not change that semantic payload or hash.
+
 ## Contracts on the two sides
 
 An atomic action owns a

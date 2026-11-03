@@ -40,6 +40,9 @@ import torch
 import yaml
 
 from embodichain.data import get_data_path
+from embodichain.data_pipeline.real2sim._geometry import (
+    _canonical_robot_geometry_sha256,
+)
 from embodichain.data_pipeline.real2sim import (
     JointSpec,
     PhaseAnnotation,
@@ -102,6 +105,31 @@ def write_json(path: Path, value: object) -> None:
 
 def write_yaml(path: Path, value: object) -> None:
     path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
+
+
+def require_prepared(prepared: Path) -> None:
+    """Reject incomplete or unqualified preparation before scheduling work."""
+    path = prepared / "qualification.json"
+    if not path.is_file():
+        raise ValueError(
+            f"prepared input is incomplete: missing {path}; run preparation first"
+        )
+    qualification = json.loads(path.read_text(encoding="utf-8"))
+    if qualification.get("admitted") is not True:
+        failed = [
+            name
+            for name, passed in qualification.get("checks", {}).items()
+            if not passed
+        ]
+        raise ValueError(
+            f"prepared input failed qualification: {', '.join(failed) or 'admitted is false'}; "
+            f"inspect {path} and rebuild preparation"
+        )
+    for name in ("task.measured.yaml", "profile.measured.yaml"):
+        if not (prepared / name).is_file():
+            raise ValueError(
+                f"prepared input is incomplete: missing {prepared / name}; rebuild preparation"
+            )
 
 
 def acquire(directory: Path) -> None:
@@ -463,7 +491,9 @@ def prepare(source_directory: Path, output: Path) -> None:
             # Frozen v1 source geometry; changing the public class is allowed,
             # changing its declared physical model requires requalification.
             source_geometry_identity=snapshot["robot_geometry_sha256"]
-            == "6b08aff1b8de77edfd1deab3da3f139d2ecfb20838bd21cf2d6207058c0d4d82",
+            == _canonical_robot_geometry_sha256(
+                "6b08aff1b8de77edfd1deab3da3f139d2ecfb20838bd21cf2d6207058c0d4d82"
+            ),
         )
         qualification["admitted"] = all(qualification["checks"].values())
         qualification.update(

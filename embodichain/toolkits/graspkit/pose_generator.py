@@ -84,6 +84,13 @@ class ParallelJawGripperModelCfg:
 
 _PARALLEL_JAW_GRIPPER_MODELS = MappingProxyType(
     {
+        "robotiq_arg2f_140": MappingProxyType(
+            {
+                "model_id": "robotiq_arg2f_140",
+                "min_opening_width": 0.002,
+                "max_opening_width": 0.15,
+            }
+        ),
         # Pika's native X approaches and Y opens. See README.md for the
         # source meshes, aperture measurement and adapter/TCP convention.
         "robotiq_2f85": MappingProxyType(
@@ -144,7 +151,8 @@ def get_parallel_jaw_gripper_model(model_id: str) -> ParallelJawGripperModelCfg:
     Built-in IDs are ``dh_pgi_140_80``, ``franka_panda_hand`` (the hand in the
     packaged Panda asset), ``cobotmagic_v100_gripper`` (the V100 fingers), and
     ``tianji_marvin_gripper`` (both hands in the asset with end effectors),
-    ``pika_gripper`` (the standalone Pika asset), and ``robotiq_2f85``.
+    ``pika_gripper`` (the standalone Pika asset), ``robotiq_2f85``, and
+    ``robotiq_arg2f_140`` (the complete hand used by GenSim).
     The V100 preset is distinct from CobotMagic's V70 hardware variant. Source
     archive checksums are recorded in GraspKit's ``README.md``. Algorithm and
     target collision policy remain generator settings.
