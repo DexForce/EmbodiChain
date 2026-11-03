@@ -1,5 +1,4 @@
 embodichain.compute
-===================
 
 Shared array and tensor computations
 ------------------------------------
@@ -184,3 +183,29 @@ compute function and Torch layer; failed solves retain their last iterate.
 
 .. automodule:: embodichain.compute.kinematics.types
    :members:
+
+
+Planar floor and silhouette geometry
+-----------------------------------
+
+.. currentmodule:: embodichain.compute.geometry.landing
+
+These CPU routines preserve actual floor triangles and payload silhouettes,
+including holes. They consume explicit numerical geometry without reading a
+robot or simulator. Landing selection retains its ordered clearance margins;
+measurements leave task acceptance and support thresholds to callers.
+
+.. autosummary::
+
+   planar_floor_region
+   select_container_landing
+   planar_placement_metrics
+   validate_planar_pose
+
+.. autofunction:: planar_floor_region
+
+.. autofunction:: select_container_landing
+
+.. autofunction:: planar_placement_metrics
+
+.. autofunction:: validate_planar_pose
