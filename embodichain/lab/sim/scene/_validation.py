@@ -20,6 +20,10 @@ from __future__ import annotations
 
 import math
 from numbers import Real
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
 
 __all__ = []
 
@@ -77,3 +81,37 @@ def _rigid_pose(value: object) -> tuple[tuple[float, ...], ...]:
     if abs(determinant - 1.0) > tolerance:
         raise ValueError("arena_pose rotation must be proper (determinant +1)")
     return (*pose[:3], (0.0, 0.0, 0.0, 1.0))
+
+
+def _owned_b1_pose(value: torch.Tensor, name: str) -> torch.Tensor:
+    """Own one B=1 rigid tensor pose using the scene/query tolerance contract."""
+    import torch
+
+    if (
+        not isinstance(value, torch.Tensor)
+        or value.shape != (1, 4, 4)
+        or not value.is_floating_point()
+    ):
+        raise ValueError(f"{name} requires one finite floating pose (1, 4, 4).")
+    owned = value.detach().clone()
+    # B=1 construction validates a tiny metadata matrix on CPU, avoiding a
+    # cuSOLVER initialization merely to check a 3x3 determinant on the sim GPU.
+    matrix = owned.to(device="cpu", dtype=torch.float64)
+    rotation = matrix[0, :3, :3]
+    if (
+        not torch.isfinite(matrix).all()
+        or not torch.allclose(
+            matrix[0, 3], matrix.new_tensor([0, 0, 0, 1]), atol=1e-6, rtol=0
+        )
+        or not torch.allclose(
+            rotation.T @ rotation,
+            torch.eye(3, device=matrix.device, dtype=matrix.dtype),
+            atol=1e-5,
+            rtol=0,
+        )
+        or not torch.isclose(
+            torch.linalg.det(rotation), matrix.new_tensor(1.0), atol=1e-5, rtol=0
+        )
+    ):
+        raise ValueError(f"{name} must be a rigid transform.")
+    return owned
