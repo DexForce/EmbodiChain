@@ -571,7 +571,7 @@ topics:
 - id: supervised-learning
   title: Supervised Learning
   aliases: [supervised learning, SL learning, visual ACT, 视觉模仿学习, 监督学习, 统一监督学习]
-  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, SequenceBatchSource, ACTPolicy, ACTSequenceSource, ACTTemporalEnsembler, build_act_trainer, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
+  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, SequenceBatchSource, ACT, LeRobot ACT, lerobot-train, ACTInferencePolicy, build_act_train_config, load_act_policy, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
   paths: [topics/supervised-learning/supervised-learning.md]
   source_of_truth:
   - embodichain/learning/sl/

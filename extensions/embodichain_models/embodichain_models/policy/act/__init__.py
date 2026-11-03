@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Action Chunking with Transformers and supervised training support."""
+"""Official LeRobot ACT training configuration and simulation adapters."""
 
 from __future__ import annotations
 
@@ -22,21 +22,18 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
-    "ACTCfg",
-    "ACTPolicy",
-    "ACTObjective",
-    "ACTTemporalEnsembler",
-    "ACTSequenceSource",
-    "build_act_trainer",
+    "ACTInferencePolicy",
+    "build_act_train_config",
+    "dataset_fingerprint",
+    "load_act_policy",
+    "policy_fingerprint",
 ]
-
 _MODULES = {
-    "ACTCfg": "model",
-    "ACTPolicy": "model",
-    "ACTObjective": "model",
-    "ACTTemporalEnsembler": "rollout",
-    "ACTSequenceSource": "data",
-    "build_act_trainer": "sl_recipe",
+    "ACTInferencePolicy": "runtime",
+    "load_act_policy": "runtime",
+    "policy_fingerprint": "runtime",
+    "build_act_train_config": "training",
+    "dataset_fingerprint": "training",
 }
 
 

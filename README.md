@@ -79,8 +79,9 @@ Recordings retain the existing task/subtask table and depth-sidecar schema on
 both routes. LeRobot 0.6.1 exposes `subtask_index` but does not automatically
 resolve `meta/subtasks.parquet`; the EmbodiChain preview resolves it explicitly.
 Use the [standalone exporter](tools/lerobot_export/README.md) for native 0.6.1
-persistent-language annotations and depth features. The SDK dependency upgrade
-does not replace the existing EmbodiChain ACT model or migrate its checkpoints.
+persistent-language annotations and depth features. The [ACT example](examples/learning/act/README.md) uses the official LeRobot
+0.6.1 trainer and policy on Python 3.12. Historical custom ACT checkpoints require
+retraining.
 
 ### Container environments
 

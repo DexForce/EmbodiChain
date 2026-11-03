@@ -59,9 +59,8 @@ memory limit; imports do not initialize simulation or import the SDK until load.
 The first backend samples resident numeric tensors after bounded SDK reads.
 `LeRobotDataSource` optionally decodes selected RGB image features on demand,
 using the same canonical frame index built during numeric loading and a shared
-bounded uint8 CPU cache. Video decoding is unsupported. Visual ACT joins the
-anchor image to its numeric window through this source and binds persisted
-image content to recovery.
+bounded uint8 CPU cache. Video decoding is unsupported. The official ACT example uses LeRobot's own
+dataset loader for training; this source remains available to SL/ODS consumers.
 
 `learning/sl/sequence.py` bridges these sources through an explicit encoder;
 the [SL context](../supervised-learning/supervised-learning.md) owns its identity

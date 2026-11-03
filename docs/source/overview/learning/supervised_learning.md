@@ -54,13 +54,12 @@ complete signatures and configuration fields.
 
 ## Integrated models
 
-Four model families provide installable factories for the shared trainer. They
+Three model families provide installable factories for the shared trainer. They
 ship in the main `embodichain` wheel; datasets, pretrained weights and optional
 runtime dependencies are prepared through each model's workflow.
 
 | Model | Use case | Prediction inputs | Prediction output |
 | --- | --- | --- | --- |
-| ACT | Visual imitation learning | Current RGB frame and robot state | A chunk of robot actions |
 | NeRD | Robot dynamics with history | States, joint efforts and optional contact history | State changes decoded into the next robot state |
 | RWM | Action-conditioned robot dynamics | Current state, action and optional physical context | Next robot state at a fixed control period |
 | RigidFormer | Interacting rigid-object dynamics | Geometry history, reference geometry and physical properties | Future rigid-object geometry |
@@ -73,14 +72,14 @@ conditional VAE. Training uses demonstrated action chunks with a masked L1 loss
 and a KL term; inference predicts an action chunk from current RGB and robot
 state without requiring future observations.
 
-The recipe reads frame-aligned RGB, numeric state and action windows from
-LeRobot datasets and fits normalization on training data only. The included
-Franka PushCube workflow covers expert collection, offline training, checkpoint
-selection and physical policy evaluation. It requires CUDA and the camera and
-dataset dependencies described in the
-{download}`ACT workflow <../../../../examples/learning/act/README.md>`.
-See the {doc}`visual ACT API </api_reference/visual_act>` for model and adapter
-interfaces.
+The ACT example uses LeRobot 0.6.1's official dataset loader, processors and
+training workflow on Python 3.12. EmbodiChain collects demonstrations and
+performs checkpoint selection and GPU simulator evaluation. Training uses a
+training-only dataset; a separately recorded validation corpus and independent
+development/test scenes remain outside training statistics. Native policy and
+processor artifacts replace the historical custom ACT checkpoint format.
+See the {download}`ACT workflow <../../../../examples/learning/act/README.md>`
+and {doc}`visual ACT API </api_reference/visual_act>` for adapters and requirements.
 
 ### NeRD: history-based robot dynamics
 
@@ -277,7 +276,6 @@ and function below, joined with `:`.
 
 | Model | Factory module / function | Model-owned behavior |
 | --- | --- | --- |
-| ACT | `policy.act.sl_recipe`<br>`build_act_trainer` | Current RGB frame, causal action chunks, ACT loss and training-set normalization |
 | NeRD | `dynamics.nerd.sl_recipe`<br>`build_supervised_trainer` | Dynamics windows, state codec, integration and numerical policy |
 | RWM | `dynamics.rwm.sl_recipe`<br>`build_rwm_trainer` | Transition corpus, state/action contract and multi-step dynamics loss |
 | RigidFormer | `dynamics.rigidformer.sl_recipe`<br>`build_rigidformer_trainer` | MOVi geometry windows, anchor losses, augmentation and EMA |
