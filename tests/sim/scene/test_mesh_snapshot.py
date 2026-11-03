@@ -30,6 +30,8 @@ from pxr import Usd, UsdGeom, UsdPhysics, Gf
 
 from embodichain.compute.geometry.mesh_bounds import transform_vertex_bounds
 from embodichain.lab.sim.scene.mesh_snapshot import (
+    SceneMeshComponent,
+    SceneMeshSnapshot,
     capture_scene_meshes,
     iter_scene_components,
 )
@@ -59,6 +61,17 @@ importlib.import_module({module!r})
         [sys.executable, "-c", script], capture_output=True, text=True
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_public_snapshot_copies_supplied_component_arrays():
+    vertices = torch.tensor([[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]])
+    faces = torch.tensor([[0, 1, 2]])
+    component = SceneMeshComponent("owner", "pose", "triangle", vertices, faces)
+    snapshot = SceneMeshSnapshot({}, components=(component,))
+    component.vertices.fill_(9.0)
+    component.faces.fill_(0)
+    torch.testing.assert_close(snapshot.components[0].vertices, vertices)
+    torch.testing.assert_close(snapshot.components[0].faces, faces)
 
 
 def _usd(path: Path, *, nonconvex=False):

@@ -79,7 +79,8 @@ class CollisionObjectSnapshot:
             env_id: Must be zero for the B=1 snapshot.
 
         Returns:
-            A list of snapshot-owned shape descriptors for planner consumption.
+            A new list of borrowed, read-only snapshot descriptors. Their tensors
+            must not be mutated; construct a new snapshot to change geometry.
         """
         if env_id != 0:
             raise IndexError("Collision snapshots support only environment zero.")

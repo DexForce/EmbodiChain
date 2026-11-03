@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 import torch
@@ -133,7 +133,7 @@ class SceneMeshSnapshot(dict[str, torch.Tensor]):
     ) -> None:
         self._initialize(
             {name: _owned_vertices(value) for name, value in rigid.items()},
-            components,
+            tuple(replace(component) for component in components),
             collision_roles,
             unavailable,
         )
