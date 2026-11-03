@@ -145,6 +145,8 @@ These pure tensor operations select a half-turn grasp orientation and rotate
 a link with its rigidly attached TCP about a link-local axis. Atomic motion
 primitives and benchmark case generation share this algebra; physical
 validation and execution remain in their consuming layers.
+``rigid_pose_displacement`` returns corresponding translation distances and
+rotation angles without selecting elapsed time or stability thresholds.
 
 .. currentmodule:: embodichain.compute.geometry.rigid
 
@@ -153,6 +155,7 @@ validation and execution remain in their consuming layers.
 
    nearest_half_turn_pose
    rotate_rigid_grasp
+   rigid_pose_displacement
 
 .. automodule:: embodichain.compute.geometry.rigid
    :members:

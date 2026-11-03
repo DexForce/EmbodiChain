@@ -29,12 +29,15 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from copy import copy, deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import math
 from types import MappingProxyType
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch
+
+from embodichain.compute.geometry.rigid import rigid_pose_displacement
+from embodichain.utils import configclass
 
 from embodichain.lab.gym.envs.objectives.conditions import evaluate_near_target
 from embodichain.lab.gym.envs.settling import (
@@ -66,6 +69,32 @@ class _SimulationSettleTarget:
     canonical_id: str
     kind: str
     native_entity: Any
+
+
+@configclass
+class SimulationSettleMonitorCfg(DynamicSettleMonitorCfg):
+    """Explicit simulation measurement selection for an existing settle monitor.
+
+    Plain :class:`DynamicSettleMonitorCfg` values retain reported velocities.
+    Pose deltas are opt-in for rigid objects, require a control timestep, and
+    leave the first observation unresolved. Preset names never select behavior.
+    """
+
+    measurement: Literal["reported_velocity", "pose_delta"] = "reported_velocity"
+    """Read backend velocities or derive speeds from consecutive observed poses."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.measurement not in ("reported_velocity", "pose_delta"):
+            raise ValueError(
+                "Unsupported settle measurement; use reported_velocity or pose_delta."
+            )
+
+    def snapshot(self) -> SimulationSettleMonitorCfg:
+        """Own and revalidate thresholds, cadence and explicit measurement mode."""
+        return SimulationSettleMonitorCfg(
+            **{field.name: getattr(self, field.name) for field in fields(self)}
+        )
 
 
 def default_simulation_settle_presets() -> Mapping[str, DynamicSettleMonitorCfg]:
@@ -111,6 +140,8 @@ class SimulationSegmentPolicyPort:
         scene_binding: Exact canonical-to-native scene declaration.
         settle_presets: Named settling policies. ``None`` installs the shared
             ``rigid_object`` and ``articulation`` presets.
+        step_dt: Control interval in seconds; required only by explicit
+            pose-delta measurement declarations.
         env_ids: Optional stable logical row IDs. They describe correlation,
             not simulator row indices; simulator rows remain ordered exactly as
             returned by the robot and bound entities.
@@ -128,6 +159,7 @@ class SimulationSegmentPolicyPort:
         *,
         settle_presets: Mapping[str, DynamicSettleMonitorCfg] | None = None,
         env_ids: torch.Tensor | None = None,
+        step_dt: float | None = None,
     ) -> None:
         if type(scene_binding) is not SimulationSceneBinding:
             raise TypeError("scene_binding must be exactly SimulationSceneBinding.")
@@ -173,9 +205,26 @@ class SimulationSegmentPolicyPort:
                 )
             normalized_presets[preset_id] = cfg.snapshot()
 
+        if step_dt is not None and (
+            isinstance(step_dt, bool)
+            or not isinstance(step_dt, (int, float))
+            or not math.isfinite(step_dt)
+            or step_dt <= 0
+        ):
+            raise ValueError("step_dt must be finite and positive when supplied.")
+        if step_dt is None and any(
+            isinstance(cfg, SimulationSettleMonitorCfg)
+            and cfg.measurement == "pose_delta"
+            for cfg in normalized_presets.values()
+        ):
+            raise ValueError(
+                "Pose-delta settling requires an explicit control step_dt."
+            )
+
         self._simulation = simulation
         self._robot = robot
         self._scene_binding = scene_binding
+        self._step_dt = step_dt
         self._env_ids = env_ids.clone()
         self._row_indices = torch.arange(
             qpos.shape[0],
@@ -245,6 +294,13 @@ class SimulationSegmentPolicyPort:
                 f"Canonical settle entity {entity_id!r} has no explicit native "
                 "dynamic binding."
             )
+        preset = self._settle_presets[policy.cfg.preset]
+        if (
+            isinstance(preset, SimulationSettleMonitorCfg)
+            and preset.measurement == "pose_delta"
+            and target.kind != "rigid_object"
+        ):
+            raise ValueError("Pose-delta settling requires a rigid-object target.")
         if target.kind == "rigid_object" and bool(
             getattr(target.native_entity, "is_non_dynamic", False)
         ):
@@ -283,6 +339,11 @@ class SimulationSegmentPolicyPort:
         preset = self._settle_presets[policy.cfg.preset]
         entity_id = policy.entity.entity_id
         target = self._settle_targets[entity_id]
+        explicit_measurement = isinstance(preset, SimulationSettleMonitorCfg)
+        use_pose_delta = explicit_measurement and preset.measurement == "pose_delta"
+        measurement_metadata = (
+            {"measurement_source": preset.measurement} if explicit_measurement else {}
+        )
 
         result_key = id(policy)
         self._post_policy_results.pop(result_key, None)
@@ -293,6 +354,7 @@ class SimulationSegmentPolicyPort:
                 "kind": policy.cfg.kind,
                 "entity_id": entity_id,
                 "preset": policy.cfg.preset,
+                **measurement_metadata,
                 "source_path": list(policy.source_path),
                 "status": "skipped",
                 "active_mask": active_mask.detach().cpu().tolist(),
@@ -303,10 +365,17 @@ class SimulationSegmentPolicyPort:
 
         active_rows = self._row_indices[active_mask]
         monitor = DynamicSettleMonitor(preset, self._env_ids[active_mask])
+        previous_pose: torch.Tensor | None = None
         elapsed_steps = 0
         while True:
+            if use_pose_delta:
+                sample, previous_pose = self._measure_pose_delta_settle_target(
+                    target, row_indices=active_rows, previous_pose=previous_pose
+                )
+            else:
+                sample = self._measure_settle_target(target, row_indices=active_rows)
             state = monitor.observe(
-                (self._measure_settle_target(target, row_indices=active_rows),),
+                (sample,),
                 elapsed_steps=elapsed_steps,
             )
             settled_mask = torch.zeros_like(active_mask)
@@ -315,6 +384,7 @@ class SimulationSegmentPolicyPort:
                 "kind": policy.cfg.kind,
                 "entity_id": entity_id,
                 "preset": policy.cfg.preset,
+                **measurement_metadata,
                 "source_path": list(policy.source_path),
                 "active_mask": active_mask.detach().cpu().tolist(),
                 "status": (
@@ -974,6 +1044,60 @@ class SimulationSegmentPolicyPort:
             angular_speed=angular_speed.to(device=device),
         )
 
+    def _measure_pose_delta_settle_target(
+        self,
+        target: _SimulationSettleTarget,
+        *,
+        row_indices: torch.Tensor,
+        previous_pose: torch.Tensor | None,
+    ) -> tuple[DynamicSettleSample, torch.Tensor]:
+        """Derive rigid-object speed from consecutive observed poses.
+
+        The first observation is unresolved because no temporal evidence exists.
+        Selection comes from the explicit preset declaration, never its name.
+        """
+        if target.kind != "rigid_object":
+            raise ValueError("Pose-delta settling requires a rigid-object target.")
+        pose = self._read_pose(
+            target.native_entity,
+            entity_id=target.canonical_id,
+        )
+        pose = pose.index_select(0, row_indices.to(pose.device))
+        row_count = row_indices.numel()
+        if previous_pose is None:
+            speed = torch.full(
+                (row_count, 1),
+                float("inf"),
+                dtype=pose.dtype,
+                device=pose.device,
+            )
+            return (
+                DynamicSettleSample(
+                    entity_id=target.canonical_id,
+                    linear_speed=speed.to(device=self._env_ids.device),
+                    angular_speed=speed.to(device=self._env_ids.device),
+                ),
+                pose,
+            )
+        if previous_pose.shape != pose.shape or previous_pose.device != pose.device:
+            raise ValueError(
+                "Consecutive rigid-object poses must have equal shape and device."
+            )
+
+        assert self._step_dt is not None
+        displacement, rotation = rigid_pose_displacement(pose, previous_pose)
+        linear_speed = displacement / self._step_dt
+        angular_speed = rotation / self._step_dt
+        device = self._env_ids.device
+        return (
+            DynamicSettleSample(
+                entity_id=target.canonical_id,
+                linear_speed=linear_speed.unsqueeze(-1).to(device=device),
+                angular_speed=angular_speed.unsqueeze(-1).to(device=device),
+            ),
+            pose,
+        )
+
     @staticmethod
     def _articulation_joint_index(
         articulation: Any,
@@ -1056,4 +1180,4 @@ class SimulationSegmentPolicyPort:
         return pose.clone()
 
 
-__all__: list[str] = []
+__all__ = ["SimulationSettleMonitorCfg"]
