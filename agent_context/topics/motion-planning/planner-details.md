@@ -69,6 +69,12 @@ URDF, mapped by joint name, before planner fallbacks. Valid runtime values,
 including zero, remain authoritative. The asset lookup is cached by path and
 file revision; mimic projection applies after fallback.
 
+`motion/limits.py` exposes complete positive request parsing and cap intersection
+without a planner dependency. It preserves requested/effective/resolved vectors
+in controlled order; acceleration is a planning budget unless reliable caps are
+explicitly supplied. Keep this adapter separate from the legacy signed/frozen
+constraint resolver. Policy consumers freeze their own normalization references.
+
 A finite backend value does not prove that a speed was authored in the asset:
 DexSim's legacy URDF reader substitutes a positive default when the field is
 missing. Preserve backend import semantics instead of guessing provenance from

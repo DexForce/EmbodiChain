@@ -50,3 +50,38 @@ validation, and dataset persistence belong to explicit host integrations.
    embodichain.lab.sim.motion.planners
    embodichain.lab.sim.motion.workspace
    embodichain.lab.sim.motion.expansion
+
+Request-level joint limits
+--------------------------
+
+``motion.limits`` validates complete positive velocity/acceleration requests in
+controlled-joint order. Scalars expand to the controlled width; vectors must
+match it exactly. The resolver intersects requested speed with effective robot
+caps, including mimic restrictions and the most restrictive selected scene row.
+Acceleration is a planning budget unless reliable hardware caps are explicitly
+supplied. This positive-limit contract rejects frozen joints, signed bounds and
+heterogeneous B-by-J requests; legacy planner constraint APIs are unchanged.
+
+``ResolvedMotionLimits`` retains requested, robot-effective and resolved values.
+Its ``constraints`` property supplies those same effective tensors to a retimer
+and validator; metadata records unknown caps without implying calibration. A
+model owns its fixed normalization references and must serialize them instead
+of changing scales when a request changes. This adapter has no policy/model
+dependency and does not change the retiming solver.
+
+.. currentmodule:: embodichain.lab.sim.motion.limits
+
+.. autosummary::
+
+   ResolvedMotionLimits
+   resolve_motion_limits
+   parse_motion_limits
+
+.. autoclass:: ResolvedMotionLimits
+   :members: constraints, metadata
+   :exclude-members: __new__
+   :no-autosummary:
+
+.. autofunction:: resolve_motion_limits
+
+.. autofunction:: parse_motion_limits
