@@ -21,6 +21,32 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.compute.kinematics.ik_path
+--------------------------------------
+
+Bounded fixed-time branch search for one Cartesian path. Solver callbacks own
+kinematics; this numeric routine preserves serial/batched seed order and accepts
+no simulation objects. Failure means the bounded search did not produce a path.
+
+.. currentmodule:: embodichain.compute.kinematics.ik_path
+
+.. autosummary::
+
+   resolve_seeded_ik_path
+
+embodichain.compute.trajectory.limits
+-------------------------------------
+
+Per-environment sampled joint-speed checks with explicit arrival intervals.
+The result checks finite positions and declared speeds; it does not establish
+continuous collision freedom or acceleration compliance.
+
+.. currentmodule:: embodichain.compute.trajectory.limits
+
+.. autosummary::
+
+   joint_velocity_validity
+
 embodichain.data
 ----------------
 
@@ -704,6 +730,52 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.sim.motion.ik
+-----------------------------
+
+Stateful adapters connect the numeric branch search to a MotionGenerator and
+Robot. Cartesian target sampling preserves every requested waypoint within an
+explicit sample budget. Continuous recovery is restricted to one environment
+and restores the caller's RNG state without changing requested timing.
+
+.. currentmodule:: embodichain.lab.sim.motion.ik
+
+.. autosummary::
+
+   resolve_continuous_ik_path
+   sample_cartesian_targets
+
+embodichain.lab.sim.motion.limits
+---------------------------------
+
+Strictly intersect runtime speed limits with the assembled URDF's named joint
+caps. Missing or nonpositive authored limits are rejected rather than replaced
+with an inferred default.
+
+.. currentmodule:: embodichain.lab.sim.motion.limits
+
+.. autosummary::
+
+   authored_joint_velocity_limits
+
+embodichain.lab.sim.motion.search
+---------------------------------
+
+Explicit call-local search ledgers and cooperative wall deadlines. Nested
+scopes reuse the outer ledger, timings may overlap, and native work is not
+preempted. Hosts choose budgets; no deadline is enabled by default.
+
+.. currentmodule:: embodichain.lab.sim.motion.search
+
+.. autosummary::
+
+   PlanningBudgetExceeded
+   SearchCost
+   current_search_cost
+   search_cost_scope
+   record_search
+   measure_search
 
 embodichain.lab.sim.scene.expansion.layout
 ------------------------------------------
@@ -1730,6 +1802,7 @@ embodichain.lab.sim.motion.planners.utils
    MoveType
    PlanState
    PlanResult
+   RejectedMotionCandidate
    normalize_success_mask
    calculate_point_allocations
    interpolate_xpos

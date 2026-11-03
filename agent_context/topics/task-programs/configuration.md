@@ -124,6 +124,12 @@ the closed-field decoder. Omitting `velocity_limit` preserves the Robot's
 ordered per-joint speed caps; an explicit scalar request is intersected with
 those caps rather than replacing them.
 
+Configured motion also accepts explicit `interpolation_mode` and `ik_seed_mode`.
+`fixed_grid` requires `acceleration_limit: null` and no scalar speed override;
+omission retains the existing adaptive policy and acceleration default.
+`sequential` selects preceding-valid-posture IK seeds. These non-default modes
+require `strategy: ik_interp`; see the [motion boundary](../motion-planning/motion-planning.md).
+
 The configured `pour` lowerer's optional `target` binds a receiving object,
 source/receiver mouth frames and usable opening radii. It lowers to a
 `PourTarget` with a late-bound receiving pose; the Atomic Skill computes the

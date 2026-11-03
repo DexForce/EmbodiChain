@@ -21,7 +21,7 @@ from embodichain.lab.sim.motion._budget import _planning_call
 import math
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from dataclasses import MISSING
+from dataclasses import MISSING, field
 from typing import Literal
 
 import matplotlib.pyplot as plt
@@ -55,6 +55,7 @@ from embodichain.compute.trajectory.interpolation import (
     _minimum_jerk_progress,
     interpolate_minimum_jerk,
 )
+from embodichain.compute.trajectory.limits import joint_velocity_validity
 from embodichain.utils import logger, configclass
 from embodichain.utils.math import (
     axis_angle_from_quat,
@@ -63,9 +64,11 @@ from embodichain.utils.math import (
     quat_from_matrix,
 )
 from .planners._joint_limits import _joint_velocity_limits, _plan_joint_ids
+from .limits import authored_joint_velocity_limits
 from .planners.utils import (
     MoveType,
     PlanResult,
+    RejectedMotionCandidate,
     PlanState,
     TrajectorySampleMethod,
     calculate_point_allocations,
@@ -170,8 +173,40 @@ class MotionGenOptions:
     interpolate_angle_step: float = np.pi / 90
     """Orientation step in radians for Cartesian pre-interpolation."""
 
+    interpolation_mode: Literal["adaptive", "fixed_grid"] = field(
+        default="adaptive", kw_only=True
+    )
+    """Keep adaptive timing, or preserve the requested sample count and interval.
+
+    ``fixed_grid`` rejects overspeed rows without retiming. It uses the stricter
+    intersection of runtime and authored URDF speed limits and accepts no scalar
+    velocity/acceleration override. Neither mode certifies acceleration unless
+    that budget is explicitly supplied to adaptive interpolation.
+    """
+
+    ik_seed_mode: Literal["batched", "sequential"] = field(
+        default="batched", kw_only=True
+    )
+    """Use the current batched solver, or seed each pose from its predecessor."""
+
     def __post_init__(self) -> None:
         """Validate backend-neutral motion generation options."""
+        if self.interpolation_mode not in {"adaptive", "fixed_grid"}:
+            raise ValueError("interpolation_mode must be adaptive or fixed_grid.")
+        if self.ik_seed_mode not in {"batched", "sequential"}:
+            raise ValueError("ik_seed_mode must be batched or sequential.")
+        if self.strategy != "ik_interp" and (
+            self.interpolation_mode != "adaptive" or self.ik_seed_mode != "batched"
+        ):
+            raise ValueError(
+                "Explicit interpolation modes require strategy='ik_interp'."
+            )
+        if self.interpolation_mode == "fixed_grid" and (
+            self.velocity_limit is not None or self.acceleration_limit is not None
+        ):
+            raise ValueError(
+                "fixed_grid requires velocity_limit=None and acceleration_limit=None."
+            )
         if self.preserve_cartesian_samples and self.strategy != "ik_interp":
             raise ValueError(
                 "preserve_cartesian_samples requires strategy='ik_interp'; "
@@ -661,6 +696,23 @@ class MotionGenerator:
             raw_result = self._generate_ik_interpolation(target_states, options)
         else:
             raw_result = self._generate_with_planner(target_states, options)
+        if (
+            options.interpolation_mode == "fixed_grid"
+            and raw_result.positions is not None
+        ):
+            limits = authored_joint_velocity_limits(
+                self.robot, options.control_part
+            ).to(raw_result.positions)
+            success = torch.as_tensor(
+                raw_result.success, device=raw_result.positions.device, dtype=torch.bool
+            )
+            valid = joint_velocity_validity(raw_result.positions, raw_result.dt, limits)
+            rejected = success & ~valid
+            if rejected.any():
+                raw_result.rejected_candidate = RejectedMotionCandidate(
+                    raw_result.positions, raw_result.dt, rejected
+                )
+            raw_result.success = success & valid
         return self._normalize_plan_result(raw_result, target_states, options)
 
     @property
@@ -1022,6 +1074,65 @@ class MotionGenerator:
         )
         return success, positions
 
+    def _solve_waypoints_for_options(
+        self,
+        poses: torch.Tensor,
+        start_qpos: torch.Tensor,
+        options: MotionGenOptions,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert options.control_part is not None
+        if options.ik_seed_mode == "sequential":
+            return self._solve_seeded_cartesian_waypoints(
+                poses, start_qpos, options.control_part
+            )
+        return self._solve_cartesian_waypoints(poses, start_qpos, options.control_part)
+
+    def _solve_seeded_cartesian_waypoints(
+        self,
+        poses: torch.Tensor,
+        start_qpos: torch.Tensor,
+        control_part: str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Solve a fixed-time path with the preceding valid posture as seed.
+
+        This bounded-memory alternative preserves the random stream and branch
+        continuity of sequential point queries. It does not perform retiming.
+        """
+        seed = start_qpos.to(self._runtime_device())
+        batch, dof = seed.shape
+        if (
+            poses.ndim != 4
+            or poses.shape[0] != batch
+            or poses.shape[2:] != (4, 4)
+            or poses.shape[1] == 0
+        ):
+            raise ValueError("Cartesian waypoints must have shape (B, N, 4, 4), N > 0.")
+        success = torch.ones(batch, dtype=torch.bool, device=seed.device)
+        points = []
+        for index in range(poses.shape[1]):
+            valid, qpos = self.robot.compute_ik(
+                pose=poses[:, index].to(seed.device),
+                name=control_part,
+                joint_seed=seed,
+            )
+            valid = normalize_success_mask(
+                valid,
+                num_envs=batch,
+                device=seed.device,
+                name=f"IK success for target state {index}",
+            )
+            qpos = torch.as_tensor(qpos, dtype=seed.dtype, device=seed.device)
+            if qpos.shape != (batch, dof):
+                raise ValueError(f"IK qpos must have shape ({batch}, {dof}).")
+            valid = valid & torch.isfinite(qpos).all(dim=1)
+            seed = torch.where(valid[:, None], qpos, seed)
+            success &= valid
+            points.append(seed)
+        positions = torch.stack(points, dim=1)
+        return success, torch.where(
+            success[:, None, None], positions, start_qpos.to(seed)[:, None]
+        )
+
     def _compute_cartesian_ik_batch(
         self,
         poses: torch.Tensor,
@@ -1125,8 +1236,8 @@ class MotionGenerator:
             if pose.dim() == 2:
                 pose = pose.unsqueeze(0)
             poses.append(pose)
-        success, solved_waypoints = self._solve_cartesian_waypoints(
-            torch.stack(poses, dim=1), start_qpos, options.control_part
+        success, solved_waypoints = self._solve_waypoints_for_options(
+            torch.stack(poses, dim=1), start_qpos, options
         )
         keyframes = torch.cat([start_qpos.unsqueeze(1), solved_waypoints], dim=1)
         if options.preserve_cartesian_samples:
@@ -1137,8 +1248,12 @@ class MotionGenerator:
                     f"{len(target_states)} targets for sample_count "
                     f"{options.sample_count}."
                 )
-            preserve_fixed_grid = False
-            if options.velocity_limit is None and options.acceleration_limit is None:
+            preserve_fixed_grid = options.interpolation_mode == "fixed_grid"
+            if (
+                not preserve_fixed_grid
+                and options.velocity_limit is None
+                and options.acceleration_limit is None
+            ):
                 velocity_limits = self._resolve_velocity_limits(
                     control_part=options.control_part,
                     batch_size=batch_size,
@@ -1241,10 +1356,10 @@ class MotionGenerator:
                 options.control_part,
                 path_sampler=options.cartesian_path_sampler,
             )
-            iteration_success, solved = self._solve_cartesian_waypoints(
+            iteration_success, solved = self._solve_waypoints_for_options(
                 sampled_poses[:, 1:],
                 solved_keyframes[:, 0],
-                options.control_part,
+                options,
             )
             success &= iteration_success
             positions = torch.cat([solved_keyframes[:, :1], solved], dim=1)
@@ -1435,6 +1550,12 @@ class MotionGenerator:
         """Interpolate IK keyframes under Robot-capped per-joint speeds."""
         assert options.sample_count is not None
         assert options.interpolation_dt is not None
+        if options.interpolation_mode == "fixed_grid":
+            return interpolate_with_distance(
+                trajectory=keyframes,
+                interp_num=options.sample_count,
+                device=keyframes.device,
+            )
         velocity_limits = self._resolve_velocity_limits(
             control_part=options.control_part,
             batch_size=keyframes.shape[0],
@@ -1660,6 +1781,7 @@ class MotionGenerator:
             policy_batching=result.policy_batching,
             waypoint_indices=waypoint_indices,
             policy_waypoint_indices=result.policy_waypoint_indices,
+            rejected_candidate=result.rejected_candidate,
         )
 
     def _runtime_device(self) -> torch.device:
