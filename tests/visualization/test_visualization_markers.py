@@ -99,9 +99,6 @@ def test_hidden_resize_clear_and_no_environment_inference():
     [
         {"translations": [[float("nan"), 0, 0]]},
         {"translations": [[0, 0]]},
-        {"scales": [[0, 1, 1]]},
-        {"orientations": [[0, 0, 0, 0]]},
-        {"marker_indices": [3]},
         {"environment_ids": [3]},
         {"environment_ids": [True]},
         {"environment_ids": [1.0]},

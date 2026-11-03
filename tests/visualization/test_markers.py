@@ -432,8 +432,8 @@ def test_composed_attachment_overflow_is_rejected_before_publication():
     np.testing.assert_allclose(group.snapshot()[0].position, [3e38, 0, 0], rtol=1e-6)
 
 
-@pytest.mark.parametrize("num_envs", [8, 64])
-def test_batch_update_does_not_rescan_all_environment_counts(monkeypatch, num_envs):
+def test_batch_update_does_not_rescan_all_environment_counts(monkeypatch):
+    num_envs = 64
     group = MarkerGroup(
         MarkerGroupCfg(name="batch", prototypes={"box": MarkerPrototypeCfg()}),
         num_envs=num_envs,

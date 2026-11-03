@@ -111,6 +111,7 @@ def test_world_poses_are_not_offset_twice(robot_path):
 def test_appearance_toggle_preserves_source_and_geometry(robot_path):
     ghost, group = _ghost(robot_path)
     ghost.visualize_qpos([[0], [0]])
+    assert all(not snapshot.unlit for snapshot in group.snapshot())
     original = tuple(ghost._visuals[0].prototype.color)
     ghost.set_appearance(
         RobotMarkersAppearanceCfg(mode="override", color=(0, 1, 0), opacity=0)
@@ -119,24 +120,17 @@ def test_appearance_toggle_preserves_source_and_geometry(robot_path):
     ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", opacity=1))
     np.testing.assert_allclose(group.snapshot()[0].color, original)
     assert ghost._visuals[0].prototype.color == original
+    assert all(not snapshot.unlit for snapshot in group.snapshot())
+    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", unlit=True))
+    assert all(snapshot.unlit for snapshot in group.snapshot())
+    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", opacity=0.2))
+    assert all(not snapshot.unlit for snapshot in group.snapshot())
     ghost.set_visibility(False, env_ids=[1])
     assert all(not item.visible for item in group.snapshot()[3:])
     assert all(item.visible for item in group.snapshot()[:3])
     ghost.remove()
     ghost.remove()
     assert group.snapshot() == ()
-
-
-def test_ghost_lighting_survives_color_and_opacity_changes(robot_path):
-    ghost, group = _ghost(robot_path)
-    ghost.visualize_qpos([[0], [0]])
-    assert all(not snapshot.unlit for snapshot in group.snapshot())
-    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="override", opacity=1))
-    assert all(not snapshot.unlit for snapshot in group.snapshot())
-    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", unlit=True))
-    assert all(snapshot.unlit for snapshot in group.snapshot())
-    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", opacity=0.2))
-    assert all(not snapshot.unlit for snapshot in group.snapshot())
 
 
 def test_reference_joint_fk_uses_named_link_order(robot_path):

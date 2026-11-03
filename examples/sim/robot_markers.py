@@ -84,8 +84,7 @@ def _run(sim: SimulationManager, args: argparse.Namespace) -> dict:
     center[2] += 0.8
     distance = 2.5 + float(np.linalg.norm(np.ptp(offsets[:, :2], axis=0))) * 1.5
     eye = center + np.array([0.6, -0.8, 0.28]) * distance
-    if not args.headless:
-        sim.open_window()
+    if not args.headless and sim.open_window():
         sim.get_world().get_windows().set_look_at(
             eye, center, np.array([0.0, 0.0, 1.0])
         )

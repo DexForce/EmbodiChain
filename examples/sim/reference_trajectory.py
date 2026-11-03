@@ -237,9 +237,8 @@ def main() -> None:
         )
         camera.open_camera()
         camera.set_visual_overlay_enabled(True)
-        if args.live:
-            sim.open_window()
-        else:
+        native_window = args.live and sim.open_window()
+        if not args.live:
             encoder = subprocess.Popen(
                 [
                     "ffmpeg",
@@ -293,27 +292,32 @@ def main() -> None:
                     objects[k].set_local_pose(torch.as_tensor(pose[None]))
             if "targets" in data:
                 targets.visualize(np.asarray(data["targets"][index]) + offsets)
-            if "command" in data:
+            vector_fields = [
+                (prototype, field)
+                for prototype, field in enumerate(("command", "velocity"))
+                if field in data
+            ]
+            if vector_fields:
                 root = poses[index, 0, 0]
                 vectors = np.stack(
-                    [data["command"][index], data["velocity"][index]]
+                    [data[field][index] for _, field in vector_fields]
                 ).copy()
                 vectors[:, 2] = 0
                 vectors = Rotation.from_quat(root[3:]).apply(vectors)
                 angle = np.arctan2(vectors[:, 1], vectors[:, 0])
-                origins = np.tile(root[:3], (2, 1))
-                origins[:, 2] += [0.2, 0.3]
-                scales = np.tile([1.0, 0.35, 0.35], (2, 1))
+                origins = np.tile(root[:3] + offsets[0], (len(vector_fields), 1))
+                origins[:, 2] += [0.2 + 0.1 * i for i, _ in vector_fields]
+                scales = np.tile([1.0, 0.35, 0.35], (len(vector_fields), 1))
                 scales[:, 0] = np.maximum(0.02, np.linalg.norm(vectors, axis=-1))
                 arrows.visualize(
                     origins,
                     Rotation.from_euler("z", angle[:, None]).as_quat(),
                     scales,
-                    [0, 1],
+                    [i for i, _ in vector_fields],
                 )
             eye, center = camera_eyes[index], camera_targets[index]
             camera.look_at(eye.tolist(), center.tolist(), [0, 0, 1])
-            if args.live:
+            if native_window:
                 window = sim.get_world().get_windows()
                 if frame == 0:
                     window.set_look_at(eye.tolist(), center.tolist(), [0, 0, 1])

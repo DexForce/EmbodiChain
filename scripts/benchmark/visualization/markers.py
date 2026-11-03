@@ -18,7 +18,8 @@
 
 Run: python -m scripts.benchmark.visualization.markers --repeats 5
 This does not measure native GPU rendering, Viser encoding/network transport,
-or GPU instancing. Array bytes describe decoded snapshot payload only.
+or GPU instancing. Array bytes count distinct NumPy snapshot arrays, including
+shared geometry once. Python objects and native/GPU allocations are excluded.
 """
 
 from __future__ import annotations
@@ -125,19 +126,18 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
                     )
                 if not valid:
                     raise AssertionError(f"Incorrect marker snapshots for {name}")
-                size = sum(
-                    sum(
-                        value.nbytes
-                        for value in (
-                            item.vertices,
-                            item.faces,
-                            item.position,
-                            item.wxyz,
-                            item.scale,
-                        )
-                    )
+                arrays = {
+                    id(value): value
                     for item in snapshots
-                )
+                    for value in (
+                        item.vertices,
+                        item.faces,
+                        item.position,
+                        item.wxyz,
+                        item.scale,
+                    )
+                }
+                size = sum(value.nbytes for value in arrays.values())
                 case = dict(envs=environments, markers_per_env=markers, impl=name)
                 performance.append({**case, **measurement})
                 metrics.append(
@@ -183,7 +183,8 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
                 "No native rendering or Viser client is active. GPU columns cover Torch "
                 "allocations only (this workload allocates no GPU tensors), not native renderer VRAM. "
                 "RSS deltas are allocator-sensitive, not peak live allocation. "
-                "Snapshot array bytes omit metadata, encoding and wire overhead. "
+                "Snapshot array bytes count distinct NumPy arrays, including shared "
+                "geometry once; metadata, encoding and wire overhead are excluded. "
                 "The three operations do different work; leaderboard ranks are tied by "
                 "correctness and are not a speed ranking of interchangeable algorithms.",
                 "## Time & Memory",

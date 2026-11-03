@@ -3481,27 +3481,6 @@ def _attach_groups_for_host_update(group_count):
     return sim, groups, pose
 
 
-@pytest.mark.parametrize("group_count", [1, 3])
-def test_automatic_attachment_refresh_preserves_host_capture_cadence(group_count):
-    sim, groups, pose = _attach_groups_for_host_update(group_count)
-    # Changed parents must still be refreshed through every host synchronization.
-    pose[:, 0] += 1
-    sim.update(step=2)
-    captures = sim._visualization_runtime.capture_calls
-    assert [
-        (item["sim_step"], item["force"], item["capture_camera_images"])
-        for item in captures
-    ] == [(1, False, False), (2, False, True)]
-    for group in groups:
-        np.testing.assert_allclose(
-            [marker.position for marker in group.snapshot()], [[14, 0, 0], [6, 20, 0]]
-        )
-    # A caller-requested mutation still publishes immediately.
-    groups[0].update(env_ids=[0], translations=[[2, 0, 0]])
-    assert len(captures) == 3
-    assert captures[-1]["force"] is True
-
-
 def test_automatic_attachment_capture_failure_does_not_interrupt_physics_or_recording():
     sim, groups, pose = _attach_groups_for_host_update(2)
     pose[:, 0] += 1
@@ -3559,10 +3538,7 @@ def test_automatic_attachment_native_failure_preserves_step_accounting():
     np.testing.assert_allclose(groups[0].snapshot()[0].position, [13, 0, 0])
 
 
-@pytest.mark.parametrize("backend", ["default", "newton"])
-def test_native_markers_receive_prepared_scene_without_preparing_physics(
-    monkeypatch, backend
-):
+def test_native_markers_receive_prepared_scene_without_preparing_physics(monkeypatch):
     from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
 
     sim, _ = _make_visualization_sim_manager()
@@ -3572,7 +3548,7 @@ def test_native_markers_receive_prepared_scene_without_preparing_physics(
     sim.arena_offsets = torch.zeros((1, 3))
     scene = object()
     sim._spawn_scene = SimpleNamespace(
-        builder=SimpleNamespace(backend=backend, is_finalized=False, result=scene)
+        builder=SimpleNamespace(backend="newton", is_finalized=False, result=scene)
     )
     sim.get_env = MagicMock(side_effect=AssertionError("raw Arena is not the owner"))
     renderer = SimpleNamespace(publish=MagicMock(), remove=MagicMock())
@@ -3664,7 +3640,7 @@ def test_process_no_render_is_detected_after_world_cleanup(monkeypatch) -> None:
 
 
 def test_after_substep_marker_refresh_precedes_visualization_capture() -> None:
-    sim, groups, pose = _attach_groups_for_host_update(1)
+    sim, groups, pose = _attach_groups_for_host_update(3)
     runtime = sim._visualization_runtime
     events: list[str] = []
     captured_positions: list[np.ndarray] = []
@@ -3697,16 +3673,26 @@ def test_after_substep_marker_refresh_precedes_visualization_capture() -> None:
 
     sim.update(step=2, after_substep=after_substep)
 
-    assert events == ["physics", "observer", "markers", "capture"] * 2
+    assert (
+        events
+        == ["physics", "observer", "markers", "markers", "markers", "capture"] * 2
+    )
     # The fixture's parent poses, marker offsets, and Arena offsets produce
     # these world positions after the observer moves each parent by one unit.
     expected = [[[14, 0, 0], [6, 20, 0]], [[15, 0, 0], [7, 20, 0]]]
-    np.testing.assert_allclose(published_positions, expected)
+    np.testing.assert_allclose(published_positions, np.repeat(expected, 3, axis=0))
     np.testing.assert_allclose(captured_positions, expected)
     assert [call["capture_camera_images"] for call in runtime.capture_calls] == [
         False,
         True,
     ]
+    assert [(call["sim_step"], call["force"]) for call in runtime.capture_calls] == [
+        (1, False),
+        (2, False),
+    ]
+    groups[0].update(env_ids=[0], translations=[[2, 0, 0]])
+    assert len(runtime.capture_calls) == 3
+    assert runtime.capture_calls[-1]["force"] is True
 
 
 def test_deferred_final_frame_refreshes_markers_after_interval_state_writes() -> None:

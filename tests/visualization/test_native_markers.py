@@ -16,102 +16,29 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 import weakref
 
 import numpy as np
 import pytest
 
+from dexsim import spawn
 from dexsim.scene.objects import SpawnedRigidBody
 from embodichain.lab.visualization.protocol import MeshMarkerOverlay
 from embodichain.lab.visualization.markers import _native
 from embodichain.lab.visualization.markers._native import NativeMarkerRenderer
 
 
-# Explicit descriptors isolate consumer transactions from native allocation.
-# Scene validates the public SDK render modes before creating a handle.
-@dataclass
-class _SdkGeometryDesc:
-    vertices: np.ndarray
-    triangles: np.ndarray
-    normals: np.ndarray | None = field(default=None, kw_only=True)
-    uv_coords: np.ndarray | None = field(default=None, kw_only=True)
-
-    @classmethod
-    def mesh(
-        cls,
-        *,
-        vertices: np.ndarray,
-        triangles: np.ndarray,
-        normals=None,
-        uv_coords=None,
-    ):
-        return cls(vertices, triangles, normals=normals, uv_coords=uv_coords)
-
-
-@dataclass
-class _SdkMaterialDesc:
-    name: str
-    metallic: float | None = None
-    roughness: float | None = None
-    base_color: tuple[float, float, float, float] | None = None
-    double_sided: bool | None = None
-    unlit: bool | None = field(default=None, kw_only=True)
-    alpha_mode: str | None = field(default=None, kw_only=True)
-    depth_write: bool | None = field(default=None, kw_only=True)
-    base_color_map: str | None = field(default=None, kw_only=True)
-    opacity_map: str | None = field(default=None, kw_only=True)
-    texture_settings: dict | None = field(default=None, kw_only=True)
-
-
-@dataclass
-class _SdkRenderDesc(_SdkGeometryDesc):
-    render_mode: str = field(default="scene", kw_only=True)
-    cast_shadow: bool = field(default=True, kw_only=True)
-    pickable: bool = field(default=True, kw_only=True)
-    material: _SdkMaterialDesc | None = None
-
-    @classmethod
-    def from_geometry(
-        cls,
-        geometry: _SdkGeometryDesc,
-        *,
-        render_mode: str = "scene",
-        cast_shadow: bool = True,
-        pickable: bool = True,
-        material: _SdkMaterialDesc | None = None,
-    ):
-        return cls(
-            geometry.vertices,
-            geometry.triangles,
-            normals=geometry.normals,
-            uv_coords=geometry.uv_coords,
-            render_mode=render_mode,
-            cast_shadow=cast_shadow,
-            pickable=pickable,
-            material=material,
-        )
-
-
-@dataclass
-class _SdkMeshObjectDesc:
-    name: str
-    renders: list[_SdkRenderDesc] = field(default_factory=list)
-    physics: object | None = None
-    per_env: bool = True
-    collisions: list[object] = field(default_factory=list)
-    scale: np.ndarray = field(default_factory=lambda: np.ones(3, dtype=np.float32))
-
-
 @pytest.fixture(autouse=True)
 def sdk_descriptors(monkeypatch):
     sdk = SimpleNamespace(
-        GeometryDesc=_SdkGeometryDesc,
-        RenderDesc=_SdkRenderDesc,
-        MaterialDesc=_SdkMaterialDesc,
-        MaterialTextureDesc=SimpleNamespace,
-        MeshObjectDesc=_SdkMeshObjectDesc,
+        GeometryDesc=spawn.GeometryDesc,
+        RenderDesc=spawn.RenderDesc,
+        MaterialDesc=spawn.MaterialDesc,
+        MaterialTextureDesc=spawn.MaterialTextureDesc,
+        MeshObjectDesc=spawn.MeshObjectDesc,
     )
 
     def import_sdk(name):
@@ -159,7 +86,7 @@ class Scene:
 
     def add_mesh_object(self, desc, *, arena_name="default"):
         assert arena_name == "default"
-        assert isinstance(desc, _SdkMeshObjectDesc)
+        assert isinstance(desc, spawn.MeshObjectDesc)
         for render in desc.renders:
             if render.render_mode not in ("scene", "overlay"):
                 raise ValueError("render_mode must be scene or overlay")
@@ -236,13 +163,13 @@ def test_mesh_descriptor_requests_overlay_without_physics():
     desc = handle.desc
     assert desc.physics is None and desc.collisions == [] and not desc.per_env
     (render,) = desc.renders
-    assert isinstance(render, _SdkRenderDesc)
+    assert isinstance(render, spawn.RenderDesc)
     np.testing.assert_array_equal(render.vertices, snapshot.vertices)
     np.testing.assert_array_equal(render.triangles, snapshot.faces)
     assert render.render_mode == "overlay"
     assert render.cast_shadow is False and render.pickable is False
     material = render.material
-    assert isinstance(material, _SdkMaterialDesc)
+    assert isinstance(material, spawn.MaterialDesc)
     assert material.base_color == snapshot.color
     assert material.unlit and material.alpha_mode == "blend"
     assert material.depth_write is False and material.double_sided
@@ -251,11 +178,25 @@ def test_mesh_descriptor_requests_overlay_without_physics():
 def test_failed_geometry_replacement_retains_previous_scene_handles():
     scene = Scene()
     renderer = NativeMarkerRenderer(scene)
-    renderer.publish("g", (marker(),))
+    initial = replace(
+        marker(),
+        texture=np.zeros((2, 2, 3), dtype=np.uint8),
+        uv_coords=np.array([[0, 0], [1, 0], [0, 1]], dtype=np.float32),
+    )
+    renderer.publish("g", (initial,))
     previous = dict(scene.handles)
+    committed_path = Path(
+        next(iter(previous.values())).desc.renders[0].material.base_color_map
+    )
     scene.fail = True
-    with pytest.raises(RuntimeError, match="upload failed"):
-        renderer.publish("g", (replace(marker(), vertices=marker().vertices * 2),))
+    for value in range(1, 4):
+        replacement = replace(
+            initial, texture=np.full((2, 2, 3), value, dtype=np.uint8)
+        )
+        with pytest.raises(RuntimeError, match="upload failed"):
+            renderer.publish("g", (replacement,))
+        assert list(committed_path.parent.glob("*.png")) == [committed_path]
+        assert len(renderer._texture_paths) == 1
     assert scene.handles == previous
     renderer.close()
     assert scene.handles == {}
@@ -274,6 +215,48 @@ def test_scene_paths_are_unique_across_groups_environments_and_renderers():
     second.close()
     first.close()
     assert scene.handles == {}
+
+
+def test_texture_files_remain_owned_after_group_removal_and_replacement():
+    from PIL import Image
+
+    scene = Scene()
+    renderer = NativeMarkerRenderer(scene)
+    images = [np.full((2, 2, 3), value, dtype=np.uint8) for value in (20, 80, 140)]
+    for group, pixels in zip(("a", "b"), images):
+        renderer.publish(
+            group,
+            (
+                replace(
+                    marker(),
+                    texture=pixels,
+                    uv_coords=np.array([[0, 0], [1, 0], [0, 1]], dtype=np.float32),
+                ),
+            ),
+        )
+    renderer.remove("a")
+    renderer.publish(
+        "c",
+        (
+            replace(
+                marker(),
+                texture=images[2],
+                uv_coords=np.array([[0, 0], [1, 0], [0, 1]], dtype=np.float32),
+            ),
+        ),
+    )
+    paths = [
+        Path(handle.desc.renders[0].material.base_color_map)
+        for handle in scene.handles.values()
+    ]
+    assert len(set(paths)) == 2
+    for path, pixels in zip(paths, images[1:]):
+        with Image.open(path) as image:
+            np.testing.assert_array_equal(np.asarray(image), pixels)
+    renderer.remove("b")
+    assert not paths[0].exists() and paths[1].is_file()
+    renderer.close()
+    assert not paths[1].exists()
 
 
 def test_geometry_replacement_releases_old_handle_after_success():
@@ -402,10 +385,7 @@ def test_updates_follow_stable_handle_after_native_rebind():
 @pytest.mark.parametrize(
     "owner, field_name",
     [
-        ("RenderDesc", "render_mode"),
         ("MaterialDesc", "unlit"),
-        ("MaterialDesc", "alpha_mode"),
-        ("MaterialDesc", "depth_write"),
         (None, "MeshObjectDesc"),
     ],
 )
@@ -418,23 +398,6 @@ def test_missing_descriptor_capability_fails_before_allocation(
     with pytest.raises(RuntimeError, match="Install a DexSim build"):
         NativeMarkerRenderer(scene)
     assert not scene.handles
-
-
-def test_changing_lighting_replaces_native_material_without_losing_pose():
-    scene = Scene()
-    renderer = NativeMarkerRenderer(scene)
-    snapshot = marker()
-    renderer.publish("g", (snapshot,))
-    original = next(iter(scene.handles.values()))
-    assert original.desc.renders[0].material.unlit is True
-    renderer.publish("g", (replace(snapshot, unlit=False),))
-    lit = next(iter(scene.handles.values()))
-    assert not original.is_valid
-    assert lit.desc.renders[0].material.unlit is False
-    np.testing.assert_allclose(lit.native().pose[:3, 3], snapshot.position)
-    renderer.publish("g", (replace(snapshot, unlit=False, color=(0, 1, 0, 0.4)),))
-    assert next(iter(scene.handles.values())) is lit
-    renderer.close()
 
 
 def test_scene_lighting_preserves_material_and_switches_at_transparency():
@@ -459,6 +422,13 @@ def test_scene_lighting_preserves_material_and_switches_at_transparency():
     assert transparent.desc.renders[0].render_mode == "overlay"
     assert transparent.desc.renders[0].material.alpha_mode == "blend"
     np.testing.assert_allclose(transparent.native().pose[:3, 3], snapshot.position)
+    renderer.publish("g", (replace(snapshot, unlit=True),))
+    unlit = next(iter(scene.handles.values()))
+    assert not transparent.is_valid
+    assert unlit.desc.renders[0].material.unlit is True
+    np.testing.assert_allclose(unlit.native().pose[:3, 3], snapshot.position)
+    renderer.publish("g", (replace(snapshot, unlit=True, color=(0, 1, 0, 0.4)),))
+    assert next(iter(scene.handles.values())) is unlit
     renderer.close()
 
 

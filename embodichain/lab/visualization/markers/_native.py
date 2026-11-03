@@ -141,10 +141,7 @@ class NativeMarkerRenderer:
 
             key = id(marker.texture)
             if key not in self._texture_paths:
-                path = str(
-                    Path(self._texture_directory.name)
-                    / f"{len(self._texture_paths)}.png"
-                )
+                path = str(Path(self._texture_directory.name) / f"{uuid4().hex}.png")
                 Image.fromarray(marker.texture).save(path)
                 self._texture_paths[key] = (marker.texture, path)
             texture_options["base_color_map"] = self._texture_paths[key][1]
@@ -317,10 +314,13 @@ class NativeMarkerRenderer:
             elif not pending:
                 self._batches.pop(name, None)
         except Exception:
-            for handle in created:
-                self._discard(handle)
-            for entry in touched:
-                self._apply(entry.handle, entry.snapshot)
+            try:
+                for handle in created:
+                    self._discard(handle)
+                for entry in touched:
+                    self._apply(entry.handle, entry.snapshot)
+            finally:
+                self._prune_textures()
             raise
         for key, entry in previous.items():
             if key not in pending or pending[key].handle is not entry.handle:
