@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "03c72f5d17fda5f3150a244430c60f0d929ed499",
+  "revision": "3110eef6547d35b4285a4e3f13f0b469e6965556",
   "source_ref": "HEAD",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
@@ -3297,6 +3297,35 @@
         }
       ],
       "details": "Start here when describing an embodied task declaratively. The configuration records the program structure and targets that the compiler validates before execution; the same language can be supplied through JSON, YAML, or Python."
+    },
+    {
+      "id": "task-spec",
+      "label": "TaskSpec",
+      "kind": "module",
+      "topic_ids": [
+        "task-spec"
+      ],
+      "summary": "Defines simulator-independent task requirements, milestones, semantic identity and evidence evaluation.",
+      "details": "TaskSpec describes required outcomes independently of an action sequence, robot or simulator. It validates normative declarations, caches them by semantic hash and evaluates supplied observations; runtime acquisition and execution belong to integrations.",
+      "boundaries": [
+        "TaskSpec owns normative task semantics and evaluation, not simulation state acquisition, motion planning or program execution."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_spec/spec.py",
+          "symbol": "TaskSpec",
+          "start_line": 335,
+          "end_line": 335,
+          "excerpt": "class TaskSpec:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/public_api",
+          "label": "TaskSpec protocol API",
+          "source_extension": ".rst"
+        }
+      ]
     },
     {
       "id": "tasks",
@@ -8291,7 +8320,8 @@
         "neural-dynamics",
         "supervised-learning",
         "nerd-showcase",
-        "robot-world-model"
+        "robot-world-model",
+        "task-spec"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -8557,7 +8587,8 @@
             "scene-export",
             "simready",
             "asset-parsers",
-            "gen-sim-sessions"
+            "gen-sim-sessions",
+            "task-spec"
           ]
         },
         {
@@ -9143,7 +9174,8 @@
         "workspace-analyzer",
         "scene-services",
         "compute",
-        "scene-expansion"
+        "scene-expansion",
+        "task-spec"
       ],
       "edge_ids": [
         "simulation-constructs-robot",
@@ -9245,6 +9277,13 @@
             "scene-services",
             "compute",
             "scene-expansion"
+          ]
+        },
+        {
+          "id": "task-specification",
+          "label": "Normative task specification",
+          "node_ids": [
+            "task-spec"
           ]
         }
       ]
