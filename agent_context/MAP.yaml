@@ -419,7 +419,7 @@ topics:
 - id: task-programs
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
-  keywords: [TaskProgramCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
+  keywords: [TaskProgramCfg, SimulationSettleMonitorCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
     joint_command_mode]
