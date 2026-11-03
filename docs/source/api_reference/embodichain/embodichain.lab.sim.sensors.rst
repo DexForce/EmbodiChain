@@ -118,7 +118,11 @@ Creating a contact history automatically enables physics-substep sampling.
 CUDA history reduction consumes compact contact rows and device counts through
 sparse Warp kernels. The ``dropped_contacts`` diagnostic sums query loss and
 scatter overflow across the current control interval; standalone updates
-without a history report the most recent sample.
+without histories or sampling observers report the most recent sample.
+``latest_sample_dropped_contacts`` exposes query and scatter loss from the latest
+fetch even when interval counters are retained. The physical-evidence sampler
+rejects either kind of loss and uses their maximum to avoid counting overlapping
+diagnostics twice. Reading these counters may synchronize device work.
 
 Sampling observers
 ------------------

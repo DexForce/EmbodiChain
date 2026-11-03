@@ -313,8 +313,16 @@ class ContactEvidenceSampler:
             selected = ids.to(mask.device)
             active = mask.index_select(0, selected).to(ids.device)
             dropped = int(self.sensor.dropped_contacts)
-            if dropped < 0:
+            # ContactSensor keeps interval counts stable during standalone
+            # refreshes. Sources without a separate latest-sample diagnostic
+            # continue to supply their existing loss count directly.
+            latest_dropped = int(
+                getattr(self.sensor, "latest_sample_dropped_contacts", dropped)
+            )
+            if dropped < 0 or latest_dropped < 0:
                 raise ValueError("Contact dropped count must be nonnegative.")
+            # These counts overlap; summing would double-count substep loss.
+            dropped = max(dropped, latest_dropped)
             if dropped:
                 errors.append("Contact query or scatter capacity was exceeded.")
             shared_error = "; ".join(dict.fromkeys(errors)) or None

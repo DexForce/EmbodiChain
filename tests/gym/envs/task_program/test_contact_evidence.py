@@ -470,6 +470,8 @@ def test_public_base_env_step_drives_actual_sensor_observer_port():
     sensor._sampling_observers = {}
     sensor._query_dropped_count = torch.zeros(1, dtype=torch.int32)
     sensor._scatter_dropped_count = torch.zeros(1, dtype=torch.int32)
+    sensor._sample_scatter_dropped_count = torch.zeros(1, dtype=torch.int32)
+    sensor._latest_contact_buffer = None
     sampled = []
     sensor._update_physics_contacts = lambda dt: sampled.append(dt)
     sampler = ContactEvidenceSampler(
@@ -791,6 +793,7 @@ def test_timeline_reset_matches_sensor_indices_without_double_generation(
     sensor._query_dropped_count = torch.zeros(1, dtype=torch.int32)
     sensor._scatter_dropped_count = torch.zeros(3, dtype=torch.int32)
     sensor._sample_scatter_dropped_count = torch.zeros(3, dtype=torch.int32)
+    sensor._latest_contact_buffer = None
     sensor._histories = {}
     sensor._sampling_observers = {}
     sensor.add_sampling_observer("timeline", timeline)

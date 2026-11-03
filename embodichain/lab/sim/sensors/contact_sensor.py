@@ -188,6 +188,7 @@ class ContactSensor(BaseSensor):
         self.device = device
         self.cfg = config
         self._query: ContactQuery | None = None
+        self._latest_contact_buffer: ContactBuffer | None = None
         self._metadata_actor_table: tuple[ContactActorInfo, ...] | None = None
         self._metadata_selected_ids: tuple[int, ...] | None = None
 
@@ -390,6 +391,9 @@ class ContactSensor(BaseSensor):
             buffer.device_counts[0] = buffer.count
             buffer.device_counts[1] = buffer.dropped_count
         self._sync_filter_actor_metadata()
+        # Each ContactQuery owns its output buffer, including device counts.
+        # Retain only its reference; reading latest loss performs no extra fetch.
+        self._latest_contact_buffer = buffer
         return buffer
 
     def _scatter_contacts(self, buffer: ContactBuffer) -> None:
@@ -435,6 +439,21 @@ class ContactSensor(BaseSensor):
         return int(
             (self._query_dropped_count.sum() + self._scatter_dropped_count.sum()).item()
         )
+
+    @property
+    def latest_sample_dropped_contacts(self) -> int:
+        """Return query and scatter loss from the latest sensor fetch.
+
+        Standalone ``update()`` preserves accumulated control-interval counters
+        when histories or observers are attached. This separate diagnostic still
+        exposes loss in that fetch, including before the first control interval.
+        Query storage is owned by this sensor's ContactQuery and reused only by
+        its subsequent fetches. Reading the counters may synchronize device work.
+        """
+        loss = self._sample_scatter_dropped_count.sum()
+        if self._latest_contact_buffer is not None:
+            loss = loss + self._latest_contact_buffer.dropped_count_device.sum()
+        return int(loss.item())
 
     def get_arena_pose(self, to_matrix: bool = False) -> torch.Tensor | None:
         """Not used.
@@ -712,6 +731,7 @@ class ContactSensor(BaseSensor):
                 value.index_fill_(0, ids, 0)
         if env_ids is None:
             self._query_dropped_count.zero_()
+            self._latest_contact_buffer = None
         for history in self._histories.values():
             history.reset(ids)
         if self._sampling_observers:
