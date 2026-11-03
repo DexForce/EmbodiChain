@@ -28,6 +28,9 @@ normal preset resolution. Re-grounding an original call retains its selection
 and occurrence ID; derived workflow-recovery calls use their own identity and
 normal policy selection. These are typed integration declarations, not new
 Task Program language fields or configured-loader extensions.
+The manifest check owns profile/preset validation. Scene registry IDs belong to
+the host selection, not `SceneManifest`; the standard adapter checks them, while
+a host constructing `TaskProgramDemoBridge` directly must validate scene ownership.
 
 ## Effect assurance and acceptance
 

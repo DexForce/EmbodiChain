@@ -1067,6 +1067,9 @@ class TaskProgramDemoBridge:
             required before any parallel branch can start.
         isolate_policy_sessions: Request fresh state from ports that provide
             ``new_task_program_session``; ports without it retain their behavior.
+        invocation_policies: Optional program-bound sequential preset selections.
+            Direct bridge hosts must first validate their scene-registry selection;
+            the standard environment adapter performs that ownership check.
 
     Parallel blocks retain their branch lanes and explicit barrier.
     They are lowered through :class:`ParallelSemanticExecutor`; they are never

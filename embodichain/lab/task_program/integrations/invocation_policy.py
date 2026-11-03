@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+import hashlib
+import json
 from types import MappingProxyType
 
 from embodichain.lab.task_program.compiler.program import (
@@ -31,6 +33,7 @@ from embodichain.lab.task_program.semantics.integration import (
 )
 
 from ._program_identity import task_program_fingerprint
+from .catalog import _canonical_value
 
 __all__ = [
     "InvocationPolicyBinding",
@@ -44,6 +47,14 @@ def _identifier(value: str, name: str) -> None:
         raise ValueError(
             f"{name} must be a non-empty exact string without outer whitespace."
         )
+
+
+def _call_digest(call: object) -> str:
+    """Snapshot a call's complete declaration without retaining mutable aliases."""
+    encoded = json.dumps(
+        _canonical_value(call), sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +94,10 @@ class BoundInvocationPolicies:
     program_fingerprint: str
     bindings: tuple[InvocationPolicyBinding, ...]
     _segment_presets: Mapping[int, tuple[str | None, ...]] = field(repr=False)
+    _program_id: str = field(repr=False)
+    _segment_calls: Mapping[int, tuple[str, ...]] = field(repr=False)
+    _segment_paths: Mapping[int, tuple[str | int, ...]] = field(repr=False)
+    _analysis_windows: Mapping[int, tuple[int, ...]] = field(repr=False)
 
     def __init__(
         self, program: CompiledTaskProgram, bindings: Iterable[InvocationPolicyBinding]
@@ -115,6 +130,8 @@ class BoundInvocationPolicies:
         sequential = set()
         parallel = set()
         segment_presets = {}
+        segment_calls = {}
+        segment_paths = {}
         for segment in program.iter_segments():
             prefix = f"{program.program_id}/{segment.segment_id}"
             if segment.parallel_block is not None:
@@ -131,6 +148,10 @@ class BoundInvocationPolicies:
             segment_presets[segment.segment_index] = tuple(
                 selected.get(identity) for identity in identities
             )
+            segment_calls[segment.segment_index] = tuple(
+                _call_digest(call.call) for call in segment.calls
+            )
+            segment_paths[segment.segment_index] = segment.source_path
         if set(selected) & parallel:
             raise ValueError(
                 "Invocation policy bindings do not support parallel branch calls."
@@ -143,6 +164,21 @@ class BoundInvocationPolicies:
         object.__setattr__(self, "program_fingerprint", fingerprint)
         object.__setattr__(self, "bindings", declarations)
         object.__setattr__(self, "_segment_presets", MappingProxyType(segment_presets))
+        object.__setattr__(self, "_program_id", program.program_id)
+        object.__setattr__(self, "_segment_calls", MappingProxyType(segment_calls))
+        object.__setattr__(self, "_segment_paths", MappingProxyType(segment_paths))
+        object.__setattr__(
+            self,
+            "_analysis_windows",
+            MappingProxyType(
+                {
+                    index: analysis.segment_indices
+                    for analysis in program.preflight_analyses()
+                    if analysis.kind == "sequential_stretch"
+                    for index in analysis.segment_indices
+                }
+            ),
+        )
 
     def validate_program(self, program: CompiledTaskProgram) -> None:
         """Reject use with a different or mutated compiled program.
@@ -160,7 +196,11 @@ class BoundInvocationPolicies:
 
         Args:
             program: Program owning the selected occurrences.
-            manifest: Exact static scene, profile and call catalog to use.
+            manifest: Static scene metadata, profile and call catalog to use.
+
+        The profile ID and runtime preset must match the compiled selection.
+        SceneManifest has no registry-selection ID: the environment adapter (or
+        a host constructing a bridge directly) must validate scene ownership.
         """
         self.validate_program(program)
         if type(manifest) is not SemanticIntegrationManifest:
@@ -171,7 +211,7 @@ class BoundInvocationPolicies:
             or manifest.runtime_preset != selection.runtime_preset
         ):
             raise ValueError(
-                "Invocation policy manifest does not match the program integration selection."
+                "Invocation policy manifest does not match the program profile/preset selection."
             )
         for segment in program.iter_segments():
             if segment.parallel_block is not None:
@@ -202,13 +242,41 @@ class BoundInvocationPolicies:
             raise ValueError(
                 "Policy selection requires a sequential compiled analysis."
             )
-        result = tuple(
-            value
-            for index in analysis.segment_indices
-            for value in self._segment_presets[index]
-        )
-        if len(result) != len(analysis.calls):
+        indices = analysis.segment_indices
+        window = self._analysis_windows.get(indices[0])
+        if window is None:
             raise ValueError(
-                "Policy selections do not match the compiled analysis window."
+                "Policy analysis does not belong to the bound program window."
             )
-        return result
+        is_stretch = analysis.kind == "sequential_stretch"
+        expected_indices = (
+            window
+            if is_stretch
+            else tuple(index for index in window if index >= indices[0])
+        )
+        phase = "preflight" if is_stretch else "execution"
+        expected_id = f"{self._program_id}:{phase}:sequential:{indices[0]}-{window[-1]}"
+        expected_prefix = (
+            sum(len(self._segment_calls[index]) for index in expected_indices)
+            if is_stretch
+            else len(self._segment_calls[indices[0]])
+        )
+        if (
+            indices != expected_indices
+            or analysis.analysis_id != expected_id
+            or analysis.source_path != self._segment_paths[indices[0]]
+            or analysis.execution_prefix_length != expected_prefix
+        ):
+            raise ValueError(
+                "Policy analysis does not belong to the bound program window."
+            )
+        expected_calls = tuple(
+            value for index in indices for value in self._segment_calls[index]
+        )
+        if tuple(_call_digest(call) for call in analysis.calls) != expected_calls:
+            raise ValueError(
+                "Policy analysis calls differ from the bound program window."
+            )
+        return tuple(
+            value for index in indices for value in self._segment_presets[index]
+        )

@@ -348,6 +348,10 @@ Bindings targeting parallel branches are explicitly rejected. Unbound parallel
 calls remain supported. The compiled-program fingerprint uses the same format as
 nominal motion sources; it includes the instruction and integration selection.
 These declarations do not add YAML fields, execute providers, or mutate an engine.
+``validate_manifest`` checks profile identity, runtime-preset selection and each
+selected call's policy contract. A scene manifest carries entity metadata rather
+than the host's scene-registry selection ID; the standard adapter validates that
+selection, and hosts constructing a bridge directly retain that responsibility.
 
 .. currentmodule:: embodichain.lab.task_program.integrations.invocation_policy
 

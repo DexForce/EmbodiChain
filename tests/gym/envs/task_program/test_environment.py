@@ -1298,5 +1298,45 @@ def test_invocation_policy_binding_rejects_reuse_after_program_change() -> None:
         builtin_semantic_call_catalog(),
         runtime_preset=None,
     )
-    with pytest.raises(ValueError, match="integration selection"):
+    with pytest.raises(ValueError, match="profile/preset selection"):
         policies.validate_manifest(compiled, foreign_selection)
+
+
+def test_invocation_policy_analysis_windows_preserve_suffixes_and_reject_foreign_calls() -> (
+    None
+):
+    from dataclasses import replace
+    from embodichain.lab.task_program import RepeatCfg
+    from embodichain.lab.task_program.integrations import (
+        BoundInvocationPolicies,
+        InvocationPolicyBinding,
+        task_program_fingerprint,
+    )
+
+    adapter = TaskProgramEnvironmentAdapter(
+        _InvocationPolicyFactory(), step_dt=_STEP_DT
+    )
+    config = _program_with_later_segment_hooks()
+    config.program = RepeatCfg(count=2, body=config.program)
+    compiled = adapter.compile(config)
+    segments = tuple(compiled.iter_segments())
+    binding = InvocationPolicyBinding(
+        task_program_fingerprint(compiled),
+        f"{compiled.program_id}/{segments[2].segment_id}:0",
+        "careful",
+    )
+    policies = BoundInvocationPolicies(compiled, (binding,))
+    analysis = compiled.preflight_analyses()[0]
+    assert policies._presets_for_analysis(analysis) == (None, None, "careful", None)
+    assert policies._presets_for_analysis(
+        compiled.sequential_execution_analysis(1)
+    ) == (None, "careful", None)
+    assert policies._presets_for_analysis(
+        compiled.sequential_execution_analysis(2)
+    ) == ("careful", None)
+    other = replace(analysis, analysis_id="foreign:preflight:sequential:0-3")
+    with pytest.raises(ValueError, match="bound program window"):
+        policies._presets_for_analysis(other)
+    reordered = replace(analysis, calls=tuple(reversed(analysis.calls)))
+    with pytest.raises(ValueError, match="bound program window"):
+        policies._presets_for_analysis(reordered)
