@@ -61,8 +61,9 @@ runtime observations, not serialized configuration. All world providers must be
 does not reread live object or robot-base poses in this mode.
 
 The opt-in supports one control part and B=1, disabled CUDA graphs, a static
-world and preserved native samples. Passive joint locks use the observed full
-qpos in both native planning and the no-payload exact-sample checker. Payloads
+world and preserved native samples. An omitted planning start uses the selected joints from this same snapshot.
+The motion facade reports collision-world updates as unavailable. Passive joint
+locks use the observed full qpos in both native planning and the no-payload exact-sample checker. Payloads
 attach only to distinct buffers owned by the fresh backend's IK/optimization/
 metric models, with alias deduplication and cleanup on failure/close. Arbitrary
 trajectory validation with payload is unavailable because its separate checker

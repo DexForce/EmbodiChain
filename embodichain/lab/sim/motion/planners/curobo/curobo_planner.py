@@ -932,7 +932,7 @@ class CuroboPlanner(BasePlanner):
             ),
             dynamic_entity_ids=tuple(self.cfg.world.dynamic_obstacle_names),
             batch_mode="per_env" if self.cfg.world.multi_env else "shared",
-            supports_updates=True,
+            supports_updates=self.supports_collision_world_updates,
         )
 
     def validate_joint_trajectory(
@@ -1363,7 +1363,19 @@ class CuroboPlanner(BasePlanner):
     ) -> torch.Tensor:
         """Resolve the planning start qpos into ``(B, controlled_dof)``."""
         if start_qpos is None:
-            start_qpos = self.robot.get_qpos(name=control_part)
+            snapshot = getattr(self, "_query_snapshot", None)
+            if snapshot is None:
+                start_qpos = self.robot.get_qpos(name=control_part)
+            else:
+                if snapshot.full_qpos.shape[1] != len(self.robot.joint_names):
+                    raise ValueError(
+                        "Query full_qpos must match the full robot joint order."
+                    )
+                ids = [
+                    self.robot.joint_names.index(name)
+                    for name in self._resolve_sim_joint_names(control_part)
+                ]
+                start_qpos = snapshot.full_qpos[:, ids]
         start_qpos = torch.as_tensor(
             start_qpos, dtype=torch.float32, device=self._curobo_device
         )

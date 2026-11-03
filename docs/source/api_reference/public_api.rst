@@ -1033,7 +1033,9 @@ embodichain.lab.gym.envs.embodied_env
 embodichain.lab.sim.motion.planners.curobo.payload
 --------------------------------------------------
 
-Runtime observation values for a fresh B=1 cuRobo query. Full joint state and
+Runtime observation values for a fresh B=1 cuRobo query. An omitted start uses
+the captured control-part joints; the motion facade reports the world as immutable.
+Full joint state and
 world-to-base transform belong to the query snapshot; an optional carried body
 owns its identity, control part, local spheres and observed world pose. These
 values are separate from serialized planner configuration.

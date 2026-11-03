@@ -474,3 +474,48 @@ def test_owned_factory_detaches_and_closes_when_the_caller_raises(monkeypatch):
         "metrics",
     ]
     assert closed == ["closed"]
+
+
+@pytest.mark.parametrize("observed", [False, True])
+@pytest.mark.parametrize("contract", ["start", "world_capability"])
+def test_public_query_facade_uses_coherent_default_start_and_world_capability(
+    monkeypatch, observed, contract
+):
+    robot, _ = _cpu_constructor(monkeypatch)
+    live_reads = []
+
+    def live_qpos(*, name):
+        live_reads.append(name)
+        return torch.tensor([[0.7]])
+
+    robot.get_qpos = live_qpos
+    starts = []
+    monkeypatch.setattr(cp.CuroboPlanner, "_get_backend", lambda *args: _backend())
+
+    def segments(self, targets, start, backends, options, pose):
+        starts.append(start.clone())
+        samples = torch.stack((start[0], targets[0].qpos[0]))
+        return self._assemble_result(
+            [[samples]],
+            [[torch.tensor([0.0, 0.04])]],
+            start,
+            torch.tensor([True]),
+            1,
+            1,
+        )
+
+    monkeypatch.setattr(cp.CuroboPlanner, "_plan_segments", segments)
+    snapshot = _snapshot(payload=False) if observed else None
+    with curobo_motion_generator(_cfg(), query_snapshot=snapshot) as generator:
+        if contract == "world_capability":
+            assert generator.supports_dynamic_collision_world is (not observed)
+            return
+        result = generator.generate(
+            [PlanState.from_qpos(torch.tensor([[0.9]]))],
+            MotionGenOptions(control_part="arm"),
+        )
+        torch.testing.assert_close(
+            result.positions[:, 0], torch.tensor([[0.1 if observed else 0.7]])
+        )
+    torch.testing.assert_close(starts[0], torch.tensor([[0.1 if observed else 0.7]]))
+    assert live_reads == ([] if observed else ["arm"])
