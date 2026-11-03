@@ -1203,7 +1203,7 @@ embodichain.lab.task_program.integrations.simulation.handover
    ConfiguredHandOverPoseProvider
 
 embodichain.lab.task_program.integrations.simulation.support_evidence
--------------------------------------------------------------------
+---------------------------------------------------------------------
 
 Native support acquisition uses a standard borrowed ``ContactSensor`` and the
 public sampling observer lifecycle. Each explicit runtime registry owns one

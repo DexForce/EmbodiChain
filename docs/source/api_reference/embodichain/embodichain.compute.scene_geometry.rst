@@ -6,7 +6,8 @@ float32/float64 tensors. Inputs share dtype and device; outputs stay on that
 CPU or CUDA device. The kernels do not accept entity UIDs, asset paths, mesh
 library objects or simulator handles, and do not import scene services.
 
-For the tensor APIs, shape, dtype, device and scalar-argument checks use host metadata. Numeric
+For the tensor APIs, shape, dtype, device and scalar-argument checks use host
+metadata. Numeric
 validity is computed on the tensor device and returned through masks or NaN
 outputs; no tensor value is copied to the host to decide validity.
 The CPU contact-patch API below instead consumes NumPy arrays and reports
