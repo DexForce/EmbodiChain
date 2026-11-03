@@ -393,3 +393,107 @@ nor collision freedom.
 
 .. autoclass:: LinkMesh
    :members:
+
+Static articulation and control inputs
+--------------------------------------
+
+These readers inspect self-contained USD sources without creating a simulator.
+``ArticulationGeometry`` measures collider vertices relative to the imported
+root body; ``fit_articulation_to_proxy`` explicitly returns a revised physical
+declaration. Prismatic discovery preserves traversal order and requires explicit
+part selection when several mechanisms exist. Press inspection measures a
+selected joint, endpoint and collider; it does not evaluate a press event.
+
+Revolute inspection consumes authored joint, grip, pointer and printed-setting
+roles. The existing ``gen_sim.twist-control/v1`` annotation format is retained
+for frozen assets; no roles are inferred from names. The physical binding does
+not select execution chunk counts, recovery rules or acceptance tolerances.
+``TwistGeometry`` keeps each body's input mesh and cooking approximation separate,
+with scale applied once. Native cooked shapes require their own observation.
+
+``create_mass_source_copy`` performs the existing Default-only compensation:
+center of mass scales by the uniform body scale and diagonal inertia by its
+square, while mass and all other authored fields remain unchanged. It writes a
+content-addressed copy and lineage manifest, leaving the original read-only.
+Qualification reconstructs that exact operation and rejects altered artifacts.
+``RevoluteSourceSeal`` pins asset, calibration and optional mass-source bytes,
+including required sidecar absence. Freshness checks reject drift rather than
+re-signing it. The circular-prism proof requires two complete uniform rings and
+closed convex topology; it does not establish dynamic path clearance.
+
+.. currentmodule:: embodichain.lab.sim.scene.articulation_geometry
+
+.. autoclass:: ArticulationGeometry
+   :members:
+
+.. autofunction:: read_articulation_geometry
+
+.. autofunction:: fit_articulation_to_proxy
+
+.. currentmodule:: embodichain.lab.sim.scene.articulation_inputs
+
+.. autoclass:: PrismaticBinding
+   :members:
+
+.. autoclass:: ArticulationPartCandidate
+   :members:
+
+.. autofunction:: discover_prismatic_parts
+
+.. autofunction:: inspect_prismatic
+
+.. autofunction:: inspect_prismatic_part
+
+.. autofunction:: handle_mesh
+
+.. currentmodule:: embodichain.lab.sim.scene.control_semantics
+
+.. autoclass:: TwistSemantics
+   :members:
+
+.. autoexception:: MissingTwistSemanticsError
+
+.. autoexception:: InvalidTwistSemanticsError
+
+.. autofunction:: resolve_twist_semantics
+
+.. currentmodule:: embodichain.lab.sim.scene.revolute_inputs
+
+.. autoclass:: RevoluteControlBinding
+   :members:
+
+.. autofunction:: inspect_revolute_control
+
+.. currentmodule:: embodichain.lab.sim.scene.revolute_geometry
+
+.. autoclass:: TwistGeometry
+   :members:
+
+.. autofunction:: load_twist_geometry
+
+.. currentmodule:: embodichain.lab.sim.scene.press_inputs
+
+.. autoclass:: PressBinding
+   :members:
+
+.. autofunction:: inspect_press
+
+.. currentmodule:: embodichain.lab.sim.scene.control_mass_source
+
+.. autoclass:: MassSourceCopy
+   :members:
+
+.. autofunction:: adjacent_manifest_path
+
+.. autofunction:: qualify_mass_source_copy
+
+.. autofunction:: create_mass_source_copy
+
+.. currentmodule:: embodichain.lab.sim.scene.control_source
+
+.. autoclass:: RevoluteSourceSeal
+   :members:
+
+.. autofunction:: capture_revolute_source_seal
+
+.. autofunction:: qualify_revolute_grip_shell

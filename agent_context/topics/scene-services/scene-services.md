@@ -17,6 +17,9 @@ semantic scene graph, generation model client or task lifecycle.
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
+| Static USD root/link geometry and explicit proxy fitting | `embodichain/lab/sim/scene/articulation_geometry.py` |
+| Source-declared prismatic, press and revolute physical bindings | `embodichain/lab/sim/scene/articulation_inputs.py`, `press_inputs.py`, `revolute_inputs.py` |
+| Explicit control roles, collider inputs and source lineage | `embodichain/lab/sim/scene/control_semantics.py`, `revolute_geometry.py`, `control_source.py`, `control_mass_source.py` |
 | Owned link-local authored collider inputs | `embodichain/lab/sim/scene/source_geometry.py` |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
 | CPU support, packing and constrained-layout strategies | `embodichain/lab/sim/scene/_support_cpu.py`, `_placement_cpu.py`, `_packing_cpu.py`, `_layout_cpu.py` |
@@ -27,6 +30,14 @@ The package facade resolves services lazily. Expansion has its own
 `scene.expansion` namespace. `compute.geometry` takes Torch tensors, never entity UIDs,
 polygon objects, simulation or GenSim models. Scene CPU strategies own support
 selection, polygon search, greedy packing and SciPy SLSQP optimization.
+
+Static control readers consume explicit authored roles, keep source mesh frames
+and identity, and never build semantic graphs or select execution/recovery
+budgets. Acceptance thresholds and semantic link IDs belong to their callers.
+`control_mass_source` retains the Default-only two-attribute mass compensation
+in a content-addressed derived source; it never edits the original asset.
+`control_source` rejects source/sidecar drift, including newly present optional
+sidecars. Source mesh proofs do not certify native cooked shapes or paths.
 
 ## Construction and proposal flow
 
