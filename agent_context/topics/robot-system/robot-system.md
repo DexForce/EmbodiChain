@@ -198,6 +198,9 @@ fixed virtual TCP links may lie upstream or downstream. A stationary opposite-ar
 TCP is not a valid hand reference. The declared TCP must also remain fixed
 throughout hand actuation. Model-specific commands and TCP
 calibration remain in concrete robot/embodiment configuration.
+`ordered_pad_line_world` validates the same explicit topology and reads only the
+two live pad poses in declaration order; use it for a jaw line without sampled
+FK or surface capture. This order is distinct from the sampled surfaces' TCP-X order.
 The [configured hand declaration](../task-programs/configuration.md) resolves
 those settings through the existing runtime-services owner; it does not create
 a second robot registry or infer topology from model/control-part names.
