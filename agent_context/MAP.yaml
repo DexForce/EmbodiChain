@@ -189,6 +189,7 @@ topics:
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
     轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体, kinematic trajectory refinement, 轨迹修正]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
+    CuroboPayload, CuroboQuerySnapshot, curobo_motion_generator,
     expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
     load_expansion_profile, SourceAdapter, CandidateCoordinator, CandidateTrajectoryBatch,
     ManipulabilityBands, manipulability_guided_residual, manipulability coverage bands,
@@ -215,6 +216,7 @@ topics:
   - embodichain/compute/kinematics/_warp/trapezoidal.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_planner.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_yaml.py
+  - embodichain/lab/sim/motion/planners/curobo/payload.py
   - embodichain/lab/task_program/semantics/scene.py
   - embodichain/lab/sim/motion/expansion/
   - embodichain/compute/trajectory/
@@ -231,6 +233,7 @@ topics:
   title: Scene Services
   aliases: [sim.scene, scene services, procedural scene, 场景服务, 程序化场景, 场景布局, 场景快照]
   keywords: [SceneFragment, SceneRecipe, GeneratedScene, SupportRegion, LayoutProblem,
+    SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,
     solve_layout, capture_state, restore_state, settle_scene, check_layout,
@@ -240,6 +243,7 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/scene/
   - embodichain/compute/geometry/
+  - embodichain/lab/sim/objects/backends/_collision_inputs.py
   watch_paths: [embodichain/lab/sim/scene/, embodichain/compute/geometry/,
     tests/sim/scene/, tests/compute/geometry/]
   related_topics: [simulation-system, scene-expansion, gen-sim, task-programs]
