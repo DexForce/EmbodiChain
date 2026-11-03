@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
+import json
 from pathlib import Path
 from threading import Event, Lock
 from types import SimpleNamespace
@@ -1019,6 +1020,64 @@ def test_fingerprint_is_stable_for_equivalent_declarations() -> None:
 
     assert left.fingerprint == right.fingerprint
     assert len(left.fingerprint) == 64
+
+
+def test_motion_modes_participate_in_sealed_registration_identity() -> None:
+    """Default behavior stays valid; explicit modes cannot reuse another seal."""
+    base = create_cube_robot_profile_binding().presets[0]
+
+    def registration_for(motion_policy):
+        return _registration_with_preset(
+            SkillPolicyPreset(
+                base.preset_id,
+                action_option_templates=base.action_option_templates,
+                effect_assurance=base.effect_assurance,
+                motion_policy=motion_policy,
+                tracking_policy=base.tracking_policy,
+                recovery_policy=base.recovery_policy,
+                workflow_recovery_policy=base.workflow_recovery_policy,
+                runner_cfg=base.runner_cfg,
+                effect_monitors=base.effect_monitors,
+                required_planner=base.required_planner,
+            )
+        )
+
+    policy = base.motion_policy
+    default = registration_for(policy)
+    explicit_default = registration_for(
+        replace(policy, interpolation_mode="adaptive", ik_seed_mode="batched")
+    )
+    sequential = registration_for(replace(policy, ik_seed_mode="sequential"))
+    fixed = registration_for(
+        replace(
+            policy,
+            interpolation_mode="fixed_grid",
+            acceleration_limit=None,
+            velocity_limit=None,
+        )
+    )
+    assert default.fingerprint == explicit_default.fingerprint
+    assert len({default.fingerprint, sequential.fingerprint, fixed.fingerprint}) == 3
+    for registration in (default, explicit_default, sequential, fixed):
+        program = decode_task_program(
+            _program_payload(), validation_context=registration.catalog
+        )
+        compiled = registration.catalog.preflight(program)
+        assert tuple(compiled.iter_segments())[0].calls[0].call.semantic_id == "pick"
+        registration.assert_unchanged()
+
+    legacy = json.loads(
+        (Path(__file__).parent / "data/motion_policy_registration_v1.json").read_text()
+    )
+    assert default.fingerprint != legacy["fingerprint"]
+    # Load the actual pre-migration seal beside the default current declaration.
+    object.__setattr__(
+        default,
+        "catalog",
+        replace(default.catalog, fingerprint=legacy["fingerprint"]),
+    )
+    with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
+        default.assert_unchanged()
 
 
 def test_fingerprint_covers_workflow_recovery_policy() -> None:
