@@ -1077,7 +1077,11 @@ class SemanticCallExecutor:
             raise ValueError("Grounded phase-effect gates require an effect spec.")
 
         self._grounded = grounded
-        runner_cfg = self._runner_cfg_override
+        runner_cfg = (
+            self._runner_cfg_override
+            if grounded.analyzed.policy_preset_id is None
+            else None
+        )
         if runner_cfg is None:
             runner_cfg = grounded.analyzed.bound.preset.runner_cfg
             if not isinstance(runner_cfg, ExecutionRunnerCfg):

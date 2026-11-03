@@ -76,6 +76,9 @@ from embodichain.lab.task_program.semantics.profiles import EffectAssurance
 from embodichain.lab.sim.types import EnvAction
 
 if TYPE_CHECKING:
+    from embodichain.lab.task_program.integrations.invocation_policy import (
+        BoundInvocationPolicies,
+    )
     from embodichain.lab.task_program.integrations.expansion import (
         CombinedTaskProgramExpansionFactory,
         TaskProgramExpansionRecord,
@@ -1083,6 +1086,7 @@ class TaskProgramDemoBridge:
         parallel_safety_validator: ParallelCommandSafetyValidator | None = None,
         expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None,
         isolate_policy_sessions: bool = False,
+        invocation_policies: BoundInvocationPolicies | None = None,
     ) -> None:
         if not isinstance(program, CompiledTaskProgramPort):
             raise TypeError("program must implement CompiledTaskProgramPort.")
@@ -1128,6 +1132,25 @@ class TaskProgramDemoBridge:
                 raise TypeError(
                     "expansion_trace_provider must be a supported expansion factory or None."
                 )
+        if invocation_policies is not None:
+            from embodichain.lab.task_program.integrations.invocation_policy import (
+                BoundInvocationPolicies,
+            )
+
+            if type(invocation_policies) is not BoundInvocationPolicies:
+                raise TypeError(
+                    "invocation_policies must be exactly BoundInvocationPolicies."
+                )
+            if type(program) is not CompiledTaskProgram or not isinstance(
+                runtime, SemanticCallExecutor
+            ):
+                raise TypeError(
+                    "Invocation policies require the standard compiled program and semantic runtime."
+                )
+            invocation_policies.validate_manifest(
+                program, runtime.compiler.integration.manifest
+            )
+        self._invocation_policies = invocation_policies
         sessions: dict[int, object] = {}
 
         def episode_port(port: object | None) -> object | None:
@@ -1499,7 +1522,17 @@ class TaskProgramDemoBridge:
                         if analysis.kind != "sequential_stretch":
                             continue
                         workflow = segment_runtime.compiler.analyze(
-                            analysis.calls, workflow_id=analysis.analysis_id
+                            analysis.calls,
+                            workflow_id=analysis.analysis_id,
+                            **(
+                                {
+                                    "preset_ids": self._invocation_policies._presets_for_analysis(
+                                        analysis
+                                    )
+                                }
+                                if self._invocation_policies is not None
+                                else {}
+                            ),
                         )
                         offset = 0
                         for index in analysis.segment_indices:

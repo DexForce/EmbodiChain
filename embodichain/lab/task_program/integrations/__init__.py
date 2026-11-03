@@ -81,8 +81,17 @@ from .simulation.policies import (
     default_simulation_settle_presets,
 )
 
+from .invocation_policy import (
+    BoundInvocationPolicies,
+    InvocationPolicyBinding,
+    task_program_fingerprint,
+)
+
 __all__ = [
     "AntipodalGraspAffordanceBinding",
+    "BoundInvocationPolicies",
+    "InvocationPolicyBinding",
+    "task_program_fingerprint",
     "ContainerAffordanceBinding",
     "ControlPartCommandPreset",
     "ControlPartEvidenceProviderDeclaration",

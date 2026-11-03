@@ -22,11 +22,15 @@ embodichain.lab.task_program.integrations
       SimulationRobotSkillProfileBinding, SimulationTaskProgramFactory,
       SimulationTaskProgramAdapterFactory, ConfiguredHandOverPoseProvider,
       CuroboParallelCommandSafetyValidator, CuroboParallelSafetyValidatorFactory,
-      SimulationSegmentPolicyPort, create_simulation_task_program_adapter
+      SimulationSegmentPolicyPort, create_simulation_task_program_adapter,
+      InvocationPolicyBinding, BoundInvocationPolicies, task_program_fingerprint
 
    .. autosummary::
 
       AntipodalGraspAffordanceBinding
+      InvocationPolicyBinding
+      BoundInvocationPolicies
+      task_program_fingerprint
       ConfiguredHandOverPoseProvider
       ContainerAffordanceBinding
       ControlPartCommandPreset
@@ -320,3 +324,42 @@ Implementation module exports
 .. autofunction:: validate_immutable_extension_declaration
 
 .. autodata:: VersionedKey
+
+Occurrence policy bindings
+-------------------------
+
+An ``InvocationPolicyBinding`` selects an existing named profile preset for one
+sequential execution occurrence, identified by the complete compiled-program
+fingerprint and ``program_id/segment_id:segment_call_index``. Pass a tuple of these
+declarations to ``TaskProgramEnvironmentAdapter.create_bridge`` through its
+``invocation_policy_bindings`` keyword. Normal calls use their existing policies
+when the tuple is empty.
+
+The adapter validates identities and selections before execution. The compiler
+links and analyzes selected presets before constructing the final Atomic
+invocation, so repeated calls and cached analyses retain distinct selections.
+Selected presets must retain the original effect assurance. A selected preset's
+existing runner settings own that occurrence; unselected calls continue to use
+the host's runner override. Re-grounding preserves the original occurrence and
+selection. Derived workflow-recovery calls keep independent IDs and ordinary
+preset selection.
+
+Bindings targeting parallel branches are explicitly rejected. Unbound parallel
+calls remain supported. The compiled-program fingerprint uses the same format as
+nominal motion sources; it includes the instruction and integration selection.
+These declarations do not add YAML fields, execute providers, or mutate an engine.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.invocation_policy
+
+.. autosummary::
+
+   InvocationPolicyBinding
+   BoundInvocationPolicies
+   task_program_fingerprint
+
+.. autoclass:: InvocationPolicyBinding
+
+.. autoclass:: BoundInvocationPolicies
+   :members: validate_program, validate_manifest
+
+.. autofunction:: task_program_fingerprint

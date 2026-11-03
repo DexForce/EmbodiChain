@@ -10,6 +10,25 @@ guards and commands inherit that ID rather than the cached analysis index.
 Direct compiler callers may omit the ID to retain workflow/index identity.
 Recovery-generated calls retain their separately analyzed workflow identity.
 
+`TaskProgramEnvironmentAdapter.create_bridge` accepts immutable
+`InvocationPolicyBinding` declarations sealing a named profile preset to a
+compiled-program fingerprint and one `program_id/segment_id:segment_call_index`
+execution ID. `task_program_fingerprint` preserves the existing nominal-source
+identity algorithm. `BoundInvocationPolicies` rejects stale programs, duplicate
+or unknown occurrences and parallel-branch targets before execution. Unbound
+parallel execution retains its existing behavior.
+
+Static preflight and the bridge's cached sequential analysis use the same
+occurrence-aligned preset selections. The compiler links each selected call
+again before analysis and grounding; it does not patch an already bound call or
+mutate the Atomic engine. Selected presets must preserve the original effect
+assurance. Their existing action options, motion, tracking, recovery and runner
+settings own that call; unselected calls retain the host's runner override and
+normal preset resolution. Re-grounding an original call retains its selection
+and occurrence ID; derived workflow-recovery calls use their own identity and
+normal policy selection. These are typed integration declarations, not new
+Task Program language fields or configured-loader extensions.
+
 ## Effect assurance and acceptance
 
 Every `SkillPolicyPreset` explicitly selects one authority:
