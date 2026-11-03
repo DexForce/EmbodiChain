@@ -235,7 +235,7 @@ class ContactEvidenceSampler:
                 request.observation_revision,
             )
         return ContactEvidenceSample(
-            PhysicalEvidenceFrame(
+            PhysicalEvidenceFrame._from_owned_batches(
                 request.timestamp,
                 request.observation_revision,
                 request.env_ids,
@@ -392,7 +392,7 @@ class ContactEvidenceSampler:
                     request.observation_revision,
                 )
             return ContactEvidenceSample(
-                PhysicalEvidenceFrame(
+                PhysicalEvidenceFrame._from_owned_batches(
                     request.timestamp, request.observation_revision, ids, batches
                 ),
                 before.native_revision,

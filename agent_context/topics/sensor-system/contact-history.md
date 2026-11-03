@@ -37,6 +37,9 @@ selected-row reset notifications. The empty default performs no observer copies
 or callbacks. Hooks run outside the sensor's internal CUDA capture; observers
 inside an external capture fail before their callbacks run. Existing history
 sampling and device kernels keep their ownership and ordering.
+Removal can supply `expected=observer` to retain a replacement registered under
+the same name. Owners that close during an in-flight token snapshot must make
+their delayed callbacks no-ops.
 
 `task_program/integrations/simulation/contact_evidence.py` adapts sampled buffers
 to the existing physical-evidence frame/batch types. It retains the validity mask,
@@ -55,3 +58,18 @@ and aliases, deduplicating rows before advancing generations. Frontends own repo
 schema wrappers and semantic actor labels. The CPU test
 `tests/gym/envs/task_program/test_contact_evidence.py` exercises the actual public
 step boundary, frame ownership, native stamps and selective reset behavior.
+
+`support_evidence.py` owns native load-patch acquisition. Its explicit
+`SupportObservationRegistry` reuses an exact native pair across bridge consumers;
+same-UID native replacements require release and rebind. Registry cleanup detaches
+only owned hooks and leaves simulation-owned resources alive. The pure COM patch
+calculation lives in `compute/geometry/contact_support.py`.
+
+Support results separate a physical boolean from availability/error masks.
+Global acquisition failures clear every row's witness, while selected resets
+advance only those row generations. A positive witness survives sleeping contacts
+only while both poses and native identities remain qualified. Complete empty
+samples do not prove an absence of support over a stability window. Every frame
+uses a real acquisition clock; `bind_clock` separately enables revision-1 window
+qualification. A legacy observation does not acquire strong metadata merely by
+sharing that owner. TaskSpec evaluation remains outside Lab.

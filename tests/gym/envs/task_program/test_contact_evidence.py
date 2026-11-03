@@ -247,6 +247,14 @@ def test_sampler_owns_masked_frames_in_requested_environment_order():
     old = sample.frame.get(CONTACT_NORMALS).values.clone()
     source.data["normal"].zero_()
     assert torch.equal(sample.frame.get(CONTACT_NORMALS).values, old)
+    request.env_ids[0] = 1
+    assert sample.frame.env_ids.tolist() == [2, 0]
+    sample.frame.env_ids[0] = 99
+    assert sample.frame.batches[CONTACT_NORMALS].env_ids.tolist() == [2, 0]
+    sample.frame.env_ids[0] = 2
+    sample.frame.batches[CONTACT_NORMALS].values[0, 0, 0] = float("nan")
+    with pytest.raises(ValueError, match="finite"):
+        sample.frame.snapshot()
     assert source.update_count == 1
 
 

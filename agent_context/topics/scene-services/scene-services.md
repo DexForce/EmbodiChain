@@ -23,8 +23,11 @@ semantic scene graph, generation model client or task lifecycle.
 | Existing-entity expansion proposals and host integration | [Scene expansion](../scene-expansion/scene-expansion.md) |
 
 The package facade resolves services lazily. Expansion has its own
-`scene.expansion` namespace. `compute.geometry` takes Torch tensors, never entity UIDs,
-polygon objects, simulation or GenSim models. Scene CPU strategies own support
+`scene.expansion` namespace. `compute.geometry` takes numeric arrays or tensors,
+never simulation or GenSim models. Its `contact_support.py` computes a contact
+patch and COM distance from arrays; native acquisition and witness lifetimes
+belong to the [sensor integration](../sensor-system/contact-history.md).
+Scene CPU strategies own support
 selection, polygon search, greedy packing and SciPy SLSQP optimization.
 
 ## Construction and proposal flow
