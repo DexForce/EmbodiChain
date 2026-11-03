@@ -50,6 +50,9 @@ The immutable `Real2SimCartonV1` distribution is pinned to Hugging Face revision
 `RAIL+d027f2ae+2023-11-20-11h-50m-49s`. Its raw recording and measured derivatives
 retain CC BY 4.0 attribution. Historical independent synthetic files in that
 published v1 archive are unused by this task. Published bytes are not replaced.
+The published robot byte fingerprint is mapped to a pinned portable geometry
+identity. Rebuilding the same collision/kinematic model in another cache or at
+another time preserves qualification; changed physical geometry still fails.
 
 ## Scope and acceptance
 

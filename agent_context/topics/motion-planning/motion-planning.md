@@ -7,6 +7,8 @@
 | Planning interface, options and batch validation | `embodichain/lab/sim/motion/planners/base_planner.py` |
 | Timed inputs/results | `embodichain/lab/sim/motion/planners/utils.py` → `PlanState`, `PlanResult` |
 | Strategy, IK preparation, result normalization | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator` |
+| Fixed-time continuous IK and Cartesian target sampling | `embodichain/lab/sim/motion/ik.py`; numeric branch search in `compute/kinematics/ik_path.py` |
+| Explicit search measurements and cooperative deadlines | `embodichain/lab/sim/motion/search.py` |
 | Joint-path timing | `embodichain/lab/sim/motion/planners/toppra_planner.py`, `trapezoidal_planner.py` in that directory |
 | Cartesian geometry and scalar timing | `embodichain/lab/sim/motion/planners/se3.py`, `bezier.py`, `_scalar_time_law.py`, `_blend_constraints.py` in that directory |
 | Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
@@ -59,6 +61,25 @@ joint/EEF moves. Limited interpolation uses minimum-jerk rest-to-rest segments
 and treats the requested count as a lower bound. Required Cartesian IK
 failures fail the row; waypoints are never discarded to salvage success.
 Unsupported routes raise instead of silently selecting another strategy.
+
+`interpolation_mode="fixed_grid"` explicitly preserves the requested count and
+arrival intervals. It requires absent scalar velocity/acceleration overrides,
+intersects runtime speeds with every controlled joint's authored URDF cap, and
+rejects overspeed rows without retiming. `ik_seed_mode="sequential"` preserves
+previous-valid-posture seeds, callback order and RNG consumption; batched IK and
+adaptive timing remain defaults. Non-default modes require `ik_interp`.
+Failed execution rows hold their start. `PlanResult.rejected_candidate` retains
+owned original positions, intervals and rejected-row identities for retries and
+audit; checking the zero-speed hold is not evidence that the candidate passed.
+
+The bounded `resolve_continuous_ik_path()` adapter preserves a single path's
+time grid and restores the caller's random stream. Its numerical seed search
+accepts only B=1 and performs no simulation or state mutation.
+Treat perturbed IK seeds as numerical hints, not executed waypoints: velocity
+checks compare each candidate to the actual preceding posture. Search ledgers
+share an outer caller-owned deadline across nested previews and isolate separate
+contexts. They do not replace `_budget.py`'s existing automatic planning hooks,
+preempt native work, or certify physical task success.
 
 Normalization must preserve the meaning of timing, derivatives, failure rows
 and backend diagnostics together. Read the
