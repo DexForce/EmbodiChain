@@ -56,9 +56,14 @@ that segment's measured baseline, including for lazy and repeated segments;
 they do not observe at compile time or reset physical state. Results remain
 row-local and exclude rows that were ineligible when the segment started.
 
-`HandOver` covers pickup, transfer, delivery and final release. Its intermediate
-acquisition gates require attachment, while the terminal effect requires both
-participants detached. Check serialized evidence against the `effect_spec.clauses`
+`HandOver` starting from free resources covers pickup, transfer, delivery and
+final release. Its intermediate acquisition gates require attachment, while
+the terminal effect requires both participants detached. With an already
+verified source hold and an explicit policy preset selecting
+`HandOverOptions.release_at_target=False`, it transfers to the destination and
+leaves that resource held. The compiler never rewrites this option from live
+state. Static analysis and fresh grounding reject a mismatched holder or missing
+held state in eligible rows. Check evidence against the `effect_spec.clauses`
 for that trace's boundary; the participant name and overall call status do not
 determine the expected raw value.
 
@@ -71,8 +76,9 @@ Sequential segments reuse one static workflow analysis per uninterrupted
 sequential stretch; parallel barriers stop this reuse across branches. Each
 executed call still grounds from a fresh observation and checks compiler/catalog
 ownership. Runtime results capture an append-only history prefix and materialize
-independent history tuples when read or serialized, keeping history copying out
-of status-only control steps. Synchronous observer or clock failures abort through
+independent history tuples when read or serialized. `SemanticCallExecutor.advance`
+advances the same due cycle as `step` without constructing a result facade;
+the bridge reads a result at terminal audit boundaries. Synchronous observer or clock failures abort through
 the runner's cancel-then-hold boundary and retain any safe-stop failure details.
 
 The environment-owned expert `joint_command_mode` is propagated through the
@@ -83,9 +89,18 @@ idle, wait, inactive-row, and abort-safe holds. This changes neither Task Progra
 language nor the policy action space.
 
 On active rows, normal joint-position frames retain unaddressed qpos targets
-by stable environment ID. Inactive rows use measured holds and invalidate
-retained targets; explicit safe stops rebase them to measured qpos. A new
-episode creates a fresh encoder.
+by stable environment ID. Simulation factories default to
+`hold_qpos_source="observed"`, reusing captured qpos without extra robot reads.
+Explicit `drive_target` mode supplies full controller targets for unaddressed
+and inactive joints. Other providers retain the measured-qpos fallback unless
+they supply `hold_qpos`. Inactive rows
+invalidate retained targets; explicit safe stops still rebase them to the
+observed qpos. A new episode creates a fresh encoder.
+
+Simulation planning observations optionally capture the arena-local robot root
+pose through the public `capture_root_pose` keyword. It is acquired in the same
+observation and copied into `RobotObservation`; the default performs no root
+query and leaves that field unset.
 
 The bridge declares `progress_total_steps` only for deterministic open-loop
 Pick/Place segments with fixed interpolation samples and no recovery, runner
@@ -127,6 +142,12 @@ integration must provide exactly one matching lowerer factory and fingerprint
 its call ID, revision, and target Atomic Skill descriptor. Use this extension
 to expose shared Atomic Skills; do not place task-local motion generators in a
 lowerer.
+Registered held effects use compiler-owned expectations, monitor grounding,
+acquisition gates and retention guards. A lowerer may explicitly preserve
+symbolic state only when it declares no effect contract. Declaring a held
+effect or phase does not certify physical attachment or weaken the selected
+assurance; verified acquisition still requires its measured monitor. A release
+or transfer target contributes to pickup look-ahead and then ends that chain.
 
 ## MLLM boundary
 

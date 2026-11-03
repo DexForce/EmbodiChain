@@ -252,6 +252,13 @@ Simulation bindings
 .. autoclass:: SimulationTaskProgramFactory
    :members:
 
+``capture_root_pose=True`` includes an owned arena-local robot root transform
+in each synchronized planning observation. The default leaves it unset and
+does not query root poses. ``hold_qpos_source="observed"`` preserves the default
+captured-position holds without another robot read. Explicit ``drive_target``
+mode reads controller targets for unaddressed joints; safe stops still use
+measured positions from their planning context.
+
 .. autoclass:: SimulationTaskProgramAdapterFactory
    :members:
 
