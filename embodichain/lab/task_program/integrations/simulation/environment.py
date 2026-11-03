@@ -618,6 +618,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             selected_scene_binding,
             settle_presets=selected_settle_presets,
             env_ids=self._env_ids,
+            step_dt=self._step_dt,
         )
 
     @classmethod
