@@ -63,8 +63,9 @@ class ConfiguredTaskProgramDeployment:
         program_path: Resolved file path for subsequent Task Program loading.
         selection: Trusted scene, robot-profile and execution-preset selection.
         integration: Validated registration and lazy live adapter factory.
-        scene_binding: Independently owned semantic scene declaration.
-        planner_config: Independently owned planner declaration, when selected.
+        scene_binding (dict): Independently owned semantic scene declaration.
+        planner_config (dict | None): Independently owned planner declaration,
+            when selected.
     """
 
     integration_id: str

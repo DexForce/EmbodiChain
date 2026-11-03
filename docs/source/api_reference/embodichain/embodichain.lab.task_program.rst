@@ -333,10 +333,8 @@ their existing static program preflight during composition.
    load_configured_task_program_deployment
 
 .. autoclass:: ConfiguredTaskProgramDeployment
-   :members:
 
 .. autoclass:: ConfiguredTaskProgramIntegration
-   :members:
 
 .. autofunction:: load_configured_task_program_deployment
 
