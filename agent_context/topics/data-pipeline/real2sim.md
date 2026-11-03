@@ -40,7 +40,13 @@ observation while lift displacement stays gravity-aligned. Place aligns the
 source release anchor to the current semantic target and records the correction.
 An optional planner collision check is reported separately from task acceptance.
 The tabletop host requires source robot, object and target geometry hashes to
-match live physical assets. Older source bundles without hashes remain valid
+match live physical assets. Robot identity uses named joint/kinematic and
+collision descriptions plus mesh contents, excluding assembly timestamps,
+cache paths and visuals. `data_pipeline.real2sim._geometry` owns the versioned
+digest and independently pinned legacy-reference aliases; aliases must never
+be inferred from the live model or written into immutable source bundles.
+Other legacy robot digests still require exact original URDF/mesh bytes.
+Older source bundles without hashes remain valid
 for explicit diagnostics but cannot use the qualified tabletop owner. In EEF
 phases, numerical IK jitter can be smoothed only if the TCP error tube and
 motion limits remain satisfied. Contact
