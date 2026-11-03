@@ -69,3 +69,5 @@ resources remain in the corresponding example. Shared MLPs and normalizers
 remain in core. Shared-SL families use the same SL contracts regardless of
 their domain. Create a family only when its implementation lands, without empty
 placeholder directories, eager cross-family imports or a new registry.
+
+For third-party training ownership and dependency profiles, see the [LeRobot guide](../../docs/source/guides/lerobot.md) and [training framework comparison](../../docs/source/guides/training_frameworks.md).

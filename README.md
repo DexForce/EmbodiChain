@@ -56,9 +56,20 @@ Use `embodichain list-task` to discover tasks and `embodichain run-task` to laun
 one with its configuration. See [Supported Tasks](https://dexforce.github.io/EmbodiChain/main/resources/task/index.html)
 for available tasks, runnable configurations, and task authoring guides.
 
-For external training, see the optional
-[RLinf integration](https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html)
-and the [official RLinf EmbodiChain recipe](https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/embodichain.html).
+### Third-party Training Frameworks
+
+EmbodiChain supports **RLinf** and **LeRobot** alongside its native trainers.
+EmbodiChain owns simulation, task configuration and demonstration collection;
+the selected framework owns its training runtime and checkpoints.
+
+| Workflow | Entry point |
+| --- | --- |
+| RLinf: train against EmbodiChain Gym environments; the upstream example uses CartPole PPO | [RLinf integration](https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html) |
+| LeRobot: collect demonstrations, train official ACT and evaluate in simulation | [LeRobot integration](https://dexforce.github.io/EmbodiChain/main/guides/lerobot.html) · [Runnable ACT example](examples/learning/act/README.md) |
+| Export finalized recordings for LeRobot 0.6.1 consumers | [Dataset export](https://dexforce.github.io/EmbodiChain/main/guides/lerobot_export.html) |
+
+See [training framework selection](https://dexforce.github.io/EmbodiChain/main/guides/training_frameworks.html)
+for dependency profiles, ownership and compatibility boundaries.
 
 ## Official Extensions
 
