@@ -2,6 +2,14 @@
 
 Read this when the request needs these details. [Topic overview](task-programs.md).
 
+## Execution occurrence identity
+
+Cached semantic analyses may serve several repeated calls. The runtime supplies
+the execution occurrence ID when grounding each original call; effect monitors,
+guards and commands inherit that ID rather than the cached analysis index.
+Direct compiler callers may omit the ID to retain workflow/index identity.
+Recovery-generated calls retain their separately analyzed workflow identity.
+
 ## Effect assurance and acceptance
 
 Every `SkillPolicyPreset` explicitly selects one authority:
