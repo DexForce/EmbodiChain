@@ -312,6 +312,7 @@ class StereoCamera(Camera):
             - normal: Normal images with shape (B, H, W, 3) and dtype torch.float32
             - position: Position images with shape (B, H, W, 3) and dtype torch.float32
             - disparity: Disparity images with shape (B, H, W, 1) and dtype torch.float32
+
         Args:
             **kwargs: Additional keyword arguments for sensor update.
         """
