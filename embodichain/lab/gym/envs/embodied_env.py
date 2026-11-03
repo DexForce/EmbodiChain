@@ -3563,6 +3563,17 @@ class EmbodiedEnv(BaseEnv):
                 except Exception as error:
                     errors.append(error)
 
+            # The synchronous demo executor owns its normal abort/safe-hold
+            # handshake. Closing here is pure cleanup, including for an
+            # abandoned manual generator: never guess an action acknowledgement
+            # or advance physics while detaching runtime observation hooks.
+            adapter = getattr(self, "_task_program_adapter", None)
+            if adapter is not None:
+                try:
+                    adapter.close()
+                except Exception as error:
+                    errors.append(error)
+
             # Report before sim.destroy(): the default destroy path exits the
             # process, so diagnostics and durability checks must finish first.
             try:

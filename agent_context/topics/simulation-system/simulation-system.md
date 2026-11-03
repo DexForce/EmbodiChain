@@ -83,6 +83,13 @@ initialization; standalone callers supply it explicitly. `update()` also
 prepares defensively. See [lifecycle](lifecycle.md) for retries, replacement,
 reset ordering, runtime controls and teardown.
 
+`simulation_time` is a read-only manager-relative clock: successful `update()`
+substeps add their actual durations before `after_substep` callbacks. Explicit
+warmup updates count; preparation/render synchronization at zero duration does
+not advance time, and object/environment reset does not rewind it. A fresh
+manager starts at zero. Episode-relative Task Program clocks can have an offset;
+physical evidence must validate that mapping instead of mixing timestamp domains.
+
 ## Quaternion and pose convention
 
 EmbodiChain domain-facing quaternions are `(x, y, z, w)` (`xyzw`); public 7D

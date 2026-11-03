@@ -505,6 +505,7 @@ class TaskProgramEnvironmentAdapter:
             )
 
         self._factory = factory
+        self._closed = False
         self._configured_nominal_sources: tuple[object, ...] = ()
         self._scene_registry_id = scene_registry_id
         self._robot_profile_id = robot_profile_id
@@ -525,6 +526,24 @@ class TaskProgramEnvironmentAdapter:
         self._post_policy_port = post_policy_port
         self._validator_port = validator_port
         self._parallel_safety_validator = parallel_safety_validator
+
+    def close(self) -> None:
+        """Close this adapter's runtime resources without stepping or marking success.
+
+        Factories without owned runtime resources require no cleanup. Existing
+        execution/abort handshakes remain with the demo executor; this method
+        does not guess whether a pending controller action was acknowledged.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        release = getattr(self._factory, "close_runtime_resources", None)
+        if callable(release):
+            release()
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("Task Program adapter runtime resources are closed.")
 
     @property
     def scene_registry_id(self) -> str:
@@ -595,6 +614,7 @@ class TaskProgramEnvironmentAdapter:
         integration: TaskProgramIntegrationCfg,
     ) -> SemanticExecutorComponents:
         """Bind compiler dependencies without observation or evidence ports."""
+        self._require_open()
         self._validate_selection(integration)
         registry = self._create_scene_registry()
         current_profile_id = _validate_identifier(
@@ -680,6 +700,7 @@ class TaskProgramEnvironmentAdapter:
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
     ) -> TaskProgramRuntimeAssembly:
         """Attach live observation, evidence, command, and runtime boundaries."""
+        self._require_open()
         if type(semantic) is not SemanticExecutorComponents:
             raise TypeError("semantic must be exactly SemanticExecutorComponents.")
         if plan_transform_factory is not None and not isinstance(
@@ -890,6 +911,7 @@ class TaskProgramEnvironmentAdapter:
         Returns:
             Lazy bridge sharing one newly assembled runtime, clock, and sink.
         """
+        self._require_open()
         if type(program) is not CompiledTaskProgram:
             raise TypeError("program must be exactly CompiledTaskProgram.")
         if self._configured_nominal_sources:

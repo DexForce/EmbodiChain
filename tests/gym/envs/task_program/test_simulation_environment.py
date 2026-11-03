@@ -2037,3 +2037,31 @@ def test_factory_planner_config_uses_owner_without_mutating_input(
     assert captured[0].robot_uid == robot.uid
     assert captured[0] is not supplied
     assert supplied.sim_instance_id == 0
+
+
+def test_closed_factory_rejects_new_observation_and_assembly_without_native_reads(
+    monkeypatch,
+):
+    factory, robot = _factory()
+    registry = factory.create_scene_registry()
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    observation = factory.create_planning_observation_provider(
+        scene_registry=registry, engine=engine, clock=EnvironmentStepClock(_STEP_DT)
+    )
+    state = TaskState.empty(_BATCH_SIZE, robot.device)
+    observation.observe(state)
+    factory.close_runtime_resources()
+    factory.close_runtime_resources()
+    monkeypatch.setattr(
+        robot,
+        "get_qpos",
+        lambda *args, **kwargs: pytest.fail(
+            "closed observation must not touch the native robot"
+        ),
+    )
+    with pytest.raises(RuntimeError, match="closed"):
+        observation.observe(state)
+    with pytest.raises(RuntimeError, match="closed"):
+        factory.create_scene_registry()
+    with pytest.raises(RuntimeError, match="closed"):
+        factory.create_adapter()

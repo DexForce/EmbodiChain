@@ -73,3 +73,11 @@ samples do not prove an absence of support over a stability window. Every frame
 uses a real acquisition clock; `bind_clock` separately enables revision-1 window
 qualification. A legacy observation does not acquire strong metadata merely by
 sharing that owner. TaskSpec evaluation remains outside Lab.
+
+Strong frames and metadata use the bound environment clock plus the measured
+substep offset. The observer fixes and checks its mapping from the real
+simulation acquisition clock when the first control interval begins. Explicit
+warmup may create a nonzero offset; unobserved advancement that changes the
+mapping invalidates the window. Legacy acquisition keeps the simulation clock
+and does not gain strong qualification. These domains must not be mixed in one
+evidence window.

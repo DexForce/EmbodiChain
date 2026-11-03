@@ -27,7 +27,7 @@ inactive use fresh measured-position holds.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, MutableMapping
 from copy import copy, deepcopy
 from dataclasses import dataclass, fields
 import math
@@ -56,10 +56,13 @@ from embodichain.lab.task_program.compiler import (
     CompiledTaskProgramValidator,
 )
 from .bindings import SimulationSceneBinding
+from .stability import SimulationStabilityConditionCfg
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.lab.sim.sensors.base_sensor import BaseSensor
+    from .support_evidence import SupportObservationRegistry
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +72,11 @@ class _SimulationSettleTarget:
     canonical_id: str
     kind: str
     native_entity: Any
+
+
+@dataclass
+class _PolicyLifetime:
+    closed: bool = False
 
 
 @configclass
@@ -145,6 +153,9 @@ class SimulationSegmentPolicyPort:
         env_ids: Optional stable logical row IDs. They describe correlation,
             not simulator row indices; simulator rows remain ordered exactly as
             returned by the robot and bound entities.
+        support_registry: Explicit runtime-owned native support observers for
+            declared support conditions.
+        sensor_suite: Host-owned sensor mapping driving those same instances.
 
     The same instance implements both ``SegmentPostPolicyPort`` and
     ``SegmentValidatorPort``. Unknown policy types, presets, canonical IDs, or
@@ -157,9 +168,14 @@ class SimulationSegmentPolicyPort:
         robot: Robot,
         scene_binding: SimulationSceneBinding,
         *,
-        settle_presets: Mapping[str, DynamicSettleMonitorCfg] | None = None,
+        settle_presets: (
+            Mapping[str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg]
+            | None
+        ) = None,
         env_ids: torch.Tensor | None = None,
         step_dt: float | None = None,
+        support_registry: SupportObservationRegistry | None = None,
+        sensor_suite: MutableMapping[str, BaseSensor] | None = None,
     ) -> None:
         if type(scene_binding) is not SimulationSceneBinding:
             raise TypeError("scene_binding must be exactly SimulationSceneBinding.")
@@ -188,7 +204,9 @@ class SimulationSegmentPolicyPort:
         )
         if not isinstance(selected_presets, Mapping) or not selected_presets:
             raise ValueError("settle_presets must be a non-empty mapping.")
-        normalized_presets: dict[str, DynamicSettleMonitorCfg] = {}
+        normalized_presets: dict[
+            str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg
+        ] = {}
         for preset_id, cfg in selected_presets.items():
             if (
                 type(preset_id) is not str
@@ -199,9 +217,12 @@ class SimulationSegmentPolicyPort:
                     "Settle preset IDs must be non-empty strings without outer "
                     "whitespace."
                 )
-            if not isinstance(cfg, DynamicSettleMonitorCfg):
+            if (
+                not isinstance(cfg, DynamicSettleMonitorCfg)
+                and type(cfg) is not SimulationStabilityConditionCfg
+            ):
                 raise TypeError(
-                    "settle_presets values must be DynamicSettleMonitorCfg values."
+                    "settle_presets require dynamic monitors or typed stability conditions."
                 )
             normalized_presets[preset_id] = cfg.snapshot()
 
@@ -213,12 +234,15 @@ class SimulationSegmentPolicyPort:
         ):
             raise ValueError("step_dt must be finite and positive when supplied.")
         if step_dt is None and any(
-            isinstance(cfg, SimulationSettleMonitorCfg)
-            and cfg.measurement == "pose_delta"
+            type(cfg) is SimulationStabilityConditionCfg
+            or (
+                isinstance(cfg, SimulationSettleMonitorCfg)
+                and cfg.measurement == "pose_delta"
+            )
             for cfg in normalized_presets.values()
         ):
             raise ValueError(
-                "Pose-delta settling requires an explicit control step_dt."
+                "Pose-delta or condition settling requires an explicit control step_dt."
             )
 
         self._simulation = simulation
@@ -242,6 +266,45 @@ class SimulationSegmentPolicyPort:
         self._validator_results: dict[int, dict[str, object]] = {}
         self._validator_active_masks: dict[int, torch.Tensor] = {}
         self._lift_baselines: dict[int, torch.Tensor] = {}
+        self._lifetime = _PolicyLifetime()
+        self._condition_runtime = None
+        conditions = {
+            name: cfg
+            for name, cfg in normalized_presets.items()
+            if type(cfg) is SimulationStabilityConditionCfg
+        }
+        if conditions:
+            from ._stability_runtime import _ConditionStabilityRuntime
+
+            self._condition_runtime = _ConditionStabilityRuntime(
+                simulation,
+                robot,
+                scene_binding,
+                conditions,
+                step_dt=step_dt,
+                registry=support_registry,
+                sensor_suite=sensor_suite,
+            )
+
+    def bind_clock(self, clock: Any) -> None:
+        """Bind the existing environment clock for explicitly declared conditions.
+
+        Args:
+            clock: Canonical environment execution clock, never advanced here.
+        """
+        self._require_open()
+        if self._condition_runtime is not None:
+            self._condition_runtime.bind_clock(clock)
+
+    def close_runtime_resources(self) -> None:
+        """Mark condition sessions closed without destroying borrowed resources."""
+        self._lifetime.closed = True
+        if self._condition_runtime is not None:
+            self._condition_runtime.close()
+
+    def _require_open(self) -> None:
+        if self._lifetime.closed:
+            raise RuntimeError("Simulation policy runtime resources are closed.")
 
     @property
     def settle_preset_ids(self) -> tuple[str, ...]:
@@ -255,12 +318,15 @@ class SimulationSegmentPolicyPort:
             A port sharing the same live scene and robot, with independent
             validator baselines, results and post-policy state.
         """
+        self._require_open()
         session = copy(self)
         session._post_policy_results = {}
         session._post_policy_success = {}
         session._validator_results = {}
         session._validator_active_masks = {}
         session._lift_baselines = {}
+        if self._condition_runtime is not None:
+            session._condition_runtime = self._condition_runtime.new_session()
         return session
 
     def validate_policy(
@@ -287,6 +353,12 @@ class SimulationSegmentPolicyPort:
                 f"Unknown settle preset {policy.cfg.preset!r}; available presets "
                 f"are {sorted(self._settle_presets)}."
             )
+        if (
+            type(self._settle_presets[policy.cfg.preset])
+            is SimulationStabilityConditionCfg
+        ):
+            self._condition_runtime.validate_policy(policy, segment=segment)
+            return
         entity_id = policy.entity.entity_id
         target = self._settle_targets.get(entity_id)
         if target is None:
@@ -334,9 +406,15 @@ class SimulationSegmentPolicyPort:
         exposed through :meth:`post_policy_result` and
         :meth:`post_policy_metadata`; no batch-level exception is raised.
         """
+        self._require_open()
         self.validate_policy(policy, segment=segment)
         active_mask = self._validate_active_mask(active_mask)
         preset = self._settle_presets[policy.cfg.preset]
+        if type(preset) is SimulationStabilityConditionCfg:
+            yield from self._condition_runtime.actions(
+                policy, segment=segment, active_mask=active_mask
+            )
+            return
         entity_id = policy.entity.entity_id
         target = self._settle_targets[entity_id]
         explicit_measurement = isinstance(preset, SimulationSettleMonitorCfg)
@@ -368,6 +446,7 @@ class SimulationSegmentPolicyPort:
         previous_pose: torch.Tensor | None = None
         elapsed_steps = 0
         while True:
+            self._require_open()
             if use_pose_delta:
                 sample, previous_pose = self._measure_pose_delta_settle_target(
                     target, row_indices=active_rows, previous_pose=previous_pose
@@ -417,6 +496,11 @@ class SimulationSegmentPolicyPort:
         if type(policy) is not CompiledPostPolicy:
             raise TypeError("policy must be exactly CompiledPostPolicy.")
         self._validate_segment_membership(segment, policy, kind="post policy")
+        if (
+            type(self._settle_presets.get(policy.cfg.preset))
+            is SimulationStabilityConditionCfg
+        ):
+            return self._condition_runtime.post_policy_result(policy, segment=segment)
         result = self._post_policy_success.get(id(policy))
         if result is None:
             raise RuntimeError("Post-policy result is unavailable before execution.")
@@ -438,6 +522,11 @@ class SimulationSegmentPolicyPort:
         if type(policy) is not CompiledPostPolicy:
             raise TypeError("policy must be exactly CompiledPostPolicy.")
         self._validate_segment_membership(segment, policy, kind="post policy")
+        if (
+            type(self._settle_presets.get(policy.cfg.preset))
+            is SimulationStabilityConditionCfg
+        ):
+            return self._condition_runtime.post_policy_metadata(policy, segment=segment)
         metadata = self._post_policy_results.get(id(policy))
         if metadata is None:
             raise RuntimeError("Post-policy metadata is unavailable before execution.")
@@ -449,6 +538,7 @@ class SimulationSegmentPolicyPort:
         This method only reads observed poses. Ineligible rows remain rejected,
         and non-finite observations reject their own rows during validation.
         """
+        self._require_open()
         if type(segment) is not CompiledTaskProgramSegment:
             raise TypeError("segment must be exactly CompiledTaskProgramSegment.")
         active = (
@@ -532,6 +622,7 @@ class SimulationSegmentPolicyPort:
         Returns:
             Boolean tensor with one result per simulation row.
         """
+        self._require_open()
         self.validate_validator(validator, segment=segment)
         if type(validator) is CompiledObjectStateValidator:
             return self._validate_object_state(validator)

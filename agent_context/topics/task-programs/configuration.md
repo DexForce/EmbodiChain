@@ -73,6 +73,16 @@ settling presets, grounders, endpoint transports, evidence and safety
 factories, and registered-call lowerers. Adapter creation calls
 `assert_unchanged()` and revalidates all live bindings.
 
+`runtime_services.settle_presets` is the closed serialized route to this same
+registration-owned table. Omission retains the existing dynamic presets; an
+explicit table owns its complete named selection. Components may contribute
+disjoint names, but duplicate ownership is rejected. Ordinary monitor fields
+retain `DynamicSettleMonitorCfg`; explicit `measurement` selects
+`SimulationSettleMonitorCfg`. A declared condition `kind` selects
+`SimulationStabilityConditionCfg`, with normalized owned geometry and timing.
+Support conditions include an explicit sensor UID/capacity declaration. The
+scene binding supplies native pair UIDs, and the full definition is fingerprinted.
+
 Configured environments use runnable `task.<embodiment>.yaml` deployments with
 three typed selections: `environment.component`,
 `task_program.{program,integration,execution_policy}`, and

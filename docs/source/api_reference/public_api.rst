@@ -1202,6 +1202,40 @@ embodichain.lab.task_program.integrations.simulation.handover
 
    ConfiguredHandOverPoseProvider
 
+embodichain.lab.task_program.integrations.simulation.stability
+--------------------------------------------------------------
+
+Named geometric conditions share ``SimulationTaskProgramRegistration.settle_presets``
+with ordinary dynamic settle monitors. ``SimulationStabilityConditionCfg`` owns
+its duration, timeout, pose/axis targets, attachment-drift bounds and optional
+native-support declaration. Registration snapshots and fingerprints the complete
+configuration; names do not select hidden behavior.
+
+Supported conditions declare a standard contact sensor through
+``SupportSensorDeclarationCfg``. The scene binding supplies its exact two native
+rigid UIDs; the runtime factory creates or reuses the sensor and the environment
+suite drives the same instance. Incompatible existing UIDs and missing clock,
+geometry or support inputs fail before execution. There is no geometry-only
+success fallback for native support.
+
+The standard policy port preserves the source time grid: the initial observation
+does not count toward duration, ordinary pose drift resets the anchor/window,
+and held-object failures remain latched. It yields controller-target holds and
+leaves environment stepping, cancellation and task acceptance with their owners.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.stability
+
+.. autosummary::
+
+   SupportSensorDeclarationCfg
+   SimulationStabilityConditionCfg
+
+.. autoclass:: SupportSensorDeclarationCfg
+   :members:
+
+.. autoclass:: SimulationStabilityConditionCfg
+   :members:
+
 embodichain.lab.task_program.integrations.simulation.support_evidence
 ---------------------------------------------------------------------
 
@@ -1212,8 +1246,11 @@ requires release and rebind; closing an old observer cannot detach a new owner
 registered under the same hook name. Borrowed sensors and bodies are never
 destroyed by this registry.
 
-Every physical batch has a real host acquisition timestamp and a collector-owned
-revision. An independently bound control clock qualifies support contract
+Every physical batch has a real timestamp and a collector-owned revision.
+Legacy acquisition uses the simulation clock. Strong frames and results use the
+bound environment clock and observed substep offset; their fixed mapping to
+simulation time is checked, including warmup offsets. Unobserved advancement
+cannot be hidden by rebasing that mapping. The bound clock qualifies support contract
 revision 1, including native source identity, topology, episode generation and
 the complete substep interval. Legacy metadata stays legacy even when sharing
 an observer whose strong clock is bound. Its strong-only sample serial and the

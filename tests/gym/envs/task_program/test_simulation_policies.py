@@ -106,6 +106,15 @@ class _Robot:
         self.qpos_reads.append(target)
         return (self.target_qpos if target else self.current_qpos).clone()
 
+    def get_joint_ids(self, *, name: str) -> list[int]:
+        if name != "arm":
+            raise KeyError(name)
+        return [0]
+
+    def compute_fk(self, *, qpos, name, to_matrix):
+        assert name == "arm" and to_matrix
+        return torch.eye(4).repeat(qpos.shape[0], 1, 1)
+
 
 class _Articulation:
     """Small articulation double with one measured prismatic joint."""
@@ -1076,3 +1085,127 @@ def test_measured_validator_rejects_a_different_segment_and_missing_binding() ->
     other = _measured_object_segment([{"kind": "object_lifted", "object": "cube"}])
     with pytest.raises(ValueError, match="does not belong"):
         port.validate_validator(other.validators[0], segment=segment)
+
+
+def test_declared_condition_keeps_duration_grid_and_resets_anchor_after_drift():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationStabilityConditionCfg,
+    )
+
+    cfg = SimulationStabilityConditionCfg(
+        entity="cube",
+        kind="placement",
+        target_position=(0.0, 0.0, 0.0),
+        duration=0.08,
+        timeout=0.24,
+        position_tolerance=1.0,
+        translation_drift=0.02,
+    )
+    port, entity, robot = _port(torch.zeros(2, 3), preset=cfg, step_dt=0.04)
+    cfg.duration = 9.0  # The port owns a normalized independent snapshot.
+    segment = _compiled_segment()
+    policy = segment.post_policies[0]
+    actions = port.actions(
+        policy, segment=segment, active_mask=torch.tensor([True, False])
+    )
+    next(actions)
+    entity._pose[0, 0, 3] = 0.03
+    next(actions)
+    assert port.post_policy_metadata(policy, segment=segment)["stable_seconds"] == [
+        0.0,
+        0.0,
+    ]
+    next(actions)
+    with pytest.raises(StopIteration):
+        next(actions)
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
+    metadata = port.post_policy_metadata(policy, segment=segment)
+    assert metadata["elapsed_seconds"] == 0.12
+    assert metadata["required_seconds"] == 0.08
+    assert metadata["stable_seconds"] == pytest.approx([0.08, 0.0])
+
+
+def test_held_condition_latches_loss_and_holds_failed_rows_at_observed_qpos():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationStabilityConditionCfg,
+    )
+
+    cfg = SimulationStabilityConditionCfg(
+        entity="cube",
+        kind="hold",
+        target_position=(0.0, 0.0, 0.0),
+        motion_parts=("arm",),
+        duration=0.12,
+        timeout=0.24,
+        position_tolerance=0.2,
+    )
+    port, entity, robot = _port(
+        torch.zeros(2, 3), preset=cfg, step_dt=0.04, target_qpos=torch.ones(2, 2)
+    )
+    segment = _compiled_segment()
+    policy = segment.post_policies[0]
+    actions = port.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    assert next(actions).tolist() == [[1.0, 1.0], [1.0, 1.0]]
+    entity._pose[0, 0, 3] = 0.03
+    command = next(actions)
+    assert torch.equal(command[0], robot.current_qpos[0])
+    assert command[1].tolist() == [1.0, 1.0]
+    entity._pose[0, 0, 3] = 0.0
+    next(actions)
+    with pytest.raises(StopIteration):
+        next(actions)
+    assert port.post_policy_result(policy, segment=segment).tolist() == [False, True]
+    assert port.post_policy_metadata(policy, segment=segment)["failed_mask"] == [
+        True,
+        False,
+    ]
+
+
+def test_condition_session_cleanup_stops_incomplete_sampling_without_success():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationStabilityConditionCfg,
+    )
+
+    cfg = SimulationStabilityConditionCfg(
+        entity="cube",
+        kind="upright",
+        local_axis=(0.0, 0.0, 2.0),
+        duration=0.08,
+        timeout=0.2,
+    )
+    port, _, _ = _port(torch.zeros(2, 3), preset=cfg, step_dt=0.04)
+    session = port.new_task_program_session()
+    segment = _compiled_segment()
+    policy = segment.post_policies[0]
+    actions = session.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    next(actions)
+    port.close_runtime_resources()
+    port.close_runtime_resources()
+    with pytest.raises(RuntimeError, match="closed"):
+        next(actions)
+    assert not session.post_policy_result(policy, segment=segment).any()
+
+
+def test_support_height_uses_highest_qualified_contact_without_averaging():
+    from embodichain.lab.task_program.integrations.simulation._stability_runtime import (
+        _contact_support_heights,
+    )
+
+    row = {
+        "contacts_world": [[-0.01, 0.0, 0.08], [0.01, 0.0, 0.12]],
+        "center_of_mass_world": [0.0, 0.0, 0.2],
+        "com_patch_distance_m": 0.0,
+        "com_tolerance_m": 0.003,
+        "upward_impulse": 0.1,
+    }
+    heights = _contact_support_heights(
+        torch.tensor([True, False]),
+        {"scope": "native_contact_support", "rows": [row, row]},
+        torch.zeros(2),
+    )
+    assert heights[0].item() == pytest.approx(0.12)
+    assert torch.isnan(heights[1])

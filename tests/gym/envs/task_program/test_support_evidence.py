@@ -58,6 +58,20 @@ class _Body:
         self.pose_reads += 1
         return self.pose.clone()
 
+    def get_vertices(self, *, scale=True):
+        import trimesh
+
+        return torch.tensor(
+            trimesh.creation.box(extents=[0.2, 0.2, 0.2]).vertices, dtype=torch.float32
+        ).repeat(self.num_instances, 1, 1)
+
+    def get_triangles(self):
+        import trimesh
+
+        return torch.tensor(
+            trimesh.creation.box(extents=[0.2, 0.2, 0.2]).faces, dtype=torch.int64
+        ).repeat(self.num_instances, 1, 1)
+
 
 class _Query:
     def __init__(self, count: int) -> None:
@@ -226,8 +240,8 @@ def test_positive_witness_survives_sleep_but_not_either_body_motion(moving):
 
 def test_strong_support_requires_clock_complete_window_and_positive_witness():
     sim, _, observer, clock, _ = _setup()
-    unavailable = _observe(observer, 1)
-    assert not unavailable.support.valid.any()
+    with pytest.raises(ValueError, match="execution clock"):
+        _observe(observer, 1)
     assert sim.query.fetches == 0
     observer.bind_clock(clock)
     _window(sim, observer, clock)
@@ -296,6 +310,33 @@ def test_binding_strong_clock_keeps_source_serial_separate_from_all_acquisitions
     result = _observe(observer, 1)
     assert result.support.observation_revision == 5
     assert result.metadata["rows"][0]["sample"]["serial"] == 4
+
+
+def test_strong_time_domain_tracks_an_explicit_warmup_offset():
+    sim, _, observer, clock, _ = _setup()
+    sim.time = 7.25
+    legacy = _observe(observer)
+    assert legacy.support.timestamp == 7.25
+    observer.bind_clock(clock)
+    _window(sim, observer, clock)
+    strong = _observe(observer, 1)
+    assert strong.support.valid.all() and strong.support.values.all()
+    assert strong.support.timestamp == 0.04
+    assert strong.metadata["observed_at"] == 0.04
+    assert strong.metadata["rows"][0]["sample"]["timestamp"] == 0.04
+    assert observer._last_sample.frame.timestamp == 0.04
+    assert _observe(observer).support.timestamp == pytest.approx(7.29)
+
+
+def test_clock_mapping_rejects_unobserved_time_between_complete_windows():
+    sim, _, observer, clock, _ = _setup(strong=True)
+    _window(sim, observer, clock)
+    assert _observe(observer, 1).support.values.all()
+    sim.time += 0.01
+    _window(sim, observer, clock)
+    result = _observe(observer, 1)
+    assert not result.support.valid.any()
+    assert all("clock mapping" in error for error in result.support.acquisition_errors)
 
 
 @pytest.mark.parametrize("substeps", [2, 5])
@@ -489,7 +530,7 @@ def test_delayed_after_sample_from_sensor_token_snapshot_does_not_revive_closed_
 
 def test_native_rest_envelope_bound_is_checked_without_installing_hook():
     sim, registry, observer, _, cfg = _setup()
-    registry.close()
+    registry.release("payload", "support")
     sim.objects["payload"] = _Body("payload", 2, rest_offset=0.01)
     with pytest.raises(ValueError, match="rest envelopes"):
         registry.acquire(
@@ -516,3 +557,133 @@ def test_contact_witness_owns_patch_and_pose_snapshot():
     patch[1][0, 0] = 1.0
     assert witness.update(pose, pose, None)[1][0, 0] == 0.0
     assert witness.update(pose, pose, None, invalid=True) is None
+
+
+@pytest.mark.parametrize("kind", ["stack", "supported_placement", "supported_region"])
+def test_standard_condition_port_consumes_qualified_support_on_the_original_grid(kind):
+    from embodichain.lab.task_program import decode_task_program, TaskProgramCompiler
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        SimulationSceneBinding,
+        SimulationRigidObjectBinding,
+    )
+    from embodichain.lab.task_program.integrations.simulation.policies import (
+        SimulationSegmentPolicyPort,
+    )
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationStabilityConditionCfg,
+        SupportSensorDeclarationCfg,
+    )
+
+    wp.init()
+    sim = _Simulation(2)
+    sim.objects["payload"].pose[:, 2, 3] = 0.2
+    sim.query.buffer.data[:, 2] = 0.1
+    binding = SimulationSceneBinding(
+        registry_id="support_scene",
+        rigid_objects=(
+            SimulationRigidObjectBinding(entity_id="item", simulation_uid="payload"),
+            SimulationRigidObjectBinding(entity_id="surface", simulation_uid="support"),
+        ),
+    )
+    cfg = SimulationStabilityConditionCfg(
+        entity="item",
+        kind=kind,
+        reference="surface",
+        reference_half_extents=(0.1, 0.1),
+        displacement=None if kind == "stack" else (0.0, 0.0, 0.2),
+        object_bottom=-0.1,
+        reference_top=0.1,
+        local_axis=(0, 0, 1),
+        reference_axis=(0, 0, 1),
+        duration=0.08,
+        timeout=0.24,
+        support_contract_revision=1,
+        support_sensor=SupportSensorDeclarationCfg(
+            uid="declared_support", max_contacts_per_env=4
+        ),
+    )
+    robot = SimpleNamespace(get_qpos=lambda target=False: torch.zeros(2, 1))
+    registry = SupportObservationRegistry(sim, acquisition_clock=lambda: sim.time)
+    port = SimulationSegmentPolicyPort(
+        sim,
+        robot,
+        binding,
+        settle_presets={"held_surface": cfg},
+        step_dt=0.04,
+        support_registry=registry,
+        sensor_suite=sim.sensors,
+    )
+    compiled = TaskProgramCompiler(binding.declare()).compile(
+        decode_task_program(
+            {
+                "program_id": "support_policy",
+                "targets": {},
+                "integration": {
+                    "robot_profile": "robot",
+                    "scene_registry": "support_scene",
+                    "runtime_preset": "default",
+                },
+                "program": {
+                    "kind": "segment",
+                    "name": "support",
+                    "steps": {
+                        "kind": "invoke",
+                        "call": {"kind": "pick", "object": "item"},
+                    },
+                    "post": [
+                        {
+                            "kind": "wait_stable",
+                            "entity": "item",
+                            "preset": "held_surface",
+                        }
+                    ],
+                },
+            }
+        )
+    )
+    segment = next(compiled.iter_segments())
+    policy = segment.post_policies[0]
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    sensor = sim.get_sensor("declared_support")
+
+    def step():
+        sensor.begin_control_step()
+        for _ in range(4):
+            sim.revision += 1
+            sim.time += 0.01
+            sensor.update_physics_step(0.01)
+        clock.advance_after_env_step()
+
+    step()  # Last complete action interval precedes the post-policy.
+    commands = 0
+    for command in port.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    ):
+        assert command.shape == (2, 1)
+        commands += 1
+        step()
+    assert commands == 2
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, True]
+    metadata = port.post_policy_metadata(policy, segment=segment)
+    assert metadata["clock_started_at"] == 0.04
+    assert metadata["clock_ended_at"] == 0.12
+    assert metadata["stable_seconds"] == [0.08, 0.08]
+    assert metadata["measurements"]["native_support"]["support_contract_revision"] == 1
+    assert sim.query.fetches == 12
+    registry.close()
+
+
+def test_support_registry_close_does_not_allow_reassembly_of_same_native_pair():
+    _, registry, observer, _, cfg = _setup()
+    registry.close()
+    registry.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        registry.acquire(
+            observer.object,
+            observer.reference,
+            entity_id="item",
+            reference_id="surface",
+            observer_name="support_observation",
+            sensor_cfg=cfg,
+        )

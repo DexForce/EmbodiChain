@@ -28,7 +28,43 @@ from embodichain.utils.math import (
     pose_inv,
 )
 
-__all__ = ["nearest_half_turn_pose", "rotate_rigid_grasp", "rigid_pose_displacement"]
+__all__ = [
+    "nearest_half_turn_pose",
+    "rotate_rigid_grasp",
+    "rigid_pose_displacement",
+    "pose_axis_alignment",
+]
+
+
+def pose_axis_alignment(
+    pose: torch.Tensor,
+    local_axis: Sequence[float],
+    *,
+    world_axis: Sequence[float] | None = None,
+    direction_free: bool = False,
+) -> torch.Tensor:
+    """Project a caller-normalized object axis onto a world-frame direction.
+
+    Args:
+        pose: Observed rigid transforms, shaped ``(B, 4, 4)``.
+        local_axis: Three object-local axis coordinates, normalized by the caller.
+        world_axis: Three normalized world coordinates; None selects positive Z.
+        direction_free: Whether either sign of the axis is acceptable.
+
+    Returns:
+        Per-row dot products, or their absolute values. Nonfinite pose values
+        remain nonfinite evidence; this helper selects no acceptance threshold.
+    """
+    if pose.ndim != 3 or pose.shape[-2:] != (4, 4) or not pose.is_floating_point():
+        raise ValueError("pose must be floating transforms with shape (B, 4, 4).")
+    if type(direction_free) is not bool:
+        raise TypeError("direction_free must be a bool.")
+    local = pose.new_tensor(local_axis)
+    world = pose.new_tensor((0.0, 0.0, 1.0) if world_axis is None else world_axis)
+    if local.shape != (3,) or world.shape != (3,):
+        raise ValueError("Alignment axes must have shape (3,).")
+    alignment = ((pose[:, :3, :3] @ local) * world).sum(-1)
+    return alignment.abs() if direction_free else alignment
 
 
 def rigid_pose_displacement(

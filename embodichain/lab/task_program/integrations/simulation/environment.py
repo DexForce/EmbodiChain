@@ -31,7 +31,7 @@ entry point.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from copy import deepcopy
 from dataclasses import dataclass, fields
 import math
@@ -92,6 +92,7 @@ from ..environment import (
     PlanningObservationPort,
 )
 from .policies import SimulationSegmentPolicyPort
+from .stability import SimulationStabilityConditionCfg
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -101,6 +102,16 @@ if TYPE_CHECKING:
 
 MotionGeneratorFactory = Callable[[], MotionGenerator]
 """Zero-argument factory that must return one fresh motion generator."""
+
+
+@dataclass
+class _RuntimeOwner:
+    closed: bool = False
+
+    def require_open(self) -> None:
+        if self.closed:
+            raise RuntimeError("Simulation Task Program runtime resources are closed.")
+
 
 _PLANNER_CFG_TYPES: Mapping[str, type[BasePlannerCfg]] = {
     "curobo": CuroboPlannerCfg,
@@ -455,6 +466,8 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
 
     def _capture(self, task_state: TaskState) -> PlanningContext:
         """Capture one synchronized robot and scene observation."""
+        if isinstance(self._owner_token, _RuntimeOwner):
+            self._owner_token.require_open()
         qpos = _full_robot_tensor(self._robot, "get_qpos", required=True)
         assert qpos is not None
         if (
@@ -516,6 +529,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             endpoint target ID, normally a robot control-part name.
         translation_threshold: Material scene translation threshold.
         rotation_threshold: Material scene rotation threshold.
+        sensor_suite: Environment-owned mapping used to drive declared support
+            sensors through the normal physics-substep lifecycle.
 
     The Gym cadence is attached to each live :class:`PlanningContext`.  Motion
     policy presets describe behavior; they do not own the environment's
@@ -535,6 +550,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         translation_threshold: float = 1.0e-4,
         rotation_threshold: float = 1.0e-3,
+        sensor_suite: MutableMapping[str, object] | None = None,
     ) -> None:
         if type(registration) is not SimulationTaskProgramRegistration:
             raise TypeError(
@@ -603,7 +619,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             rotation_threshold,
             field_name="rotation_threshold",
         )
-        self._owner_token = object()
+        self._owner_token = _RuntimeOwner()
 
         qpos = _full_robot_tensor(robot, "get_qpos", required=True)
         assert qpos is not None
@@ -612,14 +628,46 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             dtype=torch.long,
             device=qpos.device,
         )
-        self._segment_policy_port = SimulationSegmentPolicyPort(
-            simulation,
-            robot,
-            selected_scene_binding,
-            settle_presets=selected_settle_presets,
-            env_ids=self._env_ids,
-            step_dt=self._step_dt,
-        )
+        self._support_registry = None
+        conditions = [
+            cfg
+            for cfg in selected_settle_presets.values()
+            if type(cfg) is SimulationStabilityConditionCfg
+        ]
+        if any(cfg.support_sensor is not None for cfg in conditions):
+            if not isinstance(sensor_suite, MutableMapping):
+                raise ValueError(
+                    "Supported stability requires the environment sensor suite."
+                )
+            from .support_evidence import SupportObservationRegistry
+
+            self._support_registry = SupportObservationRegistry(
+                simulation, acquisition_clock=lambda: simulation.simulation_time
+            )
+        try:
+            self._segment_policy_port = SimulationSegmentPolicyPort(
+                simulation,
+                robot,
+                selected_scene_binding,
+                settle_presets=selected_settle_presets,
+                env_ids=self._env_ids,
+                step_dt=self._step_dt,
+                support_registry=self._support_registry,
+                sensor_suite=sensor_suite,
+            )
+        except Exception:
+            if self._support_registry is not None:
+                self._support_registry.close()
+            raise
+
+    def close_runtime_resources(self) -> None:
+        """Close owned observation hooks without stepping or destroying resources."""
+        if self._owner_token.closed:
+            return
+        self._owner_token.closed = True
+        self._segment_policy_port.close_runtime_resources()
+        if self._support_registry is not None:
+            self._support_registry.close()
 
     @classmethod
     def from_environment(
@@ -671,6 +719,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             grasp_pose_generators=grasp_pose_generators,
             translation_threshold=translation_threshold,
             rotation_threshold=rotation_threshold,
+            sensor_suite=getattr(environment, "sensors", None),
         )
 
     @property
@@ -720,12 +769,14 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
 
     def create_scene_registry(self) -> SceneRegistry:
         """Build one fresh authoritative registry from the task registration."""
+        self._owner_token.require_open()
         registry = self._scene_binding.build(self._simulation)
         self._registration.validate_scene_registry(registry)
         return registry
 
     def create_robot_skill_profile(self) -> RobotSkillProfile:
         """Build the robot profile used to lower calls to Atomic Skills."""
+        self._owner_token.require_open()
         profile = self._robot_profile_binding.build(self._robot)
         self._registration.validate_robot_profile(profile)
         return profile
@@ -735,6 +786,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         profile: RobotSkillProfile,
     ) -> AtomicActionEngine:
         """Create a fresh engine around the selected planner and exact profile."""
+        self._owner_token.require_open()
         if not isinstance(profile, RobotSkillProfile):
             raise TypeError("profile must be a RobotSkillProfile.")
         if profile.profile_id != self.robot_profile_id:
@@ -763,6 +815,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         clock: EnvironmentStepClock,
     ) -> PlanningObservationPort:
         """Create one planning port and planner-validated shared scene provider."""
+        self._owner_token.require_open()
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
         if not isinstance(engine, AtomicActionEngine):
@@ -780,6 +833,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             rotation_threshold=self._rotation_threshold,
         )
         shared = SharedTickSceneProvider(provider, self._env_ids)
+        self._segment_policy_port.bind_clock(clock)
         return SimulationPlanningObservationProvider(
             self._robot,
             shared,
@@ -870,12 +924,17 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
 
     def create_adapter(self) -> TaskProgramEnvironmentAdapter:
         """Create the exact Gym adapter with shared simulation policy ports."""
-        return TaskProgramEnvironmentAdapter(
-            self,
-            step_dt=self._step_dt,
-            joint_command_mode=self._joint_command_mode,
-            registration=self._registration,
-        )
+        self._owner_token.require_open()
+        try:
+            return TaskProgramEnvironmentAdapter(
+                self,
+                step_dt=self._step_dt,
+                joint_command_mode=self._joint_command_mode,
+                registration=self._registration,
+            )
+        except Exception:
+            self.close_runtime_resources()
+            raise
 
     def _create_motion_generator(self) -> MotionGenerator:
         """Create and validate one exact motion generator."""

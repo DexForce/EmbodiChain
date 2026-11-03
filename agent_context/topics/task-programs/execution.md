@@ -55,6 +55,21 @@ determine the expected raw value.
 reward, reset, and persistence. Final success is published only after every
 segment lifecycle completes normally.
 
+Named geometric/held/support stability conditions execute through the standard
+`SimulationSegmentPolicyPort`; they do not install another constraints registry.
+The initial sample does not count toward duration. Ordinary drift resets the
+object/reference anchors, while a held-state failure stays latched for the row.
+Native support and qualified planar-region inputs remain distinct measurements;
+missing acquisition cannot become geometric success. Pure task/report matching
+stays outside Lab and can consume owned condition data without a runtime.
+
+The simulation factory owns support observer reuse across bridges and installs
+the same native sensor instances in the public environment suite. Closing an
+environment keeps the demo executor's existing abort handshake, discards/finalizes
+recorders, closes runtime hooks, then destroys simulation. Close never guesses an
+action acknowledgement or steps physics; incomplete manual execution remains
+incomplete, and closed adapters/factories reject further assembly/acquisition.
+
 Sequential segments reuse one static workflow analysis per uninterrupted
 sequential stretch; parallel barriers stop this reuse across branches. Each
 executed call still grounds from a fresh observation and checks compiler/catalog
