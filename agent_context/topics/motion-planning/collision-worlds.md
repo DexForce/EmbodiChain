@@ -10,7 +10,8 @@ binding. Return to [motion planning](motion-planning.md) for other entry points.
 | Generic world declaration | `embodichain/lab/sim/motion/planners/base_planner.py` → `CollisionWorldInfo` |
 | Option copying and per-attempt binding | `embodichain/lab/sim/motion/motion_generator.py` |
 | cuRobo world config, cache and updates | `embodichain/lab/sim/motion/planners/curobo/curobo_planner.py` |
-| Physical collision descriptors to native scene | `embodichain/lab/sim/motion/planners/curobo/curobo_yaml.py` |
+| Collision-shape descriptors to native scene | `embodichain/lab/sim/motion/planners/curobo/curobo_yaml.py` |
+| Owned observed query/payload values and scoped motion factory | `embodichain/lab/sim/motion/planners/curobo/payload.py` |
 | Registry/provider agreement | `embodichain/lab/task_program/semantics/scene.py` → `SceneRegistry` |
 
 ## Logical identity survives geometry expansion
@@ -49,6 +50,31 @@ created for EEF planning; only a cold validation call creates a joint backend.
 Shared pose conventions belong to [simulation](../simulation-system/simulation-system.md).
 cuRobo goal/scene adapters alone convert `xyzw` to native `wxyz`, exactly once;
 homogeneous dynamic-pose matrices need no quaternion conversion until then.
+
+## Observed query snapshots
+
+`CuroboQuerySnapshot` owns full observed joint positions and an explicit
+`world_to_base` transform. Its optional `CuroboPayload` owns object identity,
+control part, local sphere envelope and same-observation world pose. These are
+runtime observations, not serialized configuration. All world providers must be
+`CollisionObjectSnapshot` values projected with the same transform; the planner
+does not reread live object or robot-base poses in this mode.
+
+The opt-in supports one control part and B=1, disabled CUDA graphs, a static
+world and preserved native samples. Passive joint locks use the observed full
+qpos in both native planning and the no-payload exact-sample checker. Payloads
+attach only to distinct buffers owned by the fresh backend's IK/optimization/
+metric models, with alias deduplication and cleanup on failure/close. Arbitrary
+trajectory validation with payload is unavailable because its separate checker
+does not own those attachments; direct calls fail closed. Default planner
+behavior without a query snapshot is unchanged.
+
+`curobo_motion_generator()` provides a context-managed standard facade and makes
+no phase decisions. Callers must choose explicit backend velocity/acceleration
+options when switching strategies; a fixed-grid policy's absent acceleration
+budget is not a substitute for a selected backend budget. Returned trajectories
+retain ownership after closing. Input mesh envelopes and planner spheres do not
+establish native cooked equivalence, CCD or physical task acceptance.
 
 ## Shared versus per-environment worlds
 

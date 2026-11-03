@@ -1030,6 +1030,44 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
+embodichain.lab.sim.motion.planners.curobo.payload
+--------------------------------------------------
+
+Runtime observation values for a fresh B=1 cuRobo query. Full joint state and
+world-to-base transform belong to the query snapshot; an optional carried body
+owns its identity, control part, local spheres and observed world pose. These
+values are separate from serialized planner configuration.
+
+The owned motion factory closes backend-local attachments on exit and makes no
+skill-phase decisions. Queries require CUDA graphs off, a static snapshot world
+and preserved native samples. No-payload exact trajectory checks retain observed
+passive locks; arbitrary trajectory checks with payload fail closed because their
+separate checker does not own those attachments.
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.curobo.payload
+
+.. autosummary::
+
+   CuroboPayload
+   CuroboQuerySnapshot
+   curobo_motion_generator
+
+embodichain.lab.sim.scene.collision_sources
+-------------------------------------------
+
+Explicit collision descriptors and same-observation poses become owned planner
+providers through one caller-supplied world-to-frame transform. No pose getter
+is called and no scale is applied twice. The USD link-box reader preserves
+connected-component order and its conservative input-envelope policy.
+
+.. currentmodule:: embodichain.lab.sim.scene.collision_sources
+
+.. autosummary::
+
+   CollisionObjectSnapshot
+   read_articulation_link_boxes
+   snapshot_collision_sources
+
 embodichain.lab.sim.motion.ik
 -----------------------------
 
@@ -1102,6 +1140,24 @@ embodichain.lab.sim.scene.expansion.persistence
    LoadedSceneVariants
    save_scene_variants
    load_scene_variants
+
+embodichain.lab.sim.scene.mesh_snapshot
+---------------------------------------
+
+Capture scaled rigid visual envelopes and ordered articulation collision-input
+components through plain UID/link mappings. Geometry stays in owning frames
+until supplied observations are projected. Planner roles are neutral metadata;
+missing or unsupported input geometry remains unavailable. These snapshots do
+not replace native cooked-shape, rest-offset, contact, or CCD evidence.
+
+.. currentmodule:: embodichain.lab.sim.scene.mesh_snapshot
+
+.. autosummary::
+
+   SceneMeshComponent
+   SceneMeshSnapshot
+   capture_scene_meshes
+   iter_scene_components
 
 embodichain.lab.task_program.integrations.simulation.handover
 -------------------------------------------------------------
