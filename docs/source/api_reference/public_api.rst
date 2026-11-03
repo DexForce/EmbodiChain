@@ -667,6 +667,166 @@ The caller retains ownership of its input and destination asset paths.
 
 .. autofunction:: process_obj
 
+embodichain.gen_sim.task_spec
+-----------------------------
+
+Simulator-independent task identity, predicate evaluation and content-addressed
+storage. TaskSpec describes roles, initial and final conditions, invariants,
+bounded temporal conditions and ordered milestones; callers supply observations.
+Missing evidence remains unavailable and cannot produce a certificate.
+
+``TaskSpec.from_dict`` decodes existing instances through the same semantic-hash
+validation as JSON documents and returns independent nested values. Use a new
+TaskSpec (for example, ``dataclasses.replace``) when intentionally changing its
+normative conditions; mutating a nested value invalidates the previous identity.
+Valid documents retain their hashes. Task identifiers, instructions and metadata
+are provenance rather than normative identity.
+
+.. currentmodule:: embodichain.gen_sim.task_spec
+
+.. autosummary::
+
+   CANONICALIZATION_VERSION
+   EVALUATION_STATUSES
+   KNOWN_PREDICATES
+   MILESTONE_SCHEMA
+   PREDICATE_OPERATORS
+   TASK_SPEC_SCHEMA
+   EvaluationReport
+   EvaluationStatus
+   MilestoneSpec
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   RoleSpec
+   TaskRequirement
+   TaskSpec
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+   TaskSpecValidationError
+   TaskTemplate
+   TemporalCondition
+   TemporalSpec
+   canonical_hash
+   canonical_json
+   canonicalize
+   evaluate_predicate
+   evaluate_task_spec
+   evaluate_task_template
+   evaluate_temporal_condition
+   json_snapshot
+   lookup_observation
+   validate_task_spec
+   validate_task_template
+
+embodichain.gen_sim.task_spec.canonicalization
+----------------------------------------------
+
+Deterministic JSON snapshots and SHA-256 identities. Nonfinite numbers,
+callables, byte strings and unordered sets are rejected before serialization.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.canonicalization
+
+.. autosummary::
+
+   CANONICALIZATION_VERSION
+   canonical_hash
+   canonical_json
+   canonicalize
+   json_snapshot
+
+embodichain.gen_sim.task_spec.contracts
+---------------------------------------
+
+Logical role requirements for downstream grounding, including cardinality,
+affordances, attributes and declared initial state. No simulator handles are
+stored in these contracts.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.contracts
+
+.. autosummary::
+
+   RoleSpec
+
+embodichain.gen_sim.task_spec.expressions
+-----------------------------------------
+
+A finite vocabulary of observation-backed predicates and bounded temporal
+conditions. Evaluations distinguish satisfied, failed, unknown, unavailable and
+not-run outcomes; an incomplete always-window cannot certify success.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.expressions
+
+.. autosummary::
+
+   EVALUATION_STATUSES
+   KNOWN_PREDICATES
+   PREDICATE_OPERATORS
+   EvaluationStatus
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   TemporalCondition
+   TemporalSpec
+   evaluate_predicate
+   evaluate_temporal_condition
+   lookup_observation
+
+embodichain.gen_sim.task_spec.registry
+--------------------------------------
+
+Validated TaskSpec documents are stored by semantic hash using atomic file
+replacement. Reads reject corrupt or mismatched identities. Metadata differences
+do not create different semantic identities; existing cache entries are reused
+unless replacement is requested.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.registry
+
+.. autosummary::
+
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+
+embodichain.gen_sim.task_spec.spec
+----------------------------------
+
+Normative task models and their canonical JSON form. Milestone dependencies
+must form an acyclic graph; each milestone requires its predicates to hold in one
+snapshot strictly after its predecessors. ``TaskTemplate`` is an alias of
+``TaskSpec`` for callers using the earlier spelling.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.spec
+
+.. autosummary::
+
+   MILESTONE_SCHEMA
+   TASK_SPEC_SCHEMA
+   MilestoneSpec
+   TaskRequirement
+   TaskSpec
+   TaskTemplate
+
+embodichain.gen_sim.task_spec.validation
+----------------------------------------
+
+Validate documents or instances, then evaluate caller-provided snapshots and
+trajectories. A certificate is ready only when all required checks are satisfied.
+These functions do not acquire physical evidence or execute a task. The template
+spellings are aliases of the TaskSpec functions.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.validation
+
+.. autosummary::
+
+   EvaluationReport
+   TaskSpecValidationError
+   evaluate_task_spec
+   evaluate_task_template
+   validate_task_spec
+   validate_task_template
+
 embodichain.lab.gym.envs.base_env
 ---------------------------------
 
