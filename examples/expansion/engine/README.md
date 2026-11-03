@@ -15,6 +15,15 @@ Complete source/backend matrices and broader atlas/motion recipe qualification
 remain follow-up work. Portable calibration/attachment export and independent
 postprocessing recovery are implemented and validated. The CLI rejects unsupported combinations rather than claiming full coverage.
 
+## Interactive acceptance showcase
+
+The [full showcase](showcase/README.md) pairs planning-generated UR5 experts with
+Real2Sim prototype-driven Franka experts under the same Task Program execution
+chain. Run `embodichain run-example expansion/engine/showcase --output outputs/expansion_showcase --open`
+for measured 3D/RGB-D comparisons, per-capability checks, recovery diagnostics and
+portable dataset verification. `--mode quick` samples a smaller subset; unrun
+capabilities remain explicit. `--reuse` rebuilds the offline page without a World.
+
 ## Run a configured job
 
 From the repository root, with the simulation dependencies installed:

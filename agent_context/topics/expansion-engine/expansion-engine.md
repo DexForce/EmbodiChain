@@ -32,7 +32,9 @@ before mutating the World.
 Semantic IDs pin sampling inputs, while execution IDs describe mutable resource
 budgets and postprocessing. Recipe IDs survive interrupted retries and B changes;
 new attempt IDs distinguish physical executions, and persistent job-instance IDs
-separate independently collected episodes. Frozen writes are recovered before
+separate independently collected episodes. Native scene-case identity includes the
+logical recipe: independently prepared recipes must not share trajectory-only
+coverage admission merely because their sampled physical values match. Frozen writes are recovered before
 allocating new attempts. A hard-loss time budget is an explicit lower bound.
 
 Confirmed parents may render/export before the collection target is met. Stage
@@ -80,3 +82,11 @@ Focused coverage lives in `tests/lab/expansion/`, `tests/data_pipeline/test_medi
 `tests/sim/scene/` and the existing Task Program/Real2Sim suites. Native qualification
 runs in isolated processes. Benchmark accepted-and-confirmed throughput with
 `scripts/benchmark/expansion/offline_collection.py`; report setup and media costs.
+
+The interactive acceptance example lives in `examples/expansion/engine/showcase/`.
+It composes public Engine workflows and ordinary example helpers; it must not own
+another task runtime or silently alter acceptance rules. Preview geometry uses
+measured state plus explicitly labeled FK, and pure-visual children retain their
+physical parent's clock. Qualification requires admitted operator evidence, not
+just a requested profile or completed nominal episodes. Report completeness and
+capability acceptance are separate, including diagnostic unsupported combinations.

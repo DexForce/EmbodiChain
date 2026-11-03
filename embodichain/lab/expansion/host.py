@@ -612,6 +612,11 @@ class GymExpansionHost:
                         recipe.compatibility.key,
                         physical[row],
                         parameters.get("scene_candidate_id"),
+                        # Each recipe owns an independently prepared physical
+                        # scene, even when its sampled values match another.
+                        # Sharing a case would let trajectory-only coverage
+                        # discard distinct requested recipes.
+                        recipe.recipe_id,
                     )
                 ),
                 initial_id,

@@ -312,3 +312,48 @@ def test_native_task_program_two_rows_one_world(source):
         timeout=180,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _equal_parameter_engine_probe(output: str) -> None:
+    """Two requested recipes may share geometry without being one coverage cell."""
+    from embodichain.lab.expansion import load_expansion_job, run_expansion_job
+    from embodichain.lab.expansion.journal import ExpansionJournal
+
+    root = Path(__file__).resolve().parents[3]
+    cfg = load_expansion_job(root / "examples/expansion/engine/job.default.yaml")
+    cfg.output_dir = output
+    cfg.batch_size = cfg.target_episodes = cfg.max_attempts = 2
+    cfg.capture_media = False
+    cfg.mass_scale = {}
+    cfg.friction = {}
+    result = run_expansion_job(cfg)
+    assert result["committed"] == result["attempts"] == 2, result
+    records = ExpansionJournal(output).attempts()
+    assert len({r["case"]["scene_case_id"] for r in records}) == 2
+    assert len({r["recipe_id"] for r in records}) == 2
+    assert all(r["status"] == "committed" for r in records)
+
+
+@pytest.mark.requires_sim
+@pytest.mark.slow
+def test_native_engine_keeps_distinct_recipes_with_equal_physical_parameters(tmp_path):
+    command = "import os,runpy,sys;runpy.run_path(sys.argv[1])['_equal_parameter_engine_probe'](sys.argv[2]);sys.stdout.flush();sys.stderr.flush();os._exit(0)"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            command,
+            str(Path(__file__).resolve()),
+            str(tmp_path / "job"),
+        ],
+        env={
+            **os.environ,
+            "EMBODICHAIN_SIM_EXIT_PROCESS": "0",
+            "OMP_NUM_THREADS": "1",
+            "MKL_NUM_THREADS": "1",
+        },
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
