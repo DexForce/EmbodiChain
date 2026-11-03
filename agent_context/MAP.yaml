@@ -439,6 +439,21 @@ topics:
     extensions/embodichain_tasks/configs/tasks/manipulation/, tests/lab/task_program/]
   related_topics: [atomic-actions, env-framework, simulation-system, motion-planning, sensor-system, data-pipeline]
   status: active
+- id: task-spec
+  title: Task Specification
+  aliases: [task specification, normative task specification, 任务规范, 任务规范校验]
+  keywords: [TaskSpec, TaskSpecCache, TaskRequirement, MilestoneSpec, evaluate_task_spec,
+    validate_task_spec, semantic_hash, certificate_ready]
+  paths: [topics/task-spec/task-spec.md]
+  source_of_truth:
+  - embodichain/gen_sim/task_spec/spec.py
+  - embodichain/gen_sim/task_spec/expressions.py
+  - embodichain/gen_sim/task_spec/validation.py
+  - embodichain/gen_sim/task_spec/registry.py
+  - embodichain/gen_sim/task_spec/canonicalization.py
+  watch_paths: [embodichain/gen_sim/task_spec/, tests/gen_sim/task_spec/]
+  related_topics: [gen-sim, task-programs]
+  status: active
 - id: gen-sim
   title: Gen Sim
   aliases: [gen sim, Scene Engine, SimReady, scene generation, scene editing, scene-randomization,
