@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
+from embodichain.lab.sim.scene._validation import _owned_b1_pose as _owned_pose
+
 if TYPE_CHECKING:
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
     from .curobo_planner import CuroboPlannerCfg
@@ -34,37 +36,6 @@ __all__ = ["CuroboPayload", "CuroboQuerySnapshot", "curobo_motion_generator"]
 
 # Preserve the qualified source model's reserved link identity and ordering.
 _PAYLOAD_LINK = "gen_sim_payload"
-
-
-def _owned_pose(value: torch.Tensor, name: str) -> torch.Tensor:
-    if (
-        not isinstance(value, torch.Tensor)
-        or value.shape != (1, 4, 4)
-        or not value.is_floating_point()
-    ):
-        raise ValueError(f"{name} requires one finite floating pose (1, 4, 4).")
-    owned = value.detach().clone()
-    # B=1 construction validates a tiny metadata matrix on CPU, avoiding a
-    # cuSOLVER initialization merely to check a 3x3 determinant on the sim GPU.
-    matrix = owned.to(device="cpu", dtype=torch.float64)
-    rotation = matrix[0, :3, :3]
-    if (
-        not torch.isfinite(matrix).all()
-        or not torch.allclose(
-            matrix[0, 3], matrix.new_tensor([0, 0, 0, 1]), atol=1e-6, rtol=0
-        )
-        or not torch.allclose(
-            rotation.T @ rotation,
-            torch.eye(3, device=matrix.device, dtype=matrix.dtype),
-            atol=1e-5,
-            rtol=0,
-        )
-        or not torch.isclose(
-            torch.linalg.det(rotation), matrix.new_tensor(1.0), atol=1e-5, rtol=0
-        )
-    ):
-        raise ValueError(f"{name} must be a rigid transform.")
-    return owned
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

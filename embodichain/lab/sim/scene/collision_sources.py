@@ -25,6 +25,7 @@ from pathlib import Path
 import torch
 
 from embodichain.lab.sim.objects.rigid_object import CollisionShapeDesc, RigidBodyShape
+from ._validation import _owned_b1_pose
 
 __all__ = [
     "CollisionObjectSnapshot",
@@ -63,11 +64,10 @@ class CollisionObjectSnapshot:
     provenance: str = "provided_collision_descriptors"
 
     def __post_init__(self) -> None:
-        if self.pose.shape != (1, 4, 4) or not torch.isfinite(self.pose).all():
-            raise ValueError("Collision snapshots require one finite pose (1, 4, 4).")
+        pose = _owned_b1_pose(self.pose, "Collision snapshot pose")
         if not all(isinstance(shape, CollisionShapeDesc) for shape in self.shapes):
             raise TypeError("Collision snapshots require CollisionShapeDesc values.")
-        object.__setattr__(self, "pose", self.pose.detach().clone())
+        object.__setattr__(self, "pose", pose)
         object.__setattr__(
             self, "shapes", tuple(_copy_shape(shape) for shape in self.shapes)
         )
@@ -170,15 +170,10 @@ def snapshot_collision_sources(
         raise ValueError(
             "Collision source shapes and observed poses must have equal IDs."
         )
-    if world_to_frame.shape != (1, 4, 4) or not torch.isfinite(world_to_frame).all():
-        raise ValueError(
-            "Collision projection requires one finite transform (1, 4, 4)."
-        )
+    world_to_frame = _owned_b1_pose(world_to_frame, "world_to_frame")
     result = {}
     for uid, values in shapes.items():
-        pose = observed_poses[uid]
-        if pose.shape != (1, 4, 4) or not torch.isfinite(pose).all():
-            raise ValueError(f"scene_pose_unavailable:{uid}")
+        pose = _owned_b1_pose(observed_poses[uid], f"scene_pose:{uid}")
         result[uid] = CollisionObjectSnapshot(
             tuple(values),
             world_to_frame @ pose.to(world_to_frame),

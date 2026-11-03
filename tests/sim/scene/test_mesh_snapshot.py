@@ -35,7 +35,11 @@ from embodichain.lab.sim.scene.mesh_snapshot import (
     capture_scene_meshes,
     iter_scene_components,
 )
-from embodichain.lab.sim.scene.collision_sources import read_articulation_link_boxes
+from embodichain.lab.sim.scene.collision_sources import (
+    CollisionObjectSnapshot,
+    read_articulation_link_boxes,
+    snapshot_collision_sources,
+)
 
 
 @pytest.mark.parametrize(
@@ -72,6 +76,26 @@ def test_public_snapshot_copies_supplied_component_arrays():
     component.faces.fill_(0)
     torch.testing.assert_close(snapshot.components[0].vertices, vertices)
     torch.testing.assert_close(snapshot.components[0].faces, faces)
+
+
+@pytest.mark.parametrize("invalid", ["scaled", "sheared", "reflected", "last_row"])
+def test_collision_snapshot_rejects_nonrigid_owner_and_projection_poses(invalid):
+    pose = torch.eye(4)[None]
+    if invalid == "scaled":
+        pose[0, 0, 0] = 2
+    elif invalid == "sheared":
+        pose[0, 0, 1] = 0.2
+    elif invalid == "reflected":
+        pose[0, 0, 0] = -1
+    else:
+        pose[0, 3, 0] = 0.1
+    identity = torch.eye(4)[None]
+    with pytest.raises(ValueError, match="rigid transform"):
+        CollisionObjectSnapshot((), pose)
+    with pytest.raises(ValueError, match="rigid transform"):
+        snapshot_collision_sources({"body": ()}, {"body": pose}, identity)
+    with pytest.raises(ValueError, match="rigid transform"):
+        snapshot_collision_sources({"body": ()}, {"body": identity}, pose)
 
 
 def _usd(path: Path, *, nonconvex=False):
