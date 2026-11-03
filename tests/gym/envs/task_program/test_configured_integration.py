@@ -2897,3 +2897,171 @@ def test_real2sim_collection_profile_rejects_ambiguous_limits_and_recipes(
     path.write_text(yaml.safe_dump({**payload, "unexpected": 1}))
     with pytest.raises(ValueError, match="unknown Real2Sim profile field"):
         load_real2sim_tabletop_profile(path)
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_routed_transport_is_declared_owned_and_lowered_without_live_reads(relative):
+    from types import SimpleNamespace
+    from embodichain.lab.task_program.semantics import (
+        SceneEntityRegistration,
+        SceneRegistry,
+        SemanticEffectKind,
+    )
+    from embodichain.lab.task_program.integrations.simulation.transport import (
+        RoutedMoveHeldObjectLowererFactory,
+    )
+
+    pose = (
+        {
+            "kind": "scene_entity",
+            "entity_id": "cup",
+            "relative_pose": torch.eye(4).reshape(-1).tolist(),
+            "world_orientation": torch.eye(3).reshape(-1).tolist(),
+        }
+        if relative
+        else {
+            "kind": "pose",
+            "position": [0.1, 0.2, 0.3],
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 2.0],
+        }
+    )
+    raw = {
+        "kind": "move_held_object",
+        "routes": [{"object_id": "bottle", "target_id": "destination", "pose": pose}],
+    }
+    payload = _tableware_integration_payload("pour_water")
+    lowerers = payload["runtime_services"]["registered_semantic_lowerers"]
+    index = next(
+        i for i, item in enumerate(lowerers) if item["kind"] == "move_held_object"
+    )
+    lowerers[index] = raw
+    configured = _decode_configured_task_program_integration(payload)
+    factory = next(
+        f
+        for f in configured.registration.registered_semantic_lowerer_factories
+        if f.call_id == "simulation.move_held_object"
+    )
+    assert type(factory) is RoutedMoveHeldObjectLowererFactory
+    fingerprint = configured.registration.fingerprint_payload()
+    raw["routes"][0]["object_id"] = "mutated"
+    if relative:
+        pose["relative_pose"][3] = 99.0
+    else:
+        pose["position"][0] = 99.0
+    assert configured.registration.fingerprint_payload() == fingerprint
+    robot = object()
+    registry = SceneRegistry(
+        [
+            SceneEntityRegistration(
+                SceneObjectRef(name),
+                state_provider=SimpleNamespace(
+                    observe=lambda **kwargs: pytest.fail("lowering read live state")
+                ),
+            )
+            for name in ("bottle", "cup")
+        ]
+    )
+    lowerer = factory.create(
+        simulation=None,
+        robot=robot,
+        scene_registry=registry,
+        engine=SimpleNamespace(robot=robot),
+    )
+    other = factory.create(
+        simulation=None,
+        robot=robot,
+        scene_registry=registry,
+        engine=SimpleNamespace(robot=robot),
+    )
+    assert other is not lowerer
+    arguments = {"target": "destination", "object": "bottle"}
+    if relative:
+        arguments["reference"] = "cup"
+    call = RegisteredSemanticCall(call_id=factory.call_id, arguments=arguments)
+    lowered = lowerer.lower(
+        call, context=None, bound=None, option_template=MoveHeldObjectOptions()
+    )
+    assert lowered.registered_effect.effect_kind is SemanticEffectKind.ATTACH
+    assert lowered.registered_effect.held_objects[0].object_id == "bottle"
+    target = lowered.goal.object_target_pose
+    if relative:
+        assert target.entity_id == "cup"
+        torch.testing.assert_close(target.relative_pose, torch.eye(4))
+        torch.testing.assert_close(target.world_orientation, torch.eye(3))
+    else:
+        torch.testing.assert_close(target[:3, 3], torch.tensor([0.1, 0.2, 0.3]))
+        torch.testing.assert_close(target[:3, :3], torch.eye(3))
+    lookahead = lowerer.pick_lookahead_targets(
+        call, picked_object=SceneObjectRef("bottle"), bound=None, previous_target=None
+    )
+    assert len(lookahead) == 1
+    assert (
+        lowerer.pick_lookahead_targets(
+            call, picked_object=SceneObjectRef("cup"), bound=None, previous_target=None
+        )
+        is None
+    )
+    target_matrix = target.relative_pose if relative else target
+    target_matrix.fill_(99)
+    again = lowerer.lower(
+        call, context=None, bound=None, option_template=MoveHeldObjectOptions()
+    ).goal.object_target_pose
+    assert not torch.equal(again.relative_pose if relative else again, target_matrix)
+    with pytest.raises(ValueError, match="object-target route"):
+        lowerer.lower(
+            RegisteredSemanticCall(
+                call_id=factory.call_id,
+                arguments={"target": "destination", "object": "cup"},
+            ),
+            context=None,
+            bound=None,
+            option_template=MoveHeldObjectOptions(),
+        )
+
+
+@pytest.mark.parametrize(
+    "damage", ["mixed", "duplicate", "unknown_pose_field", "nonrigid"]
+)
+def test_routed_transport_rejects_ambiguous_or_invalid_declarations(damage):
+    route = {
+        "object_id": "bottle",
+        "target_id": "destination",
+        "pose": {
+            "kind": "scene_entity",
+            "entity_id": "cup",
+            "relative_pose": torch.eye(4).reshape(-1).tolist(),
+        },
+    }
+    raw = {"kind": "move_held_object", "routes": [route]}
+    if damage == "mixed":
+        raw["target_id"] = "legacy"
+    elif damage == "duplicate":
+        raw["routes"].append(deepcopy(route))
+    elif damage == "unknown_pose_field":
+        route["pose"]["planner"] = "arbitrary"
+    else:
+        route["pose"]["relative_pose"][0] = 2.0
+    with pytest.raises((TypeError, ValueError)):
+        _decode_registered_lowerer(raw, path="lowerer")
+
+
+@pytest.mark.parametrize("missing", ["object", "reference"])
+def test_routed_transport_missing_entities_reject_before_runtime_assembly(missing):
+    payload = _tableware_integration_payload("pour_water")
+    routes = [
+        {
+            "object_id": "missing" if missing == "object" else "bottle",
+            "target_id": "destination",
+            "pose": {
+                "kind": "scene_entity",
+                "entity_id": "missing" if missing == "reference" else "cup",
+            },
+        }
+    ]
+    lowerers = payload["runtime_services"]["registered_semantic_lowerers"]
+    index = next(
+        i for i, item in enumerate(lowerers) if item["kind"] == "move_held_object"
+    )
+    lowerers[index] = {"kind": "move_held_object", "routes": routes}
+    with pytest.raises(ValueError, match="missing"):
+        _decode_configured_task_program_integration(payload)

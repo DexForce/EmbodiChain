@@ -380,3 +380,68 @@ selection, and hosts constructing a bridge directly retain that responsibility.
    :members: validate_program, validate_manifest
 
 .. autofunction:: task_program_fingerprint
+
+Configured transport targets
+----------------------------
+
+Named ``move_held_object`` routes declare canonical carried-object identities
+and absolute or scene-relative target poses. They lower to the shared
+``MoveHeldObject`` goal, retain attachment semantics and expose corresponding
+Pick lookahead targets. Lowering reads no live state and performs no IK or
+planning. Existing single-target configurations keep their factory and effect
+contract. The route form is mutually exclusive with the legacy selector fields.
+
+.. code-block:: yaml
+
+   kind: move_held_object
+   routes:
+     - object_id: bottle
+       target_id: over_cup
+       pose:
+         kind: scene_entity
+         entity_id: cup
+
+The optional ``relative_pose`` uses a flattened entity-local SE(3) matrix;
+``world_orientation`` optionally supplies a world-frame 3x3 rotation. Absolute
+poses use ``kind: pose``, ``position`` and ``quaternion_xyzw``. Every conversion
+owns its runtime tensors; declarations remain immutable and fingerprinted.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.targets
+
+.. autoclass:: AbsolutePoseTarget
+   :members:
+
+.. autoclass:: SceneEntityTarget
+   :members:
+
+.. autodata:: ConfiguredPoseTarget
+
+.. autofunction:: resolve_pose_target
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.transport
+
+.. autoclass:: HeldObjectTransportRoute
+   :members:
+
+.. autoclass:: RoutedMoveHeldObjectLowererFactory
+   :members:
+
+Declaration-only lowerer validation
+----------------------------------
+
+Factories may implement ``RegisteredSemanticLowererSceneValidator`` to reject
+missing or ambiguous references against the immutable scene manifest during
+registration. The routed transport factory uses this optional contract;
+existing factories remain valid and keep their fingerprints. Implementations
+must not construct resources or read live state during this preflight.
+
+.. currentmodule:: embodichain.lab.task_program.integrations
+
+.. autosummary::
+
+   RegisteredSemanticLowererSceneValidator
+
+.. currentmodule:: embodichain.lab.task_program.integrations.extensions
+
+.. autoclass:: RegisteredSemanticLowererSceneValidator
+   :members:
