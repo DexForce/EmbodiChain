@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from numbers import Real
 from typing import TYPE_CHECKING, Literal
@@ -82,10 +82,37 @@ class MotionPolicy:
     """Scalar acceleration budget in joint units per second squared.
 
     For ``motion_gen``, ``None`` retains the selected backend's configured
-    budget. ``ik_interp`` requires a positive scalar budget.
+    budget. Adaptive ``ik_interp`` requires a positive scalar budget; explicit
+    ``fixed_grid`` requires ``None`` and does not certify acceleration.
     """
 
+    interpolation_mode: Literal["adaptive", "fixed_grid"] = field(
+        default="adaptive", kw_only=True
+    )
+    """Select adaptive interpolation or an unchanged count/interval grid."""
+
+    ik_seed_mode: Literal["batched", "sequential"] = field(
+        default="batched", kw_only=True
+    )
+    """Select batched IK or previous-valid-posture waypoint seeding."""
+
     def __post_init__(self) -> None:
+        if self.interpolation_mode not in {"adaptive", "fixed_grid"}:
+            raise ValueError("interpolation_mode must be adaptive or fixed_grid.")
+        if self.ik_seed_mode not in {"batched", "sequential"}:
+            raise ValueError("ik_seed_mode must be batched or sequential.")
+        if self.strategy != "ik_interp" and (
+            self.interpolation_mode != "adaptive" or self.ik_seed_mode != "batched"
+        ):
+            raise ValueError(
+                "Explicit interpolation modes require strategy='ik_interp'."
+            )
+        if self.interpolation_mode == "fixed_grid" and (
+            self.velocity_limit is not None or self.acceleration_limit is not None
+        ):
+            raise ValueError(
+                "fixed_grid requires velocity_limit=None and acceleration_limit=None."
+            )
         valid_strategies = {"motion_gen", "ik_interp"}
         if self.strategy not in valid_strategies:
             raise ValueError(
@@ -103,7 +130,11 @@ class MotionPolicy:
         for name in ("velocity_limit", "acceleration_limit"):
             value = getattr(self, name)
             if value is None:
-                if name == "velocity_limit" or self.strategy == "motion_gen":
+                if (
+                    name == "velocity_limit"
+                    or self.strategy == "motion_gen"
+                    or self.interpolation_mode == "fixed_grid"
+                ):
                     continue
             if (
                 isinstance(value, bool)
@@ -184,6 +215,8 @@ class MotionPolicy:
             is_linear=cartesian_linear,
             preserve_cartesian_samples=cartesian_linear,
             cartesian_path_sampler=cartesian_path_sampler,
+            interpolation_mode=self.interpolation_mode,
+            ik_seed_mode=self.ik_seed_mode,
         )
 
 
