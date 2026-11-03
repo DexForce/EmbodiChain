@@ -227,6 +227,45 @@ def test_continuous_path_adapter_restores_rng_and_keeps_requested_timing(tmp_pat
         )
 
 
+def test_continuous_recovery_seed_is_not_an_executed_waypoint(tmp_path):
+    generator, _ = _generator(tmp_path, speed=0.2)
+    seeds = []
+
+    def solve(*, pose, joint_seed, name):
+        seeds.append(joint_seed.clone())
+        return joint_seed[:, 0] < 0.85, torch.full_like(joint_seed, 0.94)
+
+    generator.robot.compute_ik = solve
+    pose = torch.eye(4)[None]
+    pose[:, 0, 3] = 0.94
+    options = MotionGenOptions(
+        strategy="ik_interp",
+        start_qpos=torch.tensor([[0.95]]),
+        control_part="arm",
+        sample_count=2,
+        interpolation_dt=0.1,
+        interpolation_mode="fixed_grid",
+        ik_seed_mode="sequential",
+    )
+    result = resolve_continuous_ik_path(generator, [PlanState.from_xpos(pose)], options)
+    assert result is not None and result.is_all_success()
+    reference = _REFERENCE["continuous_recovery"]
+    torch.testing.assert_close(
+        result.positions, torch.tensor(reference["positions"]), rtol=0, atol=0
+    )
+    torch.testing.assert_close(result.dt, torch.tensor(reference["dt"]), rtol=0, atol=0)
+    for seed, expected in zip(seeds, reference["seeds"], strict=True):
+        torch.testing.assert_close(seed, torch.tensor(expected), rtol=0, atol=0)
+    assert (
+        resolve_continuous_ik_path(
+            generator,
+            [PlanState.from_xpos(pose)],
+            replace(options, start_qpos=torch.zeros(1, 1)),
+        )
+        is None
+    )
+
+
 @pytest.mark.parametrize("owner", [MotionPolicy, MotionGenOptions])
 @pytest.mark.parametrize(
     "kwargs",

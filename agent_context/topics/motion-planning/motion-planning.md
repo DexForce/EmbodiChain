@@ -74,7 +74,9 @@ audit; checking the zero-speed hold is not evidence that the candidate passed.
 
 The bounded `resolve_continuous_ik_path()` adapter preserves a single path's
 time grid and restores the caller's random stream. Its numerical seed search
-accepts only B=1 and performs no simulation or state mutation. Search ledgers
+accepts only B=1 and performs no simulation or state mutation.
+Treat perturbed IK seeds as numerical hints, not executed waypoints: velocity
+checks compare each candidate to the actual preceding posture. Search ledgers
 share an outer caller-owned deadline across nested previews and isolate separate
 contexts. They do not replace `_budget.py`'s existing automatic planning hooks,
 preempt native work, or certify physical task success.

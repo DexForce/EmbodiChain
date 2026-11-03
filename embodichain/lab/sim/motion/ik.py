@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import replace
 import math
 
 import torch
@@ -49,6 +48,8 @@ def resolve_continuous_ik_path(
     The previous accepted joint posture seeds the next IK query. Bounded seed
     perturbations handle joint-limit margins, while authored/runtime velocity
     checks retain the original time grid. The caller's random stream is restored.
+    Perturbed seeds are solver hints, never executed waypoints. Speed checks use
+    the actual preceding posture; collision and effect gates remain caller-owned.
 
     Args:
         generator: Stateful owner of the robot and solver integration.
@@ -65,8 +66,10 @@ def resolve_continuous_ik_path(
         ValueError: If the request is not a single path with explicit timing,
             start posture, controlled part and end-effector pose targets.
     """
+    options.__post_init__()
     if (
-        options.start_qpos is None
+        options.strategy != "ik_interp"
+        or options.start_qpos is None
         or options.start_qpos.ndim != 2
         or options.start_qpos.shape[0] != 1
         or options.control_part is None
@@ -87,17 +90,13 @@ def resolve_continuous_ik_path(
     def solve(
         target: torch.Tensor, trial: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        result = MotionGenerator.generate(
-            generator,
-            [PlanState(move_type=MoveType.EEF_MOVE, xpos=target)],
-            options=replace(
-                options,
-                start_qpos=trial,
-                sample_count=2,
-                preserve_cartesian_samples=True,
-            ),
+        # Query IK without treating the perturbed numerical seed as an actual
+        # robot posture. The numeric resolver checks displacement from the real
+        # preceding waypoint, and the complete returned path is checked below.
+        valid, positions = generator._solve_waypoints_for_options(
+            target[:, None], trial, options
         )
-        return result.success, result.positions[:, -1]
+        return valid, positions[:, -1]
 
     # Failed searches must not perturb the later grasp-candidate random stream.
     devices = [seed.device.index] if seed.is_cuda else []
