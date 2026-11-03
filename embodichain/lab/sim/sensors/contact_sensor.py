@@ -343,16 +343,22 @@ class ContactSensor(BaseSensor):
         """
 
         self._wait_for_sample()
-        key = self._contact_sample_key()
-        if key == self._last_update_key:
+        capturing = (
+            self.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
+        )
+        key = None if capturing else self._contact_sample_key()
+        if not capturing and key == self._last_update_key:
             return
         buffer = self._fetch_contacts()
         if not self._histories:
             self._query_dropped_count.copy_(buffer.dropped_count_device)
             self._scatter_dropped_count.copy_(self._sample_scatter_dropped_count)
         self._last_update_key = key
-        self._last_contact_buffer = buffer
-        self._record_sample_stream()
+        self._last_contact_buffer = None if capturing else buffer
+        if capturing:
+            self._last_history_key = None
+        else:
+            self._record_sample_stream()
 
     def _contact_sample_key(self) -> tuple[int, int, int]:
         """Consult public query metadata so topology refreshes cannot be skipped."""
@@ -578,20 +584,25 @@ class ContactSensor(BaseSensor):
         if dt <= 0:
             raise ValueError("Contact sampling dt must be positive.")
         self._wait_for_sample()
-        key = self._contact_sample_key()
-        if key == self._last_history_key:
+        # Capturing records future work; Python cache keys cannot track replay.
+        capturing = (
+            self.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
+        )
+        key = None if capturing else self._contact_sample_key()
+        if not capturing and key == self._last_history_key:
             return
         buffer = (
             self._last_contact_buffer
-            if key == self._last_update_key
+            if not capturing and key == self._last_update_key
             else self._read_contacts()
         )
         assert buffer is not None
         self._sample_physics_contacts(buffer, dt)
         self._last_update_key = key
         self._last_history_key = key
-        self._last_contact_buffer = buffer
-        self._record_sample_stream()
+        self._last_contact_buffer = None if capturing else buffer
+        if not capturing:
+            self._record_sample_stream()
 
     def _sample_physics_contacts(self, buffer: ContactBuffer, dt: float) -> None:
         """Run the reduction on the existing caller/capture stream boundary."""

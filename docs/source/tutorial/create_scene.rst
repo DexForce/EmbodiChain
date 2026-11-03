@@ -85,7 +85,7 @@ Use ``--viser-env-ids`` for selected parallel environments and
        --viser-env-ids 0 2 \
        --viser-fps 15
 
-See :doc:`/overview/sim/viser_visualization` for the complete object support
+See :doc:`/overview/sim/visualization/viser` for the complete object support
 matrix, server settings, telemetry, and remote-access guidance.
 
 Running the simulation
@@ -146,6 +146,6 @@ Next Steps
 - :doc:`create_softbody` — Add deformable bodies to your scene
 - :doc:`robot` — Load and control a robot
 - :doc:`sensor` — Add cameras and capture sensor data
-- :doc:`/overview/sim/viser_visualization` — Configure browser visualization
+- :doc:`/overview/sim/visualization/viser` — Configure browser visualization
 - :doc:`basic_env` — Create your first Gymnasium environment
 - :doc:`/overview/sim/sim_manager` — Full SimulationManager API reference

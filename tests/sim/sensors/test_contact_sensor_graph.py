@@ -225,3 +225,92 @@ def test_cached_sample_is_ready_on_another_cuda_stream(history_sample: bool) -> 
             torch.tensor([[[0.0, 0.0, 2.0]], [[0.0, 0.0, 2.0]]], device=device),
         )
     producer.synchronize()
+
+
+@pytest.mark.parametrize("history_sample", [False, True])
+@pytest.mark.parametrize("capture_after_advance", [False, True])
+def test_outer_capture_preserves_sampling_and_eager_refresh(
+    history_sample: bool, capture_after_advance: bool
+) -> None:
+    """Warmup must not suppress captured fetch/scatter/history or eager refresh."""
+    wp.init()
+    device = torch.device("cuda:0")
+    query = _CudaQuery(device)
+    source = query.buffer.data.clone()
+
+    def fetch_async() -> ContactBuffer:
+        # Model a backend whose query must copy fresh device data on each replay.
+        query.buffer.data.copy_(source)
+        return query.buffer
+
+    query.fetch_async = fetch_async
+    owner = SimpleNamespace(
+        num_envs=2,
+        physics_step_index=0,
+        arena_offsets=torch.zeros((2, 3), device=device),
+        _spawn_scene=SimpleNamespace(
+            handles=lambda uid: tuple(
+                SimpleNamespace(path=actor.path) for actor in query.actors
+            )
+        ),
+        spawn_result=SimpleNamespace(create_contact_query=lambda *a, **kw: query),
+    )
+    sensor = ContactSensor(
+        ContactSensorCfg(
+            uid="contacts", rigid_uid_list=["cube"], max_contacts_per_env=2
+        ),
+        device,
+        owner=owner,
+    )
+    history = (
+        sensor.create_history("feet", torch.tensor([[10], [20]], device=device))
+        if history_sample
+        else None
+    )
+
+    def sample() -> None:
+        if history_sample:
+            sensor.update_physics_step(0.1)
+        else:
+            sensor.update()
+
+    def assert_sample(impulse: float) -> None:
+        assert sensor.get_data()["is_valid"].tolist() == [[True, False], [True, False]]
+        torch.testing.assert_close(
+            sensor.get_data()["impulse"][:, 0],
+            torch.full_like(sensor.get_data()["impulse"][:, 0], impulse),
+        )
+        if history is not None:
+            torch.testing.assert_close(
+                history.force,
+                torch.tensor(
+                    [[[0.0, 0.0, impulse / 0.1]], [[0.0, 0.0, impulse / 0.1]]],
+                    device=device,
+                ),
+            )
+
+    stream = torch.cuda.Stream(device=device)
+    stream.wait_stream(torch.cuda.current_stream(device))
+    with torch.cuda.stream(stream):
+        sample()
+        if capture_after_advance:
+            owner.physics_step_index += 1
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            sample()
+        # Capture has not executed a new sample. Same-step eager calls must work.
+        query.buffer.device_counts[0] = 2
+        source[:2, 9] = 0.3
+        sample()
+        assert_sample(0.3)
+        sensor.reset()
+        for impulse in (0.2, 0.5):
+            owner.physics_step_index += 1
+            source[:2, 9] = impulse
+            graph.replay()
+            assert_sample(impulse)
+        if history is not None:
+            torch.testing.assert_close(
+                history.contact_count, torch.full_like(history.contact_count, 2)
+            )
+    stream.synchronize()

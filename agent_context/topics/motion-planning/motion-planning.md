@@ -7,6 +7,8 @@
 | Planning interface, options and batch validation | `embodichain/lab/sim/motion/planners/base_planner.py` |
 | Timed inputs/results | `embodichain/lab/sim/motion/planners/utils.py` → `PlanState`, `PlanResult` |
 | Strategy, IK preparation, result normalization | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator` |
+| Fixed-time continuous IK and Cartesian target sampling | `embodichain/lab/sim/motion/ik.py`; numeric branch search in `compute/kinematics/ik_path.py` |
+| Explicit search measurements and cooperative deadlines | `embodichain/lab/sim/motion/search.py` |
 | Joint-path timing | `embodichain/lab/sim/motion/planners/toppra_planner.py`, `trapezoidal_planner.py` in that directory |
 | Cartesian geometry and scalar timing | `embodichain/lab/sim/motion/planners/se3.py`, `bezier.py`, `_scalar_time_law.py`, `_blend_constraints.py` in that directory |
 | Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
@@ -14,6 +16,7 @@
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
+| Bounded interaction pose refinement before expansion | `embodichain/lab/sim/motion/refinement.py`, with numeric fitting in `compute/trajectory/refinement.py`; [Real2Sim boundary](../data-pipeline/real2sim.md) |
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
 | Distinct trajectory variants for fixed waypoints | `embodichain/lab/sim/motion/expansion/variants.py` |
@@ -59,11 +62,35 @@ and treats the requested count as a lower bound. Required Cartesian IK
 failures fail the row; waypoints are never discarded to salvage success.
 Unsupported routes raise instead of silently selecting another strategy.
 
+`interpolation_mode="fixed_grid"` explicitly preserves the requested count and
+arrival intervals. It requires absent scalar velocity/acceleration overrides,
+intersects runtime speeds with every controlled joint's authored URDF cap, and
+rejects overspeed rows without retiming. `ik_seed_mode="sequential"` preserves
+previous-valid-posture seeds, callback order and RNG consumption; batched IK and
+adaptive timing remain defaults. Non-default modes require `ik_interp`.
+Failed execution rows hold their start. `PlanResult.rejected_candidate` retains
+owned original positions, intervals and rejected-row identities for retries and
+audit; checking the zero-speed hold is not evidence that the candidate passed.
+
+The bounded `resolve_continuous_ik_path()` adapter preserves a single path's
+time grid and restores the caller's random stream. Its numerical seed search
+accepts only B=1 and performs no simulation or state mutation.
+Treat perturbed IK seeds as numerical hints, not executed waypoints: velocity
+checks compare each candidate to the actual preceding posture. Search ledgers
+share an outer caller-owned deadline across nested previews and isolate separate
+contexts. They do not replace `_budget.py`'s existing automatic planning hooks,
+preempt native work, or certify physical task success.
+
 Normalization must preserve the meaning of timing, derivatives, failure rows
 and backend diagnostics together. Read the
 [result contract](planner-details.md#normalization-and-capabilities) before
 changing interpolation or output sample counts. Final sampled collision checks
 do not establish continuous collision freedom or derivative compliance.
+
+Joint scene/deployment searches install a context-local cooperative call budget
+through `motion/_budget.py`. Robot IK, motion generation and Atomic planning
+boundaries share that host budget, including retries. See
+[scene feasibility](../scene-expansion/feasibility.md) for quota and evidence scope.
 
 ## Compute and execution ownership
 
@@ -105,6 +132,10 @@ fingerprints, and supplies no path or physical-success certificate.
 
 ## Trajectory augmentation boundary
 
+Real2Sim source templates and protected mapped retiming integrate with this
+boundary; their control-grid, source-permission and host limits are documented
+in [Real2Sim motion](../data-pipeline/real2sim.md).
+
 Scene layout proposals and their Task Program execution adapter belong to
 [scene expansion](../scene-expansion/scene-expansion.md). The trajectory
 contracts below operate within a specified scene and initial state.
@@ -139,8 +170,16 @@ Motion-limit checks are not collision/task-success certification.
 `rotate_grasp_about_object_axis` and `perturb_approach_direction` change TCP
 candidates around a fixed object axis or approach cone; both emit Cartesian
 poses that callers must replan, and neither certifies the contact.
-Grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed by
-Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
+Grasp generation belongs to `embodichain.toolkits.graspkit`, composed by Atomic
+Skills/Task Program rather than embedded in `MotionGenerator`. Its antipodal
+service requires explicit URDF collision geometry at the caller's open joint
+state. Builtin asset/TCP mappings live in `pg_grasp/model_geometry.py`; custom
+hands provide their own geometry. Sampling/collision stays in the canonical
+contact frame, and public poses map once to the declared runtime TCP. Do not
+add a second hand-specific conversion. GraspKit owns collision-qualified end-region
+selection through `pg_grasp.regions`; callers select a policy without supplying
+a Task Engine implementation. The original mesh-region path remains the default. See the [GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
+for geometry ownership and the finite collision-check scope.
 
 `variants.py` is the common candidate-generation path for joint-space,
 task-space and manipulability-guided expansion; `CandidateCoordinator` supplies
@@ -268,6 +307,9 @@ optional explicit planner specs and a run-local adapter mapping. It copies calle
 configuration; explicit planners replace the suite list and are enabled.
 `PlannerAdapter` owns build/prepare/plan/close and returns `PlanResult` for
 free-space evaluation; Atomic Skills also require an exposed `MotionGenerator`.
+`registry.planner_configuration_features()` loads built-in registrations without
+constructing backends and reports supported configuration semantics for preflight.
+Runtime request support remains the adapter instance's `capabilities` contract.
 The host owns simulation lifetime, seeded cases, evaluation, and artifacts.
 Canonical case tensors and nested parameters stay independent of adapter
 mutations through untimed copies at capacity, preparation and plan boundaries.
@@ -277,6 +319,11 @@ measured difficulty and batch semantics live in
 Cartesian bases, retain `base_case_id`, and share independent maximum-joint/constrained
 matching in `metrics/_constraints.py`. Homogeneous Joint/FullPose cases keep
 classical input contracts; partial/mixed cases require `masked_constraints`.
+The TOPPRA and cuRobo adapters expose that capability only when their explicit
+`config.masked_constraints` opt-in is enabled, preserving historical populations.
+TOPPRA uses sequential component IK; cuRobo changes native terminal pose criteria.
+Neither consumes inactive pose payloads or Cartesian reference joint witnesses.
+See [planner details](planner-details.md) for component and arm-frame contracts.
 Validation preserves native samples with deterministic joint subdivisions.
 `NeuralPlanOptions.waypoint_modalities` supplies explicit meanings, and
 position-only goals require coincident runtime/policy TCP origins. The public
@@ -322,6 +369,16 @@ solver outcomes across schedules. Worker thread limits also bound ONNX Runtime
 through the host Torch intra-op setting. Suite resources ship in the wheel;
 the installed CLI dispatches through `embodichain/cli/benchmark.py`. Source
 launchers under `scripts/benchmark/` forward motion-generation evaluation.
+`BenchmarkRunner.run_paired_arm_performance()` delegates to
+`_paired_arm_performance.py` for serial replay of independent two-arm FullPose
+requests captured by a declared TOPPRA reference before candidate measurement.
+Its immutable cache binds source cases, suite protocol and embodiment;
+candidate inputs are copied per call. Classical facade fallback stays sequential,
+while capable NMG configurations additionally report packed dispatch and parity.
+Scoring and a separate warmed memory call sit outside synchronized latency.
+Request replicas do not enter task-quality counts, and native pair success does
+not certify compiled timing or physical execution. The benchmark README owns
+usage, measurement scope and artifact interpretation.
 `tests/benchmark/motion_generation/` covers contracts and lifecycle, while
 `tests/test_benchmark_package.py` builds and installs the wheel outside the checkout.
 

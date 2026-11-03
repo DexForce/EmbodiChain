@@ -8,5 +8,6 @@ runs:
       run: |
         source activate py311
         echo "$CONDA_PREFIX/bin" >> "$GITHUB_PATH"
+        echo "EMBODICHAIN_ENV=py311" >> "$GITHUB_ENV"
         python --version
         which python pip

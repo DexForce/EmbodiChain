@@ -2,8 +2,10 @@
 
 This standalone tool reads finalized EmbodiChain LeRobot v3.0 datasets from
 disk. It runs in Python 3.12 independently of the simulator and does not install
-or import the EmbodiChain package. EmbodiChain keeps its Python 3.10+ support
-and `lerobot>=0.4.4,<0.5` recording dependency.
+or import the EmbodiChain package. EmbodiChain selects LeRobot 0.4.4 on Python
+3.10/3.11 and 0.6.1 on Python 3.12+. Both recording routes retain the source
+task/subtask and depth-sidecar schema consumed by this converter. Keep the
+converter environment separate so its dependency stack can evolve independently.
 
 Create a separate environment from the repository root:
 

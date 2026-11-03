@@ -21,8 +21,10 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import timedelta
+import io
 import math
 import os
+import pickle
 from typing import Any, TypeVar
 
 import torch
@@ -159,8 +161,53 @@ class _DistributedContext:
     def gather(self, value: Any) -> list[Any] | None:
         if not self.enabled:
             return [value]
-        # Keep the small control-state path on all-gather collectives, which
-        # are supported by both NCCL and Gloo. Non-root copies are temporary.
-        values: list[Any] = [None] * self.world_size
-        dist.all_gather_object(values, value)
-        return values if self.rank == 0 else None
+
+        # Participant snapshots can contain a full model EMA. Broadcasting one
+        # bounded chunk at a time keeps NCCL's device allocation independent of
+        # both the snapshot size and world size; only rank zero retains copies.
+        def serialize() -> io.BytesIO | None:
+            if self.rank == 0:
+                return None
+            stream = io.BytesIO()
+            pickle.dump(value, stream, protocol=pickle.HIGHEST_PROTOCOL)
+            return stream
+
+        payload = self.run(serialize, "checkpoint state serialization")
+        sizes: list[int] = [0] * self.world_size
+        dist.all_gather_object(sizes, payload.tell() if payload is not None else 0)
+        chunk_size = min(max(sizes), 16 * 1024 * 1024)
+        buffer = self.run(
+            lambda: torch.empty(
+                chunk_size, dtype=torch.uint8, device=self.control_device
+            ),
+            "checkpoint transfer buffer",
+        )
+        values: list[Any] | None = [value] if self.rank == 0 else None
+        sender = (
+            torch.frombuffer(payload.getbuffer(), dtype=torch.uint8)
+            if payload is not None
+            else None
+        )
+        for source in range(1, self.world_size):
+            received = io.BytesIO() if self.rank == 0 else None
+            failure = None
+            for offset in range(0, sizes[source], chunk_size):
+                count = min(chunk_size, sizes[source] - offset)
+                if self.rank == source:
+                    assert sender is not None
+                    buffer[:count].copy_(sender[offset : offset + count])
+                dist.broadcast(buffer[:count], src=source)
+                if received is not None and failure is None:
+                    try:
+                        received.write(buffer[:count].cpu().numpy().tobytes())
+                    except Exception as error:
+                        failure = error
+            if received is not None and failure is None:
+                try:
+                    received.seek(0)
+                    assert values is not None
+                    values.append(pickle.load(received))
+                except Exception as error:
+                    failure = error
+            self.check(failure, "checkpoint state collection")
+        return values

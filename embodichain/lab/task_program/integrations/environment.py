@@ -29,7 +29,7 @@ from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 import math
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
 from embodichain.lab.sim.motion.expansion import (
@@ -74,9 +74,15 @@ from embodichain.lab.task_program.semantics.profiles import (
 )
 from embodichain.lab.task_program.runtime.executor import SemanticCallExecutor
 from embodichain.lab.task_program.runtime.expansion import (
+    TaskProgramNominalSourceFactory,
     TaskProgramPlanTransformFactory,
 )
 from embodichain.lab.task_program.semantics.scene import SceneRegistry
+
+if TYPE_CHECKING:
+    from .invocation_policy import BoundInvocationPolicies, InvocationPolicyBinding
+    from .nominal import TracingTaskProgramNominalSources
+    from .simulation.real2sim_collision import TabletopCollisionGuardFactory
 
 from embodichain.lab.gym.envs.task_program.bridge import (
     TaskProgramDemoBridge,
@@ -500,6 +506,7 @@ class TaskProgramEnvironmentAdapter:
             )
 
         self._factory = factory
+        self._configured_nominal_sources: tuple[object, ...] = ()
         self._scene_registry_id = scene_registry_id
         self._robot_profile_id = robot_profile_id
         self._step_dt = float(step_dt)
@@ -671,6 +678,7 @@ class TaskProgramEnvironmentAdapter:
         *,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
         expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None,
+        nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
     ) -> TaskProgramRuntimeAssembly:
         """Attach live observation, evidence, command, and runtime boundaries."""
         if type(semantic) is not SemanticExecutorComponents:
@@ -775,6 +783,7 @@ class TaskProgramEnvironmentAdapter:
             clock=clock,
             runner_cfg=deepcopy(selected_runner_cfg),
             plan_transform_factory=plan_transform_factory,
+            nominal_source_factory=nominal_source_factory,
         )
         parallel_safety_validator = self._parallel_safety_validator
         if (
@@ -825,6 +834,45 @@ class TaskProgramEnvironmentAdapter:
             expansion_trace_provider=expansion_trace_provider,
         )
 
+    def _set_configured_nominal_sources(self, sources: tuple[object, ...]) -> None:
+        """Install the immutable config-owned source declarations once."""
+        from .nominal import _ConfiguredPrototypeSource
+
+        if self._configured_nominal_sources:
+            raise ValueError("configured nominal sources are already installed")
+        if not isinstance(sources, tuple) or not all(
+            isinstance(item, _ConfiguredPrototypeSource) for item in sources
+        ):
+            raise TypeError("configured nominal sources must be typed declarations")
+        self._configured_nominal_sources = sources
+
+    def create_traced_configured_sources(
+        self,
+        program: CompiledTaskProgram,
+        collision_guard: TabletopCollisionGuardFactory,
+    ) -> TracingTaskProgramNominalSources:
+        """Bind configured prototypes to a paired host collision guard.
+
+        The returned factory captures each instantiated source for the episode's
+        action-to-plan trace. It can only be used with this same guard and these
+        immutable integration declarations when the bridge is created.
+        """
+        from .nominal import (
+            _ConfiguredTaskProgramNominalSources,
+            TracingTaskProgramNominalSources,
+        )
+
+        if not self._configured_nominal_sources:
+            raise ValueError("integration has no configured nominal sources")
+        if collision_guard is None:
+            raise TypeError("configured source tracing requires a collision guard")
+        delegate = _ConfiguredTaskProgramNominalSources(
+            program,
+            self._configured_nominal_sources,
+            host_collision_guard=collision_guard,
+        )
+        return TracingTaskProgramNominalSources(program, delegate)
+
     def create_bridge(
         self,
         program: CompiledTaskProgram,
@@ -832,21 +880,77 @@ class TaskProgramEnvironmentAdapter:
         expansion_profile: CombinedExpansionProfile | None = None,
         candidate_index: int = 0,
         recipe_indices: tuple[int, ...] | None = None,
+        nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
+        plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
     ) -> TaskProgramDemoBridge:
         """Create a fresh Gym bridge for one provider-free compiled program.
 
         Args:
             program: Program compiled for this adapter's exact integration IDs.
+            invocation_policy_bindings: Named preset selections for exact sequential
+                occurrences, sealed to this compiled program's fingerprint.
 
         Returns:
             Lazy bridge sharing one newly assembled runtime, clock, and sink.
         """
         if type(program) is not CompiledTaskProgram:
             raise TypeError("program must be exactly CompiledTaskProgram.")
+        if type(invocation_policy_bindings) is not tuple:
+            raise TypeError("invocation_policy_bindings must be an exact tuple.")
+        policies = None
+        if invocation_policy_bindings:
+            from .invocation_policy import BoundInvocationPolicies
+
+            policies = BoundInvocationPolicies(program, invocation_policy_bindings)
+        if self._configured_nominal_sources:
+            if nominal_source_factory is not None:
+                from .nominal import (
+                    _ConfiguredTaskProgramNominalSources,
+                    TracingTaskProgramNominalSources,
+                )
+
+                delegate = getattr(nominal_source_factory, "_delegate", None)
+                if not (
+                    isinstance(nominal_source_factory, TracingTaskProgramNominalSources)
+                    and isinstance(delegate, _ConfiguredTaskProgramNominalSources)
+                    and delegate._declarations == self._configured_nominal_sources
+                    and delegate._host_collision_guard is not None
+                    and delegate._host_collision_guard is plan_transform_factory
+                ):
+                    raise ValueError(
+                        "configured and explicit nominal source factories cannot be combined"
+                    )
+            else:
+                from .nominal import _ConfiguredTaskProgramNominalSources
+
+                nominal_source_factory = _ConfiguredTaskProgramNominalSources(
+                    program, self._configured_nominal_sources
+                )
+        if nominal_source_factory is not None:
+            if any(
+                segment.parallel_block is not None
+                for segment in program.iter_segments()
+            ):
+                raise ValueError(
+                    "nominal sources currently require a sequential program"
+                )
+            validate_program = getattr(nominal_source_factory, "validate_program", None)
+            if not callable(validate_program):
+                raise TypeError(
+                    "nominal source factory must validate its compiled program"
+                )
+            validate_program(program)
         self._validate_selection(program.integration)
         self._preflight_program_surfaces(program)
         semantic = self._assemble_semantic_components(program.integration)
-        self._preflight_program(program, semantic.compiler)
+        if policies is not None:
+            policies.validate_manifest(program, semantic.compiler.integration.manifest)
+        self._preflight_program(
+            program,
+            semantic.compiler,
+            **({"invocation_policies": policies} if policies is not None else {}),
+        )
         if expansion_profile is not None and not isinstance(
             expansion_profile, CombinedExpansionProfile
         ):
@@ -872,10 +976,17 @@ class TaskProgramEnvironmentAdapter:
             expansion = None
         if expansion_profile is not None:
             self._program_skill_ids(program, semantic.compiler)
+        if expansion is not None and plan_transform_factory is not None:
+            raise ValueError(
+                "an Expansion Profile and an explicit plan transform cannot both own a bridge"
+            )
         assembly = self._assemble_execution_runtime(
             semantic,
-            plan_transform_factory=expansion,
+            plan_transform_factory=(
+                expansion if expansion is not None else plan_transform_factory
+            ),
             expansion_trace_provider=expansion,
+            nominal_source_factory=nominal_source_factory,
         )
         return TaskProgramDemoBridge(
             program,
@@ -887,6 +998,8 @@ class TaskProgramEnvironmentAdapter:
             runner_cfg=assembly.runner_cfg,
             parallel_safety_validator=assembly.parallel_safety_validator,
             expansion_trace_provider=assembly.expansion_trace_provider,
+            isolate_policy_sessions=nominal_source_factory is not None,
+            **({"invocation_policies": policies} if policies is not None else {}),
         )
 
     @staticmethod
@@ -937,6 +1050,8 @@ class TaskProgramEnvironmentAdapter:
         self,
         program: CompiledTaskProgram,
         compiler: SemanticCallCompiler,
+        *,
+        invocation_policies: BoundInvocationPolicies | None = None,
     ) -> None:
         """Analyze every program workflow before any physical action can run.
 
@@ -967,6 +1082,15 @@ class TaskProgramEnvironmentAdapter:
                     analysis.calls,
                     workflow_id=analysis.analysis_id,
                     path=analysis.source_path,
+                    **(
+                        {
+                            "preset_ids": invocation_policies._presets_for_analysis(
+                                analysis
+                            )
+                        }
+                        if invocation_policies is not None
+                        else {}
+                    ),
                 )
                 index += 1
                 continue

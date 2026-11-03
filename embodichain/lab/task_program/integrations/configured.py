@@ -39,6 +39,10 @@ from ._configured_services import (
 from .catalog import (
     SimulationTaskProgramRegistration,
 )
+from .composition import (
+    ConfiguredTaskProgramIntegration as _ConfiguredTaskProgramIntegration,
+)
+from .nominal import _ConfiguredPrototypeSource
 from .simulation import (
     AntipodalGraspAffordanceBinding,
     ContainerAffordanceBinding,
@@ -1365,6 +1369,8 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
                 "dynamic_collision_mode",
                 "velocity_targets",
                 "plan_opts",
+                "interpolation_mode",
+                "ik_seed_mode",
             }
         ),
     )
@@ -1381,6 +1387,13 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
             path=f"{path}.velocity_targets",
         ),
         "sample_count": sample_count,
+        "interpolation_mode": _identifier(
+            config.get("interpolation_mode", "adaptive"),
+            path=f"{path}.interpolation_mode",
+        ),
+        "ik_seed_mode": _identifier(
+            config.get("ik_seed_mode", "batched"), path=f"{path}.ik_seed_mode"
+        ),
         "dynamic_collision_mode": _enum(
             config.get("dynamic_collision_mode", DynamicCollisionMode.AUTO.value),
             DynamicCollisionMode,
@@ -1389,11 +1402,15 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
     }
     for field_name in ("velocity_limit", "acceleration_limit"):
         if field_name in config:
-            kwargs[field_name] = _real(
-                config[field_name],
-                path=f"{path}.{field_name}",
-                minimum=0.0,
-                strict_minimum=True,
+            kwargs[field_name] = (
+                None
+                if config[field_name] is None
+                else _real(
+                    config[field_name],
+                    path=f"{path}.{field_name}",
+                    minimum=0.0,
+                    strict_minimum=True,
+                )
             )
     if "plan_opts" in config:
         option_path = f"{path}.plan_opts"
@@ -1778,82 +1795,72 @@ def _decode_parallel_jaw_gripper_model(
     *,
     path: str,
 ) -> ParallelJawGripperModelCfg:
-    """Resolve one built-in model ID or validate one inline geometry model."""
+    """Resolve a registered aperture model, with optional inline bounds."""
     if type(value) is str:
         try:
             return get_parallel_jaw_gripper_model(value)
         except ValueError as exc:
             raise ValueError(f"{path}: {exc}") from exc
-
     model = _mapping(
         value,
         path=path,
         required=frozenset({"model_id"}),
-        optional=frozenset(
-            {
-                "min_opening_width",
-                "max_opening_width",
-                "finger_length",
-                "finger_width",
-                "finger_thickness",
-                "palm_depth",
-            }
-        ),
+        optional=frozenset({"min_opening_width", "max_opening_width"}),
     )
-    defaults = ParallelJawGripperModelCfg()
-    min_opening_width = _real(
+    model_id = _identifier(model["model_id"], path=f"{path}.model_id")
+    try:
+        defaults = get_parallel_jaw_gripper_model(model_id)
+    except ValueError as exc:
+        raise ValueError(f"{path}: {exc}") from exc
+    minimum = _real(
         model.get("min_opening_width", defaults.min_opening_width),
         path=f"{path}.min_opening_width",
         minimum=0.0,
         strict_minimum=True,
     )
-    max_opening_width = _real(
+    maximum = _real(
         model.get("max_opening_width", defaults.max_opening_width),
         path=f"{path}.max_opening_width",
         minimum=0.0,
         strict_minimum=True,
     )
-    if min_opening_width >= max_opening_width:
+    if minimum >= maximum:
         raise ValueError(
             f"{path}.min_opening_width must be less than {path}.max_opening_width."
         )
     return ParallelJawGripperModelCfg(
-        model_id=_identifier(model["model_id"], path=f"{path}.model_id"),
-        min_opening_width=min_opening_width,
-        max_opening_width=max_opening_width,
-        finger_length=_real(
-            model.get("finger_length", defaults.finger_length),
-            path=f"{path}.finger_length",
-            minimum=0.0,
-            strict_minimum=True,
-        ),
-        finger_width=_real(
-            model.get("finger_width", defaults.finger_width),
-            path=f"{path}.finger_width",
-            minimum=0.0,
-            strict_minimum=True,
-        ),
-        finger_thickness=_real(
-            model.get("finger_thickness", defaults.finger_thickness),
-            path=f"{path}.finger_thickness",
-            minimum=0.0,
-            strict_minimum=True,
-        ),
-        palm_depth=_real(
-            model.get("palm_depth", defaults.palm_depth),
-            path=f"{path}.palm_depth",
-            minimum=0.0,
-            strict_minimum=True,
-        ),
+        model_id=model_id, min_opening_width=minimum, max_opening_width=maximum
     )
 
 
+def _geometry_pose(value: object, *, path: str) -> tuple[float, ...]:
+    """Freeze and validate one explicit rigid geometry/TCP transform."""
+    import numpy as np
+
+    rows = _sequence(value, path=path)
+    if len(rows) != 4:
+        raise ValueError(f"{path} must have shape (4, 4).")
+    values = []
+    for index, row in enumerate(rows):
+        row_values = _sequence(row, path=f"{path}[{index}]")
+        if len(row_values) != 4:
+            raise ValueError(f"{path} must have shape (4, 4).")
+        values.extend(_real(item, path=f"{path}[{index}]") for item in row_values)
+    matrix = np.asarray(values).reshape(4, 4)
+    rotation = matrix[:3, :3]
+    if (
+        not np.allclose(matrix[3], [0, 0, 0, 1], atol=1e-7, rtol=0)
+        or not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-6, rtol=0)
+        or not np.isclose(np.linalg.det(rotation), 1, atol=1e-6, rtol=0)
+    ):
+        raise ValueError(f"{path} must be a proper rigid transform.")
+    return tuple(values)
+
+
 def _decode_grasp_generator(
-    value: object,
-    *,
-    path: str,
+    value: object, *, path: str
 ) -> _AntipodalGraspPoseGeneratorFactory:
-    """Decode one allowlisted parallel-jaw antipodal generator declaration."""
+    """Decode explicit physical geometry; removed box fields are rejected."""
     config = _mapping(
         value,
         path=path,
@@ -1862,37 +1869,49 @@ def _decode_grasp_generator(
             {
                 "sample_count",
                 "approach_direction_samples",
-                "opening_margin",
-                "point_sample_density",
                 "filter_ground_collision",
                 "force_refresh",
+                "point_spacing",
+                "side",
+                "root_from_tcp",
             }
         ),
     )
     kind = _identifier(config["kind"], path=f"{path}.kind")
     if kind != "antipodal_parallel_jaw":
         raise ValueError(
-            f"Unsupported {path}.kind {kind!r}; supported kinds are "
-            "['antipodal_parallel_jaw']."
+            f"Unsupported {path}.kind {kind!r}; supported kinds are ['antipodal_parallel_jaw']."
         )
-    model = _decode_parallel_jaw_gripper_model(
-        config["model"],
-        path=f"{path}.model",
+    model = _decode_parallel_jaw_gripper_model(config["model"], path=f"{path}.model")
+    side = (
+        _identifier(config["side"], path=f"{path}.side") if "side" in config else None
     )
+    root_from_tcp = (
+        _geometry_pose(config["root_from_tcp"], path=f"{path}.root_from_tcp")
+        if "root_from_tcp" in config
+        else None
+    )
+    if model.model_id == "tianji_marvin_gripper":
+        if side not in ("left", "right"):
+            raise ValueError(
+                f"{path}: Marvin geometry requires explicit left/right side."
+            )
+    elif side is not None:
+        raise ValueError(f"{path}: side is only supported by Marvin geometry.")
     return _AntipodalGraspPoseGeneratorFactory(
         model_id=model.model_id,
         min_opening_width=model.min_opening_width,
         max_opening_width=model.max_opening_width,
-        finger_length=model.finger_length,
-        finger_width=model.finger_width,
-        finger_thickness=model.finger_thickness,
-        palm_depth=model.palm_depth,
+        point_spacing=_real(
+            config.get("point_spacing", 0.012),
+            path=f"{path}.point_spacing",
+            minimum=0,
+            strict_minimum=True,
+        ),
+        side=side,
+        root_from_tcp=root_from_tcp,
         sample_count=(
-            _integer(
-                config["sample_count"],
-                path=f"{path}.sample_count",
-                minimum=1,
-            )
+            _integer(config["sample_count"], path=f"{path}.sample_count", minimum=1)
             if "sample_count" in config
             else None
         ),
@@ -1903,25 +1922,6 @@ def _decode_grasp_generator(
                 minimum=1,
             )
             if "approach_direction_samples" in config
-            else None
-        ),
-        opening_margin=(
-            _real(
-                config["opening_margin"],
-                path=f"{path}.opening_margin",
-                minimum=0.0,
-            )
-            if "opening_margin" in config
-            else None
-        ),
-        point_sample_density=(
-            _real(
-                config["point_sample_density"],
-                path=f"{path}.point_sample_density",
-                minimum=0.0,
-                strict_minimum=True,
-            )
-            if "point_sample_density" in config
             else None
         ),
         filter_ground_collision=(
@@ -2227,6 +2227,7 @@ class _DecodedRuntimeServices:
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
+    nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
 
 
 def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
@@ -2242,6 +2243,7 @@ def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
                 "handover_pose_providers",
                 "registered_semantic_lowerers",
                 "control_part_evidence",
+                "nominal_motion_sources",
             }
         ),
     )
@@ -2297,11 +2299,117 @@ def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
             path=f"{path}.control_part_evidence",
         )
     )
+    nominal = []
+    for index, value in enumerate(
+        _sequence(
+            config.get("nominal_motion_sources", ()),
+            path=f"{path}.nominal_motion_sources",
+        )
+    ):
+        item_path = f"{path}.nominal_motion_sources[{index}]"
+        item = _mapping(
+            value,
+            path=item_path,
+            required=frozenset(
+                {
+                    "call_index",
+                    "program_fingerprint",
+                    "provider_id",
+                    "revision",
+                    "prototype_manifest",
+                    "prototype_sha256",
+                    "object_entity_id",
+                }
+            ),
+            optional=frozenset(
+                {
+                    "target_entity_id",
+                    "target_entity_to_reference",
+                    "authority",
+                    "gripper_mode",
+                    "require_collision_validation",
+                    "refinement",
+                }
+            ),
+        )
+        if item["provider_id"] != "real2sim.prototype" or item["revision"] != "1":
+            raise ValueError(f"{item_path} names an unknown provider or revision")
+        refinement = None
+        if item.get("refinement") is not None:
+            from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
+
+            options = _mapping(
+                item["refinement"],
+                path=f"{item_path}.refinement",
+                required=frozenset(),
+                optional=frozenset(
+                    {
+                        "max_translation_m",
+                        "max_rotation_rad",
+                        "smoothing_weight",
+                        "project_pick_lift",
+                        "project_pick_approach",
+                        "project_free_boundaries",
+                        "pick_entry_projection_samples",
+                        "max_candidates",
+                        "seed",
+                        "support_margin_m",
+                        "max_release_gap_m",
+                        "max_iterations",
+                    }
+                ),
+            )
+            refinement = MotionRefinementCfg(**options)
+        declaration = _ConfiguredPrototypeSource(
+            call_index=_integer(
+                item["call_index"], path=f"{item_path}.call_index", minimum=0
+            ),
+            program_fingerprint=_identifier(
+                item["program_fingerprint"], path=f"{item_path}.program_fingerprint"
+            ),
+            prototype_manifest=_identifier(
+                item["prototype_manifest"], path=f"{item_path}.prototype_manifest"
+            ),
+            prototype_sha256=_identifier(
+                item["prototype_sha256"], path=f"{item_path}.prototype_sha256"
+            ),
+            object_entity_id=_identifier(
+                item["object_entity_id"], path=f"{item_path}.object_entity_id"
+            ),
+            target_entity_id=_optional_identifier(
+                item.get("target_entity_id"), path=f"{item_path}.target_entity_id"
+            ),
+            target_entity_to_reference=(
+                None
+                if item.get("target_entity_to_reference") is None
+                else _finite_tuple(
+                    item["target_entity_to_reference"],
+                    path=f"{item_path}.target_entity_to_reference",
+                    expected_length=16,
+                )
+            ),
+            authority=_identifier(
+                item.get("authority", "qpos"), path=f"{item_path}.authority"
+            ),
+            gripper_mode=_identifier(
+                item.get("gripper_mode", "recorded"), path=f"{item_path}.gripper_mode"
+            ),
+            require_collision_validation=_boolean(
+                item.get("require_collision_validation", True),
+                path=f"{item_path}.require_collision_validation",
+            ),
+            refinement=refinement,
+        )
+        declaration.validate_source()
+        nominal.append(declaration)
+    if len({item.call_index for item in nominal}) != len(nominal):
+        raise ValueError(f"{path}.nominal_motion_sources has duplicate call indices")
     return _DecodedRuntimeServices(
         grasp_pose_generators=generators,
         handover_pose_providers=handover,
         registered_semantic_lowerers=lowerers,
         control_part_evidence=evidence,
+        nominal_motion_sources=tuple(nominal),
     )
 
 
@@ -2311,6 +2419,7 @@ class _ConfiguredTaskProgramAdapterFactory:
 
     delegate: SimulationTaskProgramAdapterFactory
     integration_fingerprint: str
+    nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
 
     @property
     def registration(self) -> SimulationTaskProgramRegistration:
@@ -2322,16 +2431,9 @@ class _ConfiguredTaskProgramAdapterFactory:
         environment: object,
     ) -> TaskProgramEnvironmentAdapter:
         """Create a live adapter for an initialized environment."""
-        return self.delegate.create_adapter(environment)
-
-
-@dataclass(frozen=True, slots=True)
-class _ConfiguredTaskProgramIntegration:
-    """Decoded provider-free integration plus its lazy live factory."""
-
-    registration: SimulationTaskProgramRegistration
-    adapter_factory: _ConfiguredTaskProgramAdapterFactory
-    integration_fingerprint: str
+        adapter = self.delegate.create_adapter(environment)
+        adapter._set_configured_nominal_sources(self.nominal_motion_sources)
+        return adapter
 
 
 def _decode_configured_task_program_integration(
@@ -2387,6 +2489,15 @@ def _decode_configured_task_program_integration(
         "grasp_pose_generators": grasp_fingerprint,
         "planner_config": deepcopy(planner_config),
     }
+    if services.nominal_motion_sources:
+        fingerprint_payload["nominal_motion_sources"] = [
+            {
+                key: value
+                for key, value in asdict(item).items()
+                if key != "prototype_manifest"
+            }
+            for item in services.nominal_motion_sources
+        ]
     integration_fingerprint = hashlib.sha256(
         json.dumps(
             fingerprint_payload,
@@ -2404,6 +2515,7 @@ def _decode_configured_task_program_integration(
     adapter_factory = _ConfiguredTaskProgramAdapterFactory(
         delegate=delegate,
         integration_fingerprint=integration_fingerprint,
+        nominal_motion_sources=services.nominal_motion_sources,
     )
     return _ConfiguredTaskProgramIntegration(
         registration=registration,

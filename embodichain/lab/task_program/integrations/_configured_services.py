@@ -163,14 +163,11 @@ class _AntipodalGraspPoseGeneratorFactory:
     model_id: str
     min_opening_width: float
     max_opening_width: float
-    finger_length: float
-    finger_width: float
-    finger_thickness: float
-    palm_depth: float
+    point_spacing: float = 0.012
+    side: str | None = None
+    root_from_tcp: tuple[float, ...] | None = None
     sample_count: int | None = None
     approach_direction_samples: int | None = None
-    opening_margin: float | None = None
-    point_sample_density: float | None = None
     filter_ground_collision: bool | None = None
     force_refresh: bool | None = None
 
@@ -183,6 +180,10 @@ class _AntipodalGraspPoseGeneratorFactory:
             GraspAnnotationCfg,
             ParallelJawGraspCollisionCfg,
         )
+        from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+            get_parallel_jaw_collision_geometry,
+        )
+        import numpy as np
 
         algorithm_kwargs: dict[str, object] = {}
         if self.sample_count is not None:
@@ -193,10 +194,6 @@ class _AntipodalGraspPoseGeneratorFactory:
             )
 
         collision_kwargs: dict[str, object] = {}
-        if self.opening_margin is not None:
-            collision_kwargs["opening_margin"] = self.opening_margin
-        if self.point_sample_density is not None:
-            collision_kwargs["point_sample_density"] = self.point_sample_density
         if self.filter_ground_collision is not None:
             collision_kwargs["filter_ground_collision"] = self.filter_ground_collision
 
@@ -209,10 +206,16 @@ class _AntipodalGraspPoseGeneratorFactory:
                 model_id=self.model_id,
                 min_opening_width=self.min_opening_width,
                 max_opening_width=self.max_opening_width,
-                finger_length=self.finger_length,
-                finger_width=self.finger_width,
-                finger_thickness=self.finger_thickness,
-                palm_depth=self.palm_depth,
+            ),
+            collision_geometry=get_parallel_jaw_collision_geometry(
+                self.model_id,
+                point_spacing=self.point_spacing,
+                side=self.side,
+                root_from_tcp=(
+                    None
+                    if self.root_from_tcp is None
+                    else np.asarray(self.root_from_tcp).reshape(4, 4)
+                ),
             ),
             algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm_kwargs),
             collision_cfg=ParallelJawGraspCollisionCfg(**collision_kwargs),

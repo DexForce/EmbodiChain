@@ -249,6 +249,7 @@ def test_relative_sensor_urdf_is_included_from_another_working_directory(
                         else {"camera": sensor_cfg}
                     ),
                     "fpath": "output/assembled.urdf",
+                    "fpath_prefix": str(robot_asset.parent / "assembled-cache"),
                 },
                 "control_parts": {"custom_arm": ["joint"]},
             }

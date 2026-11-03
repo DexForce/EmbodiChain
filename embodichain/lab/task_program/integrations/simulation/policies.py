@@ -28,7 +28,7 @@ inactive use fresh measured-position holds.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from copy import deepcopy
+from copy import copy, deepcopy
 from dataclasses import dataclass
 import math
 from types import MappingProxyType
@@ -36,6 +36,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
+from embodichain.lab.gym.envs.objectives.conditions import evaluate_near_target
 from embodichain.lab.gym.envs.settling import (
     DynamicSettleMonitor,
     DynamicSettleMonitorCfg,
@@ -197,6 +198,21 @@ class SimulationSegmentPolicyPort:
     def settle_preset_ids(self) -> tuple[str, ...]:
         """Return installed post-policy preset IDs in declaration order."""
         return tuple(self._settle_presets)
+
+    def new_task_program_session(self) -> SimulationSegmentPolicyPort:
+        """Create fresh episode state while retaining the validated scene bindings.
+
+        Returns:
+            A port sharing the same live scene and robot, with independent
+            validator baselines, results and post-policy state.
+        """
+        session = copy(self)
+        session._post_policy_results = {}
+        session._post_policy_success = {}
+        session._validator_results = {}
+        session._validator_active_masks = {}
+        session._lift_baselines = {}
+        return session
 
     def validate_policy(
         self,
@@ -467,10 +483,14 @@ class SimulationSegmentPolicyPort:
             raise ValueError(
                 "Validator target batch must be unbatched or match simulator rows."
             )
-        error = torch.linalg.vector_norm(current_position - target_position, dim=1)
-        accepted = torch.isfinite(error) & (
-            error <= float(validator.cfg.position_tolerance)
+        measured = evaluate_near_target(
+            current_position,
+            target_position,
+            float(validator.cfg.position_tolerance),
+            inclusive=True,
         )
+        error = measured.metrics["distance"]
+        accepted = measured.satisfied
         self._validator_results[id(validator)] = {
             "kind": validator.cfg.kind,
             "object_id": entity_id,

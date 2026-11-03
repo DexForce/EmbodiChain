@@ -20,14 +20,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from embodichain.lab.task_program.language.schema import TaskProgramIntegrationCfg
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
 
+from .composition import (
+    ConfiguredTaskProgramDeployment as _ConfiguredTaskProgramDeployment,
+)
 from .configured import (
+    _ConfiguredTaskProgramAdapterFactory,
     _ConfiguredTaskProgramIntegration,
     _decode_configured_task_program_integration,
     _decode_motion_policy,
@@ -47,14 +51,13 @@ _RUNTIME_SERVICE_FIELDS = frozenset(
     }
 )
 _TASK_RUNTIME_SERVICE_FIELDS = _RUNTIME_SERVICE_FIELDS | frozenset(
-    {"grasp_pose_generator_overrides"}
+    {"grasp_pose_generator_overrides", "nominal_motion_sources"}
 )
 _GRASP_GENERATOR_OVERRIDE_FIELDS = frozenset(
     {
         "sample_count",
         "approach_direction_samples",
-        "opening_margin",
-        "point_sample_density",
+        "point_spacing",
         "filter_ground_collision",
         "force_refresh",
     }
@@ -71,19 +74,6 @@ _EXECUTION_POLICY_OVERRIDE_FIELDS = {
     ),
     "recovery": frozenset({"action_timeout", "goal_rotation_threshold"}),
 }
-
-
-@dataclass(frozen=True, slots=True)
-class _ConfiguredTaskProgramDeployment:
-    """One fully resolved configured Task Program deployment."""
-
-    integration_id: str
-    program_id: str
-    program_path: Path
-    selection: TaskProgramIntegrationCfg
-    integration: _ConfiguredTaskProgramIntegration
-    scene_binding: dict[str, object]
-    planner_config: dict[str, object] | None
 
 
 def _component_path(
@@ -249,6 +239,11 @@ def _merge_runtime_services(
     evidence = task_evidence if task_evidence is not None else skill_profile_evidence
     if evidence is not None:
         result["control_part_evidence"] = deepcopy(evidence)
+    if "nominal_motion_sources" in task:
+        result["nominal_motion_sources"] = _owned_sequence(
+            task["nominal_motion_sources"],
+            path="integration.runtime_services.nominal_motion_sources",
+        )
     return result
 
 
@@ -373,6 +368,42 @@ def _resolve_task_program_components(
         ),
         optional=frozenset({"runtime_services", "asset_requirements"}),
     )
+    integration = deepcopy(dict(integration))
+    if "runtime_services" in integration:
+        runtime_services = _owned_mapping(
+            integration["runtime_services"], path="integration.runtime_services"
+        )
+        if "nominal_motion_sources" in runtime_services:
+            sources = _owned_sequence(
+                runtime_services["nominal_motion_sources"],
+                path="integration.runtime_services.nominal_motion_sources",
+            )
+            resolved_sources = []
+            for index, item in enumerate(sources):
+                value = _owned_mapping(
+                    item,
+                    path=f"integration.runtime_services.nominal_motion_sources[{index}]",
+                )
+                if "prototype_manifest" not in value:
+                    raise ValueError("nominal source requires prototype_manifest")
+                from embodichain.data._references import _resolve_data_reference
+
+                value["prototype_manifest"] = str(
+                    _component_path(
+                        str(
+                            _resolve_data_reference(
+                                value["prototype_manifest"],
+                                base_dir=integration_path.parent,
+                            )
+                        ),
+                        base_dir=integration_path.parent,
+                        path=f"integration.runtime_services.nominal_motion_sources[{index}].prototype_manifest",
+                        suffixes=frozenset({".json"}),
+                    )
+                )
+                resolved_sources.append(value)
+            runtime_services["nominal_motion_sources"] = resolved_sources
+        integration["runtime_services"] = runtime_services
     if "asset_requirements" in integration:
         from embodichain.lab.task_program.semantics.asset_requirements import (
             AssetRequirements,
@@ -548,6 +579,21 @@ def _load_configured_task_program_deployment(
             path="execution policy.preset_id",
         ),
     )
+    factory = cast(_ConfiguredTaskProgramAdapterFactory, integration.adapter_factory)
+    if factory.nominal_motion_sources:
+        from embodichain.lab.task_program import load_task_program
+        from .nominal import _ConfiguredTaskProgramNominalSources
+
+        catalog = integration.registration.catalog
+        program = load_task_program(
+            program_path, integration=selection, validation_context=catalog
+        )
+        if program.program_id != program_id:
+            raise ValueError(
+                "configured nominal sources require the integration's program_id"
+            )
+        compiled = catalog.preflight(program)
+        _ConfiguredTaskProgramNominalSources(compiled, factory.nominal_motion_sources)
     return _ConfiguredTaskProgramDeployment(
         integration_id=integration_id,
         program_id=program_id,

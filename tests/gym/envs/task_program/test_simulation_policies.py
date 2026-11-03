@@ -842,6 +842,33 @@ def test_lift_requires_segment_start_and_uses_observed_row_baselines() -> None:
     json.dumps(trace, allow_nan=False)
 
 
+def test_segment_policy_sessions_keep_lift_baselines_independent() -> None:
+    segment = _measured_object_segment(
+        [{"kind": "object_lifted", "object": "cube", "minimum_lift": 0.05}]
+    )
+    validator = segment.validators[0]
+    owner, objects = _measured_object_port()
+    first = owner.new_task_program_session()
+    second = owner.new_task_program_session()
+    objects["cube"]._pose[:, 2, 3] = 0.0
+    first.begin_segment(segment=segment, active_mask=None)
+    objects["cube"]._pose[:, 2, 3] = 0.5
+    second.begin_segment(segment=segment, active_mask=None)
+    objects["cube"]._pose[:, 2, 3] = torch.tensor([0.56, 0.53])
+    assert first.validate(validator, segment=segment).tolist() == [True, True]
+    assert second.validate(validator, segment=segment).tolist() == [True, False]
+    assert first.validator_metadata(validator, segment=segment)["initial_height"] == [
+        0.0,
+        0.0,
+    ]
+    assert second.validator_metadata(validator, segment=segment)["initial_height"] == [
+        0.5,
+        0.5,
+    ]
+    with pytest.raises(RuntimeError, match="already captured"):
+        first.begin_segment(segment=segment, active_mask=None)
+
+
 def test_lift_rejects_nonfinite_baseline_per_row_and_preserves_inactive_mask() -> None:
     segment = _measured_object_segment([{"kind": "object_lifted", "object": "cube"}])
     port, objects = _measured_object_port(3)

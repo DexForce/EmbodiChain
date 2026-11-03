@@ -34,19 +34,22 @@ from embodichain.lab.sim.motion.planners import (
     CuroboWorldCfg,
     MoveType,
     PlanResult,
-    PlanState,
 )
 
 from ..config import PlannerSpecCfg
 from ..models import BenchmarkCase
+from ..limits import resolve_dynamic_limit, resolve_robot_velocity_limits
 from ..registry import register_planner_adapter
 from .base import PlannerAdapter, PlannerContext
+from ._constraints import _case_modalities, _case_targets
 
 __all__ = ["CuroboAdapter"]
 
 
 class CuroboAdapter(PlannerAdapter):
     """Run cuRobo with a frozen, empty-world operational configuration."""
+
+    configuration_features = frozenset({"masked_constraints"})
 
     capabilities = frozenset(
         {
@@ -65,6 +68,8 @@ class CuroboAdapter(PlannerAdapter):
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         super().__init__(spec, context)
         self.motion_generator: MotionGenerator | None = None
+        if spec.config.get("masked_constraints", False):
+            self.capabilities = self.capabilities | {"masked_constraints"}
 
     def availability(self) -> tuple[bool, str | None]:
         """Require both CUDA and the optional cuRobo runtime."""
@@ -79,9 +84,6 @@ class CuroboAdapter(PlannerAdapter):
         limits = self.resolve_motion_limits(require_timing=True)
         robot = self.context.robot
         active_ids = list(robot.active_joint_ids)
-        controlled_ids = list(robot.get_joint_ids(self.context.control_part))
-        if any(index not in active_ids for index in controlled_ids):
-            raise ValueError("cuRobo control parts must contain only active joints.")
         from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
             _curobo_joint_limits,
         )
@@ -91,15 +93,50 @@ class CuroboAdapter(PlannerAdapter):
         # these with Robot caps again, retaining zero caps on locked joints.
         velocity = [value if value > 0 else 0.2 for value in defaults["max_velocity"]]
         acceleration = defaults["max_acceleration"]
-        for column, joint_id in enumerate(controlled_ids):
-            speed = limits["velocity"][column]
-            if speed <= 0:
+        # Atomic dual-arm calls share one generator but switch motion parts.
+        # Apply the suite budget to every configured kinematic chain, retaining
+        # each chain's own effective Robot speed caps.
+        solver_parts = getattr(getattr(robot, "cfg", None), "solver_cfg", {}) or {}
+        parts = list(dict.fromkeys([self.context.control_part, *solver_parts]))
+        for part in parts:
+            controlled_ids = list(robot.get_joint_ids(part))
+            if any(index not in active_ids for index in controlled_ids):
                 raise ValueError(
-                    "cuRobo cannot plan a joint with a zero velocity limit."
+                    "cuRobo control parts must contain only active joints."
                 )
-            index = active_ids.index(joint_id)
-            velocity[index] = speed
-            acceleration[index] = limits["acceleration"][column]
+            if part == self.context.control_part:
+                part_limits = limits
+            else:
+                reference = torch.empty(0, dtype=torch.float64)
+                speed = resolve_robot_velocity_limits(
+                    robot,
+                    part,
+                    self.context.joint_velocity_limit_rad_s,
+                    reference,
+                    dof=len(controlled_ids),
+                )
+                accel = resolve_dynamic_limit(
+                    self.context.joint_acceleration_limit_rad_s2,
+                    len(controlled_ids),
+                    reference,
+                )
+                if speed is None or accel is None:
+                    raise ValueError(
+                        f"Timed planning requires motion limits for {part!r}."
+                    )
+                part_limits = {
+                    "velocity": speed.tolist(),
+                    "acceleration": accel.tolist(),
+                }
+            for column, joint_id in enumerate(controlled_ids):
+                speed = part_limits["velocity"][column]
+                if speed <= 0:
+                    raise ValueError(
+                        "cuRobo cannot plan a joint with a zero velocity limit."
+                    )
+                index = active_ids.index(joint_id)
+                velocity[index] = speed
+                acceleration[index] = part_limits["acceleration"][column]
         for key, actual in (
             ("max_velocity", velocity),
             ("max_acceleration", acceleration),
@@ -152,69 +189,97 @@ class CuroboAdapter(PlannerAdapter):
         )
         self.motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
 
-    @staticmethod
-    def _case_move_type(case: BenchmarkCase) -> MoveType:
-        """Return the planner move type required by a supported case."""
-        validity = case.case_parameters.get(
-            "motion_validity", "ordered_cartesian_waypoints"
+    def _case_move_types(self, case: BenchmarkCase) -> list[MoveType]:
+        """Return every backend needed by an ordered, possibly mixed request."""
+        if (
+            case.case_parameters.get("motion_validity")
+            == "ordered_constraint_waypoints"
+            and "masked_constraints" not in self.capabilities
+        ):
+            raise ValueError("Enable config.masked_constraints for masked cases.")
+        return list(
+            dict.fromkeys(
+                MoveType.JOINT_MOVE if value == "joint" else MoveType.EEF_MOVE
+                for value in _case_modalities(case)
+            )
         )
-        if validity == "ordered_cartesian_waypoints":
-            return MoveType.EEF_MOVE
-        if validity == "ordered_joint_waypoints":
-            return MoveType.JOINT_MOVE
-        raise ValueError(f"Unsupported motion_validity mode {validity!r}.")
+
+    def atomic_plan_options(
+        self, *, control_dt: float | None = None
+    ) -> CuroboPlanOptions:
+        """Use the same configured suite limits for preparation and Atomic calls.
+
+        Args:
+            control_dt: Host command clock; cuRobo retains native solved timing.
+
+        Returns:
+            Options retaining the generator's full active-joint budget vectors.
+        """
+        return CuroboPlanOptions()
+
+    def _case_control_parts(self, case: BenchmarkCase) -> list[str]:
+        parts = case.case_parameters.get("control_parts", {})
+        return list(
+            dict.fromkeys(
+                values["motion"]
+                for values in parts.values()
+                if isinstance(values, dict) and "motion" in values
+            )
+        ) or [self.context.control_part]
 
     def prepare(self, case: BenchmarkCase) -> dict[str, object]:
         """Materialize and warm the backend required by the benchmark case."""
         if self.motion_generator is None:
             raise RuntimeError("cuRobo adapter must be built before prepare().")
         planner = self.motion_generator.planner
-        return planner.prepare_backend(
-            control_part=self.context.control_part,
-            batch_size=case.batch_size,
-            move_type=self._case_move_type(case),
-        )
+        prepared = [
+            planner.prepare_backend(
+                control_part=part,
+                batch_size=case.batch_size,
+                move_type=move_type,
+            )
+            for part in self._case_control_parts(case)
+            for move_type in self._case_move_types(case)
+        ]
+        return prepared[0] if len(prepared) == 1 else {"backends": prepared}
 
     def prepare_cases(self, cases: list[BenchmarkCase]) -> dict[str, object]:
         """Prepare every distinct batch-size and planning-mode backend."""
         if not cases:
             raise ValueError("prepare_cases requires at least one supported case.")
+        if self.motion_generator is None:
+            raise RuntimeError("cuRobo adapter must be built before prepare_cases().")
         prepared = []
         seen = set()
         for case in cases:
-            move_type = self._case_move_type(case)
-            key = (case.batch_size, move_type)
-            if key in seen:
-                continue
-            seen.add(key)
-            prepared.append(self.prepare(case))
+            for part in self._case_control_parts(case):
+                for move_type in self._case_move_types(case):
+                    key = (case.batch_size, part, move_type)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    prepared.append(
+                        self.motion_generator.planner.prepare_backend(
+                            control_part=part,
+                            batch_size=case.batch_size,
+                            move_type=move_type,
+                        )
+                    )
         return {"backends": prepared}
 
     def plan(self, case: BenchmarkCase) -> PlanResult:
         """Plan all ordered Cartesian or joint waypoints in one call."""
         if self.motion_generator is None:
             raise RuntimeError("cuRobo adapter must be built before plan().")
-        move_type = self._case_move_type(case)
-        if move_type is MoveType.JOINT_MOVE:
-            targets = [
-                PlanState.from_qpos(
-                    case.reference_qpos[:, index], move_type=MoveType.JOINT_MOVE
-                )
-                for index in range(case.num_waypoints)
-            ]
-        else:
-            targets = [
-                PlanState.from_xpos(
-                    case.target_waypoints[:, index], move_type=MoveType.EEF_MOVE
-                )
-                for index in range(case.num_waypoints)
-            ]
+        self._case_move_types(case)
+        targets = _case_targets(case)
+        modalities = _case_modalities(case)
         return self.motion_generator.generate(
             targets,
             MotionGenOptions(
                 start_qpos=case.start_qpos,
                 control_part=self.context.control_part,
-                plan_opts=CuroboPlanOptions(),
+                plan_opts=CuroboPlanOptions(waypoint_modalities=modalities),
             ),
         )
 

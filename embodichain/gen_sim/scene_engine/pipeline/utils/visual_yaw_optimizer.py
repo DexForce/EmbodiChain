@@ -28,14 +28,10 @@ from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
     OpenAICompatibleVLM,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils import (
-    _run_blender_operation_silently,
-)
+from embodichain.gen_sim._blender_runtime import _run_blender_job
 
 _RENDER_RESOLUTION = 512
 _ALLOWED_CLOCKWISE_YAWS_DEGREES = frozenset(range(0, 360, 15))
-_VISUAL_FLOOR_SCALE = 1.3  # Preserve a small border around the canonical footprint.
-_VISUAL_MIN_FLOOR_SIZE = 0.45  # Keep a contact cue for compact upright assets.
 _VLM_SYSTEM_PROMPT = """You align one isolated canonical 3D asset to an image observation.
 The image has two panels. The LEFT panel is a fixed, slightly distant
 orthographic oblique view from above of the canonical SimReady asset in a
@@ -222,133 +218,21 @@ def _render_canonical_oblique_view(
     output_path: str | Path,
     resolution: int,
 ) -> Path:
-    """Render a temporary unscaled GLB from a fixed z-up oblique view."""
-    source_path = Path(glb_path).expanduser().resolve()
-    destination_path = Path(output_path).expanduser().resolve()
-    destination_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        import bpy
-        from mathutils import Matrix, Vector
-    except ImportError as exc:
-        raise RuntimeError(
-            "Blender's bpy is required for visual-yaw rendering."
-        ) from exc
-
-    _run_blender_operation_silently(
-        lambda: bpy.ops.wm.read_factory_settings(use_empty=True)
+    """Render an unscaled GLB using the isolated Blender runtime."""
+    destination = Path(
+        _run_blender_job(
+            "visual_yaw",
+            {
+                "glb_path": str(Path(glb_path).expanduser().resolve()),
+                "baked_scale_y_up": baked_scale_y_up,
+                "z_up_yaw_degrees": z_up_yaw_degrees,
+                "output_path": str(Path(output_path).expanduser().resolve()),
+                "resolution": resolution,
+            },
+        )
     )
-    _run_blender_operation_silently(
-        lambda: bpy.ops.import_scene.gltf(filepath=str(source_path))
-    )
-    mesh_objects = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
-    if not mesh_objects:
-        raise ValueError(f"GLB contains no mesh objects: {source_path}")
-
-    scene = bpy.context.scene
-    try:
-        scene.render.engine = "BLENDER_EEVEE_NEXT"
-    except TypeError:
-        scene.render.engine = "BLENDER_EEVEE"
-    scene.render.resolution_x = resolution
-    scene.render.resolution_y = resolution
-    scene.render.resolution_percentage = 100
-    scene.render.image_settings.file_format = "PNG"
-    scene.render.film_transparent = False
-    if scene.world is None:
-        scene.world = bpy.data.worlds.new("VisualYawWorld")
-    scene.world.color = (0.08, 0.08, 0.08)
-
-    # Blender imports the y-up GLB into z-up. Undo only baked y-up scale here.
-    y_up_to_z_up = Rotation.from_euler("x", 90.0, degrees=True).as_matrix()
-    inverse_scale_z_up = (
-        y_up_to_z_up
-        @ np.diag(1.0 / np.asarray(baked_scale_y_up, dtype=float))
-        @ y_up_to_z_up.T
-    )
-    yaw_z_up = Rotation.from_euler("z", z_up_yaw_degrees, degrees=True).as_matrix()
-    root = bpy.data.objects.new("VisualYawRoot", None)
-    scene.collection.objects.link(root)
-    for mesh_object in mesh_objects:
-        original_world_matrix = mesh_object.matrix_world.copy()
-        mesh_object.parent = root
-        mesh_object.matrix_parent_inverse = root.matrix_world.inverted()
-        mesh_object.matrix_world = original_world_matrix
-    transform = np.eye(4)
-    transform[:3, :3] = yaw_z_up @ inverse_scale_z_up
-    root.matrix_world = Matrix(transform)
-    visual_floor_size = _center_root_on_visual_floor(
-        bpy=bpy,
-        mesh_objects=mesh_objects,
-        root=root,
-    )
-    _add_visual_floor(bpy=bpy, size=visual_floor_size)
-
-    light_data = bpy.data.lights.new("VisualYawKey", type="AREA")
-    light_data.energy = 900.0
-    light_data.shape = "DISK"
-    light_data.size = 4.0
-    light = bpy.data.objects.new("VisualYawKey", light_data)
-    light.location = (2.0, -2.0, 4.0)
-    light.rotation_euler = (
-        (Vector((0.0, 0.0, 0.0)) - light.location).to_track_quat("-Z", "Y").to_euler()
-    )
-    scene.collection.objects.link(light)
-    camera_data = bpy.data.cameras.new("VisualYawCamera")
-    camera = bpy.data.objects.new("VisualYawCamera", camera_data)
-    scene.collection.objects.link(camera)
-    scene.camera = camera
-    camera.data.type = "ORTHO"
-    # Keep a wider fixed robot view with floor context, without coarse-layout scale.
-    camera.data.ortho_scale = 1.75
-    camera.location = (0.0, -4.0, 5.0)
-    camera.rotation_euler = (
-        (Vector((0.0, 0.0, 0.3)) - camera.location).to_track_quat("-Z", "Y").to_euler()
-    )
-    scene.render.filepath = str(destination_path)
-    _run_blender_operation_silently(lambda: bpy.ops.render.render(write_still=True))
-    _draw_oblique_view_axes(destination_path)
-    return destination_path
-
-
-def _center_root_on_visual_floor(
-    *, bpy: object, mesh_objects: list[object], root: object
-) -> float:
-    """Translate a temporary transformed root so its mesh rests at the origin."""
-    from mathutils import Matrix, Vector
-
-    _run_blender_operation_silently(lambda: bpy.context.view_layer.update())
-    points = np.asarray(
-        [
-            tuple(mesh_object.matrix_world @ Vector(corner))
-            for mesh_object in mesh_objects
-            for corner in mesh_object.bound_box
-        ],
-        dtype=float,
-    )
-    minimum = points.min(axis=0)
-    maximum = points.max(axis=0)
-    translation = np.eye(4)
-    translation[:3, 3] = [
-        -(minimum[0] + maximum[0]) * 0.5,
-        -(minimum[1] + maximum[1]) * 0.5,
-        -minimum[2],
-    ]
-    root.matrix_world = Matrix(translation) @ root.matrix_world
-    _run_blender_operation_silently(lambda: bpy.context.view_layer.update())
-    return max(
-        _VISUAL_MIN_FLOOR_SIZE,
-        _VISUAL_FLOOR_SCALE * float(np.max(maximum[:2] - minimum[:2])),
-    )
-
-
-def _add_visual_floor(*, bpy: object, size: float) -> None:
-    """Add a footprint-scaled support patch for local contact context."""
-    bpy.ops.mesh.primitive_plane_add(size=size, location=(0.0, 0.0, 0.0))
-    floor = bpy.context.object
-    floor.name = "VisualYawFloor"
-    material = bpy.data.materials.new("VisualYawFloorMaterial")
-    material.diffuse_color = (0.22, 0.22, 0.22, 1.0)
-    floor.data.materials.append(material)
+    _draw_oblique_view_axes(destination)
+    return destination
 
 
 def _compose_render_and_source(

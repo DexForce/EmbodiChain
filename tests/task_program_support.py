@@ -73,10 +73,14 @@ def completed_runtime(env_ids: torch.Tensor) -> Mock:
         )
         return runtime.result
 
-    runtime.start.side_effect = start
-    runtime.step.side_effect = AssertionError("A terminal runtime must not be stepped.")
-    runtime.cancel.side_effect = AssertionError(
-        "A completed runtime cannot be cancelled."
+    # Python 3.12 protocol checks use getattr_static; lazy Mock children do not
+    # implement the structural port until they are assigned as real attributes.
+    runtime.start = Mock(side_effect=start)
+    runtime.step = Mock(
+        side_effect=AssertionError("A terminal runtime must not be stepped.")
     )
-    runtime.adopt_verified_task_state.side_effect = lambda state: runtime.result
+    runtime.cancel = Mock(
+        side_effect=AssertionError("A completed runtime cannot be cancelled.")
+    )
+    runtime.adopt_verified_task_state = Mock(side_effect=lambda state: runtime.result)
     return runtime

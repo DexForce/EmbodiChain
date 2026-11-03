@@ -1,6 +1,5 @@
 Public API Supplement
-=====================
-
+==============
 .. This page is maintained by the update-api-docs agent skill.
    docs/scripts/check_api_docs.py reads it but never writes it.
 
@@ -21,6 +20,32 @@ decoding and compiling the constrained Task Program schema surface.
 
    compile_mllm_task_program
    decode_mllm_task_program
+
+embodichain.compute.kinematics.ik_path
+--------------------------------------
+
+Bounded fixed-time branch search for one Cartesian path. Solver callbacks own
+kinematics; this numeric routine preserves serial/batched seed order and accepts
+no simulation objects. Failure means the bounded search did not produce a path.
+
+.. currentmodule:: embodichain.compute.kinematics.ik_path
+
+.. autosummary::
+
+   resolve_seeded_ik_path
+
+embodichain.compute.trajectory.limits
+-------------------------------------
+
+Per-environment sampled joint-speed checks with explicit arrival intervals.
+The result checks finite positions and declared speeds; it does not establish
+continuous collision freedom or acceleration compliance.
+
+.. currentmodule:: embodichain.compute.trajectory.limits
+
+.. autosummary::
+
+   joint_velocity_validity
 
 embodichain.data
 ----------------
@@ -63,6 +88,15 @@ EmbodiChain data cache.
    RubiksCube
    ScoopIceNewEnv
    TabletopFourBases
+   Real2SimCarton
+
+``Real2SimCarton`` downloads a checksum-pinned original DROID episode, manual
+annotations, two motion-prototype sources and estimated physical proxies. Its
+revision-specific cache verifies extracted files. Measured DROID derivatives
+retain CC BY 4.0; the bundle is not a generated training dataset or hardware
+qualification.
+
+.. autoclass:: Real2SimCarton
 
 embodichain.data.assets.materials
 ------------------------------------
@@ -261,6 +295,103 @@ embodichain.data_pipeline.depth_video
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
 
+embodichain.gen_sim.asset_engine.cli.start
+-----------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.cli.start
+
+.. autosummary::
+
+   cli_ingest_single
+   main
+
+embodichain.gen_sim.asset_engine.clients
+----------------------------------------
+
+Asset-owned service client for generating and downloading articulated USDC assets.
+Close the client after use to release its HTTP session.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.clients.articulated_generation
+---------------------------------------------------------------
+
+HTTP generation client with bounded retry attempts, health checks, and validation
+of returned articulation artifacts before publication.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients.articulated_generation
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.configs
+----------------------------------------
+
+Read Asset Engine settings from the shared GenSim dotenv file. Legacy Scene
+Engine articulation keys remain accepted as aliases.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.configs.environment
+----------------------------------------------------
+
+Resolves requested Asset Engine dotenv keys and reports missing configuration
+without mutating process environment variables.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs.environment
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.pipeline
+-----------------------------------------
+
+Generate articulated assets from scene-independent asset records. The operation
+updates their USDC path and scale metadata after normalization.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.asset_engine.pipeline.articulation
+------------------------------------------------------
+
+Materializes functional articulated records through the Asset Engine client.
+Records provide source observations and coarse scales; the owning scene pipeline
+continues to control layout and export.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline.articulation
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.asset_engine.utils.geometry_utils
+----------------------------------------------------------
+
+File-based OBJ cleanup and simplification through the isolated Blender runtime.
+The caller retains ownership of its input and destination asset paths.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.utils.geometry_utils
+
+.. autosummary::
+
+   process_obj
+
+.. autofunction:: process_obj
+
 embodichain.gen_sim.env
 -----------------------
 
@@ -446,6 +577,18 @@ baseline and saves successful candidates with a completion manifest.
 
    main
 
+embodichain.gen_sim.scene_engine.configs.environment
+----------------------------------------------------
+
+Read Scene Engine settings from the shared GenSim dotenv file through the common
+parser, retaining the existing Scene Engine key names.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.configs.environment
+
+.. autosummary::
+
+   read_scene_engine_env_values
+
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 
@@ -455,6 +598,60 @@ embodichain.gen_sim.scene_engine.core.scene_edit_plan
 
    SceneEditOperation
    SceneEditPlan
+
+embodichain.gen_sim.scene_engine.errors
+---------------------------------------
+
+Identifies Scene Engine service failures separately from input or scene-schema
+validation failures.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.errors
+
+.. autosummary::
+
+   SceneServiceError
+
+embodichain.gen_sim.scene_engine.pipeline
+-----------------------------------------
+
+Stage-oriented Scene Engine API. Analyze an image or edit into an in-process
+blueprint with a persisted audit document, then materialize its assets and layout.
+Materialization copies the supplied scene/graph and closes only clients it owns.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
+
+embodichain.gen_sim.scene_engine.pipeline.api
+---------------------------------------------
+
+Blueprint value objects and their implementation entry points. Image and edit
+blueprints have separate versioned schemas and content identities. Materialization
+returns the exported scene configuration; it does not construct a Gym task.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.api
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
 
 embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
 -------------------------------------------------------------------------------
@@ -635,15 +832,165 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 
    save_layouts
 
-embodichain.gen_sim.simready_pipeline.cli.start
------------------------------------------------
+embodichain.gen_sim.task_spec
+-----------------------------
 
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.cli.start
+Simulator-independent task identity, predicate evaluation and content-addressed
+storage. TaskSpec describes roles, initial and final conditions, invariants,
+bounded temporal conditions and ordered milestones; callers supply observations.
+Missing evidence remains unavailable and cannot produce a certificate.
+
+``TaskSpec.from_dict`` decodes existing instances through the same semantic-hash
+validation as JSON documents and returns independent nested values. Use a new
+TaskSpec (for example, ``dataclasses.replace``) when intentionally changing its
+normative conditions; mutating a nested value invalidates the previous identity.
+Valid documents retain their hashes. Task identifiers, instructions and metadata
+are provenance rather than normative identity.
+
+.. currentmodule:: embodichain.gen_sim.task_spec
 
 .. autosummary::
 
-   cli_ingest_single
-   main
+   CANONICALIZATION_VERSION
+   EVALUATION_STATUSES
+   KNOWN_PREDICATES
+   MILESTONE_SCHEMA
+   PREDICATE_OPERATORS
+   TASK_SPEC_SCHEMA
+   EvaluationReport
+   EvaluationStatus
+   MilestoneSpec
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   RoleSpec
+   TaskRequirement
+   TaskSpec
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+   TaskSpecValidationError
+   TaskTemplate
+   TemporalCondition
+   TemporalSpec
+   canonical_hash
+   canonical_json
+   canonicalize
+   evaluate_predicate
+   evaluate_task_spec
+   evaluate_task_template
+   evaluate_temporal_condition
+   json_snapshot
+   lookup_observation
+   validate_task_spec
+   validate_task_template
+
+embodichain.gen_sim.task_spec.canonicalization
+----------------------------------------------
+
+Deterministic JSON snapshots and SHA-256 identities. Nonfinite numbers,
+callables, byte strings and unordered sets are rejected before serialization.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.canonicalization
+
+.. autosummary::
+
+   CANONICALIZATION_VERSION
+   canonical_hash
+   canonical_json
+   canonicalize
+   json_snapshot
+
+embodichain.gen_sim.task_spec.contracts
+---------------------------------------
+
+Logical role requirements for downstream grounding, including cardinality,
+affordances, attributes and declared initial state. No simulator handles are
+stored in these contracts.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.contracts
+
+.. autosummary::
+
+   RoleSpec
+
+embodichain.gen_sim.task_spec.expressions
+-----------------------------------------
+
+A finite vocabulary of observation-backed predicates and bounded temporal
+conditions. Evaluations distinguish satisfied, failed, unknown, unavailable and
+not-run outcomes; an incomplete always-window cannot certify success.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.expressions
+
+.. autosummary::
+
+   EVALUATION_STATUSES
+   KNOWN_PREDICATES
+   PREDICATE_OPERATORS
+   EvaluationStatus
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   TemporalCondition
+   TemporalSpec
+   evaluate_predicate
+   evaluate_temporal_condition
+   lookup_observation
+
+embodichain.gen_sim.task_spec.registry
+--------------------------------------
+
+Validated TaskSpec documents are stored by semantic hash using atomic file
+replacement. Reads reject corrupt or mismatched identities. Metadata differences
+do not create different semantic identities; existing cache entries are reused
+unless replacement is requested.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.registry
+
+.. autosummary::
+
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+
+embodichain.gen_sim.task_spec.spec
+----------------------------------
+
+Normative task models and their canonical JSON form. Milestone dependencies
+must form an acyclic graph; each milestone requires its predicates to hold in one
+snapshot strictly after its predecessors. ``TaskTemplate`` is an alias of
+``TaskSpec`` for callers using the earlier spelling.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.spec
+
+.. autosummary::
+
+   MILESTONE_SCHEMA
+   TASK_SPEC_SCHEMA
+   MilestoneSpec
+   TaskRequirement
+   TaskSpec
+   TaskTemplate
+
+embodichain.gen_sim.task_spec.validation
+----------------------------------------
+
+Validate documents or instances, then evaluate caller-provided snapshots and
+trajectories. A certificate is ready only when all required checks are satisfied.
+These functions do not acquire physical evidence or execute a task. The template
+spellings are aliases of the TaskSpec functions.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.validation
+
+.. autosummary::
+
+   EvaluationReport
+   TaskSpecValidationError
+   evaluate_task_spec
+   evaluate_task_template
+   validate_task_spec
+   validate_task_template
 
 embodichain.lab.gym.envs.base_env
 ---------------------------------
@@ -682,6 +1029,52 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.sim.motion.ik
+-----------------------------
+
+Stateful adapters connect the numeric branch search to a MotionGenerator and
+Robot. Cartesian target sampling preserves every requested waypoint within an
+explicit sample budget. Continuous recovery is restricted to one environment
+and restores the caller's RNG state without changing requested timing.
+
+.. currentmodule:: embodichain.lab.sim.motion.ik
+
+.. autosummary::
+
+   resolve_continuous_ik_path
+   sample_cartesian_targets
+
+embodichain.lab.sim.motion.limits
+---------------------------------
+
+Strictly intersect runtime speed limits with the assembled URDF's named joint
+caps. Missing or nonpositive authored limits are rejected rather than replaced
+with an inferred default.
+
+.. currentmodule:: embodichain.lab.sim.motion.limits
+
+.. autosummary::
+
+   authored_joint_velocity_limits
+
+embodichain.lab.sim.motion.search
+---------------------------------
+
+Explicit call-local search ledgers and cooperative wall deadlines. Nested
+scopes reuse the outer ledger, timings may overlap, and native work is not
+preempted. Hosts choose budgets; no deadline is enabled by default.
+
+.. currentmodule:: embodichain.lab.sim.motion.search
+
+.. autosummary::
+
+   PlanningBudgetExceeded
+   SearchCost
+   current_search_cost
+   search_cost_scope
+   record_search
+   measure_search
 
 embodichain.lab.sim.scene.expansion.layout
 ------------------------------------------
@@ -786,6 +1179,9 @@ per environment. Stable region occupancy does not establish gripper detachment.
 
 .. autosummary::
 
+   ConditionResult
+   evaluate_near_target
+   evaluate_below_height
    GoalRegionCfg
    OrderedPlacementObjectiveCfg
    MeasuredRigidObjectState
@@ -1705,6 +2101,7 @@ embodichain.lab.sim.motion.planners.utils
    MoveType
    PlanState
    PlanResult
+   RejectedMotionCandidate
    normalize_success_mask
    calculate_point_allocations
    interpolate_xpos
@@ -2567,6 +2964,15 @@ embodichain.toolkits.graspkit.pg_grasp.collision_checker
    ConvexCollisionCheckerCfg
    ConvexCollisionChecker
 
+embodichain.toolkits.graspkit.pg_grasp.fixed_geometry
+---------------------------------------------------
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.fixed_geometry
+
+.. autosummary::
+
+   FixedGripperCollisionGeometry
+
 embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
 ----------------------------------------------------------------
 
@@ -2576,7 +2982,16 @@ embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
 
    GripperCollisionCfg
    GripperCollisionChecker
-   box_surface_grid
+
+embodichain.toolkits.graspkit.pg_grasp.model_geometry
+---------------------------------------------------
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.model_geometry
+
+.. autosummary::
+   :nosignatures:
+
+   get_parallel_jaw_collision_geometry
 
 embodichain.toolkits.graspkit.scripts.annotate_grasp
 ----------------------------------------------------
@@ -2834,3 +3249,114 @@ Asset generalization contracts
    :maxdepth: 2
 
    asset_generalization
+
+Real-to-simulation motion prototypes
+------------------------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   real2sim
+
+embodichain.lab.gym.envs.managers.cfg
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.cfg
+
+Manager configuration binds named functors and explicit scene entities. RL condition groups aggregate success with conjunction, failure and truncation with disjunction.
+
+.. autosummary::
+
+   FunctorCfg
+   ConditionCfg
+   RLTaskCfg
+   EventCfg
+   ObservationCfg
+   SceneEntityCfg
+   RewardCfg
+   ActionTermCfg
+   DatasetFunctorCfg
+
+.. autoclass:: FunctorCfg
+   :members:
+
+.. autoclass:: ConditionCfg
+   :members:
+
+.. autoclass:: RLTaskCfg
+   :members:
+
+.. autoclass:: EventCfg
+   :members:
+
+.. autoclass:: ObservationCfg
+   :members:
+
+.. autoclass:: SceneEntityCfg
+   :members:
+
+.. autoclass:: RewardCfg
+   :members:
+
+.. autoclass:: ActionTermCfg
+   :members:
+
+.. autoclass:: DatasetFunctorCfg
+   :members:
+
+
+embodichain.lab.gym.envs.managers.conditions
+--------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.conditions
+
+Measured manipulation functors bind rigid objects and validate geometric parameters at construction. Calls read live physical state and reset-owned virtual targets. Missing target contexts fail explicitly.
+
+.. autosummary::
+
+   object_near_target
+   object_below_height
+
+.. autoclass:: object_near_target
+   :members:
+   :special-members: __call__
+
+.. autoclass:: object_below_height
+   :members:
+   :special-members: __call__
+
+
+embodichain.lab.gym.envs.managers.termination_manager
+-----------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.termination_manager
+
+The termination manager combines condition measurements with a host-supplied time limit once per control transition. It owns the cached Gym flags and task acceptance, resets selected rows and publishes owned snapshots without resampling.
+
+.. autosummary::
+
+   TerminationManager
+
+.. autoclass:: TerminationManager
+   :members:
+
+
+embodichain.lab.gym.envs.objectives.conditions
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.objectives.conditions
+
+Typed physical predicates provide shared distance and height measurements for RL and Task Program adapters. Invalid evidence never satisfies a condition.
+
+.. autosummary::
+
+   ConditionResult
+   evaluate_near_target
+   evaluate_below_height
+
+.. autoclass:: ConditionResult
+   :members:
+
+.. autofunction:: evaluate_near_target
+
+.. autofunction:: evaluate_below_height

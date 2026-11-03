@@ -15,7 +15,11 @@ boundary. Observation reads reuse the sampled sensor buffer.
 `SimulationManager.physics_step_index` and the query's current actor binding.
 Reading a raw sample before its history callback does not consume the history
 update. Query metadata is checked even on cache hits so topology rebuilds cannot
-retain old contacts. Cached CUDA reads wait for the producing stream.
+retain old contacts. Cached CUDA reads wait for the producing stream. Caller-owned
+CUDA graph capture bypasses raw/history deduplication and records the query read
+and reductions on the capture stream. Capture invalidates eager cache keys rather
+than marking unexecuted work as a completed sample; replay does not execute Python
+cache bookkeeping. Callers own replay scheduling and stream dependencies.
 
 Sensor reset clears only selected rows and invalidates this cache; it does not
 reset the physics solver. An explicit `update()` may therefore refresh a valid

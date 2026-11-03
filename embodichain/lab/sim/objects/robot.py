@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.motion._budget import _planning_call
+
 import torch
 import numpy as np
 
@@ -862,6 +864,7 @@ class Robot(Articulation):
             quat = quat_from_matrix(result_matrix[:, :3, :3])
             return torch.cat((pos, quat), dim=-1)
 
+    @_planning_call("ik")
     def compute_ik(
         self,
         pose: torch.Tensor | np.ndarray,
@@ -1007,6 +1010,7 @@ class Robot(Articulation):
             result = result.reshape(len(local_env_ids), n_batch, 7)
             return result
 
+    @_planning_call("ik", batched=True)
     def compute_batch_ik(
         self,
         pose: torch.Tensor | np.ndarray,

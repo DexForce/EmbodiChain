@@ -121,10 +121,27 @@ except ImportError:
     __all__ = []
 
 
+def _get_dataset_writer(dataset: Any) -> Any:
+    """Resolve the episode owner; 0.4.4's ``writer`` is only a Parquet writer."""
+    writer = getattr(dataset, "writer", None)
+    return writer if hasattr(writer, "episode_buffer") else dataset
+
+
 if LEROBOT_AVAILABLE:
 
     class _ImageCompressionLeRobotDataset(LeRobotDataset):
         """LeRobot dataset that overrides image PNG compression on request."""
+
+        @classmethod
+        def create(cls, *args: Any, **kwargs: Any) -> _ImageCompressionLeRobotDataset:
+            """Create a dataset with compression applied at its write owner."""
+            dataset = super().create(*args, **kwargs)
+            # In 0.6.1, DatasetWriter owns image persistence. Redirect only this
+            # instance's hook; never patch the upstream class globally.
+            writer = _get_dataset_writer(dataset)
+            if writer is not dataset:
+                writer._save_image = dataset._save_image
+            return dataset
 
         def _save_image(self, image: Any, fpath: Path, compress_level: int = 1) -> None:
             # LeRobot passes level 6 for image features and level 1 for the
@@ -134,7 +151,11 @@ if LEROBOT_AVAILABLE:
             image_compress_level = getattr(self, "image_compress_level", None)
             if image_compress_level is not None and compress_level == 6:
                 compress_level = image_compress_level
-            super()._save_image(image, fpath, compress_level)
+            writer = _get_dataset_writer(self)
+            if writer is self:
+                super()._save_image(image, fpath, compress_level)
+            else:
+                type(writer)._save_image(writer, image, fpath, compress_level)
 
 else:
     _ImageCompressionLeRobotDataset = None
@@ -1363,13 +1384,14 @@ class LeRobotRecorder(Functor):
     def _normalize_scalar_episode_buffer(self) -> None:
         """Collapse single-value arrays before LeRobot serializes an episode.
 
-        LeRobot 0.4.4 validates a scalar feature declared with shape ``(1,)``
+        LeRobot validates a scalar feature declared with shape ``(1,)``
         as a one-dimensional NumPy array when :meth:`add_frame` is called, but
         maps that same feature to a Hugging Face ``Value`` during
         :meth:`save_episode`. Without normalization, LeRobot stacks the frame
         arrays into shape ``(frames, 1)`` and ``datasets`` converts each
         ``array([value])`` to a Python scalar. NumPy 2.4 rejects that implicit
-        conversion.
+        conversion. Version 0.6.1 also normalizes scalars internally; applying
+        this step to its writer buffer retains the same input contract.
 
         This method runs after per-frame validation and replaces buffered
         one-element numeric arrays with dtype-preserving NumPy scalars. The
@@ -1383,7 +1405,8 @@ class LeRobotRecorder(Functor):
         if self.dataset is None:
             return
 
-        episode_buffer = getattr(self.dataset, "episode_buffer", None)
+        writer = _get_dataset_writer(self.dataset)
+        episode_buffer = getattr(writer, "episode_buffer", None)
         features = getattr(self.dataset, "features", None)
         if not isinstance(episode_buffer, dict) or not isinstance(features, Mapping):
             return
@@ -1576,9 +1599,10 @@ class LeRobotRecorder(Functor):
                 # Flush + stop the async image writer (if enabled) so every
                 # explicitly committed frame lands on disk before metadata is
                 # finalized.
-                if self.dataset.image_writer is not None:
+                writer = _get_dataset_writer(self.dataset)
+                if writer.image_writer is not None:
                     try:
-                        self.dataset.stop_image_writer()
+                        writer.stop_image_writer()
                     except Exception as error:  # noqa: BLE001 - aggregate cleanup
                         errors.append(f"image writer: {error}")
                 try:

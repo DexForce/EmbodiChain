@@ -20,9 +20,14 @@ from ..pose_generator import *
 from .antipodal_sampler import *
 from .collision_checker import *
 from .gripper_collision_checker import *
+from .fixed_geometry import *
+from .model_geometry import *
 from .pose_generator import *
+from .regions import for_axis_region, select_supported_end
 
 __all__ = [
+    "for_axis_region",
+    "select_supported_end",
     "AntipodalGraspPoseGenerator",
     "AntipodalGraspPoseGeneratorCfg",
     "AntipodalSampler",
@@ -30,9 +35,12 @@ __all__ = [
     "ConvexCollisionChecker",
     "ConvexCollisionCheckerCfg",
     "GraspAnnotationCfg",
+    "FixedGripperCollisionGeometry",
+    "get_parallel_jaw_collision_geometry",
     "GripperCollisionCfg",
     "GripperCollisionChecker",
     "GraspPoseGenerator",
+    "GraspRegionSelector",
     "ParallelJawGraspPoseGenerator",
     "ParallelJawGraspCollisionCfg",
     "ParallelJawGripperModelCfg",

@@ -49,13 +49,18 @@ COMMANDS = (
     ),
     Command(
         name="simready",
-        target="embodichain.gen_sim.simready_pipeline.cli.start:main",
+        target="embodichain.gen_sim.asset_engine.cli.start:main",
         help="Convert a raw asset directory into a SimReady asset.",
     ),
     Command(
         name="scene-engine",
         target="embodichain.gen_sim.scene_engine.cli.start:main",
         help="Generate a scene export from an input image using gen_sim/.env.",
+    ),
+    Command(
+        name="search-scene-feasibility",
+        target="embodichain.lab.task_program.integrations.feasibility:cli",
+        help="Search task-conditioned scene layouts and robot installations.",
     ),
     Command(
         name="scene-randomization",
@@ -116,6 +121,11 @@ COMMANDS = (
         name="dataset",
         target="embodichain.cli.dataset:main",
         help="Validate, split, and recover recorded expert datasets.",
+    ),
+    Command(
+        name="real2sim",
+        target="embodichain.data_pipeline.real2sim.cli:main",
+        help="Prepare and validate annotated real-to-simulation motion prototypes.",
     ),
     Command(
         name="preview_lerobot_data",
