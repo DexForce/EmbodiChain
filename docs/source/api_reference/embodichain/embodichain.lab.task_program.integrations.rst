@@ -22,12 +22,16 @@ embodichain.lab.task_program.integrations
       SimulationRobotSkillProfileBinding, SimulationTaskProgramFactory,
       SimulationTaskProgramAdapterFactory, ConfiguredHandOverPoseProvider,
       CuroboParallelCommandSafetyValidator, CuroboParallelSafetyValidatorFactory,
-      SimulationSegmentPolicyPort, create_simulation_task_program_adapter
+      SimulationSegmentPolicyPort, create_simulation_task_program_adapter,
+      ConfiguredTaskProgramDeployment, ConfiguredTaskProgramIntegration,
+      load_configured_task_program_deployment
 
    .. autosummary::
 
       AntipodalGraspAffordanceBinding
       ConfiguredHandOverPoseProvider
+      ConfiguredTaskProgramDeployment
+      ConfiguredTaskProgramIntegration
       ContainerAffordanceBinding
       ControlPartCommandPreset
       ControlPartEvidenceProviderDeclaration
@@ -65,6 +69,7 @@ embodichain.lab.task_program.integrations
       VersionedKey
       create_simulation_task_program_adapter
       default_simulation_settle_presets
+      load_configured_task_program_deployment
 
 .. currentmodule:: embodichain.lab.task_program.integrations
 

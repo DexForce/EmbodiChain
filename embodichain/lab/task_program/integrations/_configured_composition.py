@@ -20,14 +20,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from embodichain.lab.task_program.language.schema import TaskProgramIntegrationCfg
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
 
+from .composition import (
+    ConfiguredTaskProgramDeployment as _ConfiguredTaskProgramDeployment,
+)
 from .configured import (
+    _ConfiguredTaskProgramAdapterFactory,
     _ConfiguredTaskProgramIntegration,
     _decode_configured_task_program_integration,
     _decode_motion_policy,
@@ -70,19 +74,6 @@ _EXECUTION_POLICY_OVERRIDE_FIELDS = {
     ),
     "recovery": frozenset({"action_timeout", "goal_rotation_threshold"}),
 }
-
-
-@dataclass(frozen=True, slots=True)
-class _ConfiguredTaskProgramDeployment:
-    """One fully resolved configured Task Program deployment."""
-
-    integration_id: str
-    program_id: str
-    program_path: Path
-    selection: TaskProgramIntegrationCfg
-    integration: _ConfiguredTaskProgramIntegration
-    scene_binding: dict[str, object]
-    planner_config: dict[str, object] | None
 
 
 def _component_path(
@@ -588,7 +579,8 @@ def _load_configured_task_program_deployment(
             path="execution policy.preset_id",
         ),
     )
-    if integration.adapter_factory.nominal_motion_sources:
+    factory = cast(_ConfiguredTaskProgramAdapterFactory, integration.adapter_factory)
+    if factory.nominal_motion_sources:
         from embodichain.lab.task_program import load_task_program
         from .nominal import _ConfiguredTaskProgramNominalSources
 
@@ -601,9 +593,7 @@ def _load_configured_task_program_deployment(
                 "configured nominal sources require the integration's program_id"
             )
         compiled = catalog.preflight(program)
-        _ConfiguredTaskProgramNominalSources(
-            compiled, integration.adapter_factory.nominal_motion_sources
-        )
+        _ConfiguredTaskProgramNominalSources(compiled, factory.nominal_motion_sources)
     return _ConfiguredTaskProgramDeployment(
         integration_id=integration_id,
         program_id=program_id,
