@@ -26,9 +26,9 @@ from typing import Any
 
 import torch
 
-from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
+from embodichain.lab.sim.evidence import PhysicalEvidenceRequest
 from embodichain.utils import configclass
-from .contact_evidence import (
+from .contact_sampling import (
     CONTACT_ACTOR_IDS,
     CONTACT_VALID_MASK,
     CONTACT_NORMALS,

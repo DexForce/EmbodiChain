@@ -20,19 +20,22 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 import torch
 
 from embodichain.lab.sim.sensors.contact_sensor import ContactSensor
-from embodichain.lab.sim.atomic_actions.evidence import (
+from embodichain.lab.sim.evidence import (
     PhysicalEvidenceBatch,
     PhysicalEvidenceFrame,
     PhysicalEvidenceRequest,
 )
 
-if TYPE_CHECKING:
-    from embodichain.lab.sim.atomic_actions.state import PlanningContext
+
+class _ObservationContext(Protocol):
+    timestamp: float
+    env_ids: torch.Tensor
+
 
 __all__ = [
     "CONTACT_ACTOR_IDS",
@@ -407,12 +410,12 @@ class ContactEvidenceSampler:
             )
 
     def collect(
-        self, context: PlanningContext, request: PhysicalEvidenceRequest
+        self, context: _ObservationContext, request: PhysicalEvidenceRequest
     ) -> PhysicalEvidenceFrame:
         """Implement the shared physical-evidence provider port.
 
         Args:
-            context: Planning observation owning this request's time and rows.
+            context: Physical observation owning this request's time and rows.
             request: Explicit physical-contact channel request.
 
         Returns:
