@@ -14,15 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Browser-based visualization of simulation scenes via Viser.
+"""Browser presentation through Viser snapshots or native DexSim WebRTC.
 
-``SceneExporter`` produces backend-neutral snapshots, ``VisualizationRuntime`` pushes them to a Viser backend, with gizmo overlays, camera preview, and CLI helpers.
+``SceneExporter`` and ``VisualizationRuntime`` serve Viser. ``DexSimWebCfg``
+configures the manager-owned native observation view without scene export.
 """
 
 from __future__ import annotations
 
 from .cli import add_viser_args_to_parser, visualization_cfg_from_args
-from .cfg import VisualizationCfg, ViserServerCfg
+from .cfg import DexSimWebCfg, VisualizationCfg, ViserServerCfg
 from .protocol import (
     CameraImage,
     CameraImageFrame,
@@ -64,6 +65,7 @@ __all__ = [
     "CameraSpec",
     "CaptureResult",
     "DynamicMeshUpdate",
+    "DexSimWebCfg",
     "FrameOverlay",
     "GizmoCommand",
     "GizmoCommandQueue",

@@ -230,7 +230,7 @@ def _run_simulation(
         if robot is None:
             raise RuntimeError("Robot declaration failed.")
         sim.prepare()
-        if not args.headless and not args.viser:
+        if not args.headless and not args.viser and not getattr(args, "web", False):
             if not sim.open_window():
                 raise RuntimeError("The native preview window could not be opened.")
         sim.update_gizmos()
@@ -256,7 +256,9 @@ def _run_simulation(
                 log_warning(
                     "No IK Gizmos are available; check control-part chain/TCP metadata and the single-environment requirement."
                 )
-        interactive = bool(args.viser or not args.headless)
+        interactive = bool(
+            args.viser or getattr(args, "web", False) or not args.headless
+        )
         if interactive:
             log_info("Robot preview ready. Press Ctrl+C to exit.", color="green")
         _run_preview_loop(

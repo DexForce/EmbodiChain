@@ -188,6 +188,11 @@ def main():
         package_dir=get_package_dir(),
         package_data={
             "embodichain": ["VERSION"],
+            "embodichain.lab.visualization": [
+                "web_assets/*.html",
+                "web_assets/*.js",
+                "web_assets/*.css",
+            ],
             "embodichain_models.dynamics.nerd": ["THIRD_PARTY_LICENSES"],
             "embodichain_models.dynamics.rigidformer": [
                 "THIRD_PARTY_LICENSES",

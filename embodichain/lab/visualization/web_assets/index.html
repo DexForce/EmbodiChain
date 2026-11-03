@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EmbodiChain · Web viewer</title><link rel="stylesheet" href="/style.css"></head>
+<body><header><strong>EmbodiChain</strong><span>Native WebRTC viewer · experimental</span><span id="RTC_Status" role="status">Connecting…</span></header>
+<main><section id="main-view"><p id="waiting">Waiting for the first rendered frame…</p></section>
+<aside><p>Click the main view to focus. Drag or scroll to move the observation camera.</p>
+<p id="RTC_ControlStatus"></p><div id="error" role="alert" hidden></div>
+<button id="reset">Reset view</button><button id="render">Render one frame</button><button id="save">Save image</button>
+<label><input id="pause" type="checkbox">Pause viewer rendering (physics continues)</label>
+<label><input id="gizmo" type="checkbox">Select and move scene objects</label>
+<small>Object manipulation changes simulation state. Robot IK is not available in this experimental viewer.</small>
+<button id="RTC_ReleaseControl">Release control</button><button id="RTC_Stop">Stop viewing</button><button id="reconnect">Reconnect</button>
+<details open><summary>Task cameras · read-only</summary><p>These show the latest task-rendered RGB frames.</p><div id="sensor-views"></div></details>
+<details><summary>Scene</summary><pre id="scene"></pre></details>
+<details id="RTC_StatsPanel"><summary>Stream statistics</summary><div id="RTC_Stats"></div></details>
+</aside></main><div id="RTC_Videos" hidden></div>
+<script src="/browser.js"></script><script src="/app.js"></script></body></html>

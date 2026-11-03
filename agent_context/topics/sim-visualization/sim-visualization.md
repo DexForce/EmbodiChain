@@ -11,7 +11,8 @@
 | File | Role |
 |---|---|
 | `embodichain/lab/sim/sim_manager.py` | Owns visualization configuration, lifecycle, topology revisions, capture hooks, health, and telemetry |
-| `embodichain/lab/visualization/cfg.py` | `VisualizationCfg` and nested `ViserServerCfg` |
+| `embodichain/lab/visualization/cfg.py` | `VisualizationCfg`, `ViserServerCfg`, and `DexSimWebCfg` |
+| `embodichain/lab/visualization/_web_viewer.py` | Creator-thread WebRTC observer camera and application routes |
 | `embodichain/lab/visualization/cli.py` | Common `--viser*` arguments and standalone argument-to-config conversion |
 | `embodichain/lab/visualization/protocol.py` | Backend-neutral manifest, frame, mesh, camera, and overlay snapshots |
 | `embodichain/lab/visualization/scene_exporter.py` | Reads simulation assets and produces detached CPU snapshots |
@@ -51,6 +52,15 @@ and live per-environment visibility. They share the mesh manifest/frame protocol
 without entering physical-object registries; non-mesh representations require a
 separate protocol extension.
 
+The experimental `dexsim-web` backend replaces the native window using the
+existing World renderer and a separate observer camera. It bypasses the Viser
+snapshot/worker pipeline above. `WebApplication` creation, request pumping,
+render scheduling and closure run on the World creator thread. Configuration
+must enable WebRTC before World construction; auto selects Hybrid. It supports
+one environment and one viewer, with native camera-count/RGB restrictions.
+The listener binds all IPv4 interfaces and remains World-owned after application
+closure. See [WebRTC operation and limitations](../../../embodichain/lab/visualization/README.md).
+
 The simulation owns physics and assets. Scene export is read-only. When
 `allow_commands=True`, Viser Gizmo callbacks enqueue pose commands that
 `SimulationManager` later applies on the simulation thread.
@@ -74,6 +84,10 @@ this invariant.
 - [Native gizmos](native-gizmos.md): entity manipulation, IK ownership and native-window behavior.
 
 ## Invariants
+
+- WebRTC observes the existing scene without exporting meshes or stepping physics.
+  Its observer has a dedicated group; task-camera buffers and transforms are read-only.
+  Application stop does not release the native listener; World teardown does.
 
 - Scene export must not mutate physics, actions, or asset state.
 - Gizmo commands mutate targets only after simulation-thread validation.
@@ -114,6 +128,8 @@ this invariant.
 
 Relevant tests:
 
+- `tests/visualization/test_web_viewer.py`
+- `tests/visualization/test_web_viewer_browser.py` (opt-in GPU/Chrome)
 - `tests/visualization/test_cfg.py`
 - `tests/visualization/test_cli.py`
 - `tests/visualization/test_protocol.py`

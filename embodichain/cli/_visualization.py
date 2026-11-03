@@ -45,12 +45,30 @@ def _parse_viser_env_id(value: str) -> int | str:
 
 
 def add_viser_args_to_parser(parser: argparse.ArgumentParser) -> None:
-    """Add the standard EmbodiChain Viser command-line options.
+    """Add browser frontend selection and backend-specific command-line options.
 
     Args:
-        parser: Parser receiving the Viser options.
+        parser: Parser receiving mutually exclusive Viser and WebRTC options.
     """
+    frontend = parser.add_mutually_exclusive_group()
+    frontend.add_argument(
+        "--web",
+        action="store_true",
+        help="Experimental native WebRTC viewer (Linux/NVIDIA, single environment, trusted network).",
+    )
     parser.add_argument(
+        "--web-port",
+        type=int,
+        default=None,
+        help="WebRTC HTTP/signaling port (default 8765).",
+    )
+    parser.add_argument(
+        "--web-fps",
+        type=float,
+        default=None,
+        help="WebRTC observation-view render rate (default 15).",
+    )
+    frontend.add_argument(
         "--viser",
         action="store_true",
         help=(

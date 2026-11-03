@@ -272,10 +272,14 @@ def _run_preview_mode(
         return
 
     viser_enabled = bool(getattr(args, "viser", False))
-    if args.headless and not viser_enabled:
+    if args.headless and not viser_enabled and not getattr(args, "web", False):
         return
 
-    target = "Viser browser preview" if viser_enabled else "Simulation window"
+    target = (
+        "WebRTC browser preview"
+        if getattr(args, "web", False)
+        else "Viser browser preview" if viser_enabled else "Simulation window"
+    )
     log_info(f"{target} open. Press Ctrl+C to exit.", color="green")
     _preview._run_preview_loop(sim, joint_controller, interactive=True)
 
