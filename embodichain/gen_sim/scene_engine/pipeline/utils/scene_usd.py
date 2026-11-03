@@ -648,6 +648,7 @@ def _add_articulations(
             usdc_path = runtime_path
         if entry.get("fix_base", True) is not True:
             raise ValueError(f"Articulation entry {uid!r} must set fix_base=true.")
+        joint_limits = _read_revolute_qpos_limits(usdc_path) or None
         articulations.append(
             sim.add_articulation(
                 ArticulationCfg(
@@ -663,7 +664,8 @@ def _add_articulations(
                     ),
                     root_props=ArticulationRootPropertiesCfg(fixed_base=True),
                     build_pk_chain=False,
-                    qpos_limits=_read_revolute_qpos_limits(usdc_path) or None,
+                    asset_physics_mode="overlay" if joint_limits else "preserve",
+                    qpos_limits=joint_limits,
                 )
             )
         )

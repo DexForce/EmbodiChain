@@ -174,7 +174,10 @@ def analyze_image(
         "image_path": resolved_image.as_posix(),
         "scene": scene.to_dict(),
         "scene_graph": scene_graph.to_dict(),
-        "artifacts": _artifact_records(resolved_output / "scene_understanding"),
+        "artifacts": [
+            *_artifact_records(resolved_output / "scene_understanding"),
+            _artifact_record(resolved_image),
+        ],
     }
     blueprint_id = _canonical_hash(payload)
     document = {**payload, "blueprint_id": blueprint_id}
@@ -208,7 +211,12 @@ def materialize_blueprint(
 
     Returns:
         Exported scene revision without mutating the supplied blueprint objects.
+
+    Raises:
+        ValueError: If the saved blueprint or its source/understanding artifacts
+            changed. Re-analyze the scene before making generation requests.
     """
+    _verify_blueprint_artifacts(blueprint)
     scene = deepcopy(blueprint.scene)
     scene_graph = deepcopy(blueprint.scene_graph)
     effective_vlm = vlm_client or OpenAICompatibleVLM.from_dotenv()
@@ -323,35 +331,39 @@ def materialize_edit(
     """
     scene_edit_plan = deepcopy(blueprint.scene_edit_plan)
     updated_scene_graph = deepcopy(blueprint.updated_scene_graph)
-    effective_vlm = vlm_client or OpenAICompatibleVLM.from_dotenv()
     owned_clients = []
-    log_info("Starting Objects Preparation")
-    try:
-        image_generation = (
-            image_generation_client or ImageGenerationClient.from_dotenv()
-        )
-        owned_clients.append((image_generation, image_generation_client is None))
-        geometry = geometry_generation_client or GeometryGenerationClient.from_dotenv()
-        owned_clients.append((geometry, geometry_generation_client is None))
-        segmentation = (
-            image_segmentation_client or ImageSegmentationClient.from_dotenv()
-        )
-        owned_clients.append((segmentation, image_segmentation_client is None))
-        for client, _ in owned_clients:
-            client.check_health()
-        added_assets = prepare_scene_edit_assets(
-            scene_edit_plan=scene_edit_plan,
-            output_root=blueprint.output_root,
-            image_generation_client=image_generation,
-            geometry_generation_client=geometry,
-            image_segmentation_client=segmentation,
-            vlm_client=effective_vlm,
-        )
-    finally:
-        for client, owned in owned_clients:
-            if owned:
-                client.close()
-    log_info("Completed Objects Preparation")
+    added_assets = []
+    if any(operation.op == "add" for operation in scene_edit_plan.operations):
+        effective_vlm = vlm_client or OpenAICompatibleVLM.from_dotenv()
+        log_info("Starting Objects Preparation")
+        try:
+            image_generation = (
+                image_generation_client or ImageGenerationClient.from_dotenv()
+            )
+            owned_clients.append((image_generation, image_generation_client is None))
+            geometry = (
+                geometry_generation_client or GeometryGenerationClient.from_dotenv()
+            )
+            owned_clients.append((geometry, geometry_generation_client is None))
+            segmentation = (
+                image_segmentation_client or ImageSegmentationClient.from_dotenv()
+            )
+            owned_clients.append((segmentation, image_segmentation_client is None))
+            for client, _ in owned_clients:
+                client.check_health()
+            added_assets = prepare_scene_edit_assets(
+                scene_edit_plan=scene_edit_plan,
+                output_root=blueprint.output_root,
+                image_generation_client=image_generation,
+                geometry_generation_client=geometry,
+                image_segmentation_client=segmentation,
+                vlm_client=effective_vlm,
+            )
+        finally:
+            for client, owned in owned_clients:
+                if owned:
+                    client.close()
+        log_info("Completed Objects Preparation")
     log_info("Starting Layout Generation")
     scene = edit_layout(
         scene=scene_edit_plan.scene,
@@ -389,19 +401,55 @@ def _export_materialization(
     )
 
 
+def _artifact_record(path: Path) -> dict[str, Any]:
+    data = path.read_bytes()
+    return {
+        "path": path.resolve().as_posix(),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "size": len(data),
+    }
+
+
 def _artifact_records(root: Path) -> list[dict[str, Any]]:
     if not root.is_dir():
         return []
-    records = []
-    for path in sorted(item for item in root.rglob("*") if item.is_file()):
-        records.append(
-            {
-                "path": path.resolve().as_posix(),
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "size": path.stat().st_size,
-            }
-        )
-    return records
+    return [
+        _artifact_record(path)
+        for path in sorted(item for item in root.rglob("*") if item.is_file())
+    ]
+
+
+def _verify_blueprint_artifacts(blueprint: SceneBlueprintPackage) -> None:
+    """Reject overwritten observations or declarations before generation calls."""
+    try:
+        document = json.loads(blueprint.manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            raise ValueError("blueprint manifest must be an object")
+        identity = document.pop("blueprint_id")
+        if identity != blueprint.blueprint_id or _canonical_hash(document) != identity:
+            raise ValueError("blueprint identity changed")
+        if (
+            document["scene"] != blueprint.scene.to_dict()
+            or document["scene_graph"] != blueprint.scene_graph.to_dict()
+            or document["image_path"] != blueprint.image_path.as_posix()
+        ):
+            raise ValueError("blueprint declarations changed")
+        records = document["artifacts"]
+        if not isinstance(records, list) or any(
+            not isinstance(record, dict) for record in records
+        ):
+            raise ValueError("invalid artifact records")
+        if not any(
+            record.get("path") == blueprint.image_path.as_posix() for record in records
+        ):
+            raise ValueError("source image is not audited")
+        for record in records:
+            if _artifact_record(Path(record["path"])) != record:
+                raise ValueError(f"artifact changed: {record['path']}")
+    except (OSError, KeyError, TypeError, json.JSONDecodeError, ValueError) as error:
+        raise ValueError(
+            f"Scene blueprint is stale or invalid; analyze the scene again: {error}"
+        ) from error
 
 
 def _canonical_hash(value: Any) -> str:

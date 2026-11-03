@@ -128,6 +128,7 @@ def generate_scene_from_image(
     log_info("Starting Scene Export")
     rotate_scene_z_up_world(
         scene=scene,
+        scene_graph=scene_graph,
         rotation_degrees=scene_z_rotation_degrees,
     )
     scene_exporter = SceneExporter(

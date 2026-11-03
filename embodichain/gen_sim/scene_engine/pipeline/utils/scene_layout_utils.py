@@ -20,6 +20,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     layout_object_to_transform_matrix,
@@ -77,7 +78,9 @@ def translate_scene_object_y_up_by_z_up_delta(
         ]
 
 
-def rotate_scene_z_up_world(*, scene: Scene, rotation_degrees: float) -> None:
+def rotate_scene_z_up_world(
+    *, scene: Scene, rotation_degrees: float, scene_graph: SceneGraph | None = None
+) -> None:
     """Rotate every final scene pose and support point about world z.
 
     The generated meshes remain unchanged. The same rigid world transform is
@@ -87,6 +90,8 @@ def rotate_scene_z_up_world(*, scene: Scene, rotation_degrees: float) -> None:
     Args:
         scene: Final generated scene whose object poses use the internal y-up frame.
         rotation_degrees: Counterclockwise world-z rotation in degrees.
+        scene_graph: Optional saved world-axis relations and tabletop regions.
+            Directional graph metadata requires a multiple of 90 degrees.
 
     Raises:
         ValueError: If the rotation is not finite or a scene pose is incomplete.
@@ -96,6 +101,47 @@ def rotate_scene_z_up_world(*, scene: Scene, rotation_degrees: float) -> None:
         raise ValueError("rotation_degrees must be finite.")
     if angle % 360.0 == 0.0:
         return
+
+    if scene_graph is not None and (
+        scene_graph.relations
+        or any(node.table_region is not None for node in scene_graph.nodes)
+    ):
+        steps = round(angle / 90.0)
+        if not np.isclose(angle, steps * 90.0):
+            raise ValueError(
+                "Directional scene graphs require a multiple of 90 degrees."
+            )
+        directions = {
+            "left_of": (-1, 0),
+            "right_of": (1, 0),
+            "in_front_of": (0, 1),
+            "behind": (0, -1),
+        }
+        regions = {
+            "left_back": (-1, -1),
+            "back_center": (0, -1),
+            "right_back": (1, -1),
+            "left_center": (-1, 0),
+            "center": (0, 0),
+            "right_center": (1, 0),
+            "left_front": (-1, 1),
+            "front_center": (0, 1),
+            "right_front": (1, 1),
+        }
+
+        def rotated(vector: tuple[int, int]) -> tuple[int, int]:
+            x, y = vector
+            for _ in range(steps % 4):
+                x, y = -y, x
+            return x, y
+
+        direction_names = {value: key for key, value in directions.items()}
+        region_names = {value: key for key, value in regions.items()}
+        for relation in scene_graph.relations:
+            relation.relation = direction_names[rotated(directions[relation.relation])]
+        for node in scene_graph.nodes:
+            if node.table_region is not None:
+                node.table_region = region_names[rotated(regions[node.table_region])]
 
     world_rotation = np.eye(4)
     world_rotation[:3, :3] = Rotation.from_euler("z", angle, degrees=True).as_matrix()

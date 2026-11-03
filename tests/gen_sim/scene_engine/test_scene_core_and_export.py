@@ -1335,3 +1335,42 @@ def test_preview_pose_playback_renders_without_physics(
         "destroy",
         "flush",
     ]
+
+
+def test_preview_converted_limits_reach_resolved_descriptor(tmp_path, monkeypatch):
+    from dexsim.engine import JointType
+    from dexsim.spawn import ArticulationDesc, LinkDesc, JointDesc
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_usd
+    from embodichain.lab.sim.spawn.descriptors import configure_articulation_desc
+
+    limits = {"hinge": [-0.25, 1.5]}
+    monkeypatch.setattr(scene_usd, "_read_revolute_qpos_limits", lambda path: limits)
+    descriptor = ArticulationDesc(
+        name="door",
+        links=[LinkDesc("base", "", np.eye(4)), LinkDesc("lid", "base", np.eye(4))],
+        joints=[JointDesc("hinge", "base", "lid", JointType.REVOLUTE)],
+        root_link_name="base",
+    )
+
+    class Simulation:
+        def add_articulation(self, cfg):
+            assert cfg.asset_physics_mode == "overlay"
+            configure_articulation_desc(descriptor, cfg)
+            return descriptor
+
+    path = tmp_path / "door.usdc"
+    path.write_bytes(b"asset")
+    scene_usd._add_articulations(
+        sim=Simulation(),
+        entries=[
+            {
+                "uid": "door",
+                "fpath": "door.usdc",
+                "init_pos": [0, 0, 0],
+                "init_rot": [0, 0, 0],
+            }
+        ],
+        config_dir=tmp_path,
+    )
+    assert descriptor.joints[0].lower_limit == pytest.approx(-0.25)
+    assert descriptor.joints[0].upper_limit == pytest.approx(1.5)

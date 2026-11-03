@@ -16,17 +16,8 @@
 
 from __future__ import annotations
 
-from .api import (
-    SCENE_BLUEPRINT_SCHEMA,
-    SCENE_EDIT_BLUEPRINT_SCHEMA,
-    SceneBlueprintPackage,
-    SceneEditBlueprintPackage,
-    SceneMaterialization,
-    analyze_edit,
-    analyze_image,
-    materialize_blueprint,
-    materialize_edit,
-)
+from importlib import import_module
+from typing import Any
 
 __all__ = [
     "SCENE_BLUEPRINT_SCHEMA",
@@ -39,3 +30,12 @@ __all__ = [
     "materialize_blueprint",
     "materialize_edit",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Load generation APIs only when their public exports are requested."""
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"{__name__}.api"), name)
+    globals()[name] = value
+    return value

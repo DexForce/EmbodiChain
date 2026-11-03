@@ -34,9 +34,15 @@ Read [pipeline details](pipeline-details.md) for stage contracts, parser resume
 behavior, Gradio artifact ownership and focused failure diagnosis.
 
 The staged API persists a versioned image or edit blueprint before generating
-assets. Materialization copies the supplied scene/graph and closes only clients
-it creates. Blueprint objects are in-process values with persisted audit
-documents; this API does not load them as a complete task deployment.
+assets. Image materialization verifies the persisted blueprint and source/mask
+hashes before generation; changed workspaces require a new analysis. It copies
+the supplied scene/graph and closes only clients it creates. Move/delete-only
+edit materialization uses no generation clients or VLM configuration. Pipeline
+exports load lazily so utility imports do not require generation dependencies.
+Blueprint objects are in-process values with persisted audit documents; this API
+does not load them as a complete task deployment. Whole-scene rotations also
+rotate planar graph relations and table regions; directional graphs require
+quarter turns because their vocabulary is axis-aligned.
 The `simready` CLI remains available, while Python imports use `asset_engine`.
 
 ## Durable scene boundary

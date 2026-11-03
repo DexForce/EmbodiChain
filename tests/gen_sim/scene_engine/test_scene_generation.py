@@ -814,3 +814,56 @@ def test_parent_aabb_projection_rejects_a_child_that_cannot_fit() -> None:
                 "book_001": np.array([[0.0, 0.0], [1.1, 0.2]]),
             },
         )
+
+
+@pytest.mark.parametrize(
+    ("angle", "relation", "region"),
+    [
+        (180.0, "right_of", "right_back"),
+        (90.0, "behind", "left_back"),
+        (-90.0, "in_front_of", "right_front"),
+    ],
+)
+def test_world_rotation_updates_saved_graph_directions(angle, relation, region):
+    from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraphRelation
+
+    objects = [
+        SceneObject(
+            id=uid,
+            kind="table" if uid == "table" else "asset",
+            category=uid,
+            name=uid,
+            description=uid,
+            pos=[0.0, 0.0, 0.0],
+            rot=[0.0, 0.0, 0.0],
+            scale=[1.0, 1.0, 1.0],
+        )
+        for uid in ("table", "a", "b")
+    ]
+    graph = SceneGraph(
+        nodes=[
+            SceneGraphNode("table", None),
+            SceneGraphNode("a", "table", "on", table_region="left_front"),
+            SceneGraphNode("b", "table", "on"),
+        ],
+        relations=[SceneGraphRelation("a", "left_of", "b")],
+    )
+    rotate_scene_z_up_world(
+        scene=Scene(objects=objects), scene_graph=graph, rotation_degrees=angle
+    )
+    assert graph.relations[0].relation == relation
+    assert graph.nodes[1].table_region == region
+    assert graph.nodes[1].parent_relation == "on"
+
+
+def test_directional_rotation_rejects_unrepresentable_angle_before_pose_change():
+    graph = SceneGraph(
+        nodes=[
+            SceneGraphNode("table", None),
+            SceneGraphNode("a", "table", "on", table_region="left_front"),
+        ]
+    )
+    scene = Scene()
+    with pytest.raises(ValueError, match="multiple of 90"):
+        rotate_scene_z_up_world(scene=scene, scene_graph=graph, rotation_degrees=45)
+    assert graph.nodes[1].table_region == "left_front"

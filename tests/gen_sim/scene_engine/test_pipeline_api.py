@@ -23,7 +23,10 @@ from pathlib import Path
 import pytest
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
-from embodichain.gen_sim.scene_engine.core.scene_edit_plan import SceneEditPlan
+from embodichain.gen_sim.scene_engine.core.scene_edit_plan import (
+    SceneEditPlan,
+    SceneEditOperation,
+)
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
     SceneGraph,
     SceneGraphNode,
@@ -153,15 +156,18 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
     scene, graph = _table_scene()
     manifest_path = tmp_path / "scene_blueprint.json"
     manifest_path.write_text("audited blueprint\n", encoding="utf-8")
-    package = api.SceneBlueprintPackage(
-        schema_version=api.SCENE_BLUEPRINT_SCHEMA,
-        blueprint_id="blueprint",
-        image_path=tmp_path / "input.png",
-        output_root=tmp_path,
-        manifest_path=manifest_path,
-        scene=scene,
-        scene_graph=graph,
+    image_path = tmp_path / "input.png"
+    image_path.write_bytes(b"source image")
+    monkeypatch.setattr(api, "understand_scene", lambda **kwargs: (scene, graph))
+    package = api.analyze_image(
+        image_path,
+        tmp_path,
+        vlm_client=object(),
+        image_segmentation_client=_HealthyClient(),
     )
+    manifest_path = package.manifest_path
+    audited_manifest = manifest_path.read_text(encoding="utf-8")
+
     original_scene = deepcopy(scene.to_dict())
     original_graph = deepcopy(graph.to_dict())
 
@@ -197,7 +203,7 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
     assert result.scene.objects[0].name == "materialized table"
     assert package.scene.to_dict() == original_scene
     assert package.scene_graph.to_dict() == original_graph
-    assert manifest_path.read_text(encoding="utf-8") == "audited blueprint\n"
+    assert manifest_path.read_text(encoding="utf-8") == audited_manifest
 
 
 def test_materialize_edit_does_not_mutate_audited_snapshot(
@@ -289,7 +295,21 @@ def test_materialize_edit_preserves_client_ownership_when_setup_fails(
         edit_prompt="Keep the scene unchanged.",
         output_root=tmp_path,
         manifest_path=tmp_path / "scene_edit_blueprint.json",
-        scene_edit_plan=SceneEditPlan(scene=scene, scene_graph=graph, operations=[]),
+        scene_edit_plan=SceneEditPlan(
+            scene=scene,
+            scene_graph=graph,
+            operations=[
+                SceneEditOperation(
+                    op="add",
+                    object_id="new_mug",
+                    target_id="table",
+                    relation="on",
+                    category="mug",
+                    name="mug",
+                    description="A mug",
+                )
+            ],
+        ),
         updated_scene_graph=graph,
     )
     image_client = _OwnedClient()
@@ -350,15 +370,18 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
             pose_description="Stand upright on its base.",
         )
     )
-    package = api.SceneBlueprintPackage(
-        schema_version=api.SCENE_BLUEPRINT_SCHEMA,
-        blueprint_id="articulated",
-        image_path=tmp_path / "input.png",
-        output_root=tmp_path,
-        manifest_path=tmp_path / "scene_blueprint.json",
-        scene=scene,
-        scene_graph=graph,
+    image_path = tmp_path / "input.png"
+    image_path.write_bytes(b"source image")
+    monkeypatch.setattr(api, "understand_scene", lambda **kwargs: (scene, graph))
+    package = api.analyze_image(
+        image_path,
+        tmp_path,
+        vlm_client=object(),
+        image_segmentation_client=_HealthyClient(),
     )
+    manifest_path = package.manifest_path
+    audited_manifest = manifest_path.read_text(encoding="utf-8")
+
     articulated = _OwnedClient()
     monkeypatch.setattr(
         api.ArticulatedGenerationClient,
@@ -391,3 +414,124 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
 
     assert articulated.health_checks == 1
     assert articulated.close_calls == 1
+
+
+@pytest.mark.parametrize("change", ["modify", "delete", "reanalyze", "image"])
+def test_materialize_rejects_stale_observations_before_any_clients(
+    tmp_path, monkeypatch, change
+):
+    image = tmp_path / "input.png"
+    image.write_bytes(b"source")
+    scene, graph = _table_scene()
+    mask = tmp_path / "scene_understanding/mask.png"
+
+    def understand(**kwargs):
+        mask.parent.mkdir(exist_ok=True)
+        mask.write_bytes(b"original")
+        return scene, graph
+
+    monkeypatch.setattr(api, "understand_scene", understand)
+    package = api.analyze_image(
+        image, tmp_path, vlm_client=object(), image_segmentation_client=_HealthyClient()
+    )
+    if change == "modify":
+        mask.write_bytes(b"changed")
+    elif change == "delete":
+        mask.unlink()
+    elif change == "image":
+        image.write_bytes(b"changed source")
+    else:
+        image.write_bytes(b"second source")
+        api.analyze_image(
+            image,
+            tmp_path,
+            vlm_client=object(),
+            image_segmentation_client=_HealthyClient(),
+        )
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("stale observations must fail before client setup")
+
+    monkeypatch.setattr(api.OpenAICompatibleVLM, "from_dotenv", unexpected)
+    monkeypatch.setattr(api.GeometryGenerationClient, "from_dotenv", unexpected)
+    with pytest.raises(ValueError, match="stale or invalid"):
+        api.materialize_blueprint(package)
+
+
+@pytest.mark.parametrize("operation", ["move", "delete"])
+def test_layout_only_edit_requires_no_generation_clients(
+    tmp_path, monkeypatch, operation
+):
+    scene, graph = _table_scene()
+    scene.objects.append(
+        SceneObject(
+            id="mug", kind="asset", category="mug", name="mug", description="mug"
+        )
+    )
+    graph.nodes.append(
+        SceneGraphNode(object_id="mug", parent_id="table", parent_relation="on")
+    )
+    plan = SceneEditPlan(
+        scene=scene,
+        scene_graph=graph,
+        operations=[
+            (
+                SceneEditOperation(op="delete", object_id="mug")
+                if operation == "delete"
+                else SceneEditOperation(
+                    op="move",
+                    object_id="mug",
+                    target_id="table",
+                    relation="on",
+                    table_region="left_center",
+                )
+            )
+        ],
+    )
+    package = api.SceneEditBlueprintPackage(
+        api.SCENE_EDIT_BLUEPRINT_SCHEMA,
+        "edit",
+        "delete mug",
+        tmp_path,
+        tmp_path / "edit.json",
+        plan,
+        graph,
+    )
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("layout-only edits cannot depend on generation services")
+
+    for client in (
+        api.OpenAICompatibleVLM,
+        api.ImageGenerationClient,
+        api.GeometryGenerationClient,
+        api.ImageSegmentationClient,
+    ):
+        monkeypatch.setattr(client, "from_dotenv", unexpected)
+    monkeypatch.setattr(api, "prepare_scene_edit_assets", unexpected)
+    monkeypatch.setattr(api, "edit_layout", lambda **kwargs: kwargs["scene"])
+    monkeypatch.setattr(
+        api, "_export_materialization", lambda **kwargs: _materialization(**kwargs)
+    )
+    result = api.materialize_edit(package)
+    assert result.scene.objects[1].id == "mug"
+
+
+def test_importer_does_not_load_generation_api_or_matplotlib():
+    import subprocess
+    import sys
+
+    code = """
+import sys
+import importlib.abc
+class BlockGeneration(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in ('embodichain.gen_sim.scene_engine.pipeline.api', 'embodichain.gen_sim.scene_engine.pipeline.generation.scene_generation', 'matplotlib'):
+            raise ImportError('unneeded generation dependency: ' + fullname)
+sys.meta_path.insert(0, BlockGeneration())
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import SceneExportImporter
+assert 'embodichain.gen_sim.scene_engine.pipeline.api' not in sys.modules
+"""
+    subprocess.run(
+        [sys.executable, "-c", code], check=True, capture_output=True, text=True
+    )
