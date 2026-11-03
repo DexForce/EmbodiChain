@@ -21,7 +21,7 @@ from __future__ import annotations
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
 
 import threading
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
@@ -1663,19 +1663,34 @@ def test_legacy_metadata_reports_consistent_episode_success() -> None:
     assert metadata["segments"][0]["instruction"] == task_instruction
 
 
-@pytest.mark.parametrize("seed", (None, 0, 4101))
+@pytest.mark.parametrize("seed", (None, 0, 12))
 def test_demo_metadata_exposes_the_effective_environment_seed(seed: int | None) -> None:
-    """Recorded metadata carries the effective environment seed for provenance."""
+    """Finalizing an episode retains its seed after the next reset reseeds."""
     env = _RolloutWriterStub()
-    env.cfg = SimpleNamespace(seed=seed)
-    env._demo_episode_metadata = [
-        EmbodiedEnv._new_demo_episode_metadata(env, row) for row in range(env.num_envs)
-    ]
-
+    env.cfg = SimpleNamespace(
+        seed=seed, events=None, observations=None, rewards=None, dataset=None
+    )
+    env.dataset_manager = None
+    env._demo_metadata_initialized = False
+    env._demo_episode_metadata = [{} for _ in range(env.num_envs)]
+    env._new_demo_episode_metadata = MethodType(
+        EmbodiedEnv._new_demo_episode_metadata, env
+    )
+    EmbodiedEnv._initialize_episode(env)
+    env.cfg.seed = 35
     metadata = EmbodiedEnv.get_demo_episode_metadata(env, 1)
-
     assert metadata["seed"] == seed
     assert metadata["env_id"] == 1
+    EmbodiedEnv._initialize_episode(env, [1])
+    assert EmbodiedEnv.get_demo_episode_metadata(env, 1)["seed"] == 35
+    assert EmbodiedEnv.get_demo_episode_metadata(env, 0)["seed"] == seed
+
+    env.rollout_buffer = None
+    env._demo_metadata_initialized = False
+    env._demo_episode_metadata = [{} for _ in range(env.num_envs)]
+    env._new_demo_episode_metadata = Mock(side_effect=AssertionError("unused metadata"))
+    EmbodiedEnv._initialize_episode(env)
+    assert not env._demo_metadata_initialized
 
 
 def test_explicit_segment_instructions_are_preserved() -> None:

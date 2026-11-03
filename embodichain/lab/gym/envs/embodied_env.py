@@ -1487,6 +1487,14 @@ class EmbodiedEnv(BaseEnv):
     ) -> None:
         env_ids_to_process = self.episode_context._ids(env_ids)
         episode_metadata = getattr(self, "_demo_episode_metadata", None)
+        if not getattr(self, "_demo_metadata_initialized", True) and (
+            self.dataset_manager is not None
+            or getattr(self, "rollout_buffer", None) is not None
+        ):
+            episode_metadata = self._demo_episode_metadata = _EpisodeMetadataRows(
+                self.num_envs, self._new_demo_episode_metadata(0)
+            )
+            self._demo_metadata_initialized = True
         if episode_metadata is not None and getattr(
             self, "_demo_metadata_initialized", True
         ):

@@ -53,7 +53,7 @@ def test_live_inertia_frames_and_partial_reset(tmp_path: Path, backend: str) -> 
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
-            render_cfg=RenderCfg(renderer="no-render"),
+            render_cfg=RenderCfg(),
             device="cuda:0",
             num_envs=3,
             physics_cfg=physics_cfg_for_backend(backend),
