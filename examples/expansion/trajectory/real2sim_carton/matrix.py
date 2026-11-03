@@ -34,7 +34,11 @@ from embodichain.lab.task_program.integrations.simulation.real2sim_collection im
     load_real2sim_tabletop_profile,
 )
 from examples.expansion.trajectory.real2sim_carton._audit import _check_case
-from examples.expansion.trajectory.real2sim_carton.prepare import write_json, write_yaml
+from examples.expansion.trajectory.real2sim_carton.prepare import (
+    require_prepared,
+    write_json,
+    write_yaml,
+)
 
 __all__: list[str] = []
 
@@ -50,8 +54,7 @@ def run(
 ) -> Path:
     if not 1 <= jobs <= 3:
         raise ValueError("one to three independent B=1 workers are supported")
-    if not json.loads((prepared / "qualification.json").read_text())["admitted"]:
-        raise ValueError("the real input must pass qualification before the matrix")
+    require_prepared(prepared)
     output.mkdir(parents=True, exist_ok=False)
     sources = {
         "measured": (

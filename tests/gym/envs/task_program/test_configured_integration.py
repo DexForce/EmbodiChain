@@ -31,6 +31,12 @@ import torch
 from embodichain.lab.task_program import load_task_program
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.task_program.bridge import RuntimeCommandFrameEncoder
+from embodichain.lab.task_program.integrations import (
+    ConfiguredTaskProgramDeployment,
+    ConfiguredTaskProgramIntegration,
+    TaskProgramAdapterFactory,
+    load_configured_task_program_deployment,
+)
 from embodichain.lab.task_program.integrations._configured_services import (
     _MoveHeldObjectLowerer,
     _PourLowerer,
@@ -191,12 +197,12 @@ def _integration_payload(task_name: str) -> dict[str, object]:
     )
 
 
-def _deployment_from_path(path: Path):
+def _deployment_from_path(path: Path) -> ConfiguredTaskProgramDeployment:
     """Return one fully composed production deployment."""
     config = load_config(path)
     physical = _physical_components(path, config)
     assert physical.embodiment_skill_profile is not None
-    return _load_configured_task_program_deployment(
+    return load_configured_task_program_deployment(
         task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
         base_dir=path.parent,
@@ -234,17 +240,86 @@ def _tableware_integration_payload(task_name: str) -> dict[str, object]:
     )
 
 
-def _tableware_deployment(task_name: str):
+def _tableware_deployment(task_name: str) -> ConfiguredTaskProgramDeployment:
     """Return one fully composed tableware deployment."""
     path = _tableware_config_path(task_name)
     config = _tableware_gym_config(task_name)
     physical = _physical_components(path, config)
     assert physical.embodiment_skill_profile is not None
-    return _load_configured_task_program_deployment(
+    return load_configured_task_program_deployment(
         task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
         base_dir=path.parent,
     )
+
+
+def test_public_composition_owns_declarations_and_defers_live_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.task_program.integrations import (
+        SimulationTaskProgramAdapterFactory,
+    )
+
+    def unexpected_live_creation(*args: object, **kwargs: object) -> None:
+        raise AssertionError(
+            "Composition must not create simulation or a live adapter."
+        )
+
+    monkeypatch.setattr(SimulationManager, "__init__", unexpected_live_creation)
+    monkeypatch.setattr(
+        SimulationTaskProgramAdapterFactory, "create_adapter", unexpected_live_creation
+    )
+    registered_before = dict(REGISTERED_ENVS)
+    gym_before = dict(gym_registry)
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    physical = _physical_components(path, config)
+    assert physical.embodiment_skill_profile is not None
+    selectors = physical.config["task_program"]
+    profile = physical.embodiment_skill_profile
+    original = deepcopy((selectors, profile))
+    first = load_configured_task_program_deployment(
+        task_program=selectors, skill_profile=profile, base_dir=path.parent
+    )
+    second = load_configured_task_program_deployment(
+        task_program=selectors, skill_profile=profile, base_dir=path.parent
+    )
+    assert isinstance(first, ConfiguredTaskProgramDeployment)
+    assert isinstance(first.integration, ConfiguredTaskProgramIntegration)
+    assert isinstance(first.integration.adapter_factory, TaskProgramAdapterFactory)
+    assert first.program_path.is_file()
+    assert (
+        first.integration.integration_fingerprint
+        == second.integration.integration_fingerprint
+    )
+    assert first.scene_binding == second.scene_binding
+    assert (
+        first.planner_config
+        == second.planner_config
+        == {"type": "toppra", "config": {}}
+    )
+    first.scene_binding["registry_id"] = "changed_by_caller"
+    first.planner_config["config"]["grid_size"] = 127
+    assert second.scene_binding["registry_id"] != "changed_by_caller"
+    assert second.planner_config == {"type": "toppra", "config": {}}
+    assert (selectors, profile) == original
+    assert REGISTERED_ENVS == registered_before
+    assert gym_registry == gym_before
+
+
+@pytest.mark.parametrize("owner", ["task_program", "skill_profile"])
+def test_public_composition_retains_closed_declaration_fields(owner: str) -> None:
+    path = _config_path("hand_over")
+    physical = _physical_components(path, _gym_config("hand_over"))
+    assert physical.embodiment_skill_profile is not None
+    values = {
+        "task_program": deepcopy(physical.config["task_program"]),
+        "skill_profile": deepcopy(physical.embodiment_skill_profile),
+    }
+    values[owner]["unexpected_override"] = True
+    with pytest.raises(ValueError, match="unsupported fields.*unexpected_override"):
+        load_configured_task_program_deployment(**values, base_dir=path.parent)
 
 
 @pytest.fixture

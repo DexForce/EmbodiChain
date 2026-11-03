@@ -130,8 +130,8 @@ def _blender() -> dict[str, object]:
     from embodichain.gen_sim.scene_engine.pipeline.utils.visual_yaw_optimizer import (
         _render_canonical_oblique_view,
     )
-    from embodichain.gen_sim.simready_pipeline.utils.geometry_utils import process_obj
-    from embodichain.gen_sim.simready_pipeline.utils.ingest_utils import (
+    from embodichain.gen_sim.asset_engine.utils.geometry_utils import process_obj
+    from embodichain.gen_sim.asset_engine.utils.ingest_utils import (
         blender_remesh_bake,
     )
 
@@ -366,7 +366,7 @@ def _dataset_tests(repo: Path) -> dict[str, object]:
             "tests/gen_sim/test_blender_runtime.py",
             "tests/gen_sim/scene_engine/test_simready_processor_utils.py",
             "tests/gen_sim/scene_engine/test_scene_generation.py",
-            "tests/gen_sim/simready_pipeline",
+            "tests/gen_sim/asset_engine",
         ],
     )
 

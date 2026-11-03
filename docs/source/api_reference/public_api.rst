@@ -21,6 +21,32 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.compute.kinematics.ik_path
+--------------------------------------
+
+Bounded fixed-time branch search for one Cartesian path. Solver callbacks own
+kinematics; this numeric routine preserves serial/batched seed order and accepts
+no simulation objects. Failure means the bounded search did not produce a path.
+
+.. currentmodule:: embodichain.compute.kinematics.ik_path
+
+.. autosummary::
+
+   resolve_seeded_ik_path
+
+embodichain.compute.trajectory.limits
+-------------------------------------
+
+Per-environment sampled joint-speed checks with explicit arrival intervals.
+The result checks finite positions and declared speeds; it does not establish
+continuous collision freedom or acceleration compliance.
+
+.. currentmodule:: embodichain.compute.trajectory.limits
+
+.. autosummary::
+
+   joint_velocity_validity
+
 embodichain.data
 ----------------
 
@@ -269,6 +295,103 @@ embodichain.data_pipeline.depth_video
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
 
+embodichain.gen_sim.asset_engine.cli.start
+-----------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.cli.start
+
+.. autosummary::
+
+   cli_ingest_single
+   main
+
+embodichain.gen_sim.asset_engine.clients
+----------------------------------------
+
+Asset-owned service client for generating and downloading articulated USDC assets.
+Close the client after use to release its HTTP session.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.clients.articulated_generation
+---------------------------------------------------------------
+
+HTTP generation client with bounded retry attempts, health checks, and validation
+of returned articulation artifacts before publication.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients.articulated_generation
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.configs
+----------------------------------------
+
+Read Asset Engine settings from the shared GenSim dotenv file. Legacy Scene
+Engine articulation keys remain accepted as aliases.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.configs.environment
+----------------------------------------------------
+
+Resolves requested Asset Engine dotenv keys and reports missing configuration
+without mutating process environment variables.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs.environment
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.pipeline
+-----------------------------------------
+
+Generate articulated assets from scene-independent asset records. The operation
+updates their USDC path and scale metadata after normalization.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.asset_engine.pipeline.articulation
+------------------------------------------------------
+
+Materializes functional articulated records through the Asset Engine client.
+Records provide source observations and coarse scales; the owning scene pipeline
+continues to control layout and export.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline.articulation
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.asset_engine.utils.geometry_utils
+----------------------------------------------------------
+
+File-based OBJ cleanup and simplification through the isolated Blender runtime.
+The caller retains ownership of its input and destination asset paths.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.utils.geometry_utils
+
+.. autosummary::
+
+   process_obj
+
+.. autofunction:: process_obj
+
 embodichain.gen_sim.env
 -----------------------
 
@@ -454,6 +577,18 @@ baseline and saves successful candidates with a completion manifest.
 
    main
 
+embodichain.gen_sim.scene_engine.configs.environment
+----------------------------------------------------
+
+Read Scene Engine settings from the shared GenSim dotenv file through the common
+parser, retaining the existing Scene Engine key names.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.configs.environment
+
+.. autosummary::
+
+   read_scene_engine_env_values
+
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 
@@ -463,6 +598,60 @@ embodichain.gen_sim.scene_engine.core.scene_edit_plan
 
    SceneEditOperation
    SceneEditPlan
+
+embodichain.gen_sim.scene_engine.errors
+---------------------------------------
+
+Identifies Scene Engine service failures separately from input or scene-schema
+validation failures.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.errors
+
+.. autosummary::
+
+   SceneServiceError
+
+embodichain.gen_sim.scene_engine.pipeline
+-----------------------------------------
+
+Stage-oriented Scene Engine API. Analyze an image or edit into an in-process
+blueprint with a persisted audit document, then materialize its assets and layout.
+Materialization copies the supplied scene/graph and closes only clients it owns.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
+
+embodichain.gen_sim.scene_engine.pipeline.api
+---------------------------------------------
+
+Blueprint value objects and their implementation entry points. Image and edit
+blueprints have separate versioned schemas and content identities. Materialization
+returns the exported scene configuration; it does not construct a Gym task.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.api
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
 
 embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
 -------------------------------------------------------------------------------
@@ -642,30 +831,6 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 .. autosummary::
 
    save_layouts
-
-embodichain.gen_sim.simready_pipeline.cli.start
------------------------------------------------
-
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.cli.start
-
-.. autosummary::
-
-   cli_ingest_single
-   main
-
-embodichain.gen_sim.simready_pipeline.utils.geometry_utils
-----------------------------------------------------------
-
-File-based OBJ cleanup and simplification through the isolated Blender runtime.
-The caller retains ownership of its input and destination asset paths.
-
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.utils.geometry_utils
-
-.. autosummary::
-
-   process_obj
-
-.. autofunction:: process_obj
 
 embodichain.gen_sim.task_spec
 -----------------------------
@@ -864,6 +1029,52 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.sim.motion.ik
+-----------------------------
+
+Stateful adapters connect the numeric branch search to a MotionGenerator and
+Robot. Cartesian target sampling preserves every requested waypoint within an
+explicit sample budget. Continuous recovery is restricted to one environment
+and restores the caller's RNG state without changing requested timing.
+
+.. currentmodule:: embodichain.lab.sim.motion.ik
+
+.. autosummary::
+
+   resolve_continuous_ik_path
+   sample_cartesian_targets
+
+embodichain.lab.sim.motion.limits
+---------------------------------
+
+Strictly intersect runtime speed limits with the assembled URDF's named joint
+caps. Missing or nonpositive authored limits are rejected rather than replaced
+with an inferred default.
+
+.. currentmodule:: embodichain.lab.sim.motion.limits
+
+.. autosummary::
+
+   authored_joint_velocity_limits
+
+embodichain.lab.sim.motion.search
+---------------------------------
+
+Explicit call-local search ledgers and cooperative wall deadlines. Nested
+scopes reuse the outer ledger, timings may overlap, and native work is not
+preempted. Hosts choose budgets; no deadline is enabled by default.
+
+.. currentmodule:: embodichain.lab.sim.motion.search
+
+.. autosummary::
+
+   PlanningBudgetExceeded
+   SearchCost
+   current_search_cost
+   search_cost_scope
+   record_search
+   measure_search
 
 embodichain.lab.sim.scene.expansion.layout
 ------------------------------------------
@@ -1890,6 +2101,7 @@ embodichain.lab.sim.motion.planners.utils
    MoveType
    PlanState
    PlanResult
+   RejectedMotionCandidate
    normalize_success_mask
    calculate_point_allocations
    interpolate_xpos
