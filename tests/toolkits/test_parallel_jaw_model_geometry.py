@@ -34,6 +34,7 @@ from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
         ("tianji_marvin_gripper", "left", "left_hand_base_link", 0.0, 3),
         ("tianji_marvin_gripper", "right", "right_hand_base_link", 0.0, 3),
         ("robotiq_2f85", None, "robotiq_arg2f_base_link", 0.0, 11),
+        ("robotiq_arg2f_140", None, "robotiq_arg2f_base_link", 0.0, 11),
     ],
 )
 def test_registered_real_hand_assets_are_complete_and_open(

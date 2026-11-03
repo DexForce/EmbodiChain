@@ -39,7 +39,8 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Environment adapter and runtime assembly | `embodichain/lab/task_program/integrations/environment.py` |
 | Expansion source adapter, candidate transform and records | `embodichain/lab/task_program/integrations/expansion.py` |
 | Physical Gym component composition | `embodichain/lab/gym/utils/_component_composition.py` |
-| Configured semantic/policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
+| Public configured deployment composition | `embodichain/lab/task_program/integrations/composition.py` |
+| Component resolution and policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
 | Physical contact sampling, timelines and grip evidence | `embodichain/lab/task_program/integrations/simulation/contact_evidence.py`, `contact_timeline.py`, `grip_evidence.py` |

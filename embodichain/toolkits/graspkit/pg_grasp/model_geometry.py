@@ -38,6 +38,7 @@ _MODELS = (
     "tianji_marvin_gripper",
     "pika_gripper",
     "robotiq_2f85",
+    "robotiq_arg2f_140",
 )
 
 
@@ -99,8 +100,9 @@ def get_parallel_jaw_collision_geometry(
         default_tcp = _pose(xyz=(0, 0, 0.1034))
         canonical = default_tcp @ _pose(rz90)
         calibration = "PandaWithHand fr3_hand_tcp joint; native +Y closes"
-    elif model_id == "robotiq_2f85":
-        asset = "Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf"
+    elif model_id in {"robotiq_2f85", "robotiq_arg2f_140"}:
+        variant = "140" if model_id == "robotiq_arg2f_140" else "85"
+        asset = f"Robotiq/robotiq_arg2f_{variant}/robotiq_arg2f_{variant}.urdf"
         root = "robotiq_arg2f_base_link"
         links = (
             root,
@@ -126,11 +128,18 @@ def get_parallel_jaw_collision_geometry(
                 "right_inner_finger_joint",
             )
         }
-        default_tcp = _pose(xyz=(0, 0, 0.15))
-        canonical = default_tcp @ _pose(rz90)
-        calibration = (
-            "Robotiq 2F-85 fully open collision meshes; native Y opens, tool TCP Z=.15"
-        )
+        if variant == "140":
+            # The GenSim arm-to-hand mount is identity; its solver TCP rotates
+            # native Y closing into canonical X at root Z=.20.
+            canonical = default_tcp = _pose(rz90, (0, 0, 0.20))
+            calibration = (
+                "GenSim Robotiq 2F-140 fully open collision meshes; "
+                "native Y opens, root TCP Rz=90deg/Z=.20"
+            )
+        else:
+            default_tcp = _pose(xyz=(0, 0, 0.15))
+            canonical = default_tcp @ _pose(rz90)
+            calibration = "Robotiq 2F-85 fully open collision meshes; native Y opens, tool TCP Z=.15"
     elif model_id == "dh_pgi_140_80":
         asset = "DH_PGI_140_80/DH_PGI_140_80.urdf"
         root = "gripper_base_link_1"
