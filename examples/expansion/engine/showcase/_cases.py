@@ -361,7 +361,16 @@ def build_cases(root: Path, mode: str, *, preserve: bool = False) -> list[dict]:
             mass_scale={"cube": [0.98, 1.02]},
             max_wall_time_s=1200.0,
         )
-    dump(root / "cases.json", {"schema_version": 1, "mode": mode, "cases": cases})
+    # Preserve separately qualified extensions such as wider-range experiments.
+    inventory = root / "cases.json"
+    if preserve and inventory.exists():
+        known = {case["id"] for case in cases}
+        cases.extend(
+            case
+            for case in json.loads(inventory.read_text())["cases"]
+            if case["id"] not in known
+        )
+    dump(inventory, {"schema_version": 1, "mode": mode, "cases": cases})
     return cases
 
 

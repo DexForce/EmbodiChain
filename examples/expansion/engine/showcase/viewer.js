@@ -38,7 +38,7 @@ const gib=x=>x===undefined||x===null?'未采样':(x/2**30).toFixed(2)+' GiB';
 table('performanceTable',['案例','实测成功 / 已执行','累计作业时间','确认物理 episode/s','主存峰值','显存采样峰值'],data.cases.map(c=>{const seconds=c.summary.wall_time_lower_bound_s;return [c.title,`${c.summary.measured_successes||0} / ${c.summary.rollout_attempted||0}`,seconds===undefined?'—':seconds.toFixed(1)+' s'+(c.summary.wall_time_uncertain?'（下界）':''),seconds&&!c.summary.wall_time_uncertain?((c.summary.committed||0)/seconds).toFixed(4):'—',gib(c.telemetry?.sampled_peak_rss_bytes||c.runtime?.peak_rss_bytes),gib(c.telemetry?.sampled_peak_gpu_bytes)]}));
 let selectedCase=null,sides=[null,null],playing=false,elapsed=0,last=0,selectionVersion=0;
 const byId=new Map(data.episodes.map(e=>[e.id,e]));
-for(const [source,title]of [['ur5','规划生成 · UR5'],['carton','真实示范驱动 · Franka']]){const h=el('h3',title);$('caseList').append(h);for(const c of data.cases.filter(c=>c.source===source)){const b=el('button',c.title,'case');b.dataset.case=c.id;b.append(el('small',`${c.backend} · ${labels[c.status]||c.status} · ${c.summary.committed||0} 已提交`));b.onclick=()=>chooseCase(c.id);$('caseList').append(b)}}
+for(const [source,title]of [['ur5','规划生成 · UR5'],['carton','真实示范驱动 · Franka']]){const h=el('h3',title);$('caseList').append(h);for(const c of data.cases.filter(c=>c.source===source).sort((a,b)=>Number(b.id.startsWith('wide-'))-Number(a.id.startsWith('wide-')))){const b=el('button',c.title,'case');b.dataset.case=c.id;b.append(el('small',`${c.backend} · ${labels[c.status]||c.status} · ${c.summary.committed||0} 已提交`));b.onclick=()=>chooseCase(c.id);$('caseList').append(b)}}
 function fillSelect(id, episodes, selected) {
   const select = $(id); select.replaceChildren();
   for (const episode of episodes) {
@@ -278,6 +278,6 @@ function drawPixelDifference(){
 }
 setInterval(()=>{if(!document.hidden&&!$('lab').classList.contains('hidden'))drawPixelDifference()},200);
 
-chooseCase(data.cases.find(c=>c.id==='default-rerender-controls'&&data.episodes.some(e=>e.case===c.id))?.id||data.cases.find(c=>data.episodes.some(e=>e.case===c.id))?.id||data.cases[0]?.id);
+chooseCase(data.cases.find(c=>c.id==='wide-visual'&&data.episodes.some(e=>e.case===c.id))?.id||data.cases.find(c=>c.id==='default-rerender-controls'&&data.episodes.some(e=>e.case===c.id))?.id||data.cases.find(c=>data.episodes.some(e=>e.case===c.id))?.id||data.cases[0]?.id);
 
 for(const figure of document.querySelectorAll('.media figure'))figure.ondblclick=()=>figure.requestFullscreen?.();

@@ -172,8 +172,18 @@ def main() -> None:
             )
             from ._cases import ENGINE
 
-            source = ENGINE.parent / "scene_robot_feasibility/search.ur5.yaml"
-            destination = args.root / "inputs/atlas"
+            source = (
+                args.job or ENGINE.parent / "scene_robot_feasibility/search.ur5.yaml"
+            )
+            destination = (
+                args.root
+                / "inputs"
+                / (
+                    "atlas-" + args.job.stem.removeprefix("search.")
+                    if args.job
+                    else "atlas"
+                )
+            )
             if not (destination / "atlas.json").exists():
                 run_feasibility(source, destination)
             from embodichain.lab.expansion.scene import JointSceneSource

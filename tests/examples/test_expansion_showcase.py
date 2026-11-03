@@ -327,7 +327,12 @@ def test_generated_newton_clock_and_resume_preserve_frozen_inputs(tmp_path):
     visual = tmp_path / "configs/visual.ur5.yaml"
     visual.write_text(visual.read_text() + "# frozen input\n")
     frozen = visual.read_bytes()
+    inventory = json.loads((tmp_path / "cases.json").read_text())
+    extra = {**inventory["cases"][0], "id": "wide-scene", "job": "configs/custom.yaml"}
+    inventory["cases"].append(extra)
+    dump(tmp_path / "cases.json", inventory)
     build_cases(tmp_path, "full", preserve=True)
+    assert json.loads((tmp_path / "cases.json").read_text())["cases"][-1] == extra
     assert visual.read_bytes() == frozen
     assert yaml.safe_load(job_path.read_text())["max_attempts"] == 99
 
