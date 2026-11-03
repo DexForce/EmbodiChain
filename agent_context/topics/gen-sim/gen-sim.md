@@ -1,7 +1,7 @@
 # Generative simulation
 
-Scene Engine turns images into editable scenes and portable exports; the
-general SimReady pipeline ingests individual assets. Neither output is by
+Scene Engine turns images into editable scenes and portable exports; Asset
+Engine ingests individual assets and generates articulated assets. Neither output is by
 itself a complete runnable Gym task deployment.
 
 ## Entry points and resolution
@@ -14,11 +14,13 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
+| Audited image/edit stages | `scene_engine/pipeline/api.py`: `analyze_image()`, `analyze_edit()`, and their materialization functions |
 | Portable scene contract | `scene_engine/pipeline/utils/scene_exporter.py`, `scene_importer.py` |
 | Grouped layouts from an existing export | `scene_engine/cli/randomization.py`, `scene_engine/randomization/generation.py` |
 | Baseline cache, saved runs and pose playback | `scene_engine/randomization/baseline.py`, `persistence.py`, `loading.py` |
 | Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
-| General asset ingest | `simready_pipeline/pipeline/ingest.py`: `ingest_one_asset()` |
+| General asset ingest | `asset_engine/pipeline/ingest.py`: `ingest_one_asset()` |
+| Articulated asset generation | `asset_engine/pipeline/articulation.py`, `asset_engine/clients/articulated_generation.py` |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
 
@@ -30,6 +32,12 @@ Edit: import export → validate graph/typed edit plan → generate additions
 
 Read [pipeline details](pipeline-details.md) for stage contracts, parser resume
 behavior, Gradio artifact ownership and focused failure diagnosis.
+
+The staged API persists a versioned image or edit blueprint before generating
+assets. Materialization copies the supplied scene/graph and closes only clients
+it creates. Blueprint objects are in-process values with persisted audit
+documents; this API does not load them as a complete task deployment.
+The `simready` CLI remains available, while Python imports use `asset_engine`.
 
 ## Durable scene boundary
 
@@ -51,6 +59,9 @@ support. The packaged native glTF textures retain their original pixels.
 - Scene object IDs and graph node IDs must be equal sets on import and export.
 - Editable scene state is Y-up; portable runtime output is Z-up. Convert world
   pose at this boundary, and preserve `body_scale` separately from mesh geometry.
+- Articulation export measures the native root collision geometry against its
+  support surface. `init_pos` belongs to the runtime root; `proxy_init_pos`
+  preserves the editable GLB placement independently.
 - A generated scene includes a rigid table. Articulated assets need both a
   runtime USDC and a GLB proxy for editing.
 - Overwrite validates/writes new scene state before deleting stale assets.
@@ -152,7 +163,7 @@ environment files.
 | Portable scene/pose/overwrite contract | `tests/gen_sim/scene_engine/test_scene_core_and_export.py` |
 | Grouped layout generation, provenance and playback | `tests/gen_sim/scene_engine/test_randomization_*.py` |
 | Edit plans and graph | `tests/gen_sim/scene_engine/test_scene_edit.py`, `test_scene_edit_plan.py`, `test_scene_graph.py` |
-| Ingest formats and metadata | `tests/gen_sim/simready_pipeline/` |
+| Ingest formats and metadata | `tests/gen_sim/asset_engine/` |
 | UI roots/auth/session workflow | `tests/gen_sim/gradio_ui/` |
 
 Select provider-backed or simulator conversion tests only when that runtime

@@ -269,6 +269,103 @@ embodichain.data_pipeline.depth_video
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
 
+embodichain.gen_sim.asset_engine.cli.start
+-----------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.cli.start
+
+.. autosummary::
+
+   cli_ingest_single
+   main
+
+embodichain.gen_sim.asset_engine.clients
+----------------------------------------
+
+Asset-owned service client for generating and downloading articulated USDC assets.
+Close the client after use to release its HTTP session.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.clients.articulated_generation
+---------------------------------------------------------------
+
+HTTP generation client with bounded retry attempts, health checks, and validation
+of returned articulation artifacts before publication.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients.articulated_generation
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.configs
+----------------------------------------
+
+Read Asset Engine settings from the shared GenSim dotenv file. Legacy Scene
+Engine articulation keys remain accepted as aliases.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.configs.environment
+----------------------------------------------------
+
+Resolves requested Asset Engine dotenv keys and reports missing configuration
+without mutating process environment variables.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs.environment
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.pipeline
+-----------------------------------------
+
+Generate articulated assets from scene-independent asset records. The operation
+updates their USDC path and scale metadata after normalization.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.asset_engine.pipeline.articulation
+------------------------------------------------------
+
+Materializes functional articulated records through the Asset Engine client.
+Records provide source observations and coarse scales; the owning scene pipeline
+continues to control layout and export.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline.articulation
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.asset_engine.utils.geometry_utils
+----------------------------------------------------------
+
+File-based OBJ cleanup and simplification through the isolated Blender runtime.
+The caller retains ownership of its input and destination asset paths.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.utils.geometry_utils
+
+.. autosummary::
+
+   process_obj
+
+.. autofunction:: process_obj
+
 embodichain.gen_sim.env
 -----------------------
 
@@ -454,6 +551,18 @@ baseline and saves successful candidates with a completion manifest.
 
    main
 
+embodichain.gen_sim.scene_engine.configs.environment
+----------------------------------------------------
+
+Read Scene Engine settings from the shared GenSim dotenv file through the common
+parser, retaining the existing Scene Engine key names.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.configs.environment
+
+.. autosummary::
+
+   read_scene_engine_env_values
+
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 
@@ -463,6 +572,60 @@ embodichain.gen_sim.scene_engine.core.scene_edit_plan
 
    SceneEditOperation
    SceneEditPlan
+
+embodichain.gen_sim.scene_engine.errors
+---------------------------------------
+
+Identifies Scene Engine service failures separately from input or scene-schema
+validation failures.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.errors
+
+.. autosummary::
+
+   SceneServiceError
+
+embodichain.gen_sim.scene_engine.pipeline
+-----------------------------------------
+
+Stage-oriented Scene Engine API. Analyze an image or edit into an in-process
+blueprint with a persisted audit document, then materialize its assets and layout.
+Materialization copies the supplied scene/graph and closes only clients it owns.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
+
+embodichain.gen_sim.scene_engine.pipeline.api
+---------------------------------------------
+
+Blueprint value objects and their implementation entry points. Image and edit
+blueprints have separate versioned schemas and content identities. Materialization
+returns the exported scene configuration; it does not construct a Gym task.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.api
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
 
 embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
 -------------------------------------------------------------------------------
@@ -642,30 +805,6 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 .. autosummary::
 
    save_layouts
-
-embodichain.gen_sim.simready_pipeline.cli.start
------------------------------------------------
-
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.cli.start
-
-.. autosummary::
-
-   cli_ingest_single
-   main
-
-embodichain.gen_sim.simready_pipeline.utils.geometry_utils
-----------------------------------------------------------
-
-File-based OBJ cleanup and simplification through the isolated Blender runtime.
-The caller retains ownership of its input and destination asset paths.
-
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.utils.geometry_utils
-
-.. autosummary::
-
-   process_obj
-
-.. autofunction:: process_obj
 
 embodichain.lab.gym.envs.base_env
 ---------------------------------
