@@ -37,6 +37,9 @@ import trimesh
 import yaml
 
 from embodichain.data_pipeline.real2sim import load_prototype, retarget_motion_prototype
+from embodichain.data_pipeline.real2sim._geometry import (
+    _canonical_robot_geometry_sha256,
+)
 from embodichain.data_pipeline.real2sim.replay import export_real2sim_replay_manifest
 from embodichain.lab.sim.motion.expansion.real2sim_collision import (
     SampledRobotCollisionChecker,
@@ -280,7 +283,9 @@ def export(prepared: Path, matrix: Path, source_directory: Path, output: Path) -
         bodies=(PlaneCollisionBody("ground", np.eye(4)),),
         world_from_base=np.eye(4),
     )
-    if geometry.geometry_sha256 != scene["geometry"]["robot_geometry_sha256"]:
+    if geometry.geometry_sha256 != _canonical_robot_geometry_sha256(
+        scene["geometry"]["robot_geometry_sha256"]
+    ):
         raise ValueError("replay robot geometry differs from the qualified recording")
     robot = _robot(urdf, output / "robot")
     vendor = _vendor(output / "vendor")
