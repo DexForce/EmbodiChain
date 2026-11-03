@@ -96,6 +96,17 @@ selection into the unbound program, and registers the common `EmbodiedEnv`.
 The CLI may override only the program. Components have closed fields and
 intentionally omit compatibility `version` values.
 
+External callers compose the same semantic deployment through
+`integrations.load_configured_task_program_deployment`, implemented in
+`integrations/composition.py`. It consumes the resolved embodiment skill profile
+and the deployment's Task Program selectors, returning a fresh
+`ConfiguredTaskProgramDeployment` with trusted selection, registration and a
+lazy `TaskProgramAdapterFactory`. It does not register a Gym ID or create a live
+simulator or adapter. Physical component checks and ordinary program loading
+remain host responsibilities; configured nominal sources retain their static
+program preflight. Private loader aliases remain available for existing internal
+callers, with the same result types and composition rules.
+
 Ownership is explicit rather than a generic deep merge:
 
 - `program.yaml` owns task flow, targets, post-policies, and validators; it
@@ -129,6 +140,12 @@ accept a finite, non-negative `dwell_duration`; unknown timing keys still fail
 the closed-field decoder. Omitting `velocity_limit` preserves the Robot's
 ordered per-joint speed caps; an explicit scalar request is intersected with
 those caps rather than replacing them.
+
+Configured motion also accepts explicit `interpolation_mode` and `ik_seed_mode`.
+`fixed_grid` requires `acceleration_limit: null` and no scalar speed override;
+omission retains the existing adaptive policy and acceleration default.
+`sequential` selects preceding-valid-posture IK seeds. These non-default modes
+require `strategy: ik_interp`; see the [motion boundary](../motion-planning/motion-planning.md).
 
 The configured `pour` lowerer's optional `target` binds a receiving object,
 source/receiver mouth frames and usable opening radii. It lowers to a

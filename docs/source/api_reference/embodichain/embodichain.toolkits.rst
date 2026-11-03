@@ -105,6 +105,7 @@ frame; public pose outputs use the geometry's declared runtime TCP.
    ParallelJawGripperModelCfg
    AntipodalGraspPoseGenerator
    AntipodalGraspPoseGeneratorCfg
+   GraspRegionSelector
    ParallelJawGraspCollisionCfg
    GraspAnnotationCfg
    FixedGripperCollisionGeometry
@@ -115,6 +116,29 @@ frame; public pose outputs use the geometry's declared runtime TCP.
    GripperCollisionCfg
    ConvexCollisionChecker
    ConvexCollisionCheckerCfg
+
+
+
+Collision-qualified region selection
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``select_supported_end`` selects only existing collision-qualified fallback
+contacts before ranking and top-K. Duplicate orientation proposals count as one
+contact pair. ``for_axis_region`` binds this policy for one request without
+mutating a cached grasp generator; ``mesh_extent`` retains the original service.
+Neither function provides IK, trajectory or physical-success qualification.
+
+.. autosummary::
+   :nosignatures:
+
+   for_axis_region
+   select_supported_end
+
+.. autoclass:: GraspRegionSelector
+
+.. autofunction:: for_axis_region
+
+.. autofunction:: select_supported_end
 
 
 AntipodalGraspPoseGenerator
@@ -222,8 +246,22 @@ Implementation Module
 
    AntipodalGraspPoseGenerator
    AntipodalGraspPoseGeneratorCfg
+   GraspRegionSelector
    ParallelJawGraspCollisionCfg
    GraspAnnotationCfg
+
+
+
+Region policy implementation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.regions
+
+.. autosummary::
+   :nosignatures:
+
+   select_supported_end
+   for_axis_region
 
 
 URDF Convex Decomposition
