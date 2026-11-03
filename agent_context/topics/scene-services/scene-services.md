@@ -14,6 +14,7 @@ semantic scene graph, generation model client or task lifecycle.
 | UID-based support geometry and group placement | `embodichain/lab/sim/scene/geometry.py`, `placement.py` |
 | Fixed-orientation XY constraints and solution status | `embodichain/lab/sim/scene/layout.py` |
 | Existing binding selection and cloned poses | `embodichain/lab/sim/scene/query.py` |
+| Exact native planar footprint observations | `embodichain/lab/sim/scene/planar_observation.py` |
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
@@ -23,12 +24,22 @@ semantic scene graph, generation model client or task lifecycle.
 | Existing-entity expansion proposals and host integration | [Scene expansion](../scene-expansion/scene-expansion.md) |
 
 The package facade resolves services lazily. Expansion has its own
-`scene.expansion` namespace. `compute.geometry` takes numeric arrays or tensors,
-never simulation or GenSim models. Its `contact_support.py` computes a contact
-patch and COM distance from arrays; native acquisition and witness lifetimes
-belong to the [sensor integration](../sensor-system/contact-history.md).
+`scene.expansion` namespace. `compute.geometry` takes numerical geometry, never
+entity UIDs, simulation or GenSim models. Its `landing.py` CPU routines also
+consume Trimesh meshes and Shapely polygons for triangle-union floor and
+silhouette measurements. Its `contact_support.py` computes a contact patch and
+COM distance from arrays; native acquisition and witness lifetimes belong to
+the [sensor integration](../sensor-system/contact-history.md).
 Scene CPU strategies own support
 selection, polygon search, greedy packing and SciPy SLSQP optimization.
+
+`NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
+recreate it after replacing either object or changing its model/scale. Queries
+take explicit observed poses and return footprint containment, area and vertical
+gap, without accepting a task or inferring contact support. Exact silhouette mode
+retains concavities and holes; convex-hull mode remains explicit. Acquisition
+errors remain unavailable evidence. Callers own thresholds, invocation/episode
+association, observation timing and evidence publication.
 
 ## Construction and proposal flow
 
