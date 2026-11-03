@@ -43,6 +43,13 @@ when changing obstacle identity, cache generation or dynamic scene binding.
 [IK solvers](../ik-solvers/ik-solvers.md) own candidate/frame contracts;
 [Atomic Skills](../atomic-actions/atomic-actions.md) own motion execution policy.
 
+FCL query consumers opt into `embodichain[planning-geometry]`; `pyproject.toml`
+owns the qualified backend pin without adding it to core dependencies.
+The shared lazy preflight is `lab/sim/scene/_collision_backends.py::_require_fcl`.
+Missing bindings raise explicitly; another collision backend or a dummy success
+does not substitute for the requested query. Actual-FCL comparisons require the
+extra and must report dependency skips as unqualified coverage.
+
 ## Timing and batch boundary
 
 Planning is environment-batched: waypoint qpos is `(B, dof)`, TCP transforms
