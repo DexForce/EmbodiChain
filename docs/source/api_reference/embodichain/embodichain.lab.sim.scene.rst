@@ -379,3 +379,17 @@ robot installation search, independent validation and the configured entry point
    :maxdepth: 1
 
    embodichain.lab.sim.scene.feasibility
+
+Authored collider inputs
+-----------------------
+
+``LinkMesh`` carries owned link-local source vertices and triangle indices.
+It preserves authored order and dtype, and explicitly permits vertex-only
+inputs with an empty triangle array. Native cooked collision geometry and
+runtime poses remain separate observations; this value proves neither contact
+nor collision freedom.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+
+.. autoclass:: LinkMesh
+   :members:

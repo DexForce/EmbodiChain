@@ -17,6 +17,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
+| Owned link-local authored collider inputs | `embodichain/lab/sim/scene/source_geometry.py` |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
 | CPU support, packing and constrained-layout strategies | `embodichain/lab/sim/scene/_support_cpu.py`, `_placement_cpu.py`, `_packing_cpu.py`, `_layout_cpu.py` |
 | Robot-aware object proposals and full-pose IK/FK checks | `embodichain/lab/sim/scene/workspace.py` |
