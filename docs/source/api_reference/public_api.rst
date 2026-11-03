@@ -1103,7 +1103,7 @@ embodichain.lab.sim.scene.expansion.persistence
    save_scene_variants
    load_scene_variants
 
-embodichain.lab.task_program.integrations.simulation.contact_evidence
+embodichain.lab.sim.sensors.contact_sampling
 ---------------------------------------------------------------------
 
 ContactSensor acquisition into the existing PhysicalEvidenceFrame and
@@ -1120,7 +1120,7 @@ SDK contract is unavailable.
 request CPU frames; ``source_device`` records where the original numerical
 observation was produced. The common frame has no invocation field.
 
-.. currentmodule:: embodichain.lab.task_program.integrations.simulation.contact_evidence
+.. currentmodule:: embodichain.lab.sim.sensors.contact_sampling
 
 .. autosummary::
 
@@ -1134,7 +1134,7 @@ observation was produced. The common frame has no invocation field.
    ContactSourceStamp
    native_contact_revision
 
-embodichain.lab.task_program.integrations.simulation.contact_timeline
+embodichain.lab.sim.sensors.contact_timeline
 ---------------------------------------------------------------------
 
 Bounded raw substep history attached with
@@ -1155,12 +1155,59 @@ substep caps also bound empty histories.
 Frontend code owns actor/semantic label maps, serialized report schema IDs and
 any task-success evaluation.
 
-.. currentmodule:: embodichain.lab.task_program.integrations.simulation.contact_timeline
+.. currentmodule:: embodichain.lab.sim.sensors.contact_timeline
 
 .. autosummary::
 
    ContactTimeline
    ContactTimelineCfg
+
+embodichain.lab.sim.sensors.support_observation
+-----------------------------------------------
+
+Native support acquisition uses a standard borrowed ``ContactSensor`` and the
+public sampling observer lifecycle. Each explicit runtime registry owns one
+observer per exact native pair. Replacing native instances under the same UID
+requires release and rebind; closing an old observer cannot detach a new owner
+registered under the same hook name. Borrowed sensors and bodies are never
+destroyed by this registry.
+
+Every physical batch has a real timestamp and a collector-owned revision.
+Legacy acquisition uses the simulation clock. Strong frames and results use the
+bound environment clock and observed substep offset; their fixed mapping to
+simulation time is checked, including warmup offsets. Unobserved advancement
+cannot be hidden by rebasing that mapping. The bound clock qualifies support contract
+revision 1, including native source identity, topology, episode generation and
+the complete substep interval. Legacy metadata stays legacy even when sharing
+an observer whose strong clock is bound. Its strong-only sample serial and the
+all-acquisition frame revision are separate identities.
+
+``NativeSupportResult.support.valid`` must be checked before using its values.
+Acquisition errors invalidate the whole pair's witness batch; selected resets
+leave the other rows intact. Positive contact patches may persist through
+sleep while both body poses remain within the original tolerance. Missing,
+overflowed or changed observations invalidate those witnesses. A complete empty
+sample is an instantaneous negative, not proof of absent support throughout a
+stability window. Normative task acceptance remains outside this module.
+
+.. currentmodule:: embodichain.lab.sim.sensors.support_observation
+
+.. autosummary::
+
+   NATIVE_SUPPORT_CHANNEL
+   SupportControlClock
+   NativeSupportResult
+   NativeSupportObservation
+   SupportObservationRegistry
+
+.. autoclass:: NativeSupportResult
+   :members:
+
+.. autoclass:: NativeSupportObservation
+   :members:
+
+.. autoclass:: SupportObservationRegistry
+   :members:
 
 embodichain.lab.task_program.integrations.simulation.grip_evidence
 ------------------------------------------------------------------
@@ -1185,13 +1232,10 @@ serializers and TaskSpec evaluation belong outside this module.
 
 .. autosummary::
 
-   DriverOpeningBinding
    NativeGripEvidenceCfg
    NativeGripEvidenceFactory
    NativeGripEvidenceProvider
    NativeGripObserver
-   classify_contacts
-   create_joint_opening_reader
 
 embodichain.lab.task_program.integrations.simulation.handover
 -------------------------------------------------------------
@@ -1234,53 +1278,6 @@ leaves environment stepping, cancellation and task acceptance with their owners.
    :members:
 
 .. autoclass:: SimulationStabilityConditionCfg
-   :members:
-
-embodichain.lab.task_program.integrations.simulation.support_evidence
----------------------------------------------------------------------
-
-Native support acquisition uses a standard borrowed ``ContactSensor`` and the
-public sampling observer lifecycle. Each explicit runtime registry owns one
-observer per exact native pair. Replacing native instances under the same UID
-requires release and rebind; closing an old observer cannot detach a new owner
-registered under the same hook name. Borrowed sensors and bodies are never
-destroyed by this registry.
-
-Every physical batch has a real timestamp and a collector-owned revision.
-Legacy acquisition uses the simulation clock. Strong frames and results use the
-bound environment clock and observed substep offset; their fixed mapping to
-simulation time is checked, including warmup offsets. Unobserved advancement
-cannot be hidden by rebasing that mapping. The bound clock qualifies support contract
-revision 1, including native source identity, topology, episode generation and
-the complete substep interval. Legacy metadata stays legacy even when sharing
-an observer whose strong clock is bound. Its strong-only sample serial and the
-all-acquisition frame revision are separate identities.
-
-``NativeSupportResult.support.valid`` must be checked before using its values.
-Acquisition errors invalidate the whole pair's witness batch; selected resets
-leave the other rows intact. Positive contact patches may persist through
-sleep while both body poses remain within the original tolerance. Missing,
-overflowed or changed observations invalidate those witnesses. A complete empty
-sample is an instantaneous negative, not proof of absent support throughout a
-stability window. Normative task acceptance remains outside this module.
-
-.. currentmodule:: embodichain.lab.task_program.integrations.simulation.support_evidence
-
-.. autosummary::
-
-   NATIVE_SUPPORT_CHANNEL
-   SupportControlClock
-   NativeSupportResult
-   NativeSupportObservation
-   SupportObservationRegistry
-
-.. autoclass:: NativeSupportResult
-   :members:
-
-.. autoclass:: NativeSupportObservation
-   :members:
-
-.. autoclass:: SupportObservationRegistry
    :members:
 
 embodichain.lab.gym.envs.episode_context
@@ -3531,3 +3528,55 @@ Typed physical predicates provide shared distance and height measurements for RL
 .. autofunction:: evaluate_near_target
 
 .. autofunction:: evaluate_below_height
+
+embodichain.lab.sim.evidence
+----------------------------
+
+Shared physical observation values. Atomic public imports refer to these same
+classes; sensor acquisition never imports Task Program or Atomic implementation.
+
+.. currentmodule:: embodichain.lab.sim.evidence
+
+.. autosummary::
+
+   PhysicalEvidenceRequest
+   PhysicalEvidenceBatch
+   PhysicalEvidenceFrame
+
+embodichain.lab.sim.sensors.joint_opening
+-----------------------------------------
+
+Robot-owned driver calibration and read-only joint-opening observations.
+No model-name or task-name inference is performed.
+
+.. currentmodule:: embodichain.lab.sim.sensors.joint_opening
+
+.. autosummary::
+
+   DriverOpeningBinding
+   create_joint_opening_reader
+
+embodichain.compute.geometry.grip_contacts
+------------------------------------------
+
+Pure bilateral contact arithmetic on explicitly supplied actor pairs, normals
+and impulses. Invalid or ambiguous data remains distinct from a measured negative.
+
+.. currentmodule:: embodichain.compute.geometry.grip_contacts
+
+.. autosummary::
+
+   classify_contacts
+
+embodichain.lab.sim.atomic_actions.grip_evidence
+------------------------------------------------
+
+Shared physical grip interpretation consumes a PhysicalEvidenceRequest and
+explicit actor bindings, without Semantic Call or Task Program types. Results
+are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrations.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.grip_evidence
+
+.. autosummary::
+
+   GripContactObserver

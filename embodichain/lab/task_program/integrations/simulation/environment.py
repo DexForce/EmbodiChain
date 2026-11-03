@@ -639,7 +639,9 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
                 raise ValueError(
                     "Supported stability requires the environment sensor suite."
                 )
-            from .support_evidence import SupportObservationRegistry
+            from embodichain.lab.sim.sensors.support_observation import (
+                SupportObservationRegistry,
+            )
 
             self._support_registry = SupportObservationRegistry(
                 simulation, acquisition_clock=lambda: simulation.simulation_time

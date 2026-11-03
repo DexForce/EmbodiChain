@@ -32,7 +32,7 @@ from embodichain.lab.sim.scene.planar_observation import NativePlanarPlacement
 from embodichain.lab.task_program.compiler.program import CompiledPostPolicy
 from embodichain.utils.math import pose_inv
 from .stability import SimulationStabilityConditionCfg
-from .support_evidence import SupportObservationRegistry
+from embodichain.lab.sim.sensors.support_observation import SupportObservationRegistry
 
 __all__: list[str] = []
 

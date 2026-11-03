@@ -29,12 +29,12 @@ import numpy as np
 import torch
 
 from embodichain.compute.geometry.contact_support import support_from_contacts
-from embodichain.lab.sim.atomic_actions.evidence import (
+from embodichain.lab.sim.evidence import (
     PhysicalEvidenceBatch,
     PhysicalEvidenceRequest,
 )
 from embodichain.lab.sim.sensors.contact_sensor import ContactSensor, ContactSensorCfg
-from .contact_evidence import (
+from .contact_sampling import (
     CONTACT_ACTOR_IDS,
     CONTACT_IMPULSES,
     CONTACT_NORMALS,

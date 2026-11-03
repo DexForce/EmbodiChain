@@ -146,7 +146,7 @@ topics:
 - id: sensor-system
   title: Sensor System
   aliases: [sensor system, camera attachment, 传感器, 相机挂载]
-  keywords: [CameraCfg, StereoCameraCfg, ContactSensorCfg, ContactQuery, ContactSamplingObserver, Newton contact, SensorCfg,
+  keywords: [CameraCfg, StereoCameraCfg, ContactSensorCfg, ContactQuery, ContactSamplingObserver, ContactEvidenceSampler, ContactTimeline, NativeSupportObservation, SupportObservationRegistry, Newton contact, SensorCfg,
     get_sensor_obs, resolve_parent_nodes, scatter_contact_data, tiled image, quaternion, xyzw]
   paths: [topics/sensor-system/sensor-system.md]
   source_of_truth:
@@ -155,6 +155,11 @@ topics:
   - embodichain/lab/sim/sensors/stereo.py
   - embodichain/lab/sim/sensors/attachment.py
   - embodichain/lab/sim/sensors/contact_sensor.py
+  - embodichain/lab/sim/sensors/contact_sampling.py
+  - embodichain/lab/sim/sensors/contact_timeline.py
+  - embodichain/lab/sim/sensors/joint_opening.py
+  - embodichain/lab/sim/sensors/support_observation.py
+  - embodichain/lab/sim/evidence.py
   - embodichain/lab/sim/sensors/_warp/contact.py
   - embodichain/compute/image/
   watch_paths: [embodichain/lab/sim/sensors/, embodichain/compute/image/, tests/sim/sensors/]
@@ -429,7 +434,6 @@ topics:
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
     joint_command_mode, ContactEvidenceSampler, ContactTimeline, NativeGripEvidenceFactory,
-    NativeSupportObservation, SupportObservationRegistry,
     ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
@@ -437,10 +441,7 @@ topics:
   - embodichain/lab/task_program/semantics/integration.py
   - embodichain/lab/task_program/semantics/calls.py
   - embodichain/lab/task_program/integrations/configured.py
-  - embodichain/lab/task_program/integrations/simulation/contact_evidence.py
-  - embodichain/lab/task_program/integrations/simulation/contact_timeline.py
   - embodichain/lab/task_program/integrations/simulation/grip_evidence.py
-  - embodichain/lab/task_program/integrations/simulation/support_evidence.py
   - embodichain/lab/task_program/integrations/composition.py
   - embodichain/lab/task_program/integrations/_configured_composition.py
   - embodichain/lab/gym/envs/task_program/

@@ -31,7 +31,7 @@ from dexsim.scene import ContactActorInfo, ContactBuffer, ContactQueryCapabiliti
 from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
 from embodichain.lab.gym.envs.base_env import BaseEnv
 from embodichain.lab.sim.sensors.contact_sensor import ContactSensor, ContactSensorCfg
-from embodichain.lab.task_program.integrations.simulation.support_evidence import (
+from embodichain.lab.sim.sensors.support_observation import (
     ContactWitness,
     NativeSupportObservation,
     NativeSupportResult,
@@ -559,9 +559,28 @@ def test_contact_witness_owns_patch_and_pose_snapshot():
     assert witness.update(pose, pose, None, invalid=True) is None
 
 
+def test_support_registry_close_does_not_allow_reassembly_of_same_native_pair():
+    _, registry, observer, _, cfg = _setup()
+    registry.close()
+    registry.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        registry.acquire(
+            observer.object,
+            observer.reference,
+            entity_id="item",
+            reference_id="surface",
+            observer_name="support_observation",
+            sensor_cfg=cfg,
+        )
+
+
 @pytest.mark.parametrize("kind", ["stack", "supported_placement", "supported_region"])
 def test_standard_condition_port_consumes_qualified_support_on_the_original_grid(kind):
     from embodichain.lab.task_program import decode_task_program, TaskProgramCompiler
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+    from embodichain.lab.sim.sensors.support_observation import (
+        SupportObservationRegistry,
+    )
     from embodichain.lab.task_program.integrations.simulation.bindings import (
         SimulationSceneBinding,
         SimulationRigidObjectBinding,
@@ -668,22 +687,7 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
     metadata = port.post_policy_metadata(policy, segment=segment)
     assert metadata["clock_started_at"] == 0.04
     assert metadata["clock_ended_at"] == 0.12
-    assert metadata["stable_seconds"] == [0.08, 0.08]
+    assert metadata["stable_seconds"] == pytest.approx([0.08, 0.08])
     assert metadata["measurements"]["native_support"]["support_contract_revision"] == 1
     assert sim.query.fetches == 12
     registry.close()
-
-
-def test_support_registry_close_does_not_allow_reassembly_of_same_native_pair():
-    _, registry, observer, _, cfg = _setup()
-    registry.close()
-    registry.close()
-    with pytest.raises(RuntimeError, match="closed"):
-        registry.acquire(
-            observer.object,
-            observer.reference,
-            entity_id="item",
-            reference_id="surface",
-            observer_name="support_observation",
-            sensor_cfg=cfg,
-        )

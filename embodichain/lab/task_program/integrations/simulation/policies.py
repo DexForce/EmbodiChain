@@ -62,7 +62,9 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.lab.sim.sensors.base_sensor import BaseSensor
-    from .support_evidence import SupportObservationRegistry
+    from embodichain.lab.sim.sensors.support_observation import (
+        SupportObservationRegistry,
+    )
 
 
 @dataclass(frozen=True, slots=True)
