@@ -33,6 +33,7 @@ __all__ = [
     "rotate_rigid_grasp",
     "rigid_pose_displacement",
     "pose_axis_alignment",
+    "validate_rigid_pose_batch",
 ]
 
 
@@ -160,3 +161,45 @@ def rotate_rigid_grasp(
     rotated_link = link_pose[:, None] @ (to_origin @ rotations @ from_origin)
     link_to_eef = pose_inv(link_pose) @ grasp_pose
     return rotated_link, rotated_link @ link_to_eef[:, None]
+
+
+def validate_rigid_pose_batch(pose: torch.Tensor, batch_size: int) -> None:
+    """Validate observed finite, proper rigid transforms without changing them.
+
+    Args:
+        pose: Float32/float64 transforms shaped ``(batch_size, 4, 4)``.
+        batch_size: Exact expected number of observations.
+
+    Raises:
+        ValueError: Shape, finiteness, rotation or homogeneous row is invalid.
+
+    The source observation tolerances are retained: orthogonality/determinant
+    use absolute tolerance 1e-4 and homogeneous rows 1e-5, with Torch's default
+    relative tolerance. This validates geometry, not observation authenticity.
+    """
+    if (
+        not isinstance(pose, torch.Tensor)
+        or pose.dtype not in (torch.float32, torch.float64)
+        or type(batch_size) is not int
+        or batch_size < 1
+        or pose.shape != (batch_size, 4, 4)
+        or not torch.isfinite(pose).all()
+    ):
+        raise ValueError("Placement pose does not match the observed batch.")
+    rotation = pose[:, :3, :3]
+    if (
+        not torch.allclose(
+            rotation.transpose(-1, -2) @ rotation,
+            torch.eye(3, dtype=pose.dtype, device=pose.device).expand_as(rotation),
+            atol=1e-4,
+        )
+        or not torch.allclose(
+            torch.linalg.det(rotation), pose.new_ones(batch_size), atol=1e-4
+        )
+        or not torch.allclose(
+            pose[:, 3],
+            pose.new_tensor([0.0, 0.0, 0.0, 1.0]).expand(batch_size, -1),
+            atol=1e-5,
+        )
+    ):
+        raise ValueError("Placement requires rigid, non-reflected native transforms.")

@@ -174,3 +174,11 @@ The result records missing-observation counts and the last reasons. A row that
 never reestablishes a successful window after missing evidence reports
 `support_result_available=false`; consumers must not interpret that false result
 as a measured task failure. Source-global errors still invalidate every witness.
+
+`SimulationSupportObservationCollector` binds before the first action to an
+explicit environment and the bridge's actual policy session. Current capture
+checks the per-owner clock-binding generation; same-clock binding is idempotent.
+The generation is an ownership guard, not evidence of strong support. Current
+capture uses the native rest-envelope COM tolerance, while recorded snapshots
+retain the policy's original override. Recorded reads combine the original policy
+metadata with exact Gym boundary slots, never current contacts with old poses.

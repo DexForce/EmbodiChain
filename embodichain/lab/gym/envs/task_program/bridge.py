@@ -1178,6 +1178,20 @@ class TaskProgramDemoBridge:
         return self._clock
 
     @property
+    def program(self) -> CompiledTaskProgramPort:
+        """Return the program selected for this execution."""
+        return self._program
+
+    @property
+    def post_policy_port(self) -> SegmentPostPolicyPort | None:
+        """Return this bridge's actual policy session, including isolated sessions.
+
+        This is the instance used during this execution, not its factory's
+        template port. Consumers still own checking the supported provider API.
+        """
+        return self._post_policy_port
+
+    @property
     def program_completed(self) -> bool:
         """Return whether every compiled segment completed its full lifecycle."""
         return self._program_completed

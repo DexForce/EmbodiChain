@@ -23,6 +23,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Articulated asset generation | `asset_engine/pipeline/articulation.py`, `asset_engine/clients/articulated_generation.py` |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
+| Frozen placement declaration → normative evidence binding | `task_engine/evidence.py` → [TaskSpec evidence boundary](../task-spec/task-spec.md#physical-evidence-boundary) |
 
 Generate: validate input → VLM understanding → geometry/articulation generation
 → placement refinement → export. Segmentation, geometry and articulation

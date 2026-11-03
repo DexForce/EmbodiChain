@@ -832,6 +832,23 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 
    save_layouts
 
+embodichain.gen_sim.task_engine.evidence
+----------------------------------------
+
+The Task Engine adapter projects frozen role/lineage declarations and explicit
+compiled occurrence descriptors into TaskSpec bindings. It verifies source
+content identities and retains declared preset/occurrence IDs. Missing compiled
+capabilities fail explicitly; projection reads no simulation or physical trace
+and decides no predicate outcome.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.evidence
+
+.. autosummary::
+
+   project_placement_evidence_binding
+
+.. autofunction:: project_placement_evidence_binding
+
 embodichain.gen_sim.task_spec
 -----------------------------
 
@@ -913,6 +930,45 @@ stored in these contracts.
 .. autosummary::
 
    RoleSpec
+
+embodichain.gen_sim.task_spec.evidence
+--------------------------------------
+
+Placement evidence binds the frozen serialized-program/TaskSpec digests to exact
+release, support and boundary occurrences. Existing instances are re-decoded and
+their content hash is checked, including mutable nested JSON declarations.
+
+This slice supports rigid ``on`` relations with legacy ``native_contact_support``
+or the explicitly selected ``native_stable_reference_support/v2`` sampled window.
+It rejects revision-1 and full-footprint region declarations instead of evaluating
+them through a weaker scope. Import is standard-library-only; numerical proof
+re-evaluation lazily loads the shared Torch/NumPy/Shapely implementation.
+
+The verifier distinguishes unavailable acquisition from measured negatives and
+checks measured release receipts independently of plan/segment success. Raw Lab
+snapshots require an explicit episode binding and carry no accepted/released
+conclusion; TaskSpec computes those results. Historical B0 claims are checked
+when supplied. Legacy scope remains legacy even when a timeline is present.
+
+``evaluate_placement_evidence_report`` preserves goal/final and milestone/recorded
+separation, verifies declared execution prefixes and orders exact boundary slots.
+Sparse segment snapshots cannot certify complete temporal windows or continuous
+invariants. The ordinary TaskSpec evaluator remains the certificate authority.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.evidence
+
+.. autosummary::
+
+   SupportedPlacementEvidenceBinding
+   evaluate_supported_placement_evidence
+   evaluate_placement_evidence_report
+
+.. autoclass:: SupportedPlacementEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_supported_placement_evidence
+
+.. autofunction:: evaluate_placement_evidence_report
 
 embodichain.gen_sim.task_spec.expressions
 -----------------------------------------
@@ -1246,6 +1302,30 @@ embodichain.lab.task_program.integrations.simulation.handover
 
    ConfiguredHandOverPoseProvider
 
+embodichain.lab.task_program.integrations.simulation.observations
+-----------------------------------------------------------------
+
+Bind the physical collector to an initialized environment and its actual bridge
+before the first bridge control step. It uses the bridge's policy session and episode
+IDs; later episodes, closed resources and superseded current clock bindings are
+rejected. Independent runtime owners retain independent state.
+
+Current capture selects the registered pair/scope and uses the native
+rest-envelope COM tolerance. Recorded capture preserves the original policy
+parameters and reads the exact seeded end-step slots. It never resamples current
+contacts for a historical pose or falls back to a live pose/previous frame.
+The result owns physical metadata and availability only; TaskSpec and Task Engine
+are not dependencies of this Lab collector.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
+
+.. autosummary::
+
+   SimulationSupportObservationCollector
+
+.. autoclass:: SimulationSupportObservationCollector
+   :members:
+
 embodichain.lab.task_program.integrations.simulation.stability
 --------------------------------------------------------------
 
@@ -1453,12 +1533,25 @@ embodichain.lab.gym.utils.profiler
 embodichain.lab.gym.utils.trajectory_state
 ------------------------------------------
 
+Owned recorded pose snapshots identify native rows, episodes and positive
+completed trajectory slots. Missing recording, incomplete rows and unavailable
+terminal slots are errors; these readers do not query current simulation state.
+``EmbodiedEnv.capture_recorded_rigid_poses`` additionally verifies the host episode
+before and after copying. Slot indices are not simulation timestamps.
+
 .. currentmodule:: embodichain.lab.gym.utils.trajectory_state
 
 .. autosummary::
 
    capture_trajectory_state
    restore_trajectory_state
+   RecordedRigidPoseSnapshot
+   read_recorded_rigid_pose_snapshot
+
+.. autoclass:: RecordedRigidPoseSnapshot
+   :members:
+
+.. autofunction:: read_recorded_rigid_pose_snapshot
 
 embodichain.lab.scripts.analyze_workspace
 -----------------------------------------

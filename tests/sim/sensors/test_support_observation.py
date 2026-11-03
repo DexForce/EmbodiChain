@@ -765,3 +765,271 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
         8 if startup == "cold" else 16 if startup == "row_reset" else 12
     )
     registry.close()
+
+
+def _support_policy_fixture(*, com_tolerance=None, com_x=0.0):
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        SimulationSceneBinding,
+        SimulationRigidObjectBinding,
+    )
+    from embodichain.lab.task_program.integrations.simulation.policies import (
+        SimulationSegmentPolicyPort,
+    )
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationStabilityConditionCfg,
+        SupportSensorDeclarationCfg,
+    )
+
+    wp.init()
+    sim = _Simulation(2)
+    sim.objects["payload"].pose[:, 2, 3] = 0.2
+    sim.objects["payload"].body_data.com_pose[:, 0] = com_x
+    sim.query.buffer.data[:, 2] = 0.1
+    binding = SimulationSceneBinding(
+        registry_id="support_scene",
+        rigid_objects=(
+            SimulationRigidObjectBinding(entity_id="item", simulation_uid="payload"),
+            SimulationRigidObjectBinding(entity_id="surface", simulation_uid="support"),
+        ),
+    )
+    cfg = SimulationStabilityConditionCfg(
+        entity="item",
+        reference="surface",
+        kind="supported_placement",
+        displacement=(0.0, 0.0, 0.2),
+        com_tolerance=com_tolerance,
+        duration=0.04,
+        timeout=0.12,
+        support_sensor=SupportSensorDeclarationCfg(
+            uid="declared_support", max_contacts_per_env=4
+        ),
+    )
+    robot = SimpleNamespace(get_qpos=lambda target=False: torch.zeros(2, 1))
+    registry = SupportObservationRegistry(sim, acquisition_clock=lambda: sim.time)
+    port = SimulationSegmentPolicyPort(
+        sim,
+        robot,
+        binding,
+        settle_presets={"support": cfg},
+        step_dt=0.04,
+        support_registry=registry,
+        sensor_suite=sim.sensors,
+    )
+    return sim, robot, registry, port, binding, cfg
+
+
+def test_current_capture_rejects_superseded_session_but_same_clock_bind_is_idempotent():
+    first = _support_policy_fixture()
+    second = _support_policy_fixture()
+    clock, other_clock = EnvironmentStepClock(0.04), EnvironmentStepClock(0.04)
+    first[3].bind_clock(clock)
+    session = first[3].new_task_program_session()
+    second[3].bind_clock(other_clock)
+    first[3].bind_clock(clock)
+    assert session.capture_support_observation(
+        "support", clock=clock
+    ).support.valid.all()
+    first[3].bind_clock(EnvironmentStepClock(0.04))
+    with pytest.raises(ValueError, match="another runtime/session"):
+        session.capture_support_observation("support", clock=clock)
+    assert (
+        second[3]
+        .capture_support_observation("support", clock=other_clock)
+        .support.valid.all()
+    )
+    first[2].close()
+    second[2].close()
+
+
+def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_support():
+    from types import MethodType
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.task_program.bridge import (
+        TaskProgramDemoBridge,
+        BufferedGymCommandSink,
+        RuntimeCommandFrameEncoder,
+    )
+    from embodichain.lab.task_program import TaskProgramCompiler, decode_task_program
+    from embodichain.lab.task_program.integrations import (
+        SimulationTaskProgramRegistration,
+        SimulationRobotSkillProfileBinding,
+        ControlPartResourceBinding,
+        ControlPartEndpointBinding,
+    )
+    from embodichain.lab.task_program.semantics import (
+        SkillPolicyPreset,
+        EffectAssurance,
+    )
+    from embodichain.lab.sim.atomic_actions import CARTESIAN_POSE_CAPABILITY
+    from embodichain.lab.task_program.integrations.simulation.observations import (
+        SimulationSupportObservationCollector,
+    )
+
+    sim, robot, registry, template, binding, cfg = _support_policy_fixture(
+        com_tolerance=0.1, com_x=0.04
+    )
+    profile = SimulationRobotSkillProfileBinding(
+        "robot",
+        resources=(
+            ControlPartResourceBinding(
+                resource_id="primary",
+                endpoints=(
+                    ControlPartEndpointBinding(
+                        endpoint_id="motion",
+                        control_part="arm",
+                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                    ),
+                ),
+            ),
+        ),
+        presets=(
+            SkillPolicyPreset(
+                "default",
+                action_option_templates={},
+                effect_assurance=EffectAssurance.PROJECTED,
+            ),
+        ),
+        default_preset="default",
+    )
+    registration = SimulationTaskProgramRegistration(
+        binding, profile, settle_presets={"support": cfg}
+    )
+    compiled = TaskProgramCompiler(binding.declare()).compile(
+        decode_task_program(
+            {
+                "program_id": "support",
+                "targets": {},
+                "integration": {
+                    "robot_profile": "robot",
+                    "scene_registry": "support_scene",
+                    "runtime_preset": "default",
+                },
+                "program": {
+                    "kind": "segment",
+                    "name": "observe",
+                    "steps": {
+                        "kind": "invoke",
+                        "call": {"kind": "pick", "object": "item"},
+                    },
+                    "post": [
+                        {"kind": "wait_stable", "entity": "item", "preset": "support"}
+                    ],
+                },
+            }
+        )
+    )
+    clock = EnvironmentStepClock(0.04)
+    template.bind_clock(clock)
+    encoder = RuntimeCommandFrameEncoder(
+        SimpleNamespace(current_qpos=lambda ids: torch.zeros(len(ids), 1))
+    )
+    sink = BufferedGymCommandSink(encoder, clock)
+    runtime = SimpleNamespace(
+        result=None,
+        status=None,
+        start=lambda *a, **k: None,
+        step=lambda: None,
+        cancel=lambda reason: None,
+        adopt_verified_task_state=lambda state: None,
+    )
+    bridge = TaskProgramDemoBridge(
+        compiled,
+        runtime,
+        sink,
+        clock,
+        post_policy_port=template,
+        isolate_policy_sessions=True,
+    )
+    context = EpisodeContext(2)
+    context._begin_episode(torch.tensor([0, 1]))
+    context._finish_initialization(torch.tensor([0, 1]))
+    values = {}
+    for uid, body in sim.objects.items():
+        pose = torch.zeros(2, 3, 7)
+        pose[..., 6] = 1.0
+        pose[:, 1, :3] = body.pose[:, :3, 3]
+        pose[:, 0, 0] = -50.0
+        values[uid] = {"pose": pose}
+    env = SimpleNamespace(
+        sim=sim,
+        robot=robot,
+        num_envs=2,
+        episode_context=context,
+        _traj_buffer={"states": {"rigid_objects": values}},
+        _traj_steps=torch.ones(2, dtype=torch.long),
+        _closed=False,
+    )
+    env.capture_recorded_rigid_poses = MethodType(
+        EmbodiedEnv.capture_recorded_rigid_poses, env
+    )
+    collector = SimulationSupportObservationCollector(env, bridge, registration)
+    assert bridge.post_policy_port is not template
+    segment = next(compiled.iter_segments())
+    policy = segment.post_policies[0]
+    sensor = sim.get_sensor("declared_support")
+    for _ in bridge.post_policy_port.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    ):
+        sensor.begin_control_step()
+        for _ in range(4):
+            sim.time += 0.01
+            sim.revision += 1
+            sensor.update_physics_step(0.01)
+        clock.advance_after_env_step()
+    with pytest.raises((KeyError, RuntimeError)):
+        template.post_policy_metadata(policy, segment=segment)
+    before = sim.query.fetches
+    recorded = collector.capture_recorded(
+        "support",
+        segment_id=segment.name,
+        source_path=segment.source_path,
+        frame_indices=[1, 1],
+    )
+    assert sim.query.fetches == before
+    assert recorded["boundary_poses"]["item"][0][0][3] == 0.0
+    assert recorded["boundary_frames"] == [1, 1]
+    assert recorded["native_support"]["supported"] == [True, True]
+    assert recorded["native_support"]["rows"][0]["com_tolerance_m"] == 0.1
+    recorded["native_support"]["rows"][0]["contacts_world"][0][0] = 100.0
+    again = collector.capture_recorded(
+        "support",
+        segment_id=segment.name,
+        source_path=segment.source_path,
+        frame_indices=[1, 1],
+    )
+    assert again["native_support"]["rows"][0]["contacts_world"][0][0] != 100.0
+    current = collector.capture_current("support")
+    assert sim.query.fetches == before + 1
+    assert current["support_acquisition"]["clock_domain"] == "simulation_time"
+    assert current["native_support"]["supported"] == [False, False]
+    assert current["native_support"]["rows"][0]["com_tolerance_m"] == pytest.approx(
+        0.003
+    )
+    assert "support_contract_revision" not in current["native_support"]
+    with pytest.raises(ValueError, match="before the first"):
+        SimulationSupportObservationCollector(env, bridge, registration)
+    context._begin_episode(torch.tensor([0]))
+    with pytest.raises(ValueError, match="another episode"):
+        collector.capture_current("support")
+    assert sim.query.fetches == before + 1
+    template.close_runtime_resources()
+    with pytest.raises(RuntimeError, match="closed"):
+        collector.capture_recorded(
+            "support",
+            segment_id=segment.name,
+            source_path=segment.source_path,
+            frame_indices=[1, 1],
+        )
+    assert sim.query.fetches == before + 1
+    registry.close()
+
+
+def test_current_observation_rejects_replaced_native_body_before_reading_old_pose():
+    sim, registry, observer, _, _ = _setup()
+    original = observer.object
+    sim.objects["payload"] = _Body("payload", 2)
+    with pytest.raises(ValueError, match="bodies changed"):
+        observer.observe_current()
+    assert original.pose_reads == 0
+    registry.close()

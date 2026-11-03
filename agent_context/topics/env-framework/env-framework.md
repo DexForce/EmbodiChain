@@ -20,6 +20,7 @@ Lightweight RL environments have a separate owner in
 | Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
 | Scene, managers, RL outcomes and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
+| Exact recorded boundary poses and episode checks | `embodichain/lab/gym/envs/embodied_env.py` → `capture_recorded_rigid_poses`, `gym/utils/trajectory_state.py` |
 | Optional measured physical objectives | `embodichain/lab/gym/envs/objectives/`; Gym owns observation/reset hooks independently of expert acceptance |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
 | Demo segment execution / outcomes | `embodichain/lab/gym/envs/demo.py` |
@@ -101,6 +102,12 @@ active-joint qpos. Position-velocity mode stores a flat
 schema version, and `step_dt` in trajectory/demo metadata. Missing qvel fails
 before stepping in position-velocity mode; inactive and hold targets use zero
 qvel.
+
+`capture_recorded_rigid_poses` returns owned CPU poses from exact completed
+trajectory slots and checks the expected `EpisodeContext` IDs. It requires the
+seeded `end_step` slot; missing capacity/rows never select `end_step - 1` or current
+live state. Returned frame indices describe row-local recording, not simulation
+time. The shared reader/value owner is `gym/utils/trajectory_state.py`.
 
 ## Lifecycle and boundaries
 
