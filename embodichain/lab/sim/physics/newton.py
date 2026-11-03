@@ -208,12 +208,10 @@ class NewtonPhysicsBackend(PhysicsBackend):
         if solver_type is None:
             return True
         solver_type = solver_type.lower()
-        if solver_type.endswith("dexuni"):
-            return False
         runtime_device = self._runtime_device
         if runtime_device is None:
             runtime_device = str(getattr(self._manager, "device", ""))
         return not (
-            solver_type.endswith("mujoco_warp")
+            solver_type.endswith(("mujoco_warp", "dexuni"))
             and runtime_device.lower().startswith("cpu")
         )
