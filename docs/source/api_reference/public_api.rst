@@ -936,8 +936,11 @@ time or advances physics.
 Records retain only packed valid contacts on CPU. Reset clears selected
 environments and advances their generations, leaving other rows intact. Loss,
 missing source revisions, incomplete intervals and capacity exhaustion remain
-explicit. The contact-row budget is checked before each sample, so one sampled
-batch may cross it. Control-step and substep caps also bound empty histories.
+explicit. The contact-row budget is a soft threshold checked before each whole sample;
+no native sample is truncated. With N environments and per-environment sensor
+capacity C, charged rows stay below ``max_contact_rows + N*C``. Once the threshold
+is reached, the next sample records unavailable capacity loss. Control-step and
+substep caps also bound empty histories.
 Frontend code owns actor/semantic label maps, serialized report schema IDs and
 any task-success evaluation.
 

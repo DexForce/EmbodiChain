@@ -48,6 +48,13 @@ class ContactTimelineCfg:
     step_dt: float = MISSING
     max_control_steps: int = 30000
     max_contact_rows: int = 1_000_000
+    """Soft stop threshold checked before each complete native sample.
+
+    A retained sample is never truncated. With N environments and sensor capacity
+    C contacts per environment, charged rows stay below this threshold plus N*C.
+    Once the threshold is reached, the next sample is unavailable and records a
+    capacity error. This is not a strict allocation/RSS ceiling.
+    """
     max_substeps_per_control: int = 256
     max_errors_per_env: int = 16
 
@@ -298,20 +305,22 @@ class ContactTimeline:
         """Clear only selected rows and advance their episode generations.
 
         Args:
-            env_ids: Native environment IDs; None resets every row. A reset during
-                an interval suppresses those rows until the next complete interval.
+            env_ids: Sensor-compatible indices, or None for every row. The same
+                torch.long conversion and negative-index aliases as ContactSensor
+                apply; duplicates increment each selected row's generation once.
+                A reset during an interval suppresses those rows until the next
+                complete interval.
         """
-        rows = (
-            list(range(self.sampler.num_envs))
-            if env_ids is None
-            else [int(row) for row in env_ids]
-        )
-        if len(set(rows)) != len(rows) or any(
-            not 0 <= row < self.sampler.num_envs for row in rows
-        ):
-            raise ValueError(
-                "Contact timeline reset requires unique valid environment IDs."
-            )
+        if env_ids is None:
+            rows = list(range(self.sampler.num_envs))
+        else:
+            # Match the sensor's actual index_fill_ contract, including scalar
+            # tensors, negative aliases and conversion errors. Build the mask
+            # before changing any recorder state, then reset each native row once.
+            indices = torch.as_tensor(env_ids, dtype=torch.long).detach().cpu()
+            selected = torch.zeros(self.sampler.num_envs, dtype=torch.bool)
+            selected.index_fill_(0, indices, True)
+            rows = selected.nonzero(as_tuple=False).flatten().tolist()
         for row in rows:
             self._rows[row].clear()
             self._errors[row].clear()

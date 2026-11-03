@@ -43,7 +43,10 @@ different identities. The provider's output device follows its request.
 history, driven by an explicit host control clock. Keep it in the environment's
 sensor suite so `BaseEnv.step` drives the public observer port. It records no task
 verdict and reads no private active-bridge field. Selected resets clear only those
-rows; missing/partial intervals and loss remain visible. Frontends own report
+rows; missing/partial intervals and loss remain visible. The contact-row limit is
+a source-compatible soft threshold: at most one complete native batch can cross
+it; the following sample is unavailable. Reset uses the sensor's index conversion
+and aliases, deduplicating rows before advancing generations. Frontends own report
 schema wrappers and semantic actor labels. The CPU test
 `tests/gym/envs/task_program/test_contact_evidence.py` exercises the actual public
 step boundary, frame ownership, native stamps and selective reset behavior.

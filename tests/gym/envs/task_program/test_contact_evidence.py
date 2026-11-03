@@ -731,3 +731,88 @@ def test_shared_provider_keeps_distinct_parallel_evidence_channels():
     assert results["lane-b:contact"].valid.tolist() == [False]
     assert list(results) == ["lane-a:contact", "lane-b:contact"]
     assert source.update_count == 2
+
+
+def test_timeline_contact_budget_keeps_one_complete_batch_then_reports_unavailable():
+    source = ContactSource(count=3, capacity=2)
+    clock = SimpleNamespace(step_index=0)
+    sampler = ContactEvidenceSampler(
+        source,
+        native_revision_reader=lambda: source.revision,
+        topology_revision_reader=lambda: source.topology,
+    )
+    timeline = ContactTimeline(
+        sampler,
+        ContactTimelineCfg(step_dt=0.01, max_contact_rows=5),
+        clock=lambda: (clock.step_index, clock.step_index * 0.01),
+    )
+    timeline.begin_control_step()
+    timeline.after_sample(0.01, timeline.before_sample())
+    first = timeline.snapshot()
+    assert first["retained_contact_rows"] == 6
+    assert first["retained_contact_rows"] < 5 + 3 * 2
+    assert all(
+        len(row["samples"][0]["contacts"]["pairs"]) == 2
+        for row in first["environments"]
+    )
+    assert all(row["samples"][0]["available"] for row in first["environments"])
+    clock.step_index = 1
+    timeline.begin_control_step()
+    timeline.after_sample(0.01, timeline.before_sample())
+    stopped = timeline.snapshot()
+    assert stopped["retained_contact_rows"] == 6
+    assert all(len(row["samples"]) == 1 for row in stopped["environments"])
+    assert all(
+        any("capacity exceeded" in error for error in row["errors"])
+        for row in stopped["environments"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("indices", "generations"),
+    [
+        ([-1, 2, -1], [0, 0, 1]),
+        (torch.tensor(1), [0, 1, 0]),
+        ([1.9, True], [0, 1, 0]),
+        ([], [0, 0, 0]),
+    ],
+)
+def test_timeline_reset_matches_sensor_indices_without_double_generation(
+    indices, generations
+):
+    source = ContactSource(count=3)
+    timeline, _ = make_timeline(source)
+    capture_step(timeline, source)
+    before = timeline.snapshot()
+    sensor = ContactSensor.__new__(ContactSensor)
+    sensor.device = torch.device("cpu")
+    sensor._data_buffer = source.data
+    sensor._num_contacts_per_env = source.data["is_valid"].sum(1).to(torch.int32)
+    sensor._query_dropped_count = torch.zeros(1, dtype=torch.int32)
+    sensor._scatter_dropped_count = torch.zeros(3, dtype=torch.int32)
+    sensor._sample_scatter_dropped_count = torch.zeros(3, dtype=torch.int32)
+    sensor._histories = {}
+    sensor._sampling_observers = {}
+    sensor.add_sampling_observer("timeline", timeline)
+    sensor.reset(indices)
+    after = timeline.snapshot()
+    assert [row["episode_generation"] for row in after["environments"]] == generations
+    for row, generation in enumerate(generations):
+        if generation:
+            assert after["environments"][row]["samples"] == []
+            assert not source.data["is_valid"][row].any()
+        else:
+            assert after["environments"][row] == before["environments"][row]
+
+
+@pytest.mark.parametrize("indices", [[3], [-4], [[0, 1]], ["bad"]])
+def test_timeline_reset_propagates_sensor_index_errors_before_mutating_history(indices):
+    source = ContactSource(count=3)
+    timeline, _ = make_timeline(source)
+    capture_step(timeline, source)
+    before = timeline.snapshot()
+    with pytest.raises((TypeError, ValueError, IndexError, RuntimeError)) as expected:
+        torch.zeros(3).index_fill_(0, torch.as_tensor(indices, dtype=torch.long), 1)
+    with pytest.raises(type(expected.value)):
+        timeline.reset(indices)
+    assert timeline.snapshot() == before
