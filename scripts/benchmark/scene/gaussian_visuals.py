@@ -114,9 +114,29 @@ def worker(args: argparse.Namespace) -> dict:
         batch = sim.spawn_result.create_gaussian_splat_batch(list(handles))
         group_ids = [camera.group_id for camera in cameras]
 
+        rng = np.random.default_rng(42)
+        state = {}
+
+        def stage_state():
+            state.update(
+                geometry_scales=rng.uniform(0.8, 1.2, args.envs).astype(np.float32),
+                color_gain=rng.uniform(0.5, 1.5, (args.envs, 3)).astype(np.float32),
+                opacity_gain=rng.uniform(0.5, 1, args.envs).astype(np.float32),
+            )
+            visual.set_gaussian_visual_state(
+                visual.cfg.visuals[0].id,
+                scale=state["geometry_scales"],
+                color_gain=state["color_gain"],
+                opacity_gain=state["opacity_gain"],
+            )
+
+        stage_state()
+
         def publish_native():
             world.update(0.0)
-            batch.apply(world_poses=poses, visible=np.ones(args.envs, dtype=bool))
+            batch.apply(
+                world_poses=poses, visible=np.ones(args.envs, dtype=bool), **state
+            )
 
         def render_native():
             for group in group_ids:
@@ -136,6 +156,7 @@ def worker(args: argparse.Namespace) -> dict:
             wrapped()
         samples = {name: [] for name in operations}
         for iteration in range(args.iterations):
+            stage_state()
             for name in (
                 list(operations) if iteration % 2 == 0 else list(reversed(operations))
             ):
@@ -151,6 +172,7 @@ def worker(args: argparse.Namespace) -> dict:
             for name in operations
         }
         for iteration in range(args.iterations):
+            stage_state()
             for name in (
                 list(operations) if iteration % 2 == 0 else list(reversed(operations))
             ):
@@ -234,7 +256,9 @@ def worker(args: argparse.Namespace) -> dict:
             ),
             "image_mae_uint8": error,
             "native_status": status["outcome"],
-            "native_instance_input_bytes": poses.nbytes + args.envs,
+            "native_instance_input_bytes": poses.nbytes
+            + args.envs
+            + sum(v.nbytes for v in state.values()),
             "timings": {
                 name: {
                     "median_ms": statistics.median(values),
@@ -373,7 +397,7 @@ def main() -> None:
         f"Renderer: {args.renderer}; 160x120; RAW; CPU pose state; synchronous native CameraGroup completion; {args.warmup} warmups, {args.iterations} paired samples.",
         "Setup and process RSS retained delta are shared between arms. Native counters cover Gaussian resources/workspaces, not total GPU memory. No device-copy tracer was run; GPU transfer byte counts are unmeasured.",
         "Native and wrapper arms share the prepared Scene and CameraGroups. Mesh sampling introduces small RGB differences. No image tensors are copied in the timed loops.",
-        "Stage medians come from a separate paired pass: publication is CPU submission; render completion includes outstanding GPU work and wrapper capture metadata. Stage medians need not sum to end-to-end medians. Instance input bytes count native float32 rigid matrices and bool visibility only, not traced device traffic or all wrapper allocations.",
+        "Stage medians come from a separate paired pass: publication is CPU submission; render completion includes outstanding GPU work and wrapper capture metadata. Stage medians need not sum to end-to-end medians. Workload changes independent scale/RGB/opacity values each paired iteration (seed 42); both arms receive the same state. Instance input bytes count native float32 rigid matrices, uniform scales, RGB/opacity gains and bool visibility, not traced device traffic or all wrapper allocations.",
     ]
     if rows:
         notes.append("Loaded libraries: " + "; ".join(rows[0]["native_libraries"]))

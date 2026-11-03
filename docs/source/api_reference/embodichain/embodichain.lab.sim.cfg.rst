@@ -124,6 +124,46 @@ requires both the global render mode and the instance setting. Geometric
 scale and ``lod_detail_scale`` are independent. Gaussian owners must have
 positive uniform ``body_scale``.
 
+Gaussian instance randomization
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``GaussianSplatCfg.color_gain`` and ``opacity_gain`` initialize independent
+instance multipliers. Equal RGB gains change brightness; unequal gains tint
+captured radiance after SH evaluation and before the existing tone mapper.
+Opacity gain applies before native alpha culling/compositing. These operations
+retain shared source buffers and do not represent physical relighting.
+
+After adding an entity, stage selected-environment changes before rendering:
+
+.. code-block:: python
+
+   room.set_gaussian_visual_state(
+       "scan", env_ids=[1, 3],
+       color_gain=[[0.8, 1.0, 1.2], [1.2, 0.9, 0.7]],
+       opacity_gain=[0.7, 1.0], scale=[0.9, 1.1],
+   )
+
+Scalar parameters accept a scalar or one value per selected environment;
+RGB accepts ``(3,)`` or ``(N,3)``. Scale is a positive uniform world geometry
+scale including owner ``body_scale``; it does not scale physics or the local
+translation. Articulation calls supply ``link_name``. Reset restores the
+initial values only for selected environments; topology rebuild retains live
+values and the separate reset baseline. Invalid requests change no staged state.
+Runtime publication errors invalidate the capture; the next render resubmits
+all authoritative instance state.
+
+For per-arena asset choices, declare multiple elements and select their
+``visible`` state. Each distinct asset/variant remains resident even when hidden;
+sharing saves copies across environments, not the cost of the variant bank.
+``point_opacities`` (activated values in [0,1], shape ``(N,)``) and
+``sh_coefficients`` (basis-major ``(N,K,3)``, K=1/4/9/16) create independent,
+immutable flat-PLY variants. Shapes must match the loaded source. Their clones
+share that variant, while the original asset remains unchanged. These arrays
+are consumed at creation, never by per-frame state batches. Select among
+prepared variants for runtime randomization. Compressed GSQ and existing LoD
+sidecars reject point overrides; prepare an updated asset and hierarchy offline.
+This is not a mutable/deformable point-buffer API.
+
 Declare assets, call ``prepare()``, then consume frames through the existing
 ``render_frame()``/CameraGroup path. Visual bindings publish transforms without
 stepping physics. Selected visibility, reset and topology changes retain the
@@ -135,7 +175,8 @@ an explicit independent proxy. Layout and antipodal-grasp consumers use this
 surface instead of assuming that rendered appearance is a triangle mesh.
 
 Camera ``color`` retains its uint8 layout. ``capture_metadata`` records the
-completed group/frame, simulation time, calibration and native output contract;
+completed group/frame, simulation time, calibration, instance-state snapshots
+and native output contract;
 Gym exposes it separately as ``sensor_capture_metadata``. Depth is the first
 accepted Gaussian contribution's view-Z with mesh fallback and invalid
 background, not selected-surface depth. Display alpha is not Gaussian coverage.

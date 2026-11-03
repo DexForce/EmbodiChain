@@ -439,6 +439,16 @@ class SpawnScene:
             if binding is not None:
                 binding.sync()
 
+    def _gaussian_capture_state(self) -> dict[str, object]:
+        """Snapshot instance parameters without copying source point arrays."""
+        return {
+            uid: binding.describe()
+            for uid, declaration in self._assets.items()
+            if (binding := getattr(declaration.facade, "_visual_binding", None))
+            is not None
+            and binding.has_gaussians
+        }
+
     @property
     def has_visual_composition(self) -> bool:
         """Whether any declaration owns explicit companion visuals."""

@@ -264,3 +264,143 @@ def test_gaussian_workspace_failure_cannot_publish_a_valid_capture(tmp_path):
         camera = None
         sim.destroy(exit_process=False)
         sim.flush_cleanup_queue()
+
+
+@pytest.mark.parametrize("renderer", ["fast-rt", "hybrid"])
+def test_gaussian_randomization_parallel_cameras_isolation_and_reset(
+    tmp_path, renderer
+):
+    path = tmp_path / "scan.ply"
+    _write_splat(path)
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            num_envs=4,
+            device="cpu",
+            enable_entity_gizmo=False,
+            startup_summary="off",
+            render_cfg=RenderCfg(
+                renderer=renderer,
+                gaussian=GaussianRenderCfg(enabled=True),
+                denoising=DenoisingCfg(window="off", offscreen="off"),
+            ),
+        )
+    )
+    visual = None
+    cameras = []
+    try:
+        visual = sim.add_visual_object(
+            VisualObjectCfg(
+                uid="scan",
+                init_pos=(0, 0, 1),
+                visuals=[
+                    VisualElementCfg(
+                        id="main", representation=GaussianSplatCfg(file_path=str(path))
+                    ),
+                    VisualElementCfg(
+                        id="variant",
+                        representation=GaussianSplatCfg(
+                            file_path=str(path),
+                            point_opacities=np.array([0.9], np.float32),
+                            sh_coefficients=np.array([[[-1.4, 1.4, -1.4]]], np.float32),
+                        ),
+                        visible=False,
+                    ),
+                ],
+            )
+        )
+        for index, width in enumerate([80, 96]):
+            cameras.append(
+                sim.add_sensor(
+                    CameraCfg(
+                        uid=f"camera_{index}",
+                        width=width,
+                        height=64,
+                        intrinsics=(60, 60, width / 2, 32),
+                        enable_depth=True,
+                        extrinsics=CameraCfg.ExtrinsicsCfg(
+                            eye=(0, -2, 1), target=(0, 0, 1)
+                        ),
+                    )
+                )
+            )
+        sim.prepare()
+        assert cameras[0].group_id != cameras[1].group_id
+        resource_ids = visual.get_visual_elements()[0]["resource_ids"]
+        assert len(set(resource_ids)) == 1
+        variant_ids = visual.get_visual_elements()[1]["resource_ids"]
+        assert len(set(variant_ids)) == 1 and variant_ids[0] != resource_ids[0]
+        source_data = visual._visual_binding.handles[0][0].get_data(
+            fields=["sh", "leaf_opacity"]
+        )
+        variant_data = visual._visual_binding.handles[1][0].get_data(
+            fields=["sh", "leaf_opacity"]
+        )
+        assert source_data["sh"][0, 0, 0] > 0 and variant_data["sh"][0, 0, 0] < 0
+        np.testing.assert_allclose(variant_data["leaf_opacity"], [0.9])
+
+        def capture():
+            sim.render_camera_group([cam.group_id for cam in cameras])
+            result = []
+            for cam in cameras:
+                cam.update(fetch_only=True)
+                assert cam.capture_metadata["valid"]
+                assert cam.capture_metadata["status"]["group_id"] == cam.group_id
+                result.append(cam.get_data()["color"].clone())
+            return result
+
+        before = capture()
+        # Change only one environment. Shared payload IDs must remain stable.
+        visual.set_gaussian_visual_state("main", [1], color_gain=(0, 0, 0))
+        after = capture()
+        assert visual.get_visual_elements()[0]["resource_ids"] == resource_ids
+        for old, new in zip(before, after):
+            torch.testing.assert_close(old[[0, 2, 3]], new[[0, 2, 3]], atol=2, rtol=0)
+            assert (old[1].float() - new[1].float()).abs().sum() > 500
+        visual.set_gaussian_visual_state("main", [2], opacity_gain=0.0)
+        transparent = capture()
+        for old, new in zip(after, transparent):
+            torch.testing.assert_close(old[[0, 1, 3]], new[[0, 1, 3]], atol=2, rtol=0)
+            assert (old[2].float() - new[2].float()).abs().sum() > 500
+        visual.set_gaussian_visual_state("main", [1], scale=1.8)
+        after = capture()
+        np.testing.assert_allclose(
+            np.linalg.norm(
+                visual._visual_binding.handles[0][1].get_world_pose()[:3, :3], axis=0
+            ),
+            1.8,
+            atol=1e-5,
+        )
+        # Select another preloaded appearance in a different arena.
+        visual.set_gaussian_visual_state("main", [3], visible=False)
+        visual.set_gaussian_visual_state("variant", [3], visible=True)
+        selected = capture()
+        for previous, new in zip(after, selected):
+            torch.testing.assert_close(previous[:3], new[:3], atol=2, rtol=0)
+            assert (previous[3].float() - new[3].float()).abs().sum() > 500
+        # Topology rebuild keeps live randomization; reset uses the independent baseline.
+        sim.add_visual_object(
+            VisualObjectCfg(
+                uid="extra", shape=CubeCfg(size=(0.01, 0.01, 0.01)), init_pos=(0, 0, -5)
+            )
+        )
+        rebuilt = capture()
+        for old, new in zip(selected, rebuilt):
+            torch.testing.assert_close(old, new, atol=2, rtol=0)
+        visual.reset([1])
+        restored = capture()
+        for initial, selected_frame, new in zip(before, selected, restored):
+            torch.testing.assert_close(initial[1], new[1], atol=2, rtol=0)
+            torch.testing.assert_close(selected_frame[3], new[3], atol=2, rtol=0)
+        with pytest.raises(ValueError):
+            visual.set_gaussian_visual_state(
+                "main", [0, 2], color_gain=[[1, 1, 1], [-1, 1, 1]]
+            )
+        unchanged = capture()
+        for old, new in zip(restored, unchanged):
+            torch.testing.assert_close(old, new, atol=2, rtol=0)
+    finally:
+        cameras.clear()
+        visual = None
+        sim.destroy(exit_process=False)
+        sim.flush_cleanup_queue()

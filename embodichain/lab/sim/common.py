@@ -155,6 +155,58 @@ class BatchEntity(ABC):
             raise ValueError("Explicit visuals are required for this operation.")
         binding.set_visible(visible, env_ids)
 
+    def set_gaussian_visual_state(
+        self,
+        element_id: str,
+        env_ids: Sequence[int] | None = None,
+        *,
+        link_name: str | None = None,
+        color_gain: object = None,
+        opacity_gain: object = None,
+        scale: object = None,
+        visible: object = None,
+        lod_enabled: object = None,
+        lod_detail_scale: object = None,
+    ) -> None:
+        """Stage Gaussian instance randomization for the next managed render.
+
+        The shared immutable point data and physical properties remain unchanged.
+        Reset restores the configured baseline for selected environments. Declare
+        several Gaussian elements and select their visibility for an asset bank;
+        each source is shared across arenas and charged once to residency.
+
+        Args:
+            element_id: Stable visual element ID within its owner/link.
+            env_ids: Selected environments, or None for all.
+            link_name: Articulation link name, or None for a root/body visual.
+            color_gain: RGB radiance multipliers, shape (3,) or (N,3).
+            opacity_gain: Nonnegative opacity multiplier, scalar or (N,).
+            scale: Positive uniform geometry scale including owner body scale,
+                scalar or (N,). Does not scale physics or the local translation.
+            visible: Element visibility, boolean scalar or (N,).
+            lod_enabled: Hierarchy selection, boolean scalar or (N,).
+            lod_detail_scale: Positive detail multiplier, scalar or (N,).
+
+        Raises:
+            ValueError: No matching Gaussian element or invalid state values.
+        """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is None:
+            raise ValueError(
+                "Explicit Gaussian visuals are required for this operation."
+            )
+        binding.set_gaussian_state(
+            element_id,
+            env_ids,
+            link_name=link_name,
+            color_gain=color_gain,
+            opacity_gain=opacity_gain,
+            geometry_scales=scale,
+            visible=visible,
+            lod_enabled=lod_enabled,
+            lod_detail_scale=lod_detail_scale,
+        )
+
     def destroy(self) -> None:
         """Destroy all entities managed by this batch entity."""
         pass

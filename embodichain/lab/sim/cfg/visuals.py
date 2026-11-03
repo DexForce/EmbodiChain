@@ -43,8 +43,53 @@ class GaussianSplatCfg:
     lod_path: str | None = None
     lod_enabled: bool = False
     lod_detail_scale: float = 1.0
+    color_gain: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    """Independent captured-radiance RGB gains before native tone mapping."""
+    opacity_gain: float = 1.0
+    """Independent opacity gain before native alpha culling and compositing."""
+
+    point_opacities: np.ndarray | None = None
+    """Optional activated per-point opacity (N,) for an immutable flat-PLY variant."""
+    sh_coefficients: np.ndarray | None = None
+    """Optional basis-major SH (N,K,3) for an immutable flat-PLY variant."""
 
     def __post_init__(self) -> None:
+        for name in ("point_opacities", "sh_coefficients"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if self.lod_path or Path(self.file_path).suffix.lower() != ".ply":
+                raise ValueError(
+                    "Point attribute overrides require flat PLY; rebuild LoD offline for a changed asset."
+                )
+            array = np.asarray(value, dtype=np.float32)
+            if array.size == 0 or not np.isfinite(array).all():
+                raise ValueError(f"{name} requires nonempty finite float32 values.")
+            if name == "point_opacities":
+                if array.ndim != 1 or np.any(array < 0) or np.any(array > 1):
+                    raise ValueError(
+                        "point_opacities requires (N,) activated values in [0,1]."
+                    )
+            elif (
+                array.ndim != 3
+                or array.shape[1] not in (1, 4, 9, 16)
+                or array.shape[2] != 3
+            ):
+                raise ValueError("sh_coefficients requires (N,K,3), K in {1,4,9,16}.")
+        gain = np.asarray(self.color_gain, dtype=np.float64)
+        if (
+            gain.shape != (3,)
+            or not np.isfinite(gain).all()
+            or np.any(gain < 0)
+            or np.any(gain > np.finfo(np.float32).max)
+            or not math.isfinite(self.opacity_gain)
+            or self.opacity_gain < 0
+            or self.opacity_gain > np.finfo(np.float32).max
+        ):
+            raise ValueError(
+                "Gaussian appearance gains must be finite nonnegative float32 values."
+            )
+        self.color_gain = tuple(float(v) for v in gain)
         if not self.file_path or Path(self.file_path).suffix.lower() not in {
             ".ply",
             ".gsq",

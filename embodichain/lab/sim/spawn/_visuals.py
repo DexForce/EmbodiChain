@@ -126,6 +126,10 @@ class _VisualBinding:
                         pose=transform,
                         visible=element.visible,
                         per_env=True,
+                        color_gain=representation.color_gain,
+                        opacity_gain=representation.opacity_gain,
+                        point_opacities=representation.point_opacities,
+                        sh_coefficients=representation.sh_coefficients,
                     )
                 else:
                     if hasattr(representation, "fpath"):
@@ -146,6 +150,29 @@ class _VisualBinding:
                 self.elements.append(
                     _Element(element, link, name, descriptor, gaussian)
                 )
+
+        # Host-authoritative per-element state; no Gaussian point arrays here.
+        # Copies keep the initial reset baseline independent of live randomization.
+        count = facade.num_instances
+        self.gaussian_state = {}
+        for i, e in enumerate(self.elements):
+            if e.gaussian:
+                rep = e.config.representation
+                self.gaussian_state[i] = {
+                    "color_gain": np.tile(rep.color_gain, (count, 1)).astype(
+                        np.float32
+                    ),
+                    "opacity_gain": np.full(count, rep.opacity_gain, dtype=np.float32),
+                    "geometry_scales": np.full(
+                        count, e.config.scale * self.body_scale[0], dtype=np.float32
+                    ),
+                    "visible": np.full(count, e.config.visible, dtype=bool),
+                    "lod_enabled": np.full(count, rep.lod_enabled, dtype=bool),
+                    "lod_detail_scale": np.full(
+                        count, rep.lod_detail_scale, dtype=np.float32
+                    ),
+                }
+        self.initial_gaussian_state = deepcopy(self.gaussian_state)
 
     @property
     def has_gaussians(self) -> bool:
@@ -331,16 +358,107 @@ class _VisualBinding:
                 ),
                 visible=np.asarray(
                     [
-                        self.visibility[env] and self.elements[i].config.visible
+                        self.visibility[env] and self.gaussian_state[i]["visible"][env]
                         for i, env in self.gaussian_rows
                     ]
                 ),
+                **{
+                    key: np.asarray(
+                        [
+                            self.gaussian_state[i][key][env]
+                            for i, env in self.gaussian_rows
+                        ]
+                    )
+                    for key in (
+                        "geometry_scales",
+                        "color_gain",
+                        "opacity_gain",
+                        "lod_enabled",
+                    )
+                },
             )
+            # Flat assets do not admit detail updates; select hierarchy rows only.
+            lod_rows = [
+                (i, env)
+                for i, env in self.gaussian_rows
+                if self.elements[i].config.representation.lod_path
+            ]
+            if lod_rows:
+                scene.create_gaussian_splat_batch(
+                    [self.handles[i][env] for i, env in lod_rows]
+                ).apply(
+                    lod_detail_scale=np.asarray(
+                        [
+                            self.gaussian_state[i]["lod_detail_scale"][env]
+                            for i, env in lod_rows
+                        ]
+                    )
+                )
         for i, (e, handles) in enumerate(zip(self.elements, self.handles)):
             if not e.gaussian:
                 for env, handle in enumerate(handles):
                     handle.set_world_pose(transformed[i][env])
                     handle.set_visible(bool(self.visibility[env] and e.config.visible))
+
+    def set_gaussian_state(
+        self,
+        element_id: str,
+        env_ids: Any = None,
+        *,
+        link_name: str | None = None,
+        **values: Any,
+    ) -> None:
+        ids = self.indices(env_ids)
+        matches = [
+            i
+            for i, e in enumerate(self.elements)
+            if e.config.id == element_id and e.link == link_name and e.gaussian
+        ]
+        if not matches:
+            raise ValueError(
+                f"No Gaussian visual {element_id!r} on link {link_name!r}."
+            )
+        i = matches[0]
+        state = self.gaussian_state[i]
+        updates = {}
+        for key, value in values.items():
+            if value is None:
+                continue
+            if isinstance(value, torch.Tensor):
+                value = value.detach().cpu().numpy()
+            array = np.asarray(value, dtype=np.float64)
+            shape = (len(ids), 3) if key == "color_gain" else (len(ids),)
+            try:
+                array = np.broadcast_to(array, shape)
+            except ValueError as error:
+                raise ValueError(
+                    f"{key} requires {shape} or a broadcastable value."
+                ) from error
+            if key in {"visible", "lod_enabled"}:
+                if not np.isin(array, [0, 1]).all():
+                    raise ValueError(f"{key} requires boolean values.")
+            elif (
+                not np.isfinite(array).all()
+                or np.any(array < 0)
+                or np.any(array > np.finfo(np.float32).max)
+                or (
+                    key in {"geometry_scales", "lod_detail_scale"}
+                    and np.any(array.astype(np.float32) <= 0)
+                )
+            ):
+                raise ValueError(f"Invalid Gaussian {key} values.")
+            if (
+                key in {"lod_enabled", "lod_detail_scale"}
+                and not self.elements[i].config.representation.lod_path
+            ):
+                if key == "lod_detail_scale" or array.any():
+                    raise ValueError(
+                        "Gaussian LoD changes require a hierarchy sidecar."
+                    )
+            updates[key] = array.astype(state[key].dtype)
+        # Validate the complete request before changing any authoritative state.
+        for key, array in updates.items():
+            state[key][ids] = array
 
     def set_visible(self, visible: bool, env_ids: Any = None) -> None:
         ids = self.indices(env_ids)
@@ -369,6 +487,9 @@ class _VisualBinding:
     def reset(self, env_ids: Any = None) -> None:
         ids = self.indices(env_ids)
         self.visibility[ids] = getattr(self.owner.cfg, "visible", True)
+        for i, state in self.gaussian_state.items():
+            for key, value in state.items():
+                value[ids] = self.initial_gaussian_state[i][key][ids]
         self.restore_materials(ids)
 
     def restore_materials(self, env_ids: Any = None, link_names: Any = None) -> None:
@@ -558,11 +679,16 @@ class _VisualBinding:
                 ),
                 "local_pose": e.config.local_pose.copy(),
                 "scale": e.config.scale,
+                "instance_state": (
+                    {key: value.copy() for key, value in self.gaussian_state[i].items()}
+                    if e.gaussian
+                    else {}
+                ),
                 "resource_ids": (
                     tuple(h.get_resource_id() for h in handles) if e.gaussian else ()
                 ),
             }
-            for e, handles in zip(
-                self.elements, self.handles or [()] * len(self.elements)
+            for i, (e, handles) in enumerate(
+                zip(self.elements, self.handles or [()] * len(self.elements))
             )
         )

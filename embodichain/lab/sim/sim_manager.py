@@ -1980,6 +1980,7 @@ class SimulationManager:
             "renderer": self._world.get_renderer_type().name,
             "configured_offscreen_denoising": self.sim_config.render_cfg.denoising.offscreen,
             "gaussian_approach": "RASTER_CUDA",
+            "gaussian_instances": self._spawn_scene._gaussian_capture_state(),
             "camera_pose_convention": "opengl",
             "length_unit": "meter",
             "tone_mapping_enabled": self.sim_config.render_cfg.tone_mapping_enabled,
@@ -2771,6 +2772,7 @@ class SimulationManager:
         from dexsim import spawn as native_spawn
         from dexsim.scene import Scene
         from dexsim.models import GaussianSplat
+        from dexsim.environment import Arena
         from dexsim.types import Renderer
 
         if (
@@ -2778,6 +2780,11 @@ class SimulationManager:
             or not hasattr(Scene, "create_gaussian_splat_batch")
             or not hasattr(Scene, "clear_visual_meshes")
             or not hasattr(GaussianSplat, "apply_state_batch")
+            or not hasattr(Arena, "load_gaussian_splat_with_attributes")
+            or "color_gain"
+            not in getattr(native_spawn.GaussianSplatDesc, "__dataclass_fields__", {})
+            or "appearance"
+            not in (getattr(GaussianSplat.apply_state_batch, "__doc__", "") or "")
             or any(
                 not callable(getattr(self._world, name, None))
                 for name in (

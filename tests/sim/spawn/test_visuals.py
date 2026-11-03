@@ -210,6 +210,7 @@ def test_gaussian_capture_rejects_failure_and_wrong_group_without_overwriting_su
             denoising=SimpleNamespace(offscreen="off"),
         )
     )
+    sim._spawn_scene = SimpleNamespace(_gaussian_capture_state=lambda: {})
     first = sim._capture_gaussian_status(8)
     assert first["renderer"] == "FASTRT"
     assert first["configured_offscreen_denoising"] == "off"
@@ -379,3 +380,38 @@ def test_visual_material_operations_reject_gaussian_only_selection(tmp_path):
         binding.set_material(object(), [0])
     with pytest.raises(TypeError, match="captured SH"):
         binding.apply_material_inst(0, object())
+
+
+def test_gaussian_randomization_is_selective_validated_and_resettable(tmp_path):
+    binding, scene, batch, *_ = _binding(tmp_path)
+    binding.set_gaussian_state(
+        "scan",
+        [1, 3],
+        color_gain=[[0, 1, 0], [0.5, 0.5, 0.5]],
+        opacity_gain=[0.2, 0.8],
+        geometry_scales=[2, 0.5],
+        visible=[False, True],
+    )
+    binding.sync()
+    values = batch.apply.call_args.kwargs
+    np.testing.assert_array_equal(values["geometry_scales"], [1, 2, 1, 0.5])
+    np.testing.assert_array_equal(
+        values["color_gain"], [[1, 1, 1], [0, 1, 0], [1, 1, 1], [0.5, 0.5, 0.5]]
+    )
+    with pytest.raises(ValueError):
+        binding.set_gaussian_state("scan", [1], color_gain=[2, 2, 2], opacity_gain=-1)
+    np.testing.assert_array_equal(
+        binding.describe()[0]["instance_state"]["color_gain"][1], [0, 1, 0]
+    )
+    # Rebinding retains current values; reset restores only selected baseline rows.
+    scene.topology_revision += 1
+    binding.sync()
+    binding.reset([1])
+    binding.sync()
+    values = batch.apply.call_args.kwargs
+    np.testing.assert_array_equal(values["geometry_scales"], [1, 1, 1, 0.5])
+    np.testing.assert_array_equal(values["color_gain"][3], [0.5, 0.5, 0.5])
+    assert values["visible"].all()
+    snapshot = binding.describe()[0]["instance_state"]
+    snapshot["geometry_scales"][:] = 99
+    assert binding.gaussian_state[0]["geometry_scales"][0] == 1
