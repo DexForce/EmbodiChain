@@ -1202,6 +1202,7 @@ class SemanticCallCompiler:
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[PathPart, ...] = ("workflow",),
     ) -> GroundedSemanticCall:
@@ -1212,6 +1213,7 @@ class SemanticCallCompiler:
             call_index: Zero-based call index to lower.
             context: Latest immutable planning observation.
             eligible_mask: Rows still eligible to execute this call.
+            invocation_id: Execution occurrence identity, separate from cached analysis.
             revision: Monotonic revision for re-grounding the same invocation.
             path: Root diagnostic path.
 
@@ -1230,6 +1232,8 @@ class SemanticCallCompiler:
             raise TypeError("context must be exactly PlanningContext.")
         if type(revision) is not int or revision < 0:
             raise ValueError("revision must be a non-negative integer.")
+        if invocation_id is not None:
+            _validate_identifier(invocation_id, field_name="invocation_id")
         self._assert_workflow_current(workflow, path=path)
         self._validate_context(context)
         eligible = self._normalize_eligible_mask(eligible_mask, context)
@@ -1260,7 +1264,11 @@ class SemanticCallCompiler:
             recovery_policy=bound.preset.recovery_policy,
             skill_options=lowering.skill_options,
             control_overrides=lowering.control_overrides,
-            invocation_id=f"{workflow.workflow_id}:{call_index}",
+            invocation_id=(
+                invocation_id
+                if invocation_id is not None
+                else f"{workflow.workflow_id}:{call_index}"
+            ),
             revision=revision,
         )
         effect_spec = self._ground_effect_spec(

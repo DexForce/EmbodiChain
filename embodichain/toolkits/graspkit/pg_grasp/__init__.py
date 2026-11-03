@@ -23,8 +23,11 @@ from .gripper_collision_checker import *
 from .fixed_geometry import *
 from .model_geometry import *
 from .pose_generator import *
+from .regions import for_axis_region, select_supported_end
 
 __all__ = [
+    "for_axis_region",
+    "select_supported_end",
     "AntipodalGraspPoseGenerator",
     "AntipodalGraspPoseGeneratorCfg",
     "AntipodalSampler",
@@ -37,6 +40,7 @@ __all__ = [
     "GripperCollisionCfg",
     "GripperCollisionChecker",
     "GraspPoseGenerator",
+    "GraspRegionSelector",
     "ParallelJawGraspPoseGenerator",
     "ParallelJawGraspCollisionCfg",
     "ParallelJawGripperModelCfg",

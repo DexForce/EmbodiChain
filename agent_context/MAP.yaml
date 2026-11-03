@@ -189,6 +189,7 @@ topics:
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
     轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体, kinematic trajectory refinement, 轨迹修正]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
+    interpolation_mode, ik_seed_mode, resolve_continuous_ik_path, search_cost_scope, RejectedMotionCandidate,
     expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
     load_expansion_profile, SourceAdapter, CandidateCoordinator, CandidateTrajectoryBatch,
     ManipulabilityBands, manipulability_guided_residual, manipulability coverage bands,
@@ -201,6 +202,9 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
   - embodichain/lab/sim/motion/motion_generator.py
+  - embodichain/lab/sim/motion/ik.py
+  - embodichain/lab/sim/motion/limits.py
+  - embodichain/lab/sim/motion/search.py
   - embodichain/lab/sim/motion/refinement.py
   - extensions/embodichain_benchmarks/motion_generation/
   - embodichain/cli/benchmark.py
@@ -223,6 +227,7 @@ topics:
     embodichain/compute/kinematics/_path_derivatives.py,
     tests/sim/motion/test_motion_generator.py,
     tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
+    embodichain/lab/sim/motion/ik.py, embodichain/lab/sim/motion/limits.py, embodichain/lab/sim/motion/search.py,
     tests/sim/motion/expansion/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,
     tests/sim/motion/planners/, tests/compute/, examples/expansion/trajectory/, examples/expansion/README.md]
   related_topics: [simulation-system, robot-system, ik-solvers, atomic-actions]
@@ -423,13 +428,14 @@ topics:
   keywords: [TaskProgramCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
-    joint_command_mode]
+    joint_command_mode, ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
   - embodichain/lab/task_program/
   - embodichain/lab/task_program/semantics/integration.py
   - embodichain/lab/task_program/semantics/calls.py
   - embodichain/lab/task_program/integrations/configured.py
+  - embodichain/lab/task_program/integrations/composition.py
   - embodichain/lab/task_program/integrations/_configured_composition.py
   - embodichain/lab/gym/envs/task_program/
   - embodichain/agents/mllm/task_program.py

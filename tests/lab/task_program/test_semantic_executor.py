@@ -539,6 +539,7 @@ class _Compiler(SemanticCallCompiler):
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[object, ...] = ("workflow",),
     ) -> _Grounded:
@@ -568,7 +569,7 @@ class _Compiler(SemanticCallCompiler):
                 max_action_retries=0,
                 action_timeout=100.0,
             ),
-            invocation_id=f"{workflow.workflow_id}:{call_index}",
+            invocation_id=invocation_id or f"{workflow.workflow_id}:{call_index}",
             revision=revision,
         )
         target = torch.full((BATCH_SIZE, 1), float(call_index + 1))
@@ -676,6 +677,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[object, ...] = ("workflow",),
     ) -> _Grounded:
@@ -745,7 +747,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
             motion_policy=motion_policy,
             tracking_policy=tracking_policy,
             recovery_policy=recovery_policy,
-            invocation_id=f"{workflow.workflow_id}:{decision_index}",
+            invocation_id=invocation_id or f"{workflow.workflow_id}:{decision_index}",
             revision=revision,
         )
         expectation = HeldObjectStateExpectation(
@@ -2500,6 +2502,11 @@ def test_bridge_analyzes_a_sequential_stretch_once_and_grounds_each_call(
     assert bridge.completion_mask.all()
     assert compiler.analyze_count == 1
     assert compiler.ground_count == segment_count
+    assert [invocation.invocation_id for invocation in compiler.invocations] == [
+        f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}"
+        for segment in compiled.iter_segments()
+        for call in segment.calls
+    ]
     assert len(set(compiler.ground_timestamps)) == segment_count
     assert [
         invocation.goal.target_position for invocation in compiler.invocations

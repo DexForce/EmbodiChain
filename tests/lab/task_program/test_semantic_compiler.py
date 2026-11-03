@@ -825,15 +825,20 @@ def test_invalid_effect_monitor_config_fails_analysis_without_side_effects() -> 
     assert [provider.calls for provider in providers] == [0, 0]
 
 
-def test_pick_effect_spec_binds_destination_and_fresh_monitor_per_grounding() -> None:
+@pytest.mark.parametrize("invocation_id", [None, "program/segment-1:0"])
+def test_pick_effect_spec_binds_destination_and_fresh_monitor_per_grounding(
+    invocation_id: str | None,
+) -> None:
     registry, _ = _scene_registry()
     compiler, _ = _compiler(registry)
     workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
     context = _context(registry)
 
-    first = compiler.ground(workflow, 0, context)
-    repeated = compiler.ground(workflow, 0, context)
-    revised = compiler.ground(workflow, 0, context, revision=1)
+    first = compiler.ground(workflow, 0, context, invocation_id=invocation_id)
+    repeated = compiler.ground(workflow, 0, context, invocation_id=invocation_id)
+    revised = compiler.ground(
+        workflow, 0, context, revision=1, invocation_id=invocation_id
+    )
 
     spec = first.effect_spec
     assert spec is not None
@@ -841,6 +846,7 @@ def test_pick_effect_spec_binds_destination_and_fresh_monitor_per_grounding() ->
     assert spec.effect_kind is SemanticEffectKind.ATTACH
     assert spec.skill_id == first.invocation.skill_id
     assert spec.invocation_id == first.invocation.invocation_id
+    assert spec.invocation_id == (invocation_id or f"{workflow.workflow_id}:0")
     assert spec.invocation_revision == 0
     torch.testing.assert_close(spec.env_ids, context.env_ids)
     assert len(spec.state_expectations) == 1
