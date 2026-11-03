@@ -23,7 +23,7 @@ embodichain.lab.task_program.integrations
       SimulationTaskProgramAdapterFactory, ConfiguredHandOverPoseProvider,
       CuroboParallelCommandSafetyValidator, CuroboParallelSafetyValidatorFactory,
       SimulationSegmentPolicyPort, create_simulation_task_program_adapter,
-      InvocationPolicyBinding, BoundInvocationPolicies, task_program_fingerprint
+      InvocationPolicyBinding, BoundInvocationPolicies, task_program_fingerprint,
 
       ConfiguredTaskProgramDeployment, ConfiguredTaskProgramIntegration,
       load_configured_task_program_deployment
