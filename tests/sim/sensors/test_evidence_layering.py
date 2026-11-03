@@ -66,3 +66,44 @@ assert not any(name.startswith("embodichain.gen_sim.task_engine") for name in sy
         timeout=90,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_shared_evidence_owners_do_not_import_semantic_or_task_engines():
+    import ast
+    from importlib.util import resolve_name
+
+    root = Path(__file__).resolve().parents[3]
+    failures = []
+    for area in (
+        "embodichain/lab/sim/sensors",
+        "embodichain/lab/sim/atomic_actions",
+        "embodichain/compute",
+    ):
+        for path in (root / area).rglob("*.py"):
+            package = ".".join(path.relative_to(root).parent.parts)
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    module = node.module or ""
+                    if node.level:
+                        module = resolve_name("." * node.level + module, package)
+                    names = [
+                        module,
+                        *(module + "." + alias.name for alias in node.names),
+                    ]
+                else:
+                    continue
+                forbidden = (
+                    "embodichain.lab.task_program",
+                    "embodichain.gen_sim.task_engine",
+                )
+                if area.endswith("sensors"):
+                    forbidden += ("embodichain.lab.sim.atomic_actions",)
+                if any(
+                    name == prefix or name.startswith(prefix + ".")
+                    for name in names
+                    for prefix in forbidden
+                ):
+                    failures.append(f"{path.relative_to(root)}:{node.lineno}")
+    assert not failures, "Upward evidence dependencies: " + ", ".join(failures)
