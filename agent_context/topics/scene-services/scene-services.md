@@ -30,6 +30,13 @@ Trimesh meshes and Shapely polygons for triangle-union floor and silhouette meas
 Scene CPU strategies own support
 selection, polygon search, greedy packing and SciPy SLSQP optimization.
 
+`rigid_mesh.capture_rigid_mesh` snapshots scaled native input vertices and
+matching triangles as owned CPU data with the environment axis intact. It reads
+no poses, preserves duplicates/winding/order and never substitutes a hull or box
+for missing topology. Callers recapture after model/scale changes. This separate
+API leaves the lightweight mesh-envelope path unchanged and supplies
+`NativePlanarPlacement` and exact silhouette/Pour consumers.
+
 `NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
 recreate it after replacing either object or changing its model/scale. Queries
 take explicit observed poses and return footprint containment, area and vertical

@@ -396,3 +396,26 @@ is not evidence of contact support, release, stability or task completion.
 
 .. autoclass:: NativePlanarPlacement
    :members:
+
+Exact batched rigid mesh inputs
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.rigid_mesh
+
+Capture scaled vertices and their original triangle indices without reading a
+pose, changing winding, processing a mesh or merging environment rows. The owned
+CPU data supports exact silhouette and staged Pour geometry. Input meshes are
+not cooked collision shapes or physical contact evidence; consumers retain the
+observation pose and native-object lifetime separately. The lightweight scene
+mesh-envelope path does not acquire triangles unless explicitly requested by
+this separate API.
+
+.. autosummary::
+
+   RigidMeshSnapshot
+   capture_rigid_mesh
+
+.. autoclass:: RigidMeshSnapshot
+   :members:
+
+.. autofunction:: capture_rigid_mesh
