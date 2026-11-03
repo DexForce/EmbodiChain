@@ -31,7 +31,7 @@ from dexsim.scene import ContactActorInfo, ContactBuffer, ContactQueryCapabiliti
 from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
 from embodichain.lab.gym.envs.base_env import BaseEnv
 from embodichain.lab.sim.sensors.contact_sensor import ContactSensor, ContactSensorCfg
-from embodichain.lab.task_program.integrations.simulation.support_evidence import (
+from embodichain.lab.sim.sensors.support_observation import (
     ContactWitness,
     NativeSupportObservation,
     NativeSupportResult,

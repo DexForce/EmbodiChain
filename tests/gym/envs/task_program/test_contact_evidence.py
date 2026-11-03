@@ -27,23 +27,25 @@ import torch
 from embodichain.lab.gym.envs.base_env import BaseEnv
 from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
 from embodichain.lab.sim.sensors.contact_sensor import ContactSensor
-from embodichain.lab.task_program.integrations.simulation.contact_evidence import (
+from embodichain.lab.sim.sensors.contact_sampling import (
     CONTACT_ACTOR_IDS,
     CONTACT_VALID_MASK,
     CONTACT_NORMALS,
     CONTACT_IMPULSES,
     ContactEvidenceSampler,
 )
-from embodichain.lab.task_program.integrations.simulation.contact_timeline import (
+from embodichain.lab.sim.sensors.contact_timeline import (
     ContactTimeline,
     ContactTimelineCfg,
 )
-from embodichain.lab.task_program.integrations.simulation.grip_evidence import (
+from embodichain.lab.sim.sensors.joint_opening import (
     DriverOpeningBinding,
+    create_joint_opening_reader,
+)
+from embodichain.lab.task_program.integrations.simulation.grip_evidence import (
     NativeGripEvidenceCfg,
     NativeGripEvidenceFactory,
     NativeGripObserver,
-    create_joint_opening_reader,
 )
 from embodichain.lab.task_program.semantics.evidence import (
     BinaryEffectEvidenceQuery,
@@ -627,7 +629,7 @@ def test_factory_freezes_caller_configuration_without_enabling_release_by_presen
 @pytest.mark.parametrize("impulse", [0.0, 0.1])
 def test_host_frame_round_trip_preserves_cuda_threshold_facts(cosine, impulse):
     import math
-    from embodichain.lab.task_program.integrations.simulation.grip_evidence import (
+    from embodichain.compute.geometry.grip_contacts import (
         classify_contacts,
     )
 
