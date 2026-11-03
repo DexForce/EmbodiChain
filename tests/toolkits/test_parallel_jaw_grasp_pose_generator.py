@@ -222,7 +222,7 @@ def test_package_exposes_only_the_unified_generator_api() -> None:
 
 
 def test_graspkit_does_not_import_lab() -> None:
-    """The standalone toolkit must not import EmbodiChain's lab layer."""
+    """The standalone toolkit must not import runtime or generated-task layers."""
     graspkit_root = (
         Path(__file__).resolve().parents[2] / "embodichain" / "toolkits" / "graspkit"
     )
@@ -239,8 +239,10 @@ def test_graspkit_does_not_import_lab() -> None:
             forbidden_imports.extend(
                 f"{source_path.relative_to(graspkit_root)}:{module_name}"
                 for module_name in module_names
-                if module_name == "embodichain.lab"
-                or module_name.startswith("embodichain.lab.")
+                if any(
+                    module_name == prefix or module_name.startswith(prefix + ".")
+                    for prefix in ("embodichain.lab", "embodichain.gen_sim")
+                )
             )
 
     assert forbidden_imports == []

@@ -14,6 +14,7 @@
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
+| Contact-qualified paired grasp sampling and explicit URDF surfaces | `embodichain/toolkits/graspkit/pg_grasp/coordinated.py`, `urdf_surfaces.py` in that directory |
 | Bounded interaction pose refinement before expansion | `embodichain/lab/sim/motion/refinement.py`, with numeric fitting in `compute/trajectory/refinement.py`; [Real2Sim boundary](../data-pipeline/real2sim.md) |
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
@@ -160,7 +161,12 @@ selection through `pg_grasp.regions`; callers select a policy without supplying
 a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
 sampled closing geometry and contact fitting with explicit thresholds; robot/FK
 sampling and physical contact evidence remain Lab responsibilities. Tensor
-interpolation lives in `compute.geometry.gripper`. See the [GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
+interpolation lives in `compute.geometry.gripper`. `pg_grasp.coordinated` owns
+bounded paired sampling with explicit contact settings and optional observed
+world bounds; clearance preference changes costs after population selection.
+`pg_grasp.urdf_surfaces` samples explicitly selected collision links without robot
+state. See [hand geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
+for deferred Robot capture and cache lifetime, and the [GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
 for geometry ownership and the finite collision-check scope.
 
 `variants.py` is the common candidate-generation path for joint-space,

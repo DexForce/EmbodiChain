@@ -296,6 +296,58 @@ probe distance are explicit inputs; the checker does not infer task semantics.
    :members: fit_contacts, query
 
 
+Paired grasp sampling
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.coordinated
+
+The data-only sampler combines two existing antipodal generators with explicit
+sampled hand geometry and contact settings. It preserves paired proposal RNG
+scope and applies an optional clearance preference after candidate selection.
+The facade forwards standalone calls unchanged; its numeric paired-provider
+port allows a runtime owner to defer robot geometry capture outside GraspKit.
+Scene observation, cargo membership and physical execution remain caller-owned.
+
+.. autosummary::
+   :nosignatures:
+
+   CoordinatedGraspCfg
+   PairedGraspProvider
+   CoordinatedGraspSampler
+   CoordinatedGraspPoseGenerator
+   grasp_clearance_costs
+
+.. autoclass:: CoordinatedGraspCfg
+   :members:
+
+.. autoclass:: PairedGraspProvider
+   :members:
+
+.. autoclass:: CoordinatedGraspSampler
+   :members:
+
+.. autoclass:: CoordinatedGraspPoseGenerator
+   :members:
+
+.. autofunction:: grasp_clearance_costs
+
+Explicit URDF collision surfaces
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.urdf_surfaces
+
+Selected mesh/box collision links are subdivided in their authored local frames.
+Callers supply link names and sampling bounds; no robot, control-group naming
+or simulator state is consulted.
+
+.. autosummary::
+   :nosignatures:
+
+   sample_urdf_collision_surfaces
+
+.. autofunction:: sample_urdf_collision_surfaces
+
+
 URDF Convex Decomposition
 -------------------------
 
