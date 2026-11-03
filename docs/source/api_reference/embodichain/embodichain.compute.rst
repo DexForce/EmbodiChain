@@ -186,7 +186,7 @@ compute function and Torch layer; failed solves retain their last iterate.
 
 
 Planar floor and silhouette geometry
------------------------------------
+------------------------------------
 
 .. currentmodule:: embodichain.compute.geometry.landing
 
