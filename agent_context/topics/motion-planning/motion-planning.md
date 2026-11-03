@@ -157,7 +157,10 @@ hands provide their own geometry. Sampling/collision stays in the canonical
 contact frame, and public poses map once to the declared runtime TCP. Do not
 add a second hand-specific conversion. GraspKit owns collision-qualified end-region
 selection through `pg_grasp.regions`; callers select a policy without supplying
-a Task Engine implementation. The original mesh-region path remains the default. See the [GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
+a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
+sampled closing geometry and contact fitting with explicit thresholds; robot/FK
+sampling and physical contact evidence remain Lab responsibilities. Tensor
+interpolation lives in `compute.geometry.gripper`. See the [GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
 for geometry ownership and the finite collision-check scope.
 
 `variants.py` is the common candidate-generation path for joint-space,

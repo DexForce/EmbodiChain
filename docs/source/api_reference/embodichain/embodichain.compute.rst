@@ -184,3 +184,15 @@ compute function and Torch layer; failed solves retain their last iterate.
 
 .. automodule:: embodichain.compute.kinematics.types
    :members:
+
+
+Sampled hand geometry
+---------------------
+
+.. currentmodule:: embodichain.compute.geometry.gripper
+
+Interpolate fixed hand surfaces at requested pad gaps without robot, simulator,
+or task dependencies. Geometry validity is established at construction;
+the kernel preserves sample order and endpoint clamping.
+
+.. autofunction:: interpolate_hand_samples

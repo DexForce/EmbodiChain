@@ -264,6 +264,38 @@ Region policy implementation
    for_axis_region
 
 
+
+Sampled hand contact qualification
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.contact_fit
+
+These services fit finite pad surfaces and check discrete closing samples against
+an object-frame signed surface query. Robot/FK geometry construction and physical
+contact evidence remain outside GraspKit. Qualification tolerances and occupancy
+probe distance are explicit inputs; the checker does not infer task semantics.
+
+.. autosummary::
+   :nosignatures:
+
+   SampledHandGeometry
+   GraspSurfaceQuery
+   TriangleSurfaceQuery
+   HandContactChecker
+
+.. autoclass:: SampledHandGeometry
+   :members: at_width
+
+.. autoclass:: GraspSurfaceQuery
+   :members:
+
+.. autoclass:: TriangleSurfaceQuery
+   :members: query_batch_points, query_surface_normals
+
+.. autoclass:: HandContactChecker
+   :members: fit_contacts, query
+
+
 URDF Convex Decomposition
 -------------------------
 
