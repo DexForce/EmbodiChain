@@ -387,6 +387,9 @@ class DLSSCfg:
         return dlss
 
 
+from .visuals import GaussianRenderCfg
+
+
 @configclass
 class RenderCfg:
     renderer: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "auto"
@@ -410,6 +413,10 @@ class RenderCfg:
     - 'fast-rt' is a fully ray-traced renderer for maximum visual fidelity, but may have higher computational cost.
     - 'rt' is an offline ray-traced renderer for maximum visual fidelity, suitable for high-quality rendering tasks.
     """
+
+    gaussian: GaussianRenderCfg = field(default_factory=GaussianRenderCfg)
+    __annotations__["gaussian"] = GaussianRenderCfg
+    """Optional native Gaussian raster composition."""
 
     spp: int = 1
     """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
@@ -498,6 +505,7 @@ class RenderCfg:
         world_config.renderer = self.to_dexsim_flags()
         if self.renderer == "no-render":
             return
+        self.gaussian.apply(world_config)
         window_mode, offscreen_mode = self.denoising.to_dexsim_modes()
         set_rt_render_modes = getattr(world_config, "set_rt_render_modes", None)
         if callable(set_rt_render_modes):

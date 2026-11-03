@@ -1744,6 +1744,8 @@ class SimulationManager:
         scene.prepare_runtime_config(result)
         self._prepare_spawn_runtime(result)
         scene.bind()
+        if getattr(scene, "has_visual_composition", False) is True:
+            scene.bind_visuals()
         for visual in getattr(self, "_visual_objects", {}).values():
             if visual.is_spawn_bound:
                 visual._sync_spawn_state()
@@ -1774,7 +1776,10 @@ class SimulationManager:
             == topology_revision
         ):
             return
+        self._invalidate_gaussian_captures()
         self.physics.sync_render_state(result)
+        if getattr(self._spawn_scene, "has_visual_composition", False) is True:
+            self._spawn_scene.sync_visuals()
         self._synced_spawn_render_topology_revision = topology_revision
         if getattr(self, "_render_state_published", None) is not None:
             self._render_state_published = True
@@ -1861,7 +1866,17 @@ class SimulationManager:
             raise RuntimeError(
                 "Render-state synchronization requires a prepared Spawn scene."
             )
-        self.physics.sync_render_state(result)
+        try:
+            self.physics.sync_render_state(result)
+            if getattr(self._spawn_scene, "has_visual_composition", False) is True:
+                self._spawn_scene.sync_visuals()
+        except Exception:
+            # Native batch writes may have committed only a prefix. A retry
+            # must publish every binding again before any capture is accepted.
+            self._invalidate_gaussian_captures()
+            if getattr(self, "_render_state_published", None) is not None:
+                self._render_state_published = False
+            raise
         if getattr(self, "_render_state_published", None) is not None:
             self._render_state_published = True
 
@@ -1905,8 +1920,87 @@ class SimulationManager:
         if group_ids or self.is_window_opened:
             self._ensure_render_state()
         if group_ids:
-            self._world.render_camera_group(group_ids)
+            if (
+                getattr(getattr(self, "_spawn_scene", None), "has_gaussians", False)
+                is True
+            ):
+                for group_id in group_ids:
+                    self._invalidate_gaussian_captures(group_id)
+                    self._world.render_camera_group([group_id])
+                    self._capture_gaussian_status(group_id)
+            else:
+                self._world.render_camera_group(group_ids)
         self._log_scene_summary()
+
+    def _invalidate_gaussian_captures(self, group_id: int | None = None) -> None:
+        """Discard capture identities before replacement or after failed writes."""
+        captures = getattr(self, "_gaussian_captures", {})
+        if group_id is None:
+            captures.clear()
+        else:
+            captures.pop(group_id, None)
+        for sensor in getattr(self, "_sensors", {}).values():
+            if isinstance(sensor, Camera) and (
+                group_id is None or sensor.group_id == group_id
+            ):
+                if getattr(sensor, "_capture_metadata", {}):
+                    sensor._capture_metadata = {"valid": False}
+
+    def _capture_gaussian_status(
+        self, group_id: int, *, camera: Camera | None = None
+    ) -> dict[str, object]:
+        """Capture completion immediately, before another group can overwrite it."""
+        self._invalidate_gaussian_captures(group_id)
+        status = dict(self._world.get_gaussian_frame_status())
+        if (
+            not status.get("valid")
+            or not status.get("completed")
+            or status.get("outcome") not in {"SUCCESS", "NO_VISIBLE_CONTENT"}
+        ):
+            raise RuntimeError(f"Gaussian capture failed: {status}")
+        if status.get("group_id") != group_id:
+            raise RuntimeError(
+                f"Gaussian capture group mismatch: expected {group_id}, got {status}"
+            )
+        contract = dict(self._world.get_gaussian_output_contract())
+        if (
+            contract.get("group_id") != status["group_id"]
+            or contract.get("frame_index") != status.get("frame_index")
+            or not contract.get("completed")
+            or not contract.get("same_frame_identity")
+        ):
+            raise RuntimeError(
+                "Gaussian output contract changed between capture queries; render a fresh frame."
+            )
+        snapshot = {
+            "status": status,
+            "output_contract": contract,
+            "frame_id": status.get("frame_index"),
+            "simulation_time": self._visualization_sim_time,
+            "renderer": self._world.get_renderer_type().name,
+            "configured_offscreen_denoising": self.sim_config.render_cfg.denoising.offscreen,
+            "gaussian_approach": "RASTER_CUDA",
+            "camera_pose_convention": "opengl",
+            "length_unit": "meter",
+            "tone_mapping_enabled": self.sim_config.render_cfg.tone_mapping_enabled,
+            "exposure": self.sim_config.render_cfg.tone_mapping_exposure,
+        }
+        sensors = (
+            [camera] if camera is not None else getattr(self, "_sensors", {}).values()
+        )
+        for sensor in sensors:
+            if isinstance(sensor, Camera) and sensor.group_id == group_id:
+                snapshot["camera_id"] = sensor.uid
+                snapshot["outputs"] = tuple(sensor.cfg.get_data_types())
+                snapshot["intrinsics"] = sensor.get_intrinsics().detach().clone()
+                snapshot["arena_poses"] = (
+                    sensor.get_arena_pose(to_matrix=True).detach().clone()
+                )
+                snapshot["env_ids"] = tuple(range(sensor.num_instances))
+        if not hasattr(self, "_gaussian_captures"):
+            self._gaussian_captures = {}
+        self._gaussian_captures[group_id] = snapshot
+        return deepcopy(snapshot)
 
     def update(
         self,
@@ -2486,6 +2580,11 @@ class SimulationManager:
         Raises:
             RuntimeError: If called after the Spawn scene was finalized.
         """
+        if any(getattr(cfg, "link_visuals", {}) for cfg in (robot_cfgs or {}).values()):
+            raise NotImplementedError(
+                "Whole-scene visual overrides require the future import/binding API; "
+                "use add_robot with UsdSourceCfg and link_visuals for a selected source."
+            )
         if self.spawn_result is not None:
             raise RuntimeError(
                 "add_usd() must be called before SimulationManager.prepare()."
@@ -2652,6 +2751,83 @@ class SimulationManager:
         self.notify_visualization_topology_changed()
         return assets
 
+    def _validate_visual_config(self, cfg: object) -> None:
+        from .cfg.visuals import GaussianSplatCfg, _visual_elements
+
+        groups = getattr(cfg, "link_visuals", {})
+        values = getattr(cfg, "visuals", None)
+        if values is not None:
+            groups = {None: values}
+        if groups and self.sim_config.visualization.backend == "viser":
+            raise NotImplementedError(
+                "Explicit visual composition is not yet supported by Viser; use native cameras or a native window."
+            )
+        has_gaussian = False
+        for elements in groups.values():
+            for element in _visual_elements(elements) or ():
+                has_gaussian |= isinstance(element.representation, GaussianSplatCfg)
+        if not has_gaussian or self.sim_config.render_cfg.renderer == "no-render":
+            return
+        from dexsim import spawn as native_spawn
+        from dexsim.scene import Scene
+        from dexsim.models import GaussianSplat
+        from dexsim.types import Renderer
+
+        if (
+            not hasattr(native_spawn, "GaussianSplatDesc")
+            or not hasattr(Scene, "create_gaussian_splat_batch")
+            or not hasattr(Scene, "clear_visual_meshes")
+            or not hasattr(GaussianSplat, "apply_state_batch")
+            or any(
+                not callable(getattr(self._world, name, None))
+                for name in (
+                    "get_gaussian_frame_status",
+                    "get_gaussian_output_contract",
+                    "get_gaussian_effective_config",
+                )
+            )
+        ):
+            raise RuntimeError(
+                "Gaussian visuals require a qualified DexSim Spawn/Scene integration build."
+            )
+        if self.physics.name != "default":
+            raise NotImplementedError(
+                "Gaussian visuals currently require physics='default'."
+            )
+        if getattr(self, "_window_record_state", None) is not None:
+            raise NotImplementedError(
+                "Gaussian recording requires a managed Camera, not the native viewer recorder."
+            )
+        if not self.sim_config.render_cfg.gaussian.enabled:
+            raise ValueError(
+                "Gaussian visuals require render_cfg.gaussian.enabled=True before World construction."
+            )
+        if not self._world.get_gaussian_effective_config()["normalized"]["enabled"]:
+            raise RuntimeError(
+                "The native renderer has Gaussian composition disabled; configure it before World startup."
+            )
+        render = self.sim_config.render_cfg
+        if self._world.get_renderer_type() == Renderer.HYBRID and "nrd" in (
+            render.denoising.window,
+            render.denoising.offscreen,
+        ):
+            raise ValueError("Hybrid standalone NRD omits Gaussian composition.")
+        for sensor in self._sensors.values():
+            self._validate_gaussian_camera(sensor.cfg)
+
+    def _validate_gaussian_camera(self, cfg: object) -> None:
+        if getattr(cfg, "sensor_type", None) == "StereoCamera":
+            raise NotImplementedError(
+                "Gaussian capture metadata is currently qualified for Camera; StereoCamera is not yet supported."
+            )
+        if any(
+            getattr(cfg, name, False)
+            for name in ("enable_mask", "enable_normal", "enable_position")
+        ):
+            raise ValueError(
+                "Gaussian scenes do not support complete mask, normal or position camera outputs."
+            )
+
     def add_visual_object(self, cfg: VisualObjectCfg) -> VisualObject:
         """Declare a render-only mesh or primitive, without physics or colliders.
 
@@ -2664,6 +2840,7 @@ class SimulationManager:
         """
         if cfg.uid is None or cfg.uid in self.asset_uids:
             raise ValueError("Visual object requires a unique, nonempty UID.")
+        self._validate_visual_config(cfg)
         path = _asset_file_path(cfg)
         if _is_usd_path(path):
             descriptor, materials = visual_desc_from_usd(cfg)
@@ -2788,6 +2965,7 @@ class SimulationManager:
 
         declarations = []
         for cfg in cfgs:
+            self._validate_visual_config(cfg)
             source_path = _asset_file_path(cfg)
             if _is_usd_path(source_path):
                 descriptor, materials = rigid_desc_from_usd(
@@ -3190,6 +3368,14 @@ class SimulationManager:
             The stable Group facade. During initial scene construction it is
             bound to Spawn handles by :meth:`prepare`.
         """
+        if isinstance(cfg.rigid_objects, dict) and any(
+            getattr(member, "visuals", None) is not None
+            for member in cfg.rigid_objects.values()
+        ):
+            raise NotImplementedError(
+                "RigidObjectGroup visual composition is not supported; declare individual RigidObjects."
+            )
+
         if not self.physics.supports_rigid_object_group:
             raise NotImplementedError(
                 f"The {self.physics.name} backend does not support rigid object groups."
@@ -3481,6 +3667,7 @@ class SimulationManager:
             device=self.device,
         )
 
+        self._validate_visual_config(cfg)
         self._spawn_scene.declare(
             "articulation",
             descriptor.name,
@@ -3938,6 +4125,8 @@ class SimulationManager:
         Returns:
             BaseSensor: The added sensor instance handle.
         """
+        if getattr(getattr(self, "_spawn_scene", None), "has_gaussians", False) is True:
+            self._validate_gaussian_camera(sensor_cfg)
         sensor_type = sensor_cfg.sensor_type
         uid = sensor_cfg.uid
         if uid is None:
@@ -4480,6 +4669,11 @@ class SimulationManager:
         Returns:
             bool: True if recording starts successfully, otherwise False.
         """
+        if getattr(getattr(self, "_spawn_scene", None), "has_gaussians", False) is True:
+            raise NotImplementedError(
+                "Gaussian recording requires a managed Camera; native viewer recording has no capture-status contract."
+            )
+
         if self.is_window_recording():
             logger.log_error(
                 "A viewer recording session is already active. Stop it before starting a new recording."

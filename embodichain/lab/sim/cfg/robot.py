@@ -142,7 +142,13 @@ class RobotCfg(ArticulationCfg):
 
         cfg = cls()  # Create a new instance of the class (cls)
         for key, value in init_dict.items():
-            if key == "source":
+            if key == "link_visuals":
+                from .visuals import _visual_elements
+
+                cfg.link_visuals = {
+                    name: _visual_elements(elements) for name, elements in value.items()
+                }
+            elif key == "source":
                 cfg.source = _usd_source_from_value(value)
             elif key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)

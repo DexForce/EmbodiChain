@@ -160,6 +160,26 @@ class SpawnScene:
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
         self._bind_resource_materials(descriptor)
         self._initialize_facade_declaration(facade)
+        binding = None
+        if facade is not None and (
+            getattr(getattr(facade, "cfg", None), "visuals", None) is not None
+            or getattr(getattr(facade, "cfg", None), "link_visuals", {})
+        ):
+            from ._visuals import _VisualBinding
+            from dexsim.scene import Scene
+
+            if self._material_resources.renderer != "no-render":
+                if self.builder.backend != "dexsim":
+                    raise NotImplementedError(
+                        "Explicit visual composition currently requires the Default backend."
+                    )
+                if not hasattr(Scene, "clear_visual_meshes"):
+                    raise RuntimeError(
+                        "Visual composition requires DexSim Scene.clear_visual_meshes; use the qualified integration build."
+                    )
+                binding = _VisualBinding(facade, self)
+                facade._visual_binding = binding
+
         declaration = _AssetDeclaration(
             kind=kind,
             descriptor=descriptor,
@@ -197,8 +217,26 @@ class SpawnScene:
                 "soft_object": "add_soft_object",
                 "cloth_object": "add_cloth_object",
             }[kind]
-            declaration.descriptor = getattr(self.builder, add_name)(descriptor)
+            try:
+                declaration.descriptor = getattr(self.builder, add_name)(descriptor)
+            except Exception:
+                if binding is not None:
+                    remove = (
+                        self.builder.remove_articulation
+                        if kind == "articulation"
+                        else self.builder.remove_object
+                    )
+                    remove(descriptor.name)
+                    facade._visual_binding = None
+                raise
         self._assets[uid] = declaration
+        if binding is not None:
+            try:
+                binding.declare()
+            except Exception:
+                facade._visual_binding = None
+                self.remove(uid)
+                raise
         self._configure_materialized_source(uid)
         # A Newton replacement retains the old same-path handles until commit.
         # Bind the new facade only after those handles have been replaced.
@@ -258,6 +296,10 @@ class SpawnScene:
     def remove(self, uid: str) -> None:
         """Remove a declared asset from its DexSim owner."""
         declaration = self._assets[uid]
+        binding = getattr(declaration.facade, "_visual_binding", None)
+        if binding is not None:
+            binding.remove()
+            declaration.facade._visual_binding = None
         if getattr(declaration, "declaration_only", False):
             del self._assets[uid]
             return
@@ -383,6 +425,36 @@ class SpawnScene:
                 facade.attach_spawn_handles(self.handles(uid))
             facade.bind_spawn(result)
 
+    def bind_visuals(self) -> None:
+        """Bind render companions after physical and sensor metadata is ready."""
+        for declaration in self._assets.values():
+            binding = getattr(declaration.facade, "_visual_binding", None)
+            if binding is not None:
+                binding.bind(self.builder.result)
+
+    def sync_visuals(self) -> None:
+        """Publish owner-local visual transforms without advancing physics."""
+        for declaration in self._assets.values():
+            binding = getattr(declaration.facade, "_visual_binding", None)
+            if binding is not None:
+                binding.sync()
+
+    @property
+    def has_visual_composition(self) -> bool:
+        """Whether any declaration owns explicit companion visuals."""
+        return any(
+            getattr(d.facade, "_visual_binding", None) is not None
+            for d in self._assets.values()
+        )
+
+    @property
+    def has_gaussians(self) -> bool:
+        """Whether managed declarations contain Gaussian resources."""
+        return any(
+            getattr(getattr(d.facade, "_visual_binding", None), "has_gaussians", False)
+            for d in self._assets.values()
+        )
+
     def prepare_runtime_config(self, result: Any) -> None:
         """Apply facade configuration required before backend initialization.
 
@@ -406,6 +478,16 @@ class SpawnScene:
         """Release Spawn resources and facade references."""
         result = self.builder.result
         self._pending_material_assignments = None
+        for declaration in self._assets.values():
+            binding = getattr(
+                getattr(declaration, "facade", None), "_visual_binding", None
+            )
+            if binding is not None:
+                binding.handles.clear()
+                binding.gaussian_batch = None
+                binding.materials.clear()
+                binding.default_materials.clear()
+                declaration.facade._visual_binding = None
         try:
             if result is not None:
                 result.close()

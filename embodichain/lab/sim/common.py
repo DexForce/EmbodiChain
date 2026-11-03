@@ -99,6 +99,51 @@ class BatchEntity(ABC):
         """
         pass
 
+    def get_visual_elements(self) -> tuple[dict[str, object], ...]:
+        """Return owned metadata snapshots for explicitly configured visuals.
+
+        Gaussian arrays are not copied. Resource IDs are diagnostics scoped to
+        the current Scene; configuration element IDs remain stable.
+        """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            return binding.describe()
+        from embodichain.lab.sim.cfg.visuals import GaussianSplatCfg
+
+        groups = getattr(self.cfg, "link_visuals", {})
+        if getattr(self.cfg, "visuals", None) is not None:
+            groups = {None: self.cfg.visuals}
+        return tuple(
+            {
+                "id": element.id,
+                "link_name": link,
+                "representation": (
+                    "gaussian_splat"
+                    if isinstance(element.representation, GaussianSplatCfg)
+                    else "mesh"
+                ),
+                "file_path": getattr(
+                    element.representation,
+                    "file_path",
+                    getattr(element.representation, "fpath", None),
+                ),
+                "local_pose": element.local_pose.copy(),
+                "scale": element.scale,
+                "resource_ids": (),
+            }
+            for link, elements in groups.items()
+            for element in elements
+        )
+
+    def set_visual_visibility(
+        self, visible: bool, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Set visibility of configured visual elements in selected environments."""
+        binding = getattr(self, "_visual_binding", None)
+        if binding is None:
+            raise ValueError("Explicit visuals are required for this operation.")
+        binding.set_visible(visible, env_ids)
+
     def destroy(self) -> None:
         """Destroy all entities managed by this batch entity."""
         pass
