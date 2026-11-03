@@ -224,8 +224,20 @@ def main() -> None:
                 if frame == args.frames // 3 and args.num_envs > 1:
                     body.reset([1])
                     room.set_visible(False, [1])
+                    body.set_gaussian_visual_state(
+                        "appearance",
+                        [1],
+                        color_gain=(0.5, 1.3, 0.7),
+                        opacity_gain=0.75,
+                        scale=0.85,
+                    )
+                    arm.set_gaussian_visual_state(
+                        "scan", [1], link_name="tool", color_gain=(1.3, 0.5, 0.5)
+                    )
                 if frame == 2 * args.frames // 3 and args.num_envs > 1:
                     room.reset([1])
+                    body.reset([1])
+                    arm.reset([1])
                 sim.update(1 / 60, 1, render_final_step=False)
                 with sim.render_frame():
                     sim.render_camera_group([camera.group_id])
