@@ -165,3 +165,12 @@ rather than the removed integration-local contact_evidence/contact_timeline path
 Factories may create or reuse matching sensor declarations; lifecycle, scope,
 capacity, unavailable data and selective resets remain sensor contracts. Do not
 turn missing acquisition into a measured negative or a successful effect.
+
+For declared support conditions, incomplete acquisition resets only the affected
+row's stable streak and keeps yielding holds until a qualified window or timeout.
+`measurements.support_acquisition` retains the physical channel's validity,
+errors and timestamp/row/revision identity separately from source support metadata.
+The result records missing-observation counts and the last reasons. A row that
+never reestablishes a successful window after missing evidence reports
+`support_result_available=false`; consumers must not interpret that false result
+as a measured task failure. Source-global errors still invalidate every witness.

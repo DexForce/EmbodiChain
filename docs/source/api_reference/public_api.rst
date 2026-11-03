@@ -1266,6 +1266,12 @@ The standard policy port preserves the source time grid: the initial observation
 does not count toward duration, ordinary pose drift resets the anchor/window,
 and held-object failures remain latched. It yields controller-target holds and
 leaves environment stepping, cancellation and task acceptance with their owners.
+Incomplete support windows keep their per-row validity/errors and continue holds;
+other valid rows can qualify independently. Metadata includes the physical
+``support_acquisition`` channel, missing-observation counts and the latest error
+for each row. A failed result following missing evidence retains
+``support_result_available=false`` unless a complete successful window is later
+established. This distinguishes unavailable outcomes from measured negatives.
 
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.stability
 

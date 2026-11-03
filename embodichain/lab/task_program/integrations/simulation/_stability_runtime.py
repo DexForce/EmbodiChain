@@ -29,6 +29,7 @@ from embodichain.compute.geometry.rigid import (
     pose_axis_alignment,
 )
 from embodichain.lab.sim.scene.planar_observation import NativePlanarPlacement
+from embodichain.lab.sim.evidence import PhysicalEvidenceBatch
 from embodichain.lab.task_program.compiler.program import CompiledPostPolicy
 from embodichain.utils.math import pose_inv
 from .stability import SimulationStabilityConditionCfg
@@ -272,7 +273,7 @@ class _ConditionStabilityRuntime:
         cfg: SimulationStabilityConditionCfg,
         pose: torch.Tensor,
         reference: torch.Tensor,
-    ) -> tuple[torch.Tensor, dict[str, Any]]:
+    ) -> tuple[PhysicalEvidenceBatch, dict[str, Any]]:
         observer = self._support_observers[(cfg.entity, cfg.reference)]
         result = observer.observe(
             pose,
@@ -280,16 +281,9 @@ class _ConditionStabilityRuntime:
             support_contract_revision=cfg.support_contract_revision,
             com_tolerance=cfg.com_tolerance,
         )
-        if not bool(result.support.valid.all()):
-            raise ValueError(
-                "Native support unavailable: "
-                + "; ".join(
-                    dict.fromkeys(
-                        error for error in result.support.acquisition_errors if error
-                    )
-                )
-            )
-        return result.support.values.clone(), dict(result.metadata)
+        # Unavailable rows must remain distinguishable from a measured false.
+        # The caller continues holds so an initial/reset window can qualify.
+        return result.support, dict(result.metadata)
 
     def validate_policy(self, policy: Any, *, segment: Any) -> None:
         """Validate declared identity and membership without reading live state."""
@@ -368,6 +362,8 @@ class _ConditionStabilityRuntime:
         )
         initial_attachments = self._attachments(initial, cfg.motion_parts)
         failed = torch.zeros_like(active)
+        unavailable_observations = torch.zeros_like(active, dtype=torch.long)
+        last_acquisition_errors: list[str | None] = [None] * active.numel()
         for elapsed in range(maximum + 1):
             self._require_open()
             if cfg.support_contract_revision == 1 and (
@@ -385,6 +381,7 @@ class _ConditionStabilityRuntime:
             pose = self._pose(cfg.entity)
             valid = torch.isfinite(pose).all(dim=-1).all(dim=-1)
             measurements: dict[str, Any] = {}
+            support_batch: PhysicalEvidenceBatch | None = None
             if cfg.local_axis is not None:
                 alignment = pose_axis_alignment(
                     pose,
@@ -459,7 +456,8 @@ class _ConditionStabilityRuntime:
                     + reference[:, None, :3, 3]
                 )
                 top = support_world[:, :, 2].amax(-1)
-                supported, support = self._support(cfg, pose, reference)
+                support_batch, support = self._support(cfg, pose, reference)
+                supported = support_batch.values & support_batch.valid
                 contact_heights = _contact_support_heights(supported, support, top)
                 top = torch.where(torch.isfinite(contact_heights), contact_heights, top)
                 gap = bottom - top
@@ -518,9 +516,29 @@ class _ConditionStabilityRuntime:
                     native_support=support,
                 )
             if cfg.kind == "stack":
-                supported, support = self._support(cfg, pose, reference)
+                support_batch, support = self._support(cfg, pose, reference)
+                supported = support_batch.values & support_batch.valid
                 valid &= supported
                 measurements["native_support"] = support
+            if support_batch is not None:
+                unavailable_observations += active & ~support_batch.valid
+                last_acquisition_errors = [
+                    error if error is not None else previous
+                    for error, previous in zip(
+                        support_batch.acquisition_errors,
+                        last_acquisition_errors,
+                        strict=True,
+                    )
+                ]
+                measurements["support_acquisition"] = {
+                    "evidence_id": support_batch.evidence_id,
+                    "values": support_batch.values.tolist(),
+                    "valid": support_batch.valid.tolist(),
+                    "acquisition_errors": list(support_batch.acquisition_errors),
+                    "timestamp": support_batch.timestamp,
+                    "env_ids": support_batch.env_ids.tolist(),
+                    "observation_revision": support_batch.observation_revision,
+                }
             translation, rotation = self._drift(pose, anchor)
             valid &= (translation <= cfg.translation_drift) & (
                 rotation <= cfg.rotation_drift
@@ -558,6 +576,14 @@ class _ConditionStabilityRuntime:
                 "failed_mask": failed.tolist(),
                 "measurements": measurements,
             }
+            if support_batch is not None:
+                self._metadata[id(policy)].update(
+                    support_unavailable_observations=unavailable_observations.tolist(),
+                    support_last_acquisition_errors=list(last_acquisition_errors),
+                    support_result_available=(
+                        accepted | (unavailable_observations == 0)
+                    ).tolist(),
+                )
             if cfg.support_contract_revision == 1:
                 self._metadata[id(policy)].update(
                     support_contract_revision=1,

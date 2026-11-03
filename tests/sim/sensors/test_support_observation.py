@@ -574,8 +574,20 @@ def test_support_registry_close_does_not_allow_reassembly_of_same_native_pair():
         )
 
 
-@pytest.mark.parametrize("kind", ["stack", "supported_placement", "supported_region"])
-def test_standard_condition_port_consumes_qualified_support_on_the_original_grid(kind):
+@pytest.mark.parametrize(
+    "kind,startup",
+    [
+        ("stack", "complete"),
+        ("supported_placement", "complete"),
+        ("supported_region", "complete"),
+        ("stack", "cold"),
+        ("stack", "row_reset"),
+        ("stack", "clock_drift"),
+    ],
+)
+def test_standard_condition_port_consumes_qualified_support_on_the_original_grid(
+    kind, startup
+):
     from embodichain.lab.task_program import decode_task_program, TaskProgramCompiler
     from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
     from embodichain.lab.sim.sensors.support_observation import (
@@ -674,20 +686,75 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
             sensor.update_physics_step(0.01)
         clock.advance_after_env_step()
 
-    step()  # Last complete action interval precedes the post-policy.
+    if startup != "cold":
+        step()  # Last complete action interval precedes the post-policy.
+    if startup == "clock_drift":
+        sim.time += 0.005  # A source-time jump cannot silently rebase the mapping.
     commands = 0
     for command in port.actions(
         policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
     ):
         assert command.shape == (2, 1)
         commands += 1
+        if startup == "cold" and commands == 1:
+            initial = port.post_policy_metadata(policy, segment=segment)
+            acquisition = initial["measurements"]["support_acquisition"]
+            assert acquisition["valid"] == [False, False]
+            assert all(acquisition["acquisition_errors"])
+            assert acquisition["timestamp"] == 0.0
+            assert acquisition["env_ids"] == [0, 1]
+            assert initial["stable_seconds"] == [0.0, 0.0]
+        if startup == "row_reset" and commands == 2:
+            partial = port.post_policy_metadata(policy, segment=segment)
+            acquisition = partial["measurements"]["support_acquisition"]
+            assert acquisition["valid"] == [False, True]
+            assert acquisition["acquisition_errors"][0] is not None
+            assert acquisition["acquisition_errors"][1] is None
+            assert partial["stable_seconds"] == [0.0, 0.04]
+        if startup == "row_reset" and commands == 3:
+            assert port.post_policy_result(policy, segment=segment).tolist() == [
+                False,
+                True,
+            ]
         step()
-    assert commands == 2
+        if startup == "row_reset" and commands == 1:
+            sensor.reset(torch.tensor([0]))
+    if startup == "clock_drift":
+        assert commands == 6
+        assert not port.post_policy_result(policy, segment=segment).any()
+        metadata = port.post_policy_metadata(policy, segment=segment)
+        assert metadata["support_result_available"] == [False, False]
+        assert metadata["support_unavailable_observations"] == [7, 7]
+        assert all(
+            "clock mapping" in error
+            for error in metadata["support_last_acquisition_errors"]
+        )
+        assert metadata["measurements"]["support_acquisition"]["valid"] == [
+            False,
+            False,
+        ]
+        assert metadata["stable_seconds"] == [0.0, 0.0]
+        assert sim.query.fetches == 28
+        registry.close()
+        return
+    assert commands == (3 if startup == "row_reset" else 2)
     assert port.post_policy_result(policy, segment=segment).tolist() == [True, True]
     metadata = port.post_policy_metadata(policy, segment=segment)
-    assert metadata["clock_started_at"] == 0.04
-    assert metadata["clock_ended_at"] == 0.12
-    assert metadata["stable_seconds"] == pytest.approx([0.08, 0.08])
+    assert metadata["clock_started_at"] == (0.0 if startup == "cold" else 0.04)
+    assert metadata["clock_ended_at"] == pytest.approx(
+        0.08 if startup == "cold" else 0.16 if startup == "row_reset" else 0.12
+    )
+    assert metadata["stable_seconds"] == pytest.approx(
+        [0.08, 0.12] if startup == "row_reset" else [0.08, 0.08]
+    )
+    if startup != "complete":
+        assert metadata["support_unavailable_observations"] == (
+            [1, 1] if startup == "cold" else [1, 0]
+        )
+        assert metadata["support_last_acquisition_errors"][0] is not None
+    assert metadata["support_result_available"] == [True, True]
     assert metadata["measurements"]["native_support"]["support_contract_revision"] == 1
-    assert sim.query.fetches == 12
+    assert sim.query.fetches == (
+        8 if startup == "cold" else 16 if startup == "row_reset" else 12
+    )
     registry.close()
