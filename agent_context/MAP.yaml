@@ -427,13 +427,15 @@ topics:
   keywords: [TaskProgramCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
-    joint_command_mode, ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
+    joint_command_mode, InvocationPolicyBinding, BoundInvocationPolicies,
+    ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
   - embodichain/lab/task_program/
   - embodichain/lab/task_program/semantics/integration.py
   - embodichain/lab/task_program/semantics/calls.py
   - embodichain/lab/task_program/integrations/configured.py
+  - embodichain/lab/task_program/integrations/invocation_policy.py
   - embodichain/lab/task_program/integrations/composition.py
   - embodichain/lab/task_program/integrations/_configured_composition.py
   - embodichain/lab/gym/envs/task_program/
