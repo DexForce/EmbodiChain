@@ -1369,6 +1369,8 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
                 "dynamic_collision_mode",
                 "velocity_targets",
                 "plan_opts",
+                "interpolation_mode",
+                "ik_seed_mode",
             }
         ),
     )
@@ -1385,6 +1387,13 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
             path=f"{path}.velocity_targets",
         ),
         "sample_count": sample_count,
+        "interpolation_mode": _identifier(
+            config.get("interpolation_mode", "adaptive"),
+            path=f"{path}.interpolation_mode",
+        ),
+        "ik_seed_mode": _identifier(
+            config.get("ik_seed_mode", "batched"), path=f"{path}.ik_seed_mode"
+        ),
         "dynamic_collision_mode": _enum(
             config.get("dynamic_collision_mode", DynamicCollisionMode.AUTO.value),
             DynamicCollisionMode,
@@ -1393,11 +1402,15 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
     }
     for field_name in ("velocity_limit", "acceleration_limit"):
         if field_name in config:
-            kwargs[field_name] = _real(
-                config[field_name],
-                path=f"{path}.{field_name}",
-                minimum=0.0,
-                strict_minimum=True,
+            kwargs[field_name] = (
+                None
+                if config[field_name] is None
+                else _real(
+                    config[field_name],
+                    path=f"{path}.{field_name}",
+                    minimum=0.0,
+                    strict_minimum=True,
+                )
             )
     if "plan_opts" in config:
         option_path = f"{path}.plan_opts"
