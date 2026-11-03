@@ -1905,7 +1905,17 @@ class SimulationManager:
         if group_ids or self.is_window_opened:
             self._ensure_render_state()
         if group_ids:
+            cameras = [
+                sensor
+                for sensor in self._sensors.values()
+                if isinstance(sensor, Camera) and sensor.group_id in group_ids
+            ]
+            for sensor in cameras:
+                sensor._capture_metadata = None
+                sensor._pending_capture_metadata = None
             self._world.render_camera_group(group_ids)
+            for sensor in cameras:
+                sensor._snapshot_render_metadata()
         self._log_scene_summary()
 
     def update(
@@ -2162,6 +2172,23 @@ class SimulationManager:
         if intensity is not None:
             self._env.set_env_light_intensity(intensity)
 
+    # Reserved for the manager-owned shared ground Mesh. Arena IDs are unrelated.
+    _GROUND_RENDER_CATEGORY = 1
+
+    def _require_ground_plane_filtering(self) -> None:
+        from dexsim.spawn import ObjectDesc
+
+        if not (
+            hasattr(ObjectDesc, "render_categories")
+            and callable(
+                getattr(dexsim.render.Camera, "set_excluded_render_categories", None)
+            )
+        ):
+            raise RuntimeError(
+                "Per-camera ground visibility requires a DexSim build with "
+                "ObjectDesc.render_categories and Camera.set_excluded_render_categories"
+            )
+
     def _declare_spawn_default_plane(self) -> None:
         """Declare the global ground in the World's Spawn scene."""
 
@@ -2209,6 +2236,9 @@ class SimulationManager:
             physics=RigidBodyPhysicsDesc.static(),
             per_env=False,
         )
+
+        if hasattr(descriptor, "render_categories"):
+            descriptor.render_categories = self._GROUND_RENDER_CATEGORY
 
         self._spawn_scene.declare(
             "rigid_object",

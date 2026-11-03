@@ -2195,6 +2195,24 @@ embodichain.lab.sim.sensors.contact_sensor
    ContactSensor
    ContactSensorCfg
 
+embodichain.lab.sim.sensors.stereo
+---------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.stereo
+
+Stereo cameras share an environment-level pose and ground visibility policy
+across both eyes. ``PairCameraView`` forwards those operations to the borrowed
+native views; ``StereoCamera`` owns their sensor lifecycle and image buffers.
+
+.. autosummary::
+
+   StereoCamera
+   StereoCameraCfg
+   PairCameraView
+
+.. autoclass:: PairCameraView
+   :members:
+
 embodichain.lab.sim.sim_manager
 -------------------------------
 
