@@ -267,7 +267,7 @@ def test_sampling_observers_reject_external_capture_before_callbacks(monkeypatch
 
 def test_contact_sampler_normal_update_fetches_once_before_reading_data():
     from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
-    from embodichain.lab.task_program.integrations.simulation.contact_evidence import (
+    from embodichain.lab.sim.sensors.contact_sampling import (
         ContactEvidenceSampler,
         CONTACT_VALID_MASK,
     )

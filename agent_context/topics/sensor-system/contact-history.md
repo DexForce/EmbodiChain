@@ -33,13 +33,13 @@ or callbacks. Hooks run outside the sensor's internal CUDA capture; observers
 inside an external capture fail before their callbacks run. Existing history
 sampling and device kernels keep their ownership and ordering.
 
-`task_program/integrations/simulation/contact_evidence.py` adapts sampled buffers
-to the existing physical-evidence frame/batch types. It retains the validity mask,
+`lab/sim/sensors/contact_sampling.py` adapts sampled buffers
+to the shared `lab/sim/evidence.py` frame/batch types. It retains the validity mask,
 native actor IDs, Arena frames and impulses, with explicit unsupported, nonfinite,
 saturated or source-drift errors. Native and runtime observation revisions remain
 different identities. The provider's output device follows its request.
 
-`contact_timeline.py` in that integration owns bounded per-environment packed
+`lab/sim/sensors/contact_timeline.py` owns bounded per-environment packed
 history, driven by an explicit host control clock. Keep it in the environment's
 sensor suite so `BaseEnv.step` drives the public observer port. It records no task
 verdict and reads no private active-bridge field. Selected resets clear only those
