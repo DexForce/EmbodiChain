@@ -255,6 +255,12 @@ class PlanResult:
     calls for the group, not a separate latency or count for each result.
     """
 
+    motion_limit_provenance: dict[str, object] | None = None
+    """Requested/resolved limits and controlled order for opt-in requests."""
+
+    motion_validation: dict[str, torch.Tensor] | None = None
+    """Separate native completion, retiming, sampled geometry and timing states."""
+
     def __post_init__(self) -> None:
         """Validate trajectory timing and optional original policy traces."""
         rollout, lengths = self.policy_rollout_positions, self.policy_rollout_lengths
