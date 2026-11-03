@@ -20,6 +20,16 @@ Keep these boundaries separate:
 2. segment post-policy: environment advancement such as settling; and
 3. segment validator: task or dataset acceptance.
 
+Native grip evidence is an explicit simulation integration in
+`integrations/simulation/grip_evidence.py`. Its factory owns immutable object/pad
+declarations and creates the standard control-part provider through its public
+observer hook. It retains provider IDs and physical algorithm revisions; revision
+2's open-hand interpretation requires explicit driver calibration and opt-in.
+No task labels or control-part suffixes select a policy. Sampling/timeline lifecycle
+and per-row availability belong to the [contact boundary](../sensor-system/contact-history.md).
+Raw traces are observations, while report serialization and TaskSpec verdicts
+remain frontend responsibilities.
+
 Stateful segment validators capture their incoming evidence through the optional
 `begin_segment` port immediately before runtime planning starts. Lift checks use
 that segment's measured baseline, including for lazy and repeated segments;

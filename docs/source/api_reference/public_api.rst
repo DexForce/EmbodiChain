@@ -732,6 +732,93 @@ embodichain.lab.sim.scene.expansion.persistence
    save_scene_variants
    load_scene_variants
 
+embodichain.lab.task_program.integrations.simulation.contact_evidence
+---------------------------------------------------------------------
+
+ContactSensor acquisition into the existing PhysicalEvidenceFrame and
+PhysicalEvidenceBatch contracts. The first axis follows explicit native environment
+IDs; a valid-contact mask accompanies raw actor pairs, Arena-frame positions and
+normals, and native impulses. Per-channel validity distinguishes unsupported
+capabilities, nonfinite active data, saturation and source drift from measured
+negative observations. Native contact revision remains separate from runtime
+observation revision. The Default-only revision reader fails explicitly when its
+SDK contract is unavailable.
+
+``sample`` keeps frame tensors on its request's environment-ID device. The
+``collect`` provider port retains that same device contract. Host observers may
+request CPU frames; ``source_device`` records where the original numerical
+observation was produced. The common frame has no invocation field.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.contact_evidence
+
+.. autosummary::
+
+   CONTACT_ACTOR_IDS
+   CONTACT_VALID_MASK
+   CONTACT_NORMALS
+   CONTACT_IMPULSES
+   CONTACT_POSITIONS
+   ContactEvidenceSample
+   ContactEvidenceSampler
+   ContactSourceStamp
+   native_contact_revision
+
+embodichain.lab.task_program.integrations.simulation.contact_timeline
+---------------------------------------------------------------------
+
+Bounded raw substep history attached with
+``sensor.add_sampling_observer(name, timeline)``. The host supplies a control
+clock returning completed steps and elapsed control time, or None while inactive,
+and makes the sensor available in its environment sensor suite. BaseEnv.step
+then drives the existing begin/substep hooks; the observer never fetches a second
+time or advances physics.
+
+Records retain only packed valid contacts on CPU. Reset clears selected
+environments and advances their generations, leaving other rows intact. Loss,
+missing source revisions, incomplete intervals and capacity exhaustion remain
+explicit. The contact-row budget is checked before each sample, so one sampled
+batch may cross it. Control-step and substep caps also bound empty histories.
+Frontend code owns actor/semantic label maps, serialized report schema IDs and
+any task-success evaluation.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.contact_timeline
+
+.. autosummary::
+
+   ContactTimeline
+   ContactTimelineCfg
+
+embodichain.lab.task_program.integrations.simulation.grip_evidence
+------------------------------------------------------------------
+
+Target-specific paired-pad observations using explicit semantic/native object
+bindings and control-part/pad-link declarations. NativeGripEvidenceFactory uses
+the public control-part provider injection API and preserves its provider ID and
+revision. Each provider owns its observer and bounded raw-query trace.
+
+Physical interpretation revision 1 preserves the opposed positive-impulse
+criterion and absent-positive-contact observations. Revision 2 requires explicit
+opening calibration and opt-in; its one-sided open-hand release observation is
+not geometric separation or acquisition evidence. Driver indices and joint names
+are supplied by the robot/profile owner, with no model-name or suffix inference.
+
+Host frames receive all normal public ownership/validity checks. Grip arithmetic
+still runs on the original sensor device and BinaryEffectObservation returns on
+the caller's context device. Raw trace data remains observational; application
+serializers and TaskSpec evaluation belong outside this module.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.grip_evidence
+
+.. autosummary::
+
+   DriverOpeningBinding
+   NativeGripEvidenceCfg
+   NativeGripEvidenceFactory
+   NativeGripEvidenceProvider
+   NativeGripObserver
+   classify_contacts
+   create_joint_opening_reader
+
 embodichain.lab.task_program.integrations.simulation.handover
 -------------------------------------------------------------
 

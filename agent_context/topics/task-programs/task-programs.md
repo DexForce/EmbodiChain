@@ -42,6 +42,7 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Configured semantic/policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
+| Physical contact sampling, timelines and grip evidence | `embodichain/lab/task_program/integrations/simulation/contact_evidence.py`, `contact_timeline.py`, `grip_evidence.py` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 | Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
 | Episode selection, recording, final success | `embodichain/lab/gym/envs/embodied_env.py`, `demo.py` |

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 import warp as wp
 
@@ -195,3 +196,112 @@ def test_scatter_overflow_is_counted_separately_and_reset_by_selected_row():
     assert sensor.dropped_contacts == 3
     sensor.reset()
     assert sensor.dropped_contacts == 0
+
+
+@pytest.mark.parametrize("with_history", [False, True])
+def test_sampling_observers_are_instance_owned_and_bracket_native_fetch(with_history):
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    if with_history:
+        sensor.create_history("existing_history", torch.tensor([[4], [7]]))
+    other = _sensor_for_query(_FakeQuery())
+    events = []
+    original_fetch = query.fetch
+
+    def fetch():
+        events.append("fetch")
+        return original_fetch()
+
+    query.fetch = fetch
+    observer = SimpleNamespace(
+        begin_control_step=lambda: events.append("begin"),
+        before_sample=lambda: (events.append("before"), "stamp")[1],
+        after_sample=lambda dt, token: events.append(
+            ("after", dt, token, int(sensor.get_data()["is_valid"].sum()))
+        ),
+        reset=lambda ids: events.append(("reset", None if ids is None else list(ids))),
+    )
+    sensor.add_sampling_observer("audit", observer)
+    assert sensor.requires_substep_update
+    assert not other.requires_substep_update
+    with pytest.raises(ValueError, match="already exists"):
+        sensor.add_sampling_observer("audit", observer)
+    sensor.begin_control_step()
+    sensor.update_physics_step(0.01)
+    sensor.reset([0])
+    assert events == [
+        "begin",
+        "before",
+        "fetch",
+        ("after", 0.01, "stamp", 2),
+        ("reset", [0]),
+    ]
+    query.buffer.dropped_count = 3
+    sensor.update_physics_step(0.01)
+    query.buffer.dropped_count = 0
+    sensor.update()
+    assert sensor.dropped_contacts == 3
+    assert sensor.remove_sampling_observer("audit") is observer
+    assert sensor.requires_substep_update is with_history
+    events.clear()
+    sensor.update_physics_step(0.01)
+    assert events == ["fetch"]
+
+
+def test_sampling_observers_reject_external_capture_before_callbacks(monkeypatch):
+    sensor = _sensor_for_query(_FakeQuery())
+    calls = []
+    observer = SimpleNamespace(
+        begin_control_step=lambda: None,
+        before_sample=lambda: calls.append("before"),
+        after_sample=lambda *args: None,
+        reset=lambda *args: None,
+    )
+    sensor.add_sampling_observer("audit", observer)
+    sensor.device = SimpleNamespace(type="cuda")
+    monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", lambda: True)
+    with pytest.raises(RuntimeError, match="external CUDA capture"):
+        sensor.update_physics_step(0.01)
+    assert calls == []
+
+
+def test_contact_sampler_normal_update_fetches_once_before_reading_data():
+    from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
+    from embodichain.lab.task_program.integrations.simulation.contact_evidence import (
+        ContactEvidenceSampler,
+        CONTACT_VALID_MASK,
+    )
+
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    calls = []
+    original = query.fetch
+
+    def fetch():
+        calls.append("fetch")
+        return original()
+
+    query.fetch = fetch
+    sample = ContactEvidenceSampler(sensor).sample(
+        PhysicalEvidenceRequest(0.0, 0, torch.tensor([1, 0]))
+    )
+    assert calls == ["fetch"]
+    assert sample.frame.get(CONTACT_VALID_MASK).values.sum().item() == 2
+    assert all(batch.valid.all() for batch in sample.frame.batches.values())
+
+
+def test_sampling_observer_exception_is_not_replaced_with_empty_success():
+    sensor = _sensor_for_query(_FakeQuery())
+
+    def fail(*args):
+        raise RuntimeError("observer failed")
+
+    observer = SimpleNamespace(
+        begin_control_step=lambda: None,
+        before_sample=lambda: None,
+        after_sample=fail,
+        reset=lambda ids: None,
+    )
+    sensor.add_sampling_observer("broken", observer)
+    with pytest.raises(RuntimeError, match="observer failed"):
+        sensor.update_physics_step(0.01)

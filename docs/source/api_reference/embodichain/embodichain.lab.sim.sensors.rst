@@ -119,3 +119,22 @@ CUDA history reduction consumes compact contact rows and device counts through
 sparse Warp kernels. The ``dropped_contacts`` diagnostic sums query loss and
 scatter overflow across the current control interval; standalone updates
 without a history report the most recent sample.
+
+Sampling observers
+------------------
+
+Named sampling observers belong to one ContactSensor instance. The empty default
+adds no observer snapshots or callbacks. Begin and selective-reset notifications
+follow the sensor's own history/counter updates; before/after tokens surround the
+native fetch. Observation callbacks run outside the internal CUDA capture, and
+external capture with observers is rejected before callbacks begin. The observer
+owns retention limits and diagnostics and must not step physics or issue commands.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_sensor
+
+.. autosummary::
+
+   ContactSamplingObserver
+
+.. autoclass:: ContactSamplingObserver
+   :members:

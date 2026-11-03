@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Protocol, Sequence, runtime_checkable
 
 import dexsim
 import numpy as np
@@ -45,7 +45,44 @@ __all__ = [
     "ArticulationContactFilterCfg",
     "ContactSensor",
     "ContactSensorCfg",
+    "ContactSamplingObserver",
 ]
+
+
+@runtime_checkable
+class ContactSamplingObserver(Protocol):
+    """Observe sensor sampling boundaries without stepping or issuing commands.
+
+    A sensor owns named observer registrations per instance. Tokens returned by
+    ``before_sample`` correlate one source stamp with its completed sample;
+    observers own token interpretation, storage bounds and failure reporting.
+    Hooks execute outside the sensor's internal CUDA capture.
+    """
+
+    def begin_control_step(self) -> None:
+        """Observe a new control interval after sensor counters are cleared."""
+        ...
+
+    def before_sample(self) -> object:
+        """Capture a source stamp before the native contact query is fetched."""
+        ...
+
+    def after_sample(self, dt: float, token: object) -> None:
+        """Observe the sampled buffer after device work finishes.
+
+        Args:
+            dt: Physics interval represented by this sample, in seconds.
+            token: The same observer's corresponding before-sample token.
+        """
+        ...
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Reset selected observer rows after the sensor's own reset.
+
+        Args:
+            env_ids: Native environment rows, or None for the complete batch.
+        """
+        ...
 
 
 @configclass
@@ -162,6 +199,7 @@ class ContactSensor(BaseSensor):
             self._scatter_dropped_count
         )
         self._histories: dict[str, ContactHistory] = {}
+        self._sampling_observers: dict[str, ContactSamplingObserver] = {}
         self._sample_graph = None
         self._sample_graph_key = None
         self._sample_stream = None
@@ -334,7 +372,7 @@ class ContactSensor(BaseSensor):
         """
 
         buffer = self._fetch_contacts()
-        if not self._histories:
+        if not self.requires_substep_update:
             self._query_dropped_count.copy_(buffer.dropped_count_device)
             self._scatter_dropped_count.copy_(self._sample_scatter_dropped_count)
 
@@ -520,10 +558,42 @@ class ContactSensor(BaseSensor):
         self._histories[name] = history
         return history
 
+    def add_sampling_observer(
+        self, name: str, observer: ContactSamplingObserver
+    ) -> None:
+        """Register one instance-owned observer on the existing substep lifecycle.
+
+        Args:
+            name: Unique non-empty observer name within this sensor.
+            observer: Read-only sampling observer with bounded, owned state.
+
+        Raises:
+            ValueError: If the name is empty or already registered.
+            TypeError: If the observer does not implement the sampling port.
+        """
+        if type(name) is not str or not name or name != name.strip():
+            raise ValueError("Sampling observer name must be a non-empty exact string.")
+        if name in self._sampling_observers:
+            raise ValueError(f"Sampling observer {name!r} already exists.")
+        if not isinstance(observer, ContactSamplingObserver):
+            raise TypeError("observer must implement ContactSamplingObserver.")
+        self._sampling_observers[name] = observer
+
+    def remove_sampling_observer(self, name: str) -> ContactSamplingObserver:
+        """Detach a registered observer without changing contact histories.
+
+        Args:
+            name: Previously registered observer name.
+
+        Returns:
+            The detached observer; the caller retains its recorded data.
+        """
+        return self._sampling_observers.pop(name)
+
     @property
     def requires_substep_update(self) -> bool:
         """Whether this sensor participates in the physics-substep lifecycle."""
-        return bool(self._histories)
+        return bool(self._histories or self._sampling_observers)
 
     def begin_control_step(self) -> None:
         """Start a new interval without discarding persistent contact timing."""
@@ -531,6 +601,9 @@ class ContactSensor(BaseSensor):
         self._scatter_dropped_count.zero_()
         for history in self._histories.values():
             history.begin_control_step()
+        if self._sampling_observers:
+            for observer in self._sampling_observers.values():
+                observer.begin_control_step()
 
     def update_physics_step(self, dt: float) -> None:
         """Sample contacts and advance registered histories after physics.
@@ -540,6 +613,29 @@ class ContactSensor(BaseSensor):
         """
         if dt <= 0:
             raise ValueError("Contact sampling dt must be positive.")
+        observers = self._sampling_observers
+        if (
+            observers
+            and self.device.type == "cuda"
+            and torch.cuda.is_current_stream_capturing()
+        ):
+            raise RuntimeError(
+                "Contact sampling observers require calls outside external CUDA capture."
+            )
+        tokens = (
+            tuple(
+                (observer, observer.before_sample())
+                for observer in tuple(observers.values())
+            )
+            if observers
+            else ()
+        )
+        self._update_physics_contacts(dt)
+        for observer, token in tokens:
+            observer.after_sample(dt, token)
+
+    def _update_physics_contacts(self, dt: float) -> None:
+        """Keep the existing contact/history device path independent of observers."""
         buffer = self._read_contacts()
         if self.device.type != "cuda" or torch.cuda.is_current_stream_capturing():
             self._sample_contacts(buffer, dt)
@@ -618,6 +714,9 @@ class ContactSensor(BaseSensor):
             self._query_dropped_count.zero_()
         for history in self._histories.values():
             history.reset(ids)
+        if self._sampling_observers:
+            for observer in self._sampling_observers.values():
+                observer.reset(env_ids)
 
     def filter_by_user_ids(
         self, item_user_ids: torch.Tensor, env_ids: Sequence[int] | None = None
