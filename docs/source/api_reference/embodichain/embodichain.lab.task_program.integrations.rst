@@ -326,7 +326,7 @@ Implementation module exports
 .. autodata:: VersionedKey
 
 Occurrence policy bindings
--------------------------
+--------------------------
 
 An ``InvocationPolicyBinding`` selects an existing named profile preset for one
 sequential execution occurrence, identified by the complete compiled-program
