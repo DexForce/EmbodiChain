@@ -198,6 +198,9 @@ fixed virtual TCP links may lie upstream or downstream. A stationary opposite-ar
 TCP is not a valid hand reference. The declared TCP must also remain fixed
 throughout hand actuation. Model-specific commands and TCP
 calibration remain in concrete robot/embodiment configuration.
+The [configured hand declaration](../task-programs/configuration.md) resolves
+those settings through the existing runtime-services owner; it does not create
+a second robot registry or infer topology from model/control-part names.
 
 `RobotCoordinatedGraspProvider` captures both hands on its first paired query.
 Retain that provider with its owning Robot/environment adapter across bridge,

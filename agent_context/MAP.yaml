@@ -404,6 +404,7 @@ topics:
   title: Atomic Skills
   aliases: [atomic action, atomic skill, 原子动作, 原子技能]
   keywords: [AtomicActionEngine, run-atomic-action, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
+    hand_geometry_cfgs,
     RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry, control-grid retiming,
     AffordanceSamplingContext, AffordancePoseCandidates, AffordanceSample, affordance sampling]
   paths: [topics/atomic-actions/atomic-actions.md]
@@ -427,6 +428,7 @@ topics:
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
   keywords: [TaskProgramCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
+    hand_geometries,
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
     joint_command_mode]
