@@ -1857,6 +1857,9 @@ def _decode_grasp_generator(
             {
                 "sample_count",
                 "approach_direction_samples",
+                "approach_deviation_angle",
+                "max_candidates",
+                "center_mode",
                 "filter_ground_collision",
                 "force_refresh",
                 "point_spacing",
@@ -1886,6 +1889,9 @@ def _decode_grasp_generator(
             )
     elif side is not None:
         raise ValueError(f"{path}: side is only supported by Marvin geometry.")
+    center_mode = config.get("center_mode")
+    if "center_mode" in config and center_mode not in ("bounds", "centroid"):
+        raise ValueError(f"{path}.center_mode must be 'bounds' or 'centroid'.")
     return _AntipodalGraspPoseGeneratorFactory(
         model_id=model.model_id,
         min_opening_width=model.min_opening_width,
@@ -1912,6 +1918,21 @@ def _decode_grasp_generator(
             if "approach_direction_samples" in config
             else None
         ),
+        approach_deviation_angle=(
+            _real(
+                config["approach_deviation_angle"],
+                path=f"{path}.approach_deviation_angle",
+                minimum=0,
+            )
+            if "approach_deviation_angle" in config
+            else None
+        ),
+        max_candidates=(
+            _integer(config["max_candidates"], path=f"{path}.max_candidates", minimum=1)
+            if "max_candidates" in config
+            else None
+        ),
+        center_mode=center_mode,
         filter_ground_collision=(
             _boolean(
                 config["filter_ground_collision"],
@@ -2505,7 +2526,14 @@ def _decode_configured_task_program_integration(
     grasp_fingerprint = tuple(
         {
             "target_id": target_id,
-            "factory": asdict(factory),
+            "factory": {
+                key: value
+                for key, value in asdict(factory).items()
+                if not (
+                    key in {"approach_deviation_angle", "max_candidates", "center_mode"}
+                    and value is None
+                )
+            },
         }
         for target_id, factory in services.grasp_pose_generators
     )
