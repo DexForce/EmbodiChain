@@ -3416,3 +3416,16 @@ Typed physical predicates provide shared distance and height measurements for RL
 .. autofunction:: evaluate_near_target
 
 .. autofunction:: evaluate_below_height
+
+Native WebRTC viewer configuration
+---------------------------------
+
+The experimental WebRTC viewer uses a dedicated observation camera in the
+existing World. It requires a WebRTC-enabled Linux/NVIDIA DexSim build; its
+native listener binds all IPv4 interfaces and lives until World teardown.
+
+.. autoclass:: embodichain.lab.visualization.DexSimWebCfg
+   :members:
+
+.. autoclass:: embodichain.lab.visualization.cfg.DexSimWebCfg
+   :no-index:

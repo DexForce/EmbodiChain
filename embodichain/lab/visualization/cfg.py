@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from dataclasses import field
+import math
 
 from embodichain.utils import configclass
 from embodichain.cli._visualization import (
@@ -28,7 +29,7 @@ from embodichain.cli._visualization import (
     _DEFAULT_ENV_IDS,
 )
 
-__all__ = ["VisualizationCfg", "ViserServerCfg"]
+__all__ = ["VisualizationCfg", "ViserServerCfg", "DexSimWebCfg"]
 
 
 @configclass
@@ -59,12 +60,58 @@ class ViserServerCfg:
 
 
 @configclass
+class DexSimWebCfg:
+    """Configure the experimental native WebRTC window replacement.
+
+    Requires a Linux/NVIDIA DexSim build with WebApplication and NVENC.
+    The native listener binds all IPv4 interfaces and lives until World teardown.
+    One viewer and one simulation environment are supported initially.
+
+    Args:
+        port: Native HTTP/signaling port on a trusted network.
+        width: Main observation view width, even and between 32 and 4096.
+        height: Main observation view height, even and between 32 and 4096.
+        fps: Maximum application rendering rate, independent of physics time.
+        eye: Initial observation camera location in world coordinates.
+        target: Initial observation camera look-at target.
+        ice: Optional DexSim ICE configuration for STUN/TURN connectivity.
+    """
+
+    port: int = 8765
+    width: int = 1280
+    height: int = 720
+    fps: float = 15.0
+    eye: tuple[float, float, float] = (2.5, -3.5, 2.0)
+    target: tuple[float, float, float] = (0.0, 0.0, 0.6)
+    ice: dict[str, object] | None = None
+
+    def __post_init__(self) -> None:
+        """Validate settings before allocating native resources."""
+        if type(self.port) is not int or not 1 <= self.port <= 65535:
+            raise ValueError("WebRTC port must be between 1 and 65535.")
+        for name in ("width", "height"):
+            value = getattr(self, name)
+            if type(value) is not int or not 32 <= value <= 4096 or value % 2:
+                raise ValueError(f"WebRTC {name} must be even and in [32, 4096].")
+        if not math.isfinite(self.fps) or not 0 < self.fps <= 30:
+            raise ValueError("WebRTC fps must be finite and in (0, 30].")
+        for name in ("eye", "target"):
+            value = getattr(self, name)
+            if len(value) != 3 or not all(math.isfinite(v) for v in value):
+                raise ValueError(
+                    f"WebRTC {name} must contain three finite coordinates."
+                )
+        if tuple(self.eye) == tuple(self.target):
+            raise ValueError("WebRTC eye and target must differ.")
+
+
+@configclass
 class VisualizationCfg:
     """Configure live scene visualization.
 
     Args:
-        backend: Visualization backend name. Supported values are ``"none"``
-            and ``"viser"``.
+        backend: Visualization backend name. Supported values are ``"none"``,
+            ``"viser"`` and ``"dexsim-web"``.
         scene_fps: Maximum scene capture rate.
         env_ids: Environment indices exposed by the visualizer. ``None`` selects
             every simulation environment.
@@ -76,11 +123,15 @@ class VisualizationCfg:
             rate limiting.
         soft_body_fps: Maximum soft-body and cloth vertex update rate.
         allow_commands: Whether simulation-mutating browser commands are allowed.
-            This enables Viser Gizmo dragging and registered articulation joint
-            controls. Keep it disabled for untrusted or publicly reachable
-            browser sessions.
+            Enables Viser Gizmos/joint controls or native WebRTC entity editing.
+            Read-only WebRTC clients can still navigate the observer camera.
+            Keep disabled for untrusted or publicly reachable browser sessions.
         viser_server: Viser HTTP/WebSocket server binding settings.
+        web: Native WebRTC observation-view settings.
     """
+
+    web: DexSimWebCfg = field(default_factory=DexSimWebCfg)
+    """Native WebRTC observation-view settings."""
 
     backend: str = "none"
     scene_fps: float = _DEFAULT_SCENE_FPS
@@ -94,9 +145,11 @@ class VisualizationCfg:
 
     def __post_init__(self) -> None:
         """Validate visualization settings."""
-        if self.backend not in {"none", "viser"}:
+        if isinstance(self.web, dict):
+            self.web = DexSimWebCfg(**self.web)
+        if self.backend not in {"none", "viser", "dexsim-web"}:
             raise ValueError(
-                f"Unsupported visualization backend {self.backend!r}; expected 'none' or 'viser'."
+                f"Unsupported visualization backend {self.backend!r}; expected 'none', 'viser' or 'dexsim-web'."
             )
         if self.scene_fps <= 0.0:
             raise ValueError("scene_fps must be greater than zero.")
@@ -125,5 +178,7 @@ class VisualizationCfg:
                     f"Selected {len(self.env_ids)} environments, exceeding "
                     f"max_visible_envs={self.max_visible_envs}."
                 )
-        if self.allow_commands and self.backend != "viser":
-            raise ValueError("allow_commands is only supported by the Viser backend.")
+        if self.allow_commands and self.backend == "none":
+            raise ValueError("allow_commands requires Viser or dexsim-web.")
+        if self.backend == "dexsim-web" and self.env_ids != [0]:
+            raise ValueError("dexsim-web currently requires env_ids=[0].")

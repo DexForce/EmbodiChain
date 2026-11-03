@@ -2778,3 +2778,26 @@ def test_config_to_cfg_resolves_usd_source_files(monkeypatch, tmp_path):
         assert isinstance(asset.source, UsdSourceCfg)
         assert asset.source.file_path == str(tmp_path / "scene.usda")
         assert asset.source.source_prim_path == "/World/Asset"
+
+
+def test_web_launcher_preserves_file_view_settings_and_applies_overrides():
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+    args = parser.parse_args(["--web", "--web-port", "8766"])
+    config = {
+        "id": "Dummy-v0",
+        "physics": "default",
+        "visualization": {
+            "web": {"width": 640, "height": 360, "fps": 10},
+        },
+    }
+    merged = merge_args_with_gym_config(args, config)
+    assert merged["headless"]
+    assert merged["visualization"]["backend"] == "dexsim-web"
+    assert merged["visualization"]["web"] == {
+        "width": 640,
+        "height": 360,
+        "fps": 10,
+        "port": 8766,
+    }
+    assert "port" not in config["visualization"]["web"]

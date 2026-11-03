@@ -4,6 +4,17 @@ Read this when the request needs these details. [Topic overview](sim-visualizati
 
 ## Configuration
 
+`backend="dexsim-web"` selects the experimental native WebRTC window
+replacement; `visualization.web` owns `DexSimWebCfg`. Shared launchers accept
+`--web`, mutually exclusive with `--viser`, and optional `--web-port` /
+`--web-fps` overrides. Browser modes force headless before World construction.
+WebRTC calls to `capture_visualization()` pump application events and render
+the observer on the creator thread, including while physics is paused.
+Its sensor restrictions, network and lifecycle boundaries are documented in
+[the viewer guide](../../../embodichain/lab/visualization/README.md).
+
+The following snapshot and server settings describe the Viser backend.
+
 `SimulationManagerCfg.visualization` owns a `VisualizationCfg`. Server settings
 are nested under `visualization.viser_server`; there is no top-level
 `SimulationManagerCfg.viser_server`.
@@ -31,7 +42,7 @@ are nested under `visualization.viser_server`; there is no top-level
 | `label` | `"EmbodiChain"` | Browser application label |
 | `verbose` | `False` | Viser diagnostics |
 
-Validation rejects an unsupported backend, empty or duplicate explicit
+Viser configuration validation rejects an unsupported backend, empty or duplicate explicit
 `env_ids`, negative IDs, a violated optional environment limit, non-positive
 sampling rates, invalid server fields, and commands enabled without the Viser backend.
 `SceneExporter` performs the later check that every selected environment

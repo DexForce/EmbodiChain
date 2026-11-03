@@ -53,6 +53,16 @@ native renderer. Viser retains native rendering because its current exporter
 reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
 when the saved training configuration uses NoRender.
 
+## WebRTC observation view
+
+`visualization.backend="dexsim-web"` reserves native rendering before World
+construction and forces the local window closed. A dedicated observation camera
+is rendered from `render_frame()` without adding sensor renders. Paused callers
+pump `capture_visualization()` on the World creator thread. WebRTC application
+closure precedes sensor/scene teardown; its listener is released with World
+cleanup. Follow [visualization](../sim-visualization/sim-visualization.md) for
+configuration and current single-environment restrictions.
+
 ## Default scene presentation
 
 `SimulationManager.set_default_background()` authors the native ground material

@@ -3273,3 +3273,49 @@ def test_process_no_render_is_detected_after_world_cleanup(monkeypatch) -> None:
         lambda: SimpleNamespace(renderer=dexsim.types.Renderer.NORENDER),
     )
     assert SimulationManager._get_process_renderer() == "no-render"
+
+
+@pytest.mark.parametrize("num_envs,renderer", [(2, "hybrid"), (1, "no-render")])
+def test_web_rejects_unsupported_world_before_creation(num_envs, renderer) -> None:
+    with pytest.raises(ValueError, match="dexsim-web"):
+        SimulationManagerCfg(
+            num_envs=num_envs,
+            render_cfg=RenderCfg(renderer=renderer),
+            visualization=VisualizationCfg(backend="dexsim-web"),
+        )
+
+
+def test_web_config_selects_headless_native_streaming(monkeypatch, tmp_path) -> None:
+    from embodichain.lab.visualization import DexSimWebCfg
+
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
+    monkeypatch.setattr(dexsim, "WebApplication", object, raising=False)
+    native = dexsim.WorldConfig()
+    world_fields = SimpleNamespace(
+        webrtc_enabled=False,
+        raytrace_config=native.raytrace_config,
+        postprocess_config=native.postprocess_config,
+    )
+    monkeypatch.setattr(dexsim, "WorldConfig", lambda: world_fields)
+    config = SimulationManagerCfg(
+        visualization=VisualizationCfg(
+            backend="dexsim-web", web=DexSimWebCfg(port=8766)
+        )
+    )
+    manager = SimpleNamespace(
+        _material_cache_dir=tmp_path,
+        physics=SimpleNamespace(configure_world=lambda *_: None),
+    )
+    world = SimulationManager._convert_sim_config(manager, config)
+    assert config.headless and not world.open_windows
+    assert world.webrtc_enabled and world.webrtc_port == 8766
+    assert world.webrtc_input_camera == "__embodichain_web_viewer"
+    assert world.renderer == RenderCfg(renderer="hybrid").to_dexsim_flags()
+
+
+def test_web_preflight_reports_missing_dexsim_api(monkeypatch, tmp_path) -> None:
+    monkeypatch.delattr(dexsim, "WebApplication", raising=False)
+    config = SimulationManagerCfg(visualization=VisualizationCfg(backend="dexsim-web"))
+    manager = SimpleNamespace(_material_cache_dir=tmp_path)
+    with pytest.raises(RuntimeError, match="WebRTC-enabled DexSim"):
+        SimulationManager._convert_sim_config(manager, config)

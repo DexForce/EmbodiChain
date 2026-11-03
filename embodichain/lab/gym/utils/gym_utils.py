@@ -1467,8 +1467,21 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     if args.device is not None:
         merged_config["device"] = args.device
     viser_enabled = bool(getattr(args, "viser", False))
-    if args.headless is not None or viser_enabled:
-        merged_config["headless"] = bool(args.headless or viser_enabled)
+    web_enabled = bool(getattr(args, "web", False))
+    if web_enabled and viser_enabled:
+        raise ValueError("--web and --viser are mutually exclusive.")
+    if args.headless is not None or viser_enabled or web_enabled:
+        merged_config["headless"] = bool(args.headless or viser_enabled or web_enabled)
+    if web_enabled:
+        visualization = deepcopy(merged_config.get("visualization", {}))
+        visualization.update(backend="dexsim-web", allow_commands=True)
+        web = deepcopy(visualization.get("web", {}))
+        for name in ("port", "fps"):
+            value = getattr(args, f"web_{name}", None)
+            if value is not None:
+                web[name] = value
+        visualization["web"] = web
+        merged_config["visualization"] = visualization
     if args.renderer is not None:
         merged_config["renderer"] = args.renderer
     requested_physics = getattr(args, "physics", None)

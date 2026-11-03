@@ -326,9 +326,9 @@ class SimulationManagerCfg:
     headless: bool = False
     """Whether to run without an automatically opened native window.
 
-    This is forced to ``True`` when the Viser backend is enabled. Viser and
-    the native DexSim window are mutually exclusive; browser Gizmos do not
-    require a native window.
+    Browser backends force this to ``True`` and exclude the native window.
+    ``dexsim-web`` uses a separate native observation camera; Viser exports
+    scene snapshots to its own browser renderer.
     """
 
     enable_entity_gizmo: bool = True
@@ -413,8 +413,13 @@ class SimulationManagerCfg:
             self.robot_ik_gizmo, GizmoCfg
         ):
             raise TypeError("robot_ik_gizmo must be a GizmoCfg, mapping, or None.")
-        if self.visualization.backend == "viser":
+        if self.visualization.backend != "none":
             self.headless = True
+        if self.visualization.backend == "dexsim-web":
+            if self.num_envs != 1:
+                raise ValueError("dexsim-web currently supports num_envs=1 only.")
+            if self.render_cfg.renderer == "no-render":
+                raise ValueError("dexsim-web requires a native renderer.")
 
     @property
     def physics_dt(self) -> float:
@@ -609,6 +614,7 @@ class SimulationManager:
         self._window_record_state: _WindowRecordState | None = None
         self._window_record_save_threads: list[threading.Thread] = []
         self._visualization_runtime = None
+        self._web_viewer = None
         self._arenas: list[dexsim.environment.Arena] = []
         self._gizmos: dict[str, object] = {}
         self._markers: dict[str, _AxisMarkerGroup] = {}
@@ -1002,9 +1008,19 @@ class SimulationManager:
         """Return current visualization service and client health."""
         from embodichain.lab.visualization import RuntimeHealth
 
+        if getattr(self, "_web_viewer", None) is not None:
+            viewer = self._web_viewer
+            return RuntimeHealth(
+                status="failed" if viewer.error else "ready",
+                running=not viewer.closed,
+                endpoint=viewer.endpoint,
+                client_count=0,  # Native peer count is not exposed by WebApplication.
+                published_scene_revision=self._visualization_topology_revision,
+                worker_error=viewer.error,
+            )
         if self._visualization_runtime is not None:
             return self._visualization_runtime.health
-        configured = self.sim_config.visualization.backend == "viser"
+        configured = self.sim_config.visualization.backend != "none"
         return RuntimeHealth(
             status="stopped" if configured else "disabled",
             running=False,
@@ -1049,8 +1065,26 @@ class SimulationManager:
         return self._visualization_topology_revision
 
     def start_visualization(self) -> VisualizationRuntime | None:
-        """Start the configured live visualizer and publish the current scene."""
+        """Start browser presentation without finalizing an empty scene.
+
+        Returns:
+            Viser snapshot runtime, or None for native WebRTC/disabled mode.
+            WebRTC exposes status through :attr:`visualization_health` and
+            pumps requests through :meth:`capture_visualization` on the World
+            creator thread. Its listener remains owned by the World.
+        """
         if self.sim_config.visualization.backend == "none":
+            return None
+        if self.sim_config.visualization.backend == "dexsim-web":
+            if getattr(self, "_web_viewer", None) is None:
+                from embodichain.lab.visualization._web_viewer import _WebViewer
+
+                self._web_viewer = _WebViewer(self)
+                self._visualization_error_reported = False
+                logger.log_info(
+                    f"WebRTC viewer ready at {self._web_viewer.endpoint} "
+                    "(native listener binds all IPv4 interfaces; trusted networks only)."
+                )
             return None
         visualizable_assets = (
             getattr(self, "_visual_objects", {}),
@@ -1114,6 +1148,9 @@ class SimulationManager:
 
     def refresh_visualization(self) -> SceneManifest | None:
         """Publish current scene topology when Viser is active."""
+        if self.sim_config.visualization.backend == "dexsim-web":
+            self.capture_visualization(force=True)
+            return None
         runtime = self.start_visualization()
         if runtime is None:
             return None
@@ -1133,7 +1170,11 @@ class SimulationManager:
         *,
         capture_camera_images: bool = True,
     ) -> bool:
-        """Capture current scene data for the configured visualizer.
+        """Capture scene data or pump/render the native WebRTC observation view.
+
+        WebRTC calls belong to the World creator thread and never step physics.
+        Call this while simulation is paused to keep application commands live.
+        WebRTC consumes existing sensor images without rendering sensors again.
 
         Args:
             force: Whether to bypass visualization frame-rate limiting.
@@ -1142,6 +1183,9 @@ class SimulationManager:
         Returns:
             Whether scene or camera data was captured.
         """
+        if self.sim_config.visualization.backend == "dexsim-web":
+            self.start_visualization()
+            return self._web_viewer.capture(force=force)
         runtime = self.start_visualization()
         if runtime is None:
             return False
@@ -1183,11 +1227,16 @@ class SimulationManager:
             )
         except Exception as error:
             if not self._visualization_error_reported:
-                logger.log_warning(f"Viser visualization update failed: {error!r}")
+                logger.log_warning(f"Visualization update failed: {error!r}")
+                if getattr(self, "_web_viewer", None) is not None:
+                    self._web_viewer.error = str(error)
                 self._visualization_error_reported = True
 
     def stop_visualization(self) -> None:
-        """Stop the visualization server and release its worker thread."""
+        """Close the visualizer; the native WebRTC listener lives until World teardown."""
+        if getattr(self, "_web_viewer", None) is not None:
+            self._web_viewer.close()
+            self._web_viewer = None
         runtime = self._visualization_runtime
         if runtime is None:
             return
@@ -1237,6 +1286,27 @@ class SimulationManager:
         world_config.backend = Backend.VULKAN
         world_config.thread_mode = sim_config.thread_mode
         world_config.cache_path = str(self._material_cache_dir)
+
+        if sim_config.visualization.backend == "dexsim-web":
+            from embodichain.lab.visualization._web_viewer import _CAMERA_NAME
+
+            if not hasattr(dexsim, "WebApplication") or not hasattr(
+                world_config, "webrtc_enabled"
+            ):
+                raise RuntimeError(
+                    "dexsim-web requires a WebRTC-enabled DexSim build with WebApplication (8b867e321 or later)."
+                )
+            if sim_config.num_envs != 1:
+                raise ValueError("dexsim-web currently supports num_envs=1 only.")
+            if sim_config.render_cfg.renderer == "no-render":
+                raise ValueError("dexsim-web requires a native renderer.")
+            world_config.webrtc_enabled = True
+            world_config.webrtc_port = sim_config.visualization.web.port
+            world_config.webrtc_input_camera = _CAMERA_NAME
+            if sim_config.visualization.web.ice is not None:
+                world_config.webrtc_ice = sim_config.visualization.web.ice
+            if sim_config.render_cfg.renderer == "auto":
+                sim_config.render_cfg.renderer = "hybrid"
 
         process_renderer = SimulationManager._get_process_renderer()
 
@@ -1834,7 +1904,7 @@ class SimulationManager:
                     self._step_window_record_from_sim_update(
                         self._window_record_state, record_dt
                     )
-            if self.sim_config.visualization.backend == "viser":
+            if self.sim_config.visualization.backend != "none":
                 with self.profiler.section("visualization_capture"):
                     self.capture_visualization_safely(
                         force=force_visualization,
@@ -2070,30 +2140,29 @@ class SimulationManager:
     def can_open_native_window(self) -> bool:
         """Return whether the native DexSim window may be opened.
 
-        The Viser backend owns visualization while it is configured or
-        running, so a native window must not be opened for the same simulation.
+        Browser backends own presentation while configured or running, so a
+        native window must not be opened for the same simulation.
 
         Returns:
-            ``True`` unless the Viser backend is configured or running.
+            ``True`` unless a browser backend is configured or running.
         """
         return (
-            self.sim_config.visualization.backend != "viser"
+            self.sim_config.visualization.backend == "none"
             and self._visualization_runtime is None
         )
 
     def open_window(self) -> bool:
         """Open the native DexSim simulation window when allowed.
 
-        Viser owns visualization while it is configured or running. In that
-        case this method safely skips the native window so launchers do not
-        need a separate Viser condition.
+        Browser presentation safely skips the native window so launchers do
+        not need backend-specific window conditions.
 
         Returns:
             ``True`` when the native window is open, otherwise ``False``.
         """
         if not self.can_open_native_window():
             logger.log_info(
-                "Skipping the native DexSim window because the Viser backend "
+                "Skipping the native DexSim window because a browser backend "
                 "is configured or running."
             )
             return False
@@ -3939,6 +4008,10 @@ class SimulationManager:
             BaseSensor: The added sensor instance handle.
         """
         sensor_type = sensor_cfg.sensor_type
+        if getattr(self, "_web_viewer", None) is not None:
+            from embodichain.lab.visualization._web_viewer import _validate_sensor
+
+            _validate_sensor(sensor_cfg, self._sensors.values())
         uid = sensor_cfg.uid
         if uid is None:
             uid = f"{sensor_type.lower()}_{len(self._sensors)}"

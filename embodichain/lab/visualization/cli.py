@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import argparse
 
-from .cfg import VisualizationCfg, ViserServerCfg
+from .cfg import DexSimWebCfg, VisualizationCfg, ViserServerCfg
 from embodichain.cli._visualization import add_viser_args_to_parser
 
 __all__ = ["add_viser_args_to_parser", "visualization_cfg_from_args"]
@@ -33,8 +33,18 @@ def visualization_cfg_from_args(
         args: Namespace populated by :func:`add_viser_args_to_parser`.
 
     Returns:
-        Visualization configuration including Viser server settings.
+        Visualization configuration for the selected browser frontend.
     """
+    if getattr(args, "web", False):
+        if getattr(args, "viser", False):
+            raise ValueError("--web and --viser are mutually exclusive.")
+        web = DexSimWebCfg()
+        for name in ("port", "fps"):
+            value = getattr(args, f"web_{name}", None)
+            if value is not None:
+                setattr(web, name, value)
+        web.__post_init__()
+        return VisualizationCfg(backend="dexsim-web", web=web, allow_commands=True)
     defaults = VisualizationCfg()
     server_defaults = defaults.viser_server
     enabled = bool(getattr(args, "viser", False))

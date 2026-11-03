@@ -96,3 +96,16 @@ def test_removed_viser_gizmo_flag_is_rejected() -> None:
 
     with pytest.raises(SystemExit):
         parser.parse_args(["--viser-gizmo"])
+
+
+def test_web_cli_builds_independent_config_and_excludes_viser() -> None:
+    parser = argparse.ArgumentParser()
+    add_viser_args_to_parser(parser)
+    cfg = visualization_cfg_from_args(
+        parser.parse_args(["--web", "--web-port", "8766", "--web-fps", "10"])
+    )
+    assert cfg.backend == "dexsim-web"
+    assert cfg.web.port == 8766 and cfg.web.fps == 10
+    assert cfg.allow_commands
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--web", "--viser"])

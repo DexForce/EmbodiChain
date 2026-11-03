@@ -88,7 +88,7 @@ def _setup_viser_joint_control(
 
 
 def _publish_loaded_assets(sim: SimulationManager, args: argparse.Namespace) -> None:
-    if getattr(args, "viser", False):
+    if getattr(args, "viser", False) or getattr(args, "web", False):
         sim.capture_visualization_safely(force=True)
 
 
