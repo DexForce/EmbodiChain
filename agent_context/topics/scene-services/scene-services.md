@@ -15,6 +15,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Fixed-orientation XY constraints and solution status | `embodichain/lab/sim/scene/layout.py` |
 | Existing binding selection and cloned poses | `embodichain/lab/sim/scene/query.py` |
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
+| Invocation-owned cooked-shape closing/opening and rigid precontact queries | `embodichain/lab/sim/scene/native_hand.py`, `_native_hand_capture.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
@@ -26,6 +27,24 @@ The package facade resolves services lazily. Expansion has its own
 `scene.expansion` namespace. `compute.geometry` takes Torch tensors, never entity UIDs,
 polygon objects, simulation or GenSim models. Scene CPU strategies own support
 selection, polygon search, greedy packing and SciPy SLSQP optimization.
+
+`native_hand.py` owns CPU/FCL nominal hand queries using the original Default
+cooked convex/box shapes and pair rest/contact offsets. Its private capture
+adapter requires the exact simulation-owned Robot, native source identity and
+B1/env0. It consumes explicit [hand calibration](../robot-system/robot-system.md#sampled-hand-geometry)
+and current resolved commands; no semantic request, continuation or preview is
+read in Scene services. Atomic consumers select those routes before capture.
+Source-compatible B0/F1 native preparation explicitly selects 65 stroke samples;
+surface-sampling budgets must not silently change that native qualification grid.
+Each preparation supplies a fresh query ID independent of planning RNG, the robot
+timestamp and scene version. Opening reference/target poses share that scope.
+Queries own caches and FCL resources; close them in a context manager or finally
+block before leaving the preparation. Closed queries reject further work while
+retaining their reports, and never destroy borrowed native entities. The optional
+`planning-geometry` dependency is required; missing FCL produces no clearance
+result. These sampled geometric checks are not physical acquisition/release
+evidence. Native capture and its source-differential CPU coverage are separate
+from native simulation qualification.
 
 ## Construction and proposal flow
 

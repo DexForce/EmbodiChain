@@ -351,6 +351,43 @@ A report passes only when its nonempty required checks all pass. Fixed-step sett
    :members:
    :imported-members:
 
+embodichain.lab.sim.scene.native_hand
+--------------------------------------
+
+These invocation-owned CPU/FCL queries use captured Default cooked convex/box
+collision shapes and their original rest/contact offsets. They preserve nominal
+closing, opening and rigid-scene prefix checks; they do not measure attachment,
+release or continuous collision freedom. Install ``embodichain[planning-geometry]``
+to supply the qualified optional FCL runtime. Missing support raises an explicit
+error and never produces a substitute clearance result.
+
+The builder accepts exact Robot/native identities, explicit hand calibration,
+current resolved stroke commands and a B1/env0 observation. Each scope combines
+a fresh identity generated independently of planning RNG with the robot timestamp
+and scene version.
+Opening poses must share this scope. Use the closing query as a context manager
+or close it in a ``finally`` block; later queries fail while collected reports
+remain available. Closing releases query/FCL resources, never borrowed entities.
+Atomic consumers select source/purpose/continuation eligibility before capture.
+
+.. currentmodule:: embodichain.lab.sim.scene.native_hand
+
+.. autosummary::
+   :nosignatures:
+
+   NativeQueryScope
+   NativeOpeningTarget
+   NativeContactPart
+   NativeClosingQuery
+   NativeOpeningQuery
+   NativeRigidRestScene
+   build_native_closing_query
+   build_native_rigid_rest_scene
+
+.. automodule:: embodichain.lab.sim.scene.native_hand
+   :members:
+
+
 Related integrations
 --------------------
 
