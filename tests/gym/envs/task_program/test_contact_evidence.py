@@ -246,6 +246,10 @@ def test_sampler_owns_masked_frames_in_requested_environment_order():
         == [[True, True, False, False]] * 2
     )
     assert all(batch.valid.all() for batch in sample.frame.batches.values())
+    sample.frame.batches[CONTACT_NORMALS].env_ids[0] = 1
+    assert sample.frame.get(CONTACT_IMPULSES).env_ids.tolist() == [2, 0]
+    assert sample.frame.env_ids.tolist() == [2, 0]
+    sample.frame.batches[CONTACT_NORMALS].env_ids[0] = 2
     old = sample.frame.get(CONTACT_NORMALS).values.clone()
     source.data["normal"].zero_()
     assert torch.equal(sample.frame.get(CONTACT_NORMALS).values, old)
@@ -258,6 +262,15 @@ def test_sampler_owns_masked_frames_in_requested_environment_order():
     with pytest.raises(ValueError, match="finite"):
         sample.frame.snapshot()
     assert source.update_count == 1
+
+
+def test_sampler_revalidates_request_scope_before_touching_the_source():
+    source = ContactSource(count=3)
+    request = PhysicalEvidenceRequest(2.0, 7, torch.tensor([2, 0]))
+    request.env_ids[1] = 2
+    with pytest.raises(ValueError, match="unique"):
+        ContactEvidenceSampler(source).sample(request)
+    assert source.update_count == 0
 
 
 @pytest.mark.parametrize(

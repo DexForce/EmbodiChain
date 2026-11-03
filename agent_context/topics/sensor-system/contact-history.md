@@ -41,7 +41,13 @@ Removal can supply `expected=observer` to retain a replacement registered under
 the same name. Owners that close during an in-flight token snapshot must make
 their delayed callbacks no-ops.
 
-`lab/sim/sensors/contact_sampling.py` adapts sampled buffers
+`lab/sim/sensors/contact_sampling.py` snapshots and revalidates each request
+before acquisition. It validates channel shape/dtype and finite-row masks once,
+then privately transfers the fresh channel tensors into evidence batches. Each
+batch still owns its environment IDs and all frame alignment checks remain.
+Public batch/frame construction and snapshots always revalidate and copy mutable
+inputs; this path does not cache validation by tensor/object identity.
+The sampler adapts sampled buffers
 to the shared `lab/sim/evidence.py` frame/batch types. It retains the validity mask,
 native actor IDs, Arena frames and impulses, with explicit unsupported, nonfinite,
 saturated or source-drift errors. Native and runtime observation revisions remain
