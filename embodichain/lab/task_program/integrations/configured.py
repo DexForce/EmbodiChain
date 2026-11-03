@@ -39,6 +39,9 @@ from ._configured_services import (
 from .catalog import (
     SimulationTaskProgramRegistration,
 )
+from .composition import (
+    ConfiguredTaskProgramIntegration as _ConfiguredTaskProgramIntegration,
+)
 from .nominal import _ConfiguredPrototypeSource
 from .simulation import (
     AntipodalGraspAffordanceBinding,
@@ -2418,15 +2421,6 @@ class _ConfiguredTaskProgramAdapterFactory:
         adapter = self.delegate.create_adapter(environment)
         adapter._set_configured_nominal_sources(self.nominal_motion_sources)
         return adapter
-
-
-@dataclass(frozen=True, slots=True)
-class _ConfiguredTaskProgramIntegration:
-    """Decoded provider-free integration plus its lazy live factory."""
-
-    registration: SimulationTaskProgramRegistration
-    adapter_factory: _ConfiguredTaskProgramAdapterFactory
-    integration_fingerprint: str
 
 
 def _decode_configured_task_program_integration(
