@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import builtins
 from copy import deepcopy
+import hashlib
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -206,11 +208,23 @@ def test_calibration_changes_fingerprint_and_omission_preserves_legacy_payload()
     payload["runtime_services"] = {"hand_geometries": {}}
     empty = _decode_configured_task_program_integration(payload)
     assert omitted.integration_fingerprint == empty.integration_fingerprint
-    # Captured from the unmodified 1e1cd2d6d configured decoder for this payload.
-    assert (
-        omitted.integration_fingerprint
-        == "7134455eabc8ab42677da60fae4436399cd7be02415ef6ba6f11ffeee4b19b3a"
-    )
+    # Preserve the legacy envelope, while the independently versioned catalog
+    # remains free to change its own registration identity.
+    legacy_envelope = {
+        "registration": omitted.registration.fingerprint,
+        "grasp_pose_generators": (),
+        "planner_config": None,
+    }
+    expected = hashlib.sha256(
+        json.dumps(
+            legacy_envelope,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert omitted.integration_fingerprint == expected
 
 
 def test_omitted_engine_calibration_does_not_load_geometry_provider(monkeypatch):
