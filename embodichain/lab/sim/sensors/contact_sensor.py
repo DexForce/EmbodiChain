@@ -371,12 +371,16 @@ class ContactSensor(BaseSensor):
 
     def _wait_for_sample(self) -> None:
         if self._sample_ready_stream is not None:
+            # Outer capture cannot depend on an uncaptured producer event.
+            # The caller establishes dependencies before capture and replay.
+            if torch.cuda.is_current_stream_capturing():
+                return
             caller = torch.cuda.current_stream(self.device)
             if caller.cuda_stream != self._sample_ready_stream.cuda_stream:
                 caller.wait_stream(self._sample_ready_stream)
 
     def _record_sample_stream(self) -> None:
-        if self.device.type == "cuda":
+        if self.device.type == "cuda" and not torch.cuda.is_current_stream_capturing():
             self._sample_ready_stream = torch.cuda.current_stream(self.device)
 
     def _fetch_contacts(self) -> ContactBuffer:

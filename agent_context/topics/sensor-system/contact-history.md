@@ -19,7 +19,9 @@ retain old contacts. Cached CUDA reads wait for the producing stream. Caller-own
 CUDA graph capture bypasses raw/history deduplication and records the query read
 and reductions on the capture stream. Capture invalidates eager cache keys rather
 than marking unexecuted work as a completed sample; replay does not execute Python
-cache bookkeeping. Callers own replay scheduling and stream dependencies.
+cache bookkeeping. Callers own replay scheduling and establish stream dependencies before capture
+and replay. Capture skips eager producer waits and never records its stream as
+a completed producer, including control-interval initialization and reset.
 
 Sensor reset clears only selected rows and invalidates this cache; it does not
 reset the physics solver. An explicit `update()` may therefore refresh a valid

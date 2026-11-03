@@ -229,8 +229,9 @@ def test_cached_sample_is_ready_on_another_cuda_stream(history_sample: bool) -> 
 
 @pytest.mark.parametrize("history_sample", [False, True])
 @pytest.mark.parametrize("capture_after_advance", [False, True])
+@pytest.mark.parametrize("capture_mode", ["same_stream", "other_stream", "lifecycle"])
 def test_outer_capture_preserves_sampling_and_eager_refresh(
-    history_sample: bool, capture_after_advance: bool
+    history_sample: bool, capture_after_advance: bool, capture_mode: str
 ) -> None:
     """Warmup must not suppress captured fetch/scatter/history or eager refresh."""
     wp.init()
@@ -291,12 +292,22 @@ def test_outer_capture_preserves_sampling_and_eager_refresh(
 
     stream = torch.cuda.Stream(device=device)
     stream.wait_stream(torch.cuda.current_stream(device))
-    with torch.cuda.stream(stream):
+    producer = (
+        stream if capture_mode == "same_stream" else torch.cuda.Stream(device=device)
+    )
+    producer.wait_stream(torch.cuda.current_stream(device))
+    with torch.cuda.stream(producer):
         sample()
+    # Even a completed producer must not introduce an uncaptured event into capture.
+    producer.synchronize()
+    with torch.cuda.stream(stream):
         if capture_after_advance:
             owner.physics_step_index += 1
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph, stream=stream):
+            if capture_mode == "lifecycle":
+                sensor.reset()
+                sensor.begin_control_step()
             sample()
         # Capture has not executed a new sample. Same-step eager calls must work.
         query.buffer.device_counts[0] = 2
@@ -311,6 +322,9 @@ def test_outer_capture_preserves_sampling_and_eager_refresh(
             assert_sample(impulse)
         if history is not None:
             torch.testing.assert_close(
-                history.contact_count, torch.full_like(history.contact_count, 2)
+                history.contact_count,
+                torch.full_like(
+                    history.contact_count, 1 if capture_mode == "lifecycle" else 2
+                ),
             )
     stream.synchronize()
