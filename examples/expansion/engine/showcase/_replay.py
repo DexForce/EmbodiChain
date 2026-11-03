@@ -471,6 +471,9 @@ def export_replays(root: Path, job: Path) -> dict:
                 "tcp": tcp[:, :3, 3],
                 "qpos": q,
                 "joint_names": env.robot.joint_names,
+                "joint_types": [
+                    env.robot.get_joint_type(name) for name in env.robot.joint_names
+                ],
                 "segments": metadata.get("segments", []),
                 "timestamps_origin": "measured",
                 "tcp_origin": "FK of measured qpos",
@@ -503,6 +506,7 @@ def export_replays(root: Path, job: Path) -> dict:
                 "validation": plain([vars(c) for c in episode.validation.checks]),
                 "artifact": str(Path(receipt.storage_id).relative_to(root)),
                 "kind": "physical",
+                "joint_types": data["joint_types"],
             }
             outputs.append(record)
             for child in (

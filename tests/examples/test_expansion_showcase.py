@@ -330,3 +330,49 @@ def test_generated_newton_clock_and_resume_preserve_frozen_inputs(tmp_path):
     build_cases(tmp_path, "full", preserve=True)
     assert visual.read_bytes() == frozen
     assert yaml.safe_load(job_path.read_text())["max_attempts"] == 99
+
+
+def test_browser_comparison_selects_actual_augmentation_and_preserves_units():
+    import shutil
+    import pytest
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is needed to verify the browser comparison logic")
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            node,
+            str(Path(__file__).with_name("showcase_comparison.cjs")),
+            str(root / "examples/expansion/engine/showcase/comparison.js"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_preview_joint_types_are_explicit_and_survive_asset_removal(tmp_path):
+    from examples.expansion.engine.showcase._report import preview_joint_types
+
+    urdf = tmp_path / "robot.urdf"
+    urdf.write_text(
+        '<robot name="test"><joint name="arm" type="continuous"/><joint name="finger" type="prismatic"/></robot>'
+    )
+    dump(
+        tmp_path / "jobs/example/job.json",
+        {"resolved_deployment": {"robot": {"urdf_cfg": {"fpath": str(urdf)}}}},
+    )
+    episode = {"model": "model", "metadata": {"joint_names": ["arm", "finger"]}}
+    assert preview_joint_types(tmp_path, {"id": "example"}, episode) == [
+        "continuous",
+        "prismatic",
+    ]
+    urdf.unlink()
+    assert preview_joint_types(tmp_path, {"id": "example"}, episode) == [
+        "continuous",
+        "prismatic",
+    ]
+    unknown = {"model": "other", "metadata": {"joint_names": ["unknown"]}}
+    assert preview_joint_types(tmp_path, {"id": "missing"}, unknown) == [None]

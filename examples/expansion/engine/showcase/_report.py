@@ -641,6 +641,41 @@ def failure_details(value) -> list[str]:
     return list(dict.fromkeys(messages))
 
 
+def preview_joint_types(root: Path, case: dict, episode: dict) -> list[str | None]:
+    """Freeze explicit joint types for old previews without creating a simulator."""
+    names = episode["metadata"]["joint_names"]
+    if episode.get("joint_types") is not None:
+        return episode["joint_types"]
+    path = root / "replay" / (episode["model"] + ".joints.json")
+    saved = read(path)
+    if saved and saved["joint_names"] == names:
+        return saved["joint_types"]
+    job = read(root / "jobs" / case["id"] / "job.json", {})
+    robot = job.get("resolved_deployment", {}).get("robot", {})
+    source = robot.get("fpath") or robot.get("urdf_cfg", {}).get("fpath")
+    if not source or not Path(source).is_file():
+        return [None] * len(names)
+    import hashlib
+    import xml.etree.ElementTree as ET
+
+    raw = Path(source).read_bytes()
+    kinds = {
+        j.attrib["name"]: j.attrib.get("type")
+        for j in ET.fromstring(raw).findall("joint")
+    }
+    result = [kinds.get(name) for name in names]
+    dump(
+        path,
+        {
+            "joint_names": names,
+            "joint_types": result,
+            "source": "recorded deployment URDF",
+            "urdf_sha256": hashlib.sha256(raw).hexdigest(),
+        },
+    )
+    return result
+
+
 def build_page(root: Path) -> dict:
     inventory = read(root / "cases.json", {"mode": "full", "cases": []})
     acceptance = read(
@@ -706,6 +741,11 @@ def build_page(root: Path) -> dict:
             metadata = episode["metadata"]
             episode = {
                 **episode,
+                "joint_types": preview_joint_types(root, case, episode),
+                "initial_poses": {
+                    entity["uid"]: entity["pose"]
+                    for entity in metadata.get("initial_state", ())
+                },
                 "metadata": {
                     k: metadata[k]
                     for k in (
@@ -768,6 +808,11 @@ def build_page(root: Path) -> dict:
     payload = json.dumps(
         data, ensure_ascii=False, allow_nan=False, separators=(",", ":")
     ).replace("<", "\\u003c")
+    import hashlib
+
+    for script in ("comparison.js", "viewer.js"):
+        revision = hashlib.sha256((HERE / script).read_bytes()).hexdigest()[:12]
+        template = template.replace(f'src="{script}"', f'src="{script}?v={revision}"')
+        shutil.copyfile(HERE / script, root / script)
     (root / "index.html").write_text(template.replace("__SHOWCASE_DATA__", payload))
-    shutil.copyfile(HERE / "viewer.js", root / "viewer.js")
     return acceptance
