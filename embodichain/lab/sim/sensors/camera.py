@@ -323,6 +323,9 @@ class Camera(BaseSensor):
         Poses are arena-local OpenGL transforms in metres. Renderer identity is
         effective; offscreen denoising records the configured mode because the
         SDK has no per-group mode query. Image-buffer ownership is unchanged.
+
+        Returns:
+            An independent metadata snapshot, or an empty mapping for Mesh captures.
         """
         from copy import deepcopy
 

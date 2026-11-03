@@ -707,6 +707,9 @@ class BaseEnv(gym.Env):
 
         Recorders may serialize this snapshot beside observations. Gaussian
         render/update failures propagate before an observation is returned.
+
+        Returns:
+            Sensor names mapped to their owned, nonempty capture metadata.
         """
         snapshots = {}
         for name, sensor in self.sensors.items():

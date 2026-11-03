@@ -104,7 +104,14 @@ class VisualElementCfg:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> VisualElementCfg:
-        """Decode a tagged Gaussian or existing shape representation."""
+        """Decode a tagged Gaussian or existing shape representation.
+
+        Args:
+            data: Element fields with a tagged representation mapping or config.
+
+        Returns:
+            Validated visual element configuration.
+        """
         values = dict(data)
         rep = values.get("representation")
         if isinstance(rep, Mapping):
@@ -179,7 +186,11 @@ class GaussianRenderCfg:
             raise ValueError("lod_target_pixel_size must be finite and positive.")
 
     def apply(self, world_config: object) -> None:
-        """Configure the native World before startup; require APIs only when enabled."""
+        """Configure the native World before startup; require APIs only when enabled.
+
+        Args:
+            world_config: Native DexSim WorldConfig to configure before creation.
+        """
         self.__post_init__()
         if not self.enabled:
             return

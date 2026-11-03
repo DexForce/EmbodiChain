@@ -1849,6 +1849,16 @@ class RigidObject(BatchEntity):
 
         Appearance replacement preserves the original surface unless an explicit
         semantic_shape is supplied. Gaussian data never substitutes for a mesh.
+
+        Args:
+            env_ids: Environment indices, or None for all environments.
+
+        Returns:
+            Owner-local vertices of shape (B, V, 3) with body scaling applied,
+            and triangle indices of shape (B, F, 3).
+
+        Raises:
+            ValueError: If no semantic surface or explicit proxy is available.
         """
         binding = getattr(self, "_visual_binding", None)
         if binding is None:

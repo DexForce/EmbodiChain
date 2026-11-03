@@ -104,6 +104,9 @@ class BatchEntity(ABC):
 
         Gaussian arrays are not copied. Resource IDs are diagnostics scoped to
         the current Scene; configuration element IDs remain stable.
+
+        Returns:
+            Element metadata with representation, local transform and resource IDs.
         """
         binding = getattr(self, "_visual_binding", None)
         if binding is not None:
@@ -138,7 +141,15 @@ class BatchEntity(ABC):
     def set_visual_visibility(
         self, visible: bool, env_ids: Sequence[int] | None = None
     ) -> None:
-        """Set visibility of configured visual elements in selected environments."""
+        """Set visibility of configured visual elements in selected environments.
+
+        Args:
+            visible: Whether the configured elements should be rendered.
+            env_ids: Environment indices, or None for all environments.
+
+        Raises:
+            ValueError: If the entity has no explicit visual composition.
+        """
         binding = getattr(self, "_visual_binding", None)
         if binding is None:
             raise ValueError("Explicit visuals are required for this operation.")
