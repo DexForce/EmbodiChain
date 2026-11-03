@@ -135,11 +135,21 @@ def _case(tmp_path, *, renamed_pads=False, moving_tcp=False):
     return robot, cfg
 
 
-@pytest.mark.parametrize("renamed_pads", [False, True])
+@pytest.mark.parametrize(
+    "renamed_pads,virtual_tcp", [(False, False), (True, False), (True, True)]
+)
 def test_named_fk_sampling_matches_source_without_control_or_pad_name_guessing(
-    tmp_path, renamed_pads
+    tmp_path, renamed_pads, virtual_tcp
 ):
     robot, cfg = _case(tmp_path, renamed_pads=renamed_pads)
+    if virtual_tcp:
+        document = ET.parse(robot.cfg.fpath).getroot()
+        ET.SubElement(document, "link", name="virtual_tcp")
+        joint = ET.SubElement(document, "joint", name="fixed_virtual_tcp", type="fixed")
+        ET.SubElement(joint, "parent", link="hand_base")
+        ET.SubElement(joint, "child", link="virtual_tcp")
+        ET.ElementTree(document).write(robot.cfg.fpath)
+        robot.cfg.solver_cfg[cfg.motion_part].end_link_name = "virtual_tcp"
     before = robot.qpos.clone()
     result = capture.build_parallel_jaw_hand_geometry(robot, cfg=cfg)
     fixture = _fixture()
@@ -149,7 +159,12 @@ def test_named_fk_sampling_matches_source_without_control_or_pad_name_guessing(
     assert robot.calls[0]["joint_names"] == expected_call["joint_names"]
     assert robot.calls[0]["qpos"] == expected_call["qpos"]
     pad_order = tuple(reversed(robot.pads)) if renamed_pads else robot.pads
-    assert robot.calls[0]["link_names"] == ["hand_base", *pad_order, "mount"]
+    assert robot.calls[0]["link_names"] == [
+        "hand_base",
+        *pad_order,
+        *(["virtual_tcp"] if virtual_tcp else []),
+        "virtual_tcp" if virtual_tcp else "mount",
+    ]
     for name, expected in fixture["expected"].items():
         value = getattr(result, name)
         assert list(value.shape) == expected["shape"]
@@ -170,16 +185,36 @@ def test_missing_mimic_command_is_rejected_before_fk(tmp_path):
     assert robot.reads == 0 and robot.calls == []
 
 
+def test_opposite_arm_tcp_is_rejected_even_when_it_is_stationary(tmp_path):
+    robot, cfg = _case(tmp_path)
+    document = ET.parse(robot.cfg.fpath).getroot()
+    ET.SubElement(document, "link", name="opposite_tcp")
+    joint = ET.SubElement(document, "joint", name="opposite_arm_joint", type="revolute")
+    ET.SubElement(joint, "parent", link="base")
+    ET.SubElement(joint, "child", link="opposite_tcp")
+    ET.ElementTree(document).write(robot.cfg.fpath)
+    robot.joint_names.append("opposite_arm_joint")
+    robot.qpos = torch.cat((robot.qpos, torch.tensor([[0.2]])), dim=1)
+    robot.cfg.solver_cfg["other_motion"] = NS(
+        end_link_name="opposite_tcp", tcp=torch.eye(4).tolist()
+    )
+    cfg.motion_part = "other_motion"
+
+    with pytest.raises(ValueError, match="fixed URDF joints"):
+        capture.build_parallel_jaw_hand_geometry(robot, cfg=cfg)
+    assert robot.reads == 0 and robot.calls == []
+
+
 def test_moving_finger_tcp_is_rejected_before_surface_capture(tmp_path, monkeypatch):
     robot, cfg = _case(tmp_path, moving_tcp=True)
     surfaces = Mock(
         side_effect=AssertionError("Do not sample geometry in a moving TCP frame.")
     )
     monkeypatch.setattr(capture, "sample_urdf_collision_surfaces", surfaces)
-    with pytest.raises(ValueError, match="TCP moves"):
+    with pytest.raises(ValueError, match="fixed URDF joints"):
         capture.build_parallel_jaw_hand_geometry(robot, cfg=cfg)
     surfaces.assert_not_called()
-    assert len(robot.calls) == 1
+    assert robot.calls == [] and robot.reads == 0
 
 
 def _delegate():

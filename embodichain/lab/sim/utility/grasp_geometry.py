@@ -162,6 +162,23 @@ def _capture(robot: Robot, cfg: RobotHandGeometryCfg) -> SampledHandGeometry:
     solver = robot.cfg.solver_cfg[cfg.motion_part]
     if solver.end_link_name not in all_links:
         raise ValueError("The motion solver end link is absent from the runtime URDF.")
+    fixed_neighbors: dict[str, set[str]] = {name: set() for name in all_links}
+    for joint in joints.values():
+        if joint.attrib["type"] == "fixed":
+            parent = joint.find("parent").attrib["link"]
+            child = joint.find("child").attrib["link"]
+            fixed_neighbors[parent].add(child)
+            fixed_neighbors[child].add(parent)
+    connected, pending = {cfg.hand_root_link}, [cfg.hand_root_link]
+    while pending:
+        for neighbor in fixed_neighbors[pending.pop()] - connected:
+            connected.add(neighbor)
+            pending.append(neighbor)
+    if solver.end_link_name not in connected:
+        raise ValueError(
+            "Unsupported hand frame: hand root and motion solver end link must "
+            "be connected only by fixed URDF joints."
+        )
     current = robot.get_qpos()
     if (
         not isinstance(current, torch.Tensor)
@@ -249,7 +266,8 @@ def build_parallel_jaw_hand_geometry(
 
     Raises:
         ValueError: The selected joints, geometry, commands or fixed-TCP contract
-            are unsupported. The motion TCP must remain fixed during hand motion.
+            are unsupported. The hand root and solver end link must be connected
+            by fixed URDF joints, and the motion TCP must stay fixed during closure.
 
     No simulator step or robot-state write is performed. Rebuild when the model,
     calibration or hand commands change; runtime ownership belongs to the caller.

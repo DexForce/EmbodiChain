@@ -193,8 +193,10 @@ hand-root and pad links, joint commands and sampling bounds. Control names never
 imply capabilities. Commands cover every moving hand-subtree joint, including
 mimic followers, in the resolved control-part order. Named full-articulation FK
 uses the first measured row as its reference posture without changing robot state.
-The declared motion TCP must remain fixed throughout hand actuation; geometry
-whose actuation moves that TCP is unsupported. Model-specific commands and TCP
+The hand root and solver end link must connect through fixed URDF joints;
+fixed virtual TCP links may lie upstream or downstream. A stationary opposite-arm
+TCP is not a valid hand reference. The declared TCP must also remain fixed
+throughout hand actuation. Model-specific commands and TCP
 calibration remain in concrete robot/embodiment configuration.
 
 `RobotCoordinatedGraspProvider` captures both hands on its first paired query.
