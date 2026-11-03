@@ -545,3 +545,15 @@ def test_report_requires_recorded_milestones_and_keeps_final_failure_independent
     )[0]
     assert report.temporal[0].status is EvaluationStatus.UNAVAILABLE
     assert not report.certificate_ready
+
+
+def test_acquisition_exception_marker_keeps_the_unavailable_reason():
+    spec, binding, _, program = _legacy_evidence()
+    result = evaluate_supported_placement_evidence(
+        spec,
+        binding,
+        {"unavailable": "Rigid trajectory recording is unavailable."},
+        program=program,
+    )[0]
+    assert result.status is EvaluationStatus.UNAVAILABLE
+    assert result.reason == "Rigid trajectory recording is unavailable."

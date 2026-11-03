@@ -27,7 +27,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from embodichain.gen_sim.task_spec import TaskSpec, canonical_hash, json_snapshot
-from embodichain.gen_sim.task_spec.evidence import SupportedPlacementEvidenceBinding
+from embodichain.gen_sim.task_spec.evidence import (
+    SupportedPlacementEvidenceBinding,
+    evaluate_supported_placement_evidence,
+)
 
 __all__ = ["project_placement_evidence_binding"]
 
@@ -221,7 +224,7 @@ def project_placement_evidence_binding(
         if milestone is not None
         else ()
     )
-    return SupportedPlacementEvidenceBinding(
+    result = SupportedPlacementEvidenceBinding(
         task_spec_digest=validation["task_spec_digest"],
         program_digest=validation["program_digest"],
         predicate_id=predicate_id,
@@ -243,3 +246,7 @@ def project_placement_evidence_binding(
         env_ids=tuple(range(num_envs)),
         episode_ids=None if episode_ids is None else tuple(episode_ids),
     )
+    # TaskSpec owns goal/milestone association rules. Empty observations exercise
+    # that static selection without collecting or evaluating physical samples.
+    evaluate_supported_placement_evidence(normalized, result, {}, program=program)
+    return result

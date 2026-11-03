@@ -430,6 +430,13 @@ def evaluate_supported_placement_evidence(
         if not isinstance(snapshot, dict):
             raise TypeError("Physical evidence must be a JSON mapping.")
         reference = (selected.binding_hash, canonical_hash(snapshot))
+        if "unavailable" in snapshot:
+            message = snapshot["unavailable"]
+            if type(message) is not str or not message.strip():
+                raise ValueError(
+                    "Unavailable evidence must retain a nonempty acquisition reason."
+                )
+            raise ValueError(message)
         if selected.episode_ids is not None:
             if snapshot.get("episode_ids") != list(selected.episode_ids) or any(
                 type(value) is not int for value in snapshot.get("episode_ids", [])
