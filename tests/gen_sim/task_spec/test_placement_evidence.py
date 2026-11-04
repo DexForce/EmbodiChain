@@ -557,3 +557,31 @@ def test_acquisition_exception_marker_keeps_the_unavailable_reason():
     )[0]
     assert result.status is EvaluationStatus.UNAVAILABLE
     assert result.reason == "Rigid trajectory recording is unavailable."
+
+
+@pytest.mark.parametrize("family", ["E4", "E5"])
+def test_single_placement_proof_cannot_replace_transfer_or_coordinated_transport(
+    family,
+):
+    from dataclasses import replace
+
+    spec, binding, evidence, program = _legacy_evidence()
+    predicate = spec.goal[0]
+    spec = replace(
+        spec,
+        goal=(
+            replace(
+                predicate,
+                arguments={
+                    **predicate.arguments,
+                    "task_type": family,
+                    "terminal_behavior": "place",
+                },
+            ),
+        ),
+    )
+    binding = replace(
+        binding, task_spec_digest=canonical_hash(spec.to_dict()), binding_hash=""
+    )
+    with pytest.raises(ValueError, match="task-family evidence"):
+        evaluate_supported_placement_evidence(spec, binding, evidence, program=program)

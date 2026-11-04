@@ -389,6 +389,10 @@ def evaluate_supported_placement_evidence(
     if len(predicates) != 1:
         raise ValueError("Placement binding must identify one declared predicate.")
     predicate = predicates[0]
+    if predicate.arguments.get("task_type") not in {None, "E1"}:
+        raise ValueError(
+            "This placement slice does not verify handover, coordinated transport or other task-family evidence."
+        )
     milestone_predicate = any(
         item.id == selected.predicate_id
         for milestone in normalized.milestones
