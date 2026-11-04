@@ -354,11 +354,10 @@ A report passes only when its nonempty required checks all pass. Fixed-step sett
 embodichain.lab.sim.scene.native_hand
 --------------------------------------
 
-These invocation-owned CPU/FCL queries use captured Default cooked convex/box
+These invocation-owned CPU/Newton queries use captured Default cooked convex/box
 collision shapes and their original rest/contact offsets. They preserve nominal
 closing, opening and rigid-scene prefix checks; they do not measure attachment,
-release or continuous collision freedom. Install ``embodichain[planning-geometry]``
-to supply the qualified optional FCL runtime. Missing support raises an explicit
+release or continuous collision freedom. The shared Newton runtime supplies isolated query states. Missing support raises an explicit
 error and never produces a substitute clearance result.
 
 The builder accepts exact Robot/native identities, explicit hand calibration,
@@ -367,7 +366,7 @@ a fresh identity generated independently of planning RNG with the robot timestam
 and scene version.
 Opening poses must share this scope. Use the closing query as a context manager
 or close it in a ``finally`` block; later queries fail while collected reports
-remain available. Closing releases query/FCL resources, never borrowed entities.
+remain available. Closing releases query/Newton resources, never borrowed entities.
 Atomic consumers select source/purpose/continuation eligibility before capture.
 
 .. currentmodule:: embodichain.lab.sim.scene.native_hand
@@ -416,3 +415,17 @@ robot installation search, independent validation and the configured entry point
    :maxdepth: 1
 
    embodichain.lab.sim.scene.feasibility
+
+Native distance diagnostics use capped clearance lower bounds, with the query
+precision interval retained for classification. A threshold crossing that
+interval raises unavailable geometry. Candidate axes, stroke samples and decision
+order remain unchanged; exact FCL distance values and negative penetration-depth
+reports are not part of the Newton contract.
+
+.. currentmodule:: embodichain.lab.sim.scene.native_hand
+
+``NativeRigidObstacle`` describes captured physical geometry and pose. The scene
+query constructs its own Newton resources; callers do not supply backend managers.
+
+.. autoclass:: NativeRigidObstacle
+   :members:

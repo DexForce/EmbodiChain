@@ -33,7 +33,7 @@ from embodichain.lab.sim.utility.grasp_geometry import (
     _resolve_hand_frame,
 )
 from embodichain.utils.math import pose_inv
-from ._collision_backends import _require_fcl
+from ._collision_backends import _require_newton
 from .native_hand import (
     NativeContactPart,
     NativeClosingQuery,
@@ -41,6 +41,7 @@ from .native_hand import (
     NativeOpeningTarget,
     NativeQueryScope,
     NativeRigidRestScene,
+    NativeRigidObstacle,
     _neutral_identity,
     _rigid_pose,
 )
@@ -175,7 +176,7 @@ def _build_native_closing_query(
     opening: NativeOpeningTarget | None,
     identity: Mapping[str, object] | None,
 ) -> NativeClosingQuery:
-    _require_fcl()
+    _require_newton()
     if not isinstance(scope, NativeQueryScope):
         raise TypeError("scope must be NativeQueryScope.")
     if type(revision) is not int or revision not in range(1, 10):
@@ -365,7 +366,7 @@ def _build_native_closing_query(
 def _build_native_rigid_rest_scene(
     simulation: SimulationManager, closing: NativeClosingQuery
 ) -> NativeRigidRestScene:
-    _require_fcl()
+    _require_newton()
     if not isinstance(closing, NativeClosingQuery):
         raise TypeError("closing must be NativeClosingQuery.")
     closing._require_open()
@@ -413,10 +414,7 @@ def _build_native_rigid_rest_scene(
             .double()
             .numpy()
         )
-        manager = trimesh.collision.CollisionManager()
-        for index, mesh in enumerate(meshes):
-            manager.add_object(f"{uid}:{index}", mesh, transform=pose)
-        targets.append((uid, rest, manager))
+        targets.append(NativeRigidObstacle(uid, rest, tuple(meshes), pose))
     result = NativeRigidRestScene(closing.parts, targets, scope=closing.scope)
     closing.rigid_scene_screen = result
     return result

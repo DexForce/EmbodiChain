@@ -28,7 +28,7 @@ The package facade resolves services lazily. Expansion has its own
 polygon objects, simulation or GenSim models. Scene CPU strategies own support
 selection, polygon search, greedy packing and SciPy SLSQP optimization.
 
-`native_hand.py` owns CPU/FCL nominal hand queries using the original Default
+`native_hand.py` owns CPU/Newton nominal hand queries using the original Default
 cooked convex/box shapes and pair rest/contact offsets. Its private capture
 adapter requires the exact simulation-owned Robot, native source identity and
 B1/env0. It consumes explicit [hand calibration](../robot-system/robot-system.md#sampled-hand-geometry)
@@ -38,10 +38,10 @@ Source-compatible B0/F1 native preparation explicitly selects 65 stroke samples;
 surface-sampling budgets must not silently change that native qualification grid.
 Each preparation supplies a fresh query ID independent of planning RNG, the robot
 timestamp and scene version. Opening reference/target poses share that scope.
-Queries own caches and FCL resources; close them in a context manager or finally
+Queries own caches and Newton resources; close them in a context manager or finally
 block before leaving the preparation. Closed queries reject further work while
 retaining their reports, and never destroy borrowed native entities. The optional
-`planning-geometry` dependency is required; missing FCL produces no clearance
+Newton runtime is required; missing bindings produce no clearance
 result. These sampled geometric checks are not physical acquisition/release
 evidence. Native capture and its source-differential CPU coverage are separate
 from native simulation qualification.

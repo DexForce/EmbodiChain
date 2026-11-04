@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Analytic inputs and actual-FCL instrumentation for native query regression."""
+"""Analytic inputs and Newton query instrumentation for native query regression."""
 
 from __future__ import annotations
 
@@ -166,8 +166,9 @@ def recording_manager(original):
             )
             return self.inner.set_transform(name, matrix)
 
-        def min_distance_other(self, other):
-            distance = float(self.inner.min_distance_other(other.inner))
+        def distance_interval(self, other, limit):
+            interval = self.inner.distance_interval(other.inner, limit)
+            distance = interval.lower
             trace.append(
                 {
                     "op": "distance",
@@ -176,6 +177,31 @@ def recording_manager(original):
                     "distance": distance,
                 }
             )
-            return distance
+            return interval
+
+        def close(self):
+            self.inner.close()
 
     return Manager, trace
+
+
+def decisions(value):
+    """Compare source decisions/order separately from backend distance diagnostics."""
+    if isinstance(value, dict):
+        return {
+            key: decisions(item)
+            for key, item in value.items()
+            if not key.endswith(("minimum_distance_m", "clearance_lower_bound_m"))
+            and key
+            not in {
+                "distance",
+                "minimum_rest_clearance_m",
+                "mesh_distance_m",
+                "collision_backend",
+                "collision_backend_version",
+                "distance_semantics",
+            }
+        }
+    if isinstance(value, (tuple, list)):
+        return [decisions(item) for item in value]
+    return value

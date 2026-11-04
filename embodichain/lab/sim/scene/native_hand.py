@@ -16,11 +16,12 @@
 
 """Invocation-owned native hand clearance from captured cooked collision shapes.
 
-These CPU/FCL queries preserve the source nominal closing/opening law. They
+These CPU/Newton queries preserve the source nominal closing/opening law. They
 qualify discrete geometry only; no query is measured acquisition/release evidence.
 """
 
 from __future__ import annotations
+from importlib.metadata import version
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
@@ -36,7 +37,8 @@ import numpy as np
 import torch
 import trimesh
 
-from ._collision_backends import _require_fcl
+from ._collision_backends import _require_newton
+from ._newton_queries import _ConvexCollection
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -50,6 +52,7 @@ __all__ = [
     "NativeClosingQuery",
     "NativeOpeningQuery",
     "NativeRigidRestScene",
+    "NativeRigidObstacle",
     "build_native_closing_query",
     "build_native_rigid_rest_scene",
 ]
@@ -302,7 +305,7 @@ class NativeClosingQuery(_QueryLifetime):
         target_contact_offset: float | None = None,
         gravity_in_object: np.ndarray | None = None,
     ) -> None:
-        """Prepare FCL managers for one explicit captured closing stroke.
+        """Prepare Newton managers for one explicit captured closing stroke.
 
         Args:
             parts: Captured enabled collision links in source order, with two pads.
@@ -321,7 +324,7 @@ class NativeClosingQuery(_QueryLifetime):
         directly does not certify that it came from a native collision body.
         """
         self._start_scope(scope)
-        _require_fcl()
+        _require_newton()
         parts = tuple(parts)
         if type(revision) is not int or revision not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
             raise ValueError("Unsupported Pick closing revision")
@@ -407,12 +410,12 @@ class NativeClosingQuery(_QueryLifetime):
                 for part in parts
             ]
         )
-        self.target = trimesh.collision.CollisionManager()
+        self.target = _ConvexCollection()
         for index, mesh in enumerate(target_meshes):
             self.target.add_object(str(index), mesh)
         self.managers = []
         for part in parts:
-            manager = trimesh.collision.CollisionManager()
+            manager = _ConvexCollection()
             for index, mesh in enumerate(part.meshes):
                 manager.add_object(str(index), mesh)
             self.managers.append(manager)
@@ -435,7 +438,7 @@ class NativeClosingQuery(_QueryLifetime):
         distance = np.linalg.norm(gap, axis=-1)
         if not np.isfinite(distance).all():
             raise ValueError("Native closing bound distance is unavailable")
-        # Query exact FCL near a boundary; this reserve never relaxes its offsets.
+        # Query exact Newton near a boundary; this reserve never relaxes its offsets.
         rounding = 1e-6 * np.maximum(1.0, np.abs(boxes).max(axis=(2, 3)))
         return distance > self._distance_thresholds[None] + rounding
 
@@ -447,7 +450,7 @@ class NativeClosingQuery(_QueryLifetime):
 
         Returns:
             Owned acceptance/reason record with the checked prefix and diagnostics.
-            Cached repeats do not issue additional FCL queries.
+            Cached repeats do not issue additional Newton queries.
         """
         self._require_open()
         pose = _rigid_pose(tcp_in_object)
@@ -489,11 +492,15 @@ class NativeClosingQuery(_QueryLifetime):
                     continue
                 for index in range(len(part.meshes)):
                     manager.set_transform(str(index), pose @ part.tcp_poses[step])
-                distance = float(manager.min_distance_other(self.target))
-                if not math.isfinite(distance):
-                    raise ValueError("Native mesh distance is unavailable")
                 rest = part.rest_offset + self.target_rest_offset
-                if distance <= rest:
+                band = (
+                    rest
+                    if part.contact_offset is None or self.target_contact_offset is None
+                    else max(rest, part.contact_offset + self.target_contact_offset)
+                )
+                interval = manager.distance_interval(self.target, band)
+                distance = interval.lower
+                if interval.below(rest):
                     if part.pad:
                         pad_contact += 1
                         if (
@@ -505,7 +512,7 @@ class NativeClosingQuery(_QueryLifetime):
                                 "valid": False,
                                 "reason": "pad_rest_at_opening",
                                 "link": part.name,
-                                "minimum_distance_m": distance,
+                                "clearance_lower_bound_m": distance,
                                 "native_pair_rest_offset_m": rest,
                             }
                     elif rejected is None:
@@ -513,17 +520,17 @@ class NativeClosingQuery(_QueryLifetime):
                             "valid": False,
                             "reason": "nonpad_rest_before_bilateral_pad",
                             "link": part.name,
-                            "minimum_distance_m": distance,
+                            "clearance_lower_bound_m": distance,
                             "native_pair_rest_offset_m": rest,
                         }
                 if self.revision >= 2 and not part.pad and halo is None:
                     contact = part.contact_offset + self.target_contact_offset
-                    if distance <= contact:
+                    if interval.below(contact):
                         halo = {
                             "valid": False,
                             "reason": "nonpad_contact_envelope_before_bilateral_pad_rest",
                             "link": part.name,
-                            "minimum_distance_m": distance,
+                            "clearance_lower_bound_m": distance,
                             "native_pair_contact_offset_m": contact,
                         }
             if (
@@ -533,8 +540,8 @@ class NativeClosingQuery(_QueryLifetime):
             ):
                 first_halo = {
                     "first_nonpad_contact_halo_link": halo["link"],
-                    "first_nonpad_contact_halo_minimum_distance_m": halo[
-                        "minimum_distance_m"
+                    "first_nonpad_contact_halo_clearance_lower_bound_m": halo[
+                        "clearance_lower_bound_m"
                     ],
                     "first_nonpad_contact_halo_sample_index": step,
                     "first_nonpad_contact_halo_native_pair_contact_offset_m": halo[
@@ -631,6 +638,9 @@ class NativeClosingQuery(_QueryLifetime):
         if self.closed:
             return deepcopy(self._closed_report)
         result = {
+            "collision_backend": "newton.CollisionPipeline",
+            "collision_backend_version": version("newton"),
+            "distance_semantics": "capped_conversion_interval/v1",
             "query_scope": asdict(self.scope),
             "revision": self.revision,
             "identity": deepcopy(self.identity),
@@ -700,7 +710,7 @@ class NativeClosingQuery(_QueryLifetime):
         self.deferred_source_proposal_calls += 1
 
     def close(self) -> None:
-        """Release owned FCL resources while retaining the collected report."""
+        """Release owned Newton resources while retaining the collected report."""
         if self.closed:
             return
         self._closed_report = self.report()
@@ -709,7 +719,10 @@ class NativeClosingQuery(_QueryLifetime):
             if query is not None:
                 query.close()
         self.opening_screen = self.rigid_scene_screen = None
+        for manager in self.managers:
+            manager.close()
         self.managers.clear()
+        self.target.close()
         self.target = None
         self.parts = ()
         self._part_tcp_boxes = None
@@ -770,7 +783,7 @@ class NativeOpeningQuery(_QueryLifetime):
             scope: Must equal the closing query's preparation scope.
         """
         self._start_scope(scope)
-        _require_fcl()
+        _require_newton()
         closing._require_open()
         if scope != closing.scope:
             raise ValueError(
@@ -793,13 +806,13 @@ class NativeOpeningQuery(_QueryLifetime):
         self.object_target_pose = _rigid_pose(object_target_pose)
         self.reference_pose = _rigid_pose(reference_pose)
         self.identity = deepcopy(identity)
-        self.reference = trimesh.collision.CollisionManager()
+        self.reference = _ConvexCollection()
         for index, mesh in enumerate(reference_meshes):
             self.reference.add_object(str(index), mesh, transform=self.reference_pose)
         self.reference_shape_count = len(reference_meshes)
         self.managers = []
         for part in closing.parts:
-            manager = trimesh.collision.CollisionManager()
+            manager = _ConvexCollection()
             for index, mesh in enumerate(part.meshes):
                 manager.add_object(str(index), mesh)
             self.managers.append(manager)
@@ -843,7 +856,7 @@ class NativeOpeningQuery(_QueryLifetime):
                 "terminal_tcp": terminal.tolist(),
                 "checked_queries": 0,
                 "contact_halo_links": [],
-                "minimum_distance_m": None,
+                "clearance_lower_bound_m": None,
             }
             for step in range(stop, -1, -1):
                 for part, manager in zip(
@@ -853,22 +866,25 @@ class NativeOpeningQuery(_QueryLifetime):
                         manager.set_transform(
                             str(index), terminal @ part.tcp_poses[step]
                         )
-                    distance = float(manager.min_distance_other(self.reference))
-                    if not math.isfinite(distance):
-                        raise ValueError("Opening native mesh distance is unavailable.")
+                    rest = self.rest_offset + part.rest_offset
+                    contact = self.contact_offset + part.contact_offset
+                    interval = manager.distance_interval(
+                        self.reference, max(rest, contact)
+                    )
+                    distance = interval.lower
                     result["checked_queries"] += 1
-                    previous = result["minimum_distance_m"]
-                    result["minimum_distance_m"] = (
+                    previous = result["clearance_lower_bound_m"]
+                    result["clearance_lower_bound_m"] = (
                         distance if previous is None else min(previous, distance)
                     )
                     rest = self.rest_offset + part.rest_offset
                     contact = self.contact_offset + part.contact_offset
                     if (
-                        distance <= contact
+                        interval.below(contact)
                         and part.name not in result["contact_halo_links"]
                     ):
                         result["contact_halo_links"].append(part.name)
-                    if distance <= rest:
+                    if interval.below(rest):
                         result.update(
                             valid=False,
                             reason="hand_support_rest_envelope_overlap",
@@ -892,6 +908,9 @@ class NativeOpeningQuery(_QueryLifetime):
             return deepcopy(self._closed_report)
         records = list(self.cache.values())
         return {
+            "collision_backend": "newton.CollisionPipeline",
+            "collision_backend_version": version("newton"),
+            "distance_semantics": "capped_conversion_interval/v1",
             "query_scope": asdict(self.scope),
             "scope": "discrete_native_opening_prefix_not_physical_release",
             "physical_evidence": False,
@@ -912,15 +931,48 @@ class NativeOpeningQuery(_QueryLifetime):
         }
 
     def close(self) -> None:
-        """Release only owned support/hand FCL resources and retain diagnostics."""
+        """Release only owned support/hand Newton resources and retain diagnostics."""
         if self.closed:
             return
         self._closed_report = self.report()
         self._closed = True
+        for manager in self.managers:
+            manager.close()
         self.managers.clear()
+        self.reference.close()
         self.reference = None
         self.closing = None
         self.cache.clear()
+
+
+@dataclass(frozen=True, slots=True)
+class NativeRigidObstacle:
+    """Owned physical obstacle declaration, independent of collision backend APIs.
+
+    Args:
+        uid: Exact native rigid identity.
+        rest_offset: Original nonnegative native rest offset.
+        meshes: Ordered, already-scaled physical convex shape meshes.
+        pose: Captured rigid world pose, never refreshed during a query.
+    """
+
+    uid: str
+    rest_offset: float
+    meshes: tuple[trimesh.Trimesh, ...]
+    pose: np.ndarray
+
+    def __post_init__(self) -> None:
+        if type(self.uid) is not str or not self.uid or self.uid != self.uid.strip():
+            raise ValueError("Native obstacle requires an exact identity.")
+        if not math.isfinite(self.rest_offset) or self.rest_offset < 0:
+            raise ValueError(
+                "Native obstacle requires a finite nonnegative rest offset."
+            )
+        meshes = tuple(self.meshes)
+        if not meshes or any(not isinstance(mesh, trimesh.Trimesh) for mesh in meshes):
+            raise ValueError("Native obstacle requires physical convex shape meshes.")
+        object.__setattr__(self, "meshes", tuple(mesh.copy() for mesh in meshes))
+        object.__setattr__(self, "pose", _rigid_pose(self.pose))
 
 
 class NativeRigidRestScene(_QueryLifetime):
@@ -929,24 +981,32 @@ class NativeRigidRestScene(_QueryLifetime):
     def __init__(
         self,
         parts: Sequence[NativeContactPart],
-        targets: Sequence[tuple[str, float, trimesh.collision.CollisionManager]],
+        targets: Sequence[NativeRigidObstacle],
         *,
         scope: NativeQueryScope,
     ) -> None:
-        """Bind ordered captured hand parts and rigid FCL groups to one scope.
+        """Bind ordered captured hand parts and rigid Newton groups to one scope.
 
         Args:
             parts: Captured source hand stroke, frozen as a tuple on construction.
-            targets: Ordered native UID, original rest offset and world FCL groups.
-                Rows are frozen and FCL manager ownership transfers to this query;
-                callers must not mutate or reuse those managers during its lifetime.
-                Closing releases its references, never borrowed native entities.
+            targets: Ordered physical obstacle declarations. Backend query resources
+                are created and owned here; callers never construct a backend manager.
+                Closing releases query resources, never borrowed native entities.
             scope: Same preparation/observation scope as the owning closing query.
         """
         self._start_scope(scope)
-        _require_fcl()
+        _require_newton()
         parts = tuple(parts)
-        targets = tuple((uid, rest, manager) for uid, rest, manager in targets)
+        declarations = tuple(targets)
+        if any(type(value) is not NativeRigidObstacle for value in declarations):
+            raise TypeError("Native obstacles must use typed physical declarations.")
+        targets = []
+        for value in declarations:
+            manager = _ConvexCollection()
+            for index, mesh in enumerate(value.meshes):
+                manager.add_object(f"{value.uid}:{index}", mesh, transform=value.pose)
+            targets.append((value.uid, value.rest_offset, manager))
+        targets = tuple(targets)
         if not parts or any(
             not math.isfinite(value) or value < 0
             for value in [
@@ -960,7 +1020,7 @@ class NativeRigidRestScene(_QueryLifetime):
         self.parts, self.targets = parts, targets
         self.managers = []
         for part in parts:
-            manager = trimesh.collision.CollisionManager()
+            manager = _ConvexCollection()
             for index, mesh in enumerate(part.meshes):
                 manager.add_object(str(index), mesh)
             self.managers.append(manager)
@@ -1003,37 +1063,40 @@ class NativeRigidRestScene(_QueryLifetime):
                 for index in range(len(part.meshes)):
                     manager.set_transform(str(index), pose @ part.tcp_poses[step])
                 for uid, rest, target in self.targets:
-                    distance = float(manager.min_distance_other(target))
-                    if not math.isfinite(distance):
-                        raise ValueError(
-                            "Native hand/scene mesh distance is unavailable."
-                        )
                     pair_rest = part.rest_offset + rest
+                    interval = manager.distance_interval(target, pair_rest)
+                    distance = interval.lower
                     margin = distance - pair_rest
                     minimum = min(minimum, margin)
-                    if margin <= 0:
+                    if interval.below(pair_rest):
                         result.update(
                             valid=False,
                             kind="native_rigid_pair_rest",
                             link=part.name,
                             scene_uid=uid,
                             sample_index=step,
-                            mesh_distance_m=distance,
+                            mesh_clearance_lower_bound_m=distance,
                             native_pair_rest_offset_m=pair_rest,
-                            minimum_rest_clearance_m=minimum,
+                            minimum_rest_clearance_lower_bound_m=minimum,
                         )
                         self.cache[key] = result
                         return dict(result)
-        result["minimum_rest_clearance_m"] = minimum if math.isfinite(minimum) else None
+        result["minimum_rest_clearance_lower_bound_m"] = (
+            minimum if math.isfinite(minimum) else None
+        )
         self.cache[key] = result
         return dict(result)
 
     def close(self) -> None:
-        """Release this snapshot's FCL managers, never the native scene bodies."""
+        """Release this snapshot's Newton managers, never the native scene bodies."""
         if self.closed:
             return
         self._closed = True
+        for manager in self.managers:
+            manager.close()
         self.managers.clear()
+        for _, _, target in self.targets:
+            target.close()
         self.targets = self.parts = ()
 
 

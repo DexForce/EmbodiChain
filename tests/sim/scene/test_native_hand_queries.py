@@ -14,9 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Actual-FCL native hand query parity, scopes and owned query lifetimes."""
+"""Newton native hand query decisions, scopes and owned query lifetimes."""
 
 from __future__ import annotations
+from embodichain.lab.sim.scene import native_hand, _native_hand_capture as capture
+from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
 
 from dataclasses import replace
 import json
@@ -34,20 +36,22 @@ from embodichain.lab.sim.scene.native_hand import (
     NativeOpeningTarget,
     NativeQueryScope,
     NativeRigidRestScene,
+    NativeRigidObstacle,
 )
 from ._native_hand_fixture import (
     exercise,
     query_inputs,
     recording_manager,
+    decisions,
     stable_report,
 )
 
 
 @pytest.fixture
-def fcl_available():
+def newton_available():
     pytest.importorskip(
-        "fcl",
-        reason="Actual native geometry is unqualified without planning-geometry/python-fcl.",
+        "newton",
+        reason="Actual native geometry is unqualified without Newton runtime.",
     )
 
 
@@ -65,18 +69,21 @@ def _scope():
 
 
 @pytest.mark.parametrize("index", range(15))
-def test_closing_results_candidate_axes_and_fcl_trace_match_f1(
-    fcl_available, monkeypatch, index
+def test_closing_results_candidate_axes_and_newton_query_order_match_f1_decisions(
+    newton_available, monkeypatch, index
 ):
     case = _reference()["closing"][index]
-    manager, trace = recording_manager(trimesh.collision.CollisionManager)
-    monkeypatch.setattr(trimesh.collision, "CollisionManager", manager)
+    manager, trace = recording_manager(_ConvexCollection)
+    monkeypatch.setattr(native_hand, "_ConvexCollection", manager)
     parts, target, options = query_inputs(case["case"], NativeContactPart)
     with NativeClosingQuery(parts, target, 0.0, scope=_scope(), **options) as query:
         actual = exercise(query, case["case"])
-        assert actual == case["result"]
-        assert trace == case["trace"]
+        assert decisions(actual) == decisions(case["result"])
+        assert decisions(trace) == decisions(case["trace"])
         before_close = query.report()
+        assert before_close["collision_backend"] == "newton.CollisionPipeline"
+        assert before_close["collision_backend_version"]
+        assert before_close["distance_semantics"] == "capped_conversion_interval/v1"
     assert query.closed and query.report() == before_close
     for operation in (
         lambda: query.inspect(np.eye(4)),
@@ -90,11 +97,11 @@ def test_closing_results_candidate_axes_and_fcl_trace_match_f1(
 
 @pytest.mark.parametrize("index", [0, 1])
 def test_opening_prefix_and_contact_halo_report_match_f1(
-    fcl_available, monkeypatch, index
+    newton_available, monkeypatch, index
 ):
     case = _reference()["opening"][index]
-    manager, trace = recording_manager(trimesh.collision.CollisionManager)
-    monkeypatch.setattr(trimesh.collision, "CollisionManager", manager)
+    manager, trace = recording_manager(_ConvexCollection)
+    monkeypatch.setattr(native_hand, "_ConvexCollection", manager)
     parts, target, options = query_inputs({"revision": 4}, NativeContactPart)
     closing = NativeClosingQuery(parts, target, 0.0, scope=_scope(), **options)
     pose = np.eye(4)
@@ -112,10 +119,12 @@ def test_opening_prefix_and_contact_halo_report_match_f1(
         scope=closing.scope,
     )
     closing.opening_screen = opening
-    assert opening.inspect(pose, source) == case["result"]
-    assert opening.inspect(pose.copy(), source) == case["repeated"]
-    assert stable_report(opening.report()) == case["report"]
-    assert trace == case["trace"]
+    assert decisions(opening.inspect(pose, source)) == decisions(case["result"])
+    assert decisions(opening.inspect(pose.copy(), source)) == decisions(
+        case["repeated"]
+    )
+    assert decisions(stable_report(opening.report())) == decisions(case["report"])
+    assert decisions(trace) == decisions(case["trace"])
     report = opening.report()
     closing.close()
     assert opening.closed and opening.report() == report
@@ -125,29 +134,28 @@ def test_opening_prefix_and_contact_halo_report_match_f1(
 
 @pytest.mark.parametrize("index", [0, 1])
 def test_rigid_scene_prefix_uses_original_pair_rest_and_query_order(
-    fcl_available, monkeypatch, index
+    newton_available, monkeypatch, index
 ):
     case = _reference()["scene"][index]
-    manager, trace = recording_manager(trimesh.collision.CollisionManager)
-    monkeypatch.setattr(trimesh.collision, "CollisionManager", manager)
+    manager, trace = recording_manager(_ConvexCollection)
+    monkeypatch.setattr(native_hand, "_ConvexCollection", manager)
     parts, _, _ = query_inputs({"revision": 4}, NativeContactPart)
-    other = manager()
     pose = np.eye(4)
     pose[2, 3] = case["height"]
-    other.add_object(
-        "obstacle:0", trimesh.creation.box((0.5, 0.5, 0.05)), transform=pose
+    obstacle = NativeRigidObstacle(
+        "obstacle", 0.001, (trimesh.creation.box((0.5, 0.5, 0.05)),), pose
     )
-    scene = NativeRigidRestScene(parts, [("obstacle", 0.001, other)], scope=_scope())
-    assert scene.inspect(np.eye(4), 2) == case["result"]
-    assert scene.inspect(np.eye(4), 2) == case["repeated"]
-    assert trace == case["trace"]
+    scene = NativeRigidRestScene(parts, [obstacle], scope=_scope())
+    assert decisions(scene.inspect(np.eye(4), 2)) == decisions(case["result"])
+    assert decisions(scene.inspect(np.eye(4), 2)) == decisions(case["repeated"])
+    assert decisions(trace) == decisions(case["trace"])
     scene.close()
     with pytest.raises(RuntimeError, match="closed"):
         scene.inspect(np.eye(4), 2)
 
 
 @pytest.mark.parametrize("tensor_poses", [False, True])
-def test_opening_scope_and_owned_grounding_are_explicit(fcl_available, tensor_poses):
+def test_opening_scope_and_owned_grounding_are_explicit(newton_available, tensor_poses):
     pose = torch.eye(4, dtype=torch.float64) if tensor_poses else np.eye(4)
     identity = {"place_id": "planned-place", "labels": ["owned"]}
     target = NativeOpeningTarget("support", pose, pose, _scope(), identity)
@@ -205,7 +213,7 @@ def test_scope_rejects_unsupported_observation_identity(change):
         replace(_scope(), **change)
 
 
-def test_returned_report_and_contact_grids_do_not_alias_caller_data(fcl_available):
+def test_returned_report_and_contact_grids_do_not_alias_caller_data(newton_available):
     poses = np.repeat(np.eye(4)[None], 3, axis=0)
     part = NativeContactPart("pad", (trimesh.creation.box(),), poses, 0.0, True)
     poses[0, 0, 3] = 5
@@ -217,16 +225,16 @@ def test_returned_report_and_contact_grids_do_not_alias_caller_data(fcl_availabl
         assert query.inspect(np.eye(4))["valid"] is True
 
 
-def test_caller_part_lists_cannot_change_prepared_fcl_queries(fcl_available):
+def test_caller_part_lists_cannot_change_prepared_newton_queries(newton_available):
     parts, source, options = query_inputs({"revision": 4}, NativeContactPart)
     closing_parts, scene_parts = list(parts), list(parts)
-    obstacle = trimesh.collision.CollisionManager()
     obstacle_pose = np.eye(4)
     obstacle_pose[2, 3] = 0.4
-    obstacle.add_object(
-        "obstacle", trimesh.creation.box((0.5, 0.5, 0.05)), transform=obstacle_pose
-    )
-    targets = [("obstacle", 0.001, obstacle)]
+    targets = [
+        NativeRigidObstacle(
+            "obstacle", 0.001, (trimesh.creation.box((0.5, 0.5, 0.05)),), obstacle_pose
+        )
+    ]
     closing = NativeClosingQuery(closing_parts, source, 0.0, scope=_scope(), **options)
     scene = NativeRigidRestScene(scene_parts, targets, scope=_scope())
     try:
