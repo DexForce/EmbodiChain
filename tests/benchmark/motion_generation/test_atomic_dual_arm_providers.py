@@ -1605,7 +1605,7 @@ def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_p
         robot.get_qpos_limits.return_value = torch.tensor([limits])
         _, opened, closed = AtomicSkillScenario._resolve_gripper(robot, gripper)
         torch.testing.assert_close(opened, torch.zeros(6))
-        assert float(closed[0]) == pytest.approx(0.35)
+        assert float(closed[0]) == pytest.approx(0.45)
         assert joints[names[0]].find("mimic") is None
         for name, command in zip(names[1:], closed[1:], strict=True):
             mimic = joints[name].find("mimic")
