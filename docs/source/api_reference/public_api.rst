@@ -1315,7 +1315,7 @@ embodichain.lab.gym.envs.managers.action_types
    ActionTrace
 
 embodichain.lab.gym.envs.managers.observation_manager
---------------------------------------------------
+-----------------------------------------------------
 
 .. currentmodule:: embodichain.lab.gym.envs.managers.observation_manager
 
@@ -1324,7 +1324,7 @@ embodichain.lab.gym.envs.managers.observation_manager
    ObservationManager
 
 embodichain.lab.gym.envs.managers.reward_manager
----------------------------------------------
+------------------------------------------------
 
 .. currentmodule:: embodichain.lab.gym.envs.managers.reward_manager
 
