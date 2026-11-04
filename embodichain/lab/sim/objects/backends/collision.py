@@ -222,10 +222,19 @@ def _from_physical_body(
         elif isinstance(
             geometry, (ConvexMeshGeometry, TriangleMeshGeometry, SDFGeometry)
         ):
-            vertices = torch.tensor(geometry.vertices, dtype=dtype).reshape(-1, 3)
-            triangles = torch.tensor(geometry.triangles, dtype=torch.int32).reshape(
-                -1, 3
+            vertices = torch.tensor(geometry.vertices, dtype=dtype)
+            triangles = torch.tensor(
+                geometry.triangles, dtype=torch.int64 if convex_only else torch.int32
             )
+            if convex_only and (
+                vertices.ndim != 2
+                or vertices.shape[1] != 3
+                or triangles.ndim != 2
+                or triangles.shape[1] != 3
+            ):
+                raise ValueError("Native mesh topology is unavailable.")
+            vertices = vertices.reshape(-1, 3)
+            triangles = triangles.reshape(-1, 3)
             scale = getattr(geometry, "scale", None)
             if convex_only:
                 scale_tensor = torch.as_tensor(scale, dtype=dtype)

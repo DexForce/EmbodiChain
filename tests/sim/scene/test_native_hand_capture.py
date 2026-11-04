@@ -214,6 +214,11 @@ def test_cooked_convex_scale_and_local_pose_are_applied_once(monkeypatch):
     assert capture._native_meshes(Body((source,), enabled=False)) == ()
     with pytest.raises(ValueError, match="convex or box"):
         capture._native_meshes(Body((object(),)))
+    # Public descriptor decoding may reshape flat SDK arrays. The native source
+    # contract rejects them instead of silently changing geometry availability.
+    malformed = Convex(vertices.ravel(), faces, np.ones(3), pose)
+    with pytest.raises(ValueError, match="topology"):
+        capture._native_meshes(Body((malformed,)))
 
 
 def test_native_capture_and_graspkit_respect_owner_dependencies():
