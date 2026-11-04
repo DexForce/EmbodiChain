@@ -48,6 +48,9 @@ COM-patch acquisition channel and cannot switch validators by adding a record;
 a single report cannot mix raw and historical contracts. Older binding versions
 must be rebuilt from declarations rather than re-signed automatically. The frontend supplies resolved descriptors and
 existing named conditions; it reads no pose buffer and computes no acceptance.
+New placement bundles project the configured owner condition directly through
+`project_configured_placement_evidence_binding`, without a legacy constraint
+file or digest. The B0 fixture adapter separately checks its frozen source identity.
 TaskSpec verifies receipts, acquisition masks, episode IDs, sampled support windows
 and recorded execution prefixes. Lab owns the physical collector and recorded
 pose snapshots; no Lab module imports TaskSpec or Task Engine.

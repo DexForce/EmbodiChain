@@ -846,8 +846,18 @@ and decides no predicate outcome.
 .. autosummary::
 
    project_placement_evidence_binding
+   project_configured_placement_evidence_binding
 
 .. autofunction:: project_placement_evidence_binding
+
+New bundles use ``project_configured_placement_evidence_binding`` with a detached
+condition from the configured owner's named settle preset. It requires no
+``constraints.json`` or constraints digest and does not write either artifact.
+The original projection remains only a frozen B0 source-comparison adapter,
+checking that source payload's identity before sharing the same projection.
+Neither entry point derives numerical policy values from task or object names.
+
+.. autofunction:: project_configured_placement_evidence_binding
 
 embodichain.gen_sim.task_spec
 -----------------------------

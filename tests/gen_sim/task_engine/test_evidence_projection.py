@@ -102,3 +102,52 @@ def test_projection_rejects_unmatched_or_uncompiled_inputs_instead_of_filling_ga
         occurrences["step_01__call_02"]["source_path"][-1] = 0
     with pytest.raises((KeyError, ValueError)):
         _project(payload, occurrences)
+
+
+def test_configured_owner_projection_needs_no_legacy_constraints_payload_or_digest():
+    from embodichain.gen_sim.task_engine.evidence import (
+        project_configured_placement_evidence_binding,
+    )
+
+    payload, occurrences = _declared()
+    expected = _project(payload, occurrences)
+    preset = "gen_sim.step_01__call_02.stable"
+    condition = deepcopy(payload.pop("constraints")["presets"][preset])
+    payload["validation"].pop("constraints_digest")
+    before = deepcopy(condition)
+    result = project_configured_placement_evidence_binding(
+        payload["spec"],
+        payload["graph"],
+        payload["validation"],
+        payload["program"],
+        occurrences,
+        condition=condition,
+        predicate_id="goal_001",
+        release_node_id="step_01__call_02",
+        boundary_node_id="step_01__call_03",
+        evidence_scope="native_contact_support",
+        stability_preset=preset,
+        observation_kind="final",
+        episode_ids=[2],
+    )
+    assert result.to_dict() == expected.to_dict()
+    assert condition == before
+    condition["com_tolerance"] = 0.2
+    assert result.condition["com_tolerance"] == 0.1
+    condition["entity"] = "other"
+    with pytest.raises(ValueError, match="grounded endpoints"):
+        project_configured_placement_evidence_binding(
+            payload["spec"],
+            payload["graph"],
+            payload["validation"],
+            payload["program"],
+            occurrences,
+            condition=condition,
+            predicate_id="goal_001",
+            release_node_id="step_01__call_02",
+            boundary_node_id="step_01__call_03",
+            evidence_scope="native_contact_support",
+            stability_preset=preset,
+            observation_kind="final",
+            episode_ids=[2],
+        )
