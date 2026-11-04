@@ -478,3 +478,27 @@ verifier.
    HeldObjectGuardResult
    PhaseEffectGateRequest
    PhaseEffectGateResult
+
+
+Explicit native Pick preparation
+--------------------------------
+
+This opt-in integration selects the source-compatible Pick revisions 1–9,
+requests Scene's physical geometry and binds GraspKit qualification to the shared
+isolated Newton backend. It installs no alternate skill registry and leaves
+ordinary PickUp defaults unchanged. Source-compatible preparation explicitly
+selects 65 stroke samples through the hand declaration. Opening grounding shares
+the fresh query scope. The action preparation owns query cleanup and its native
+capture token; borrowed simulation entities are never destroyed.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.native_hand
+
+.. autosummary::
+   :nosignatures:
+
+   NativeOpeningTarget
+   build_native_closing_query
+   build_native_rigid_rest_scene
+
+.. automodule:: embodichain.lab.sim.atomic_actions.native_hand
+   :members:

@@ -168,8 +168,14 @@ def _from_physical_body(
     physical_body: object,
     *,
     object_uid: str,
+    dtype: torch.dtype = torch.float32,
+    convex_only: bool = False,
 ) -> list[CollisionShapeDesc]:
-    """Extract collision descriptors from the legacy native body API."""
+    """Decode physical shapes once for public snapshots and strict native queries.
+
+    Public snapshots retain their float32 contract. Native convex queries select
+    float64 and reject unsupported shapes rather than using a descriptor fallback.
+    """
     from ..rigid_object import CollisionShapeDesc
 
     shape_count = int(physical_body.get_shape_count())
@@ -189,8 +195,13 @@ def _from_physical_body(
                 f"of RigidObject {object_uid!r}."
             )
 
+        if convex_only and not isinstance(geometry, (BoxGeometry, ConvexMeshGeometry)):
+            raise ValueError(
+                "Native queries require readable cooked convex or box shapes."
+            )
+
         shape_name = physical_body.get_shape_name(shape_idx) or f"shape_{shape_idx}"
-        local_pose = torch.tensor(geometry.local_pose, dtype=torch.float32)
+        local_pose = torch.tensor(geometry.local_pose, dtype=dtype)
         if local_pose.shape != (4, 4):
             raise RuntimeError(
                 f"DexSim collision shape {shape_idx} of {object_uid!r} returned "
@@ -202,7 +213,7 @@ def _from_physical_body(
             local_pose=local_pose.clone(),
         )
         if isinstance(geometry, BoxGeometry):
-            desc.half_extents = torch.tensor(geometry.half_extents, dtype=torch.float32)
+            desc.half_extents = torch.tensor(geometry.half_extents, dtype=dtype)
         elif isinstance(geometry, SphereGeometry):
             desc.radius = float(geometry.radius)
         elif isinstance(geometry, CapsuleGeometry):
@@ -211,17 +222,21 @@ def _from_physical_body(
         elif isinstance(
             geometry, (ConvexMeshGeometry, TriangleMeshGeometry, SDFGeometry)
         ):
-            vertices = torch.tensor(geometry.vertices, dtype=torch.float32).reshape(
-                -1, 3
-            )
+            vertices = torch.tensor(geometry.vertices, dtype=dtype).reshape(-1, 3)
             triangles = torch.tensor(geometry.triangles, dtype=torch.int32).reshape(
                 -1, 3
             )
             scale = getattr(geometry, "scale", None)
+            if convex_only:
+                scale_tensor = torch.as_tensor(scale, dtype=dtype)
+                if (
+                    scale_tensor.shape != (3,)
+                    or not torch.isfinite(scale_tensor).all()
+                    or (scale_tensor <= 0).any()
+                ):
+                    raise ValueError("Native shape scale is unavailable.")
             if scale is not None:
-                vertices = vertices * torch.tensor(scale, dtype=torch.float32).reshape(
-                    1, 3
-                )
+                vertices = vertices * torch.tensor(scale, dtype=dtype).reshape(1, 3)
             desc.vertices = vertices
             desc.triangles = triangles
         shapes.append(desc)

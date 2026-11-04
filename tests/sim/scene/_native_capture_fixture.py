@@ -64,6 +64,9 @@ class Body:
     def get_shape_count(self):
         return len(self.shapes)
 
+    def get_shape_name(self, index):
+        return f"shape_{index}"
+
     def get_shape_geometry(self, index):
         return self.shapes[index]
 

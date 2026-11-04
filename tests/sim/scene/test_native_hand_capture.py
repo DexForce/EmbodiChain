@@ -17,30 +17,28 @@
 """Native capture contracts using SDK-shaped ports, without launching simulation."""
 
 from __future__ import annotations
-from embodichain.lab.sim.scene import native_hand
+from embodichain.lab.sim.atomic_actions import native_hand
 from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
 
-from copy import deepcopy
 from dataclasses import replace
 import ast
 import json
 from pathlib import Path
-from types import SimpleNamespace as NS
 from unittest.mock import Mock
 
-import dexsim.engine
 import numpy as np
 import pytest
 import torch
-import trimesh
 
-from embodichain.lab.sim.scene import _native_hand_capture as capture
-from embodichain.lab.sim.scene.native_hand import (
+from embodichain.lab.sim.scene import native_hand as capture
+from embodichain.lab.sim.objects.backends import collision as shape_decoder
+from embodichain.lab.sim.atomic_actions.native_hand import (
     NativeOpeningTarget,
-    NativeQueryScope,
     build_native_closing_query,
     build_native_rigid_rest_scene,
 )
+from embodichain.toolkits.graspkit.pg_grasp.native_contact import NativeQueryScope
+
 from ._native_capture_fixture import (
     Box,
     Convex,
@@ -59,8 +57,8 @@ def ports(tmp_path, monkeypatch):
         "newton",
         reason="Native capture geometry is unqualified without Newton runtime.",
     )
-    monkeypatch.setattr(dexsim.engine, "BoxGeometry", Box)
-    monkeypatch.setattr(dexsim.engine, "ConvexMeshGeometry", Convex)
+    monkeypatch.setattr(shape_decoder, "BoxGeometry", Box)
+    monkeypatch.setattr(shape_decoder, "ConvexMeshGeometry", Convex)
     return setup_case(tmp_path)
 
 
@@ -180,7 +178,7 @@ def test_unsupported_native_inputs_fail_before_fk(ports, change):
 
 def test_missing_newton_is_preflighted_before_native_capture(monkeypatch):
     failure = Mock(side_effect=ImportError("Newton unavailable"))
-    monkeypatch.setattr(capture, "_require_newton", failure)
+    monkeypatch.setattr(native_hand, "_require_newton", failure)
     with pytest.raises(ImportError, match="Newton"):
         build_native_closing_query(
             None,
@@ -198,8 +196,8 @@ def test_missing_newton_is_preflighted_before_native_capture(monkeypatch):
 
 
 def test_cooked_convex_scale_and_local_pose_are_applied_once(monkeypatch):
-    monkeypatch.setattr(dexsim.engine, "ConvexMeshGeometry", Convex)
-    monkeypatch.setattr(dexsim.engine, "BoxGeometry", Box)
+    monkeypatch.setattr(shape_decoder, "ConvexMeshGeometry", Convex)
+    monkeypatch.setattr(shape_decoder, "BoxGeometry", Box)
     pose = np.array(
         [[0, -1, 0, 1], [1, 0, 0, 2], [0, 0, 1, 3], [0, 0, 0, 1]], dtype=float
     )
@@ -218,31 +216,42 @@ def test_cooked_convex_scale_and_local_pose_are_applied_once(monkeypatch):
         capture._native_meshes(Body((object(),)))
 
 
-def test_native_scene_queries_do_not_import_task_or_atomic_request_layers():
-    directory = Path(__file__).parents[3] / "embodichain/lab/sim/scene"
+def test_native_capture_and_graspkit_respect_owner_dependencies():
+    root = Path(__file__).parents[3] / "embodichain"
+    sources = [
+        (
+            root / "lab/sim/scene/native_hand.py",
+            (
+                "embodichain.gen_sim",
+                "embodichain.lab.task_program",
+                "embodichain.lab.sim.atomic_actions",
+            ),
+        ),
+        (
+            root / "toolkits/graspkit/pg_grasp/native_contact.py",
+            (
+                "embodichain.gen_sim",
+                "embodichain.lab",
+            ),
+        ),
+    ]
     forbidden = []
-    for filename in ("native_hand.py", "_native_hand_capture.py"):
-        tree = ast.parse((directory / filename).read_text())
-        for node in ast.walk(tree):
+    for source, prefixes in sources:
+        for node in ast.walk(ast.parse(source.read_text())):
             modules = []
             if isinstance(node, ast.Import):
                 modules = [item.name for item in node.names]
             elif isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                if node.level:
-                    parent = "embodichain.lab.sim.scene".split(".")
-                    module = ".".join([*parent[: len(parent) - node.level + 1], module])
-                modules = [module]
+                assert (
+                    node.level == 0
+                ), "Use absolute imports at these owner boundaries."
+                modules = [node.module or ""]
             forbidden.extend(
-                f"{filename}:{module}"
+                f"{source.name}:{module}"
                 for module in modules
                 if any(
                     module == prefix or module.startswith(prefix + ".")
-                    for prefix in (
-                        "embodichain.gen_sim",
-                        "embodichain.lab.task_program",
-                        "embodichain.lab.sim.atomic_actions",
-                    )
+                    for prefix in prefixes
                 )
             )
     assert forbidden == []

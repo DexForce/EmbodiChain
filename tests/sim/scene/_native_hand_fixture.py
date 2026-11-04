@@ -26,6 +26,9 @@ from scipy.spatial.transform import Rotation
 import torch
 import trimesh
 
+from embodichain.lab.sim.atomic_actions.native_hand import _closing_policy
+from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
+
 
 def query_inputs(case, part_type):
     parts = []
@@ -63,7 +66,13 @@ def query_inputs(case, part_type):
                 0.002,
             )
         )
-    options = {"revision": case["revision"], "target_contact_offset": 0.002}
+    options = {
+        "policy": _closing_policy(case["revision"]),
+        "report_metadata": {"revision": case["revision"]},
+        "target_contact_offset": 0.002,
+        "collision_factory": _ConvexCollection,
+        "collision_metadata": _ConvexCollection.metadata(),
+    }
     if case["revision"] == 9:
         options["gravity_in_object"] = np.asarray(
             case.get("gravity", [0, 0, -1]), dtype=np.float64
@@ -122,6 +131,8 @@ def recording_manager(original):
     created = []
 
     class Manager:
+        metadata = staticmethod(original.metadata)
+
         def __init__(self):
             self.index = len(created)
             self.inner = original()

@@ -193,6 +193,10 @@ hand-root and pad links, joint commands and sampling bounds. Control names never
 imply capabilities. Commands cover every moving hand-subtree joint, including
 mimic followers, in the resolved control-part order. Named full-articulation FK
 uses the first measured row as its reference posture without changing robot state.
+The private stroke sampler is shared with native cooked-shape capture; native
+consumers supply their explicit same-observation state and retain their original
+link order and inverse arithmetic. URDF surface population and native 65-sample
+qualification budgets remain separately selected by their callers.
 The hand root and solver end link must connect through fixed URDF joints;
 fixed virtual TCP links may lie upstream or downstream. A stationary opposite-arm
 TCP is not a valid hand reference. The declared TCP must also remain fixed

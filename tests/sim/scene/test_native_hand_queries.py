@@ -17,7 +17,6 @@
 """Newton native hand query decisions, scopes and owned query lifetimes."""
 
 from __future__ import annotations
-from embodichain.lab.sim.scene import native_hand
 from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
 
 from dataclasses import replace
@@ -29,15 +28,17 @@ import pytest
 import torch
 import trimesh
 
-from embodichain.lab.sim.scene.native_hand import (
+from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
+    ClosingContactPolicy,
     NativeClosingQuery,
     NativeContactPart,
     NativeOpeningQuery,
-    NativeOpeningTarget,
     NativeQueryScope,
     NativeRigidRestScene,
     NativeRigidObstacle,
 )
+from embodichain.lab.sim.atomic_actions.native_hand import NativeOpeningTarget
+
 from ._native_hand_fixture import (
     exercise,
     query_inputs,
@@ -65,14 +66,22 @@ def _scope():
     return NativeQueryScope("deterministic-test-scope", 1.25, 7)
 
 
+@pytest.mark.parametrize(
+    "options", [{"contact_halo": "unknown"}, {"opening_check": "enabled"}]
+)
+def test_unknown_or_untyped_geometric_policy_fails_before_query_construction(options):
+    with pytest.raises(ValueError):
+        ClosingContactPolicy(**options)
+
+
 @pytest.mark.parametrize("index", range(15))
 def test_closing_results_candidate_axes_and_newton_query_order_match_f1_decisions(
-    newton_available, monkeypatch, index
+    newton_available, index
 ):
     case = _reference()["closing"][index]
     manager, trace = recording_manager(_ConvexCollection)
-    monkeypatch.setattr(native_hand, "_ConvexCollection", manager)
     parts, target, options = query_inputs(case["case"], NativeContactPart)
+    options["collision_factory"] = manager
     with NativeClosingQuery(parts, target, 0.0, scope=_scope(), **options) as query:
         actual = exercise(query, case["case"])
         assert actual["inspect"]["valid"] is case["expected_valid"]
@@ -82,13 +91,11 @@ def test_closing_results_candidate_axes_and_newton_query_order_match_f1_decision
 
 
 @pytest.mark.parametrize("index", [0, 1])
-def test_opening_prefix_and_contact_halo_report_match_f1(
-    newton_available, monkeypatch, index
-):
+def test_opening_prefix_and_contact_halo_report_match_f1(newton_available, index):
     case = _reference()["opening"][index]
     manager, trace = recording_manager(_ConvexCollection)
-    monkeypatch.setattr(native_hand, "_ConvexCollection", manager)
     parts, target, options = query_inputs({"revision": 4}, NativeContactPart)
+    options["collision_factory"] = manager
     closing = NativeClosingQuery(parts, target, 0.0, scope=_scope(), **options)
     pose = np.eye(4)
     source = closing.inspect(pose)
@@ -120,18 +127,19 @@ def test_opening_prefix_and_contact_halo_report_match_f1(
 
 @pytest.mark.parametrize("index", [0, 1])
 def test_rigid_scene_prefix_uses_original_pair_rest_and_query_order(
-    newton_available, monkeypatch, index
+    newton_available, index
 ):
     case = _reference()["scene"][index]
     manager, trace = recording_manager(_ConvexCollection)
-    monkeypatch.setattr(native_hand, "_ConvexCollection", manager)
     parts, _, _ = query_inputs({"revision": 4}, NativeContactPart)
     pose = np.eye(4)
     pose[2, 3] = case["height"]
     obstacle = NativeRigidObstacle(
         "obstacle", 0.001, (trimesh.creation.box((0.5, 0.5, 0.05)),), pose
     )
-    scene = NativeRigidRestScene(parts, [obstacle], scope=_scope())
+    scene = NativeRigidRestScene(
+        parts, [obstacle], scope=_scope(), collision_factory=manager
+    )
     assert decision_digest(scene.inspect(np.eye(4), 2)) == case["result_sha256"]
     assert decision_digest(scene.inspect(np.eye(4), 2)) == case["repeated_sha256"]
     assert decision_digest(trace) == case["trace_sha256"]
@@ -204,8 +212,11 @@ def test_returned_report_and_contact_grids_do_not_alias_caller_data(newton_avail
     part = NativeContactPart("pad", (trimesh.creation.box(),), poses, 0.0, True)
     poses[0, 0, 3] = 5
     assert part.tcp_poses[0, 0, 3] == 0 and not part.tcp_poses.flags.writeable
-    parts, source, options = query_inputs({"revision": 4}, NativeContactPart)
+    parts, source, options = query_inputs(
+        {"revision": 4, "body": "halo"}, NativeContactPart
+    )
     with NativeClosingQuery(parts, source, 0.0, scope=_scope(), **options) as query:
+        options["policy"].contact_halo = "reject"
         result = query.inspect(np.eye(4))
         result["valid"] = False
         assert query.inspect(np.eye(4))["valid"] is True
@@ -235,7 +246,9 @@ def test_caller_part_lists_cannot_change_prepared_newton_queries(newton_availabl
         )
     ]
     closing = NativeClosingQuery(closing_parts, source, 0.0, scope=_scope(), **options)
-    scene = NativeRigidRestScene(scene_parts, targets, scope=_scope())
+    scene = NativeRigidRestScene(
+        scene_parts, targets, scope=_scope(), collision_factory=_ConvexCollection
+    )
     try:
         closing_parts.clear()
         scene_parts.reverse()

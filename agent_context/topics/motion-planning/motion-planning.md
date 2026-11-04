@@ -189,6 +189,14 @@ selection through `pg_grasp.regions`; callers select a policy without supplying
 a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
 sampled closing geometry and contact fitting with explicit thresholds; robot/FK
 sampling and physical contact evidence remain Lab responsibilities.
+`pg_grasp.native_contact` owns discrete convex closing/opening and rigid-clearance
+qualification through an injected `ConvexMeshQuery` factory; it imports no Lab
+runtime. `ClosingContactPolicy` declares geometric rules without experiment
+revision dispatch. This exact-shape route retains native pair offsets and contact
+ordering; it does not replace the surface-based checker. Scene captures physical
+geometry, and Atomic Actions select source policies and bind the existing Newton
+backend. Queries own only isolated collision resources and preserve unavailable
+threshold results; hosts retain simulation ownership and physical-effect evidence.
 `SampledHandGeometry.at_width()` interpolates the supplied hand samples.
 The public `get_dual_arm_grasp_proposals()` path retains candidate generation
 and ranking while leaving geometric qualification to the caller; normal

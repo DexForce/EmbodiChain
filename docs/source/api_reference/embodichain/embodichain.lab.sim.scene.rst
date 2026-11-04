@@ -400,40 +400,27 @@ A report passes only when its nonempty required checks all pass. Fixed-step sett
 embodichain.lab.sim.scene.native_hand
 --------------------------------------
 
-These invocation-owned CPU/Newton queries use captured Default cooked convex/box
-collision shapes and their original rest/contact offsets. They preserve nominal
-closing, opening and rigid-scene prefix checks; they do not measure attachment,
-release or continuous collision freedom. The shared Newton runtime supplies isolated query states. Missing support raises an explicit
-error and never produces a substitute clearance result.
+These read-only services capture Default cooked convex/box shapes, native
+rest/contact offsets and the configured hand stroke through named FK. They reuse
+object-backend shape decoding and the existing hand-stroke sampler. Capture
+requires the exact simulation-owned Robot, registered native UIDs and B1/env0;
+subsequent rigid reads reject replaced owners. No query, grasp policy or
+experiment revision is selected here.
 
-The builder accepts exact Robot/native identities, explicit hand calibration,
-current resolved stroke commands and a B1/env0 observation. Each scope combines
-a fresh identity generated independently of planning RNG with the robot timestamp
-and scene version.
-Opening poses must share this scope. Use the closing query as a context manager
-or close it in a ``finally`` block; later queries fail while collected reports
-remain available. Closing releases query/Newton resources, never borrowed entities.
-Atomic consumers select source/purpose/continuation eligibility before capture.
-
-Native distance diagnostics use capped clearance lower bounds. A query precision
-interval spanning a threshold remains unavailable; exact global distance and
-negative penetration depth are not part of this contract. ``NativeRigidObstacle``
-contains physical geometry and pose; callers never construct backend managers.
+GraspKit owns discrete geometric qualification through an injected collision
+backend. Atomic Actions select the source Pick policy and compose query
+lifetimes. Captured geometry does not establish physical acquisition or release.
 
 .. currentmodule:: embodichain.lab.sim.scene.native_hand
 
 .. autosummary::
    :nosignatures:
 
-   NativeQueryScope
-   NativeOpeningTarget
-   NativeContactPart
-   NativeClosingQuery
-   NativeOpeningQuery
-   NativeRigidRestScene
-   NativeRigidObstacle
-   build_native_closing_query
-   build_native_rigid_rest_scene
+   NativeHandGeometry
+   NativeRigidGeometry
+   capture_native_hand_geometry
+   capture_native_rigid_geometry
+   capture_native_rigid_obstacles
 
 .. automodule:: embodichain.lab.sim.scene.native_hand
    :members:

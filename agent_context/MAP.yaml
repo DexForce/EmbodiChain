@@ -203,6 +203,7 @@ topics:
     TrajectoryVariant, plan_trajectory_variants, apply_trajectory_variant, expand_trajectory_variants,
     via_points, nullspace_residual, perturb_approach_direction, sample_approach_cone, TIMING_PROFILES,
     trajectory variant, 轨迹变体, 固定路点,
+    NativeQueryScope, NativeClosingQuery, ClosingContactPolicy, ConvexMeshQuery, native hand queries,
     collision world, compute trajectory, trajectory resampling, trajectory warping, retime_to_control_grid,
     JointTrajectoryPlaybackCfg, play_joint_trajectory, quaternion, xyzw, wxyz,
     CoordinatedGraspSampler, PairedGraspProvider, sample_urdf_collision_surfaces, 双手抓取采样]
@@ -248,8 +249,7 @@ topics:
   title: Scene Services
   aliases: [sim.scene, scene services, procedural scene, 场景服务, 程序化场景, 场景布局, 场景快照]
   keywords: [SceneFragment, SceneRecipe, GeneratedScene, SupportRegion, LayoutProblem,
-    NativeQueryScope, NativeClosingQuery, NativeOpeningTarget, native hand queries,
-
+    NativeHandGeometry, capture_native_hand_geometry, capture_native_rigid_obstacles, native hand capture,
     NativePlanarPlacement, planar_floor_region, planar_placement_metrics, select_container_landing,
     SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
@@ -419,7 +419,7 @@ topics:
   title: Atomic Skills
   aliases: [atomic action, atomic skill, 原子动作, 原子技能]
   keywords: [AtomicActionEngine, run-atomic-action, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
-    hand_geometry_cfgs,
+    hand_geometry_cfgs, NativeOpeningTarget, build_native_closing_query, native Pick preparation,
     RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry, control-grid retiming,
     AffordanceSamplingContext, AffordancePoseCandidates, AffordanceSample, affordance sampling]
   paths: [topics/atomic-actions/atomic-actions.md]
@@ -432,6 +432,7 @@ topics:
   - embodichain/lab/sim/atomic_actions/runner.py
   - embodichain/lab/sim/atomic_actions/articulation_geometry.py
   - embodichain/lab/sim/atomic_actions/affordance_sampling.py
+  - embodichain/lab/sim/atomic_actions/native_hand.py
   - embodichain/lab/sim/atomic_actions/primitives/
   - embodichain/cli/run_example.py
   - examples/sim/atomic_action/

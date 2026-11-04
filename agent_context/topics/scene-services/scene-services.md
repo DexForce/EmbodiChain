@@ -16,7 +16,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Existing binding selection and cloned poses | `embodichain/lab/sim/scene/query.py` |
 | Exact native planar footprint observations | `embodichain/lab/sim/scene/planar_observation.py` |
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
-| Invocation-owned cooked-shape closing/opening and rigid precontact queries | `embodichain/lab/sim/scene/native_hand.py`, `_native_hand_capture.py` |
+| Exact native hand/rigid shape and physical-offset capture | `embodichain/lab/sim/scene/native_hand.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
@@ -31,23 +31,15 @@ Trimesh meshes and Shapely polygons for triangle-union floor and silhouette meas
 Scene CPU strategies own support
 selection, polygon search, greedy packing and SciPy SLSQP optimization.
 
-`native_hand.py` owns CPU/Newton nominal hand queries using the original Default
-cooked convex/box shapes and pair rest/contact offsets. Its private capture
-adapter requires the exact simulation-owned Robot, native source identity and
-B1/env0. It consumes explicit [hand calibration](../robot-system/robot-system.md#sampled-hand-geometry)
-and current resolved commands; no semantic request, continuation or preview is
-read in Scene services. Atomic consumers select those routes before capture.
-Source-compatible B0/F1 native preparation explicitly selects 65 stroke samples;
-surface-sampling budgets must not silently change that native qualification grid.
-Each preparation supplies a fresh query ID independent of planning RNG, the robot
-timestamp and scene version. Opening reference/target poses share that scope.
-Queries own caches and Newton resources; close them in a context manager or finally
-block before leaving the preparation. Closed queries reject further work while
-retaining their reports, and never destroy borrowed native entities. The optional
-Newton runtime is required; missing bindings produce no clearance
-result. These sampled geometric checks are not physical acquisition/release
-evidence. Native capture and its source-differential CPU coverage are separate
-from native simulation qualification.
+`native_hand.py` captures cooked convex/box geometry and explicitly requested
+rest/contact offsets for the exact simulation-owned Robot and native rigid UIDs.
+It requires Default/B1/env0, checks named FK against native frames, and validates
+original owners before subsequent rigid reads. Shape decoding reuses the object
+backend; closing FK reuses [hand geometry](../robot-system/robot-system.md#sampled-hand-geometry).
+It creates no collision query and selects no grasp policy. Geometric qualification
+belongs to [GraspKit](../motion-planning/motion-planning.md), with source revision
+selection and query/resource composition in [Atomic Actions](../atomic-actions/atomic-actions.md).
+Captured shapes and nominal queries do not establish physical acquisition/release.
 
 `NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
 recreate it after replacing either object or changing its model/scale. Queries
