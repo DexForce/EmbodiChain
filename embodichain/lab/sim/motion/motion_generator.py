@@ -812,6 +812,7 @@ class MotionGenerator:
             len(move_types) == 1
             and move_type is MoveType.JOINT_MOVE
             and owns_sparse_waypoints
+            and not options.is_linear
         )
         should_preinterpolate = (
             len(move_types) == 1
@@ -2117,7 +2118,7 @@ class MotionGenerator:
             if sparse_cartesian:
                 # A sparse joint planner owns timing between the requested
                 # goals. Densifying a free Cartesian move would turn every IK
-                # sample into a mandatory rest point for trapezoidal timing.
+                # sample into a mandatory rest point for stopped timing.
                 total_interpolated_poses = xpos_list.to(self._runtime_device())
             else:
                 # Allocations are per environment; share their segment maxima

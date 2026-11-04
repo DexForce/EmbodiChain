@@ -187,7 +187,9 @@ embodichain benchmark motion-generation \
 
 Each hand exposes its six authored linkage joints in explicit command order.
 Opening commands are six zeros; closing commands are
-`[0.7, -0.7, 0.7, -0.7, -0.7, 0.7]`, matching the URDF mimic multipliers.
+`[0.35, -0.35, 0.35, -0.35, -0.35, 0.35]`, matching the URDF mimic multipliers.
+This limits the commanded closure to half of the authored `0.7 rad` range to
+reduce squeezing the can. Suite version `v2` requires fresh frozen inputs.
 Contact scoring uses the two actual inner finger pads on each assembled hand,
 with the standard 5 mm separation threshold.
 
@@ -592,7 +594,10 @@ With the Atomic control period, TOPPRA enables
 are conservatively extended onto the exact control grid before composition.
 Shared goals remain explicit, row prefixes merge before terminal padding, and
 `MotionGenerator` preserves solved native samples. This retains stops for gripper
-holds. Non-Atomic calls keep the default continuous spline; NMG's request and
+holds. Free Cartesian moves send only the observed start and requested goal
+knots through IK to TOPPRA, avoiding a separate stop at every spatial
+interpolation sample. Explicit Cartesian-line requests keep their dense path
+samples. Non-Atomic calls keep the default continuous spline; NMG's request and
 rollout budget are unchanged. Phase sample counts remain lower bounds, with
 physical execution and independent compiled timing checks determining the result.
 
