@@ -457,25 +457,20 @@ def test_sampling_observers_share_the_physics_step_cache_with_history(raw_first)
     assert history.contact_count.tolist() == [2, 2]
 
 
-def test_contact_package_preserves_public_imports_and_sensor_config_registration():
+def test_contact_package_exports_and_sensor_config_registration():
     from embodichain.lab.sim.sensors import SensorCfg
     from embodichain.lab.sim.sensors.contact import (
-        ContactHistory,
         ContactSensor as PackagedSensor,
         ContactSensorCfg as PackagedCfg,
     )
     from embodichain.lab.sim.sensors.contact.sensor import (
         ContactSensor as Implementation,
     )
-    from embodichain.lab.sim.sensors.contact_sensor import (
-        ContactSensor as ExistingSensor,
-    )
-    from embodichain.lab.sim.sensors.contact_history import (
-        ContactHistory as ExistingHistory,
-    )
+    from importlib.util import find_spec
 
-    assert ContactSensor is PackagedSensor is ExistingSensor is Implementation
-    assert ContactHistory is ExistingHistory
+    assert ContactSensor is PackagedSensor is Implementation
+    assert find_spec("embodichain.lab.sim.sensors.contact_sensor") is None
+    assert find_spec("embodichain.lab.sim.sensors.contact_history") is None
     config = SensorCfg.from_dict(
         {"sensor_type": "ContactSensor", "uid": "contacts", "rigid_uid_list": ["cube"]}
     )

@@ -2,8 +2,9 @@
 
 The canonical implementation is `lab/sim/sensors/contact/`: `sensor.py`,
 `history.py`, `sampling.py`, `timeline.py` and private `_warp/` adaptation kernels.
-The established `sensors.contact_sensor` and `sensors.contact_history` imports
-re-export the same classes, while internal callers use the canonical package.
+Use `sensors.contact` or its implementation submodules. The old flat
+`contact_sensor` and `contact_history` modules have been removed. The parent
+`sensors` registry still exports `ContactSensor` and its configuration.
 
 `ContactSensor.create_history()` registers sensor-owned `ContactHistory` objects
 and enables substep sampling automatically. Tasks select body IDs, counterpart

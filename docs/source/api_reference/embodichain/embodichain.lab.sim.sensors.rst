@@ -172,28 +172,13 @@ measurement and remains in ``sensors.joint_opening``.
    ContactTimelineCfg
    ContactHistory
 
-Existing public imports
------------------------
+Import migration
+----------------
 
 The sensor registry and ``from embodichain.lab.sim.sensors import ContactSensor``
-keep their existing names. The established ``contact_sensor`` and
-``contact_history`` modules re-export the exact canonical classes; they contain
-no duplicate implementation. This PR's newly introduced sampling/timeline imports
-use ``contact.sampling`` and ``contact.timeline``. Implementation-qualified type
-names now use the new package; regenerate declarations that explicitly seal such
-names rather than silently rewriting an old identity.
-
-.. currentmodule:: embodichain.lab.sim.sensors.contact_sensor
-
-.. autosummary::
-
-   ArticulationContactFilterCfg
-   ContactSensor
-   ContactSensorCfg
-   ContactSamplingObserver
-
-.. currentmodule:: embodichain.lab.sim.sensors.contact_history
-
-.. autosummary::
-
-   ContactHistory
+keep their existing names. The old flat ``sensors.contact_sensor`` and
+``sensors.contact_history`` modules have been removed. Import from
+``sensors.contact`` or its ``sensor`` and ``history`` submodules instead.
+Sampling and timeline APIs use ``contact.sampling`` and ``contact.timeline``.
+Regenerate declarations that explicitly seal implementation-qualified type names;
+old identities are not silently rewritten.
