@@ -44,6 +44,9 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Component resolution and policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
+| Physical acquisition and history | `embodichain/lab/sim/sensors/contact/sampling.py`, `contact/timeline.py` |
+| Physical grip interpretation | `embodichain/lab/sim/atomic_actions/grip_evidence.py` |
+| Evidence declarations and semantic adaptation | `embodichain/lab/task_program/integrations/simulation/grip_evidence.py` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 | Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
 | Episode selection, recording, final success | `embodichain/lab/gym/envs/embodied_env.py`, `demo.py` |
@@ -86,6 +89,14 @@ Source-bound bridges request independent session state from the simulation
 post-policy/validator port while retaining its registered scene bindings. This
 isolates lift baselines and policy results across episodes. Native bridges and
 ports without the optional session factory retain their existing ownership.
+
+Simulation settling defaults to reported native velocities. An explicit
+`simulation.policies.SimulationSettleMonitorCfg(measurement="pose_delta")`
+retains the shared monitor's cadence and per-row timeout rules while deriving
+speed from consecutive rigid poses. The runtime supplies its control `step_dt`;
+the first observation is unresolved. Registration/catalog preflight rejects
+non-rigid targets before live assembly. Preset names do not select algorithms,
+and plain settle configurations preserve existing defaults and fingerprints.
 
 An optional nominal source is selected separately before Atomic planning and
 is bound to a compiled sequential call occurrence. Its configured declaration

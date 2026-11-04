@@ -97,6 +97,21 @@ Contact-aperture bounds, grasp algorithm, collision policy and annotation/cache
 policy have separate owners. Internal candidates use the canonical contact
 frame; public pose outputs use the geometry's declared runtime TCP.
 
+``get_dual_arm_grasp_proposals()`` exposes unqualified paired proposals for an
+explicit downstream refinement stage. It retains angle eligibility, NMS,
+ranking, population budgets and runtime-TCP conversion, while constructing no
+fixed-hand collision checker. Ordinary validated queries retain their separate
+checked backend and existing behavior.
+
+The optional ``role="left"`` or ``role="right"`` returns only that side.
+Both sides' eligibility-dependent direction draws remain unchanged, preserving
+the selected population and final Torch RNG; unrequested pose construction,
+NMS and ranking are skipped. Omitting ``role`` retains both sides.
+Raw and validated backends share read-only mesh and antipodal annotations,
+while collision state remains separate. Refresh applies once per mesh's first
+preparation. ``clear_cache()`` releases both modes' mesh backends and retains
+configuration/hand geometry; subsequent queries prepare lazily again.
+
 .. autosummary::
    :nosignatures:
 
@@ -262,6 +277,109 @@ Region policy implementation
 
    select_supported_end
    for_axis_region
+
+
+
+Sampled hand contact qualification
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.contact_fit
+
+These services fit finite pad surfaces and check discrete closing samples against
+an object-frame signed surface query. Robot/FK geometry construction and physical
+contact evidence remain outside GraspKit. Qualification tolerances and occupancy
+probe distance are explicit inputs; the checker does not infer task semantics.
+``SampledHandGeometry.at_width()`` interpolates the hand surfaces at requested
+pad gaps and clamps out-of-range gaps to the sampled endpoints.
+``HandContactChecker.refine()`` combines fitting and target-only closing checks,
+returning corrected candidates and a valid mask without changing their order.
+
+.. autosummary::
+   :nosignatures:
+
+   SampledHandGeometry
+   GraspSurfaceQuery
+   TriangleSurfaceQuery
+   HandContactChecker
+
+.. autoclass:: SampledHandGeometry
+   :members: at_width
+
+.. autoclass:: GraspSurfaceQuery
+   :members:
+
+.. autoclass:: TriangleSurfaceQuery
+   :members: query_batch_points, query_surface_normals
+
+.. autoclass:: HandContactChecker
+   :members: refine, fit_contacts, query
+
+
+Paired grasp sampling
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.coordinated
+
+Paired refinement composes the public proposal API with
+``HandContactChecker.refine()``; it does not overwrite generator internals.
+One immutable target-surface query is shared by the two hand refiners for each
+mesh identity/version. Each hand retains independent candidate and diagnostic
+state. Mesh mutation creates a new query and new refiners.
+
+Superseded versions of the same tensor pair release their old queries,
+refiners and generator backends, including when tensor storage or shape changes.
+Distinct tensor pairs remain cached until ``clear_cache()`` releases all target
+queries/refiners and both bound generators' mesh backends. Sampled hand geometry
+remains available; runtime hosts own cleanup between unrelated asset cohorts.
+
+The data-only sampler combines two existing antipodal generators with explicit
+sampled hand geometry and contact settings. It preserves paired proposal RNG
+scope and applies an optional clearance preference after candidate selection.
+The facade forwards standalone calls unchanged; its numeric paired-provider
+port allows a runtime owner to defer robot geometry capture outside GraspKit.
+Scene observation, cargo membership and physical execution remain caller-owned.
+
+.. autosummary::
+   :nosignatures:
+
+   CoordinatedGraspCfg
+   PairedGraspProvider
+   CoordinatedGraspSampler
+   CoordinatedGraspPoseGenerator
+   grasp_clearance_costs
+
+.. autoclass:: CoordinatedGraspCfg
+   :members:
+
+.. autoclass:: PairedGraspProvider
+   :members:
+
+.. autoclass:: CoordinatedGraspSampler
+   :members:
+
+.. autoclass:: CoordinatedGraspPoseGenerator
+   :members:
+
+.. autofunction:: grasp_clearance_costs
+
+Explicit URDF collision surfaces
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.urdf_surfaces
+
+Selected mesh/box collision links are subdivided in their authored local frames.
+Callers supply link names and sampling bounds; no robot, control-group naming
+or simulator state is consulted.
+Shape decoding and collision-origin handling are shared with fixed-opening
+geometry. Its barycentric sampling and this service's subdivision sampling
+retain their existing point populations.
+
+.. autosummary::
+   :nosignatures:
+
+   sample_urdf_collision_surfaces
+
+.. autofunction:: sample_urdf_collision_surfaces
 
 
 URDF Convex Decomposition
