@@ -1113,7 +1113,9 @@ normals, and native impulses. Per-channel validity distinguishes unsupported
 capabilities, nonfinite active data, saturation and source drift from measured
 negative observations. Native contact revision remains separate from runtime
 observation revision. The Default-only revision reader fails explicitly when its
-SDK contract is unavailable.
+SDK contract is unavailable. Signed ``CONTACT_DISTANCES`` are opt-in;
+``DEFAULT_CHANNELS`` retains the original five-channel request. Missing distance
+invalidates its explicit channel without invalidating other available channels.
 
 ``sample`` keeps frame tensors on its request's environment-ID device. The
 ``collect`` provider port retains that same device contract. Host observers may
@@ -1129,6 +1131,8 @@ observation was produced. The common frame has no invocation field.
    CONTACT_NORMALS
    CONTACT_IMPULSES
    CONTACT_POSITIONS
+   CONTACT_DISTANCES
+   DEFAULT_CHANNELS
    ContactEvidenceSample
    ContactEvidenceSampler
    ContactSourceStamp

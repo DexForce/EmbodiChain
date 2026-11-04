@@ -52,6 +52,9 @@ to the shared `lab/sim/evidence.py` frame/batch types. It retains the validity m
 native actor IDs, Arena frames and impulses, with explicit unsupported, nonfinite,
 saturated or source-drift errors. Native and runtime observation revisions remain
 different identities. The provider's output device follows its request.
+Signed distance is an explicitly requested channel; an empty request retains
+the original five channels. Missing distance invalidates only that requested
+channel, while nonfinite active distances retain per-row unavailability.
 
 `lab/sim/sensors/contact_timeline.py` owns bounded per-environment packed
 history, driven by an explicit host control clock. Keep it in the environment's

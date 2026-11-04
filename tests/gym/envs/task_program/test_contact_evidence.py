@@ -842,3 +842,50 @@ def test_timeline_reset_propagates_sensor_index_errors_before_mutating_history(i
     with pytest.raises(type(expected.value)):
         timeline.reset(indices)
     assert timeline.snapshot() == before
+
+
+def test_optional_contact_distances_preserve_default_channels_and_row_validity():
+    from embodichain.lab.sim.sensors.contact_sampling import (
+        CONTACT_DISTANCES,
+        CONTACT_POSITIONS,
+        DEFAULT_CHANNELS,
+    )
+
+    source = ContactSource(count=2, capacity=3)
+    sampler = ContactEvidenceSampler(source)
+    default = sampler.sample(PhysicalEvidenceRequest(1.0, 1, torch.tensor([1, 0])))
+    assert tuple(default.frame.batches) == DEFAULT_CHANNELS
+    assert len(DEFAULT_CHANNELS) == 5
+    assert all(batch.valid.all() for batch in default.frame.batches.values())
+    missing = sampler.sample(
+        PhysicalEvidenceRequest(
+            1.0,
+            2,
+            torch.tensor([1, 0]),
+            (CONTACT_POSITIONS, CONTACT_DISTANCES),
+        )
+    )
+    assert missing.frame.get(CONTACT_POSITIONS).valid.all()
+    assert missing.frame.get(CONTACT_DISTANCES).valid.tolist() == [False, False]
+    assert all(missing.frame.get(CONTACT_DISTANCES).acquisition_errors)
+    source.data["distance"] = torch.tensor(
+        [
+            [-0.001, 0.002, float("nan")],
+            [float("nan"), 0.004, float("nan")],
+        ]
+    )
+    sampled = sampler.sample(
+        PhysicalEvidenceRequest(
+            2.0,
+            3,
+            torch.tensor([1, 0]),
+            (CONTACT_DISTANCES,),
+        )
+    )
+    distance = sampled.frame.get(CONTACT_DISTANCES)
+    assert distance.valid.tolist() == [False, True]
+    assert distance.values[1].tolist() == pytest.approx([-0.001, 0.002, 0.0])
+    assert distance.values.device == sampled.frame.env_ids.device
+    source.data["distance"].zero_()
+    assert distance.values[1, 0] == pytest.approx(-0.001)
+    assert source.update_count == 3
