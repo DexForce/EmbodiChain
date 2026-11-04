@@ -55,7 +55,7 @@ class SimulationSupportObservationCollector:
         registration: SimulationTaskProgramRegistration,
     ) -> None:
         from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
-        from ..catalog import SimulationTaskProgramRegistration
+        from ..catalog import SimulationTaskProgramRegistration, _canonical_value
 
         if (
             type(bridge) is not TaskProgramDemoBridge
@@ -86,6 +86,16 @@ class SimulationSupportObservationCollector:
         ):
             raise ValueError(
                 "The bridge program has another registered integration selection."
+            )
+        if _canonical_value(port._scene_binding) != _canonical_value(
+            registration.scene_binding
+        ):
+            raise ValueError(
+                "The bridge scene binding differs from the selected registration."
+            )
+        if set(port._settle_presets) != set(registration.settle_presets):
+            raise ValueError(
+                "The bridge policy table has another complete preset selection."
             )
         for name, cfg in registration.settle_presets.items():
             if name not in port._settle_presets or asdict(cfg) != asdict(

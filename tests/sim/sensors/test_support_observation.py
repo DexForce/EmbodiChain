@@ -800,7 +800,7 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
     registry.close()
 
 
-def _support_policy_fixture(*, com_tolerance=None, com_x=0.0):
+def _support_policy_fixture(*, com_tolerance=None, com_x=0.0, extra_preset=False):
     from embodichain.lab.task_program.integrations.simulation.bindings import (
         SimulationSceneBinding,
         SimulationRigidObjectBinding,
@@ -843,7 +843,7 @@ def _support_policy_fixture(*, com_tolerance=None, com_x=0.0):
         sim,
         robot,
         binding,
-        settle_presets={"support": cfg},
+        settle_presets={"support": cfg, **({"unused": cfg} if extra_preset else {})},
         step_dt=0.04,
         support_registry=registry,
         sensor_suite=sim.sensors,
@@ -874,8 +874,15 @@ def test_current_capture_rejects_superseded_session_but_same_clock_bind_is_idemp
     second[2].close()
 
 
-def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_support():
+@pytest.mark.parametrize(
+    "declaration_case",
+    ["normal", "foreign_scene", "missing_preset", "equivalent_snapshot"],
+)
+def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_support(
+    declaration_case,
+):
     from types import MethodType
+    from dataclasses import replace
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
     from embodichain.lab.gym.envs.task_program.bridge import (
@@ -900,7 +907,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     )
 
     sim, robot, registry, template, binding, cfg = _support_policy_fixture(
-        com_tolerance=0.1, com_x=0.04
+        com_tolerance=0.1, com_x=0.04, extra_preset=True
     )
     profile = SimulationRobotSkillProfileBinding(
         "robot",
@@ -926,7 +933,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         default_preset="default",
     )
     registration = SimulationTaskProgramRegistration(
-        binding, profile, settle_presets={"support": cfg}
+        binding, profile, settle_presets={"support": cfg, "unused": cfg}
     )
     compiled = TaskProgramCompiler(binding.declare()).compile(
         decode_task_program(
@@ -996,6 +1003,28 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     env.capture_recorded_rigid_poses = MethodType(
         EmbodiedEnv.capture_recorded_rigid_poses, env
     )
+    if declaration_case == "foreign_scene":
+        foreign = replace(
+            binding,
+            rigid_objects=(
+                replace(binding.rigid_objects[0], simulation_uid="other_payload"),
+                *binding.rigid_objects[1:],
+            ),
+        )
+        registration = replace(registration, scene_binding=foreign)
+        with pytest.raises(ValueError, match="scene binding differs"):
+            SimulationSupportObservationCollector(env, bridge, registration)
+        registry.close()
+        return
+    if declaration_case == "missing_preset":
+        registration = replace(registration, settle_presets={"support": cfg})
+        with pytest.raises(ValueError, match="complete preset selection"):
+            SimulationSupportObservationCollector(env, bridge, registration)
+        registry.close()
+        return
+    if declaration_case == "equivalent_snapshot":
+        registration = replace(registration, scene_binding=replace(binding))
+        assert registration.scene_binding is not binding
     collector = SimulationSupportObservationCollector(env, bridge, registration)
     assert bridge.post_policy_port is not template
     segment = next(compiled.iter_segments())
