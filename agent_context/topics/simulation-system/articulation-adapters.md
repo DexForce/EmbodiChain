@@ -28,6 +28,15 @@ velocity clears position gain. Newton rejects active acceleration drives;
 non-MuJoCo position mode is gain-based emulation with zero velocity target.
 Exact field options and defaults remain in `cfg/articulation.py`.
 
+`spawn/source.py` retains authored URDF passive damping and friction in the
+Newton joint descriptor before configured overlays. Passive damping is
+independent of the velocity target gain `joint_drive_props.damping`;
+none/effort modes clear PD gains without removing source dissipation. Explicit
+descriptor values, including zero, retain ownership over source defaults.
+URDF collision geometry remains owned by the native source: resolved
+`LinkDesc.collisions` may contain only attribute overlays and is not a count
+of physical colliders.
+
 ## State order and batched writes
 
 Public `joint_names` follows finalized Scene qpos/qvel order, which may differ
@@ -81,7 +90,10 @@ principal axes between two writes.
 MuJoCo-Warp mimic joints retain native equality constraints and contact-force
 coupling. `_configure_newton_mimic_compliance()` adjusts only the selected
 articulation's equality rows, respecting the solver's time-constant safety
-floor; a weak follower drive stabilizes updates. Command targets propagate the
+floor; a weak follower drive stabilizes updates. Optional root fields
+`newton_mimic_solref` and `newton_mimic_solimp` select a per-articulation
+MuJoCo profile; omission preserves the existing compliance approximation.
+Contact impedance remains separate. Command targets propagate the
 authored leader relation. Never copy measured follower state or disable the
 native equality, which would turn the follower into an independent servo.
 Keep private Newton runtime access in the backend helper, with generic

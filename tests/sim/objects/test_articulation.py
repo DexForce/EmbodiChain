@@ -55,6 +55,72 @@ DRIVE_TEST_STIFFNESS = 12.0
 DRIVE_TEST_DAMPING = 4.0
 
 
+@pytest.mark.gpu
+@pytest.mark.requires_sim
+def test_native_continuous_urdf_joint_preserves_unlimited_rotation(
+    tmp_path: Path,
+) -> None:
+    from dexsim.spawn.adapters import newton_articulation_adapter
+
+    if not getattr(
+        newton_articulation_adapter, "PRESERVES_CONTINUOUS_URDF_LIMITS", False
+    ):
+        pytest.skip("Requires DexSim continuous joint patch.")
+    from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RenderCfg
+
+    path = tmp_path / "continuous.urdf"
+    path.write_text(
+        """<robot name="continuous">
+    <link name="base"/><link name="wheel">
+      <inertial><mass value="1"/><inertia ixx=".01" iyy=".01" izz=".01" ixy="0" ixz="0" iyz="0"/></inertial>
+      <collision><geometry><cylinder radius=".03" length=".01"/></geometry></collision>
+      <visual><geometry><cylinder radius=".03" length=".01"/></geometry></visual>
+    </link><joint name="spin" type="continuous"><parent link="base"/><child link="wheel"/><axis xyz="0 0 1"/></joint>
+    </robot>""",
+        encoding="utf-8",
+    )
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            startup_summary="off",
+            enable_entity_gizmo=False,
+            physics_cfg=NewtonPhysicsCfg(
+                use_cuda_graph=False,
+                num_substeps=1,
+                solver_cfg={"solver_type": "mujoco_warp"},
+            ),
+            render_cfg=RenderCfg(renderer="hybrid"),
+        )
+    )
+    try:
+        art = sim.add_articulation(
+            ArticulationCfg(
+                uid="wheel",
+                fpath=str(path),
+                init_pos=(0, 0, 1),
+                joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
+            )
+        )
+        sim.prepare()
+        backend = get_newton_backend(sim.get_world())
+        assert not backend.solver.mj_model.jnt_limited[-1]
+        # Newton canonicalizes infinity to its internal unlimited MAXVAL
+        # sentinel. Assert source semantics and the actual solver's limit flag.
+        joint = sim.spawn_result.handles["arena_0/wheel"].articulation_desc.joints[0]
+        assert np.isneginf(joint.lower_limit)
+        assert np.isposinf(joint.upper_limit)
+        angle = 4 * torch.pi
+        art.set_qpos(torch.tensor([[angle]], device=sim.device), target=False)
+        sim.update(step=1)
+        torch.testing.assert_close(
+            art.get_qpos(), torch.tensor([[angle]], device=sim.device)
+        )
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
 def _inertia_tensor(inertia: torch.Tensor, com_pose: torch.Tensor) -> torch.Tensor:
     """Compare physical inertia independently of the chosen principal axes."""
     rotation = matrix_from_quat(com_pose[..., 3:])

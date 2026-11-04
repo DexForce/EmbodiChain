@@ -597,8 +597,12 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         # Asset-loading adapter option, not a native ShapeConfig parameter.
         "use_native_mesh_loader",
     }
+    # Raw MuJoCo parameters are capability-gated for older SDK builds; they
+    # become normal descriptor fields once the bundled SDK patch is applied.
+    optional_native_fields = {"solref", "solimp", "solmix"} - names(NewtonCollisionDesc)
     assert (
-        newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
+        newton_fields - optional_native_fields
+        == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
     )
 
     assert names(NewtonCollisionPipelineCfg) - {"soft_contact_margin"} == names(
@@ -1004,6 +1008,8 @@ def test_backend_joint_and_articulation_configs_round_trip() -> None:
         "sleep_threshold": None,
         "min_position_iters": None,
         "min_velocity_iters": None,
+        "newton_mimic_solref": None,
+        "newton_mimic_solimp": None,
     }
     assert type(restored_root) is ArticulationRootPropertiesCfg
 
@@ -1018,6 +1024,8 @@ def test_articulation_root_config_rejects_backend_discriminator() -> None:
 def test_articulation_root_config_round_trip() -> None:
     root = ArticulationRootPropertiesCfg(
         fixed_base=True,
+        newton_mimic_solref=(0.002, 1.0),
+        newton_mimic_solimp=(0.9999, 0.9999, 0.001, 0.5, 2.0),
         sleep_threshold=0.005,
         min_position_iters=8,
         min_velocity_iters=2,
@@ -1033,6 +1041,20 @@ def test_articulation_root_config_round_trip() -> None:
 def test_articulation_root_requires_both_solver_iteration_counts() -> None:
     with pytest.raises(ValueError, match="must be configured together"):
         ArticulationRootPropertiesCfg(min_position_iters=8)
+
+
+@pytest.mark.parametrize("value", [(0.0, 1.0), (0.002, -1.0), (0.002, float("nan"))])
+def test_articulation_root_rejects_invalid_mimic_reference(value) -> None:
+    with pytest.raises(ValueError, match="newton_mimic_solref"):
+        ArticulationRootPropertiesCfg(newton_mimic_solref=value)
+
+
+@pytest.mark.parametrize(
+    "value", [(0.99, 0.9, 0.001, 0.5, 2.0), (0.9, 0.99, 0.0, 0.5, 2.0)]
+)
+def test_articulation_root_rejects_invalid_mimic_impedance(value) -> None:
+    with pytest.raises(ValueError, match="newton_mimic_solimp"):
+        ArticulationRootPropertiesCfg(newton_mimic_solimp=value)
 
 
 def test_robot_cfg_round_trip_preserves_grouped_backend_types() -> None:

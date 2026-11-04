@@ -69,6 +69,16 @@ class RigidObjectCfg(ObjectBaseCfg):
     use config.
     """
 
+    env_variants: dict[int, RigidObjectCfg] | None = None
+    """Complete preparation-time replacements indexed by environment ID.
+
+    Omitted environments use this configuration. Each replacement supplies its
+    own shape, mass properties and initial pose; its UID identifies the source
+    asset, while the resulting object retains the parent's logical UID. Nested
+    variants are unsupported. Requires the DexSim assembly variants capability
+    and the Newton backend; topology is fixed until a scene rebuild.
+    """
+
     def resolve_asset_physics_mode(self) -> AssetPhysicsMode:
         """Return the effective file-backed physics policy."""
         return _resolve_asset_physics_mode(self.asset_physics_mode)
@@ -77,6 +87,24 @@ class RigidObjectCfg(ObjectBaseCfg):
     def from_dict(cls, init_dict: Dict[str, Any]) -> RigidObjectCfg:
         """Parse a rigid object and normalize legacy mesh collision ownership."""
         data = dict(init_dict)
+        if data.get("env_variants") is not None:
+            variants = data["env_variants"]
+            if not isinstance(variants, Mapping):
+                raise TypeError(
+                    "env_variants must map environment indices to rigid configs."
+                )
+            normalized = {}
+            for key, value in variants.items():
+                if isinstance(key, str) and key.isdecimal():
+                    key = int(key)
+                if isinstance(key, bool) or not isinstance(key, int) or key < 0:
+                    raise ValueError(
+                        "env_variants keys must be non-negative environment indices."
+                    )
+                normalized[key] = (
+                    cls.from_dict(dict(value)) if isinstance(value, Mapping) else value
+                )
+            data["env_variants"] = normalized
         attrs_value = data.get("attrs")
         if isinstance(attrs_value, Mapping) and "mesh_collision_props" in attrs_value:
             shape_value = data.get("shape")

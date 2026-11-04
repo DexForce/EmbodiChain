@@ -71,7 +71,15 @@ from embodichain.lab.sim.cfg import (
     VolumeDeformableMeshingCfg,
     VolumeDeformableObjectCfg,
 )
-from embodichain.lab.sim.shapes import CubeCfg, LoadOption, MeshCfg
+from embodichain.lab.sim.shapes import (
+    CompoundShapeCfg,
+    CubeCfg,
+    CylinderCfg,
+    LoadOption,
+    MeshCfg,
+    ShapeCfg,
+    ShapePartCfg,
+)
 from embodichain.lab.sim.objects import Articulation, RigidObject, RigidObjectGroup
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
@@ -89,6 +97,189 @@ pytestmark = pytest.mark.no_sim
 
 RESTITUTION = 0.25
 DEFORMABLE_MESH_PATH = "/assets/deformable.obj"
+
+
+def test_compound_keeps_hole_and_one_parent_mass() -> None:
+    """Separated walls must not become a single hull spanning the aperture."""
+    cfg = RigidObjectCfg(
+        uid="hole",
+        shape=CompoundShapeCfg(
+            parts=[
+                ShapePartCfg(
+                    shape=CubeCfg(size=(0.01, 0.06, 0.02)), position=(-0.02, 0, 0)
+                ),
+                ShapePartCfg(
+                    shape=CubeCfg(size=(0.01, 0.06, 0.02)), position=(0.02, 0, 0)
+                ),
+            ]
+        ),
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=2.0, inertia=(0.01, 0.02, 0.03))
+        ),
+    )
+
+    desc, _ = rigid_desc_from_cfg(cfg)
+
+    assert len(desc.collisions) == 2
+    assert len(desc.renders) == 2
+    assert [part.segment_name for part in desc.collisions] == [
+        "hole_part_0",
+        "hole_part_1",
+    ]
+    assert [part.segment_name for part in desc.renders] == [
+        "hole_part_0",
+        "hole_part_1",
+    ]
+    assert desc.physics.mass == pytest.approx(2.0)
+    np.testing.assert_allclose(desc.physics.inertia, np.diag([0.01, 0.02, 0.03]))
+    # Both wall AABBs exclude the centerline by 15 mm.
+    for collision in desc.collisions:
+        assert abs(collision.local_transform[0, 3]) - collision.size[
+            0
+        ] / 2 == pytest.approx(0.015)
+    assert [collision.render_source_index for collision in desc.collisions] == [0, 1]
+
+
+def test_compound_independent_visual_preserves_xyzw_pose() -> None:
+    cfg = RigidObjectCfg(
+        uid="compound",
+        shape=CompoundShapeCfg(
+            parts=[
+                ShapePartCfg(
+                    shape=CubeCfg(), position=(1, 2, 3), quaternion=(0.5, 0.5, 0.5, 0.5)
+                )
+            ],
+            visual_parts=[
+                ShapePartCfg(
+                    shape=CylinderCfg(radius=0.1, half_height=0.2), position=(4, 5, 6)
+                )
+            ],
+        ),
+    )
+
+    desc, _ = rigid_desc_from_cfg(cfg)
+
+    expected_rotation = [[0, 0, 1], [1, 0, 0], [0, 1, 0]]
+    np.testing.assert_allclose(
+        desc.collisions[0].local_transform[:3, :3], expected_rotation, atol=1e-7
+    )
+    np.testing.assert_allclose(desc.collisions[0].local_transform[:3, 3], [1, 2, 3])
+    assert desc.collisions[0].render_source_index is None
+    assert len(desc.renders) == 1
+    np.testing.assert_allclose(desc.renders[0].local_transform[:3, 3], [4, 5, 6])
+    assert desc.renders[0].radius == pytest.approx(0.1)
+    assert desc.renders[0].half_height == pytest.approx(0.2)
+
+
+def test_compound_shape_roundtrip_uses_public_nested_loader() -> None:
+    source = CompoundShapeCfg(
+        parts=[
+            ShapePartCfg(
+                shape=CylinderCfg(radius=0.01, half_height=0.03, axis="X"),
+                position=(0.1, 0.2, 0.3),
+            )
+        ],
+        visual_parts=[ShapePartCfg(shape=CubeCfg(size=(0.02, 0.02, 0.06)))],
+    )
+
+    decoded = ShapeCfg.from_dict(source.to_dict())
+    desc, _ = rigid_desc_from_cfg(RigidObjectCfg(uid="roundtrip", shape=decoded))
+
+    assert desc.collisions[0].axis == "x"
+    np.testing.assert_allclose(
+        desc.collisions[0].local_transform[:3, 3], [0.1, 0.2, 0.3]
+    )
+    assert desc.renders[0].size == pytest.approx([0.02, 0.02, 0.06])
+
+
+@pytest.mark.parametrize(
+    "collision",
+    [None, MeshCollisionCfg(approximation="convex_decomposition", max_hulls=2)],
+)
+def test_compound_rejects_implicit_or_reprocessed_convex_parts(collision) -> None:
+    with pytest.raises(ValueError, match="explicit approximation='convex_hull'"):
+        CompoundShapeCfg(
+            parts=[ShapePartCfg(shape=MeshCfg(fpath="wall.obj", collision=collision))]
+        )
+
+
+def test_compound_rejects_nested_parts_and_degenerate_quaternion() -> None:
+    compound = CompoundShapeCfg(parts=[ShapePartCfg(shape=CubeCfg())])
+    with pytest.raises(TypeError, match="nested compounds"):
+        ShapePartCfg(shape=compound)
+    with pytest.raises(ValueError, match="nonzero xyzw"):
+        ShapePartCfg(shape=CubeCfg(), quaternion=(0, 0, 0, 0))
+
+
+def test_raw_mujoco_contact_parameters_preserve_values_or_fail_closed() -> None:
+    reference = (0.002, 1.0)
+    impedance = (0.8, 0.99, 0.0001, 0.5, 2.0)
+    cfg = RigidObjectCfg(
+        uid="raw_contact",
+        shape=CubeCfg(),
+        attrs=RigidBodyPhysicsCfg(
+            collision_props=NewtonCollisionPropertiesCfg(
+                solref=reference, solimp=impedance, solmix=0.7
+            )
+        ),
+    )
+    if not {"solref", "solimp", "solmix"}.issubset(
+        {item.name for item in fields(NewtonCollisionDesc)}
+    ):
+        with pytest.raises(NotImplementedError, match="cannot preserve raw MuJoCo"):
+            rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+    else:
+        descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+        contact = descriptor.collisions[0].newton
+        assert contact.solref == pytest.approx(reference)
+        assert contact.solimp == pytest.approx(impedance)
+        assert contact.solmix == pytest.approx(0.7)
+
+
+def test_prepared_variants_keep_one_logical_uid_or_fail_closed() -> None:
+    cfg = RigidObjectCfg.from_dict(
+        {
+            "uid": "logical",
+            "shape": {"shape_type": "Cube", "size": [0.01, 0.01, 0.01]},
+            "env_variants": {
+                "1": {
+                    "uid": "source_asset",
+                    "shape": {
+                        "shape_type": "Cylinder",
+                        "radius": 0.02,
+                        "half_height": 0.03,
+                    },
+                    "attrs": {"mass_props": {"mass": 2.0}},
+                }
+            },
+        }
+    )
+    assert cfg.env_variants[1].uid == "source_asset"
+    if "env_variants" not in {item.name for item in fields(ObjectDesc)}:
+        with pytest.raises(NotImplementedError, match="per-environment rigid variants"):
+            rigid_desc_from_cfg(cfg)
+    else:
+        descriptor, _ = rigid_desc_from_cfg(cfg)
+        replacement = descriptor.env_variants[1]
+        assert descriptor.name == replacement.name == "logical"
+        assert replacement.collisions[0].radius == pytest.approx(0.02)
+        assert replacement.physics.mass == pytest.approx(2.0)
+        assert cfg.env_variants[1].uid == "source_asset"
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"solref": (0.002, -1)},
+        {"solref": (0, 1)},
+        {"solimp": (0.9, 0.95, 0, 0.5, 2)},
+        {"solimp": (0.9, 0.95, 0.001, 0.5)},
+        {"solmix": -1},
+    ],
+)
+def test_invalid_raw_contact_parameters_fail_at_configuration(parameters) -> None:
+    with pytest.raises(ValueError):
+        NewtonCollisionPropertiesCfg(**parameters)
 
 
 def test_soft_descriptor_uses_newton_particle_schema() -> None:

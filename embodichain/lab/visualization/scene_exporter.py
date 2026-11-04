@@ -336,11 +336,23 @@ class SceneExporter:
                 if asset is None:
                     continue
                 selected_env_ids = list(self._env_ids)
-                vertices_by_env = asset.get_vertices(
-                    env_ids=selected_env_ids,
-                    scale=True,
-                )
-                faces_by_env = asset.get_triangles(env_ids=selected_env_ids)
+                if getattr(getattr(asset, "cfg", None), "env_variants", None):
+                    # Geometry may be ragged across prepared variants. Retain
+                    # the homogeneous tensor API and read one row at a time.
+                    vertices_by_env = [
+                        asset.get_vertices(env_ids=[env_id], scale=True)[0]
+                        for env_id in selected_env_ids
+                    ]
+                    faces_by_env = [
+                        asset.get_triangles(env_ids=[env_id])[0]
+                        for env_id in selected_env_ids
+                    ]
+                else:
+                    vertices_by_env = asset.get_vertices(
+                        env_ids=selected_env_ids,
+                        scale=True,
+                    )
+                    faces_by_env = asset.get_triangles(env_ids=selected_env_ids)
                 for selected_index, env_id in enumerate(self._env_ids):
                     vertices = vertices_by_env[selected_index]
                     faces = faces_by_env[selected_index]
