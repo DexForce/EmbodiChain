@@ -26,15 +26,15 @@ import torch
 
 from embodichain.lab.gym.envs.base_env import BaseEnv
 from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
-from embodichain.lab.sim.sensors.contact_sensor import ContactSensor
-from embodichain.lab.sim.sensors.contact_sampling import (
+from embodichain.lab.sim.sensors.contact.sensor import ContactSensor
+from embodichain.lab.sim.sensors.contact.sampling import (
     CONTACT_ACTOR_IDS,
     CONTACT_VALID_MASK,
     CONTACT_NORMALS,
     CONTACT_IMPULSES,
     ContactEvidenceSampler,
 )
-from embodichain.lab.sim.sensors.contact_timeline import (
+from embodichain.lab.sim.sensors.contact.timeline import (
     ContactTimeline,
     ContactTimelineCfg,
 )
@@ -481,22 +481,18 @@ def test_empty_contact_timeline_does_not_retain_sensor_padding():
 
 
 def test_public_base_env_step_drives_actual_sensor_observer_port():
+    from test_contact_query_sensor import (
+        _FakeQuery,
+        _sensor_for_query,
+    )
+    import warp as wp
+
+    wp.init()
     source = ContactSource()
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
     clock = SimpleNamespace(step_index=0)
-    sensor = ContactSensor.__new__(ContactSensor)
-    sensor.device = torch.device("cpu")
-    sensor._entities = [None]
-    sensor._num_instances = 1
-    sensor._query = SimpleNamespace(capabilities=source.contact_capabilities)
-    sensor._data_buffer = source.data
-    sensor._histories = {}
-    sensor._sampling_observers = {}
-    sensor._query_dropped_count = torch.zeros(1, dtype=torch.int32)
-    sensor._scatter_dropped_count = torch.zeros(1, dtype=torch.int32)
-    sensor._sample_scatter_dropped_count = torch.zeros(1, dtype=torch.int32)
-    sensor._latest_contact_buffer = None
     sampled = []
-    sensor._update_physics_contacts = lambda dt: sampled.append(dt)
     sampler = ContactEvidenceSampler(
         sensor,
         native_revision_reader=lambda: source.revision,
@@ -521,7 +517,9 @@ def test_public_base_env_step_drives_actual_sensor_observer_port():
     def update(dt, steps, **kwargs):
         for step in range(steps):
             source.revision += 1
-            source.data["impulse"].fill_((step + 1) * 0.01)
+            query.buffer.data[:2, 9].fill_((step + 1) * 0.01)
+            sensor._sim.physics_step_index += 1
+            sampled.append(dt)
             kwargs["after_substep"](dt)
 
     env.sim = SimpleNamespace(update=update, render_frame=lambda: nullcontext())
@@ -810,6 +808,7 @@ def test_timeline_reset_matches_sensor_indices_without_double_generation(
     capture_step(timeline, source)
     before = timeline.snapshot()
     sensor = ContactSensor.__new__(ContactSensor)
+    sensor._sample_ready_stream = None
     sensor.device = torch.device("cpu")
     sensor._data_buffer = source.data
     sensor._num_contacts_per_env = source.data["is_valid"].sum(1).to(torch.int32)
@@ -842,3 +841,42 @@ def test_timeline_reset_propagates_sensor_index_errors_before_mutating_history(i
     with pytest.raises(type(expected.value)):
         timeline.reset(indices)
     assert timeline.snapshot() == before
+
+
+@pytest.mark.parametrize("loss", [0, 3, -1])
+def test_sampler_combined_loss_diagnostic_does_not_read_legacy_counters(loss):
+    source = ContactSource()
+
+    class CombinedSource:
+        def __getattr__(self, name):
+            return getattr(source, name)
+
+        @property
+        def evidence_dropped_contacts(self):
+            return loss
+
+        @property
+        def dropped_contacts(self):
+            raise AssertionError("Combined acquisition must not synchronize twice.")
+
+        @property
+        def latest_sample_dropped_contacts(self):
+            raise AssertionError("Combined acquisition must not synchronize twice.")
+
+    sample = ContactEvidenceSampler(CombinedSource()).sample(
+        PhysicalEvidenceRequest(1.0, 0, torch.tensor([0]))
+    )
+    assert sample.frame.get(CONTACT_NORMALS).valid.tolist() == [loss == 0]
+    if loss:
+        assert sample.frame.get(CONTACT_NORMALS).acquisition_errors[0]
+
+
+@pytest.mark.parametrize("loss", [3, -1])
+def test_custom_source_latest_loss_fallback_retains_unavailable_evidence(loss):
+    source = ContactSource()
+    source.latest_sample_dropped_contacts = loss
+    sample = ContactEvidenceSampler(source).sample(
+        PhysicalEvidenceRequest(1.0, 0, torch.tensor([0]))
+    )
+    assert sample.frame.get(CONTACT_NORMALS).valid.tolist() == [False]
+    assert sample.frame.get(CONTACT_NORMALS).acquisition_errors[0]

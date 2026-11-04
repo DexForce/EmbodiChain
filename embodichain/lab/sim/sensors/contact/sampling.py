@@ -24,7 +24,7 @@ from typing import Protocol
 
 import torch
 
-from embodichain.lab.sim.sensors.contact_sensor import ContactSensor
+from embodichain.lab.sim.sensors.contact.sensor import ContactSensor
 from embodichain.lab.sim.evidence import (
     PhysicalEvidenceBatch,
     PhysicalEvidenceFrame,
@@ -317,17 +317,20 @@ class ContactEvidenceSampler:
                 )
             selected = ids.to(mask.device)
             active = mask.index_select(0, selected).to(ids.device)
-            dropped = int(self.sensor.dropped_contacts)
-            # ContactSensor keeps interval counts stable during standalone
-            # refreshes. Sources without a separate latest-sample diagnostic
-            # continue to supply their existing loss count directly.
-            latest_dropped = int(
-                getattr(self.sensor, "latest_sample_dropped_contacts", dropped)
-            )
-            if dropped < 0 or latest_dropped < 0:
-                raise ValueError("Contact dropped count must be nonnegative.")
-            # These counts overlap; summing would double-count substep loss.
-            dropped = max(dropped, latest_dropped)
+            dropped = getattr(self.sensor, "evidence_dropped_contacts", None)
+            if dropped is None:
+                # Custom sources retain their existing diagnostic contract.
+                dropped = int(self.sensor.dropped_contacts)
+                latest_dropped = int(
+                    getattr(self.sensor, "latest_sample_dropped_contacts", dropped)
+                )
+                if dropped < 0 or latest_dropped < 0:
+                    raise ValueError("Contact dropped count must be nonnegative.")
+                dropped = max(dropped, latest_dropped)
+            else:
+                dropped = int(dropped)
+                if dropped < 0:
+                    raise ValueError("Contact dropped count must be nonnegative.")
             if dropped:
                 errors.append("Contact query or scatter capacity was exceeded.")
             shared_error = "; ".join(dict.fromkeys(errors)) or None

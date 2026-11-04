@@ -32,7 +32,7 @@ import viser
 import viser.transforms as tf
 from pathlib import Path
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 if TYPE_CHECKING:
     from .pose_generator import GraspRegionSelector
@@ -92,6 +92,8 @@ class _AntipodalMeshBackend:
         use_largest_connected_component: bool,
         filter_ground_collision: bool,
         approach_alignment_angle: float | None = None,
+        check_collision: bool = True,
+        prepared: _AntipodalMeshBackend | None = None,
     ) -> None:
         """Initialize the private backend for one target-local mesh.
 
@@ -104,6 +106,10 @@ class _AntipodalMeshBackend:
             max_deviation_angle: Maximum approach-axis deviation in radians.
             approach_direction_samples: Number of approach variants per pair.
             max_candidates: Maximum number of ranked candidates to retain.
+            check_collision: Construct and use the fixed-hand checker; false
+                serves explicit unqualified proposal queries only.
+            prepared: Same-generator backend whose immutable mesh/annotation
+                buffers can be shared across qualification modes.
             interactive_annotation: Whether to select a region through Viser.
             viser_port: Port for interactive annotation.
             use_largest_connected_component: Whether to retain only the largest
@@ -115,18 +121,24 @@ class _AntipodalMeshBackend:
         self.device = vertices.device
         self.vertices = vertices
         self.triangles = triangles
-        self.mesh = trimesh.Trimesh(
-            vertices=vertices.to("cpu").numpy(),
-            faces=triangles.to("cpu").numpy(),
-            process=False,
-            force="mesh",
+        self.mesh = (
+            prepared.mesh
+            if prepared is not None
+            else trimesh.Trimesh(
+                vertices=vertices.to("cpu").numpy(),
+                faces=triangles.to("cpu").numpy(),
+                process=False,
+                force="mesh",
+            )
         )
-        self._collision_checker = GripperCollisionChecker(
-            object_mesh_verts=vertices,
-            object_mesh_faces=triangles,
-            cfg=collision_cfg,
-            collision_geometry=collision_geometry,
-        )
+        self._collision_checker = None
+        if check_collision:
+            self._collision_checker = GripperCollisionChecker(
+                object_mesh_verts=vertices,
+                object_mesh_faces=triangles,
+                cfg=collision_cfg,
+                collision_geometry=collision_geometry,
+            )
         self._sampler_cfg = sampler_cfg
         self._center_mode = sampler_cfg.center_mode
         self._max_deviation_angle = max_deviation_angle
@@ -138,15 +150,20 @@ class _AntipodalMeshBackend:
         self._use_largest_connected_component = use_largest_connected_component
         self._filter_ground_collision = filter_ground_collision
         self._antipodal_sampler = AntipodalSampler(cfg=sampler_cfg)
-        self._hit_point_pairs: torch.Tensor | None = None
+        self._hit_point_pairs: torch.Tensor | None = (
+            prepared._hit_point_pairs if prepared is not None else None
+        )
 
         # Load cached antipodal pairs for the whole mesh if available.
-        cache_path = self._get_cache_dir(self.vertices, self.triangles)
-        if os.path.exists(cache_path):
-            logger.log_info(f"Found cached antipodal pairs at {cache_path}. Loading.")
-            self._hit_point_pairs = torch.tensor(
-                np.load(cache_path), dtype=torch.float32, device=self.device
-            )
+        if prepared is None:
+            cache_path = self._get_cache_dir(self.vertices, self.triangles)
+            if os.path.exists(cache_path):
+                logger.log_info(
+                    f"Found cached antipodal pairs at {cache_path}. Loading."
+                )
+                self._hit_point_pairs = torch.tensor(
+                    np.load(cache_path), dtype=torch.float32, device=self.device
+                )
 
     @property
     def is_prepared(self) -> bool:
@@ -643,6 +660,8 @@ class _AntipodalMeshBackend:
         left_to_right_arm_direction: torch.Tensor,
         middle_empty_ratio: float = 0.4,
         visualize_collision: bool = False,
+        *,
+        role: Literal["left", "right"] | None = None,
     ) -> dict | None:
         if self._hit_point_pairs is None:
             logger.log_warning(
@@ -691,45 +710,37 @@ class _AntipodalMeshBackend:
             right_center = mesh_vert_transformed[
                 mesh_projection > right_threshold
             ].mean(dim=0)
-        is_succes_left, grasp_poses_left, open_lengths_left, total_cost_left = (
-            self._filter_valid_grasp_poses(
-                hit_points_=hit_points_[left_mask],
-                origin_points_=origin_points_[left_mask],
+        result = {}
+        for side, mask, center in (
+            ("left", left_mask, left_center),
+            ("right", right_mask, right_center),
+        ):
+            origins, hits = origin_points_[mask], hit_points_[mask]
+            if role is not None and side != role:
+                # Keep every original RNG draw, including the unused side's
+                # eligibility-dependent draws, without building/ranking poses.
+                self._qualified_geometry(
+                    origins,
+                    hits,
+                    approach_direction,
+                    object_pose,
+                    materialize=False,
+                )
+                continue
+            success, poses, widths, costs = self._filter_valid_grasp_poses(
+                hit_points_=hits,
+                origin_points_=origins,
                 object_pose=object_pose,
                 approach_direction=approach_direction,
-                mesh_center=left_center,
+                mesh_center=center,
                 visualize_collision=visualize_collision,
             )
-        )
-        is_succes_right, grasp_poses_right, open_lengths_right, total_cost_right = (
-            self._filter_valid_grasp_poses(
-                hit_points_=hit_points_[right_mask],
-                origin_points_=origin_points_[right_mask],
-                object_pose=object_pose,
-                approach_direction=approach_direction,
-                mesh_center=right_center,
-                visualize_collision=visualize_collision,
-            )
-        )
-        result = {
-            "left": {
-                "is_success": is_succes_left,
-                "grasp_poses": grasp_poses_left,
-                "open_lengths": open_lengths_left,
-                "total_cost": total_cost_left,
-            },
-            "right": {
-                "is_success": is_succes_right,
-                "grasp_poses": grasp_poses_right,
-                "open_lengths": open_lengths_right,
-                "total_cost": total_cost_right,
-            },
-        }
-        # self.visualize_grasp_poses(
-        #     obj_pose=object_pose,
-        #     grasp_poses=torch.vstack([grasp_poses_left, grasp_poses_right]),
-        #     open_lengths=torch.cat([open_lengths_left, open_lengths_right]),
-        # )
+            result[side] = {
+                "is_success": success,
+                "grasp_poses": poses,
+                "open_lengths": widths,
+                "total_cost": costs,
+            }
         return result
 
     def _filter_valid_grasp_poses(
@@ -770,8 +781,9 @@ class _AntipodalMeshBackend:
         pair_ids: torch.Tensor | None = None,
         directions: tuple[torch.Tensor, ...] = (),
         visualize_collision: bool = False,
+        materialize: bool = True,
     ) -> _GraspGeometry:
-        """Keep geometry before ranking; reuse one invocation's direction draws."""
+        """Reuse original direction draws, optionally skipping pose materialization."""
         if pair_ids is None:
             pair_ids = torch.arange(len(origin_points_), device=origin_points_.device)
 
@@ -792,13 +804,6 @@ class _AntipodalMeshBackend:
             logger.log_warning("No valid antipodal pairs after angle filtering.")
             return empty()
 
-        centers = (origin_points_ + hit_points_) / 2
-        valid_grasp_x = grasp_x[valid_mask]
-        valid_centers = centers[valid_mask]
-        valid_open_lengths = torch.norm(
-            origin_points_[valid_mask] - hit_points_[valid_mask], dim=-1
-        )
-
         # compute grasp poses using antipodal point pairs and approach direction
         if not directions:
             sampled = [approach_direction]
@@ -808,6 +813,15 @@ class _AntipodalMeshBackend:
                 )
                 sampled.append(rota_direction[0])
             directions = tuple(sampled)
+        if not materialize:
+            return empty()
+
+        centers = (origin_points_ + hit_points_) / 2
+        valid_grasp_x = grasp_x[valid_mask]
+        valid_centers = centers[valid_mask]
+        valid_open_lengths = torch.norm(
+            origin_points_[valid_mask] - hit_points_[valid_mask], dim=-1
+        )
         valid_grasp_poses_list = []
         for direct in directions:
             valid_grasp_poses = (
@@ -846,22 +860,28 @@ class _AntipodalMeshBackend:
         valid_centers = valid_centers[nms_indices]
         valid_pair_ids = valid_pair_ids[nms_indices]
 
-        is_colliding, max_penetration = self._collision_checker.query(
-            object_pose,
-            valid_grasp_poses,
-            is_filter_ground_collision=self._filter_ground_collision,
-            is_visual=visualize_collision,
-            collision_threshold=0.0,
-        )
-        if is_colliding.logical_not().sum() == 0:
-            logger.log_warning("No valid antipodal pairs after collision filtering.")
-            return empty()
-
+        if self._collision_checker is not None:
+            is_colliding, max_penetration = self._collision_checker.query(
+                object_pose,
+                valid_grasp_poses,
+                is_filter_ground_collision=self._filter_ground_collision,
+                is_visual=visualize_collision,
+                collision_threshold=0.0,
+            )
+            if is_colliding.logical_not().sum() == 0:
+                logger.log_warning(
+                    "No valid antipodal pairs after collision filtering."
+                )
+                return empty()
+            valid_grasp_poses = valid_grasp_poses[~is_colliding]
+            valid_open_lengths = valid_open_lengths[~is_colliding]
+            valid_centers = valid_centers[~is_colliding]
+            valid_pair_ids = valid_pair_ids[~is_colliding]
         return _GraspGeometry(
-            valid_grasp_poses[~is_colliding],
-            valid_open_lengths[~is_colliding],
-            valid_centers[~is_colliding],
-            valid_pair_ids[~is_colliding],
+            valid_grasp_poses,
+            valid_open_lengths,
+            valid_centers,
+            valid_pair_ids,
             directions,
         )
 
