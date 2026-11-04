@@ -468,10 +468,17 @@ def test_empty_contact_timeline_does_not_retain_sensor_padding():
 
 
 def test_public_base_env_step_drives_actual_sensor_observer_port():
-    from test_contact_query_sensor import (
-        _FakeQuery,
-        _sensor_for_query,
+    from importlib.util import module_from_spec, spec_from_file_location
+    from pathlib import Path
+
+    # Reuse the complete real-sensor fixture rather than mirror its private buffers.
+    fixture_path = (
+        Path(__file__).parents[3] / "sim/sensors/test_contact_query_sensor.py"
     )
+    spec = spec_from_file_location("contact_query_fixture", fixture_path)
+    fixture = module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    _FakeQuery, _sensor_for_query = fixture._FakeQuery, fixture._sensor_for_query
     import warp as wp
 
     wp.init()
