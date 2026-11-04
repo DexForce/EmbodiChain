@@ -30,6 +30,10 @@ import warp as wp
     [
         ("embodichain.compute", ["warp", "torch", "embodichain.lab"]),
         (
+            "embodichain.compute.geometry.mesh_bounds",
+            ["embodichain.lab", "embodichain.gen_sim", "dexsim"],
+        ),
+        (
             "embodichain.compute.kinematics.ik_path",
             ["embodichain.lab", "embodichain.gen_sim", "dexsim"],
         ),

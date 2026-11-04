@@ -689,6 +689,7 @@ def test_initial_validator_reads_contacts_without_replaying_history() -> None:
     )
     owner = SimpleNamespace(
         num_envs=1,
+        physics_step_index=0,
         spawn_result=SimpleNamespace(
             create_contact_query=lambda targets, **kwargs: query
         ),

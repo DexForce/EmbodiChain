@@ -16,12 +16,15 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
+import pytest
 import torch
 import warp as wp
 
 from dexsim.scene import ContactActorInfo, ContactBuffer, ContactQueryCapabilities
+from embodichain.lab.gym.envs import BaseEnv
 from embodichain.lab.sim.sensors import ContactSensor, ContactSensorCfg
 
 
@@ -35,6 +38,8 @@ class _FakeQuery:
         }
         self.actors = tuple(self._actors.values())
         self.actor_info_calls = 0
+        self.fetch_calls = 0
+        self.available = True
         self.buffer = ContactBuffer.allocate(4, "cpu")
         self.buffer.count = 2
         self.buffer.data[0] = torch.tensor(
@@ -51,6 +56,8 @@ class _FakeQuery:
         return self._actors[actor_id]
 
     def fetch(self) -> ContactBuffer:
+        assert self.available, "SDK contact snapshot is unavailable after reset"
+        self.fetch_calls += 1
         return self.buffer
 
 
@@ -72,6 +79,7 @@ def test_contact_sensor_consumes_scene_query_and_explicit_env_ids() -> None:
     )
     owner = SimpleNamespace(
         num_envs=2,
+        physics_step_index=0,
         spawn_result=result,
         _spawn_scene=SimpleNamespace(handles=lambda uid: handles),
         arena_offsets=torch.zeros((2, 3)),
@@ -85,10 +93,12 @@ def test_contact_sensor_consumes_scene_query_and_explicit_env_ids() -> None:
 
     sensor = ContactSensor(cfg, torch.device("cpu"), owner=owner)
     sensor.update()
+    assert query.fetch_calls == 1
     original_ids = sensor.item_user_ids
     original_env_ids = sensor.item_env_ids
     assert query.actor_info_calls == len(query.selected_actor_ids)
     sensor.update()
+    assert query.fetch_calls == 1
     assert sensor.item_user_ids is original_ids
     assert sensor.item_env_ids is original_env_ids
     assert query.actor_info_calls == len(query.selected_actor_ids)
@@ -138,6 +148,7 @@ def _sensor_for_query(query, capacity=2):
     )
     owner = SimpleNamespace(
         num_envs=2,
+        physics_step_index=0,
         arena_offsets=torch.zeros((2, 3)),
         _spawn_scene=SimpleNamespace(handles=lambda uid: handles),
         spawn_result=SimpleNamespace(
@@ -159,15 +170,20 @@ def test_default_history_enables_substep_sampling_and_preserves_interval_drops()
     assert sensor.requires_substep_update
     sensor.begin_control_step()
     query.buffer.dropped_count = 3
+    sensor._sim.physics_step_index += 1
     sensor.update_physics_step(0.01)
     assert history.found.all()
+    sensor.update_physics_step(0.01)
+    assert query.fetch_calls == 1
     query.buffer.count = 0
     query.buffer.dropped_count = 0
+    sensor._sim.physics_step_index += 1
     sensor.update_physics_step(0.01)
     assert not history.contact.any()
     assert history.found.all()
     assert sensor.dropped_contacts == 3
     sensor.update()  # Observation refresh must not replace interval diagnostics.
+    assert query.fetch_calls == 2
     assert sensor.dropped_contacts == 3
     sensor.begin_control_step()
     assert sensor.dropped_contacts == 0
@@ -183,15 +199,396 @@ def test_scatter_overflow_is_counted_separately_and_reset_by_selected_row():
     sensor.create_history("feet", torch.tensor([[4], [7]]))
     sensor.begin_control_step()
     query.buffer.dropped_count = 2
+    sensor._sim.physics_step_index += 1
     sensor.update_physics_step(0.01)
     assert sensor.total_current_contacts == 2
     assert sensor._scatter_dropped_count.tolist() == [1, 0]
     assert sensor.dropped_contacts == 3
     query.buffer.count = 0
     query.buffer.dropped_count = 0
+    sensor._sim.physics_step_index += 1
     sensor.update_physics_step(0.01)
     assert sensor.dropped_contacts == 3
     sensor.reset([1])
     assert sensor.dropped_contacts == 3
     sensor.reset()
     assert sensor.dropped_contacts == 0
+
+
+@pytest.mark.parametrize("with_history", [False, True])
+def test_sampling_observers_are_instance_owned_and_bracket_native_fetch(with_history):
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    if with_history:
+        sensor.create_history("existing_history", torch.tensor([[4], [7]]))
+    other = _sensor_for_query(_FakeQuery())
+    events = []
+    original_fetch = query.fetch
+
+    def fetch():
+        events.append("fetch")
+        return original_fetch()
+
+    query.fetch = fetch
+    observer = SimpleNamespace(
+        begin_control_step=lambda: events.append("begin"),
+        before_sample=lambda: (events.append("before"), "stamp")[1],
+        after_sample=lambda dt, token: events.append(
+            ("after", dt, token, int(sensor.get_data()["is_valid"].sum()))
+        ),
+        reset=lambda ids: events.append(("reset", None if ids is None else list(ids))),
+    )
+    sensor.add_sampling_observer("audit", observer)
+    assert sensor.requires_substep_update
+    assert not other.requires_substep_update
+    with pytest.raises(ValueError, match="already exists"):
+        sensor.add_sampling_observer("audit", observer)
+    sensor.begin_control_step()
+    sensor.update_physics_step(0.01)
+    sensor.reset([0])
+    assert events == [
+        "begin",
+        "before",
+        "fetch",
+        ("after", 0.01, "stamp", 2),
+        ("reset", [0]),
+    ]
+    query.buffer.dropped_count = 3
+    sensor._sim.physics_step_index += 1
+    sensor.update_physics_step(0.01)
+    query.buffer.dropped_count = 0
+    sensor.update()
+    assert sensor.dropped_contacts == 3
+    assert sensor.remove_sampling_observer("audit") is observer
+    assert sensor.requires_substep_update is with_history
+    events.clear()
+    sensor._sim.physics_step_index += 1
+    sensor.update_physics_step(0.01)
+    assert events == ["fetch"]
+
+
+def test_sampling_observers_reject_external_capture_before_callbacks(monkeypatch):
+    sensor = _sensor_for_query(_FakeQuery())
+    calls = []
+    observer = SimpleNamespace(
+        begin_control_step=lambda: None,
+        before_sample=lambda: calls.append("before"),
+        after_sample=lambda *args: None,
+        reset=lambda *args: None,
+    )
+    sensor.add_sampling_observer("audit", observer)
+    sensor.device = SimpleNamespace(type="cuda")
+    monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", lambda: True)
+    with pytest.raises(RuntimeError, match="external CUDA capture"):
+        sensor.update_physics_step(0.01)
+    assert calls == []
+
+
+def test_contact_sampler_normal_update_fetches_once_before_reading_data():
+    from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
+    from embodichain.lab.sim.sensors.contact.sampling import (
+        ContactEvidenceSampler,
+        CONTACT_VALID_MASK,
+    )
+
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    calls = []
+    original = query.fetch
+
+    def fetch():
+        calls.append("fetch")
+        return original()
+
+    query.fetch = fetch
+    sample = ContactEvidenceSampler(sensor).sample(
+        PhysicalEvidenceRequest(0.0, 0, torch.tensor([1, 0]))
+    )
+    assert calls == ["fetch"]
+    assert sample.frame.get(CONTACT_VALID_MASK).values.sum().item() == 2
+    assert all(batch.valid.all() for batch in sample.frame.batches.values())
+
+
+def test_sampling_observer_exception_is_not_replaced_with_empty_success():
+    sensor = _sensor_for_query(_FakeQuery())
+
+    def fail(*args):
+        raise RuntimeError("observer failed")
+
+    observer = SimpleNamespace(
+        begin_control_step=lambda: None,
+        before_sample=lambda: None,
+        after_sample=fail,
+        reset=lambda ids: None,
+    )
+    sensor.add_sampling_observer("broken", observer)
+    with pytest.raises(RuntimeError, match="observer failed"):
+        sensor.update_physics_step(0.01)
+
+
+def test_contact_cache_preserves_gym_and_standalone_refresh_after_reset():
+    """Reset invalidates the cache, while empty reset and repeated reads do not."""
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    owner = sensor._sim
+    sensors = {"contact": sensor}
+
+    def advance(dt, count, after_substep=None, **kwargs):
+        for _ in range(count):
+            owner.physics_step_index += 1
+            query.available = True
+            if after_substep is not None:
+                after_substep(dt)
+
+    owner.update = advance
+    owner.render_camera_group = lambda ids: None
+    env = SimpleNamespace(
+        sensors=sensors,
+        sim=owner,
+        physics_dt=0.001,
+        cfg=SimpleNamespace(sim_steps_per_control=20),
+        num_envs=2,
+        device=torch.device("cpu"),
+        _camera_group_ids=[],
+        _profiler=SimpleNamespace(section=lambda *args: nullcontext()),
+    )
+    BaseEnv._get_sensor_obs(env)
+    BaseEnv._get_sensor_obs(env)
+    assert query.fetch_calls == 1
+    BaseEnv._advance_physics(env)
+    assert owner.physics_step_index == 20 and query.fetch_calls == 1
+    BaseEnv._get_sensor_obs(env)
+    sensor.update()
+    assert query.fetch_calls == 2
+    untouched = sensor.get_data()[1].clone()
+
+    sensor.reset([0])
+    assert not sensor.get_data()["is_valid"][0].any()
+    for name, value in untouched.items():
+        torch.testing.assert_close(sensor.get_data()[name][1], value)
+    # Scene preparation clears sensor history after settling, then explicitly
+    # refreshes raw evidence from the still-valid completed physics step.
+    BaseEnv._get_sensor_obs(env)
+    assert query.fetch_calls == 3 and owner.physics_step_index == 20
+    assert sensor.get_data()["is_valid"][:, 0].all()
+    sensor.reset([])
+    sensor.update()
+    assert query.fetch_calls == 3
+
+    # Replay advances the manager directly rather than through env.step().
+    owner.update(0.001, 1)
+    BaseEnv._get_sensor_obs(env)
+    assert query.fetch_calls == 4
+    assert sensor.get_data()["is_valid"][:, 0].all()
+
+    sensor.reset()
+    assert not sensor.get_data()["is_valid"].any()
+    sensor.update()
+    assert query.fetch_calls == 5
+    assert sensor.get_data()["is_valid"][:, 0].all()
+
+
+def test_history_reuses_raw_sample_and_advances_only_once_per_physics_step():
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    history = sensor.create_history("feet", torch.tensor([[4], [7]]))
+    sensor.begin_control_step()
+    sensor._sim.physics_step_index += 1
+    sensor.update()
+    sensor.update_physics_step(0.01)
+    sensor.update_physics_step(0.01)
+    assert query.fetch_calls == 1
+    assert history.contact_count.tolist() == [1, 1]
+
+
+def test_failed_contact_query_does_not_poison_step_cache():
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    sensor._sim.physics_step_index += 1
+    query.available = False
+    with pytest.raises(AssertionError, match="snapshot is unavailable"):
+        sensor.update()
+    query.available = True
+    sensor.update()
+    assert query.fetch_calls == 1
+    assert sensor.get_data()["is_valid"][:, 0].all()
+
+
+def test_same_step_topology_change_refreshes_sample_and_actor_metadata():
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    sensor.update()
+    assert sensor.total_current_contacts == 2
+    query._actors[7] = ContactActorInfo(7, "arena_0/other", None, "arena_0", 0)
+    query.actors = tuple(query._actors.values())
+    query.buffer.count = 0  # A rebuilt model has no solved contacts yet.
+    sensor.update()
+    assert query.fetch_calls == 2
+    assert sensor.total_current_contacts == 0
+    assert not sensor.get_data()["is_valid"].any()
+    assert sensor.item_env_ids.tolist() == [0, 0]
+
+
+@pytest.mark.parametrize("raw_first", [False, True])
+def test_sampling_observers_share_the_physics_step_cache_with_history(raw_first):
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    history = sensor.create_history("feet", torch.tensor([[4], [7]]))
+    events = []
+    sensor.add_sampling_observer(
+        "audit",
+        SimpleNamespace(
+            begin_control_step=lambda: None,
+            before_sample=lambda: events.append("before"),
+            after_sample=lambda dt, token: events.append(("after", dt)),
+            reset=lambda ids: None,
+        ),
+    )
+    sensor.begin_control_step()
+    for index in range(2):
+        sensor._sim.physics_step_index += 1
+        if raw_first:
+            sensor.update()
+        sensor.update_physics_step(0.01)
+        sensor.update_physics_step(0.01)
+        sensor.update()
+        assert query.fetch_calls == index + 1
+        assert events == ["before", ("after", 0.01)] * (index + 1)
+    assert history.contact_count.tolist() == [2, 2]
+
+
+def test_contact_package_exports_and_sensor_config_registration():
+    from embodichain.lab.sim.sensors import SensorCfg
+    from embodichain.lab.sim.sensors.contact import (
+        ContactSensor as PackagedSensor,
+        ContactSensorCfg as PackagedCfg,
+    )
+    from embodichain.lab.sim.sensors.contact.sensor import (
+        ContactSensor as Implementation,
+    )
+    from importlib.util import find_spec
+
+    assert ContactSensor is PackagedSensor is Implementation
+    assert find_spec("embodichain.lab.sim.sensors.contact.sensor") is None
+    assert find_spec("embodichain.lab.sim.sensors.contact_history") is None
+    config = SensorCfg.from_dict(
+        {"sensor_type": "ContactSensor", "uid": "contacts", "rigid_uid_list": ["cube"]}
+    )
+    assert type(config) is ContactSensorCfg is PackagedCfg
+
+
+def test_disabled_observers_do_not_build_or_iterate_subscription_snapshots():
+    class DisabledObservers(dict):
+        def values(self):
+            raise AssertionError("Disabled observer path must not enumerate callbacks.")
+
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    sensor._sampling_observers = DisabledObservers()
+    history = sensor.create_history("feet", torch.tensor([[4], [7]]))
+    sensor.begin_control_step()
+    sensor._sim.physics_step_index += 1
+    sensor.update_physics_step(0.01)
+    sensor.update_physics_step(0.01)
+    sensor.update()
+    assert query.fetch_calls == 1
+    assert history.contact_count.tolist() == [1, 1]
+
+
+def test_observer_snapshot_survives_subscription_removal_during_sampling():
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    events = []
+
+    def before():
+        sensor.remove_sampling_observer("audit")
+        return "prepared"
+
+    sensor.add_sampling_observer(
+        "audit",
+        SimpleNamespace(
+            begin_control_step=lambda: None,
+            before_sample=before,
+            after_sample=lambda dt, token: events.append((dt, token)),
+            reset=lambda ids: None,
+        ),
+    )
+    sensor.update_physics_step(0.01)
+    assert events == [(0.01, "prepared")]
+    sensor._sim.physics_step_index += 1
+    sensor.update_physics_step(0.01)
+    assert events == [(0.01, "prepared")]
+    assert query.fetch_calls == 2
+
+
+@pytest.mark.parametrize("loss", ["none", "query", "scatter"])
+def test_first_standalone_sample_with_observer_preserves_loss_unavailability(loss):
+    """The observer's interval counter has not yet seen this standalone fetch."""
+    from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
+    from embodichain.lab.sim.sensors.contact.sampling import (
+        ContactEvidenceSampler,
+    )
+
+    wp.init()
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query, capacity=1)
+    sensor.add_sampling_observer(
+        "audit",
+        SimpleNamespace(
+            begin_control_step=lambda: None,
+            before_sample=lambda: None,
+            after_sample=lambda dt, token: None,
+            reset=lambda ids: None,
+        ),
+    )
+    if loss == "query":
+        query.buffer.dropped_count = 3
+    elif loss == "scatter":
+        query.buffer.count = 3
+        query.buffer.env_ids[:3] = torch.tensor([0, 0, 1])
+        query.buffer.actor_ids[:3] = torch.tensor([[4, -1], [4, -1], [7, -1]])
+        query.buffer.data[2] = query.buffer.data[1]
+    fetches = []
+    original_fetch = query.fetch
+
+    def fetch():
+        fetches.append(True)
+        return original_fetch()
+
+    query.fetch = fetch
+    sample = ContactEvidenceSampler(sensor).sample(
+        PhysicalEvidenceRequest(1.0, 0, torch.tensor([1, 0]))
+    )
+    assert fetches == [True]
+    assert sensor.dropped_contacts == 0
+    if loss == "none":
+        assert all(batch.valid.all() for batch in sample.frame.batches.values())
+    else:
+        assert all(not batch.valid.any() for batch in sample.frame.batches.values())
+        assert all(
+            "capacity" in error
+            for batch in sample.frame.batches.values()
+            for error in batch.acquisition_errors
+        )
+        assert sample.dropped_contacts == (3 if loss == "query" else 1)
+
+
+def test_latest_contact_loss_belongs_to_one_query_and_respects_selected_reset():
+    wp.init()
+    first_query, second_query = _FakeQuery(), _FakeQuery()
+    first, second = _sensor_for_query(first_query), _sensor_for_query(second_query)
+    first_query.buffer.dropped_count = 3
+    first.update()
+    second.update()
+    assert first.latest_sample_dropped_contacts == 3
+    assert second.latest_sample_dropped_contacts == 0
+    first.reset([1])
+    assert first.latest_sample_dropped_contacts == 3
+    first.reset()
+    assert first.latest_sample_dropped_contacts == 0
+    first.update()
+    assert first.latest_sample_dropped_contacts == 3
+    first_query.buffer.dropped_count = 0
+    first._sim.physics_step_index += 1
+    first.update()
+    assert first.latest_sample_dropped_contacts == 0

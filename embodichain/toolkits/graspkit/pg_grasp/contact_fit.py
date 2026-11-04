@@ -297,6 +297,28 @@ class HandContactChecker:
         self.geometry = geometry
         self.target = target
 
+    def refine(
+        self, obj_pose: torch.Tensor, poses: torch.Tensor, widths: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Fit candidates and qualify their target-only closing geometry.
+
+        Args:
+            obj_pose: Object-to-world transform for this target.
+            poses: Candidate TCP-to-world transforms, shape ``(K, 4, 4)``.
+            widths: Proposed pad gaps, shape ``(K,)``.
+
+        Returns:
+            Corrected poses, corrected gaps and a boolean valid mask in the
+            original candidate order. Rejected candidates remain in the arrays;
+            callers select them using the mask. Diagnostics remain available
+            through ``last_counts`` and the separate :meth:`query` API.
+        """
+        fitted, gaps = self.fit_contacts(obj_pose, poses, widths)
+        rejected, _ = self.query(
+            obj_pose, fitted, gaps, is_filter_ground_collision=False
+        )
+        return fitted, gaps, ~rejected
+
     def fit_contacts(
         self, obj_pose: torch.Tensor, poses: torch.Tensor, widths: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:

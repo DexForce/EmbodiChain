@@ -97,3 +97,5 @@ See Also
 - :doc:`/overview/gym/env` — EmbodiedEnv configuration and Action Manager
 - :doc:`/features/online_data` — Online data streaming pipeline
 - :doc:`/resources/task/index` — Available RL task environments
+
+For external training, see :doc:`/guides/rlinf`. The :doc:`/guides/training_frameworks` comparison also covers LeRobot imitation learning and native SL.

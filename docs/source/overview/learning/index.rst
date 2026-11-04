@@ -24,5 +24,6 @@ Related Workflows
 Use the :doc:`/overview/gym/index` to define task observations, actions, and
 rewards. For demonstration-based learning workflows, see
 :doc:`/tutorial/data_expansion` and :doc:`/features/online_data` for collecting
-and supplying training data. The optional :doc:`/guides/rlinf` integration
-connects EmbodiChain environments to an external training backend.
+and supplying training data. See :doc:`/guides/training_frameworks` to choose
+between native trainers, :doc:`/guides/rlinf` for external RL and
+:doc:`/guides/lerobot` for official ACT imitation learning.

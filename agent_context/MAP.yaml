@@ -149,7 +149,7 @@ topics:
 - id: sensor-system
   title: Sensor System
   aliases: [sensor system, camera attachment, 传感器, 相机挂载]
-  keywords: [CameraCfg, StereoCameraCfg, ContactSensorCfg, ContactQuery, Newton contact, SensorCfg,
+  keywords: [CameraCfg, StereoCameraCfg, ContactSensorCfg, ContactQuery, ContactSamplingObserver, ContactEvidenceSampler, ContactTimeline, Newton contact, SensorCfg,
     get_sensor_obs, resolve_parent_nodes, scatter_contact_data, tiled image, quaternion, xyzw]
   paths: [topics/sensor-system/sensor-system.md]
   source_of_truth:
@@ -157,8 +157,11 @@ topics:
   - embodichain/lab/sim/sensors/camera.py
   - embodichain/lab/sim/sensors/stereo.py
   - embodichain/lab/sim/sensors/attachment.py
-  - embodichain/lab/sim/sensors/contact_sensor.py
-  - embodichain/lab/sim/sensors/_warp/contact.py
+  - embodichain/lab/sim/sensors/contact/sensor.py
+  - embodichain/lab/sim/sensors/contact/sampling.py
+  - embodichain/lab/sim/sensors/contact/timeline.py
+  - embodichain/lab/sim/evidence.py
+  - embodichain/lab/sim/sensors/contact/_warp/scatter.py
   - embodichain/compute/image/
   watch_paths: [embodichain/lab/sim/sensors/, embodichain/compute/image/, tests/sim/sensors/]
   related_topics: [simulation-system, robot-system, env-framework, sim-visualization]
@@ -192,6 +195,7 @@ topics:
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
     轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体, kinematic trajectory refinement, 轨迹修正]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
+    CuroboPayload, CuroboQuerySnapshot, curobo_motion_generator,
     interpolation_mode, ik_seed_mode, resolve_continuous_ik_path, search_cost_scope, RejectedMotionCandidate,
     expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
     load_expansion_profile, SourceAdapter, CandidateCoordinator, CandidateTrajectoryBatch,
@@ -223,6 +227,7 @@ topics:
   - embodichain/compute/kinematics/_warp/trapezoidal.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_planner.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_yaml.py
+  - embodichain/lab/sim/motion/planners/curobo/payload.py
   - embodichain/lab/task_program/semantics/scene.py
   - embodichain/lab/sim/motion/expansion/
   - embodichain/compute/trajectory/
@@ -244,6 +249,9 @@ topics:
   aliases: [sim.scene, scene services, procedural scene, 场景服务, 程序化场景, 场景布局, 场景快照]
   keywords: [SceneFragment, SceneRecipe, GeneratedScene, SupportRegion, LayoutProblem,
     NativeQueryScope, NativeClosingQuery, NativeOpeningTarget, native hand queries,
+
+    NativePlanarPlacement, planar_floor_region, planar_placement_metrics, select_container_landing,
+    SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,
     solve_layout, capture_state, restore_state, settle_scene, check_layout,
@@ -253,6 +261,7 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/scene/
   - embodichain/compute/geometry/
+  - embodichain/lab/sim/objects/backends/_collision_inputs.py
   watch_paths: [embodichain/lab/sim/scene/, embodichain/compute/geometry/,
     tests/sim/scene/, tests/compute/geometry/]
   related_topics: [simulation-system, scene-expansion, gen-sim, task-programs]
@@ -433,17 +442,21 @@ topics:
 - id: task-programs
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
-  keywords: [TaskProgramCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
+  keywords: [TaskProgramCfg, SimulationSettleMonitorCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
     hand_geometries,
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
-    joint_command_mode, ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
+    joint_command_mode, InvocationPolicyBinding, BoundInvocationPolicies, ContactEvidenceSampler, ContactTimeline, NativeGripEvidenceFactory,
+    ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
   - embodichain/lab/task_program/
   - embodichain/lab/task_program/semantics/integration.py
   - embodichain/lab/task_program/semantics/calls.py
   - embodichain/lab/task_program/integrations/configured.py
+  - embodichain/lab/task_program/integrations/simulation/grip_evidence.py
+
+  - embodichain/lab/task_program/integrations/invocation_policy.py
   - embodichain/lab/task_program/integrations/composition.py
   - embodichain/lab/task_program/integrations/_configured_composition.py
   - embodichain/lab/gym/envs/task_program/
