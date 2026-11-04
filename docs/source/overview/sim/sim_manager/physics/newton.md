@@ -8,6 +8,16 @@ EmbodiChain's shared scene, object, sensor, and stepping APIs. Select it with
 {class}`~cfg.NewtonPhysicsCfg`, or with `physics: newton` in a Gym environment
 configuration.
 
+## Package compatibility
+
+This integration requires `dexsim_engine>=0.5.1,<0.6`. The earlier `0.5.1rc1`
+package does not contain the batched RL and contact fixes required here.
+When testing locally built candidates, install the EmbodiChain and DexSim wheels
+in the same `python -m pip install` command, with dependency resolution enabled,
+then run `python -m pip check`. A local version such as `0.5.1+<revision>` satisfies
+the requirement. Use the paired candidate wheels until DexSim 0.5.1 is published
+to the package index.
+
 ```{important}
 For scenes that combine an articulated robot with cloth or a volume soft body,
 start with **DexUni**. It is the DexSim coupled solver configuration for this
@@ -126,3 +136,11 @@ and [solver tuning reference](https://newton-physics.github.io/newton/stable/con
 newton/dexuni
 newton/runtime_qualification
 ```
+
+## Mesh query acceleration
+
+`NewtonPhysicsCfg.mesh_bvh_constructor` selects the mesh BVH constructor used
+for mesh and heightfield ray queries. Its default `None` preserves the engine
+configuration. Large CUDA terrain scans can use `"cubql"` with a DexSim build
+supporting this field. This setting changes the acceleration structure, while
+preserving mesh geometry and physical contact parameters.

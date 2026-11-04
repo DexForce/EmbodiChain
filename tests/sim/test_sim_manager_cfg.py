@@ -124,15 +124,16 @@ def test_newton_physics_cfg_uses_device() -> None:
 
 
 @pytest.mark.no_sim
-def test_newton_physics_cfg_preserves_dexsim_auto_solver_default() -> None:
-    from dexsim.engine.newton_physics import AutoSolverCfg
+def test_newton_physics_cfg_preserves_dexsim_solver_default() -> None:
+    from dexsim.engine.newton_physics import NewtonCfg
 
     cfg = NewtonPhysicsCfg()
 
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
-    assert isinstance(dexsim_cfg.solver_cfg, AutoSolverCfg)
-    assert dexsim_cfg.solver_cfg.solver_type == "auto"
+    native_default = NewtonCfg().solver_cfg
+    assert type(dexsim_cfg.solver_cfg) is type(native_default)
+    assert dexsim_cfg.solver_cfg.solver_type == native_default.solver_type
 
 
 @pytest.mark.no_sim
@@ -158,18 +159,22 @@ def test_newton_physics_cfg_forwards_render_sync_policy(
 
 
 @pytest.mark.no_sim
-def test_newton_physics_cfg_requires_dexsim_auto_solver_api(
+@pytest.mark.parametrize("solver_cfg", [None, {"solver_type": "mujoco_warp"}])
+def test_newton_physics_cfg_converts_without_auto_solver_api(
     monkeypatch: pytest.MonkeyPatch,
+    solver_cfg: dict[str, str] | None,
 ) -> None:
     from dexsim.engine import newton_physics
 
-    monkeypatch.delattr(newton_physics, "AutoSolverCfg")
+    monkeypatch.delattr(newton_physics, "AutoSolverCfg", raising=False)
 
-    with pytest.raises(
-        ImportError,
-        match="cannot import name 'AutoSolverCfg'",
-    ):
-        NewtonPhysicsCfg().to_dexsim_cfg(gpu_id=0)
+    native_cfg = NewtonPhysicsCfg(solver_cfg=solver_cfg).to_dexsim_cfg(gpu_id=0)
+    expected = (
+        newton_physics.NewtonCfg().solver_cfg.solver_type
+        if solver_cfg is None
+        else "mujoco_warp"
+    )
+    assert native_cfg.solver_cfg.solver_type == expected
 
 
 @pytest.mark.no_sim
@@ -292,7 +297,7 @@ def test_newton_backend_exposes_resolved_solver_type() -> None:
 
 
 @pytest.mark.no_sim
-def test_newton_backend_reports_scene_resolved_auto_solver(
+def test_newton_backend_reports_scene_resolved_solver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     world = object()
@@ -308,7 +313,12 @@ def test_newton_backend_reports_scene_resolved_auto_solver(
 
     backend.configure_world(world_config, sim_config)
 
-    assert world_config.newton_cfg.solver_cfg.solver_type == "auto"
+    from dexsim.engine.newton_physics import NewtonCfg
+
+    assert (
+        world_config.newton_cfg.solver_cfg.solver_type
+        == NewtonCfg().solver_cfg.solver_type
+    )
     assert backend.solver_type == "mujoco_warp"
 
 
@@ -450,14 +460,31 @@ def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
 
 
 @pytest.mark.no_sim
-def test_newton_physics_cfg_accepts_explicit_auto_solver_mapping() -> None:
-    from dexsim.engine.newton_physics import AutoSolverCfg
+def test_newton_physics_cfg_explicit_auto_uses_installed_api() -> None:
+    from dexsim.engine import newton_physics
 
     cfg = NewtonPhysicsCfg(solver_cfg={"class_type": "AutoSolverCfg"})
+    auto_solver_cfg = getattr(newton_physics, "AutoSolverCfg", None)
+    if auto_solver_cfg is None:
+        with pytest.raises(RuntimeError, match="AutoSolverCfg.*solver_cfg=None"):
+            cfg.to_dexsim_cfg(gpu_id=0)
+    else:
+        assert isinstance(cfg.to_dexsim_cfg(gpu_id=0).solver_cfg, auto_solver_cfg)
 
-    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
-    assert isinstance(dexsim_cfg.solver_cfg, AutoSolverCfg)
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "solver_cfg", [{"solver_type": "auto"}, {"class_type": "AutoSolverCfg"}]
+)
+def test_newton_physics_cfg_reports_removed_auto_solver(
+    monkeypatch: pytest.MonkeyPatch,
+    solver_cfg: dict[str, str],
+) -> None:
+    from dexsim.engine import newton_physics
+
+    monkeypatch.delattr(newton_physics, "AutoSolverCfg", raising=False)
+    with pytest.raises(RuntimeError, match="AutoSolverCfg.*solver_cfg=None"):
+        NewtonPhysicsCfg(solver_cfg=solver_cfg).to_dexsim_cfg(gpu_id=0)
 
 
 @pytest.mark.no_sim

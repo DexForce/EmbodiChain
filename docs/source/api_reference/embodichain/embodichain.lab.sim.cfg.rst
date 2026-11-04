@@ -177,6 +177,27 @@ without consumers.
    physics_backend_from_cfg
    validate_physics_cfg
 
+Articulation configuration module
+---------------------------------
+
+Articulation configuration types also live in
+``embodichain.lab.sim.cfg.articulation``. ``JointDrivePropertiesCfg`` separates
+drive gains from Newton joint-limit gains through ``limit_stiffness`` and
+``limit_damping``. Each accepts a scalar or joint-rule mapping; ``None`` keeps
+the source/backend value. With Newton's MuJoCo solver, setting both to zero
+selects the default MuJoCo limit response while retaining joint bounds.
+
+.. currentmodule:: embodichain.lab.sim.cfg.articulation
+
+.. autosummary::
+
+   ArticulationRootPropertiesCfg
+   LinkPhysicsOverrideCfg
+   link_attrs_from_dict
+   JointDrivePropertiesCfg
+   NewtonJointDrivePropertiesCfg
+   ArticulationCfg
+
 Compatibility facade
 --------------------
 

@@ -302,6 +302,13 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     on CUDA unless the caller explicitly supplies another device.
     """
 
+    mesh_bvh_constructor: Literal["sah", "median", "lbvh", "cubql"] | None = None
+    """Optional mesh and heightfield query BVH constructor.
+
+    ``None`` preserves the engine default. CUDA terrain ray workloads can select
+    ``"cubql"`` through a DexSim build exposing this configuration field.
+    """
+
     num_substeps: int = 10
     """Number of Newton solver substeps per EmbodiChain physics step.
 
@@ -347,8 +354,9 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     A mapping is converted to the matching DexSim Newton solver config. Include
     ``solver_type`` or ``class_type`` to select the solver, then add any
     parameters accepted by that DexSim solver config. If omitted, EmbodiChain
-    preserves DexSim's scene-aware ``AutoSolverCfg`` default. A DexSim build
-    exporting ``AutoSolverCfg`` is required; no concrete-solver fallback is used.
+    preserves the installed DexSim default. Current DexSim selects through
+    ``DexUniSolverCfg``; older builds use ``AutoSolverCfg``. Explicit ``auto``
+    mappings require an installed DexSim build that still exports that class.
     """
 
     collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(
@@ -372,8 +380,8 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         gpu_id: int,
     ) -> NewtonCfg:
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
+        from dexsim.engine import newton_physics
         from dexsim.engine.newton_physics import (
-            AutoSolverCfg,
             DexUniSolverCfg,
             FeatherstoneSolverCfg,
             MJWarpSolverCfg,
@@ -394,7 +402,6 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         )
 
         solver_cfg_map: dict[str, type] = {
-            "auto": AutoSolverCfg,
             "dexuni": DexUniSolverCfg,
             "mujoco_warp": MJWarpSolverCfg,
             "xpbd": XPBDSolverCfg,
@@ -402,6 +409,9 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "featherstone": FeatherstoneSolverCfg,
             "vbd": VBDSolverCfg,
         }
+        auto_solver_cfg = getattr(newton_physics, "AutoSolverCfg", None)
+        if auto_solver_cfg is not None:
+            solver_cfg_map["auto"] = auto_solver_cfg
         solver_cfg = _newton_solver_cfg_to_dexsim(
             solver_cfg=self.solver_cfg,
             solver_cfg_map=solver_cfg_map,
@@ -412,8 +422,8 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         ):
             logger.log_error(
                 "Newton gradient mode requires an explicit "
-                "solver_type='semi_implicit'; AutoSolver does not select a "
-                "differentiable solver."
+                "solver_type='semi_implicit'; automatic solver selection does "
+                "not select a differentiable solver."
             )
 
         collision_pipeline_cfg = None
@@ -446,6 +456,8 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "collision_pipeline_cfg": collision_pipeline_cfg,
             "sync_to_dexsim": self.sync_to_renderer,
         }
+        if self.mesh_bvh_constructor is not None:
+            newton_cfg_args["mesh_bvh_constructor"] = self.mesh_bvh_constructor
         if solver_cfg is not None:
             newton_cfg_args["solver_cfg"] = solver_cfg
 
@@ -525,6 +537,13 @@ def _newton_solver_cfg_to_dexsim(
         or "auto"
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
+    if normalized_solver_type == "auto" and "auto" not in solver_cfg_map:
+        logger.log_error(
+            "Installed DexSim does not provide AutoSolverCfg. Use "
+            "solver_cfg=None for its current scene-aware default, or select "
+            "solver_type='dexuni'. To preserve an older automatic choice, "
+            "select that concrete solver explicitly."
+        )
     solver_cfg_type = solver_cfg_map[normalized_solver_type]
     if normalized_solver_type == "dexuni":
         try:
