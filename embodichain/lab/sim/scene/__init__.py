@@ -63,6 +63,13 @@ __all__ = [
     "settle_scene",
     "RobotSceneWorkspace",
     "SceneWorkspaceCandidate",
+    "SceneMeshComponent",
+    "SceneMeshSnapshot",
+    "capture_scene_meshes",
+    "iter_scene_components",
+    "CollisionObjectSnapshot",
+    "read_articulation_link_boxes",
+    "snapshot_collision_sources",
 ]
 
 _EXPORT_MODULES = {
@@ -102,6 +109,13 @@ _EXPORT_MODULES = {
     "settle_scene": "validation",
     "RobotSceneWorkspace": "workspace",
     "SceneWorkspaceCandidate": "workspace",
+    "SceneMeshComponent": "mesh_snapshot",
+    "SceneMeshSnapshot": "mesh_snapshot",
+    "capture_scene_meshes": "mesh_snapshot",
+    "iter_scene_components": "mesh_snapshot",
+    "CollisionObjectSnapshot": "collision_sources",
+    "read_articulation_link_boxes": "collision_sources",
+    "snapshot_collision_sources": "collision_sources",
 }
 
 

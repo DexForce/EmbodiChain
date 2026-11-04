@@ -21,5 +21,7 @@ Practical guides for common tasks in EmbodiChain.
    robot_catalog
    configured_manipulation_rl
    policy_evaluation
+   training_frameworks
+   lerobot
    rlinf
    cli
