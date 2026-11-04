@@ -62,7 +62,6 @@ resets while that model, calibration and hand commands remain unchanged;
 single-arm calls do not trigger capture. Concrete sampling and contact fitting
 remain data-only GraspKit services.
 
-
 ``RobotCoordinatedGraspProvider.clear_cache()`` releases asset-query caches
 without reading the robot or discarding captured hand geometry. It is also safe
 before the first query. Changes to the model, commands or TCP calibration still

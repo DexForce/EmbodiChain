@@ -46,10 +46,6 @@ from ._configured_hand_geometry import (
     _RobotHandGeometryCfgFactory,
     _decode_hand_geometry,
 )
-from ._configured_hand_geometry import (
-    _RobotHandGeometryCfgFactory,
-    _decode_hand_geometry,
-)
 from .catalog import (
     SimulationTaskProgramRegistration,
 )

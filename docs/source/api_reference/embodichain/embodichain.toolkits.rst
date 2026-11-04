@@ -289,7 +289,6 @@ These services fit finite pad surfaces and check discrete closing samples agains
 an object-frame signed surface query. Robot/FK geometry construction and physical
 contact evidence remain outside GraspKit. Qualification tolerances and occupancy
 probe distance are explicit inputs; the checker does not infer task semantics.
-
 ``SampledHandGeometry.at_width()`` interpolates the hand surfaces at requested
 pad gaps and clamps out-of-range gaps to the sampled endpoints.
 ``HandContactChecker.refine()`` combines fitting and target-only closing checks,
@@ -313,8 +312,6 @@ returning corrected candidates and a valid mask without changing their order.
    :members: query_batch_points, query_surface_normals
 
 .. autoclass:: HandContactChecker
-   :members: fit_contacts, query
-
    :members: refine, fit_contacts, query
 
 
@@ -322,7 +319,6 @@ Paired grasp sampling
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.coordinated
-
 
 Paired refinement composes the public proposal API with
 ``HandContactChecker.refine()``; it does not overwrite generator internals.
@@ -374,7 +370,6 @@ Explicit URDF collision surfaces
 Selected mesh/box collision links are subdivided in their authored local frames.
 Callers supply link names and sampling bounds; no robot, control-group naming
 or simulator state is consulted.
-
 Shape decoding and collision-origin handling are shared with fixed-opening
 geometry. Its barycentric sampling and this service's subdivision sampling
 retain their existing point populations.
