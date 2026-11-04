@@ -480,3 +480,47 @@ def test_contact_package_preserves_public_imports_and_sensor_config_registration
         {"sensor_type": "ContactSensor", "uid": "contacts", "rigid_uid_list": ["cube"]}
     )
     assert type(config) is ContactSensorCfg is PackagedCfg
+
+
+def test_disabled_observers_do_not_build_or_iterate_subscription_snapshots():
+    class DisabledObservers(dict):
+        def values(self):
+            raise AssertionError("Disabled observer path must not enumerate callbacks.")
+
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    sensor._sampling_observers = DisabledObservers()
+    history = sensor.create_history("feet", torch.tensor([[4], [7]]))
+    sensor.begin_control_step()
+    sensor._sim.physics_step_index += 1
+    sensor.update_physics_step(0.01)
+    sensor.update_physics_step(0.01)
+    sensor.update()
+    assert query.fetch_calls == 1
+    assert history.contact_count.tolist() == [1, 1]
+
+
+def test_observer_snapshot_survives_subscription_removal_during_sampling():
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    events = []
+
+    def before():
+        sensor.remove_sampling_observer("audit")
+        return "prepared"
+
+    sensor.add_sampling_observer(
+        "audit",
+        SimpleNamespace(
+            begin_control_step=lambda: None,
+            before_sample=before,
+            after_sample=lambda dt, token: events.append((dt, token)),
+            reset=lambda ids: None,
+        ),
+    )
+    sensor.update_physics_step(0.01)
+    assert events == [(0.01, "prepared")]
+    sensor._sim.physics_step_index += 1
+    sensor.update_physics_step(0.01)
+    assert events == [(0.01, "prepared")]
+    assert query.fetch_calls == 2

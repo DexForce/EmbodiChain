@@ -52,8 +52,8 @@ and `tests/gym/envs/test_substep_sensors.py`.
 
 `ContactSensor.add_sampling_observer` attaches a named, instance-owned read-only
 observer to this same lifecycle. It receives begin, before-sample, after-sample and
-selected-row reset notifications. The empty default performs no observer copies
-or callbacks. Hooks run outside the sensor's internal CUDA capture; observers
+selected-row reset notifications. With no observers, the update path does not
+enumerate subscriptions, construct token generators or enter callback loops. Hooks run outside the sensor's internal CUDA capture; observers
 inside an external capture fail before their callbacks run. Existing history
 sampling and device kernels keep their ownership and ordering.
 

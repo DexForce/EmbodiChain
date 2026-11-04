@@ -674,10 +674,14 @@ class ContactSensor(BaseSensor):
         key = None if capturing else self._contact_sample_key()
         if not capturing and key == self._last_history_key:
             return
-        tokens = tuple(
-            (observer, observer.before_sample())
-            for observer in tuple(observers.values())
-        )
+        # Keep the default history-only path free of observer snapshots and
+        # generator allocation. Capture a stable subscription set only when used.
+        tokens = None
+        if observers:
+            tokens = tuple(
+                (observer, observer.before_sample())
+                for observer in tuple(observers.values())
+            )
         buffer = (
             self._last_contact_buffer
             if not capturing and key == self._last_update_key
@@ -690,8 +694,9 @@ class ContactSensor(BaseSensor):
         self._last_contact_buffer = None if capturing else buffer
         if not capturing:
             self._record_sample_stream()
-        for observer, token in tokens:
-            observer.after_sample(dt, token)
+        if tokens is not None:
+            for observer, token in tokens:
+                observer.after_sample(dt, token)
 
     def _sample_physics_contacts(self, buffer: ContactBuffer, dt: float) -> None:
         """Run the reduction on the existing caller/capture stream boundary."""
