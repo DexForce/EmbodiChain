@@ -4,6 +4,9 @@ The peg, gear and nut tasks use EmbodiChain's native managers, temporal policy
 and PPO. Actor inputs contain encoder-derived features and action history;
 privileged state and contact labels are training-only inputs.
 
+A pinned checkpoint, frozen physical resources and native replay evidence are
+available through [the reproduction guide](REPRODUCING.md) and `model.json`.
+
 ## Training and evaluation
 
 Use the registered default Rizon4S and Robotiq2F85 assets through the task
