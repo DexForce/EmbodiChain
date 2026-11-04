@@ -80,6 +80,7 @@ from embodichain.lab.task_program.runtime.expansion import (
 from embodichain.lab.task_program.semantics.scene import SceneRegistry
 
 if TYPE_CHECKING:
+    from .invocation_policy import BoundInvocationPolicies, InvocationPolicyBinding
     from .nominal import TracingTaskProgramNominalSources
     from .simulation.real2sim_collision import TabletopCollisionGuardFactory
 
@@ -780,6 +781,7 @@ class TaskProgramEnvironmentAdapter:
             )
         command_encoder = RuntimeCommandFrameEncoder(
             observation_provider,
+            hold_qpos_provider=getattr(observation_provider, "hold_qpos", None),
             transports=self._runtime_transports,
             include_joint_position=include_joint_position,
             joint_command_mode=self._joint_command_mode,
@@ -902,11 +904,14 @@ class TaskProgramEnvironmentAdapter:
         recipe_indices: tuple[int, ...] | None = None,
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
     ) -> TaskProgramDemoBridge:
         """Create a fresh Gym bridge for one provider-free compiled program.
 
         Args:
             program: Program compiled for this adapter's exact integration IDs.
+            invocation_policy_bindings: Named preset selections for exact sequential
+                occurrences, sealed to this compiled program's fingerprint.
 
         Returns:
             Lazy bridge sharing one newly assembled runtime, clock, and sink.
@@ -914,6 +919,13 @@ class TaskProgramEnvironmentAdapter:
         self._require_open()
         if type(program) is not CompiledTaskProgram:
             raise TypeError("program must be exactly CompiledTaskProgram.")
+        if type(invocation_policy_bindings) is not tuple:
+            raise TypeError("invocation_policy_bindings must be an exact tuple.")
+        policies = None
+        if invocation_policy_bindings:
+            from .invocation_policy import BoundInvocationPolicies
+
+            policies = BoundInvocationPolicies(program, invocation_policy_bindings)
         if self._configured_nominal_sources:
             if nominal_source_factory is not None:
                 from .nominal import (
@@ -955,7 +967,13 @@ class TaskProgramEnvironmentAdapter:
         self._validate_selection(program.integration)
         self._preflight_program_surfaces(program)
         semantic = self._assemble_semantic_components(program.integration)
-        self._preflight_program(program, semantic.compiler)
+        if policies is not None:
+            policies.validate_manifest(program, semantic.compiler.integration.manifest)
+        self._preflight_program(
+            program,
+            semantic.compiler,
+            **({"invocation_policies": policies} if policies is not None else {}),
+        )
         if expansion_profile is not None and not isinstance(
             expansion_profile, CombinedExpansionProfile
         ):
@@ -1004,6 +1022,7 @@ class TaskProgramEnvironmentAdapter:
             parallel_safety_validator=assembly.parallel_safety_validator,
             expansion_trace_provider=assembly.expansion_trace_provider,
             isolate_policy_sessions=nominal_source_factory is not None,
+            **({"invocation_policies": policies} if policies is not None else {}),
         )
 
     @staticmethod
@@ -1054,6 +1073,8 @@ class TaskProgramEnvironmentAdapter:
         self,
         program: CompiledTaskProgram,
         compiler: SemanticCallCompiler,
+        *,
+        invocation_policies: BoundInvocationPolicies | None = None,
     ) -> None:
         """Analyze every program workflow before any physical action can run.
 
@@ -1084,6 +1105,15 @@ class TaskProgramEnvironmentAdapter:
                     analysis.calls,
                     workflow_id=analysis.analysis_id,
                     path=analysis.source_path,
+                    **(
+                        {
+                            "preset_ids": invocation_policies._presets_for_analysis(
+                                analysis
+                            )
+                        }
+                        if invocation_policies is not None
+                        else {}
+                    ),
                 )
                 index += 1
                 continue

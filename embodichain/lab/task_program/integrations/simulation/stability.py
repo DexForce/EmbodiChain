@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 from embodichain.utils import configclass
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.sensors.contact_sensor import ContactSensorCfg
+    from embodichain.lab.sim.sensors.contact.sensor import ContactSensorCfg
 
 __all__ = [
     "SupportSensorDeclarationCfg",
@@ -67,7 +67,7 @@ class SupportSensorDeclarationCfg:
         Returns:
             An owned ContactSensorCfg that requires both actors in each contact.
         """
-        from embodichain.lab.sim.sensors.contact_sensor import ContactSensorCfg
+        from embodichain.lab.sim.sensors.contact.sensor import ContactSensorCfg
 
         owned = self.snapshot()
         return ContactSensorCfg(

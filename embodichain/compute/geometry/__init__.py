@@ -29,6 +29,8 @@ __all__ = [
     "triangle_geometry",
     "nearest_half_turn_pose",
     "rotate_rigid_grasp",
+    "transform_vertex_bounds",
+    "aabb_sphere_cover",
 ]
 
 _EXPORT_MODULES = {
@@ -39,6 +41,8 @@ _EXPORT_MODULES = {
     "triangle_geometry": "mesh",
     "nearest_half_turn_pose": "rigid",
     "rotate_rigid_grasp": "rigid",
+    "transform_vertex_bounds": "mesh_bounds",
+    "aabb_sphere_cover": "mesh_bounds",
 }
 
 

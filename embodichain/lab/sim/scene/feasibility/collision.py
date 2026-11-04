@@ -270,6 +270,7 @@ class NewtonCollisionChecker:
             self._aliases.setdefault(collision_id, {collision_id})
         self.ignored_pairs = frozenset(self._expand_pairs(ignored_pairs))
         self.last_pair = None
+        self.last_clearance_interval: tuple[float, float] | None = None
         self._frame_uids = tuple(dict.fromkeys(b.frame_uid for b in self.bodies))
         self._native = tuple(
             i for i, body in enumerate(self.bodies) if body.kind != "halfspace"
@@ -579,10 +580,16 @@ class NewtonCollisionChecker:
         Returns:
             Discrete collision evidence and a nonnegative clearance estimate
             capped at detection_gap_m; unreported contacts never imply infinity.
+            ``last_clearance_interval`` records the lower/upper estimates under
+            the query's conversion-precision policy. Its upper endpoint remains
+            infinite when no native contact was reported in the detection band.
+            An interval spanning a consumer threshold cannot classify that
+            threshold. Acquisition failures leave the interval unavailable.
         """
         if self._closed:
             raise RuntimeError("collision checker is closed")
         self.last_pair = None
+        self.last_clearance_interval = None
         frames = {}
         for uid in self._frame_uids:
             if uid not in frame_poses:
@@ -603,6 +610,7 @@ class NewtonCollisionChecker:
             allowed_contacts, moving_objects, all_pairs
         )
         clearance = math.inf
+        upper_clearance = math.inf
         for i, j in planes:
             plane, shape = (i, j) if self.bodies[i].kind == "halfspace" else (j, i)
             with np.errstate(over="ignore", invalid="ignore"):
@@ -614,7 +622,9 @@ class NewtonCollisionChecker:
                     "Nonfinite analytic halfspace separation"
                 )
             clearance = min(clearance, max(0.0, distance))
+            upper_clearance = min(upper_clearance, max(0.0, distance))
             if distance < self.clearance_m - 1e-8:
+                self.last_clearance_interval = (0.0, upper_clearance)
                 return self._failure(i, j), max(0.0, distance)
         if has_native:
             from scipy.spatial.transform import Rotation
@@ -681,9 +691,12 @@ class NewtonCollisionChecker:
                     min(self.detection_gap_m, separation) - tolerance,
                 ),
             )
+            upper_clearance = min(upper_clearance, max(0.0, separation + tolerance))
             if math.isfinite(summary[1]):
+                self.last_clearance_interval = (clearance, upper_clearance)
                 a, b = divmod(int(summary[1]), len(self._native))
                 return self._failure(self._native[a], self._native[b]), clearance
+        self.last_clearance_interval = (clearance, upper_clearance)
         return FeasibilityCheck(
             "collision",
             "passed",

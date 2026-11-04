@@ -30,12 +30,10 @@ import sys
 from types import SimpleNamespace
 import torch
 from embodichain.lab.sim.evidence import PhysicalEvidenceRequest, PhysicalEvidenceBatch
-from embodichain.lab.sim.sensors.contact_sampling import ContactEvidenceSampler
-from embodichain.lab.sim.sensors.contact_timeline import ContactTimeline
-from embodichain.lab.sim.sensors.support_observation import (
-    NativeSupportObservation, NativeSupportResult, SupportObservationRegistry,
-)
-from embodichain.lab.sim.atomic_actions.grip_evidence import GripContactObserver
+from embodichain.lab.sim.sensors.contact.sampling import ContactEvidenceSampler
+from embodichain.lab.sim.sensors.contact.timeline import ContactTimeline
+from embodichain.lab.sim.atomic_actions.grip_evidence import GripContactObserver, DriverOpeningBinding
+from embodichain.lab.sim.sensors.support_observation import NativeSupportObservation, NativeSupportResult, SupportObservationRegistry
 from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceBatch as ExistingBatch
 assert ExistingBatch is PhysicalEvidenceBatch
 sensor = SimpleNamespace(
@@ -56,6 +54,10 @@ result = observer.observe(PhysicalEvidenceRequest(1., 0, torch.tensor([0])),
 assert result.values.tolist() == [True]
 assert result.valid.tolist() == [True]
 assert result.acquisition_errors == (None,)
+
+robot = SimpleNamespace(joint_names=["drive"], get_joint_ids=lambda name: [0], get_qpos=lambda name: torch.zeros(1, 1))
+opening = DriverOpeningBinding("hand", ("drive",), (0,), (0.,), .05).bind(robot)
+assert opening(0)["open"] is True
 assert not any(name.startswith("embodichain.lab.task_program") for name in sys.modules)
 assert not any(name.startswith("embodichain.gen_sim.task_engine") for name in sys.modules)
 """
