@@ -28,7 +28,11 @@ from embodichain.utils import configclass
 if TYPE_CHECKING:
     from embodichain.lab.sim.sensors.contact_sensor import ContactSensorCfg
 
-__all__ = ["SupportSensorDeclarationCfg", "SimulationStabilityConditionCfg"]
+__all__ = [
+    "SupportSensorDeclarationCfg",
+    "SimulationStabilityConditionCfg",
+    "SimulationJointStabilityConditionCfg",
+]
 
 
 @configclass
@@ -291,4 +295,58 @@ class SimulationStabilityConditionCfg:
             field.name: deepcopy(getattr(owned, field.name))
             for field in fields(owned)
             if field.name != "support_sensor"
+        }
+
+
+@configclass
+class SimulationJointStabilityConditionCfg:
+    """Explicit joint-position window in the existing named settle-preset table.
+
+    The default window retains source articulation acceptance: one second
+    within target tolerance and at most 0.001 runtime joint units of full-window
+    drift (one millimetre for the migrated prismatic control), bounded by five
+    seconds. These are declared policy values, not intrinsic
+    properties of the asset or its joint. No root-pose substitution is used.
+    """
+
+    entity: str = MISSING
+    """Canonical articulation identity from the scene binding."""
+    joint: str = MISSING
+    """Exact native joint name, with no name-based inference."""
+    target: float = MISSING
+    """Declared target coordinate, in the joint's native runtime units."""
+    tolerance: float = MISSING
+    """Inclusive absolute target tolerance in the same units."""
+    duration: float = 1.0
+    timeout: float = 5.0
+    position_drift: float = 0.001
+
+    def snapshot(self) -> SimulationJointStabilityConditionCfg:
+        """Return a detached, normalized complete condition declaration."""
+        self.validate()
+        owned = deepcopy(self)
+        for name in ("entity", "joint"):
+            value = getattr(owned, name)
+            if type(value) is not str or not value or value != value.strip():
+                raise ValueError(f"Joint stability {name} must be an exact identifier.")
+        for name in ("target", "tolerance", "duration", "timeout", "position_drift"):
+            value = getattr(owned, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+            ):
+                raise ValueError(f"Joint stability {name} must be finite.")
+            if name != "target" and value <= 0:
+                raise ValueError(f"Joint stability {name} must be positive.")
+            setattr(owned, name, float(value))
+        if owned.timeout < owned.duration:
+            raise ValueError("Joint stability timeout cannot precede its duration.")
+        return owned
+
+    def to_condition_dict(self) -> dict[str, object]:
+        """Return detached policy values for independent normative matching."""
+        owned = self.snapshot()
+        return {
+            field.name: deepcopy(getattr(owned, field.name)) for field in fields(owned)
         }

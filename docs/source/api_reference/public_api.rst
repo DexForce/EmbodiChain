@@ -1255,6 +1255,16 @@ its duration, timeout, pose/axis targets, attachment-drift bounds and optional
 native-support declaration. Registration snapshots and fingerprints the complete
 configuration; names do not select hidden behavior.
 
+``SimulationJointStabilityConditionCfg`` observes an explicitly bound native
+joint, with independently declared target tolerance and full-window drift.
+The standard port preserves the initial observed robot hold, counts only
+acknowledged ticks after the initial sample, and records the original
+``joint_position_and_stability`` receipt. This is joint retention evidence;
+it does not qualify contact safety. When an execution clock is bound, the
+receipt additionally includes the actual final joint acquisition with per-row
+validity, environment IDs and a policy-window sample sequence. Without a clock,
+no timestamped raw evidence is fabricated.
+
 Supported conditions declare a standard contact sensor through
 ``SupportSensorDeclarationCfg``. The scene binding supplies its exact two native
 rigid UIDs; the runtime factory creates or reuses the sensor and the environment
@@ -1279,11 +1289,15 @@ established. This distinguishes unavailable outcomes from measured negatives.
 
    SupportSensorDeclarationCfg
    SimulationStabilityConditionCfg
+   SimulationJointStabilityConditionCfg
 
 .. autoclass:: SupportSensorDeclarationCfg
    :members:
 
 .. autoclass:: SimulationStabilityConditionCfg
+   :members:
+
+.. autoclass:: SimulationJointStabilityConditionCfg
    :members:
 
 embodichain.lab.gym.envs.episode_context

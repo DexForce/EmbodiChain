@@ -61,6 +61,10 @@ Named geometric/held/support stability conditions execute through the standard
 `SimulationSegmentPolicyPort`; they do not install another constraints registry.
 The initial sample does not count toward duration. Ordinary drift resets the
 object/reference anchors, while a held-state failure stays latched for the row.
+Joint stability uses the actual joint coordinate and full-window range, holding
+the original observed robot position. Its receipt does not claim contact safety.
+An execution clock adds the final raw joint sample with actual acquisition time
+and row identity; unclocked direct execution retains the legacy receipt alone.
 Native support and qualified planar-region inputs remain distinct measurements;
 missing acquisition cannot become geometric success. Pure task/report matching
 stays outside Lab and can consume owned condition data without a runtime.

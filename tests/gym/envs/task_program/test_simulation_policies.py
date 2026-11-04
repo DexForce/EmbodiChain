@@ -225,7 +225,7 @@ def _compiled_segment(*, settle_preset: str = "fast"):
     return next(compiled.iter_segments())
 
 
-def _compiled_articulation_segment():
+def _compiled_articulation_segment(*, settle_preset=None):
     """Compile one standard joint-position validator."""
     payload = {
         "program_id": "joint_policy_test",
@@ -256,6 +256,10 @@ def _compiled_articulation_segment():
             ],
         },
     }
+    if settle_preset is not None:
+        payload["program"]["post"] = [
+            {"kind": "wait_stable", "entity": "drawer", "preset": settle_preset}
+        ]
     registry = SceneRegistry(
         (
             SceneEntityRegistration(
@@ -1245,3 +1249,133 @@ def test_observation_clock_scope_is_local_idempotent_and_does_not_change_default
     with pytest.raises(RuntimeError, match="closed"):
         _ = second.observation_clock
     assert independent.observation_clock is clock
+
+
+def _joint_condition_port(qpos, *, duration=1.0, timeout=5.0):
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationJointStabilityConditionCfg,
+    )
+
+    art = _Articulation(qpos)
+    robot = _Robot(
+        torch.zeros(qpos.shape[0], 2), target_qpos=torch.ones(qpos.shape[0], 2)
+    )
+    cfg = SimulationJointStabilityConditionCfg(
+        entity="drawer",
+        joint="cabinet_to_drawer",
+        target=0.1,
+        tolerance=0.03,
+        duration=duration,
+        timeout=timeout,
+    )
+    port = SimulationSegmentPolicyPort(
+        _Simulation(articulation=art),
+        robot,
+        SimulationSceneBinding(
+            registry_id="test_scene",
+            articulations=(
+                SimulationArticulationBinding(
+                    entity_id="drawer", simulation_uid="native_drawer"
+                ),
+            ),
+        ),
+        settle_presets={"joint": cfg},
+        step_dt=0.04,
+    )
+    segment = _compiled_articulation_segment(settle_preset="joint")
+    return port, art, robot, segment, segment.post_policies[0]
+
+
+def test_joint_stability_uses_joint_window_and_original_observed_hold():
+    port, art, robot, segment, policy = _joint_condition_port(
+        torch.tensor([[0.1], [0.2]])
+    )
+    commands = []
+    for command in port.actions(
+        policy, segment=segment, active_mask=torch.tensor([True, True])
+    ):
+        commands.append(command)
+        robot.current_qpos.add_(0.01)
+    assert len(commands) == 125
+    assert all(torch.equal(command, torch.zeros(2, 2)) for command in commands)
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
+    metadata = port.post_policy_metadata(policy, segment=segment)
+    assert metadata == {
+        "joint": "cabinet_to_drawer",
+        "target": 0.1,
+        "observed": art.get_qpos()[:, 0].tolist(),
+        "tolerance": 0.03,
+        "stable_seconds": 1.0,
+        "accepted": [True, False],
+        "evidence": "joint_position_and_stability",
+        "contact_qualification": "not_provided",
+    }
+    assert not any(robot.qpos_reads)
+
+
+def test_joint_stability_resets_the_full_range_and_does_not_count_tick_zero():
+    port, art, _, segment, policy = _joint_condition_port(torch.tensor([[0.1]]))
+    steps = 0
+    for _ in port.actions(policy, segment=segment, active_mask=torch.tensor([True])):
+        steps += 1
+        if steps == 10:
+            art._qpos[0, 0] = 0.1011
+    assert steps == 35
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True]
+
+
+def test_joint_stability_unavailable_rows_and_inactive_rows_preserve_source_boundary():
+    port, art, _, segment, policy = _joint_condition_port(
+        torch.tensor([[0.1], [float("nan")]])
+    )
+    actions = list(
+        port.actions(policy, segment=segment, active_mask=torch.tensor([True, False]))
+    )
+    assert len(actions) == 25
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
+    assert port.post_policy_metadata(policy, segment=segment)["observed"][1] is None
+    actions = list(
+        port.actions(policy, segment=segment, active_mask=torch.tensor([True, True]))
+    )
+    assert actions == []
+    assert not port.post_policy_result(policy, segment=segment).any()
+
+
+def test_joint_stability_clocked_raw_channel_uses_actual_scope_and_sample_sequence():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, _, _, segment, policy = _joint_condition_port(torch.tensor([[0.1]]))
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    for _ in port.actions(policy, segment=segment, active_mask=torch.tensor([True])):
+        clock.advance_after_env_step()
+    record = port.post_policy_metadata(policy, segment=segment)
+    raw = record["joint_observation"]
+    assert raw["evidence_id"] == "articulation.joint_position"
+    assert raw["timestamp"] == clock.now() == 1.0
+    assert raw["observation_revision"] == 26
+    assert raw["valid"] == [True] and raw["env_ids"] == [0]
+    assert raw["acquisition_errors"] == [None]
+    assert raw["start_step"] == 0 and raw["end_step"] == 25
+    assert record["evidence"] == "joint_position_and_stability"
+    # No successful receipt from this same compiled policy can survive a
+    # later incomplete/cancelled execution.
+    actions = port.actions(policy, segment=segment, active_mask=torch.tensor([True]))
+    next(actions)
+    actions.close()
+    with pytest.raises(RuntimeError, match="unavailable"):
+        port.post_policy_result(policy, segment=segment)
+
+
+def test_joint_stability_rejects_unacknowledged_steps_before_claiming_duration():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, _, _, segment, policy = _joint_condition_port(torch.tensor([[0.1]]))
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    actions = port.actions(policy, segment=segment, active_mask=torch.tensor([True]))
+    next(actions)
+    with pytest.raises(ValueError, match="acknowledged"):
+        next(actions)
+    with pytest.raises(RuntimeError, match="unavailable"):
+        port.post_policy_result(policy, segment=segment)
