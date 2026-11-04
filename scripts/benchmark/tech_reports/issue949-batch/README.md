@@ -4,7 +4,7 @@
 
 ## 支持边界与修改
 
-实现基于 #935 合并提交 `45d986e5f597c8c68bad092b0d0ed2be3511ab2c`，包含同一工作树已有的单球修复，分支为 `codex/observed-query-lifecycle`。结果针对本地工作树而非未修改的基线提交；关键文件散列见 `source-sha256.json`。
+实现基于 #935 合并提交 `45d986e5f597c8c68bad092b0d0ed2be3511ab2c`，包含同一工作树已有的单球修复，分支为 `codex/observed-query-lifecycle`。结果针对本地工作树而非未修改的基线提交；关键文件散列见 `measurements.json` 的 `source_sha256`。
 
 - `CuroboQuerySnapshot` 接受 full_qpos `(B,D_full)`、world_to_base `(B,4,4)`，拥有输入副本；env_ids 默认规范化为 `(0,...,B-1)`，显式重排/子集拒绝。
 - 共用内部 batched SE(3) validator，一次小矩阵 CPU 传输完成校验；已有 B=1 Scene provider 校验包装仍保持 B=1，不扩大 Scene 写操作范围。
@@ -29,10 +29,18 @@ CPU/合同回归 **149 passed, 1 skipped, 2 deselected**，含快照所有权、
 
 未执行物理抓持/任务 rollout；上述是 observed 输入、原生规划、有限采样世界碰撞检查和生命周期证据，不是完整 self-collision、CCD 或物理任务成功资格。
 
+## 单球修复与生命周期
+
+单球 payload 使用观测 FK 将球心转换到 link-local 坐标，再走 AttachmentManager 的无变换写入路径，避免 cuRobo 0.8 的 singleton squeeze 错误；球数和半径保持不变。
+
+延迟回收来自 native 对象的 bound-method 回调环：`LBFGSOpt → GradientOptCore → LBFGSOpt`，以及 `PRMGraphPlanner → 辅助对象 → PRMGraphPlanner`。原生 destroy 释放 CUDA Graph，但不切断这些 Python 引用环。Host 应在关闭 scope、释放 native 引用后的同步边界执行 GC；close 不隐式全局 GC，也不承诺 reserved 显存归零。
+
+生产回归 `test_observed_payload_buffers_and_query_lifetimes` 保留独立矩阵 oracle、单球/27 球、正常/异常退出、buffer weakref 和旧轨迹所有权检查。六次查询在显式回收后，live allocated 从 8,632,320 到 8,647,680 字节，仅增加 15,360 字节。诊断转储、JUnit XML 和重复测试日志不作为常驻 benchmark 文件保留。
+
 ## 测量方法
 
-- 同一物理 GPU 3：RTX PRO 5000 72GB Blackwell；驱动 580.126.20。Torch 2.7.0+cu128、cuRobo 0.8.0、Warp 1.17.0、DexSim 0.5.1rc1；CPU 线程 1。硬件信息见 `hardware.csv`。
-- 固定 Panda 初态，第一关节目标增量在 0.04–0.12 rad；同一个静态 box，尺寸 `[0.18,0.40,0.36]`、位置 `[0.45,0,0.18]`；共享几何及基座投影后的世界；无 payload。start/target 与 corpus digest 在 JSON 中。
+- 同一物理 GPU 3：RTX PRO 5000 72GB Blackwell；驱动 580.126.20。Torch 2.7.0+cu128、cuRobo 0.8.0、Warp 1.17.0、DexSim 0.5.1rc1；CPU 线程 1。硬件信息见 `measurements.json` 的 `hardware`。
+- 固定 Panda 初态，第一关节目标增量在 0.04–0.12 rad；同一个静态 box，尺寸 `[0.18,0.40,0.36]`、位置 `[0.45,0,0.18]`；共享几何及基座投影后的世界；无 payload。start/target 与 corpus digest 在 `measurements.json` 的各次运行记录中。
 - 每组完成同样 B 行工作：serial 创建 B 个 fresh B=1 查询，batch 创建一个 fresh B 查询。同一进程内交替先后顺序，使用相同种子 949、max_attempts=2、warmup_iterations=0、graphs off、原生样本保留；没有降低 batch 的质量预算。
 - 由于所属 Robot 实例数约束，在同一进程内预先建立两个相同模型的 Robot owner：一个 B=1、一个 B 实例。它们共同驻留同一 GPU，消费同一份冻结数值输入与世界；不修改 robot.num_instances、不绕过生产校验、不计仿真初始化为查询收益。没有并行进程执行规划。
 - 计时从快照构造到结果返回、scope close、整组 GC 后同步；同一组 serial 的 B 个查询之后和一个 batch 查询之后各做一次 GC。这样包括不同构造次数及真实回收成本，未偷偷保留可复用 planner。冻结场景采集与两份 owner 初始化单列，不计入 group_ms。
@@ -83,6 +91,6 @@ CUDA_VISIBLE_DEVICES=3 OMP_NUM_THREADS=1 /root/miniconda3/envs/py311/bin/python 
   --run-gpu -q
 ```
 
-将 batch-size 改为 1/2 可复现其余配置。各 JSON 保存逐组原始时间、成功行、采样长度、duration、memory probe、依赖版本和脚本散列；`series.json` 保存顺序运行的精确命令及 NVML 采样。首个 B=4 运行后仅对 benchmark 做 Black 格式化，故其脚本 hash 与后续运行不同，计时逻辑与参数相同。
+将 batch-size 改为 1/2 可复现其余配置。`measurements.json` 的 `runs` 保留五次运行的完整记录，包括逐组原始时间、成功行、采样长度、duration、memory probe、依赖版本和脚本散列；`nvml_runs` 保存顺序运行的精确命令及 NVML 采样。首个 B=4 运行后仅对 benchmark 做 Black 格式化，故其脚本 hash 与后续运行不同，计时逻辑与参数相同。
 
 本轮不扩大到逐环境独立世界、不同锁值或 payload batch，不新增缓存、实例池、并发服务。性能结论限于这组 joint-space 小场景；EEF 的功能回归通过，不代表已测得相同 EEF 加速倍数。
