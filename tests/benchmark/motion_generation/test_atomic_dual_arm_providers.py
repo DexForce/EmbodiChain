@@ -1569,7 +1569,7 @@ def test_dual_arm_provider_builds_both_arms_and_grippers():
 
 
 def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_path):
-    """Qualify the hand and half-closure against its real assembled URDF."""
+    """Qualify both hands and limited closure against the real assembled URDF."""
     from embodichain.utils.string import resolve_matching_names
 
     suite = load_suite("atomic_dual_franka_robotiq_hand_over")
@@ -1605,7 +1605,7 @@ def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_p
         robot.get_qpos_limits.return_value = torch.tensor([limits])
         _, opened, closed = AtomicSkillScenario._resolve_gripper(robot, gripper)
         torch.testing.assert_close(opened, torch.zeros(6))
-        assert float(closed[0]) == pytest.approx(0.5 * limits[0][1])
+        assert float(closed[0]) == pytest.approx(0.3)
         assert joints[names[0]].find("mimic") is None
         for name, command in zip(names[1:], closed[1:], strict=True):
             mimic = joints[name].find("mimic")

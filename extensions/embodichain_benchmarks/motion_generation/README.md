@@ -187,9 +187,10 @@ embodichain benchmark motion-generation \
 
 Each hand exposes its six authored linkage joints in explicit command order.
 Opening commands are six zeros; closing commands are
-`[0.35, -0.35, 0.35, -0.35, -0.35, 0.35]`, matching the URDF mimic multipliers.
-This limits the commanded closure to half of the authored `0.7 rad` range to
-reduce squeezing the can. Suite version `v2` requires fresh frozen inputs.
+`[0.3, -0.3, 0.3, -0.3, -0.3, 0.3]` on both hands, matching the URDF mimic
+multipliers. This limits the commanded closure to `0.3 rad` within the authored
+`0.7 rad` range to reduce squeezing the can. Suite version `v4` requires fresh
+frozen inputs.
 Contact scoring uses the two actual inner finger pads on each assembled hand,
 with the standard 5 mm separation threshold.
 
