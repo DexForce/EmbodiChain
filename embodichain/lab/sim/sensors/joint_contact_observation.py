@@ -211,6 +211,16 @@ class JointContactObserver:
         Missing channels retain unavailability independently; they never become
         measured no-contact or joint success. None means the window limit was hit.
         """
+        record = self._capture_owned(refresh=refresh, source_stamp=source_stamp)
+        return None if record is None else record.snapshot()
+
+    def _capture_owned(
+        self,
+        *,
+        refresh: bool,
+        source_stamp: ContactSourceStamp | None = None,
+    ) -> JointContactObservation | None:
+        """Store one newly owned frame without publishing a redundant copy."""
         if self._closed or not self._active:
             raise RuntimeError("Joint contact observation has no active window.")
         generation, phase = self._generation, self._phase
@@ -271,14 +281,16 @@ class JointContactObserver:
                 "Simulation time changed during joint/contact acquisition."
             )
         record = JointContactObservation(
-            PhysicalEvidenceFrame(timestamp, self._revision, request.env_ids, batches),
+            PhysicalEvidenceFrame._from_owned_batches(
+                timestamp, self._revision, request.env_ids, batches
+            ),
             phase,
             sample.native_revision,
             sample.topology_revision,
             sample.dropped_contacts,
         )
         self._records.append(record)
-        return record.snapshot()
+        return record
 
     @property
     def record_count(self) -> int:
@@ -332,7 +344,9 @@ class JointContactObserver:
             abs_tol=1e-8,
         ):
             raise ValueError("Joint contact samples do not cover consecutive substeps.")
-        self.capture(refresh=False, source_stamp=token[2])
+        # Substep callbacks do not publish a return value. Public capture and
+        # snapshots still revalidate and copy every externally visible frame.
+        self._capture_owned(refresh=False, source_stamp=token[2])
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         """End the owned window when its single native row resets."""

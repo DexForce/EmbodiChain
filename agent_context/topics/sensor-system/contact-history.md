@@ -64,6 +64,9 @@ invocation/episode scope; no sensor declares skill success or task acceptance.
 Within that generation records are append-only. `snapshot_since` returns owned
 new records for incremental projection; resets advance the generation before
 clearing history, and full `snapshot` retains its original ownership contract.
+Substep storage transfers only fresh batches from ordinary validated batch
+constructors into its private frame. It avoids an unused publication copy;
+public capture/snapshot still revalidate and detach all returned tensors.
 
 `lab/sim/sensors/contact_timeline.py` owns bounded per-environment packed
 history, driven by an explicit host control clock. Keep it in the environment's
