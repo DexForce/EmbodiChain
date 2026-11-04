@@ -278,6 +278,29 @@ Simulation bindings
 Implementation module exports
 -----------------------------
 
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.policies
+
+``SimulationSettleMonitorCfg`` adds an explicit measurement mode to the existing
+dynamic settle thresholds and cadence. Use it in a registration's
+``settle_presets`` table. ``pose_delta`` requires an explicitly bound native
+rigid object and the authoritative control ``step_dt``; provider-free catalog
+preflight rejects articulation targets. The first observation has no previous
+pose and remains unresolved. Inactive rows and timeout behavior retain the
+shared monitor contract.
+
+Plain ``DynamicSettleMonitorCfg`` values and the built-in preset table keep
+reported velocities and their existing identity/metadata. Names such as
+``contained_rigid_object`` do not select measurement behavior or install a preset.
+Configured JSON declarations must be decoded by their integration owner; this
+type does not register a second deployment configuration source.
+
+.. autosummary::
+
+   SimulationSettleMonitorCfg
+
+.. autoclass:: SimulationSettleMonitorCfg
+   :members:
+
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.parallel_safety
 
 .. autosummary::

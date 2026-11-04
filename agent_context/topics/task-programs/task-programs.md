@@ -90,6 +90,14 @@ post-policy/validator port while retaining its registered scene bindings. This
 isolates lift baselines and policy results across episodes. Native bridges and
 ports without the optional session factory retain their existing ownership.
 
+Simulation settling defaults to reported native velocities. An explicit
+`simulation.policies.SimulationSettleMonitorCfg(measurement="pose_delta")`
+retains the shared monitor's cadence and per-row timeout rules while deriving
+speed from consecutive rigid poses. The runtime supplies its control `step_dt`;
+the first observation is unresolved. Registration/catalog preflight rejects
+non-rigid targets before live assembly. Preset names do not select algorithms,
+and plain settle configurations preserve existing defaults and fingerprints.
+
 An optional nominal source is selected separately before Atomic planning and
 is bound to a compiled sequential call occurrence. Its configured declaration
 and verification boundary are described in [Real2Sim motion](../data-pipeline/real2sim.md).
