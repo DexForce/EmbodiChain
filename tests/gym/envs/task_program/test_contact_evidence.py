@@ -463,17 +463,24 @@ def test_public_base_env_step_drives_actual_sensor_observer_port():
     source = ContactSource()
     clock = SimpleNamespace(step_index=0)
     sensor = ContactSensor.__new__(ContactSensor)
+    sensor._sample_ready_stream = None
+    sensor._last_update_key = None
+    sensor._last_history_key = None
+    sensor._last_contact_buffer = None
     sensor.device = torch.device("cpu")
     sensor._entities = [None]
     sensor._num_instances = 1
-    sensor._query = SimpleNamespace(capabilities=source.contact_capabilities)
+    sensor._query = SimpleNamespace(
+        capabilities=source.contact_capabilities, actors=(), selected_actor_ids=()
+    )
     sensor._data_buffer = source.data
     sensor._histories = {}
     sensor._sampling_observers = {}
     sensor._query_dropped_count = torch.zeros(1, dtype=torch.int32)
     sensor._scatter_dropped_count = torch.zeros(1, dtype=torch.int32)
     sampled = []
-    sensor._update_physics_contacts = lambda dt: sampled.append(dt)
+    sensor._read_contacts = lambda: object()
+    sensor._sample_physics_contacts = lambda buffer, dt: sampled.append(dt)
     sampler = ContactEvidenceSampler(
         sensor,
         native_revision_reader=lambda: source.revision,
@@ -498,10 +505,14 @@ def test_public_base_env_step_drives_actual_sensor_observer_port():
     def update(dt, steps, **kwargs):
         for step in range(steps):
             source.revision += 1
+            env.sim.physics_step_index += 1
             source.data["impulse"].fill_((step + 1) * 0.01)
             kwargs["after_substep"](dt)
 
-    env.sim = SimpleNamespace(update=update, render_frame=lambda: nullcontext())
+    env.sim = SimpleNamespace(
+        update=update, render_frame=lambda: nullcontext(), physics_step_index=0
+    )
+    sensor._sim = env.sim
     env._profiler = SimpleNamespace(section=lambda *args, **kwargs: nullcontext())
     env._elapsed_steps = torch.zeros(1, dtype=torch.long)
     for name in ("_preprocess_action", "_step_action", "_postprocess_action"):
@@ -787,6 +798,10 @@ def test_timeline_reset_matches_sensor_indices_without_double_generation(
     capture_step(timeline, source)
     before = timeline.snapshot()
     sensor = ContactSensor.__new__(ContactSensor)
+    sensor._sample_ready_stream = None
+    sensor._last_update_key = None
+    sensor._last_history_key = None
+    sensor._last_contact_buffer = None
     sensor.device = torch.device("cpu")
     sensor._data_buffer = source.data
     sensor._num_contacts_per_env = source.data["is_valid"].sum(1).to(torch.int32)
