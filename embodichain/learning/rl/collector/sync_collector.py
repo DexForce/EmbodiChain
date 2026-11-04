@@ -56,6 +56,10 @@ class SyncCollector(BaseCollector):
         self.distribution_param_dim = getattr(
             policy_module, "distribution_param_dim", None
         )
+        self.training_observation_groups = getattr(
+            policy_module, "training_observation_groups", {}
+        )
+        self.training_field_specs = getattr(policy_module, "training_field_specs", {})
         self._supports_shared_rollout = hasattr(self.env, "set_rollout_buffer")
         self.obs_td = self._reset_env()
 
@@ -88,6 +92,16 @@ class SyncCollector(BaseCollector):
         if initial_critic_obs is not None:
             rollout["critic_obs"][:, 0] = initial_critic_obs
         for step_idx in range(num_steps):
+            # Copy before env.step: auto-reset and reused observation buffers may
+            # replace the labels with those of the following state.
+            for name, groups in self.training_observation_groups.items():
+                labels = flatten_observation_groups(self.obs_td, groups)
+                target = rollout[name][:, step_idx]
+                if labels.shape != target.shape:
+                    raise ValueError(f"Training observation '{name}' shape mismatch.")
+                if labels.dtype != target.dtype:
+                    raise TypeError(f"Training observation '{name}' dtype mismatch.")
+                target.copy_(labels)
             step_fields = {"obs": rollout["obs"][:, step_idx]}
             if self.uses_separate_critic_obs:
                 step_fields["critic_obs"] = rollout["critic_obs"][:, step_idx]
@@ -261,6 +275,8 @@ class SyncCollector(BaseCollector):
                     num_steps + 1,
                     self.distribution_param_dim,
                 )
+        for name, (shape, _) in self.training_field_specs.items():
+            expected_shapes[name] = (self.env.num_envs, num_steps + 1, *shape)
         for key, expected_shape in expected_shapes.items():
             actual_shape = tuple(rollout[key].shape)
             if actual_shape != expected_shape:

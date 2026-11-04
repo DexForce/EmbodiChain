@@ -3733,3 +3733,16 @@ existing locomotion configuration name while implementations move into a package
 .. currentmodule:: embodichain.lab.gym.envs.managers.observations
 
 .. autofunction:: velocity_locomotion_observation
+
+embodichain.learning.rl.policies.proprioceptive_actor_critic
+------------------------------------------------------------
+
+Temporal encoder policy, selective observation-history storage and weighted training-only contact decoding. Actor export keeps the deployment input independent of privileged state.
+
+.. currentmodule:: embodichain.learning.rl.policies.proprioceptive_actor_critic
+
+.. autosummary::
+
+   ObservationHistory
+   ProprioceptiveActorCriticCfg
+   ProprioceptiveActorCritic
