@@ -166,6 +166,7 @@ class _AntipodalGraspPoseGeneratorFactory:
     point_spacing: float = 0.012
     side: str | None = None
     root_from_tcp: tuple[float, ...] | None = None
+    root_from_contact_frame: tuple[float, ...] | None = None
     sample_count: int | None = None
     approach_direction_samples: int | None = None
     approach_deviation_angle: float | None = None
@@ -208,6 +209,11 @@ class _AntipodalGraspPoseGeneratorFactory:
         if self.force_refresh is not None:
             annotation_kwargs["force_refresh"] = self.force_refresh
 
+        geometry_kwargs = {}
+        if self.root_from_contact_frame is not None:
+            geometry_kwargs["root_from_contact_frame"] = np.asarray(
+                self.root_from_contact_frame
+            ).reshape(4, 4)
         return AntipodalGraspPoseGenerator(
             ParallelJawGripperModelCfg(
                 model_id=self.model_id,
@@ -223,6 +229,7 @@ class _AntipodalGraspPoseGeneratorFactory:
                     if self.root_from_tcp is None
                     else np.asarray(self.root_from_tcp).reshape(4, 4)
                 ),
+                **geometry_kwargs,
             ),
             algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm_kwargs),
             collision_cfg=ParallelJawGraspCollisionCfg(**collision_kwargs),
