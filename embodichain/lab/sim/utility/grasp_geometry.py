@@ -349,6 +349,15 @@ class RobotCoordinatedGraspProvider:
         self._cfg.validate_values()
         self._sampler: CoordinatedGraspSampler | None = None
 
+    def clear_cache(self) -> None:
+        """Release asset-query caches while retaining any captured hand geometry.
+
+        This performs no capture or robot-state read. Changes to the Robot,
+        model, hand commands or calibration still require a new provider.
+        """
+        if self._sampler is not None:
+            self._sampler.clear_cache()
+
     def get_dual_arm_valid_grasp_poses(
         self,
         *,

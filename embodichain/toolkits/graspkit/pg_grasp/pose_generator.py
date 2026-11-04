@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import math
-from typing import Literal, Protocol
+from typing import Literal, Protocol, TypeVar
 
 import torch
 
@@ -42,6 +42,8 @@ __all__ = [
     "GraspAnnotationCfg",
     "ParallelJawGraspCollisionCfg",
 ]
+
+_CacheValue = TypeVar("_CacheValue")
 
 
 def _validate_mesh_geometry(
@@ -96,7 +98,22 @@ def _mesh_geometry_key(
         tuple(mesh_triangles.shape),
         mesh_triangles.data_ptr(),
         mesh_triangles._version,
+        id(mesh_vertices),
+        id(mesh_triangles),
     )
+
+
+def _drop_stale_mesh_versions(
+    cache: dict[tuple[object, ...], _CacheValue], key: tuple[object, ...]
+) -> None:
+    """Release superseded versions of the same vertex/index tensor objects.
+
+    Call only on a cache miss, keeping repeated unchanged queries constant-time.
+    Separate meshes and triangulations retain their own entries.
+    """
+    for previous in tuple(cache):
+        if previous != key and previous[-2:] == key[-2:]:
+            del cache[previous]
 
 
 class GraspRegionSelector(Protocol):
@@ -265,10 +282,10 @@ class GraspAnnotationCfg:
 class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     """Reusable antipodal generator for any parallel-jaw gripper model.
 
-    Target meshes are supplied per call. The service lazily owns one private
-    single-mesh backend per tensor-backed mesh, allowing callers to reuse
-    sampled annotations without placing live generator state on a scene
-    affordance or exposing a second generator API.
+    Target meshes are supplied per call. Private qualification modes share
+    immutable mesh annotations while retaining independent collision state.
+    Callers reuse these annotations without placing live generator state on
+    a scene affordance or exposing a second generator API.
 
     ``collision_geometry`` is mandatory and describes actual collision meshes
     at the declared pre-grasp opening. Internal sampling and collision use its
@@ -331,6 +348,15 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         """Return an owned annotation-policy snapshot."""
         return deepcopy(self._annotation_cfg)
 
+    def clear_cache(self) -> None:
+        """Release all mesh backends while retaining configuration and hand geometry.
+
+        Disk annotations remain available. The next query prepares its backend
+        lazily, using the configured annotation/refresh policy.
+        """
+        self._backends.clear()
+        self._proposal_backends.clear()
+
     def _backend(
         self,
         mesh_vertices: torch.Tensor,
@@ -345,6 +371,13 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         backend = cache.get(key)
         if backend is not None:
             return backend
+
+        for entries in (self._backends, self._proposal_backends):
+            _drop_stale_mesh_versions(entries, key)
+        other_cache = self._backends if proposals_only else self._proposal_backends
+        prepared = other_cache.get(key)
+        if prepared is not None and not prepared.is_prepared:
+            prepared = None
 
         model = self._gripper_model
         algorithm = self._algorithm_cfg
@@ -375,8 +408,9 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             ),
             filter_ground_collision=collision.filter_ground_collision,
             check_collision=not proposals_only,
+            prepared=prepared,
         )
-        if annotation.force_refresh or not backend.is_prepared:
+        if prepared is None and (annotation.force_refresh or not backend.is_prepared):
             backend.annotate()
         cache[key] = backend
         return backend
@@ -657,6 +691,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         left_to_right_arm_direction: torch.Tensor,
         approach_direction: torch.Tensor,
         middle_empty_ratio: float = 0.4,
+        role: Literal["left", "right"] | None = None,
     ) -> list[dict[str, dict[str, object]] | None]:
         """Generate paired proposals for a caller-owned qualification stage.
 
@@ -667,6 +702,9 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             left_to_right_arm_direction: World-space pairing direction.
             approach_direction: World-space approach direction.
             middle_empty_ratio: Existing middle-region exclusion ratio.
+            role: Retain only this side's candidates, or both when omitted.
+                Both sides' original direction draws are consumed in either
+                mode; unrequested pose construction, NMS and ranking are skipped.
 
         Returns:
             The ordinary paired candidate records in the declared runtime TCP.
@@ -674,7 +712,10 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             retained. Target/ground collision and closing-contact checks are
             deliberately absent; ``is_success`` only means proposals exist.
             Callers must qualify candidates before planning or execution.
+            With an explicit role, each non-None row contains only that role.
         """
+        if role is not None and role not in ("left", "right"):
+            raise ValueError("role must be 'left', 'right', or None.")
         return self._dual_arm_candidates(
             mesh_vertices=mesh_vertices,
             mesh_triangles=mesh_triangles,
@@ -683,6 +724,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             approach_direction=approach_direction,
             middle_empty_ratio=middle_empty_ratio,
             proposals_only=True,
+            role=role,
         )
 
     def _dual_arm_candidates(
@@ -695,6 +737,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         middle_empty_ratio: float = 0.4,
         proposals_only: bool,
+        role: Literal["left", "right"] | None = None,
     ) -> list[dict[str, dict[str, object]] | None]:
         """Return antipodal candidate sets separated for a left/right pair."""
         if isinstance(middle_empty_ratio, bool) or not isinstance(
@@ -727,6 +770,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 approach_direction=directions[index],
                 left_to_right_arm_direction=arm_direction,
                 middle_empty_ratio=ratio,
+                **({"role": role} if role is not None else {}),
             )
             if result is not None:
                 result = {

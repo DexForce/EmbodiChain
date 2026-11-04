@@ -203,7 +203,10 @@ calibration remain in concrete robot/embodiment configuration.
 Retain that provider with its owning Robot/environment adapter across bridge,
 engine and episode resets while the model, calibration and commands are unchanged.
 Single-arm facade calls never trigger capture. A different Robot needs its own
-providers; model names are not cache identities. GraspKit receives explicit
+providers; model names are not cache identities. The provider's `clear_cache()`
+releases asset-query state without reading the Robot or recapturing its hand
+geometry; it does not replace rebuilding after calibration/command changes.
+GraspKit receives explicit
 sampled data and numeric queries, while scene observation and cargo membership
 remain caller-owned. The source-equivalence and lifetime coverage lives in
 `tests/sim/utility/test_grasp_geometry.py`.

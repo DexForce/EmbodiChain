@@ -29,6 +29,7 @@ from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.utils import configclass, logger
 from .pose_generator import (
     AntipodalGraspPoseGenerator,
+    _drop_stale_mesh_versions,
     _mesh_geometry_key,
     _validate_mesh_geometry,
 )
@@ -235,12 +236,14 @@ class _HandSampler:
         key = _mesh_geometry_key(vertices, triangles)
         if key not in self._surface_queries:
             _validate_mesh_geometry(vertices, triangles)
+            _drop_stale_mesh_versions(self._surface_queries, key)
             self._surface_queries[key] = TriangleSurfaceQuery(
                 vertices,
                 triangles,
                 normal_probe_distance=self._cfg.normal_probe_distance,
             )
         if key not in self._validators:
+            _drop_stale_mesh_versions(self._validators, key)
             self._validators[key] = HandContactChecker(
                 self._geometry,
                 self._surface_queries[key],
@@ -248,7 +251,9 @@ class _HandSampler:
                 minimum_normal_cosine=self._cfg.minimum_normal_cosine,
             )
         checker = self._validators[key]
-        proposals = self._delegate.get_dual_arm_grasp_proposals(**kwargs)
+        proposals = self._delegate.get_dual_arm_grasp_proposals(
+            **kwargs, role=self._role
+        )
         output = []
         for row, proposal in enumerate(proposals):
             if proposal is None:
@@ -371,6 +376,17 @@ class CoordinatedGraspSampler:
         surfaces: dict[tuple[object, ...], TriangleSurfaceQuery] = {}
         self._left = _HandSampler(left, left_geometry, "left", owned, surfaces)
         self._right = _HandSampler(right, right_geometry, "right", owned, surfaces)
+
+    def clear_cache(self) -> None:
+        """Release target queries, hand refiners and both generators' mesh backends.
+
+        Sampled hand geometry and configuration remain bound. Hosts can call
+        this between unrelated asset cohorts without recapturing robot geometry.
+        """
+        self._left._surface_queries.clear()
+        for hand in (self._left, self._right):
+            hand._validators.clear()
+            hand._delegate.clear_cache()
 
     def get_dual_arm_valid_grasp_poses(
         self,

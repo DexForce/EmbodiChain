@@ -18,9 +18,11 @@
 
 from __future__ import annotations
 
+import gc
 import json
 from pathlib import Path
 from unittest.mock import Mock
+import weakref
 
 import pytest
 import torch
@@ -116,6 +118,7 @@ def _ports(monkeypatch, *, reject_all=False) -> list[dict]:
         def __init__(
             self, geometry, target, *, contact_tolerance, minimum_normal_cosine
         ):
+            self.target = target
             self.role = "left" if float(geometry.body[0, 0, 0]) > 0 else "right"
             trace.append(
                 {
@@ -250,7 +253,7 @@ def test_paired_population_query_trace_and_rng_match_pinned_source(
     trace = _ports(monkeypatch, reject_all=case_name == "rejected")
     sampler = _sampler()
     bounds = torch.tensor(case["cargo_bounds"]) if case["cargo_bounds"] else None
-    with torch.random.fork_rng():
+    with torch.random.fork_rng(devices=[]):
         torch.manual_seed(fixture["seed"])
         actual = sampler.get_dual_arm_valid_grasp_poses(
             **_query(case["rows"]), cargo_bounds=bounds
@@ -358,10 +361,28 @@ def test_shared_target_query_is_rebuilt_when_mesh_changes(monkeypatch):
     sampler.get_dual_arm_valid_grasp_poses(**query)
     assert sum(event["op"] == "surface" for event in trace) == 1
     assert sum(event["op"] == "checker" for event in trace) == 2
-    query["mesh_vertices"].add_(0.001)
+    for version in range(1, 5):
+        old_surface = weakref.ref(next(iter(sampler._left._surface_queries.values())))
+        old_checkers = [
+            weakref.ref(next(iter(hand._validators.values())))
+            for hand in (sampler._left, sampler._right)
+        ]
+        query["mesh_vertices"].add_(0.001)
+        sampler.get_dual_arm_valid_grasp_poses(**query)
+        gc.collect()
+        assert old_surface() is None
+        assert all(reference() is None for reference in old_checkers)
+        assert sum(event["op"] == "surface" for event in trace) == version + 1
+        assert sum(event["op"] == "checker" for event in trace) == 2 * (version + 1)
+
+    retained = [weakref.ref(value) for value in sampler._left._surface_queries.values()]
+    sampler.clear_cache()
+    gc.collect()
+    assert all(reference() is None for reference in retained)
+    before = len(trace)
     sampler.get_dual_arm_valid_grasp_poses(**query)
-    assert sum(event["op"] == "surface" for event in trace) == 2
-    assert sum(event["op"] == "checker" for event in trace) == 4
+    assert sum(event["op"] == "surface" for event in trace[before:]) == 1
+    assert sum(event["op"] == "checker" for event in trace[before:]) == 2
 
 
 def test_real_contact_refinement_accepts_opposed_box_grasps_without_fixed_checker(
@@ -373,6 +394,9 @@ def test_real_contact_refinement_accepts_opposed_box_grasps_without_fixed_checke
     from embodichain.toolkits.graspkit.pg_grasp import (
         _antipodal_backend as implementation,
     )
+
+    nms = Mock(wraps=implementation.pose_nms)
+    monkeypatch.setattr(implementation, "pose_nms", nms)
 
     def forbidden(*args, **kwargs):
         raise AssertionError(
@@ -421,6 +445,7 @@ def test_real_contact_refinement_accepts_opposed_box_grasps_without_fixed_checke
         left_to_right_arm_direction=torch.tensor([1.0, 0, 0]),
         approach_direction=torch.tensor([0.0, 0, -1]),
     )[0]
+    assert nms.call_count == 2  # Only the side consumed by each hand is materialized.
     for role, x in (("left", -0.075), ("right", 0.075)):
         assert result[role]["is_success"]
         torch.testing.assert_close(
@@ -429,3 +454,7 @@ def test_real_contact_refinement_accepts_opposed_box_grasps_without_fixed_checke
         torch.testing.assert_close(
             result[role]["grasp_poses"][:, 0, 3], torch.tensor([x]), atol=1e-6, rtol=0
         )
+    native_query = weakref.ref(next(iter(sampler._left._surface_queries.values())))
+    sampler.clear_cache()
+    gc.collect()
+    assert native_query() is None

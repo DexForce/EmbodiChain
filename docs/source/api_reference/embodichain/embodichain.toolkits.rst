@@ -103,6 +103,15 @@ ranking, population budgets and runtime-TCP conversion, while constructing no
 fixed-hand collision checker. Ordinary validated queries retain their separate
 checked backend and existing behavior.
 
+The optional ``role="left"`` or ``role="right"`` returns only that side.
+Both sides' eligibility-dependent direction draws remain unchanged, preserving
+the selected population and final Torch RNG; unrequested pose construction,
+NMS and ranking are skipped. Omitting ``role`` retains both sides.
+Raw and validated backends share read-only mesh and antipodal annotations,
+while collision state remains separate. Refresh applies once per mesh's first
+preparation. ``clear_cache()`` releases both modes' mesh backends and retains
+configuration/hand geometry; subsequent queries prepare lazily again.
+
 .. autosummary::
    :nosignatures:
 
@@ -317,6 +326,12 @@ One immutable target-surface query is shared by the two hand refiners for each
 mesh identity/version. Each hand retains independent candidate and diagnostic
 state. Mesh mutation creates a new query and new refiners.
 
+Superseded versions of the same tensor pair release their old queries,
+refiners and generator backends, including when tensor storage or shape changes.
+Distinct tensor pairs remain cached until ``clear_cache()`` releases all target
+queries/refiners and both bound generators' mesh backends. Sampled hand geometry
+remains available; runtime hosts own cleanup between unrelated asset cohorts.
+
 The data-only sampler combines two existing antipodal generators with explicit
 sampled hand geometry and contact settings. It preserves paired proposal RNG
 scope and applies an optional clearance preference after candidate selection.
@@ -355,6 +370,9 @@ Explicit URDF collision surfaces
 Selected mesh/box collision links are subdivided in their authored local frames.
 Callers supply link names and sampling bounds; no robot, control-group naming
 or simulator state is consulted.
+Shape decoding and collision-origin handling are shared with fixed-opening
+geometry. Its barycentric sampling and this service's subdivision sampling
+retain their existing point populations.
 
 .. autosummary::
    :nosignatures:

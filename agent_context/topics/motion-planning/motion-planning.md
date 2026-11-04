@@ -190,8 +190,14 @@ these proposals with `HandContactChecker.refine()` and shares one target-surface
 query across both hands for the same mesh identity/version. It owns bounded
 paired sampling with explicit contact settings
 and optional observed world bounds; clearance preference changes costs after
-population selection. `pg_grasp.urdf_surfaces` samples explicitly selected
-collision links without robot state. See
+population selection. A proposal `role` skips unused pose/NMS/ranking work while
+preserving both sides' original direction draws and the selected population.
+Raw/validated backends share read-only annotations, with separate collision state.
+Mesh mutation retires superseded versions; hosts call `clear_cache()` between
+unrelated asset cohorts to release distinct-mesh queries/backends while keeping
+sampled hand geometry. `pg_grasp.urdf_surfaces` samples explicitly selected
+collision links without robot state, sharing shape/origin decoding with fixed
+geometry while retaining each sampling policy's original point population. See
 [hand geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
 for deferred Robot capture and cache lifetime, and the
 [GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)

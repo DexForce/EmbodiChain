@@ -19,8 +19,11 @@
 from __future__ import annotations
 
 import ast
+import gc
 from pathlib import Path
 from typing import Any, ClassVar
+from unittest.mock import Mock
+import weakref
 
 import pytest
 import torch
@@ -455,15 +458,20 @@ def test_box_side_region_projects_hint_onto_opposed_faces_without_oracle() -> No
         project_box_side_grasp(hint, np.array([0.10, -0.05, 0.04]), cfg)
 
 
+@pytest.mark.parametrize("checked_first", [False, True])
+@pytest.mark.parametrize("force_refresh", [False, True])
 def test_explicit_proposals_skip_fixed_checker_and_keep_validated_queries_isolated(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    checked_first: bool,
+    force_refresh: bool,
 ) -> None:
     from embodichain.toolkits.graspkit.pg_grasp import (
         _antipodal_backend as implementation,
     )
 
     constructions = []
+    annotation_count = 0
 
     class RejectAll:
         def __init__(self, **kwargs):
@@ -473,6 +481,8 @@ def test_explicit_proposals_skip_fixed_checker_and_keep_validated_queries_isolat
             return torch.ones(len(poses), dtype=torch.bool), torch.zeros(len(poses))
 
     def annotate(backend):
+        nonlocal annotation_count
+        annotation_count += 1
         # Two independent 60 mm antipodal pairs on opposite object sides.
         backend._hit_point_pairs = torch.tensor(
             [
@@ -489,7 +499,7 @@ def test_explicit_proposals_skip_fixed_checker_and_keep_validated_queries_isolat
         lambda *args: str(tmp_path / "unprepared.npy"),
     )
     monkeypatch.setattr(_AntipodalMeshBackend, "annotate", annotate)
-    generator = _generator()
+    generator = _generator(force_refresh=force_refresh)
     vertices, triangles = _geometry()
     query = dict(
         mesh_vertices=vertices,
@@ -498,11 +508,13 @@ def test_explicit_proposals_skip_fixed_checker_and_keep_validated_queries_isolat
         left_to_right_arm_direction=torch.tensor([1.0, 0, 0]),
         approach_direction=torch.tensor([0.0, 0, -1]),
     )
-    with torch.random.fork_rng():
+    with torch.random.fork_rng(devices=[]):
+        if checked_first:
+            generator.get_dual_arm_valid_grasp_poses(**query)
         torch.manual_seed(741)
         raw = generator.get_dual_arm_grasp_proposals(**query)[0]
         rng = torch.random.get_rng_state().clone()
-        assert constructions == []
+        assert len(constructions) == int(checked_first)
         assert all(item["is_success"] for item in raw.values())
         checked = generator.get_dual_arm_valid_grasp_poses(**query)[0]
         assert len(constructions) == 1
@@ -511,6 +523,15 @@ def test_explicit_proposals_skip_fixed_checker_and_keep_validated_queries_isolat
         replay = generator.get_dual_arm_grasp_proposals(**query)[0]
         assert len(constructions) == 1
         assert torch.equal(torch.random.get_rng_state(), rng)
+        for side in ("left", "right"):
+            torch.manual_seed(741)
+            selected = generator.get_dual_arm_grasp_proposals(**query, role=side)[0]
+            assert set(selected) == {side}
+            assert torch.equal(torch.random.get_rng_state(), rng)
+            for key in ("grasp_poses", "open_lengths", "total_cost"):
+                torch.testing.assert_close(
+                    selected[side][key], raw[side][key], rtol=0, atol=0
+                )
     for role in ("left", "right"):
         torch.testing.assert_close(
             raw[role]["open_lengths"], torch.full_like(raw[role]["open_lengths"], 0.06)
@@ -519,3 +540,88 @@ def test_explicit_proposals_skip_fixed_checker_and_keep_validated_queries_isolat
             torch.testing.assert_close(
                 raw[role][key], replay[role][key], atol=0, rtol=0
             )
+    assert annotation_count == 1
+    checked_backend = next(iter(generator._backends.values()))
+    raw_backend = next(iter(generator._proposal_backends.values()))
+    assert checked_backend is not raw_backend
+    assert checked_backend.mesh is raw_backend.mesh
+    assert checked_backend._hit_point_pairs is raw_backend._hit_point_pairs
+    old_backends = [weakref.ref(checked_backend), weakref.ref(raw_backend)]
+    del checked_backend, raw_backend
+
+    # Replacing tensor storage also changes shape; logical mesh identity retires
+    # every old mode's backend, not just the mode queried after the mutation.
+    vertices.set_(torch.cat((vertices, vertices.new_zeros((1, 3)))))
+    generator.get_dual_arm_grasp_proposals(**query)
+    gc.collect()
+    assert all(reference() is None for reference in old_backends)
+    assert annotation_count == 2
+    assert len(generator._proposal_backends) == 1 and not generator._backends
+    generator.clear_cache()
+    assert not generator._backends and not generator._proposal_backends
+    generator.get_dual_arm_grasp_proposals(**query)
+    assert annotation_count == 3
+
+
+@pytest.mark.parametrize("missing_side", [None, "left", "right"])
+def test_role_proposals_preserve_seeded_population_and_rng_with_partial_rows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, missing_side: str | None
+) -> None:
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        _antipodal_backend as implementation,
+    )
+
+    pairs = torch.tensor(
+        [
+            [[0.0, -0.03, 0.0], [0.0, 0.03, 0.0]],
+            [[0.05, -0.03, 0.0], [0.05, 0.03, 0.0]],
+        ]
+    )
+    if missing_side == "left":
+        pairs = pairs[1:]
+    elif missing_side == "right":
+        pairs = pairs[:1]
+
+    def annotate(instance):
+        instance._hit_point_pairs = pairs
+        return pairs
+
+    monkeypatch.setattr(_AntipodalMeshBackend, "annotate", annotate)
+    monkeypatch.setattr(
+        _AntipodalMeshBackend,
+        "_get_cache_dir",
+        lambda *args: str(tmp_path / "absent.npy"),
+    )
+    nms = Mock(wraps=implementation.pose_nms)
+    monkeypatch.setattr(implementation, "pose_nms", nms)
+    generator = _generator()
+    vertices, faces = _geometry()
+    query = dict(
+        mesh_vertices=vertices,
+        mesh_triangles=faces,
+        obj_poses=torch.eye(4).repeat(2, 1, 1),
+        left_to_right_arm_direction=torch.tensor([1.0, 0, 0]),
+        # The second row has no eligible grasp: it must consume no direction
+        # draws for either side and must retain the original failure sentinel.
+        approach_direction=torch.tensor([[0.0, 0, -1], [0.0, 1, 0]]),
+    )
+    with torch.random.fork_rng(devices=[]):
+        for seed in (0, 1):
+            torch.manual_seed(seed)
+            full = generator.get_dual_arm_grasp_proposals(**query)
+            expected_rng = torch.random.get_rng_state()
+            for side in ("left", "right"):
+                torch.manual_seed(seed)
+                nms.reset_mock()
+                selected = generator.get_dual_arm_grasp_proposals(**query, role=side)
+                assert nms.call_count == int(side != missing_side)
+                assert torch.equal(torch.random.get_rng_state(), expected_rng)
+                for got, expected in zip(selected, full, strict=True):
+                    assert set(got) == {side}
+                    assert got[side]["is_success"] == expected[side]["is_success"]
+                    for field in ("grasp_poses", "open_lengths", "total_cost"):
+                        torch.testing.assert_close(
+                            got[side][field], expected[side][field], rtol=0, atol=0
+                        )
+    with pytest.raises(ValueError, match="role"):
+        generator.get_dual_arm_grasp_proposals(**query, role="both")
