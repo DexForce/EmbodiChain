@@ -16,6 +16,9 @@
 
 from __future__ import annotations
 
+from collections import deque
+import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
@@ -23,6 +26,7 @@ from unittest.mock import MagicMock, call
 import gymnasium as gym
 import pytest
 import torch
+from tensordict import TensorDict
 
 from embodichain.learning.rl.evaluation import (
     convert_policy_action_for_env,
@@ -99,6 +103,102 @@ class _MixedDeviceEnv:
         self.action_manager = _DeviceCheckingActionManager(self.device)
 
 
+def test_trainer_metric_means_transfer_only_one_scalar_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Logging preserves mixed metric means without per-value host copies."""
+    original_cpu = torch.Tensor.cpu
+    transferred_shapes = []
+
+    def counted_cpu(value: torch.Tensor, *args, **kwargs):
+        transferred_shapes.append(tuple(value.shape))
+        return original_cpu(value, *args, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, "cpu", counted_cpu)
+    trainer = Trainer.__new__(Trainer)
+    values = trainer._pack_log_dicts(
+        {
+            "rewards": {
+                "progress": torch.tensor([1.0, 3.0], requires_grad=True),
+                "other": [1, 5],
+            },
+            "metrics": {
+                "grasped": torch.tensor([True, False]),
+                "length": torch.tensor([1, 3], dtype=torch.int64),
+                "noncontiguous": torch.arange(8.0).reshape(2, 4)[:, ::2],
+                "empty": torch.empty(0),
+                "unsupported": "not a numeric metric",
+            },
+        }
+    )
+    assert list(values) == [
+        "rewards/progress",
+        "rewards/other",
+        "metrics/grasped",
+        "metrics/length",
+        "metrics/noncontiguous",
+        "metrics/empty",
+    ]
+    assert list(values.values())[:-1] == [2.0, 3.0, 0.5, 2.0, 3.0]
+    assert math.isnan(values["metrics/empty"])
+    assert transferred_shapes == [(5,)]
+
+
+@pytest.mark.parametrize("logging_enabled", [True, False])
+def test_trainer_rollout_logging_reuses_means_for_both_sinks(
+    monkeypatch: pytest.MonkeyPatch, logging_enabled: bool
+) -> None:
+    """Each control step retains its tags/global step and shares scalar means."""
+    trainer = Trainer.__new__(Trainer)
+    trainer.curr_ret = torch.zeros(2)
+    trainer.curr_len = torch.zeros(2, dtype=torch.int32)
+    trainer.ret_window, trainer.len_window = deque(), deque()
+    trainer.global_step = 10
+    trainer.distributed, trainer.rank = False, 0
+    trainer.writer = MagicMock() if logging_enabled else None
+    trainer.use_wandb = logging_enabled
+    trainer.buffer_size = 2
+    rollout = object()
+    trainer.buffer = SimpleNamespace(start_rollout=lambda: rollout, add=MagicMock())
+    scalar_means = MagicMock(wraps=trainer._pack_log_dicts)
+    monkeypatch.setattr(trainer, "_pack_log_dicts", scalar_means)
+    wandb_log = MagicMock()
+    monkeypatch.setattr("embodichain.learning.rl.utils.trainer.wandb.log", wandb_log)
+
+    def collect(*, num_steps, rollout, on_step_callback):
+        for _ in range(num_steps):
+            on_step_callback(
+                TensorDict(
+                    {"reward": torch.tensor([1.0, 3.0]), "done": torch.zeros(2).bool()},
+                    batch_size=[2],
+                ),
+                {
+                    "rewards": {"progress": torch.tensor([1.0, 3.0])},
+                    "metrics": {"grasped": torch.tensor([True, False])},
+                },
+            )
+        return rollout
+
+    trainer.collector = SimpleNamespace(collect=collect)
+    trainer._collect_rollout()
+    assert trainer.global_step == 14
+    if logging_enabled:
+        assert scalar_means.call_count == 2
+        assert trainer.writer.add_scalar.call_args_list == [
+            call("rewards/progress", 2.0, 12),
+            call("metrics/grasped", 0.5, 12),
+            call("rewards/progress", 2.0, 14),
+            call("metrics/grasped", 0.5, 14),
+        ]
+        assert wandb_log.call_args_list == [
+            call({"rewards/progress": 2.0, "metrics/grasped": 0.5}, step=12),
+            call({"rewards/progress": 2.0, "metrics/grasped": 0.5}, step=14),
+        ]
+    else:
+        scalar_means.assert_not_called()
+        wandb_log.assert_not_called()
+
+
 @pytest.mark.parametrize("rank", [0, 1])
 def test_trainer_without_eval_env_ignores_empty_eval_events(
     tmp_path: Path, rank: int
@@ -150,10 +250,14 @@ def test_trainer_with_eval_env_creates_eval_event_manager(tmp_path: Path) -> Non
     assert trainer.eval_event_manager._env is eval_env
 
 
-def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None:
+@pytest.mark.parametrize("explicit_legacy", [False, True])
+def test_evaluate_episodes_counts_actual_completions_and_restores_mode(
+    explicit_legacy: bool,
+) -> None:
     policy = _DeterministicPolicy()
     policy.train()
     env = _AsyncAutoResetEnv()
+    episodes = []
 
     result = evaluate_episodes(
         policy=policy,
@@ -161,6 +265,8 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None
         num_episodes=4,
         device="cpu",
         seed=123,
+        on_episode=episodes.append,
+        **({"episode_allocation": "first_completed"} if explicit_legacy else {}),
     )
 
     assert policy.training
@@ -168,8 +274,134 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None
     assert result["eval/avg_reward"] == 1.25
     assert result["eval/avg_length"] == 1.25
     assert result["eval/success_rate"] == 1.0
+    assert result["eval/completed_episodes"] == 4
+    assert result["eval/success_samples"] == 4
+    assert result["eval/success_ci95_low"] == pytest.approx(0.5101091635)
+    assert result["eval/success_ci95_high"] == pytest.approx(1.0)
     assert result["eval/metrics/terminal_step"] == 1.25
     assert "eval/metrics/final_position" not in result
+    assert [record["global_episode_index"] for record in episodes] == list(range(4))
+    assert [record["env_id"] for record in episodes] == [0, 0, 1, 0]
+    assert [record["length"] for record in episodes] == [1, 1, 2, 1]
+    assert [record["return"] for record in episodes] == [1.0, 1.0, 2.0, 1.0]
+    assert all(record["success"] == 1.0 for record in episodes)
+    assert all("final_position" not in record["metrics"] for record in episodes)
+    json.dumps(episodes, allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    "episodes,expected_success,expected_length,expected_min,expected_max,controls",
+    [
+        (6, 2 / 3, 5 / 3, 2, 2, 6),
+        (4, 0.5, 2.0, 1, 2, 6),
+        (2, 0.5, 2.0, 0, 1, 3),
+    ],
+)
+def test_balanced_evaluation_scores_fixed_quotas_despite_unequal_episode_lengths(
+    episodes: int,
+    expected_success: float,
+    expected_length: float,
+    expected_min: int,
+    expected_max: int,
+    controls: int,
+) -> None:
+    """Slow failures keep their assigned trials after fast rows exhaust quotas."""
+
+    class TimedOutcomeEnv(_AsyncAutoResetEnv):
+        def __init__(self) -> None:
+            super().__init__()
+            self.horizons = torch.tensor([3, 1, 1])
+            self.physical_completions = torch.zeros(3, dtype=torch.long)
+            self.control_steps = 0
+
+        def step(self, action):
+            observation, reward, done, truncated, info = super().step(action)
+            self.physical_completions += done
+            self.control_steps += 1
+            info["success"] = torch.tensor([False, True, True])
+            return observation, reward, done, truncated, info
+
+    env = TimedOutcomeEnv()
+    records = []
+    result = evaluate_episodes(
+        policy=_DeterministicPolicy(),
+        env=env,
+        num_episodes=episodes,
+        device="cpu",
+        episode_allocation="balanced",
+        on_episode=records.append,
+    )
+    assert result["eval/completed_episodes"] == episodes
+    assert result["eval/success_samples"] == episodes
+    assert result["eval/success_rate"] == pytest.approx(expected_success)
+    assert result["eval/avg_length"] == pytest.approx(expected_length)
+    assert result["eval/avg_reward"] == pytest.approx(expected_length)
+    assert result["eval/episodes_per_env_min"] == expected_min
+    assert result["eval/episodes_per_env_max"] == expected_max
+    assert env.control_steps == controls
+    # Finished-quota rows still step/reset naturally; their additional fast
+    # successes must not enter any scored reward, length, success or metric.
+    torch.testing.assert_close(
+        env.physical_completions, torch.tensor([controls // 3, controls, controls])
+    )
+    assert result["eval/metrics/terminal_step"] == pytest.approx(expected_length)
+    assert len(records) == episodes
+    assert [record["global_episode_index"] for record in records] == list(
+        range(episodes)
+    )
+    quota, remainder = divmod(episodes, env.num_envs)
+    assert [sum(record["env_id"] == row for record in records) for row in range(3)] == [
+        quota + int(row < remainder) for row in range(3)
+    ]
+    for record in records:
+        expected_steps = 3 if record["env_id"] == 0 else 1
+        assert record["length"] == expected_steps
+        assert record["return"] == float(expected_steps)
+        assert record["success"] == float(record["env_id"] != 0)
+        assert record["metrics"] == {"terminal_step": float(expected_steps)}
+    json.dumps(records, allow_nan=False)
+
+
+def test_episode_callback_omits_absent_success_and_restores_mode_on_failure() -> None:
+    class UnlabelledEnv(_AsyncAutoResetEnv):
+        def step(self, action):
+            observation, reward, done, truncated, info = super().step(action)
+            del info["success"]
+            return observation, reward, done, truncated, info
+
+    policy = _DeterministicPolicy()
+    policy.train()
+    records = []
+
+    def reject(record: dict) -> None:
+        records.append(record)
+        raise OSError("episode sink unavailable")
+
+    with pytest.raises(OSError, match="episode sink unavailable"):
+        evaluate_episodes(
+            policy=policy,
+            env=UnlabelledEnv(),
+            num_episodes=4,
+            device="cpu",
+            on_episode=reject,
+        )
+    assert policy.training
+    assert len(records) == 1
+    assert records[0]["global_episode_index"] == 0
+    assert "success" not in records[0]
+
+
+def test_evaluation_rejects_unknown_episode_allocation_before_reset() -> None:
+    env = _AsyncAutoResetEnv()
+    with pytest.raises(ValueError, match="episode_allocation"):
+        evaluate_episodes(
+            policy=_DeterministicPolicy(),
+            env=env,
+            num_episodes=1,
+            device="cpu",
+            episode_allocation="automatic",
+        )
+    assert env.last_seed is None
 
 
 def test_policy_action_moves_to_environment_device_before_preprocessing() -> None:

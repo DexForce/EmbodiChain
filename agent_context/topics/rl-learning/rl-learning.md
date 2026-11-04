@@ -191,6 +191,13 @@ observation groups. The collector and standard buffer preserve separate
 collector also records the old Gaussian mean and standard deviation for KL
 measurement. These rollout fields have explicit dimensions in the buffer.
 
+`evaluate_episodes` retains `first_completed` allocation as its compatibility
+default. Optional `balanced` allocation fixes per-arena quotas before stepping,
+preventing completion-time censoring when episode durations differ. The native
+`eval-policy --episode-allocation balanced` exposes this protocol. The optional
+`on_episode` callback receives CPU records only for scored completions. Select
+checkpoints on validation data before independent testing with separate seeds.
+
 Read [training and extension](training.md) for evaluation, checkpoints,
 distributed ownership, official examples and adding algorithms/policies/envs.
 
@@ -228,6 +235,21 @@ for differentiable IK ownership. Root exports load on demand; importing a
 lightweight APG component must not eagerly load the simulator-backed Trainer.
 
 ## Invariants
+
+Auto-reset timeouts retain completed-row terminal observations and row IDs.
+The collector evaluates the terminal state before using its value for timeout
+bootstrap; true termination suppresses bootstrap even when truncation is also
+set. Legacy environments without terminal observations retain their previous
+fallback contract.
+
+Training snapshots freeze physical environment/embodiment/scene components
+relative to their declaring deployment before moving configs into a run.
+The optional `EmbodiedEnvCfg.resource_export` function owns materialized
+task resources. It receives the unwrapped environment, an owned frozen mapping
+and the destination directory; consumers use it to pin materialized resources together with their
+preparation/export declarations. Explicit `./` resource paths resolve relative to the saved config,
+including robot `fpath`/solver `urdf_path` and `assembly_manifest`. Raw checkpoint context remains
+unchanged so resource packaging does not redefine resume compatibility.
 
 - The selected environment must expose batched observation/action spaces and
   `num_envs`.

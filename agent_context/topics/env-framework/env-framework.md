@@ -33,9 +33,10 @@ wrappers, and replay. Read [profiling](profiling.md) only for instrumentation.
 
 Velocity locomotion deployments select catalog robot IDs in both backends.
 Their `contracts/_config.py` expands the task JSON's matching model selection
-using the backend-free robot profile reader. Task-specific actions, observations,
-rewards and contact termination rules remain in the task package; robot defaults
-and the distinct asset/contract joint orders are owned by
+using the backend-free robot profile reader. Task-specific actions, observation
+state construction, rewards and contact termination rules remain in the task
+package; their observation functor is exposed by the manager observation package.
+Robot defaults and the distinct asset/contract joint orders are owned by
 [robot-system](../robot-system/robot-system.md).
 
 ## Launcher argument ownership
@@ -103,6 +104,17 @@ before stepping in position-velocity mode; inactive and hold targets use zero
 qvel.
 
 ## Lifecycle and boundaries
+
+
+An optional `scene_preparation` functor declaration prepares an owned
+`EmbodiedEnvCfg` before any World is created. Registered task defaults can
+supply the same declaration; an explicit config takes precedence. The function
+returns ordinary scene/manager configuration and must not step physics or own
+a runtime environment. `resource_export` packages task resources when native
+RL checkpoint configuration is saved. These functions allow generated-asset
+tasks to register `EmbodiedEnv` directly while keeping model-specific code in
+the task extension.
+
 
 `EmbodiedEnv._setup_robot()` creates an instance-owned `active_joint_ids` list
 on each setup, preserving control-part order or copying explicit configured

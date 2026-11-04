@@ -333,6 +333,57 @@ def test_clipped_value_loss_uses_larger_error() -> None:
     assert float(loss) == pytest.approx(0.64)
 
 
+@pytest.mark.parametrize("clip", [-0.2, 0.0, 0.2, 1.0, 2.0])
+def test_clipped_actor_loss_matches_ratio_objective_and_gradients(clip: float) -> None:
+    algorithm = _algorithm(_policy(), clip_coef=clip)
+    generator = torch.Generator().manual_seed(20261026)
+    log_ratio = (torch.randn(4096, generator=generator) * 2).requires_grad_()
+    reference_log_ratio = log_ratio.detach().clone().requires_grad_()
+    advantages = torch.randn(4096, generator=generator)
+    # Independent reference is the original probability-ratio definition.
+    # Include the existing zero/wide clip settings and negative-clip behavior.
+    ratio = reference_log_ratio.exp()
+    reference = -torch.minimum(
+        ratio * advantages, ratio.clamp(1 - clip, 1 + clip) * advantages
+    ).mean()
+    actual = algorithm._actor_loss(log_ratio, advantages)
+    actual.backward()
+    reference.backward()
+    torch.testing.assert_close(actual, reference, atol=1e-5, rtol=1e-4)
+    torch.testing.assert_close(
+        log_ratio.grad, reference_log_ratio.grad, atol=1e-5, rtol=1e-4
+    )
+
+
+@pytest.mark.parametrize("advantage,expected", [(1.0, -1.2), (0.0, 0.0)])
+def test_clipped_actor_loss_does_not_backpropagate_inactive_exp_overflow(
+    advantage: float, expected: float
+) -> None:
+    algorithm = _algorithm(_policy(), clip_coef=0.2)
+    # exp(100) overflows FP32, although a positive advantage already clips
+    # this branch to ratio 1.2. Computing exp first produced a NaN gradient.
+    log_ratio = torch.tensor([100.0], requires_grad=True)
+    loss = algorithm._actor_loss(log_ratio, torch.tensor([advantage]))
+    loss.backward()
+    assert float(loss) == pytest.approx(expected)
+    torch.testing.assert_close(log_ratio.grad, torch.zeros_like(log_ratio))
+
+
+def test_unbounded_negative_advantage_still_fails_nonfinite_gradient_guard() -> None:
+    policy = _policy()
+    algorithm = _algorithm(policy, clip_coef=0.2)
+    parameter = next(policy.actor.parameters())
+    with torch.no_grad():
+        parameter.fill_(100.0 / parameter.numel())
+    loss = algorithm._actor_loss(parameter.sum().reshape(1), torch.tensor([-1.0]))
+    # Negative advantages retain the genuinely unbounded upper-ratio branch;
+    # a global log-ratio clamp would incorrectly make this objective finite.
+    assert torch.isinf(loss)
+    loss.backward()
+    with pytest.raises(FloatingPointError, match="optimizer step skipped"):
+        algorithm._clip_gradients()
+
+
 def test_action_bound_loss_penalizes_policy_means_outside_unit_range() -> None:
     action_mean = torch.tensor([[-2.0], [-0.5], [0.5], [2.0]])
 
@@ -424,3 +475,95 @@ def test_gae_handles_episode_boundaries(
     _, returns = compute_gae(rollout, gamma=0.99, gae_lambda=0.95)
 
     torch.testing.assert_close(returns, torch.tensor([[expected_return]]))
+
+
+def test_timeout_bootstraps_terminal_state_instead_of_current_or_reset_state() -> None:
+    from embodichain.learning.rl.algo import compute_gae
+    from embodichain.learning.rl.buffer import RolloutBuffer
+    from embodichain.learning.rl.collector import SyncCollector
+    from embodichain.learning.rl.policies import ActorCritic
+
+    class TimeoutEnv:
+        num_envs = 1
+        device = torch.device("cpu")
+
+        def reset(self):
+            return {"state": torch.tensor([[2.0]])}, {}
+
+        def step(self, action):
+            return (
+                {"state": torch.tensor([[99.0]])},
+                torch.tensor([1.0]),
+                torch.tensor([False]),
+                torch.tensor([True]),
+                {
+                    "terminal_observation": {"state": torch.tensor([[7.0]])},
+                    "terminal_env_ids": torch.tensor([0]),
+                    "terminal_observation_mask": torch.tensor([True]),
+                },
+            )
+
+    critic = torch.nn.Linear(1, 1, bias=False)
+    with torch.no_grad():
+        critic.weight.fill_(1.0)
+    policy = ActorCritic(1, 1, torch.device("cpu"), torch.nn.Linear(1, 1), critic)
+    env = TimeoutEnv()
+    buffer = RolloutBuffer(1, 1, 1, 1, env.device)
+    rollout = SyncCollector(env, policy, env.device).collect(
+        1, rollout=buffer.start_rollout()
+    )
+    _, returns = compute_gae(rollout, gamma=0.9, gae_lambda=1.0)
+    torch.testing.assert_close(returns, torch.tensor([[7.3]]))
+
+
+@pytest.mark.parametrize("tensor_dict_info", [False, True])
+def test_base_env_preserves_terminal_rows_before_reused_reset_storage(
+    tensor_dict_info: bool,
+) -> None:
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs import BaseEnv
+
+    state = torch.tensor([[3.0], [7.0], [11.0]])
+    observation = {"state": state}
+    info = {"success": torch.tensor([True, False, False])}
+    if tensor_dict_info:
+        info = TensorDict(info, batch_size=[3])
+
+    def reset(**kwargs):
+        state[kwargs["options"]["reset_ids"]] = 99.0
+        return observation, {}
+
+    env = SimpleNamespace(
+        _profiler=SimpleNamespace(section=lambda *args, **kwargs: nullcontext()),
+        sim=SimpleNamespace(render_frame=lambda: nullcontext()),
+        _preprocess_action=lambda **kwargs: kwargs["action"],
+        _step_action=lambda **kwargs: kwargs["action"],
+        _postprocess_action=lambda **kwargs: kwargs["action"],
+        _advance_physics=lambda: None,
+        _update_sim_state=lambda **kwargs: None,
+        _update_physical_objective=lambda: None,
+        get_obs=lambda **kwargs: observation,
+        get_info=lambda **kwargs: info,
+        get_reward=lambda **kwargs: torch.ones(3),
+        _extend_reward=lambda **kwargs: kwargs["rewards"],
+        check_truncated=lambda **kwargs: torch.tensor([False, True, False]),
+        _hook_after_sim_step=lambda **kwargs: None,
+        _elapsed_steps=torch.zeros(3, dtype=torch.long),
+        max_episode_steps=10,
+        cfg=SimpleNamespace(ignore_terminations=False),
+        num_envs=3,
+        device=torch.device("cpu"),
+        reset=reset,
+    )
+    env._get_termination_flags = lambda obs, info: BaseEnv._get_termination_flags(
+        env, obs, info
+    )
+    _, _, _, _, info = BaseEnv.step(env, torch.zeros(3, 1))
+    torch.testing.assert_close(
+        info["terminal_observation"]["state"], torch.tensor([[3.0], [7.0]])
+    )
+    torch.testing.assert_close(state, torch.tensor([[99.0], [99.0], [11.0]]))
+    torch.testing.assert_close(
+        info["terminal_observation_mask"], torch.tensor([False, True, False])
+    )

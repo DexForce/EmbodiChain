@@ -256,7 +256,12 @@ class JointPositionToLimitsAction(_JointAction):
 
 
 class RelativeJointPositionAction(_JointAction):
-    """Add scaled relative actions to current selected positions."""
+    """Add scaled relative actions to current selected positions.
+
+    Optional ``target_limits`` contains a lower/upper pair per selected joint.
+    It limits the resulting position command without changing the raw policy
+    action used by observation histories.
+    """
 
     contract_id: ClassVar[str] = "joint_position.relative@1"
     command_type = "qpos"
@@ -273,6 +278,20 @@ class RelativeJointPositionAction(_JointAction):
         )
         clip = cfg.params.get("clip")
         self._clip = None if clip is None else float(clip)
+        limits = cfg.params.get("target_limits")
+        self._target_limits = None
+        if limits is not None:
+            limits = torch.as_tensor(limits, dtype=torch.float32, device=env.device)
+            if (
+                tuple(limits.shape) != (self.action_dim, 2)
+                or not torch.isfinite(limits).all()
+                or not (limits[:, 0] < limits[:, 1]).all()
+            ):
+                raise ValueError(
+                    "target_limits must contain finite ordered lower/upper pairs "
+                    "for each selected joint."
+                )
+            self._target_limits = limits
 
     @property
     def action_space(self) -> gym.spaces.Box:
@@ -289,6 +308,10 @@ class RelativeJointPositionAction(_JointAction):
             self._raw_actions.clamp_(-self._clip, self._clip)
         current = self._env.robot.get_qpos()[:, list(self._joint_ids)]
         self._processed_actions.copy_(current + self._raw_actions * self._scale)
+        if self._target_limits is not None:
+            self._processed_actions.clamp_(
+                min=self._target_limits[:, 0], max=self._target_limits[:, 1]
+            )
 
     def apply_actions(self) -> None:
         self._env.robot.set_qpos(

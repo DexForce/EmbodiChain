@@ -102,6 +102,7 @@ class SyncCollector(BaseCollector):
                 self._to_env_action(step_td["action"])
             )
             next_obs_td = dict_to_tensordict(next_obs, self.device)
+            self._write_timeout_values(rollout, step_idx, env_info)
             self._write_step(
                 rollout=rollout,
                 step_idx=step_idx,
@@ -140,6 +141,36 @@ class SyncCollector(BaseCollector):
         )
         self.policy.get_value(last_next_td)
         rollout["value"][:, -1] = last_next_td["value"]
+
+    def _write_timeout_values(
+        self, rollout: TensorDict, step_idx: int, env_info: dict
+    ) -> None:
+        """Use pre-reset terminal observations for time-limit bootstrapping."""
+        if "timeout_value" not in rollout.keys():
+            return
+        rollout["timeout_value"][:, step_idx].fill_(float("nan"))
+        terminal = env_info.get("terminal_observation")
+        if terminal is None:
+            return
+        observation = dict_to_tensordict(terminal, self.device)
+        actor_obs, critic_obs = self._model_observations(observation)
+        fields = {"obs": actor_obs}
+        if critic_obs is not None:
+            fields["critic_obs"] = critic_obs
+        terminal_td = TensorDict(
+            fields, batch_size=[actor_obs.shape[0]], device=self.device
+        )
+        self.policy.get_value(terminal_td)
+        env_ids = env_info.get("terminal_env_ids")
+        if env_ids is None:
+            env_ids = torch.arange(self.env.num_envs, device=self.device)
+        else:
+            env_ids = env_ids.to(self.device)
+        values = terminal_td["value"]
+        mask = env_info.get("terminal_observation_mask")
+        if mask is not None:
+            values = torch.where(mask.to(self.device)[env_ids], values, float("nan"))
+        rollout["timeout_value"][env_ids, step_idx] = values
 
     def _reset_env(self) -> TensorDict:
         obs, _ = self.env.reset()

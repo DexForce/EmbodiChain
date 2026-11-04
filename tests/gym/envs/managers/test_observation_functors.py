@@ -257,6 +257,30 @@ from embodichain.lab.gym.envs.managers.observations import (
 )
 
 
+def test_locomotion_observation_keeps_legacy_import_and_selects_requested_group():
+    from types import SimpleNamespace
+
+    from embodichain.lab.gym.envs.managers.observations import (
+        velocity_locomotion_observation,
+    )
+    from embodichain_tasks.locomotion.managers.observations import (
+        velocity_locomotion_observation as legacy,
+    )
+
+    actor, critic = torch.tensor([[1.0]]), torch.tensor([[2.0]])
+    calls = []
+
+    def build(*, enable_corruption):
+        calls.append(enable_corruption)
+        return actor, critic
+
+    env = SimpleNamespace(build_velocity_locomotion_observations=build)
+    assert legacy is velocity_locomotion_observation
+    assert velocity_locomotion_observation(env, {}) is actor
+    assert legacy(env, {}, privileged=True, enable_corruption=True) is critic
+    assert calls == [False, True]
+
+
 class TestGetRigidObjectPose:
     """Tests for get_rigid_object_pose functor."""
 
@@ -402,7 +426,9 @@ class TestGetSensorIntrinsics:
 
         # Replace the mock sensor with a proper one that will pass isinstance check
         # by using patch to mock the Camera import
-        with patch("embodichain.lab.gym.envs.managers.observations.Camera", MockSensor):
+        with patch(
+            "embodichain.lab.gym.envs.managers.observations._common.Camera", MockSensor
+        ):
             result = get_sensor_intrinsics(env, obs, entity_cfg=MagicMock(uid="camera"))
 
         assert result.shape == (1, 3, 3)
@@ -489,7 +515,8 @@ class TestGetObjectUid:
     """Tests for get_object_uid functor."""
 
     @patch(
-        "embodichain.lab.gym.envs.managers.observations.RigidObject", MockRigidObject
+        "embodichain.lab.gym.envs.managers.observations._common.RigidObject",
+        MockRigidObject,
     )
     def test_returns_correct_shape(self):
         """Test that get_object_uid returns correct tensor shape."""
@@ -502,7 +529,8 @@ class TestGetObjectUid:
         assert result.dtype == torch.int32
 
     @patch(
-        "embodichain.lab.gym.envs.managers.observations.RigidObject", MockRigidObject
+        "embodichain.lab.gym.envs.managers.observations._common.RigidObject",
+        MockRigidObject,
     )
     def test_returns_correct_value(self):
         """Test that get_object_uid returns correct user ID from object."""
@@ -527,7 +555,8 @@ class TestGetObjectUid:
         assert torch.all(result == 0)
 
     @patch(
-        "embodichain.lab.gym.envs.managers.observations.RigidObject", MockRigidObject
+        "embodichain.lab.gym.envs.managers.observations._common.RigidObject",
+        MockRigidObject,
     )
     def test_different_num_envs(self):
         """Test that functor works with different number of environments."""

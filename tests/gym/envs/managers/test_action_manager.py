@@ -132,6 +132,42 @@ def test_relative_joint_position_uses_selected_current_qpos() -> None:
     torch.testing.assert_close(term.processed_actions, torch.tensor([[0.8, -0.4]]))
 
 
+def test_relative_position_limits_command_without_changing_action_history() -> None:
+    env = make_action_env(
+        num_envs=1,
+        joint_names=("joint_0", "joint_1", "joint_2"),
+        parts={"arm": (2, 0)},
+    )
+    env.robot.get_qpos.return_value = torch.tensor([[0.1, 5.0, 0.3]])
+    term = RelativeJointPositionAction(
+        make_cfg(
+            RelativeJointPositionAction,
+            part_name="arm",
+            preserve_order=True,
+            scale=0.5,
+            target_limits=[[-0.4, 0.6], [-0.2, 0.4]],
+        ),
+        env,
+    )
+    term.process_actions(torch.tensor([[2.0, -2.0]]))
+    torch.testing.assert_close(term.processed_actions, torch.tensor([[0.6, -0.2]]))
+    torch.testing.assert_close(term.raw_actions, torch.tensor([[2.0, -2.0]]))
+
+
+@pytest.mark.parametrize("limits", [[[0.0, 0.0]], [[1.0, -1.0]], [[0.0, float("nan")]]])
+def test_relative_position_rejects_invalid_target_limits(
+    limits: list[list[float]],
+) -> None:
+    env = make_action_env(num_envs=1, joint_names=("joint_0",))
+    with pytest.raises(ValueError, match="target_limits"):
+        RelativeJointPositionAction(
+            make_cfg(
+                RelativeJointPositionAction, part_name="arm", target_limits=limits
+            ),
+            env,
+        )
+
+
 def test_joint_velocity_applies_selected_limits_and_ids() -> None:
     """Velocity actions use selected velocity bounds and setter."""
     env = make_action_env(num_envs=1, joint_names=("joint_0", "joint_1"))

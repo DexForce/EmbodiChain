@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -139,6 +139,8 @@ def evaluate_episodes(
     seed: int | None = None,
     on_step: Callable[[dict[str, Any]], None] | None = None,
     observation_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
+    episode_allocation: Literal["first_completed", "balanced"] = "first_completed",
+    on_episode: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, float]:
     """Evaluate exactly ``num_episodes`` completed asynchronous episodes.
 
@@ -151,10 +153,39 @@ def evaluate_episodes(
         on_step: Optional callback for raw step info.
         observation_transform: Optional frozen preprocessing transform, such as
             a running observation normalizer.
+        episode_allocation: ``first_completed`` preserves the legacy completion
+            order. ``balanced`` scores a fixed quota for every environment:
+            ``num_episodes // num_envs``, plus one for the first remainder rows.
+            Finished-quota rows keep stepping and resetting naturally, but their
+            additional episodes are unscored. Equal quotas avoid censoring slow
+            episodes when parallel successes and failures have different lengths.
+        on_episode: Optional callback invoked once for each scored episode,
+            after allocation filtering. Receives plain Python values with
+            zero-based ``global_episode_index``, ``env_id``, ``return``, integer
+            ``length``, optional numeric ``success`` and scalar ``metrics``.
+            Unscored completions and vector/matrix metrics are excluded.
+            Exceptions propagate after restoring the policy's training mode.
+
+    Returns:
+        Completed-episode metrics and recorded-success confidence intervals.
+        Balanced allocation also reports the minimum and maximum scored
+        episode counts per environment.
     """
     if num_episodes <= 0:
         raise ValueError("num_episodes must be positive.")
+    if episode_allocation not in {"first_completed", "balanced"}:
+        raise ValueError("episode_allocation must be 'first_completed' or 'balanced'.")
     device = torch.device(device)
+    num_envs = int(env.num_envs)
+    if num_envs <= 0:
+        raise ValueError("Environment num_envs must be positive.")
+    targets = completed_per_env = None
+    if episode_allocation == "balanced":
+        targets = torch.full(
+            (num_envs,), num_episodes // num_envs, dtype=torch.long, device=device
+        )
+        targets[: num_episodes % num_envs] += 1
+        completed_per_env = torch.zeros_like(targets)
     previous_training = policy.training
     policy.eval()
 
@@ -162,7 +193,6 @@ def evaluate_episodes(
     lengths: list[float] = []
     successes: list[float] = []
     metric_values: dict[str, list[float]] = {}
-    num_envs = int(env.num_envs)
     current_return = torch.zeros(num_envs, dtype=torch.float32, device=device)
     current_length = torch.zeros(num_envs, dtype=torch.long, device=device)
 
@@ -193,23 +223,53 @@ def evaluate_episodes(
             done_indices = torch.nonzero(done, as_tuple=False).squeeze(-1)
             if done_indices.numel() == 0:
                 continue
-            remaining = num_episodes - len(returns)
-            selected = done_indices[:remaining]
-            returns.extend(_selected_values(current_return, selected))
-            lengths.extend(_selected_values(current_length, selected))
+            if completed_per_env is not None:
+                selected = done_indices[
+                    completed_per_env[done_indices] < targets[done_indices]
+                ]
+                completed_per_env[selected] += 1
+            else:
+                remaining = num_episodes - len(returns)
+                selected = done_indices[:remaining]
+            first_episode_index = len(returns)
+            selected_returns = _selected_values(current_return, selected)
+            selected_lengths = _selected_values(current_length, selected)
+            returns.extend(selected_returns)
+            lengths.extend(selected_lengths)
+            selected_successes = None
+            selected_metrics: dict[str, list[float]] = {}
 
             if isinstance(info, Mapping):
                 if "success" in info:
-                    successes.extend(_selected_values(info["success"], selected))
+                    selected_successes = _selected_values(info["success"], selected)
+                    successes.extend(selected_successes)
                 metrics = info.get("metrics", {})
                 if isinstance(metrics, Mapping):
                     for name, value in metrics.items():
                         # Skip vector/matrix metrics: reshape(-1) would break env indexing.
                         if not _is_per_env_scalar_metric(value, num_envs):
                             continue
-                        metric_values.setdefault(str(name), []).extend(
-                            _selected_values(value, selected)
-                        )
+                        values = _selected_values(value, selected)
+                        metric_values.setdefault(str(name), []).extend(values)
+                        if on_episode is not None:
+                            selected_metrics[str(name)] = values
+
+            if on_episode is not None and selected_returns:
+                selected_env_ids = selected.detach().cpu().tolist()
+                for index, env_id in enumerate(selected_env_ids):
+                    record = {
+                        "global_episode_index": first_episode_index + index,
+                        "env_id": int(env_id),
+                        "return": selected_returns[index],
+                        "length": int(selected_lengths[index]),
+                        "metrics": {
+                            name: values[index]
+                            for name, values in selected_metrics.items()
+                        },
+                    }
+                    if selected_successes is not None:
+                        record["success"] = selected_successes[index]
+                    on_episode(record)
 
             current_return[done_indices] = 0.0
             current_length[done_indices] = 0
@@ -220,7 +280,29 @@ def evaluate_episodes(
         "eval/avg_reward": float(np.mean(returns)),
         "eval/avg_length": float(np.mean(lengths)),
         "eval/success_rate": (float(np.mean(successes)) if successes else float("nan")),
+        "eval/completed_episodes": float(len(returns)),
+        "eval/success_samples": float(len(successes)),
     }
+    if completed_per_env is not None:
+        result["eval/episodes_per_env_min"] = float(completed_per_env.min())
+        result["eval/episodes_per_env_max"] = float(completed_per_env.max())
+    if successes and all(value in (0.0, 1.0) for value in successes):
+        # Wilson's 95% score interval remains informative at 0% and 100%.
+        # The denominator is completed episodes carrying a success label.
+        z = 1.959963984540054
+        count = len(successes)
+        proportion = sum(successes) / count
+        denominator = 1 + z * z / count
+        center = (proportion + z * z / (2 * count)) / denominator
+        radius = (
+            z
+            * np.sqrt(
+                proportion * (1 - proportion) / count + z * z / (4 * count * count)
+            )
+            / denominator
+        )
+        result["eval/success_ci95_low"] = max(0.0, float(center - radius))
+        result["eval/success_ci95_high"] = min(1.0, float(center + radius))
     for name, values in metric_values.items():
         if values:
             result[f"eval/metrics/{name}"] = float(np.mean(values))
