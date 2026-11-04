@@ -21,14 +21,13 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-__all__ = ["TianjiMarvinCfg", "TianjiMarvinRobotiq140Cfg"]
+__all__ = ["TianjiMarvinCfg"]
 
 
 def __getattr__(name: str) -> Any:
-    if name not in __all__:
+    if name != "TianjiMarvinCfg":
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module = ".cfg" if name == "TianjiMarvinCfg" else ".robotiq"
-    value = getattr(import_module(module, __name__), name)
+    value = import_module(".cfg", __name__).TianjiMarvinCfg
     globals()[name] = value
     return value
 

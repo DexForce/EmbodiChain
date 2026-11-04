@@ -1733,16 +1733,13 @@ def test_grasp_search_declarations_reject_invalid_values_before_construction(val
     [
         ("dual_franka", "dual_franka_robotiq_arg2f_140"),
         ("dual_ur10", "dual_ur10_robotiq_arg2f_140"),
-        ("dual_tianji", "tianji_marvin_robotiq_arg2f_140"),
     ],
 )
 def test_migrated_robotiq_embodiments_preserve_frozen_physical_declarations(
-    profile, component, tmp_path
+    profile, component
 ):
     from copy import deepcopy
     import json
-    from embodichain.lab.sim.cfg import RobotCfg
-    from embodichain_robots import TianjiMarvinRobotiq140Cfg
 
     frozen = json.loads(
         (Path(__file__).parent / "data/robotiq_embodiments_b0.json").read_text()
@@ -1757,29 +1754,7 @@ def test_migrated_robotiq_embodiments_preserve_frozen_physical_declarations(
     actual = deepcopy(physical.config["robot"])
     # Scene placement is an explicit deployment input, separate from the component's reference pose.
     actual["init_pos"] = expected["init_pos"]
-    if profile == "dual_tianji":
-        model = tmp_path / "assembled.urdf"
-        model.write_text('<robot name="test"/>')
-        expected["fpath"] = str(model)
-        actual["fpath"] = str(model)
-        assert actual.pop("class_type") == "TianjiMarvinRobotiq140"
-        expected_cfg = RobotCfg.from_dict(expected).to_dict()
-        actual_cfg = TianjiMarvinRobotiq140Cfg.from_dict(actual).to_dict()
-        for key in (
-            "control_parts",
-            "solver_cfg",
-            "joint_drive_props",
-            "root_props",
-            "attrs",
-            "init_qpos",
-            "init_pos",
-            "init_rot",
-            "asset_physics_mode",
-        ):
-            assert actual_cfg[key] == expected_cfg[key], key
-        assert actual_cfg["sensors"] == []
-    else:
-        assert actual == expected
+    assert actual == expected
     declaration = physical.embodiment_skill_profile
     assert declaration is not None
     services = declaration["runtime_services"]

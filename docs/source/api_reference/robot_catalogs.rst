@@ -85,14 +85,6 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
 
-.. py:class:: embodichain_robots.TianjiMarvinRobotiq140Cfg
-
-   Assemble the complete bare Marvin body with two fixed Robotiq wrists. The
-   source names, six-joint hands and calibrated TCPs are retained. Build through
-   ``from_dict()``; ``build_pk_serial_chain()`` uses the same assembled model.
-   Explicit embodiment configuration owns simulation armature, solver tolerances
-   and home positions. Model resources are published together in the assembly cache.
-
 .. py:class:: embodichain_robots.DexforceW1Cfg
 
    DexforceW1 specific configuration, inherits from RobotCfg and allows custom parameters.
@@ -653,20 +645,3 @@ and cache prefixes while using the shared core download and locking services.
    :no-index:
 
    Dataset class for the Universal Robots.
-
-embodichain_robots.tianji.marvin.robotiq
---------------------------------------
-
-.. currentmodule:: embodichain_robots.tianji.marvin.robotiq
-
-.. autosummary::
-
-   TianjiMarvinRobotiq140Cfg
-
-.. autoclass:: TianjiMarvinRobotiq140Cfg
-   :members: from_dict, build_pk_serial_chain, assembly_directory
-
-.. py:class:: embodichain_robots.tianji.marvin.TianjiMarvinRobotiq140Cfg
-   :no-index:
-
-   Lazy model-level export of :class:`embodichain_robots.TianjiMarvinRobotiq140Cfg`.
