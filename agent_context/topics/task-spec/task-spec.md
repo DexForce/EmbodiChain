@@ -41,8 +41,12 @@ It rejects corrupted or mismatched documents and publishes writes atomically.
 
 ## Physical evidence boundary
 
-Placement bindings seal serialized program/spec identities and exact release,
-support and boundary occurrences. The frontend supplies resolved descriptors and
+Placement binding version 2 seals the explicit `raw_snapshot` or
+`historical_record` input contract alongside program/spec identities and exact
+release, support and boundary occurrences. A raw input requires a complete
+COM-patch acquisition channel and cannot switch validators by adding a record;
+a single report cannot mix raw and historical contracts. Older binding versions
+must be rebuilt from declarations rather than re-signed automatically. The frontend supplies resolved descriptors and
 existing named conditions; it reads no pose buffer and computes no acceptance.
 TaskSpec verifies receipts, acquisition masks, episode IDs, sampled support windows
 and recorded execution prefixes. Lab owns the physical collector and recorded

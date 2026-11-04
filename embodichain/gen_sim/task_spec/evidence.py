@@ -111,6 +111,7 @@ class SupportedPlacementEvidenceBinding:
     boundary_source_path: tuple[str | int, ...]
     evidence_scope: str
     observation_kind: str
+    evidence_format: str = "raw_snapshot"
     condition: Mapping[str, Any] = field(default_factory=dict)
     required_execution: tuple[Mapping[str, Any], ...] = ()
     env_ids: tuple[int, ...] = (0,)
@@ -146,6 +147,17 @@ class SupportedPlacementEvidenceBinding:
             raise ValueError("Unsupported placement evidence scope.")
         if self.observation_kind not in {"recorded", "final"}:
             raise ValueError("observation_kind must be recorded or final.")
+        if self.evidence_format not in {"raw_snapshot", "historical_record"}:
+            raise ValueError(
+                "evidence_format must explicitly select raw_snapshot or historical_record."
+            )
+        if (
+            self.evidence_scope == "native_stable_support"
+            and self.evidence_format != "historical_record"
+        ):
+            raise ValueError(
+                "Raw sampled-timeline collection is not implemented; it cannot use the COM-patch acquisition contract."
+            )
         ids = tuple(self.env_ids)
         if (
             not ids
@@ -220,7 +232,7 @@ class SupportedPlacementEvidenceBinding:
 
     def _payload(self) -> dict[str, Any]:
         return {
-            "schema_version": "task_spec.placement_evidence_binding/v1",
+            "schema_version": "task_spec.placement_evidence_binding/v2",
             **{
                 item.name: json_snapshot(getattr(self, item.name))
                 for item in fields(self)
@@ -251,8 +263,10 @@ class SupportedPlacementEvidenceBinding:
         raw = value.to_dict() if isinstance(value, cls) else json_snapshot(value)
         if not isinstance(raw, dict):
             raise TypeError("Placement evidence binding must be a mapping.")
-        if raw.pop("schema_version", None) != "task_spec.placement_evidence_binding/v1":
-            raise ValueError("Unsupported placement evidence binding schema.")
+        if raw.pop("schema_version", None) != "task_spec.placement_evidence_binding/v2":
+            raise ValueError(
+                "Unsupported placement evidence binding schema; rebuild bindings from their normative and execution declarations."
+            )
         return cls(**raw)
 
 
@@ -441,6 +455,16 @@ def evaluate_supported_placement_evidence(
                     "Unavailable evidence must retain a nonempty acquisition reason."
                 )
             raise ValueError(message)
+        historical_record = selected.evidence_format == "historical_record"
+        if historical_record:
+            if "record" not in snapshot or "native_support" in snapshot:
+                raise ValueError(
+                    "Historical evidence requires its record format, without a raw snapshot overlay."
+                )
+        elif "record" in snapshot:
+            raise ValueError(
+                "Raw evidence cannot select historical validation by adding a record."
+            )
         if selected.episode_ids is not None:
             if snapshot.get("episode_ids") != list(selected.episode_ids) or any(
                 type(value) is not int for value in snapshot.get("episode_ids", [])
@@ -448,14 +472,28 @@ def evaluate_supported_placement_evidence(
                 raise ValueError(
                     "Physical support belongs to another declared episode."
                 )
-        elif "record" not in snapshot:
+        elif not historical_record:
             raise ValueError(
                 "Raw Lab observations require an explicit episode binding."
             )
         acquisition = snapshot.get("support_acquisition")
+        if acquisition is None and not historical_record:
+            raise ValueError("Raw support acquisition channel is missing.")
         if acquisition is not None:
+            if selected.evidence_scope == "native_stable_support":
+                raise ValueError(
+                    "The sampled-timeline scope cannot borrow a COM-patch acquisition channel."
+                )
             if (
                 not isinstance(acquisition, Mapping)
+                or acquisition.get("evidence_id") != "support.com_patch"
+                or not _bool_rows(acquisition.get("values"), size)
+                or type(acquisition.get("timestamp")) not in (int, float)
+                or not math.isfinite(acquisition["timestamp"])
+                or acquisition["timestamp"] < 0
+                or type(acquisition.get("observation_revision")) is not int
+                or acquisition["observation_revision"] < 0
+                or acquisition.get("clock_domain") != "simulation_time"
                 or acquisition.get("env_ids") != list(selected.env_ids)
                 or any(
                     type(value) is not int for value in acquisition.get("env_ids", [])
@@ -471,7 +509,7 @@ def evaluate_supported_placement_evidence(
                 not isinstance(errors, list)
                 or len(errors) != size
                 or any(
-                    error is not None and (type(error) is not str or not error)
+                    error is not None and (type(error) is not str or not error.strip())
                     for error in errors
                 )
             ):
@@ -531,7 +569,6 @@ def evaluate_supported_placement_evidence(
                 raise ValueError("Evidence belongs to another execution occurrence.")
             selected_segments.append(segment)
         release_segment, support_boundary, boundary = selected_segments
-        historical_record = "record" in snapshot
         if not historical_record:
             native = json_snapshot(snapshot["native_support"])
             metrics = {
@@ -547,6 +584,20 @@ def evaluate_supported_placement_evidence(
                 "measurements": metrics,
             }
         record = snapshot["record"]
+        if acquisition is not None:
+            native = record["measurements"]
+            if not _bool_rows(native.get("supported"), size) or any(
+                available and value != supported
+                for available, value, supported in zip(
+                    availability,
+                    acquisition["values"],
+                    native["supported"],
+                    strict=True,
+                )
+            ):
+                raise ValueError(
+                    "Support channel values contradict the native measurement rows."
+                )
         if record.get("uid") != selected.object_id or record.get("part_id") is not None:
             raise ValueError("Placement record names another physical subject.")
         released, release_available, receipt, _ = measured_release(
@@ -701,6 +752,10 @@ def evaluate_placement_evidence_report(
         raise ValueError("Evidence bindings must identify unique predicates.")
     if any(item.env_ids != tuple(range(num_envs)) for item in selected):
         raise ValueError("Evidence bindings have another environment batch.")
+    if len({item.evidence_format for item in selected}) > 1:
+        raise ValueError(
+            "One report cannot mix raw and historical evidence input contracts."
+        )
     if len({item.episode_ids for item in selected}) > 1:
         raise ValueError(
             "Evidence bindings cannot mix declared or historical episodes."

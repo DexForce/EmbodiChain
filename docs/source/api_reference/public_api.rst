@@ -935,8 +935,18 @@ embodichain.gen_sim.task_spec.evidence
 --------------------------------------
 
 Placement evidence binds the frozen serialized-program/TaskSpec digests to exact
-release, support and boundary occurrences. Existing instances are re-decoded and
-their content hash is checked, including mutable nested JSON declarations.
+release, support and boundary occurrences. Binding schema version 2 also seals
+``evidence_format``: new runtime snapshots use ``raw_snapshot`` and historical
+B0 re-evaluation explicitly selects ``historical_record``. Existing instances
+are re-decoded and their content hash is checked, including nested JSON data.
+Older binding versions must be rebuilt; the TaskSpec v0.1 identity is unchanged.
+
+Raw snapshots require the complete ``support.com_patch`` acquisition channel,
+including values, validity/errors, timestamp, environment IDs, observation
+revision and clock domain. Values must agree with the native measurements.
+Adding a ``record`` cannot downgrade raw validation, and reports reject mixed
+raw/historical input contracts. Raw sampled-timeline collection is not yet
+implemented and cannot be substituted with the COM-patch channel.
 
 This slice supports rigid ``on`` relations with legacy ``native_contact_support``
 or the explicitly selected ``native_stable_reference_support/v2`` sampled window.

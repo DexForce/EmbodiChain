@@ -49,6 +49,7 @@ def project_placement_evidence_binding(
     evidence_scope: str,
     stability_preset: str,
     observation_kind: str,
+    evidence_format: str = "raw_snapshot",
     episode_ids: Sequence[int] | None = None,
     num_envs: int = 1,
 ) -> SupportedPlacementEvidenceBinding:
@@ -72,6 +73,7 @@ def project_placement_evidence_binding(
         stability_preset: Explicit named constraint referenced by the support
             occurrence. Its meaning is never inferred from the preset name.
         observation_kind: ``final`` or ``recorded``.
+        evidence_format: Explicit raw_snapshot or historical_record contract.
         episode_ids: Optional historical identity, required for new Lab snapshots.
         num_envs: Ordered native row count.
 
@@ -241,6 +243,7 @@ def project_placement_evidence_binding(
         boundary_source_path=tuple(boundary["source_path"]),
         evidence_scope=evidence_scope,
         observation_kind=observation_kind,
+        evidence_format=evidence_format,
         condition=condition,
         required_execution=required,
         env_ids=tuple(range(num_envs)),
