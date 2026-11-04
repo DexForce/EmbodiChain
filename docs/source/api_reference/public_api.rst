@@ -1033,10 +1033,13 @@ embodichain.lab.gym.envs.embodied_env
 embodichain.lab.sim.motion.planners.curobo.payload
 --------------------------------------------------
 
-Runtime observation values for a fresh B=1 cuRobo query. Full joint state and
-world-to-base transform belong to the query snapshot; an optional carried body
-owns its identity, control part, local spheres and observed world pose. These
-values are separate from serialized planner configuration.
+Runtime observation values for a fresh cuRobo query. Without payload, queries
+support the complete robot environment batch in canonical row order, with a
+shared static collision world and identical passive joint locks. Full joint
+state and world-to-base transforms belong to the query snapshot. Payload queries
+remain B=1; the carried body owns its identity, control part, local spheres and
+observed world pose. These values are separate from serialized configuration.
+Subsets, reordered environments, and per-environment worlds are unsupported.
 
 The owned motion factory closes backend-local attachments on exit and makes no
 skill-phase decisions. Queries require CUDA graphs off, a static snapshot world

@@ -1,0 +1,1227 @@
+{
+  "versions": {
+    "torch": "2.7.0+cu128",
+    "nvidia-curobo": "0.8.0",
+    "warp-lang": "1.17.0",
+    "dexsim-engine": "0.5.1rc1"
+  },
+  "python": "3.11.14",
+  "gpu": "NVIDIA RTX PRO 5000 72GB Blackwell",
+  "visible_devices": "3",
+  "commit": "45d986e5f597c8c68bad092b0d0ed2be3511ab2c",
+  "seed": 949,
+  "threads": 1,
+  "warmup": 0,
+  "repeats": 1,
+  "scope": "fresh B=1, static box, joint target +0.12 rad, no graphs, native samples; no physical execution",
+  "memory_scope": "separate warmed queries; Torch allocator only, excludes native allocations",
+  "rows": [
+    {
+      "round": 0,
+      "payload": false,
+      "phase": "steady",
+      "capture_ms": 2.39894213154912,
+      "facade_ms": 114.6906609646976,
+      "backend_prepare_including_attach_ms": 604.6245661564171,
+      "plan_ms": 1454.2222549207509,
+      "success": true,
+      "samples": 21,
+      "start_error_rad": 0.0,
+      "goal_error_rad": 2.384185791015625e-07,
+      "trajectory_digest": "805fc88a0b4bc9272161aa478f9a87072b09e7e3209ccdce1401c44721461b70",
+      "validation_ms": 169.07314537093043,
+      "all_samples_valid": true,
+      "close_ms": 0.7582800462841988,
+      "total_with_validation_ms": 2346.77283000201,
+      "query_ms": 2176.694704219699,
+      "ownership_and_state_passed": true,
+      "allocated_after_close_bytes": 60012544
+    },
+    {
+      "round": 1,
+      "payload": false,
+      "phase": "memory",
+      "allocated_before_bytes": 60012544,
+      "capture_ms": 1.3102563098073006,
+      "facade_ms": 0.5685808137059212,
+      "backend_prepare_including_attach_ms": 214.3074651248753,
+      "plan_ms": 438.2231500931084,
+      "success": true,
+      "samples": 21,
+      "start_error_rad": 0.0,
+      "goal_error_rad": 2.384185791015625e-07,
+      "trajectory_digest": "805fc88a0b4bc9272161aa478f9a87072b09e7e3209ccdce1401c44721461b70",
+      "validation_ms": 743.4570458717644,
+      "all_samples_valid": true,
+      "repeat_same_shape": true,
+      "repeat_exact": true,
+      "close_ms": 0.9074690751731396,
+      "total_with_validation_ms": 1399.633765220642,
+      "query_ms": 655.3169214166701,
+      "peak_allocated_bytes": 529584128,
+      "peak_reserved_bytes": 572522496,
+      "ownership_and_state_passed": true,
+      "allocated_after_close_bytes": 60014592
+    }
+  ],
+  "simulation_setup_ms": 4844.463241752237,
+  "payload_sphere_count": 27,
+  "input_digest": "e176a011ed826225fd5f9156d36e0a01c6f8517ced8401be970c2439a25cc7dc",
+  "full_qpos": [
+    [
+      0.0,
+      -0.5690000057220459,
+      0.0,
+      -2.809999942779541,
+      0.0,
+      3.0369999408721924,
+      0.7409999966621399
+    ]
+  ],
+  "target_qpos": [
+    [
+      0.11999999731779099,
+      -0.5690000057220459,
+      0.0,
+      -2.809999942779541,
+      0.0,
+      3.0369999408721924,
+      0.7409999966621399
+    ]
+  ],
+  "summary": {
+    "False": {
+      "count": 1,
+      "successes": 1,
+      "capture_ms": {
+        "p50": 2.39894213154912,
+        "p95": 2.39894213154912
+      },
+      "facade_ms": {
+        "p50": 114.6906609646976,
+        "p95": 114.6906609646976
+      },
+      "backend_prepare_including_attach_ms": {
+        "p50": 604.6245661564171,
+        "p95": 604.6245661564171
+      },
+      "plan_ms": {
+        "p50": 1454.2222549207509,
+        "p95": 1454.2222549207509
+      },
+      "close_ms": {
+        "p50": 0.7582800462841988,
+        "p95": 0.7582800462841988
+      },
+      "query_ms": {
+        "p50": 2176.694704219699,
+        "p95": 2176.694704219699
+      },
+      "total_with_validation_ms": {
+        "p50": 2346.77283000201,
+        "p95": 2346.77283000201
+      },
+      "reciprocal_query_stage_sum_per_second": 0.4594121527752234
+    }
+  },
+  "retained_trajectory_storage_bytes": 2352,
+  "allocated_before_gc_bytes": 60014592,
+  "gc_collected_objects": 3061,
+  "garbage_types": {
+    "builtins.type": 7,
+    "builtins.tuple": 521,
+    "builtins.cell": 36,
+    "builtins.dict": 288,
+    "builtins.function": 23,
+    "curobo._src.geom.collision.collision_scene.SceneCollision": 1,
+    "curobo._src.geom.data.data_scene.SceneData": 1,
+    "curobo._src.geom.collision.checker_collision.CollisionChecker": 1,
+    "curobo._src.geom.types.SceneCfg": 1,
+    "curobo._src.geom.data.data_cuboid.CuboidData": 1,
+    "torch.Tensor": 949,
+    "builtins.list": 316,
+    "curobo._src.geom.types.Cuboid": 1,
+    "curobo._src.geom.types.Material": 1,
+    "curobo._src.types.device_cfg.DeviceCfg": 45,
+    "curobo._src.robot.parser.parser_urdf.UrdfRobotParser": 2,
+    "yourdfpy.urdf.Link": 20,
+    "yourdfpy.urdf.Inertial": 16,
+    "yourdfpy.urdf.Visual": 16,
+    "yourdfpy.urdf.Geometry": 32,
+    "yourdfpy.urdf.Mesh": 32,
+    "yourdfpy.urdf.Collision": 16,
+    "yourdfpy.urdf.URDF": 2,
+    "builtins.method": 44,
+    "yourdfpy.urdf.Robot": 2,
+    "yourdfpy.urdf.Joint": 18,
+    "curobo._src.graph_planner.graph_planner_prm.PRMGraphPlanner": 1,
+    "yourdfpy.urdf.Dynamics": 14,
+    "yourdfpy.urdf.Limit": 14,
+    "yourdfpy.urdf.SafetyController": 14,
+    "curobo._src.graph_planner.graph_planner_prm_cfg.PRMGraphPlannerCfg": 1,
+    "curobo._src.rollout.rollout_robot.RobotRollout": 6,
+    "curobo._src.graph_planner.search.path_finder_networkx.NetworkXPathFinder": 1,
+    "curobo._src.graph_planner.search.path_pruner.PathPruner": 1,
+    "curobo._src.graph_planner.graph.connector_linear.LinearConnector": 1,
+    "curobo._src.graph_planner.graph.node_distance.DistanceNeighborCalculator": 1,
+    "curobo._src.graph_planner.graph.node_manager.GraphNodeManager": 1,
+    "curobo._src.graph_planner.graph.node_sampling_strategy.NodeSamplingStrategy": 1,
+    "curobo._src.graph_planner.graph.constructor.GraphConstructor": 1,
+    "curobo._src.types.robot.RobotCfg": 1,
+    "curobo._src.rollout.rollout_robot_cfg.RobotRolloutCfg": 3,
+    "curobo._src.transition.robot_state_transition.RobotStateTransition": 12,
+    "curobo._src.util.sampling.sample_buffer.SampleBuffer": 7,
+    "curobo._src.rollout.cost_manager.cost_manager_robot.RobotCostManager": 22,
+    "networkx.classes.graph.Graph": 1,
+    "curobo._src.robot.kinematics.kinematics_cfg.KinematicsCfg": 1,
+    "curobo._src.transition.robot_state_transition_cfg.RobotStateTransitionCfg": 3,
+    "curobo._src.rollout.cost_manager.cost_manager_robot_cfg.RobotCostManagerCfg": 6,
+    "curobo._src.optim.gradient.lbfgs.LBFGSOpt": 2,
+    "curobo._src.optim.gradient.lbfgs.LBFGSOptCfg": 2,
+    "curobo._src.state.state_joint.JointState": 44,
+    "curobo._src.types.tool_pose.GoalToolPose": 2,
+    "curobo._src.robot.kinematics.kinematics.Kinematics": 12,
+    "curobo._src.transition.fns_state_transition.StateFromPositionTeleport": 16,
+    "curobo._src.util.state_filter.JointStateFilter": 22,
+    "curobo._src.util.sampling.sequencer_halton.HaltonSequencer": 7,
+    "curobo._src.robot.types.self_collision_params.SelfCollisionKinematicsCfg": 1,
+    "curobo._src.robot.loader.kinematics_loader_cfg.KinematicsLoaderCfg": 1,
+    "curobo._src.transition.robot_state_transition_cfg.TimeTrajCfg": 3,
+    "curobo._src.util.state_filter.FilterCfg": 3,
+    "curobo._src.cost.cost_self_collision_cfg.SelfCollisionCostCfg": 3,
+    "curobo._src.cost.cost_scene_collision_cfg.SceneCollisionCostCfg": 3,
+    "curobo._src.cost.cost_cspace_cfg.CSpaceCostCfg": 3,
+    "curobo._src.cost.cost_cspace_dist_cfg.CSpaceDistCostCfg": 2,
+    "curobo._src.cost.cost_tool_pose_cfg.ToolPoseCostCfg": 3,
+    "curobo._src.optim.components.quasi_newton_buffers.QuasiNewtonBuffers": 2,
+    "curobo._src.optim.components.gradient_opt_core.GradientOptCore": 2,
+    "curobo._src.rollout.goal_registry.GoalRegistry": 2,
+    "curobo._src.state.filter_coeff.FilterCoeff": 5,
+    "scipy.stats._qmc.Halton": 7,
+    "curobo._src.cost.cost_self_collision.SelfCollisionCost": 12,
+    "curobo._src.cost.cost_scene_collision.SceneCollisionCost": 12,
+    "curobo._src.cost.cost_cspace_position.PositionCSpaceCost": 8,
+    "torch.cuda.streams.Stream": 50,
+    "torch.cuda.streams.Event": 50,
+    "curobo._src.cost.cost_tool_pose.ToolPoseCost": 10,
+    "curobo._src.cost.cost_cspace_dist.CSpaceDistCost": 4,
+    "curobo._src.robot.types.joint_limits.JointLimits": 3,
+    "curobo._src.cost.tool_pose_criteria.ToolPoseCriteria": 13,
+    "curobo._src.optim.components.action_bounds.ActionBounds": 2,
+    "curobo._src.optim.components.best_tracker.BestTracker": 2,
+    "curobo._src.optim.gradient.line_search_strategy.ApproxWolfeLineSearchStrategy": 4,
+    "curobo._src.optim.gradient.line_search_context.LineSearchContext": 4,
+    "numpy.random._generator.Generator": 14,
+    "curobo._src.cost.tool_pose_criteria.StackedToolPoseCriteria": 10,
+    "curobo._src.transition.fns_state_transition.StateFromBSplineKnot": 8,
+    "curobo._src.cost.cost_cspace_state.StateCSpaceCost": 4,
+    "numpy.random._pcg64.PCG64": 14,
+    "_thread.RLock": 14,
+    "curobo._src.geom.collision.buffer_collision.CollisionBuffer": 8,
+    "warp._src.context.Kernel": 2,
+    "numpy.random.bit_generator.SeedSequence": 14,
+    "torch.Size": 8,
+    "warp._src.codegen.Adjoint": 2,
+    "torch.autograd.function.SweptSphereObstacleCollisionBackward": 2,
+    "warp._src.types.array": 34,
+    "warp._src.deterministic.DeterministicCodegen": 2,
+    "warp._src.codegen.Var": 40,
+    "warp._src.codegen._LValueOrigin": 34,
+    "_ctypes.PyCArrayType": 2,
+    "builtins.getset_descriptor": 16,
+    "builtins.StgDict": 2,
+    "json.encoder.JSONEncoder": 1
+  },
+  "cycles": [
+    [
+      {
+        "type": "builtins.method",
+        "method": "GradientOptCore._compute_cost_constraint_and_gradient_initial"
+      },
+      {
+        "type": "builtins.method",
+        "method": "GradientOptCore._compute_cost_constraint_and_gradient"
+      },
+      {
+        "type": "builtins.method",
+        "method": "LBFGSOpt._on_shift"
+      },
+      {
+        "type": "builtins.method",
+        "method": "LBFGSOpt._on_resize"
+      },
+      {
+        "type": "builtins.method",
+        "method": "LBFGSOpt._on_initial_state"
+      },
+      {
+        "type": "builtins.method",
+        "method": "LBFGSOpt._on_reinitialize"
+      },
+      {
+        "type": "builtins.method",
+        "method": "LBFGSOpt._get_step_direction_impl"
+      },
+      {
+        "type": "curobo._src.optim.gradient.lbfgs.LBFGSOpt"
+      },
+      {
+        "type": "curobo._src.optim.gradient.line_search_context.LineSearchContext"
+      },
+      {
+        "type": "curobo._src.optim.components.gradient_opt_core.GradientOptCore"
+      },
+      {
+        "type": "curobo._src.optim.gradient.line_search_context.LineSearchContext"
+      }
+    ],
+    [
+      {
+        "type": "builtins.method",
+        "method": "GradientOptCore._compute_cost_constraint_and_gradient_initial"
+      },
+      {
+        "type": "builtins.method",
+        "method": "GradientOptCore._compute_cost_constraint_and_gradient"
+      },
+      {
+        "type": "builtins.method",
+        "method": "LBFGSOpt._on_shift"
+      },
+      {
+        "type": "builtins.method",
+        "method": "LBFGSOpt._on_resize"
+      },
+      {
+        "type": "builtins.method",
+        "method": "LBFGSOpt._on_initial_state"
+      },
+      {
+        "type": "builtins.method",
+        "method": "LBFGSOpt._on_reinitialize"
+      },
+      {
+        "type": "builtins.method",
+        "method": "LBFGSOpt._get_step_direction_impl"
+      },
+      {
+        "type": "curobo._src.optim.gradient.lbfgs.LBFGSOpt"
+      },
+      {
+        "type": "curobo._src.optim.gradient.line_search_context.LineSearchContext"
+      },
+      {
+        "type": "curobo._src.optim.gradient.line_search_context.LineSearchContext"
+      },
+      {
+        "type": "curobo._src.optim.components.gradient_opt_core.GradientOptCore"
+      }
+    ],
+    [
+      {
+        "type": "builtins.method",
+        "method": "PRMGraphPlanner._find_path_for_index_pairs"
+      },
+      {
+        "type": "builtins.method",
+        "method": "PRMGraphPlanner.check_samples_feasibility"
+      },
+      {
+        "type": "builtins.method",
+        "method": "GraphConstructor.steer_and_register_edges"
+      },
+      {
+        "type": "builtins.method",
+        "method": "PRMGraphPlanner.check_samples_feasibility"
+      },
+      {
+        "type": "builtins.method",
+        "method": "PRMGraphPlanner.check_samples_feasibility"
+      },
+      {
+        "type": "curobo._src.graph_planner.graph_planner_prm.PRMGraphPlanner"
+      },
+      {
+        "type": "curobo._src.graph_planner.search.path_pruner.PathPruner"
+      },
+      {
+        "type": "curobo._src.graph_planner.graph.node_sampling_strategy.NodeSamplingStrategy"
+      },
+      {
+        "type": "curobo._src.graph_planner.graph.constructor.GraphConstructor"
+      },
+      {
+        "type": "curobo._src.graph_planner.graph.connector_linear.LinearConnector"
+      }
+    ],
+    [
+      {
+        "type": "builtins.cell"
+      },
+      {
+        "type": "builtins.cell"
+      },
+      {
+        "type": "builtins.tuple"
+      },
+      {
+        "type": "builtins.function"
+      },
+      {
+        "type": "builtins.function"
+      },
+      {
+        "type": "builtins.tuple"
+      },
+      {
+        "type": "builtins.function"
+      },
+      {
+        "type": "builtins.cell"
+      },
+      {
+        "type": "builtins.tuple"
+      }
+    ],
+    [
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.StgDict",
+        "keys": [
+          "_length_",
+          "_type_",
+          "__module__",
+          "__dict__",
+          "__weakref__",
+          "__doc__"
+        ]
+      },
+      {
+        "type": "_ctypes.PyCArrayType"
+      },
+      {
+        "type": "builtins.tuple"
+      }
+    ],
+    [
+      {
+        "type": "builtins.tuple"
+      },
+      {
+        "type": "builtins.StgDict",
+        "keys": [
+          "_length_",
+          "_type_",
+          "__module__",
+          "__dict__",
+          "__weakref__",
+          "__doc__"
+        ]
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "_ctypes.PyCArrayType"
+      }
+    ],
+    [
+      {
+        "type": "builtins.dict",
+        "keys": [
+          "__module__",
+          "__init__",
+          "__cuda_stream__",
+          "__dict__",
+          "__weakref__",
+          "__doc__"
+        ]
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.tuple"
+      },
+      {
+        "type": "builtins.type"
+      }
+    ],
+    [
+      {
+        "type": "builtins.dict",
+        "keys": [
+          "__module__",
+          "__init__",
+          "__cuda_stream__",
+          "__dict__",
+          "__weakref__",
+          "__doc__"
+        ]
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.tuple"
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.type"
+      }
+    ],
+    [
+      {
+        "type": "builtins.dict",
+        "keys": [
+          "__module__",
+          "__init__",
+          "__cuda_stream__",
+          "__dict__",
+          "__weakref__",
+          "__doc__"
+        ]
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.tuple"
+      },
+      {
+        "type": "builtins.type"
+      }
+    ],
+    [
+      {
+        "type": "builtins.dict",
+        "keys": [
+          "__module__",
+          "__init__",
+          "__cuda_stream__",
+          "__dict__",
+          "__weakref__",
+          "__doc__"
+        ]
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.tuple"
+      },
+      {
+        "type": "builtins.type"
+      }
+    ],
+    [
+      {
+        "type": "builtins.dict",
+        "keys": [
+          "__module__",
+          "__init__",
+          "__cuda_stream__",
+          "__dict__",
+          "__weakref__",
+          "__doc__"
+        ]
+      },
+      {
+        "type": "builtins.type"
+      },
+      {
+        "type": "builtins.tuple"
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      }
+    ],
+    [
+      {
+        "type": "builtins.dict",
+        "keys": [
+          "__module__",
+          "__init__",
+          "__cuda_stream__",
+          "__dict__",
+          "__weakref__",
+          "__doc__"
+        ]
+      },
+      {
+        "type": "builtins.type"
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      },
+      {
+        "type": "builtins.tuple"
+      },
+      {
+        "type": "builtins.getset_descriptor"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.robot.parser.parser_urdf.UrdfRobotParser"
+      },
+      {
+        "type": "builtins.method",
+        "method": "UrdfRobotParser._file_name_handler"
+      },
+      {
+        "type": "yourdfpy.urdf.URDF"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.robot.parser.parser_urdf.UrdfRobotParser"
+      },
+      {
+        "type": "builtins.method",
+        "method": "UrdfRobotParser._file_name_handler"
+      },
+      {
+        "type": "yourdfpy.urdf.URDF"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Adjoint"
+      },
+      {
+        "type": "warp._src.deterministic.DeterministicCodegen"
+      },
+      {
+        "type": "builtins.dict",
+        "keys": [
+          "func",
+          "is_user_function",
+          "skip_forward_codegen",
+          "skip_reverse_codegen",
+          "used_by_backward_kernel",
+          "force_adjoint_codegen",
+          "uses_grad_call",
+          "filename",
+          "fun_lineno",
+          "_shared_source",
+          "source",
+          "tree",
+          "fun_def_lineno",
+          "source_lines",
+          "transformers",
+          "fun_name",
+          "lineno",
+          "custom_reverse_mode",
+          "custom_reverse_num_input_args",
+          "arg_types",
+          "args",
+          "symbols",
+          "ref_params",
+          "has_unresolved_static_expressions",
+          "resolved_static_expressions",
+          "deferred_static_expressions",
+          "det_meta",
+          "det_registry",
+          "deterministic",
+          "_reference_nodes",
+          "_assigned_name_ids",
+          "kernel_dim",
+          "scalar_tid_extent_limit_candidate"
+        ]
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Adjoint"
+      },
+      {
+        "type": "warp._src.deterministic.DeterministicCodegen"
+      },
+      {
+        "type": "builtins.dict",
+        "keys": [
+          "func",
+          "is_user_function",
+          "skip_forward_codegen",
+          "skip_reverse_codegen",
+          "used_by_backward_kernel",
+          "force_adjoint_codegen",
+          "uses_grad_call",
+          "filename",
+          "fun_lineno",
+          "_shared_source",
+          "source",
+          "tree",
+          "fun_def_lineno",
+          "source_lines",
+          "transformers",
+          "fun_name",
+          "lineno",
+          "custom_reverse_mode",
+          "custom_reverse_num_input_args",
+          "arg_types",
+          "args",
+          "symbols",
+          "ref_params",
+          "has_unresolved_static_expressions",
+          "resolved_static_expressions",
+          "deferred_static_expressions",
+          "det_meta",
+          "det_registry",
+          "deterministic",
+          "_reference_nodes",
+          "_assigned_name_ids",
+          "kernel_dim",
+          "scalar_tid_extent_limit_candidate"
+        ]
+      }
+    ],
+    [
+      {
+        "type": "builtins.cell"
+      },
+      {
+        "type": "builtins.function"
+      },
+      {
+        "type": "builtins.tuple"
+      }
+    ],
+    [
+      {
+        "type": "builtins.cell"
+      },
+      {
+        "type": "builtins.function"
+      },
+      {
+        "type": "builtins.tuple"
+      }
+    ],
+    [
+      {
+        "type": "builtins.cell"
+      },
+      {
+        "type": "builtins.tuple"
+      },
+      {
+        "type": "builtins.function"
+      }
+    ],
+    [
+      {
+        "type": "builtins.cell"
+      },
+      {
+        "type": "builtins.tuple"
+      },
+      {
+        "type": "builtins.function"
+      }
+    ],
+    [
+      {
+        "type": "builtins.type"
+      },
+      {
+        "type": "builtins.tuple"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "warp._src.codegen.Var"
+      },
+      {
+        "type": "warp._src.codegen._LValueOrigin"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ],
+    [
+      {
+        "type": "curobo._src.util.state_filter.JointStateFilter"
+      },
+      {
+        "type": "builtins.method",
+        "method": "JointStateFilter.integrate_pos"
+      }
+    ]
+  ],
+  "allocated_after_gc_bytes": 60010496,
+  "status": "completed"
+}

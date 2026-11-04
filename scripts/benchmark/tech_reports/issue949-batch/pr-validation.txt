@@ -1,0 +1,19 @@
+PR preparation validation on main 017968d4326c08c4c6d44aa7faddf7221d8d965f plus this working-tree change.
+
+GPU: CUDA_VISIBLE_DEVICES=1, OMP_NUM_THREADS=1, py311.
+pytest test_curobo_integration.py::test_observed_shared_world_native_batch
+       test_curobo_integration.py::test_observed_payload_buffers_and_query_lifetimes --run-gpu -q
+3 passed, 1 warning in 46.05s.
+
+Focused contracts: test_curobo_query_snapshot.py, test_curobo_planner.py,
+test_mesh_snapshot.py, test_mesh_bounds.py.
+149 passed, 1 skipped, 2 deselected, 1 warning in 35.28s.
+
+Context tests: 42 passed in 0.84s; map check passed.
+black 26.10.1, black .: 1958 files unchanged.
+API coverage: 3650/3650 exports documented.
+Public API reference corrected to describe shared-world no-payload batches.
+Hardware CSV explicitly included despite the repository-wide *.csv ignore rule.
+
+Recorded benchmark measurements remain unchanged and retain their original base/source hashes.
+No physical execution qualification, full-suite run, or Sphinx build claimed.

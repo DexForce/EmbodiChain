@@ -1,0 +1,86 @@
+[
+  {
+    "label": "b1",
+    "command": [
+      "/root/miniconda3/envs/py311/bin/python",
+      "-m",
+      "scripts.benchmark.motion.observed_batch",
+      "--batch-size",
+      "1",
+      "--warmup",
+      "2",
+      "--repeats",
+      "10",
+      "--output",
+      "/tmp/949-batch-b1.json"
+    ],
+    "returncode": 0,
+    "wall_s": 67.71620531613007,
+    "nvml_start_bytes": 623575040,
+    "nvml_peak_bytes": 10554048512,
+    "sampling_interval_s": 0.1
+  },
+  {
+    "label": "b2",
+    "command": [
+      "/root/miniconda3/envs/py311/bin/python",
+      "-m",
+      "scripts.benchmark.motion.observed_batch",
+      "--batch-size",
+      "2",
+      "--warmup",
+      "2",
+      "--repeats",
+      "10",
+      "--output",
+      "/tmp/949-batch-b2.json"
+    ],
+    "returncode": 0,
+    "wall_s": 74.74162215879187,
+    "nvml_start_bytes": 621477888,
+    "nvml_peak_bytes": 11132796928,
+    "sampling_interval_s": 0.1
+  },
+  {
+    "label": "b4-repeat2",
+    "command": [
+      "/root/miniconda3/envs/py311/bin/python",
+      "-m",
+      "scripts.benchmark.motion.observed_batch",
+      "--batch-size",
+      "4",
+      "--warmup",
+      "2",
+      "--repeats",
+      "10",
+      "--output",
+      "/tmp/949-batch-b4-repeat2.json"
+    ],
+    "returncode": 0,
+    "wall_s": 94.43002170184627,
+    "nvml_start_bytes": 621477888,
+    "nvml_peak_bytes": 11946491904,
+    "sampling_interval_s": 0.1
+  },
+  {
+    "label": "b4-repeat3",
+    "command": [
+      "/root/miniconda3/envs/py311/bin/python",
+      "-m",
+      "scripts.benchmark.motion.observed_batch",
+      "--batch-size",
+      "4",
+      "--warmup",
+      "2",
+      "--repeats",
+      "10",
+      "--output",
+      "/tmp/949-batch-b4-repeat3.json"
+    ],
+    "returncode": 0,
+    "wall_s": 92.62133885268122,
+    "nvml_start_bytes": 621608960,
+    "nvml_peak_bytes": 11946491904,
+    "sampling_interval_s": 0.1
+  }
+]
