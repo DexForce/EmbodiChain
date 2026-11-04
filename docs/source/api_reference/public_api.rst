@@ -968,7 +968,11 @@ The verifier distinguishes unavailable acquisition from measured negatives and
 checks measured release receipts independently of plan/segment success. Raw Lab
 snapshots require an explicit episode binding and carry no accepted/released
 conclusion; TaskSpec computes those results. Historical B0 claims are checked
-when supplied. Legacy scope remains legacy even when a timeline is present.
+when supplied. Legacy scope remains legacy even when a timeline is present. Its instantaneous
+final observation needs the exact measured release and actual final runtime
+boundary, not an unexecuted later wait/park policy. This preserves measured final
+negatives when execution stops early, while recorded milestones still require
+the full successful prefix and their original support receipt.
 
 ``evaluate_placement_evidence_report`` preserves goal/final and milestone/recorded
 separation, verifies declared execution prefixes and orders exact boundary slots.

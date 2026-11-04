@@ -55,7 +55,11 @@ TaskSpec verifies receipts, acquisition masks, episode IDs, sampled support wind
 and recorded execution prefixes. Lab owns the physical collector and recorded
 pose snapshots; no Lab module imports TaskSpec or Task Engine.
 
-Current goals cannot borrow recorded milestone success. Boundary snapshots do
+Current goals cannot borrow recorded milestone success. The legacy instantaneous
+final-support scope requires its exact measured release and actual final runtime
+boundary, but not an unexecuted later wait/park policy. Failed post-policy execution
+therefore does not erase an available final physical negative. Recorded milestones
+still require their complete group prefix and original support receipt. Boundary snapshots do
 not establish a complete control-step trajectory. The explicit legacy contact
 scope and version-2 sampled-support scope retain their original meanings;
 revision-1/full-footprint region declarations require their own verifier and are

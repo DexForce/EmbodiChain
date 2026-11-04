@@ -283,7 +283,7 @@ def _legacy_flags(
     evidence: Mapping[str, Any],
     released: list[bool],
     boundary: Mapping[str, Any],
-    support_boundary: Mapping[str, Any],
+    support_boundary: Mapping[str, Any] | None,
     *,
     require_claims: bool,
 ) -> list[bool]:
@@ -322,6 +322,10 @@ def _legacy_flags(
         if not torch.allclose(observed, recorded, atol=1e-4, rtol=0):
             raise ValueError("Support differs from the exact observed boundary poses.")
     if binding.observation_kind == "recorded":
+        if support_boundary is None:
+            raise ValueError(
+                "Recorded support requires its executed policy occurrence."
+            )
         if metrics.get("boundary_frames") != boundary.get("end_steps"):
             raise ValueError("Recorded support has another terminal state slot.")
         traces = [
@@ -559,11 +563,23 @@ def evaluate_supported_placement_evidence(
                 )
             ]
         selected_segments = []
-        for name, path in (
-            (selected.release_segment_id, selected.release_source_path),
-            (selected.support_segment_id, selected.support_source_path),
-            (selected.boundary_segment_id, selected.boundary_source_path),
+        for index, (name, path) in enumerate(
+            (
+                (selected.release_segment_id, selected.release_source_path),
+                (selected.support_segment_id, selected.support_source_path),
+                (selected.boundary_segment_id, selected.boundary_source_path),
+            )
         ):
+            if (
+                index == 1
+                and selected.evidence_scope == "native_contact_support"
+                and selected.observation_kind == "final"
+            ):
+                # Instantaneous B0 final support never consumed a completed
+                # wait-policy receipt. The declaration still selects the owner
+                # condition, even when execution stopped before that occurrence.
+                selected_segments.append(None)
+                continue
             segment = segments[name]
             if segment["metadata"]["program_segment_source_path"] != list(path):
                 raise ValueError("Evidence belongs to another execution occurrence.")
