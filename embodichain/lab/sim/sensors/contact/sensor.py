@@ -193,6 +193,7 @@ class ContactSensor(BaseSensor):
         self._metadata_selected_ids: tuple[int, ...] | None = None
 
         self._query_dropped_count = torch.zeros(1, dtype=torch.int32, device=device)
+        self._latest_query_dropped_count = torch.zeros_like(self._query_dropped_count)
         self._scatter_dropped_count = torch.zeros(
             owner.num_envs, dtype=torch.int32, device=device
         )
@@ -438,6 +439,7 @@ class ContactSensor(BaseSensor):
         return buffer
 
     def _scatter_contacts(self, buffer: ContactBuffer) -> None:
+        self._latest_query_dropped_count.copy_(buffer.dropped_count_device)
         assert self._num_contacts_per_env is not None
         self._num_contacts_per_env.zero_()
         self._data_buffer["is_valid"].zero_()
@@ -479,6 +481,22 @@ class ContactSensor(BaseSensor):
         """
         return int(
             (self._query_dropped_count.sum() + self._scatter_dropped_count.sum()).item()
+        )
+
+    @property
+    def latest_sample_dropped_contacts(self) -> int:
+        """Return query and scatter loss from the latest sampled snapshot.
+
+        Unlike interval counters, this diagnostic also covers standalone refreshes
+        with observers attached. Reads respect the sampling stream and may
+        synchronize device work. Selective reset retains query-wide loss.
+        """
+        self._wait_for_sample()
+        return int(
+            (
+                self._latest_query_dropped_count.sum()
+                + self._sample_scatter_dropped_count.sum()
+            ).item()
         )
 
     def get_arena_pose(self, to_matrix: bool = False) -> torch.Tensor | None:
@@ -781,6 +799,7 @@ class ContactSensor(BaseSensor):
                 value.index_fill_(0, ids, 0)
         if env_ids is None:
             self._query_dropped_count.zero_()
+            self._latest_query_dropped_count.zero_()
         for history in self._histories.values():
             history.reset(ids)
         if self._sampling_observers:

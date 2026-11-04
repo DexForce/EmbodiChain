@@ -519,3 +519,76 @@ def test_observer_snapshot_survives_subscription_removal_during_sampling():
     sensor.update_physics_step(0.01)
     assert events == [(0.01, "prepared")]
     assert query.fetch_calls == 2
+
+
+@pytest.mark.parametrize("loss", ["none", "query", "scatter"])
+def test_first_standalone_sample_with_observer_preserves_loss_unavailability(loss):
+    """The observer's interval counter has not yet seen this standalone fetch."""
+    from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
+    from embodichain.lab.sim.sensors.contact.sampling import (
+        ContactEvidenceSampler,
+    )
+
+    wp.init()
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query, capacity=1)
+    sensor.add_sampling_observer(
+        "audit",
+        SimpleNamespace(
+            begin_control_step=lambda: None,
+            before_sample=lambda: None,
+            after_sample=lambda dt, token: None,
+            reset=lambda ids: None,
+        ),
+    )
+    if loss == "query":
+        query.buffer.dropped_count = 3
+    elif loss == "scatter":
+        query.buffer.count = 3
+        query.buffer.env_ids[:3] = torch.tensor([0, 0, 1])
+        query.buffer.actor_ids[:3] = torch.tensor([[4, -1], [4, -1], [7, -1]])
+        query.buffer.data[2] = query.buffer.data[1]
+    fetches = []
+    original_fetch = query.fetch
+
+    def fetch():
+        fetches.append(True)
+        return original_fetch()
+
+    query.fetch = fetch
+    sample = ContactEvidenceSampler(sensor).sample(
+        PhysicalEvidenceRequest(1.0, 0, torch.tensor([1, 0]))
+    )
+    assert fetches == [True]
+    assert sensor.dropped_contacts == 0
+    if loss == "none":
+        assert all(batch.valid.all() for batch in sample.frame.batches.values())
+    else:
+        assert all(not batch.valid.any() for batch in sample.frame.batches.values())
+        assert all(
+            "capacity" in error
+            for batch in sample.frame.batches.values()
+            for error in batch.acquisition_errors
+        )
+        assert sample.dropped_contacts == (3 if loss == "query" else 1)
+
+
+def test_latest_contact_loss_belongs_to_one_query_and_respects_selected_reset():
+    wp.init()
+    first_query, second_query = _FakeQuery(), _FakeQuery()
+    first, second = _sensor_for_query(first_query), _sensor_for_query(second_query)
+    first_query.buffer.dropped_count = 3
+    first.update()
+    second.update()
+    assert first.latest_sample_dropped_contacts == 3
+    assert second.latest_sample_dropped_contacts == 0
+    first.reset([1])
+    assert first.latest_sample_dropped_contacts == 3
+    first.reset()
+    assert first.latest_sample_dropped_contacts == 0
+    first.update()
+    assert first.latest_sample_dropped_contacts == 3
+    first_query.buffer.dropped_count = 0
+    first._sim.physics_step_index += 1
+    first.update()
+    assert first.latest_sample_dropped_contacts == 0

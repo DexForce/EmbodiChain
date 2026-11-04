@@ -120,6 +120,12 @@ sparse Warp kernels. The ``dropped_contacts`` diagnostic sums query loss and
 scatter overflow across the current control interval; standalone updates
 without a history report the most recent sample.
 
+``latest_sample_dropped_contacts`` reports the latest fetch's query and scatter
+loss even when observers retain interval counters. Evidence sampling rejects
+either diagnostic and takes their maximum to avoid double counting. Full reset
+clears latest loss; selective reset retains query-wide loss. Diagnostic reads
+respect sampling-stream dependencies and may synchronize device work.
+
 Sampling observers
 ------------------
 

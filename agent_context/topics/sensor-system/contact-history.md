@@ -46,6 +46,11 @@ Selective reset clears only the selected rows.
 `dropped_contacts` reports query loss plus separately counted scatter overflow
 across the control interval. Query counts stay on the device until this diagnostic
 is read. A standalone sensor without histories or sampling observers reports the latest update.
+`latest_sample_dropped_contacts` separately reports the latest query and scatter
+loss even when interval counters are retained. Its device counters are updated
+by the scatter path, including graph replay. Full reset clears both; selective
+reset retains query-wide loss. Evidence rejects loss from either diagnostic and
+uses their maximum, since the counts overlap.
 See `tests/sim/sensors/test_contact_history.py`, `test_contact_query_sensor.py`
 and `tests/gym/envs/test_substep_sensors.py`.
 
