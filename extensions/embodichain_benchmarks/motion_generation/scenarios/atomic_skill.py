@@ -161,22 +161,27 @@ class AtomicSkillScenario(ScenarioProvider):
         return get_parallel_jaw_gripper_model(model_id)
 
     def grasp_root_from_tcp(self) -> list[list[float]] | None:
-        """Bind mounted PGI geometry to this fixture's actual solver TCP.
+        """Bind flange-mounted hand geometry to this fixture's solver TCP.
 
-        PGI fixture roots attach at the arm flange, the solver end link. Their
-        configured tool points differ (.15/.17 m and explicit overrides).
+        PGI and Robotiq fixture roots attach at the arm flange, the solver end
+        link. Their configured tool points can differ from GraspKit defaults.
         Native Panda instead uses its actual named hand TCP from the asset;
-        no PGI offset is applied to it.
+        no flange-relative offset is applied to it.
         """
         model = self.grasp_model()
-        if model is not None and model.model_id != "dh_pgi_140_80":
+        if model is not None and model.model_id not in {
+            "dh_pgi_140_80",
+            "robotiq_arg2f_140",
+        }:
             return None
         if self.robot is None:
-            raise RuntimeError("A bound robot is required for the mounted PGI TCP.")
+            raise RuntimeError("A bound robot is required for the mounted hand TCP.")
         solver = self.robot.cfg.solver_cfg[self.control_part]
         tcp = solver.get("tcp") if isinstance(solver, Mapping) else solver.tcp
         if tcp is None:
-            raise ValueError("The mounted PGI fixture requires an explicit solver TCP.")
+            raise ValueError(
+                "The mounted hand fixture requires an explicit solver TCP."
+            )
         return [[float(value) for value in row] for row in tcp]
 
     def trial_metadata(self, case: BenchmarkCase) -> dict[str, object]:

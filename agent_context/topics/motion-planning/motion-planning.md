@@ -348,6 +348,9 @@ rotation axis. Failed chains do not truncate other rows or change their choices.
 Built-in Atomic suites
 compile and replay on their declared command clock; compiled replay consumes
 arrival intervals on physics ticks and preserves observation segment indices.
+Mounted-hand selection must agree with command joint order and contact links.
+PGI and Robotiq collision samplers bind the actual flange-relative solver TCP;
+the benchmark README owns the hand-specific fixture and suite selections.
 Legacy fixed-sample replay remains explicit in trial metadata. The benchmark
 README and design contract own population and protocol details.
 Physical grasp/retention scoring consumes synchronized, target-filtered finger

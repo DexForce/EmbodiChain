@@ -130,8 +130,9 @@ Backend-owned random generators are not reset per trial, so stochastic solver
 outcomes may vary with case order or sharding even though frozen inputs match.
 
 The suite resources are installed with the package, so callers can run from
-any directory. Robot assets and optional cuRobo, TOPPRA or ONNX Runtime
-dependencies follow their normal installation and asset-resolution rules.
+any directory. Robot assets and optional cuRobo or ONNX Runtime dependencies
+follow their normal installation and asset-resolution rules. TOPPRA uses the
+in-tree implementation and needs no separate `toppra` package.
 
 ### Native Panda hand
 
@@ -169,6 +170,33 @@ Explicit Placement top/handle grasps still need native-hand input and physical
 qualification; matching TCP kinematics alone does not certify a successful grasp
 or task. Existing PGI suites and their generic services remain available.
 
+### Franka handover with Robotiq 2F-140
+
+`atomic_dual_franka_robotiq_hand_over` mounts
+`Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf` on both Franka arms through
+`robot.config.gripper_type: robotiq_2f_140`. It replaces the removed
+`atomic_dual_franka_pgi_hand_over` suite and enables TOPPRA by default.
+Run it directly in an installed EmbodiChain environment, without NMG or Pixi:
+
+```bash
+embodichain benchmark motion-generation \
+  --suite atomic_dual_franka_robotiq_hand_over \
+  --algorithms toppra --device cuda \
+  --num-trials 1 --warmup-trials 0 --no-headless
+```
+
+Each hand exposes its six authored linkage joints in explicit command order.
+Opening commands are six zeros; closing commands are
+`[0.7, -0.7, 0.7, -0.7, -0.7, 0.7]`, matching the URDF mimic multipliers.
+Contact scoring uses the two actual inner finger pads on each assembled hand,
+with the standard 5 mm separation threshold.
+
+The flange-relative solver TCP is `Rz(90 degrees)` with `Z=0.21 m`.
+`grasp_model: robotiq_arg2f_140` supplies the complete open-hand collision
+geometry; preparation and replay pass the solver TCP to GraspKit so its
+registered `Z=0.20 m` contact frame maps to the runtime tool point once.
+The new hand and suite identity require newly generated frozen inputs.
+
 | Suite | Use |
 | --- | --- |
 | [`motion_panda_free_space_smoke`](./suites/motion_panda_free_space_smoke.yaml) | Small Panda EEF/joint planning check |
@@ -179,7 +207,8 @@ or task. Existing PGI suites and their generic services remain available.
 | [`atomic_franka_pgi_door_pour_align_push`](./suites/atomic_franka_pgi_door_pour_align_push.yaml) | OpenDoor, Pour, AxisAlign and PushObject |
 | [`atomic_franka_pgi_spatial_generalization`](./suites/atomic_franka_pgi_spatial_generalization.yaml) | Ten task-level skills across nominal, pose and primitive-geometry domains |
 | [`atomic_dual_ur5_pgi_hand_over`](./suites/atomic_dual_ur5_pgi_hand_over.yaml), [`atomic_dual_ur5_pgi_coordinated_pickment`](./suites/atomic_dual_ur5_pgi_coordinated_pickment.yaml), [`atomic_dual_ur5_pgi_coordinated_placement`](./suites/atomic_dual_ur5_pgi_coordinated_placement.yaml) | Dual UR5 + PGI physical skills with TOPPRA |
-| [`atomic_dual_franka_pgi_hand_over`](./suites/atomic_dual_franka_pgi_hand_over.yaml), [`atomic_dual_franka_pgi_coordinated_placement`](./suites/atomic_dual_franka_pgi_coordinated_placement.yaml) | Nominal B=1 dual Franka + PGI development fixtures with TOPPRA, cuRobo and paired raw/retimed NMG |
+| [`atomic_dual_franka_robotiq_hand_over`](./suites/atomic_dual_franka_robotiq_hand_over.yaml) | Nominal B=1 dual Franka + Robotiq 2F-140 handover with TOPPRA |
+| [`atomic_dual_franka_pgi_coordinated_placement`](./suites/atomic_dual_franka_pgi_coordinated_placement.yaml) | Nominal B=1 dual Franka + PGI placement fixture with TOPPRA, cuRobo and paired raw/retimed NMG |
 | [`atomic_dual_ur5_pgi_hand_over_spatial_generalization`](./suites/atomic_dual_ur5_pgi_hand_over_spatial_generalization.yaml), [`atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization`](./suites/atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization.yaml), [`atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization`](./suites/atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization.yaml) | Dual-arm pose, task-frame and composed domains |
 | [`atomic_ur5_embodiment`](./suites/atomic_ur5_embodiment.yaml) | Component-defined UR5 embodiment with nominal/object-XY PickUp domains |
 

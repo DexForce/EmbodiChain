@@ -89,6 +89,15 @@ ROBOTIQ_2F_140_URDF_PATH = "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
 
 ROBOTIQ_HAND_JOINT_PATTERN = r".*(?:finger|knuckle)_joint"
 
+_ROBOTIQ_HAND_JOINTS = (
+    "finger_joint",
+    "left_inner_knuckle_joint",
+    "left_inner_finger_joint",
+    "right_outer_knuckle_joint",
+    "right_inner_knuckle_joint",
+    "right_inner_finger_joint",
+)
+
 
 _UR_TUTORIAL_QPOS_LIMITS: tuple[tuple[float, float], ...] = tuple(
     (-2.0 * math.pi, 2.0 * math.pi) for _ in range(6)
@@ -724,7 +733,9 @@ def create_dual_tutorial_robot_cfg(
             hand_component["transform"],
             **hand_component.get("params", {}),
         )
-        base_cfg.control_parts["eef"] = [ROBOTIQ_HAND_JOINT_PATTERN]
+        # Commands follow the authored linkage order, independently of native
+        # joint traversal order and the signs of its mimic followers.
+        base_cfg.control_parts["eef"] = list(_ROBOTIQ_HAND_JOINTS)
         base_cfg.init_qpos = (
             base_cfg.init_qpos[: len(base_cfg.control_parts["arm"])] + [0.0] * 6
         )
@@ -801,6 +812,17 @@ def create_dual_tutorial_robot_cfg(
                     f"{side}_fr3_{finger}finger"
                     for side in ("left", "right")
                     for finger in ("left", "right")
+                ]
+            )
+        }
+    elif gripper == "robotiq_2f_140":
+        cfg.link_attrs = {
+            "newton_gripper_contacts": _newton_gripper_contacts(
+                [
+                    "left_inner_finger_pad",
+                    "left_right_inner_finger_pad",
+                    "right_left_inner_finger_pad",
+                    "right_inner_finger_pad",
                 ]
             )
         }

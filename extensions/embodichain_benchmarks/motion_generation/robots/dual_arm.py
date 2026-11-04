@@ -47,7 +47,8 @@ class DualArmProvider(RobotProvider):
     ``left_eef``/``right_eef``.  ``robot.config`` selects the arm family and
     the tutorial construction parameters, so each coordinated skill suite can
     reuse its robot. ``gripper_type: panda_hand`` selects the complete native
-    Franka hand and TCP; omission retains the existing mounted PGI fixture.
+    Franka hand and TCP; ``robotiq_2f_140`` selects the six-joint Robotiq hand
+    and its calibrated TCP. Omission retains the mounted PGI fixture.
     """
 
     control_part = "left_arm"
@@ -66,7 +67,7 @@ class DualArmProvider(RobotProvider):
             urdf_name=str(config.get("urdf_name", f"benchmark_dual_{robot_type}")),
             tcp_z=(
                 None
-                if "tcp_z" not in config and gripper == "panda_hand"
+                if "tcp_z" not in config and gripper in {"panda_hand", "robotiq_2f_140"}
                 else float(config.get("tcp_z", 0.15))
             ),
             gripper=gripper,

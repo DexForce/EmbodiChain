@@ -864,7 +864,7 @@ class _EndpointRobot:
 
 
 def _prepared_endpoint_case(batch=8, failure=None):
-    suite = load_suite("atomic_dual_franka_pgi_hand_over")
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
     scenario = AtomicSkillScenario()
     scenario.robot = robot = _EndpointRobot(batch, failure)
     scenario.control_part = "left_arm"
@@ -934,7 +934,7 @@ def test_dual_case_does_not_freeze_when_only_the_primary_arm_is_qualified(failur
 def _hand_over_generation(monkeypatch, *, endpoint_failure=None):
     """Prepare real case/endpoint qualification around a CPU reference result."""
     batch = 8
-    suite = load_suite("atomic_dual_franka_pgi_hand_over")
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
     scenario = AtomicSkillScenario()
     scenario.robot = robot = _EndpointRobot(batch, endpoint_failure)
     scenario.control_part = "left_arm"
@@ -1568,19 +1568,85 @@ def test_dual_arm_provider_builds_both_arms_and_grippers():
     assert create_robot_provider(suite.robot).control_part == "left_arm"
 
 
+def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_path):
+    """Qualify the replacement hand against its real assembled URDF."""
+    from embodichain.utils.string import resolve_matching_names
+
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
+    cfg = create_robot_provider(suite.robot).build_cfg()
+    cfg.urdf_cfg.fpath = str(tmp_path / "franka_robotiq.urdf")
+    tree = ET.parse(cfg.urdf_cfg.assemble_urdf())
+    joints = {
+        joint.get("name"): joint
+        for joint in tree.findall("joint")
+        if joint.get("type") != "fixed"
+    }
+    links = [link.get("name") for link in tree.findall("link")]
+    assert len(joints) == len(cfg.init_qpos) == 26
+    assert cfg.init_qpos[-12:] == [0.0] * 12
+    for side in ("left", "right"):
+        assert Path(cfg.urdf_cfg.components[f"{side}_hand"]["urdf_path"]).name == (
+            "robotiq_arg2f_140.urdf"
+        )
+        np.testing.assert_allclose(
+            cfg.solver_cfg[f"{side}_arm"].tcp,
+            [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.21], [0, 0, 0, 1]],
+        )
+    declared_contacts = set()
+    for gripper in suite.enabled_tracks()[0].config["grippers"]:
+        part = gripper["control_part"]
+        names = cfg.control_parts[part]
+        assert len(names) == 6
+        limits = [
+            [float(joints[name].find("limit").get(key)) for key in ("lower", "upper")]
+            for name in names
+        ]
+        robot = Mock(device=CPU)
+        robot.get_qpos_limits.return_value = torch.tensor([limits])
+        _, opened, closed = AtomicSkillScenario._resolve_gripper(robot, gripper)
+        torch.testing.assert_close(opened, torch.zeros(6))
+        assert float(closed[0]) == pytest.approx(0.7)
+        assert joints[names[0]].find("mimic") is None
+        for name, command in zip(names[1:], closed[1:], strict=True):
+            mimic = joints[name].find("mimic")
+            assert mimic.get("joint") == names[0]
+            assert float(command) == pytest.approx(
+                float(closed[0]) * float(mimic.get("multiplier"))
+                + float(mimic.get("offset", "0"))
+            )
+        assert len(gripper["finger_links"]) == 2
+        assert set(gripper["finger_links"]) <= set(links)
+        declared_contacts.update(gripper["finger_links"])
+    assert len(declared_contacts) == 4
+    assert (
+        set(
+            resolve_matching_names(
+                cfg.link_attrs["newton_gripper_contacts"].link_names_expr, links
+            )[1]
+        )
+        == declared_contacts
+    )
+    for rules in (
+        cfg.joint_drive_props.stiffness,
+        cfg.joint_drive_props.damping,
+        cfg.joint_drive_props.max_effort,
+    ):
+        resolve_matching_names(list(rules), list(joints))
+
+
 def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_path):
     """Check actual assembled geometry/kinematics, including the native mimic."""
     from embodichain.utils.string import resolve_matching_names
     from embodichain_robots import FrankaPandaCfg
 
-    suite = load_suite("atomic_dual_franka_pgi_hand_over")
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
     values = {
         **suite.robot.config,
         "gripper_type": "panda_hand",
         "uid": "native_panda_dual_test",
         "urdf_name": "native_panda_dual_test",
     }
-    values.pop("tcp_z")
+    values.pop("tcp_z", None)
     cfg = create_robot_provider(replace(suite.robot, config=values)).build_cfg()
     assert Path(cfg.urdf_cfg.fpath).name == "native_panda_dual_test.urdf"
     cfg.urdf_cfg.fpath = str(tmp_path / "native_panda_dual.urdf")
@@ -1685,9 +1751,9 @@ def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_pat
 def test_native_panda_dual_rejects_incompatible_arm_or_tool_override(
     overrides, message
 ):
-    suite = load_suite("atomic_dual_franka_pgi_hand_over")
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
     values = {**suite.robot.config, "gripper_type": "panda_hand"}
-    values.pop("tcp_z")
+    values.pop("tcp_z", None)
     values.update(overrides)
     with pytest.raises(ValueError, match=message):
         create_robot_provider(replace(suite.robot, config=values)).build_cfg()
@@ -1798,18 +1864,21 @@ def test_dual_arm_suites_plan_with_toppra_and_declare_both_grippers(
 @pytest.mark.parametrize("skill_id", ["hand_over", "coordinated_placement"])
 def test_franka_dual_suites_use_independent_seven_joint_arms(skill_id: str) -> None:
     """Decode the published suites through their production robot provider."""
-    suite = load_suite(f"atomic_dual_franka_pgi_{skill_id}")
+    suite = load_suite(
+        "atomic_dual_franka_robotiq_hand_over"
+        if skill_id == "hand_over"
+        else "atomic_dual_franka_pgi_coordinated_placement"
+    )
     cfg = create_robot_provider(suite.robot).build_cfg()
     for part in ("left_arm", "right_arm"):
         assert len(cfg.control_parts[part]) == 7
         assert cfg.solver_cfg[part].root_link_name.startswith(part.split("_")[0])
     assert set(cfg.control_parts["left_arm"]).isdisjoint(cfg.control_parts["right_arm"])
-    assert {spec.id for spec in suite.planners if spec.enabled} == {
-        "toppra",
-        "curobo",
-        "nmg",
-        "nmg_retimed",
-    }
+    assert {spec.id for spec in suite.planners if spec.enabled} == (
+        {"toppra"}
+        if skill_id == "hand_over"
+        else {"toppra", "curobo", "nmg", "nmg_retimed"}
+    )
     track = suite.enabled_tracks()[0]
     assert [skill["id"] for skill in track.config["skills"]] == [skill_id]
     assert track.config["batch_sizes"] == [1]
