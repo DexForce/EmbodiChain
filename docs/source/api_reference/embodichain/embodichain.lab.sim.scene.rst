@@ -369,6 +369,11 @@ or close it in a ``finally`` block; later queries fail while collected reports
 remain available. Closing releases query/Newton resources, never borrowed entities.
 Atomic consumers select source/purpose/continuation eligibility before capture.
 
+Native distance diagnostics use capped clearance lower bounds. A query precision
+interval spanning a threshold remains unavailable; exact global distance and
+negative penetration depth are not part of this contract. ``NativeRigidObstacle``
+contains physical geometry and pose; callers never construct backend managers.
+
 .. currentmodule:: embodichain.lab.sim.scene.native_hand
 
 .. autosummary::
@@ -380,6 +385,7 @@ Atomic consumers select source/purpose/continuation eligibility before capture.
    NativeClosingQuery
    NativeOpeningQuery
    NativeRigidRestScene
+   NativeRigidObstacle
    build_native_closing_query
    build_native_rigid_rest_scene
 
@@ -415,17 +421,3 @@ robot installation search, independent validation and the configured entry point
    :maxdepth: 1
 
    embodichain.lab.sim.scene.feasibility
-
-Native distance diagnostics use capped clearance lower bounds, with the query
-precision interval retained for classification. A threshold crossing that
-interval raises unavailable geometry. Candidate axes, stroke samples and decision
-order remain unchanged; exact FCL distance values and negative penetration-depth
-reports are not part of the Newton contract.
-
-.. currentmodule:: embodichain.lab.sim.scene.native_hand
-
-``NativeRigidObstacle`` describes captured physical geometry and pose. The scene
-query constructs its own Newton resources; callers do not supply backend managers.
-
-.. autoclass:: NativeRigidObstacle
-   :members:
