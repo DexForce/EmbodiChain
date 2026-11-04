@@ -42,6 +42,10 @@ from ._configured_services import (
     _RelativePlaceLowererFactory,
     _RelativePlaceRoute,
 )
+from ._configured_hand_geometry import (
+    _RobotHandGeometryCfgFactory,
+    _decode_hand_geometry,
+)
 from .catalog import (
     SimulationTaskProgramRegistration,
 )
@@ -2544,6 +2548,7 @@ class _DecodedRuntimeServices:
     grasp_pose_generators: tuple[
         tuple[str, _AntipodalGraspPoseGeneratorFactory], ...
     ] = ()
+    hand_geometries: tuple[tuple[str, _RobotHandGeometryCfgFactory], ...] = ()
     handover_pose_providers: tuple[ConfiguredHandOverPoseProvider, ...] = ()
     registered_semantic_lowerers: tuple[
         _ArticulationLinkSlideLowererFactory
@@ -2560,7 +2565,11 @@ class _DecodedRuntimeServices:
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
 
 
-def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
+def _decode_runtime_services(
+    value: object,
+    *,
+    robot_profile_binding: SimulationRobotSkillProfileBinding | None = None,
+) -> _DecodedRuntimeServices:
     """Decode the allowlisted live-service portion of an integration."""
     path = "integration.runtime_services"
     config = _mapping(
@@ -2570,6 +2579,7 @@ def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
         optional=frozenset(
             {
                 "grasp_pose_generators",
+                "hand_geometries",
                 "handover_pose_providers",
                 "registered_semantic_lowerers",
                 "control_part_evidence",
@@ -2590,6 +2600,25 @@ def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
                 ),
             )
             for target_id, item in generators_value.items()
+        )
+    )
+    hand_values = config.get("hand_geometries", {})
+    if not isinstance(hand_values, Mapping):
+        raise TypeError(f"{path}.hand_geometries must be a mapping.")
+    if hand_values and robot_profile_binding is None:
+        raise ValueError("Hand geometry declarations require a decoded robot profile.")
+    hand_geometries = tuple(
+        sorted(
+            (
+                _identifier(target_id, path=f"{path}.hand_geometries keys"),
+                _decode_hand_geometry(
+                    item,
+                    path=f"{path}.hand_geometries.{target_id}",
+                    target_id=target_id,
+                    profile=robot_profile_binding,
+                ),
+            )
+            for target_id, item in hand_values.items()
         )
     )
     handover = tuple(
@@ -2736,6 +2765,7 @@ def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
         raise ValueError(f"{path}.nominal_motion_sources has duplicate call indices")
     return _DecodedRuntimeServices(
         grasp_pose_generators=generators,
+        hand_geometries=hand_geometries,
         handover_pose_providers=handover,
         registered_semantic_lowerers=lowerers,
         control_part_evidence=evidence,
@@ -2788,7 +2818,9 @@ def _decode_configured_task_program_integration(
     )
     scene_binding = _decode_scene(config["scene"])
     robot_profile_binding = _decode_robot_profile(config["robot_profile"])
-    services = _decode_runtime_services(config.get("runtime_services", {}))
+    services = _decode_runtime_services(
+        config.get("runtime_services", {}), robot_profile_binding=robot_profile_binding
+    )
 
     call_catalog = builtin_semantic_call_catalog()
     for lowerer_factory in services.registered_semantic_lowerers:
@@ -2819,6 +2851,11 @@ def _decode_configured_task_program_integration(
         "grasp_pose_generators": grasp_fingerprint,
         "planner_config": deepcopy(planner_config),
     }
+    if services.hand_geometries:
+        fingerprint_payload["hand_geometries"] = tuple(
+            {"target_id": target_id, "factory": asdict(factory)}
+            for target_id, factory in services.hand_geometries
+        )
     if services.nominal_motion_sources:
         fingerprint_payload["nominal_motion_sources"] = [
             {
@@ -2840,6 +2877,7 @@ def _decode_configured_task_program_integration(
     delegate = SimulationTaskProgramAdapterFactory(
         registration,
         grasp_pose_generator_factories=dict(services.grasp_pose_generators),
+        hand_geometry_cfg_factories=dict(services.hand_geometries),
         planner_config=planner_config,
     )
     adapter_factory = _ConfiguredTaskProgramAdapterFactory(

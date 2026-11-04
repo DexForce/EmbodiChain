@@ -1638,6 +1638,45 @@ def test_simulation_factory_returns_exact_environment_adapter() -> None:
     assert factory.segment_policy_port is not None
 
 
+def test_simulation_factory_preserves_owned_hand_calibration_across_engines() -> None:
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
+
+    robot = _EvidenceRobot()
+    environment = SimpleNamespace(sim=_Simulation(robot), robot=robot, step_dt=_STEP_DT)
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"), _evidence_profile_binding()
+    )
+    cfg = RobotHandGeometryCfg(
+        motion_part="arm",
+        hand_part="hand",
+        hand_root_link="tool_root",
+        pad_link_names=("contact_b", "contact_a"),
+        open_qpos=(_HAND_OPEN_POSITION,),
+        closed_qpos=(_HAND_GRASP_POSITION,),
+        sample_count=65,
+        body_max_edge=0.01,
+        pad_max_edge=0.004,
+        max_subdivisions=10,
+    )
+    factory = SimulationTaskProgramFactory.from_environment(
+        environment,
+        registration=registration,
+        motion_generator_factory=lambda: _motion_generator(robot),
+        hand_geometry_cfgs={"hand": cfg},
+    )
+    cfg.pad_link_names = ("changed", "input")
+    profile = factory.create_robot_skill_profile()
+    engines = [factory.create_atomic_action_engine(profile) for _ in range(2)]
+    for engine in engines:
+        calibrated = engine.planning_services.hand_geometry_cfg("hand")
+        assert calibrated.pad_link_names == ("contact_b", "contact_a")
+        assert calibrated.open_qpos == (_HAND_OPEN_POSITION,)
+        calibrated.closed_qpos = (99,)
+    assert engines[0].planning_services.hand_geometry_cfg("hand").closed_qpos == (
+        _HAND_GRASP_POSITION,
+    )
+
+
 def test_simulation_factory_uses_environment_expert_joint_command_mode() -> None:
     robot = _Robot()
     simulation = _Simulation(robot)

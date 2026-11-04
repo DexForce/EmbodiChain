@@ -60,6 +60,14 @@ with accepted rows retained independently and selected offsets in diagnostics.
 Held-object transport and Pour keep the binding's configured grasp command; a
 contact-blocked measured aperture does not retain closing effort.
 
+Optional `hand_geometry_cfgs` enter through `AtomicActionEngine` and its existing
+`ActionPlanningServices`. `hand_geometry_cfg(target_id)` returns an independent
+Lab configuration and fails for undeclared targets; it never infers a model or
+captures geometry. Consumers retain declared pad-link order and replace closing
+commands with the current resolved endpoint commands, including invocation
+overrides. [Robot geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
+defines the capture boundary. Task Program declarations do not enter Atomic APIs.
+
 `PickUpOptions.approach_direction` accepts one world vector or one vector per
 planning row. PickUp and AxisAlign normalize each row independently and use the
 same direction for candidate eligibility and pre-grasp translation. A benchmark

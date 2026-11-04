@@ -121,7 +121,10 @@ from .extensions import (
     validate_immutable_extension_declaration,
 )
 from .simulation import SimulationRobotSkillProfileBinding, SimulationSceneBinding
-from .simulation.policies import default_simulation_settle_presets
+from .simulation.policies import (
+    SimulationSettleMonitorCfg,
+    default_simulation_settle_presets,
+)
 
 _CATALOG_FINGERPRINT_SCHEMA_VERSION = 4
 _POST_POLICY_KINDS = frozenset({"wait_stable"})
@@ -511,6 +514,14 @@ class TaskProgramIntegrationCatalog:
         repr=False,
         compare=False,
     )
+    pose_delta_settle_preset_ids: frozenset[str] = field(
+        default_factory=frozenset, kw_only=True
+    )
+    """Presets explicitly selecting consecutive rigid-pose measurements."""
+    rigid_settle_entity_ids: frozenset[str] = field(
+        default_factory=frozenset, kw_only=True
+    )
+    """Native rigid-object identities and affordances resolving to those objects."""
 
     def __post_init__(self) -> None:
         for field_name in ("scene_registry_id", "robot_profile_id"):
@@ -578,6 +589,15 @@ class TaskProgramIntegrationCatalog:
         if not preset_ids:
             raise ValueError("settle_preset_ids must not be empty.")
         object.__setattr__(self, "settle_preset_ids", preset_ids)
+        for name in ("pose_delta_settle_preset_ids", "rigid_settle_entity_ids"):
+            values = frozenset(getattr(self, name))
+            for value in values:
+                _exact_identifier(value, field_name=name)
+            object.__setattr__(self, name, values)
+        if not self.pose_delta_settle_preset_ids <= preset_ids:
+            raise ValueError(
+                "Pose-delta presets must belong to the settle-preset table."
+            )
         if (
             type(self.fingerprint) is not str
             or len(self.fingerprint) != 64
@@ -702,7 +722,6 @@ class TaskProgramIntegrationCatalog:
         path: ConfigPath,
     ) -> None:
         """Validate one registered post-policy kind and named preset."""
-        del path
         if policy.kind not in _POST_POLICY_KINDS:
             raise KeyError(
                 f"Unknown post-policy kind {policy.kind!r}; available kinds are "
@@ -713,6 +732,14 @@ class TaskProgramIntegrationCatalog:
                 f"Unknown settle preset {policy.preset!r}; available presets are "
                 f"{sorted(self.settle_preset_ids)}."
             )
+        if policy.preset in self.pose_delta_settle_preset_ids:
+            entity = self.scene.resolve(policy.entity, path=(*path, "entity"))
+            if entity.entity_id not in self.rigid_settle_entity_ids:
+                raise TaskProgramValidationError(
+                    "unsupported_pose_delta_settle_target",
+                    path,
+                    "Pose-delta settling requires an explicitly bound native rigid object.",
+                )
 
     def validate_validator(
         self,
@@ -739,6 +766,9 @@ class TaskProgramIntegrationCatalog:
             runtime_preset=program.integration.runtime_preset,
         )
         for segment in compiled.iter_segments():
+            for policy in segment.post_policies:
+                if policy.cfg.preset in self.pose_delta_settle_preset_ids:
+                    self.validate_post_policy(policy.cfg, path=policy.source_path)
             if (
                 segment.parallel_block is not None
                 and self.parallel_safety_declaration is None
@@ -1265,6 +1295,18 @@ class SimulationTaskProgramRegistration:
                 call_catalog=self.call_catalog,
                 relation_grounder_keys=relation_grounder_keys,
                 settle_preset_ids=frozenset(settle_presets),
+                pose_delta_settle_preset_ids=frozenset(
+                    key
+                    for key, cfg in settle_presets.items()
+                    if isinstance(cfg, SimulationSettleMonitorCfg)
+                    and cfg.measurement == "pose_delta"
+                ),
+                rigid_settle_entity_ids=frozenset(
+                    binding.entity_id for binding in self.scene_binding.rigid_objects
+                )
+                | frozenset(
+                    binding.entity_id for binding in self.scene_binding.antipodal_grasps
+                ),
                 endpoint_adapter_declarations=extensions.endpoint_adapters,
                 runtime_transport_declarations=extensions.runtime_transports,
                 parallel_safety_declaration=extensions.parallel_safety,

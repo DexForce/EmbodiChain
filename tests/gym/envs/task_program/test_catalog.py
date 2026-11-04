@@ -494,6 +494,50 @@ def _registration() -> SimulationTaskProgramRegistration:
     )
 
 
+def test_explicit_settle_mode_is_fingerprinted_and_preflighted_without_simulation():
+    from embodichain.lab.task_program.integrations import (
+        SimulationRigidizedArticulationObjectBinding,
+    )
+    from embodichain.lab.task_program.integrations.simulation.policies import (
+        SimulationSettleMonitorCfg,
+    )
+
+    base = _registration()
+    pose = replace(
+        base,
+        settle_presets={
+            "observed": SimulationSettleMonitorCfg(measurement="pose_delta")
+        },
+    )
+    velocity = replace(base, settle_presets={"observed": SimulationSettleMonitorCfg()})
+    assert pose.fingerprint != velocity.fingerprint
+    assert pose.settle_presets["observed"].measurement == "pose_delta"
+    payload = _program_payload()
+    payload["program"] = {
+        "kind": "segment",
+        "name": "observe",
+        "steps": payload["program"],
+        "post": [{"kind": "wait_stable", "entity": "cube", "preset": "observed"}],
+    }
+    program = decode_task_program(payload)
+    pose.catalog.preflight(program)
+    unsupported = replace(
+        pose,
+        scene_binding=SimulationSceneBinding(
+            registry_id=CUBE_SCENE_REGISTRY_ID,
+            rigidized_articulations=(
+                SimulationRigidizedArticulationObjectBinding(
+                    entity_id="cube",
+                    simulation_uid="native_articulation",
+                    locked_qpos={"joint": 0.0},
+                ),
+            ),
+        ),
+    )
+    with pytest.raises(TaskProgramValidationError, match="native rigid object"):
+        unsupported.catalog.preflight(program)
+
+
 def _parallel_live_inputs() -> tuple[object, SceneRegistry, AtomicActionEngine]:
     """Build minimal identity-consistent inputs for factory lifecycle tests."""
     robot = object()

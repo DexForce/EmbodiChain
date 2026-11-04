@@ -110,7 +110,7 @@ Contact filtering and substep timing are owned by the sensor layer. Tasks
 select body and counterpart IDs, then consume interval events and completed
 flight durations without advancing the sensor state.
 
-.. automodule:: embodichain.lab.sim.sensors.contact_history
+.. automodule:: embodichain.lab.sim.sensors.contact.history
    :members:
    :undoc-members:
 
@@ -119,3 +119,66 @@ CUDA history reduction consumes compact contact rows and device counts through
 sparse Warp kernels. The ``dropped_contacts`` diagnostic sums query loss and
 scatter overflow across the current control interval; standalone updates
 without a history report the most recent sample.
+
+Sampling observers
+------------------
+
+Named sampling observers belong to one ContactSensor instance. The empty default
+adds no observer snapshots or callbacks. Begin and selective-reset notifications
+follow the sensor's own history/counter updates; before/after tokens surround one physics-step sample. A prior raw fetch
+in that same step is reused; repeated substep calls do not repeat callbacks. Observation callbacks run outside the internal CUDA capture, and
+external capture with observers is rejected before callbacks begin. The observer
+owns retention limits and diagnostics and must not step physics or issue commands.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sensor
+
+.. autosummary::
+
+   ContactSamplingObserver
+
+.. autoclass:: ContactSamplingObserver
+   :members:
+
+Contact package
+---------------
+
+``embodichain.lab.sim.sensors.contact`` is the canonical entry point for contact
+sensor configuration, acquisition and history. Its ``sensor``, ``sampling``,
+``history`` and ``timeline`` modules share one package; sensor-specific Warp
+adaptation kernels live under its private ``_warp`` directory. Generic physical
+evidence remains in ``lab.sim.evidence``; grasp interpretation and Task Program
+bindings remain in their owning layers. Calibrated hand opening used for release
+interpretation belongs to ``atomic_actions.grip_evidence``, not the sensor layer.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact
+
+.. autosummary::
+   :nosignatures:
+
+   ArticulationContactFilterCfg
+   ContactSensor
+   ContactSensorCfg
+   ContactSamplingObserver
+   CONTACT_ACTOR_IDS
+   CONTACT_VALID_MASK
+   CONTACT_NORMALS
+   CONTACT_IMPULSES
+   CONTACT_POSITIONS
+   ContactEvidenceSample
+   ContactEvidenceSampler
+   ContactSourceStamp
+   native_contact_revision
+   ContactTimeline
+   ContactTimelineCfg
+   ContactHistory
+
+Import migration
+----------------
+
+The sensor registry and ``from embodichain.lab.sim.sensors import ContactSensor``
+keep their existing names. The old flat ``sensors.contact_sensor`` and
+``sensors.contact_history`` modules have been removed. Import from
+``sensors.contact`` or its ``sensor`` and ``history`` submodules instead.
+Sampling and timeline APIs use ``contact.sampling`` and ``contact.timeline``.
+Regenerate declarations that explicitly seal implementation-qualified type names;
+old identities are not silently rewritten.
