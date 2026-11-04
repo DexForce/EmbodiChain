@@ -147,7 +147,7 @@ native fetch. Observation callbacks run outside the internal CUDA capture, and
 external capture with observers is rejected before callbacks begin. The observer
 owns retention limits and diagnostics and must not step physics or issue commands.
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact_sensor
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sensor
 
 follow the sensor's own history/counter updates; before/after tokens surround one physics-step sample. A prior raw fetch
 in that same step is reused; repeated substep calls do not repeat callbacks. Observation callbacks run outside the internal CUDA capture, and
