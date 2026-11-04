@@ -160,9 +160,14 @@ def _condition_values(value: Mapping[str, Any]) -> SimpleNamespace:
 
 
 def _constraint_axis_alignment(cfg: Any, pose: torch.Tensor) -> torch.Tensor:
-    world = pose.new_tensor(cfg.world_axis or (0.0, 0.0, 1.0))
-    alignment = ((pose[:, :3, :3] @ pose.new_tensor(cfg.local_axis)) * world).sum(-1)
-    return alignment.abs() if cfg.axis_direction_free else alignment
+    from embodichain.compute.geometry.rigid import pose_axis_alignment
+
+    return pose_axis_alignment(
+        pose,
+        cfg.local_axis,
+        world_axis=cfg.world_axis,
+        direction_free=cfg.axis_direction_free,
+    )
 
 
 def _constraint_pose_flags(
