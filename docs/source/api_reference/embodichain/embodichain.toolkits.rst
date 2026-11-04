@@ -274,6 +274,8 @@ These services fit finite pad surfaces and check discrete closing samples agains
 an object-frame signed surface query. Robot/FK geometry construction and physical
 contact evidence remain outside GraspKit. Qualification tolerances and occupancy
 probe distance are explicit inputs; the checker does not infer task semantics.
+``SampledHandGeometry.at_width()`` interpolates the hand surfaces at requested
+pad gaps and clamps out-of-range gaps to the sampled endpoints.
 
 .. autosummary::
    :nosignatures:
