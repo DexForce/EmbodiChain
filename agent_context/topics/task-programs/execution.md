@@ -182,3 +182,9 @@ The generation is an ownership guard, not evidence of strong support. Current
 capture uses the native rest-envelope COM tolerance, while recorded snapshots
 retain the policy's original override. Recorded reads combine the original policy
 metadata with exact Gym boundary slots, never current contacts with old poses.
+
+The same policy port's `measure_support_geometry` projects an owned current or
+historical support snapshot against its existing region geometry. The collector
+uses exact recorded slots for historical projection, then supplies raw footprint
+and contact-height measurements to TaskSpec. It does not resample contacts, read
+a current pose for a past boundary, or compute a normative accepted flag.

@@ -112,7 +112,9 @@ def project_placement_evidence_binding(
     if len(matches) != 1:
         raise ValueError("Projection requires one exact declared predicate.")
     predicate, milestone = matches[0]
-    if predicate.name != "semantic_goal" or predicate.arguments.get("relation") != "on":
+    if predicate.name != "semantic_goal" or predicate.arguments.get("relation") not in (
+        {"on", "inside"} if evidence_scope == "native_supported_placement" else {"on"}
+    ):
         raise ValueError(
             "This projection supports the declared rigid on-relation slice."
         )

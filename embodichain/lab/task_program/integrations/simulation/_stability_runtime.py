@@ -24,6 +24,9 @@ from dataclasses import dataclass
 import math
 from typing import Any
 import torch
+from embodichain.compute.geometry.contact_support import (
+    contact_support_heights as _contact_support_heights,
+)
 from embodichain.compute.geometry.rigid import (
     rigid_pose_displacement,
     pose_axis_alignment,
@@ -46,68 +49,6 @@ __all__: list[str] = []
 class _Lifetime:
     closed: bool = False
     clock_generation: int = 0
-
-
-def _contact_support_heights(
-    supported: torch.Tensor,
-    observation: Mapping[str, Any],
-    like: torch.Tensor,
-) -> torch.Tensor:
-    """Refine heights only from NativeSupportObservation's qualified patch.
-
-    Its contact points already require positive upward load and COM support.
-    Keep the highest qualified point so penetration is not hidden by averaging.
-    Unavailable rows cannot replace the existing conservative mesh envelope.
-    """
-    heights = torch.full_like(like, torch.nan)
-    rows = observation.get("rows")
-    if (
-        supported.dtype != torch.bool
-        or supported.shape != like.shape
-        or observation.get("scope") != "native_contact_support"
-        or not isinstance(rows, list)
-        or len(rows) != like.shape[0]
-    ):
-        return heights
-    for index, row in enumerate(rows):
-        if not supported[index] or not isinstance(row, Mapping):
-            continue
-        values = tuple(
-            row.get(name)
-            for name in ("com_patch_distance_m", "com_tolerance_m", "upward_impulse")
-        )
-        if any(
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-            for value in values
-        ):
-            continue
-        distance, tolerance, impulse = values
-        if tolerance <= 0 or not 0 <= distance <= tolerance or impulse <= 0:
-            continue
-        if row.get("contacts_world") is None or row.get("center_of_mass_world") is None:
-            continue
-        try:
-            points = torch.as_tensor(
-                row["contacts_world"], device=like.device, dtype=like.dtype
-            )
-            center = torch.as_tensor(
-                row["center_of_mass_world"], device=like.device, dtype=like.dtype
-            )
-        except (TypeError, ValueError):
-            continue
-        if (
-            points.ndim != 2
-            or points.shape[1] != 3
-            or not points.shape[0]
-            or center.shape != (3,)
-            or not torch.isfinite(points).all()
-            or not torch.isfinite(center).all()
-        ):
-            continue
-        heights[index] = points[:, 2].amax()
-    return heights
 
 
 class _ConditionStabilityRuntime:
@@ -296,6 +237,62 @@ class _ConditionStabilityRuntime:
             support_contract_revision=cfg.support_contract_revision,
             clock=clock,
         )
+
+    def measure_support_geometry(
+        self,
+        preset_id: str,
+        *,
+        native_support: Mapping[str, Any],
+        object_pose: Any,
+        reference_pose: Any,
+    ) -> dict[str, Any]:
+        """Project captured poses against this owner's existing input geometry.
+
+        No sensor or live pose is sampled. The caller supplies either a current
+        owned observation or its historical policy snapshot and seeded poses.
+        """
+        self._require_open()
+        cfg = self._presets[preset_id]
+        if cfg.kind != "supported_region":
+            raise ValueError(
+                "Full-footprint measurements require a declared region condition."
+            )
+        # The frozen collector computed final/historical mesh projection on CPU.
+        # Preserve that arithmetic/device boundary even when simulation is CUDA.
+        vertices = self._support_vertices[cfg.entity].detach().cpu()
+        pose = torch.as_tensor(
+            object_pose, dtype=vertices.dtype, device=vertices.device
+        )
+        reference = torch.as_tensor(
+            reference_pose, dtype=vertices.dtype, device=vertices.device
+        )
+        if (
+            native_support.get("entity") != cfg.entity
+            or native_support.get("reference") != cfg.reference
+            or native_support.get("env_ids") != list(range(vertices.shape[0]))
+        ):
+            raise ValueError("Captured support has another declared pair or row scope.")
+        landing = self._region_geometry[(cfg.entity, cfg.reference)].measure(
+            pose.detach().cpu(), reference.detach().cpu()
+        )
+        landing.update(support_tolerance_m=0.05, penetration_tolerance_m=0.01)
+        bottom = (vertices.to(pose) @ pose[:, 2, :3, None]).squeeze(-1).amin(-1) + pose[
+            :, 2, 3
+        ]
+        heights = _contact_support_heights(
+            torch.tensor(
+                native_support["supported"], dtype=torch.bool, device=pose.device
+            ),
+            native_support,
+            bottom,
+        )
+        return {
+            "landing_region": landing,
+            "support_gap_m": [
+                float(value) if torch.isfinite(value) else None
+                for value in bottom - heights
+            ],
+        }
 
     def _support(
         self,

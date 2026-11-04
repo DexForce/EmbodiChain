@@ -283,9 +283,11 @@ def test_binding_instance_owns_data_and_rejects_stale_nested_identity():
         evaluate_supported_placement_evidence(spec, binding, evidence, program=program)
 
 
-def test_evidence_cold_import_does_not_load_numeric_or_simulation_backends():
+@pytest.mark.parametrize("strong", [False, True])
+def test_evidence_cold_import_does_not_load_numeric_or_simulation_backends(strong):
     root = Path(__file__).resolve().parents[3]
-    source = f"import sys; sys.path.insert(0, {str(root)!r}); import embodichain.gen_sim.task_spec.evidence; assert not any(name == 'torch' or name == 'numpy' or name.startswith('embodichain.lab') for name in sys.modules)"
+    binding = (_strong_evidence() if strong else _legacy_evidence())[1].to_dict()
+    source = f"import sys; sys.path.insert(0, {str(root)!r}); from embodichain.gen_sim.task_spec.evidence import SupportedPlacementEvidenceBinding; SupportedPlacementEvidenceBinding.from_dict({binding!r}); assert not any(name == 'torch' or name == 'numpy' or name.startswith('embodichain.lab') for name in sys.modules)"
     result = subprocess.run(
         [sys.executable, "-I", "-c", source], text=True, capture_output=True, timeout=30
     )
@@ -585,3 +587,324 @@ def test_single_placement_proof_cannot_replace_transfer_or_coordinated_transport
     )
     with pytest.raises(ValueError, match="task-family evidence"):
         evaluate_supported_placement_evidence(spec, binding, evidence, program=program)
+
+
+def _strong_evidence(*, region=False, historical=False):
+    from dataclasses import replace
+    import math
+
+    spec, old, evidence, program = _legacy_evidence()
+    relation = "inside" if region else "on"
+    if region:
+        predicate = spec.goal[0]
+        spec = replace(
+            spec,
+            goal=(
+                replace(
+                    predicate, arguments={**predicate.arguments, "relation": relation}
+                ),
+            ),
+        )
+    condition = dict(
+        entity="cube",
+        reference="pad",
+        kind="supported_region" if region else "supported_placement",
+        duration=0.12,
+        timeout=1.0,
+        translation_drift=0.02,
+        rotation_drift=math.pi / 18,
+        support_contract_revision=1,
+    )
+    if not region:
+        condition["displacement"] = [0.0, 0.0, 0.0]
+    binding = replace(
+        old,
+        task_spec_digest=canonical_hash(spec.to_dict()),
+        evidence_scope="native_supported_placement",
+        condition=condition,
+        episode_ids=(0,),
+        binding_hash="",
+    )
+    call = evidence["segments"][0]["metadata"]["runtime"]["calls"][0]
+    receipt = call["effects"][0]
+    receipt["verification_id"] = 3
+    call["active_plan_attempt_generation"] = 0
+    call["plan_attempts"] = [
+        dict(
+            invocation_id="place:0",
+            invocation_revision=0,
+            invocation_index=0,
+            attempt_generation=0,
+            planned_at=0.0,
+        )
+    ]
+    call["events"] = [
+        dict(
+            invocation_id="place:0",
+            invocation_revision=0,
+            invocation_index=0,
+            timestamp=time,
+            kind=kind,
+            env_mask=[True],
+            **extra,
+        )
+        for kind, time, extra in [
+            ("trajectory_segment_entered", 0.04, {"segment_name": "release"}),
+            ("action_completed", 0.08, {}),
+        ]
+    ]
+    points = [
+        [-0.01, -0.01, 0.0],
+        [0.01, -0.01, 0.0],
+        [0.01, 0.01, 0.0],
+        [-0.01, 0.01, 0.0],
+    ]
+    native = evidence["record"]["measurements"]
+    native.pop("reference_uid")
+    native.pop("relation")
+    native.pop("released")
+    native.update(
+        support_contract_revision=1,
+        clock="environment_step",
+        observed_at=0.2,
+        observed_step=5,
+        step_dt=0.04,
+        episode_generations=[0],
+        actor_pairs=[
+            dict(
+                object_uid="cube",
+                reference_uid="pad",
+                object_actor=1,
+                reference_actor=2,
+                **{
+                    kind
+                    + "_info": dict(
+                        actor_id=index,
+                        env_id=0,
+                        link_name=None,
+                        path="/Arena/" + uid,
+                        arena_name="Arena",
+                    )
+                    for kind, index, uid in [
+                        ("object", 1, "cube"),
+                        ("reference", 2, "pad"),
+                    ]
+                },
+            )
+        ],
+    )
+    native["rows"] = [
+        dict(
+            contacts_world=points,
+            center_of_mass_world=[0.0, 0.0, 0.02],
+            com_patch_distance_m=0.0,
+            com_tolerance_m=0.003,
+            upward_impulse=1.0,
+            raw_contacts=dict(
+                user_ids=[[2, 1]] * 4,
+                position=points,
+                normal=[[0.0, 0.0, 1.0]] * 4,
+                impulse=[0.25] * 4,
+            ),
+            sample=dict(
+                timestamp=0.2,
+                control_step=5,
+                substep=4,
+                serial=8,
+                native_revision=8,
+                topology_revision=0,
+                episode_generation=0,
+            ),
+            retained=False,
+        )
+    ]
+    segment = evidence["segments"][1]
+    segment["end_steps"] = [5]
+    trace = segment["metadata"]["post_policies"][0]
+    trace["result_mask"] = [True]
+    trace["result"].update(
+        kind=condition["kind"],
+        required_seconds=0.12,
+        accepted_mask=[True],
+        stable_seconds=[0.12],
+        start_step=2,
+        end_step=5,
+        clock_started_at=0.08,
+        clock_ended_at=0.2,
+        support_contract_revision=1,
+        entity="cube",
+        reference="pad",
+    )
+    trace["result"]["measurements"]["native_support"] = deepcopy(native)
+    raw = dict(
+        segments=evidence["segments"],
+        native_support=deepcopy(native),
+        boundary_poses=evidence["boundary_poses"],
+        episode_ids=[0],
+    )
+    if region:
+        landing = dict(
+            scope="measured_planar_landing_region",
+            object_pose=deepcopy(native["object_pose"]),
+            reference_pose=deepcopy(native["reference_pose"]),
+            support_tolerance_m=0.05,
+            penetration_tolerance_m=0.01,
+            full_footprint_inside=[True],
+            support_gap_m=[0.0],
+            footprint_area_m2=[0.0004],
+        )
+        trace["result"]["measurements"].update(
+            landing_region=deepcopy(landing), support_gap=[0.0]
+        )
+        raw.update(landing_region=landing, support_gap_m=[0.0])
+    if historical:
+        from embodichain.gen_sim.task_spec._support_contract import release_window
+
+        metrics = dict(
+            scope="native_supported_placement",
+            support_contract_revision=1,
+            placement_node_id="place",
+            support_boundary_node_id="park",
+            boundary_node_id="park",
+            stability_preset="declared_support",
+            observation_kind="final",
+            reference_uid="pad",
+            relation=relation,
+            released=[True],
+            release_window=release_window(call, receipt, 1),
+            native_support=raw.pop("native_support"),
+        )
+        for key in ("landing_region", "support_gap_m"):
+            if key in raw:
+                metrics[key] = raw.pop(key)
+        raw["record"] = dict(
+            uid="cube", part_id=None, accepted=[True], measurements=metrics
+        )
+    return spec, binding, raw, program
+
+
+@pytest.mark.parametrize("region", [False, True])
+@pytest.mark.parametrize("historical", [False, True])
+def test_strong_support_rechecks_raw_load_window_and_declared_footprint(
+    region, historical
+):
+    spec, binding, evidence, program = _strong_evidence(
+        region=region, historical=historical
+    )
+    result = evaluate_supported_placement_evidence(
+        spec, binding, evidence, program=program
+    )
+    assert result[0].status is EvaluationStatus.SATISFIED, result[0].reason
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "foreign_actor",
+        "superseded_plan",
+        "missing_phase",
+        "changed_patch",
+        "wide_native_tolerance",
+        "stale_boundary",
+    ],
+)
+def test_strong_support_never_substitutes_derived_claims_for_qualified_sources(damage):
+    spec, binding, evidence, program = _strong_evidence()
+    if damage == "foreign_actor":
+        evidence["native_support"]["actor_pairs"][0]["object_uid"] = "other"
+    elif damage == "superseded_plan":
+        evidence["segments"][0]["metadata"]["runtime"]["calls"][0][
+            "active_plan_attempt_generation"
+        ] = 1
+    elif damage == "missing_phase":
+        evidence["segments"][0]["metadata"]["runtime"]["calls"][0]["events"].pop(0)
+    elif damage == "changed_patch":
+        evidence["native_support"]["rows"][0]["upward_impulse"] = 2.0
+    elif damage == "wide_native_tolerance":
+        evidence["native_support"]["rows"][0]["com_tolerance_m"] = 0.1
+    else:
+        evidence["boundary_poses"]["cube"][0][0][3] = 0.02
+    result = evaluate_supported_placement_evidence(
+        spec, binding, evidence, program=program
+    )
+    assert result[0].status is EvaluationStatus.UNAVAILABLE
+    assert result[0].reason
+
+
+def test_current_full_footprint_negative_is_not_replaced_by_historical_success():
+    spec, binding, evidence, program = _strong_evidence(region=True)
+    evidence["landing_region"]["full_footprint_inside"] = [False]
+    result = evaluate_supported_placement_evidence(
+        spec, binding, evidence, program=program
+    )
+    assert result[0].status is EvaluationStatus.FAILED, result[0].reason
+
+
+def test_strong_stack_preserves_its_explicit_reference_axis_requirement():
+    from dataclasses import replace
+
+    spec, binding, evidence, program = _strong_evidence()
+    condition = {
+        **binding.condition,
+        "kind": "stack",
+        "displacement": None,
+        "local_axis": [0.0, 0.0, 1.0],
+        "reference_axis": [0.0, 0.0, 1.0],
+        "reference_half_extents": [0.1, 0.1],
+    }
+    binding = replace(binding, condition=condition, binding_hash="")
+    trace = evidence["segments"][1]["metadata"]["post_policies"][0]["result"]
+    trace["kind"] = "stack"
+    result = evaluate_supported_placement_evidence(
+        spec, binding, evidence, program=program
+    )[0]
+    assert result.status is EvaluationStatus.SATISFIED, result.reason
+    evidence["native_support"]["reference_pose"] = deepcopy(
+        evidence["native_support"]["reference_pose"]
+    )
+    for poses in (
+        evidence["boundary_poses"]["pad"],
+        evidence["native_support"]["reference_pose"],
+    ):
+        poses[0][0][0] = -1.0
+        poses[0][2][2] = -1.0
+    result = evaluate_supported_placement_evidence(
+        spec, binding, evidence, program=program
+    )[0]
+    assert result.status is EvaluationStatus.FAILED, result.reason
+
+
+def test_recorded_full_footprint_uses_recomputed_seeded_pose_without_borrowing_history():
+    from dataclasses import replace
+    from embodichain.gen_sim.task_spec import MilestoneSpec
+
+    spec, binding, evidence, program = _strong_evidence(region=True)
+    predicate = replace(spec.goal[0], predicate_id="inside_recorded")
+    spec = replace(spec, milestones=(MilestoneSpec("placed_once", (predicate,)),))
+    binding = replace(
+        binding,
+        task_spec_digest=canonical_hash(spec.to_dict()),
+        predicate_id=predicate.id,
+        observation_kind="recorded",
+        required_execution=tuple(
+            {"segment_id": name, "source_path": ["program", "items", i]}
+            for i, name in enumerate(("place", "park"))
+        ),
+        binding_hash="",
+    )
+    for segment in evidence["segments"]:
+        segment.update(active=[True], successes=[True])
+    evidence["boundary_frames"] = [5]
+    result = evaluate_supported_placement_evidence(
+        spec, binding, evidence, program=program
+    )[0]
+    assert result.status is EvaluationStatus.SATISFIED, result.reason
+    # Below the existing pose-match tolerance, but the exact geometry record
+    # must still agree with the original policy snapshot after recomputation.
+    evidence["boundary_poses"]["cube"][0][0][3] = 0.00008
+    evidence["landing_region"]["object_pose"][0][0][3] = 0.00008
+    result = evaluate_supported_placement_evidence(
+        spec, binding, evidence, program=program
+    )[0]
+    assert result.status is EvaluationStatus.UNAVAILABLE
+    assert "own policy snapshot" in result.reason

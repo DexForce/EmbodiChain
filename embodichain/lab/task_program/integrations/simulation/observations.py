@@ -162,7 +162,21 @@ class SimulationSupportObservationCollector:
         self._check_episode()
         channel = result.support
         native = deepcopy(dict(result.metadata))
+        geometry = {}
+        if (
+            cfg.kind == "supported_region"
+            and "object_pose" in native
+            and "reference_pose" in native
+        ):
+            geometry = self._port.measure_support_geometry(
+                preset_id,
+                native_support=native,
+                object_pose=native["object_pose"],
+                reference_pose=native["reference_pose"],
+            )
+        self._check_episode()
         return {
+            **geometry,
             "native_support": native,
             "boundary_poses": {
                 name: deepcopy(native[key])
@@ -254,7 +268,17 @@ class SimulationSupportObservationCollector:
             if cfg.support_contract_revision == 1
             else "simulation_time"
         )
+        geometry = {}
+        if cfg.kind == "supported_region":
+            geometry = self._port.measure_support_geometry(
+                preset_id,
+                native_support=native,
+                object_pose=poses[cfg.entity],
+                reference_pose=poses[cfg.reference],
+            )
+        self._check_episode()
         return {
+            **geometry,
             "native_support": native,
             "support_acquisition": acquisition,
             "boundary_poses": poses,
