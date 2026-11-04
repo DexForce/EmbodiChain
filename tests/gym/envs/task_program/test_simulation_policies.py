@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -39,6 +40,7 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 from embodichain.lab.task_program.integrations.simulation.policies import (
     SimulationSegmentPolicyPort,
+    SimulationSettleMonitorCfg,
 )
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from embodichain.lab.sim.atomic_actions import EntityState
@@ -136,13 +138,19 @@ class _Simulation:
     def __init__(
         self,
         entity: _RigidObject | None = None,
+        reference: _RigidObject | None = None,
         articulation: _Articulation | None = None,
     ) -> None:
         self.entity = entity
+        self.reference = reference
         self.articulation = articulation
 
     def get_rigid_object(self, uid: str) -> _RigidObject | None:
-        return self.entity if uid == "native_cube" else None
+        if uid == "native_cube":
+            return self.entity
+        if uid == "native_reference":
+            return self.reference
+        return None
 
     def get_articulation(self, uid: str) -> _Articulation | None:
         return (
@@ -259,11 +267,58 @@ def _compiled_articulation_segment():
     return next(compiled.iter_segments())
 
 
+def _compiled_relative_segment():
+    """Compile one validator with two late-observed object identities."""
+    payload = {
+        "program_id": "relative_policy_test",
+        "integration": {
+            "robot_profile": "test_robot",
+            "scene_registry": "test_scene",
+            "runtime_preset": "safe",
+        },
+        "targets": {},
+        "program": {
+            "kind": "segment",
+            "name": "place_relative",
+            "steps": {
+                "kind": "invoke",
+                "call": {"kind": "pick", "object": "cube"},
+            },
+            "validators": [
+                {
+                    "kind": "object_near_relative_target",
+                    "object": "cube",
+                    "reference": "reference",
+                    "displacement": [0.0, -0.1, 0.04],
+                    "position_tolerance": 0.05,
+                }
+            ],
+        },
+    }
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=SceneObjectRef("cube"),
+                state_provider=_StaticStateProvider(),
+            ),
+            SceneEntityRegistration(
+                ref=SceneObjectRef("reference"),
+                state_provider=_StaticStateProvider(),
+            ),
+        )
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(
+        decode_task_program(payload)
+    )
+    return next(compiled.iter_segments())
+
+
 def _port(
     positions: torch.Tensor,
     *,
     preset: DynamicSettleMonitorCfg | None = None,
     target_qpos: torch.Tensor | None = None,
+    step_dt: float | None = None,
 ) -> tuple[SimulationSegmentPolicyPort, _RigidObject, _Robot]:
     """Build one policy port and expose its mutable test doubles."""
     entity = _RigidObject(positions)
@@ -292,8 +347,99 @@ def _port(
                 required_stable_checks=2,
             )
         },
+        step_dt=step_dt,
     )
     return port, entity, robot
+
+
+def test_pose_delta_is_explicit_unresolved_first_and_preserves_partial_rows() -> None:
+    cfg = SimulationSettleMonitorCfg(
+        measurement="pose_delta",
+        min_steps=0,
+        max_steps=3,
+        check_interval_steps=1,
+        required_stable_checks=2,
+    )
+    port, entity, _ = _port(torch.zeros(2, 3), preset=cfg, step_dt=0.02)
+    # Backend velocity-cache values do not select or override explicit pose evidence.
+    entity.body_data.lin_vel.fill_(100)
+    cfg.measurement = "reported_velocity"
+    segment = _compiled_segment()
+    policy = segment.post_policies[0]
+    actions = port.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    count = 0
+    for action in actions:
+        count += 1
+        assert action.shape == (2, 2)
+        metadata = port.post_policy_metadata(policy, segment=segment)
+        if count == 1:
+            assert metadata["state"]["max_linear_speed"] == [None, None]
+            assert metadata["state"]["settled_mask"] == [False, False]
+        entity._pose[1, 0, 3] += 0.1
+    assert count == 3
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
+    metadata = port.post_policy_metadata(policy, segment=segment)
+    assert metadata["measurement_source"] == "pose_delta"
+    assert metadata["status"] == "timed_out"
+    assert metadata["state"]["max_linear_speed"] == pytest.approx([0.0, 5.0])
+    json.dumps(metadata, allow_nan=False)
+    # A new episode starts with fresh temporal evidence; the old last pose is not reused.
+    fresh = port.new_task_program_session()
+    iterator = fresh.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    next(iterator)
+    assert fresh.post_policy_metadata(policy, segment=segment)["state"][
+        "max_linear_speed"
+    ] == [None, None]
+    iterator.close()
+
+
+def test_pose_delta_requires_cadence_and_preserves_explicit_snapshot() -> None:
+    cfg = SimulationSettleMonitorCfg(measurement="pose_delta")
+    assert cfg.snapshot().measurement == "pose_delta"
+    with pytest.raises(ValueError, match="step_dt"):
+        _port(torch.zeros(2, 3), preset=cfg)
+    cfg.measurement = "implicit_by_name"
+    with pytest.raises(ValueError, match="measurement"):
+        cfg.snapshot()
+
+
+def test_pose_delta_wait_matches_frozen_b0_command_and_evidence_trace() -> None:
+    frozen = json.loads(
+        (Path(__file__).parent / "data/pose_delta_settle_b0.json").read_text()
+    )
+    port, entity, _ = _port(
+        torch.zeros(2, 3),
+        step_dt=0.02,
+        preset=SimulationSettleMonitorCfg(
+            measurement="pose_delta",
+            min_steps=0,
+            max_steps=3,
+            check_interval_steps=1,
+            required_stable_checks=2,
+        ),
+    )
+    entity.body_data.lin_vel.fill_(100)
+    segment = _compiled_segment()
+    policy = segment.post_policies[0]
+    actions = port.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    commands = []
+    for pose, expected in zip(frozen["poses"], frozen["trace"], strict=True):
+        entity._pose = torch.tensor(pose)
+        try:
+            commands.append(next(actions).tolist())
+        except StopIteration:
+            pass
+        # The arbitrary preset name is the only declaration difference.
+        expected["preset"] = "fast"
+        assert port.post_policy_metadata(policy, segment=segment) == expected
+    assert commands == frozen["commands"]
+    assert port.post_policy_result(policy, segment=segment).tolist() == frozen["result"]
 
 
 def _rigidized_port(
@@ -689,6 +835,44 @@ def test_object_near_target_validates_rows_independently() -> None:
     assert metadata["position_tolerance"] == 0.05
     assert metadata["position_error"] == pytest.approx([0.01, 0.20])
     assert metadata["accepted_mask"] == [True, False]
+
+
+def test_object_near_relative_target_observes_both_rows_independently() -> None:
+    """The validator derives each target from the current reference pose."""
+    segment = _compiled_relative_segment()
+    obj = _RigidObject(torch.tensor([[0.01, -0.1, 0.04], [0.20, -0.1, 0.04]]))
+    reference = _RigidObject(torch.tensor([[0.0, 0.0, 0.0], [0.10, 0.0, 0.0]]))
+    port = SimulationSegmentPolicyPort(
+        _Simulation(entity=obj, reference=reference),
+        _Robot(torch.zeros(2, 2)),
+        SimulationSceneBinding(
+            registry_id="test_scene",
+            rigid_objects=(
+                SimulationRigidObjectBinding(
+                    entity_id="cube",
+                    simulation_uid="native_cube",
+                ),
+                SimulationRigidObjectBinding(
+                    entity_id="reference",
+                    simulation_uid="native_reference",
+                ),
+            ),
+        ),
+    )
+
+    validator = segment.validators[0]
+    result = port.validate(validator, segment=segment)
+    metadata = port.validator_metadata(validator, segment=segment)
+
+    assert result.tolist() == [True, False]
+    assert metadata["kind"] == "object_near_relative_target"
+    assert metadata["object_id"] == "cube"
+    assert metadata["reference_id"] == "reference"
+    assert metadata["displacement"] == pytest.approx([0.0, -0.1, 0.04])
+    assert metadata["position_error"] == pytest.approx([0.01, 0.10])
+    assert metadata["accepted_mask"] == [True, False]
+    assert obj.pose_reads == 1
+    assert reference.pose_reads == 1
 
 
 def test_articulation_joint_position_validates_measured_rows() -> None:

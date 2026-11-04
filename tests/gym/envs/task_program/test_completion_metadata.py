@@ -317,6 +317,7 @@ class _TraceCompiler(SemanticCallCompiler):
             revision=revision,
         )
         analyzed = SimpleNamespace(
+            policy_preset_id=None,
             call=workflow.calls[call_index],
             effect_assurance=EffectAssurance.PROJECTED,
             effect_monitor_ref=None,
