@@ -80,6 +80,8 @@ class _SimulationSettleTarget:
 @dataclass
 class _PolicyLifetime:
     closed: bool = False
+    observation_clock: object | None = None
+    observation_generation: int = 0
 
 
 @configclass
@@ -270,6 +272,8 @@ class SimulationSegmentPolicyPort:
         self._validator_active_masks: dict[int, torch.Tensor] = {}
         self._lift_baselines: dict[int, torch.Tensor] = {}
         self._lifetime = _PolicyLifetime()
+        self._observation_clock: SupportControlClock | None = None
+        self._observation_generation = 0
         self._condition_runtime = None
         conditions = {
             name: cfg
@@ -298,6 +302,45 @@ class SimulationSegmentPolicyPort:
         self._require_open()
         if self._condition_runtime is not None:
             self._condition_runtime.bind_clock(clock)
+        if self._lifetime.observation_clock is not clock:
+            self._lifetime.observation_clock = clock
+            self._lifetime.observation_generation += 1
+        self._observation_clock = clock
+        self._observation_generation = self._lifetime.observation_generation
+
+    @property
+    def observation_clock(self) -> SupportControlClock | None:
+        """Return this session's current observation clock, or None before binding.
+
+        A later session can supersede this owner's observation binding. Reading
+        a superseded clock raises instead of assigning new facts to an old
+        execution. This guard does not manage active actions or cancellation.
+        """
+        self._require_open()
+        if self._observation_clock is None:
+            return None
+        self.validate_observation_scope(self._observation_clock)
+        return self._observation_clock
+
+    def validate_observation_scope(self, clock: SupportControlClock) -> None:
+        """Require the actual bridge's current observation ownership.
+
+        Args:
+            clock: Exact canonical clock supplied by the requesting bridge.
+
+        Raises:
+            ValueError: The session is unbound or superseded by another clock.
+            RuntimeError: Runtime resources are closed.
+        """
+        self._require_open()
+        if (
+            clock is None
+            or self._observation_clock is not clock
+            or self._observation_generation != self._lifetime.observation_generation
+        ):
+            raise ValueError(
+                "Observation capture belongs to another runtime/session clock."
+            )
 
     def close_runtime_resources(self) -> None:
         """Mark condition sessions closed without destroying borrowed resources."""

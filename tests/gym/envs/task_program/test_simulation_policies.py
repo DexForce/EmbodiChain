@@ -1209,3 +1209,39 @@ def test_support_height_uses_highest_qualified_contact_without_averaging():
     )
     assert heights[0].item() == pytest.approx(0.12)
     assert torch.isnan(heights[1])
+
+
+def test_observation_clock_scope_is_local_idempotent_and_does_not_change_default_execution():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    template, _, _ = _port(torch.zeros(2, 3), step_dt=0.04)
+    assert template.observation_clock is None
+    first = template.new_task_program_session()
+    clock = EnvironmentStepClock(0.04)
+    first.bind_clock(clock)
+    assert first.observation_clock is clock
+    first.bind_clock(clock)
+    first.validate_observation_scope(clock)
+    second = template.new_task_program_session()
+    other_clock = EnvironmentStepClock(0.04)
+    second.bind_clock(other_clock)
+    with pytest.raises(ValueError, match="another runtime/session"):
+        first.validate_observation_scope(clock)
+    with pytest.raises(ValueError, match="another runtime/session"):
+        _ = first.observation_clock
+    assert second.observation_clock is other_clock
+    independent, _, _ = _port(torch.zeros(2, 3), step_dt=0.04)
+    independent.bind_clock(clock)
+    assert independent.observation_clock is clock
+    segment = _compiled_segment()
+    policy = segment.post_policies[0]
+    list(
+        first.actions(
+            policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+        )
+    )
+    assert first.post_policy_result(policy, segment=segment).all()
+    template.close_runtime_resources()
+    with pytest.raises(RuntimeError, match="closed"):
+        _ = second.observation_clock
+    assert independent.observation_clock is clock

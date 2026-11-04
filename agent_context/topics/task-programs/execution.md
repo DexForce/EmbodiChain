@@ -174,3 +174,9 @@ The result records missing-observation counts and the last reasons. A row that
 never reestablishes a successful window after missing evidence reports
 `support_result_available=false`; consumers must not interpret that false result
 as a measured task failure. Source-global errors still invalidate every witness.
+
+`SimulationSegmentPolicyPort.observation_clock` exposes only the requesting
+session's current observation binding; an unbound port returns None and a
+superseded session rejects new reads. Same-clock binding is idempotent and the
+generation belongs to the existing owner lifetime, not a global active-run
+registry. Default execution, cancellation and cleanup retain their own protocols.
