@@ -1590,7 +1590,7 @@ def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_p
         )
         np.testing.assert_allclose(
             cfg.solver_cfg[f"{side}_arm"].tcp,
-            [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.21], [0, 0, 0, 1]],
+            [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.20], [0, 0, 0, 1]],
         )
     declared_contacts = set()
     for gripper in suite.enabled_tracks()[0].config["grippers"]:
@@ -1605,7 +1605,7 @@ def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_p
         robot.get_qpos_limits.return_value = torch.tensor([limits])
         _, opened, closed = AtomicSkillScenario._resolve_gripper(robot, gripper)
         torch.testing.assert_close(opened, torch.zeros(6))
-        assert float(closed[0]) == pytest.approx(0.3)
+        assert float(closed[0]) == pytest.approx(0.35)
         assert joints[names[0]].find("mimic") is None
         for name, command in zip(names[1:], closed[1:], strict=True):
             mimic = joints[name].find("mimic")

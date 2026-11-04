@@ -187,17 +187,23 @@ embodichain benchmark motion-generation \
 
 Each hand exposes its six authored linkage joints in explicit command order.
 Opening commands are six zeros; closing commands are
-`[0.3, -0.3, 0.3, -0.3, -0.3, 0.3]` on both hands, matching the URDF mimic
-multipliers. This limits the commanded closure to `0.3 rad` within the authored
-`0.7 rad` range to reduce squeezing the can. Suite version `v4` requires fresh
+`[0.35, -0.35, 0.35, -0.35, -0.35, 0.35]` on both hands, matching the URDF mimic
+multipliers. This limits the commanded closure to half of the authored
+`0.7 rad` range to reduce squeezing the can. Suite version `v5` requires fresh
 frozen inputs.
 Contact scoring uses the two actual inner finger pads on each assembled hand,
 with the standard 5 mm separation threshold.
 
-The flange-relative solver TCP is `Rz(90 degrees)` with `Z=0.21 m`.
+The suite sets `robot.config.tcp_z: 0.20` on both arms, reducing the
+flange-relative solver TCP from `Z=0.21 m` while retaining `Rz(90 degrees)`.
 `grasp_model: robotiq_arg2f_140` supplies the complete open-hand collision
 geometry; preparation and replay pass the solver TCP to GraspKit so its
 registered `Z=0.20 m` contact frame maps to the runtime tool point once.
+TCP calibration alone preserves the physical contact location. The handover
+skill also sets `grasp_depth_offset_m: 0.01` to move the actual contact centre
+1 cm toward the hand (root Z `0.20` to `0.19 m`) for both pickup and receiving
+grasps. Collision surfaces are rebuilt in that contact frame before candidate
+filtering; the resulting TCP poses and depth setting are frozen with the case.
 The new hand and suite identity require newly generated frozen inputs.
 
 | Suite | Use |

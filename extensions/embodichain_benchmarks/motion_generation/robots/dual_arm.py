@@ -49,6 +49,8 @@ class DualArmProvider(RobotProvider):
     reuse its robot. ``gripper_type: panda_hand`` selects the complete native
     Franka hand and TCP; ``robotiq_2f_140`` selects the six-joint Robotiq hand
     and its calibrated TCP. Omission retains the mounted PGI fixture.
+    ``robot.config.tcp_z`` overrides both explicitly selected Robotiq TCPs
+    while preserving their mounting rotations.
     """
 
     control_part = "left_arm"

@@ -53,6 +53,7 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
     GraspAnnotationCfg,
+    FixedGripperCollisionGeometry,
     get_parallel_jaw_collision_geometry,
     ParallelJawGraspCollisionCfg,
 )
@@ -158,6 +159,7 @@ def create_parallel_jaw_grasp_pose_generator(
     approach_alignment_angle: float | None = None,
     gripper_model: ParallelJawGripperModelCfg | None = None,
     root_from_tcp: Sequence[Sequence[float]] | None = None,
+    grasp_depth_offset_m: float = 0.0,
 ) -> ParallelJawGraspPoseGenerator:
     """Create a standalone generator for the sample's mounted gripper.
 
@@ -170,20 +172,63 @@ def create_parallel_jaw_grasp_pose_generator(
         gripper_model: Explicit fixture geometry; omission uses the PGI sample.
         root_from_tcp: Actual fixture TCP relative to the hand root, when it
             differs from the model's default calibration.
+        grasp_depth_offset_m: Move the physical contact centre toward the hand
+            by this distance along canonical approach Z. Collision surfaces and
+            output poses are rebuilt in that contact frame before sampling.
 
     Returns:
         A generator with actual open hand collision surfaces and runtime TCP
         poses. Finite surface checks do not establish continuous mesh or path
         collision freedom.
+
+    Raises:
+        ValueError: If ``grasp_depth_offset_m`` is not finite.
     """
+    if isinstance(grasp_depth_offset_m, bool) or not math.isfinite(
+        grasp_depth_offset_m
+    ):
+        raise ValueError("grasp_depth_offset_m must be finite.")
     model = TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model
+    geometry = get_parallel_jaw_collision_geometry(
+        model.model_id,
+        point_spacing=0.012,
+        root_from_tcp=None if root_from_tcp is None else np.asarray(root_from_tcp),
+    )
+    if grasp_depth_offset_m != 0.0:
+        # A TCP calibration alone preserves physical contact geometry. Rebase
+        # the complete hand surfaces as well, so depth changes are checked by
+        # the sampler rather than applied after collision qualification.
+        source = geometry.provenance
+        contact_shift = np.eye(4)
+        contact_shift[2, 3] = grasp_depth_offset_m
+        shifted = FixedGripperCollisionGeometry.from_urdf(
+            source["urdf_path"],
+            root_link=source["root_link"],
+            tcp_link=source["tcp_link"],
+            collision_links=tuple(
+                dict.fromkeys(part["link"] for part in source["parts"])
+            ),
+            joint_positions=source["joint_positions"],
+            grasp_from_tcp=contact_shift @ np.asarray(source["grasp_from_tcp"]),
+            point_spacing=source["point_spacing_m"],
+            link_from_tcp=np.asarray(source["link_from_tcp"]),
+            mesh_paths=source["mesh_paths"],
+        )
+        geometry = FixedGripperCollisionGeometry(
+            shifted.points,
+            {
+                **source,
+                **shifted.provenance,
+                "root_from_contact_frame": (
+                    np.asarray(source["root_from_contact_frame"])
+                    @ np.linalg.inv(contact_shift)
+                ).tolist(),
+                "grasp_depth_offset_m": grasp_depth_offset_m,
+            },
+        )
     return AntipodalGraspPoseGenerator(
         model,
-        collision_geometry=get_parallel_jaw_collision_geometry(
-            model.model_id,
-            point_spacing=0.012,
-            root_from_tcp=None if root_from_tcp is None else np.asarray(root_from_tcp),
-        ),
+        collision_geometry=geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=n_sample,
             max_candidates=max_candidates,
@@ -690,12 +735,13 @@ def create_dual_tutorial_robot_cfg(
         robot_type: Arm family to mount on both sides.
         uid: Simulation robot identifier.
         urdf_name: Cache name for the assembled dual-arm URDF.
-        tcp_z: Optional explicit PGI local-Z override for Python callers.
-            Omission selects the fixture's handover TCP; UR10/Robotiq uses
-            its separate calibrated mounting transform.
+        tcp_z: Optional local-Z override for PGI or an explicitly selected
+            Robotiq hand, applied to both arms while retaining mounting rotation.
+            Omission selects the fixture's calibrated handover TCP. Legacy
+            implicit UR10/Robotiq callers retain their separate calibration.
         gripper: Explicit mounted hand selection. Native ``panda_hand`` is
             Franka-only and rejects ``tcp_z`` because its URDF owns the TCP.
-            Robotiq uses its full fixture TCP rather than the PGI override.
+            Robotiq retains its mounting rotation when overriding ``tcp_z``.
         solver: UR solver selection; Franka retains its preset unless
             ``"pytorch"`` is explicitly selected.
         ur_ik_nearest_weight: Optional nearest-solution weights for UR IK.
@@ -752,7 +798,12 @@ def create_dual_tutorial_robot_cfg(
         else sample_tool_tcp(
             robot_type,
             point="handover",
-            tcp_z=tcp_z if robot_type != "ur10" and gripper is None else None,
+            tcp_z=(
+                tcp_z
+                if gripper == "robotiq_2f_140"
+                or (robot_type != "ur10" and gripper is None)
+                else None
+            ),
             gripper=gripper,
         )
     )

@@ -1090,6 +1090,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
             "hold_steps": int(config.get("hold_steps", 4)),
             "retreat_steps": int(config.get("retreat_steps", 20)),
             "retreat_distance_m": float(config.get("retreat_distance_m", 0.10)),
+            "grasp_depth_offset_m": float(config.get("grasp_depth_offset_m", 0.0)),
             "control_parts": parts,
         }
         grasp_parts = [values["grasp"] for values in parts.values()]
@@ -1097,6 +1098,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
             int(config.get("grasp_sample_count", 10_000)),
             gripper_model=scenario.grasp_model(),
             root_from_tcp=scenario.grasp_root_from_tcp(),
+            grasp_depth_offset_m=float(parameters["grasp_depth_offset_m"]),
         )
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(

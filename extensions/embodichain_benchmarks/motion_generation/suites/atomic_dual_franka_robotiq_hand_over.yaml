@@ -2,7 +2,7 @@
 # Hand asset: Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf
 schema_version: 1
 name: atomic_dual_franka_robotiq_hand_over
-suite_version: atomic_dual_franka_robotiq_hand_over_v4
+suite_version: atomic_dual_franka_robotiq_hand_over_v5
 profile: smoke
 robot:
   id: dual_franka_robotiq_hand_over
@@ -20,6 +20,7 @@ robot:
     - 0.0
     - -90.0
     gripper_type: robotiq_2f_140
+    tcp_z: 0.20
 planners:
 - id: toppra
   adapter: toppra
@@ -65,13 +66,13 @@ tracks:
       - 0.0
       - 0.0
       grasp_qpos:
-      # Limit closure to 0.3 rad, with the URDF mimic signs on both hands.
-      - 0.3
-      - -0.3
-      - 0.3
-      - -0.3
-      - -0.3
-      - 0.3
+      # Half of the authored 0.7 rad closure, with the URDF mimic signs.
+      - 0.35
+      - -0.35
+      - 0.35
+      - -0.35
+      - -0.35
+      - 0.35
     - control_part: right_eef
       finger_links:
       - right_left_inner_finger_pad
@@ -84,12 +85,12 @@ tracks:
       - 0.0
       - 0.0
       grasp_qpos:
-      - 0.3
-      - -0.3
-      - 0.3
-      - -0.3
-      - -0.3
-      - 0.3
+      - 0.35
+      - -0.35
+      - 0.35
+      - -0.35
+      - -0.35
+      - 0.35
     fixtures:
     - id: support_surface
       kind: cube
@@ -138,6 +139,7 @@ tracks:
       lift_height_m: 0.15
       hand_interp_steps: 10
       grasp_sample_count: 10000
+      grasp_depth_offset_m: 0.01
       pre_action_settle_steps: 500
       cases:
       - name: soda_can_left_to_right
