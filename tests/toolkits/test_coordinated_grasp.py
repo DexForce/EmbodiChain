@@ -362,3 +362,70 @@ def test_shared_target_query_is_rebuilt_when_mesh_changes(monkeypatch):
     sampler.get_dual_arm_valid_grasp_poses(**query)
     assert sum(event["op"] == "surface" for event in trace) == 2
     assert sum(event["op"] == "checker" for event in trace) == 4
+
+
+def test_real_contact_refinement_accepts_opposed_box_grasps_without_fixed_checker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import trimesh
+    from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGeneratorCfg
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        _antipodal_backend as implementation,
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError(
+            "Paired contact refinement constructed a fixed-hand checker"
+        )
+
+    def annotate(backend):
+        backend._hit_point_pairs = torch.tensor(
+            [
+                [[-0.075, -0.03, 0.0], [-0.075, 0.03, 0.0]],
+                [[0.075, -0.03, 0.0], [0.075, 0.03, 0.0]],
+            ]
+        )
+        return backend._hit_point_pairs
+
+    monkeypatch.setattr(implementation, "GripperCollisionChecker", forbidden)
+    monkeypatch.setattr(
+        implementation._AntipodalMeshBackend,
+        "_get_cache_dir",
+        lambda *args: str(tmp_path / "unprepared.npy"),
+    )
+    monkeypatch.setattr(implementation._AntipodalMeshBackend, "annotate", annotate)
+
+    def delegate(role):
+        return AntipodalGraspPoseGenerator(
+            ParallelJawGripperModelCfg(model_id=role),
+            collision_geometry=FixedGripperCollisionGeometry(
+                torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
+            ),
+            collision_cfg=ParallelJawGraspCollisionCfg(filter_ground_collision=False),
+            algorithm_cfg=AntipodalGraspPoseGeneratorCfg(approach_direction_samples=1),
+        )
+
+    mesh = trimesh.creation.box(extents=[0.2, 0.06, 0.1])
+    sampler = coordinated.CoordinatedGraspSampler(
+        delegate("left"),
+        delegate("right"),
+        _geometry("left"),
+        _geometry("right"),
+        cfg=_cfg(),
+    )
+    result = sampler.get_dual_arm_valid_grasp_poses(
+        mesh_vertices=torch.tensor(mesh.vertices, dtype=torch.float32),
+        mesh_triangles=torch.tensor(mesh.faces),
+        obj_poses=torch.eye(4)[None],
+        left_to_right_arm_direction=torch.tensor([1.0, 0, 0]),
+        approach_direction=torch.tensor([0.0, 0, -1]),
+    )[0]
+    for role, x in (("left", -0.075), ("right", 0.075)):
+        assert result[role]["is_success"]
+        torch.testing.assert_close(
+            result[role]["open_lengths"], torch.tensor([0.0602]), atol=1e-6, rtol=0
+        )
+        torch.testing.assert_close(
+            result[role]["grasp_poses"][:, 0, 3], torch.tensor([x]), atol=1e-6, rtol=0
+        )
