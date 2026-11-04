@@ -478,3 +478,32 @@ verifier.
    HeldObjectGuardResult
    PhaseEffectGateRequest
    PhaseEffectGateResult
+
+
+Scoped grasp preparation
+------------------------
+
+``ActionPlanningServices.prepare_grasp_query()`` resolves the declared hand
+calibration by endpoint target ID and binds Scene capture to GraspKit's explicit
+``ClosingContactPolicy`` and the existing isolated Newton backend. It accepts no
+experiment revision selector and installs no alternate skill registration.
+Ordinary PickUp defaults remain unchanged. Source-compatible capture uses the
+caller's explicit 65-sample hand declaration.
+
+Use this service as a context manager. Closing, optional release-opening and
+rigid-scene query resources close together on normal exit, failure or cancellation;
+borrowed simulation entities are never destroyed. ``GraspOpeningTarget`` carries
+already-grounded poses from the same observation scope. An undeclared hand
+calibration fails before capture. Diagnostic metadata never selects policy.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.runtime
+
+.. autosummary::
+   :nosignatures:
+
+   GraspOpeningTarget
+
+.. autoclass:: GraspOpeningTarget
+   :members:
+
+.. automethod:: ActionPlanningServices.prepare_grasp_query
