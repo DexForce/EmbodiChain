@@ -3521,19 +3521,6 @@ classes; sensor acquisition never imports Task Program or Atomic implementation.
    PhysicalEvidenceBatch
    PhysicalEvidenceFrame
 
-embodichain.lab.sim.sensors.joint_opening
------------------------------------------
-
-Robot-owned driver calibration and read-only joint-opening observations.
-No model-name or task-name inference is performed.
-
-.. currentmodule:: embodichain.lab.sim.sensors.joint_opening
-
-.. autosummary::
-
-   DriverOpeningBinding
-   create_joint_opening_reader
-
 embodichain.compute.geometry.grip_contacts
 ------------------------------------------
 
@@ -3558,3 +3545,18 @@ are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrat
 .. autosummary::
 
    GripContactObserver
+   DriverOpeningBinding
+
+``DriverOpeningBinding.bind(robot)`` validates the explicit joint order before
+creating a per-environment reader. It performs no qpos read during binding;
+observations require the entire hand row to be finite and retain the strict
+``abs(measured - open_qpos) < tolerance`` driver threshold. This calibration and
+release interpretation belong to Atomic, not to a separate sensor or reader
+factory. Integrations only select and bind the declared calibration.
+
+The former ``sensors.joint_opening`` module and standalone
+``create_joint_opening_reader`` export are removed. Declarations sealing the
+qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
+
+.. autoclass:: DriverOpeningBinding
+   :members:

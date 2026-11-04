@@ -161,7 +161,10 @@ to the integration and execution thresholds belong to the selected policy.
 The integration resolves those declarations against exact native owners and
 adapts semantic clauses to shared physical requests. Sensor acquisition/history
 lives in `lab.sim.sensors`; physical grip interpretation lives in
-`lab.sim.atomic_actions.grip_evidence`; contact arithmetic lives in
+`lab.sim.atomic_actions.grip_evidence`, including `DriverOpeningBinding.bind`
+for calibrated hand-opening observations. Factories bind those declarations
+before creating sensor resources; sensors do not own release predicates or
+experiment labels. Contact arithmetic lives in
 `compute.geometry.grip_contacts`. `lab.sim.evidence` is the common frame/batch/request
 owner. Existing Atomic public imports refer to the same types. No raw acquisition
 module imports Task Program or Task Engine. Invocation and episode associations

@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 import math
 from typing import Any
 import torch
@@ -34,7 +35,7 @@ from embodichain.lab.sim.sensors.contact.sampling import (
     CONTACT_IMPULSES,
 )
 
-__all__ = ["GripContactObserver"]
+__all__ = ["GripContactObserver", "DriverOpeningBinding"]
 _INVALID_CONTACT = (
     "Target grip contact is incomplete, one-sided, non-opposing, or saturated."
 )
@@ -46,6 +47,114 @@ _RELEASE_SCOPE = (
 def _identifier(value: str, name: str) -> None:
     if type(value) is not str or not value or value != value.strip():
         raise ValueError(f"{name} must be a non-empty exact identifier.")
+
+
+@dataclass(frozen=True, slots=True)
+class DriverOpeningBinding:
+    """Explicit joint-order calibration for the measured open-hand observation.
+
+    The declaring robot/profile owns driver selection; this layer does not infer
+    mimic joints or hand geometry from a model name or a control-part suffix.
+
+    Args:
+        control_part: Explicit hand control-group name.
+        joint_names: Complete joint order reported for that control group.
+        driver_indices: Indices of the measured driving joints in that order.
+        open_qpos: Open configuration in the complete declared joint order.
+        tolerance: Positive absolute driver-position tolerance in joint units.
+    """
+
+    control_part: str
+    joint_names: tuple[str, ...]
+    driver_indices: tuple[int, ...]
+    open_qpos: tuple[float, ...]
+    tolerance: float
+
+    def __post_init__(self) -> None:
+        _identifier(self.control_part, "control_part")
+        if (
+            type(self.joint_names) is not tuple
+            or not self.joint_names
+            or len(set(self.joint_names)) != len(self.joint_names)
+        ):
+            raise ValueError("joint_names must be a nonempty unique tuple.")
+        for name in self.joint_names:
+            _identifier(name, "joint_names")
+        if (
+            type(self.driver_indices) is not tuple
+            or not self.driver_indices
+            or len(set(self.driver_indices)) != len(self.driver_indices)
+            or any(
+                type(i) is not int or not 0 <= i < len(self.joint_names)
+                for i in self.driver_indices
+            )
+        ):
+            raise ValueError("driver_indices must select unique declared joints.")
+        if (
+            type(self.open_qpos) is not tuple
+            or len(self.open_qpos) != len(self.joint_names)
+            or not all(
+                not isinstance(value, bool)
+                and isinstance(value, (int, float))
+                and math.isfinite(value)
+                for value in self.open_qpos
+            )
+        ):
+            raise ValueError("open_qpos must match the complete finite joint order.")
+        if (
+            isinstance(self.tolerance, bool)
+            or not math.isfinite(self.tolerance)
+            or self.tolerance <= 0
+        ):
+            raise ValueError("Opening tolerance must be finite and positive.")
+
+    def bind(self, robot: object) -> Callable[[int], Mapping[str, object]]:
+        """Bind the declared joint order to a read-only open-hand observation.
+
+        Args:
+            robot: Robot exposing joint names, control indices and measured qpos.
+
+        Returns:
+            A per-environment reader. Binding checks joint order without reading
+            qpos; observations keep the strict opening threshold and require the
+            complete hand row to be finite. They do not prove contact separation.
+        """
+        binding = self
+        names = tuple(
+            robot.joint_names[int(index)]
+            for index in robot.get_joint_ids(name=self.control_part)
+        )
+        if names != self.joint_names:
+            raise ValueError(
+                "Release opening requires the exact configured joint order."
+            )
+
+        def observe(env_id: int) -> Mapping[str, object]:
+            qpos = robot.get_qpos(name=binding.control_part)
+            if (
+                qpos.ndim != 2
+                or qpos.shape[1] != len(binding.joint_names)
+                or not 0 <= env_id < qpos.shape[0]
+            ):
+                raise ValueError(
+                    "Release joint observation has an invalid shape or environment."
+                )
+            indices = list(binding.driver_indices)
+            measured = qpos[env_id, indices]
+            target = measured.new_tensor(binding.open_qpos)[indices]
+            finite = bool(torch.isfinite(qpos[env_id]).all())
+            return {
+                "finite": finite,
+                "open": finite
+                and bool(((measured - target).abs() < binding.tolerance).all()),
+                "driving_joint_names": [binding.joint_names[i] for i in indices],
+                "measured_qpos": measured.detach().cpu().tolist(),
+                "open_qpos": target.detach().cpu().tolist(),
+                "tolerance": binding.tolerance,
+                "scope": _RELEASE_SCOPE,
+            }
+
+        return observe
 
 
 def _finite_trace_copy(value: Any, path: str, errors: list[dict[str, str]]) -> Any:
