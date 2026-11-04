@@ -151,6 +151,12 @@ hand's geometry, including its 0.08 m maximum opening. Single-arm declarations
 use `gripper.control_part: eef`; dual declarations use the `grippers` list.
 Omitting these new selectors retains the existing PGI fixture behavior.
 
+Physical grasp scoring also requires explicit `finger_links`, one collision
+link per finger. Native Panda uses `[fr3_leftfinger, fr3_rightfinger]`; mounted
+dual hands use their actual assembled link names. Custom control-part names
+remain valid. Component-backed tracks may supply only these benchmark contact
+settings in `config.gripper`; the component still owns the command presets.
+
 GraspKit returns sampled poses already converted once to the declared runtime
 TCP; see its [frame contract](../../../embodichain/toolkits/graspkit/README.md#frames-and-collision-scope).
 The Placement provider converts its explicitly authored canonical top/handle
@@ -561,11 +567,31 @@ holds. Non-Atomic calls keep the default continuous spline; NMG's request and
 rollout budget are unchanged. Phase sample counts remain lower bounds, with
 physical execution and independent compiled timing checks determining the result.
 
-The physical standard is `atomic-skill-v2`. Pour checks peak rotation, lift and
+The physical standard is `atomic-skill-v3`. Grasp and retention stages require
+every configured finger to have a valid contact with its target object at the
+same observation time. The minimum signed contact separation for each finger
+must be strictly below `gripper.contact_distance_threshold_m` (default **0.005 m**).
+Penetrating contacts have negative separation; a valid query with no matching
+contact is a miss. Joint position alone cannot establish a grasp. The dedicated
+close window supplies grasp-end evidence, while retention uses the final sample
+of its declared window. Contacts from different times cannot be combined.
+Articulated targets use their configured `target_link`; coordinated placement
+uses the support object's identity for the supporting gripper.
+
+Replay records compact per-finger distances alongside the existing synchronized
+channels. Missing finger/actor bindings, unsupported contact geometry and
+truncated contact buffers produce unavailable evidence, rather than a measured
+miss or joint-state fallback. `physics.grasp_contact_max_contacts_per_env`
+defaults to 256; query overflow conservatively invalidates all affected rows.
+Trial `metadata.grasp_contacts` retains bindings, thresholds and unavailable
+reasons. These measurements are independent of optional replay diagnostics.
+The new physical protocol and contact settings change scoring fingerprints;
+preserve earlier artifacts and reevaluate under the new identity.
+
+Pour checks peak rotation, lift and
 retention, plus return to the initial **full orientation** during terminal settle
 within the existing rotation tolerance. Catalogues intending upright-object tilt
-must choose a horizontal object-local axis. Preserve v1 artifacts and use new
-protocol identities for this changed success definition.
+must choose a horizontal object-local axis.
 
 Reference preparation first uses exact sequential IK, then may use bounded
 search inside the original position/rotation arrival region for rejected rows.

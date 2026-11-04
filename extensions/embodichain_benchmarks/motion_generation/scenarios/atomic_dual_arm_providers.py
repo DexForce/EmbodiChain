@@ -97,12 +97,6 @@ if TYPE_CHECKING:
 
 __all__: list[str] = []
 
-# A parallel-jaw gripper closing on an object stops at the object's width; one
-# that misses runs to its grasp command.  The tutorial PGI holding the plastic
-# tray stops about 3.4 mm short of its 0.026 command and reaches the command
-# within 0.1 mm when it closes on nothing.
-_GRIPPER_HOLD_GAP = 0.001
-
 
 class _HandOverEvaluator:
     """Evaluate measured pickup, transfer, handover, and placement stages."""
@@ -125,25 +119,27 @@ class _HandOverEvaluator:
         batches: list[Sequence[Mapping[str, StageEvidence]]] = []
         if pickup is not None:
             grasped = gripper_holding(
-                pickup, observation, source, gap=_GRIPPER_HOLD_GAP
+                pickup, observation, source, object_id=case.object_id
             )
             if grasped is not None:
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(pickup, observation=observation),
+                        valid_mask=trace_validity(
+                            pickup, observation=observation, contact_parts=(source,)
+                        ),
                         stage_id="grasped",
                         window="grasp_end",
                         measurements={"grasp_established": grasped},
-                        method="source_gripper_joint_state",
-                        source="measured_proxy",
+                        method="target_finger_contacts_and_state",
+                        source="contact_sensor",
                     )
                 )
         if transfer is not None:
             source_held = gripper_holding(
-                transfer, observation, source, gap=_GRIPPER_HOLD_GAP
+                transfer, observation, source, object_id=case.object_id
             )
             destination_held = gripper_holding(
-                transfer, observation, destination, gap=_GRIPPER_HOLD_GAP
+                transfer, observation, destination, object_id=case.object_id
             )
             min_height = minimum_height_above_initial_support(transfer, case)
             if (
@@ -153,21 +149,25 @@ class _HandOverEvaluator:
             ):
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(transfer, observation=observation),
+                        valid_mask=trace_validity(
+                            transfer,
+                            observation=observation,
+                            contact_parts=(source, destination),
+                        ),
                         stage_id="transferred",
                         window="transfer_end",
                         measurements={
                             "both_grasps_established": source_held & destination_held,
                             "min_height_above_support_m": min_height,
                         },
-                        method="dual_gripper_and_object_trace",
-                        source="measured_proxy",
+                        method="target_finger_contacts_and_state",
+                        source="contact_sensor",
                     )
                 )
         if exchange is not None:
             giver_released = gripper_released(exchange, observation, source)
             receiver_retained = gripper_holding(
-                exchange, observation, destination, gap=_GRIPPER_HOLD_GAP
+                exchange, observation, destination, object_id=case.object_id
             )
             min_height = minimum_height_above_initial_support(exchange, case)
             if (
@@ -177,7 +177,11 @@ class _HandOverEvaluator:
             ):
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(exchange, observation=observation),
+                        valid_mask=trace_validity(
+                            exchange,
+                            observation=observation,
+                            contact_parts=(destination,),
+                        ),
                         stage_id="handed_over",
                         window="handover_end",
                         measurements={
@@ -185,8 +189,8 @@ class _HandOverEvaluator:
                             "receiver_retained": receiver_retained,
                             "min_height_above_support_m": min_height,
                         },
-                        method="dual_gripper_and_object_trace",
-                        source="measured_proxy",
+                        method="target_finger_contacts_and_state",
+                        source="contact_sensor",
                     )
                 )
         if settle is not None and settle.object_pose is not None:
@@ -252,22 +256,26 @@ class _CoordinatedPickmentEvaluator:
         settle = replay_trace(observation, "dual_pick_settle")
         batches: list[Sequence[Mapping[str, StageEvidence]]] = []
         if grasp is not None:
-            left_held = gripper_holding(grasp, observation, left, gap=_GRIPPER_HOLD_GAP)
+            left_held = gripper_holding(
+                grasp, observation, left, object_id=case.object_id
+            )
             right_held = gripper_holding(
-                grasp, observation, right, gap=_GRIPPER_HOLD_GAP
+                grasp, observation, right, object_id=case.object_id
             )
             if left_held is not None and right_held is not None:
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(grasp, observation=observation),
+                        valid_mask=trace_validity(
+                            grasp, observation=observation, contact_parts=(left, right)
+                        ),
                         stage_id="dual_grasped",
                         window="grasp_end",
                         measurements={
                             "left_grasp_established": left_held,
                             "right_grasp_established": right_held,
                         },
-                        method="dual_gripper_joint_state",
-                        source="measured_proxy",
+                        method="target_finger_contacts_and_state",
+                        source="contact_sensor",
                     )
                 )
         if lift is not None and lift.object_pose is not None:
@@ -315,10 +323,10 @@ class _CoordinatedPickmentEvaluator:
                 )
         if settle is not None and settle.object_pose is not None:
             left_held = gripper_holding(
-                settle, observation, left, gap=_GRIPPER_HOLD_GAP
+                settle, observation, left, object_id=case.object_id
             )
             right_held = gripper_holding(
-                settle, observation, right, gap=_GRIPPER_HOLD_GAP
+                settle, observation, right, object_id=case.object_id
             )
             min_height = minimum_height_above_initial_support(settle, case)
             final = settle.object_pose[-1]
@@ -344,15 +352,19 @@ class _CoordinatedPickmentEvaluator:
                 if left_held is not None and right_held is not None:
                     batches.append(
                         stage_evidence_batch(
-                            valid_mask=trace_validity(settle, observation=observation),
+                            valid_mask=trace_validity(
+                                settle,
+                                observation=observation,
+                                contact_parts=(left, right),
+                            ),
                             stage_id="held",
                             window="terminal_settle",
                             measurements={
                                 "object_retained": left_held & right_held,
                                 "min_height_above_support_m": min_height,
                             },
-                            method="dual_gripper_and_object_settle_trace",
-                            source="measured_proxy",
+                            method="target_finger_contacts_and_state",
+                            source="contact_sensor",
                         )
                     )
         evidence = (
@@ -439,20 +451,24 @@ class _CoordinatedPlacementEvaluator:
         if release is not None:
             placing_released = gripper_released(release, observation, placing_part)
             support_retained = gripper_holding(
-                release, observation, support_part, gap=_GRIPPER_HOLD_GAP
+                release, observation, support_part, object_id=support_id
             )
             if placing_released is not None and support_retained is not None:
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(release, observation=observation),
+                        valid_mask=trace_validity(
+                            release,
+                            observation=observation,
+                            contact_parts=(support_part,),
+                        ),
                         stage_id="released",
                         window="release_end",
                         measurements={
                             "placing_release_established": placing_released,
                             "support_retained": support_retained,
                         },
-                        method="role_gripper_joint_state",
-                        source="measured_proxy",
+                        method="target_finger_contacts_and_state",
+                        source="contact_sensor",
                     )
                 )
         if (
@@ -1195,19 +1211,19 @@ class _HandOverCases(AtomicSkillCaseProvider):
                 "handover_pickup",
                 pickup.start,
                 pickup.stop,
-                frozenset({"gripper_qpos"}),
+                frozenset({"gripper_contact", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "handover_transfer",
                 transfer_start.start,
                 transfer_end.stop,
-                frozenset({"object_pose", "gripper_qpos"}),
+                frozenset({"gripper_contact", "object_pose", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "handover_exchange",
                 exchange.start,
                 exchange.stop,
-                frozenset({"object_pose", "gripper_qpos"}),
+                frozenset({"gripper_contact", "object_pose", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "handover_settle",
@@ -1406,7 +1422,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
                 "dual_pick_grasp",
                 close.start,
                 close.stop,
-                frozenset({"gripper_qpos"}),
+                frozenset({"gripper_contact", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "dual_pick_lift",
@@ -1424,7 +1440,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
                 "dual_pick_settle",
                 waypoint_count,
                 waypoint_count,
-                frozenset({"object_pose", "gripper_qpos"}),
+                frozenset({"gripper_contact", "object_pose", "gripper_qpos"}),
                 include_settle=True,
             ),
         )
@@ -1887,7 +1903,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
                 "coordinated_place_release",
                 release.start,
                 release.stop,
-                frozenset({"gripper_qpos"}),
+                frozenset({"gripper_contact", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "coordinated_place_settle",
