@@ -543,3 +543,20 @@ closed convex topology; it does not establish dynamic path clearance.
 .. autofunction:: capture_revolute_source_seal
 
 .. autofunction:: qualify_revolute_grip_shell
+
+Native planar observations
+--------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.planar_observation
+
+Capture scaled native geometry using exact object UIDs and measure supplied
+observation poses. Object replacement invalidates the observer. Unsupported or
+missing geometry raises an acquisition error; measured footprint containment
+is not evidence of contact support, release, stability or task completion.
+
+.. autosummary::
+
+   NativePlanarPlacement
+
+.. autoclass:: NativePlanarPlacement
+   :members:

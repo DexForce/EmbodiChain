@@ -1033,10 +1033,13 @@ embodichain.lab.gym.envs.embodied_env
 embodichain.lab.sim.motion.planners.curobo.payload
 --------------------------------------------------
 
-Runtime observation values for a fresh B=1 cuRobo query. Full joint state and
-world-to-base transform belong to the query snapshot; an optional carried body
-owns its identity, control part, local spheres and observed world pose. These
-values are separate from serialized planner configuration.
+Runtime observation values for a fresh cuRobo query. Without payload, queries
+support the complete robot environment batch in canonical row order, with a
+shared static collision world and identical passive joint locks. Full joint
+state and world-to-base transforms belong to the query snapshot. Payload queries
+remain B=1; the carried body owns its identity, control part, local spheres and
+observed world pose. These values are separate from serialized configuration.
+Subsets, reordered environments, and per-environment worlds are unsupported.
 
 The owned motion factory closes backend-local attachments on exit and makes no
 skill-phase decisions. Queries require CUDA graphs off, a static snapshot world
@@ -1140,6 +1143,93 @@ embodichain.lab.sim.scene.expansion.persistence
    LoadedSceneVariants
    save_scene_variants
    load_scene_variants
+
+embodichain.lab.sim.sensors.contact.sampling
+---------------------------------------------------------------------
+
+ContactSensor acquisition into the existing PhysicalEvidenceFrame and
+PhysicalEvidenceBatch contracts. The first axis follows explicit native environment
+IDs; a valid-contact mask accompanies raw actor pairs, Arena-frame positions and
+normals, and native impulses. Per-channel validity distinguishes unsupported
+capabilities, nonfinite active data, saturation and source drift from measured
+negative observations. Native contact revision remains separate from runtime
+observation revision. The Default-only revision reader fails explicitly when its
+SDK contract is unavailable.
+
+``sample`` keeps frame tensors on its request's environment-ID device. The
+``collect`` provider port retains that same device contract. Host observers may
+request CPU frames; ``source_device`` records where the original numerical
+observation was produced. The common frame has no invocation field.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
+
+.. autosummary::
+
+   CONTACT_ACTOR_IDS
+   CONTACT_VALID_MASK
+   CONTACT_NORMALS
+   CONTACT_IMPULSES
+   CONTACT_POSITIONS
+   ContactEvidenceSample
+   ContactEvidenceSampler
+   ContactSourceStamp
+   native_contact_revision
+
+embodichain.lab.sim.sensors.contact.timeline
+---------------------------------------------------------------------
+
+Bounded raw substep history attached with
+``sensor.add_sampling_observer(name, timeline)``. The host supplies a control
+clock returning completed steps and elapsed control time, or None while inactive,
+and makes the sensor available in its environment sensor suite. BaseEnv.step
+then drives the existing begin/substep hooks; the observer never fetches a second
+time or advances physics.
+
+Records retain only packed valid contacts on CPU. Reset clears selected
+environments and advances their generations, leaving other rows intact. Loss,
+missing source revisions, incomplete intervals and capacity exhaustion remain
+explicit. The contact-row budget is a soft threshold checked before each whole sample;
+no native sample is truncated. With N environments and per-environment sensor
+capacity C, charged rows stay below ``max_contact_rows + N*C``. Once the threshold
+is reached, the next sample records unavailable capacity loss. Control-step and
+substep caps also bound empty histories.
+Frontend code owns actor/semantic label maps, serialized report schema IDs and
+any task-success evaluation.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
+
+.. autosummary::
+
+   ContactTimeline
+   ContactTimelineCfg
+
+embodichain.lab.task_program.integrations.simulation.grip_evidence
+------------------------------------------------------------------
+
+Target-specific paired-pad observations using explicit semantic/native object
+bindings and control-part/pad-link declarations. NativeGripEvidenceFactory uses
+the public control-part provider injection API and preserves its provider ID and
+revision. Each provider owns its observer and bounded raw-query trace.
+
+Physical interpretation revision 1 preserves the opposed positive-impulse
+criterion and absent-positive-contact observations. Revision 2 requires explicit
+opening calibration and opt-in; its one-sided open-hand release observation is
+not geometric separation or acquisition evidence. Driver indices and joint names
+are supplied by the robot/profile owner, with no model-name or suffix inference.
+
+Host frames receive all normal public ownership/validity checks. Grip arithmetic
+still runs on the original sensor device and BinaryEffectObservation returns on
+the caller's context device. Raw trace data remains observational; application
+serializers and TaskSpec evaluation belong outside this module.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.grip_evidence
+
+.. autosummary::
+
+   NativeGripEvidenceCfg
+   NativeGripEvidenceFactory
+   NativeGripEvidenceProvider
+   NativeGripObserver
 
 embodichain.lab.sim.scene.mesh_snapshot
 ---------------------------------------
@@ -2184,10 +2274,10 @@ embodichain.lab.sim.sensors.camera
    Camera
    CameraCfg
 
-embodichain.lab.sim.sensors.contact_sensor
+embodichain.lab.sim.sensors.contact.sensor
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact_sensor
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sensor
 
 .. autosummary::
 
@@ -3416,3 +3506,57 @@ Typed physical predicates provide shared distance and height measurements for RL
 .. autofunction:: evaluate_near_target
 
 .. autofunction:: evaluate_below_height
+
+embodichain.lab.sim.evidence
+----------------------------
+
+Shared physical observation values. Atomic public imports refer to these same
+classes; sensor acquisition never imports Task Program or Atomic implementation.
+
+.. currentmodule:: embodichain.lab.sim.evidence
+
+.. autosummary::
+
+   PhysicalEvidenceRequest
+   PhysicalEvidenceBatch
+   PhysicalEvidenceFrame
+
+embodichain.compute.geometry.grip_contacts
+------------------------------------------
+
+Pure bilateral contact arithmetic on explicitly supplied actor pairs, normals
+and impulses. Invalid or ambiguous data remains distinct from a measured negative.
+
+.. currentmodule:: embodichain.compute.geometry.grip_contacts
+
+.. autosummary::
+
+   classify_contacts
+
+embodichain.lab.sim.atomic_actions.grip_evidence
+------------------------------------------------
+
+Shared physical grip interpretation consumes a PhysicalEvidenceRequest and
+explicit actor bindings, without Semantic Call or Task Program types. Results
+are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrations.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.grip_evidence
+
+.. autosummary::
+
+   GripContactObserver
+   DriverOpeningBinding
+
+``DriverOpeningBinding.bind(robot)`` validates the explicit joint order before
+creating a per-environment reader. It performs no qpos read during binding;
+observations require the entire hand row to be finite and retain the strict
+``abs(measured - open_qpos) < tolerance`` driver threshold. This calibration and
+release interpretation belong to Atomic, not to a separate sensor or reader
+factory. Integrations only select and bind the declared calibration.
+
+The former ``sensors.joint_opening`` module and standalone
+``create_joint_opening_reader`` export are removed. Declarations sealing the
+qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
+
+.. autoclass:: DriverOpeningBinding
+   :members:
