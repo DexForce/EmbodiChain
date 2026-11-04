@@ -285,3 +285,37 @@ def test_manager_reset_preserves_unselected_rows() -> None:
     torch.testing.assert_close(manager.action[1], action[1])
     torch.testing.assert_close(manager.get_term("arm").raw_actions[0], torch.zeros(2))
     torch.testing.assert_close(manager.get_term("arm").raw_actions[1], action[1])
+
+
+def test_substep_refresh_preserves_inactive_position_holds():
+    """A refreshed command cannot move a completed demo row."""
+    from action_test_utils import FakeAction, make_action_env
+    from embodichain.lab.gym.envs.managers import ActionManager, ActionTermCfg
+
+    class TrackingAction(FakeAction):
+        requires_substep_update = True
+
+        def update_substep(self):
+            self.processed_actions.fill_(0.8)
+
+    env = make_action_env(num_envs=2, joint_names=("joint",))
+    manager = ActionManager(
+        {
+            "arm": ActionTermCfg(
+                func=TrackingAction,
+                params={"action_dim": 1, "low": -1.0, "high": 1.0, "joint_ids": (0,)},
+            )
+        },
+        env,
+    )
+    manager.process_action(torch.tensor([[0.2], [0.3]]))
+    manager.mask_inactive(torch.tensor([True, False]))
+    manager.apply_substep_actions()
+    torch.testing.assert_close(
+        manager.get_term("arm").processed_actions, torch.tensor([[0.8], [0.0]])
+    )
+    manager.process_action(torch.tensor([[0.4], [0.5]]))
+    manager.apply_substep_actions()
+    torch.testing.assert_close(
+        manager.get_term("arm").processed_actions, torch.full((2, 1), 0.8)
+    )

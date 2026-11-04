@@ -48,6 +48,7 @@ __all__ = [
     "JointVelocityAction",
     "ParallelGripperAction",
     "RelativeEefPoseAction",
+    "RelativeEefDlsAction",
     "RelativeJointPositionAction",
     "register_action_contract",
     "resolve_action_contract",
@@ -620,6 +621,203 @@ class EefPoseAction(ActionTerm):
         self._ik_success[ids] = False
 
 
+class RelativeEefDlsAction(EefPoseAction):
+    """Track an unbounded relative EEF request on every physics substep.
+
+    Translation and rotation-vector inputs are scaled in the arena frame.
+    The target is held for the control interval; each substep solves the
+    damped Jacobian system from measured joints and applies joint limits.
+    """
+
+    contract_id: ClassVar[str] = "eef_pose.relative_substep_dls@1"
+    requires_substep_update: ClassVar[bool] = True
+
+    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
+        """Bind an arm and its fixed control-interval target.
+
+        Args:
+            cfg: Term parameters: ``part_name``, positive ``translation_scale``
+                and ``rotation_scale`` (both 0.5), and ``damping`` (0.01).
+            env: Environment owning the robot and physics loop.
+        """
+        if "pose_representation" in cfg.params or "scale" in cfg.params:
+            raise ValueError(
+                "RelativeEefDlsAction uses xyz/rotation-vector inputs and separate scales."
+            )
+        super().__init__(cfg, env)
+        self._translation_scale = float(cfg.params.get("translation_scale", 0.5))
+        self._rotation_scale = float(cfg.params.get("rotation_scale", 0.5))
+        self._damping = float(cfg.params.get("damping", 0.01))
+        for name, value in (
+            ("translation_scale", self._translation_scale),
+            ("rotation_scale", self._rotation_scale),
+            ("damping", self._damping),
+        ):
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be positive and finite; found {value}.")
+        self._solver = env.robot.get_solver(self._part_name)
+        self._target_pose = torch.eye(4, device=self.device).repeat(self.num_envs, 1, 1)
+        self._identity = torch.eye(6, device=self.device)
+        self._descriptor = ActionTermDescriptor(
+            representation="relative_eef_pose",
+            action_dim=6,
+            feature_names=(
+                "delta_x",
+                "delta_y",
+                "delta_z",
+                "delta_rx",
+                "delta_ry",
+                "delta_rz",
+            ),
+            units=("unitless",) * 6,
+            normalization=None,
+            joint_names=self._joint_names,
+            metadata={
+                "frame": "arena",
+                "rotation": "rotation_vector",
+                "translation_scale": self._translation_scale,
+                "rotation_scale": self._rotation_scale,
+                "damping": self._damping,
+                "update": "physics_substep",
+                "request_clipping": False,
+            },
+            contract=self.resolved_contract_id(),
+        )
+
+    def _measured_pose(self) -> torch.Tensor:
+        return self._env.robot.compute_fk(
+            self._env.robot.get_qpos()[:, list(self._joint_ids)],
+            name=self._part_name,
+            to_matrix=True,
+        )
+
+    def _action_from_joint_targets(self, qpos: torch.Tensor) -> torch.Tensor:
+        """Express a joint-position expert target as the same relative request.
+
+        Args:
+            qpos: Full robot joint targets, shaped ``(num_envs, dof)``.
+
+        Returns:
+            Unbounded xyz/rotation-vector actions, shaped ``(num_envs, 6)``.
+        """
+        from scipy.spatial.transform import Rotation
+
+        current = self._measured_pose()
+        target = self._env.robot.compute_fk(
+            qpos[:, list(self._joint_ids)], name=self._part_name, to_matrix=True
+        )
+        delta = Rotation.from_matrix(
+            (target[:, :3, :3] @ current[:, :3, :3].mT).detach().cpu().numpy()
+        ).as_rotvec()
+        rotation = torch.as_tensor(delta, dtype=current.dtype, device=self.device)
+        return torch.cat(
+            (
+                (target[:, :3, 3] - current[:, :3, 3]) / self._translation_scale,
+                rotation / self._rotation_scale,
+            ),
+            dim=-1,
+        )
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        """Set a target from measured pose without clipping the request.
+
+        Args:
+            actions: Finite floating actions shaped ``(num_envs, 6)``.
+        """
+        from scipy.spatial.transform import Rotation
+
+        if (
+            not isinstance(actions, torch.Tensor)
+            or not actions.is_floating_point()
+            or actions.shape != self._raw_actions.shape
+            or actions.device != self._raw_actions.device
+            or not bool(torch.isfinite(actions).all())
+        ):
+            raise ValueError(
+                f"Expected finite floating actions with shape {tuple(self._raw_actions.shape)} on {self.device}."
+            )
+        self._previous_raw_actions.copy_(self._raw_actions)
+        self._raw_actions.copy_(actions)
+        current = self._measured_pose()
+        self._target_pose.copy_(current)
+        self._target_pose[:, :3, 3] += actions[:, :3] * self._translation_scale
+        delta = Rotation.from_rotvec(
+            (actions[:, 3:] * self._rotation_scale).detach().cpu().numpy()
+        )
+        rotation = torch.as_tensor(
+            delta.as_matrix(), dtype=current.dtype, device=self.device
+        )
+        self._target_pose[:, :3, :3] = rotation @ current[:, :3, :3]
+        self.update_substep()
+
+    def process_joint_targets(self, qpos: torch.Tensor) -> None:
+        """Retain the expert's exact FK target and record its relative action.
+
+        Args:
+            qpos: Full robot joint-position expert targets.
+        """
+        actions = self._action_from_joint_targets(qpos)
+        self._previous_raw_actions.copy_(self._raw_actions)
+        self._raw_actions.copy_(actions)
+        self._target_pose.copy_(
+            self._env.robot.compute_fk(
+                qpos[:, list(self._joint_ids)],
+                name=self._part_name,
+                to_matrix=True,
+            )
+        )
+        self.update_substep()
+
+    def update_substep(self) -> None:
+        """Recompute bounded joint targets toward the held EEF target."""
+        from scipy.spatial.transform import Rotation
+
+        current = self._measured_pose()
+        qpos = self._env.robot.get_qpos().clone()
+        delta = Rotation.from_matrix(
+            (self._target_pose[:, :3, :3] @ current[:, :3, :3].mT)
+            .detach()
+            .cpu()
+            .numpy()
+        ).as_rotvec()
+        error = torch.cat(
+            (
+                self._target_pose[:, :3, 3] - current[:, :3, 3],
+                torch.as_tensor(delta, dtype=qpos.dtype, device=self.device),
+            ),
+            dim=-1,
+        )
+        jacobian = self._env.robot.compute_jacobian(
+            qpos,
+            end_link_name=self._solver.end_link_name,
+            root_link_name=self._solver.root_link_name,
+        )
+        transpose = jacobian.mT
+        increment = transpose @ torch.linalg.solve(
+            jacobian @ transpose + self._damping**2 * self._identity,
+            error.unsqueeze(-1),
+        )
+        limits = self._env.robot.get_qpos_limits()[:, list(self._joint_ids)]
+        self._processed_actions.copy_(
+            (qpos[:, list(self._joint_ids)] + increment.squeeze(-1)).clamp(
+                limits[..., 0], limits[..., 1]
+            )
+        )
+        self._ik_success.copy_(torch.isfinite(self._processed_actions).all(dim=-1))
+        if not bool(self._ik_success.all()):
+            raise ValueError("RelativeEefDlsAction produced nonfinite joint targets.")
+
+    def reset(self, env_ids: list[int] | torch.Tensor | None = None) -> None:
+        """Discard target history for selected rows.
+
+        Args:
+            env_ids: Selected rows, or all rows.
+        """
+        super().reset(env_ids)
+        ids = slice(None) if env_ids is None else env_ids
+        self._target_pose[ids] = torch.eye(4, device=self.device)
+
+
 class RelativeEefPoseAction(EefPoseAction):
     """Convert normalized arena-frame pose deltas into selected-arm targets.
 
@@ -914,6 +1112,9 @@ class ParallelGripperAction(ActionTerm):
         self._joint_names = tuple(
             env.robot.joint_names[index] for index in self._joint_ids
         )
+        self._open_on_zero = params.get("open_on_zero", True)
+        if type(self._open_on_zero) is not bool:
+            raise ValueError("open_on_zero must be boolean.")
         self._command_mode = str(params.get("command_mode", "continuous"))
         if self._command_mode not in {"continuous", "binary"}:
             raise ValueError("command_mode must be 'continuous' or 'binary'.")
@@ -968,7 +1169,10 @@ class ParallelGripperAction(ActionTerm):
             units=("normalized",),
             normalization="minus_one_to_one",
             joint_names=self._joint_names,
-            metadata={"command_mode": self._command_mode},
+            metadata={
+                "command_mode": self._command_mode,
+                "open_on_zero": self._open_on_zero,
+            },
             contract=self.resolved_contract_id(),
         )
 
@@ -1005,6 +1209,23 @@ class ParallelGripperAction(ActionTerm):
     def part_name(self) -> str:
         """Return the robot control part owning the gripper joints."""
         return self._part_name
+
+    def process_joint_targets(self, qpos: torch.Tensor) -> None:
+        """Encode a binary expert gripper target as an opening/closing request.
+
+        Args:
+            qpos: Full robot joint-position targets.
+
+        The encoded opening/closing request becomes the term's raw action.
+        """
+        if self._command_mode != "binary":
+            raise NotImplementedError(
+                "Joint-target conversion requires a binary gripper."
+            )
+        selected = qpos[:, list(self._joint_ids)]
+        opened = (selected - self._open_command).square().sum(-1)
+        closed = (selected - self._close_command).square().sum(-1)
+        self.process_actions(torch.where(opened < closed, 1.0, -1.0).unsqueeze(-1))
 
     @property
     def command_mode(self) -> str:
@@ -1072,7 +1293,11 @@ class ParallelGripperAction(ActionTerm):
         else:
             self._processed_actions.copy_(
                 torch.where(
-                    self._raw_actions >= 0.0,
+                    (
+                        (self._raw_actions >= 0.0)
+                        if self._open_on_zero
+                        else (self._raw_actions > 0.0)
+                    ),
                     self._open_command,
                     self._close_command,
                 )
@@ -1148,6 +1373,7 @@ for _contract_id, _action_class in {
     "joint_effort@1": JointEffortAction,
     "eef_pose.absolute@1": EefPoseAction,
     "eef_pose.relative@1": RelativeEefPoseAction,
+    "eef_pose.relative_substep_dls@1": RelativeEefDlsAction,
     "gripper.parallel@1": ParallelGripperAction,
 }.items():
     register_action_contract(_contract_id, _action_class)

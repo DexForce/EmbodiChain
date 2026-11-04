@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import inspect
 import torch
 from collections.abc import Sequence
 from prettytable import PrettyTable
@@ -30,11 +29,14 @@ from embodichain.lab.gym.utils.gym_utils import (
     fetch_data_from_dict,
     assign_data_to_dict,
 )
-from .manager_base import ManagerBase
+from .manager_base import Functor, ManagerBase
 from .cfg import ObservationCfg
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
+
+
+__all__ = ["ObservationManager"]
 
 
 class ObservationManager(ManagerBase):
@@ -213,5 +215,5 @@ class ObservationManager(ManagerBase):
             self._mode_functor_cfgs[functor_cfg.mode].append(functor_cfg)
 
             # check if the functor is a class
-            if inspect.isclass(functor_cfg.func):
+            if isinstance(functor_cfg.func, Functor):
                 self._mode_class_functor_cfgs[functor_cfg.mode].append(functor_cfg)

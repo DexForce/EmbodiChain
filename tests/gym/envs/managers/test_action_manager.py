@@ -985,3 +985,115 @@ def test_relative_eef_solver_maps_fk_seed_and_returned_joint_order(
     torch.testing.assert_close(term.processed_actions, expected_commands)
     assert env.robot.set_qpos.call_args.kwargs["joint_ids"] == [2, 0]
     assert term.descriptor.joint_names == ("joint_2", "joint_0")
+
+
+@pytest.mark.parametrize("batch", [1, 8, 32])
+def test_substep_dls_preserves_unbounded_targets_and_expert_conversion(batch):
+    """Expert and policy requests follow the same held-pose DLS trajectory."""
+    from scipy.spatial.transform import Rotation
+    from embodichain.lab.gym.envs.managers.actions import RelativeEefDlsAction
+
+    qpos = torch.zeros(batch, 7)
+    qpos[:, :3] = torch.tensor([0.2, -0.1, 0.3])
+    limits = torch.tensor([-3.0, 3.0]).expand(batch, 7, 2).clone()
+    jacobian = torch.eye(6, 7).expand(batch, 6, 7).clone()
+
+    def fk(values, *, name, to_matrix):
+        pose = torch.eye(4).repeat(batch, 1, 1)
+        pose[:, :3, 3] = values[:, :3]
+        pose[:, :3, :3] = torch.tensor(
+            Rotation.from_rotvec(values[:, 3:6].numpy()).as_matrix(), dtype=values.dtype
+        )
+        return pose
+
+    robot = SimpleNamespace(
+        get_joint_ids=lambda part, **kwargs: list(range(7)),
+        joint_names=tuple(f"joint{i}" for i in range(7)),
+        get_qpos=lambda: qpos,
+        get_qpos_limits=lambda: limits,
+        compute_fk=fk,
+        compute_jacobian=lambda values, **kwargs: jacobian,
+        get_solver=lambda part: SimpleNamespace(
+            end_link_name="tool", root_link_name="base"
+        ),
+        set_qpos=lambda **kwargs: None,
+    )
+    env = SimpleNamespace(num_envs=batch, device="cpu", robot=robot)
+    term = RelativeEefDlsAction(make_cfg(RelativeEefDlsAction, part_name="arm"), env)
+    action = torch.tensor([1.5, -1.2, 0.1, 0.2, -0.1, 0.3]).expand(batch, 6).clone()
+    current = fk(qpos, name="arm", to_matrix=True)
+    target = current.clone()
+    target[:, :3, 3] += action[:, :3] * 0.5
+    target[:, :3, :3] = (
+        torch.tensor(
+            Rotation.from_rotvec((action[:, 3:] * 0.5).numpy()).as_matrix(),
+            dtype=qpos.dtype,
+        )
+        @ current[:, :3, :3]
+    )
+    planned = qpos.clone()
+    planned[:, :3] = target[:, :3, 3]
+    planned[:, 3:6] = torch.tensor(
+        Rotation.from_matrix(target[:, :3, :3].numpy()).as_rotvec(), dtype=qpos.dtype
+    )
+    term.process_joint_targets(planned)
+    torch.testing.assert_close(term.raw_actions, action)
+    target = fk(planned, name="arm", to_matrix=True)
+    assert np.isinf(term.action_space.high).all()
+    for _ in range(5):
+        pose = fk(qpos, name="arm", to_matrix=True)
+        error = torch.cat(
+            (
+                target[:, :3, 3] - pose[:, :3, 3],
+                torch.tensor(
+                    Rotation.from_matrix(
+                        (target[:, :3, :3] @ pose[:, :3, :3].mT).numpy()
+                    ).as_rotvec(),
+                    dtype=qpos.dtype,
+                ),
+            ),
+            -1,
+        )
+        expected = (
+            qpos
+            + (
+                jacobian.mT
+                @ torch.linalg.solve(
+                    jacobian @ jacobian.mT + 0.01**2 * torch.eye(6), error.unsqueeze(-1)
+                )
+            ).squeeze(-1)
+        ).clamp(limits[..., 0], limits[..., 1])
+        term.update_substep()
+        torch.testing.assert_close(term.processed_actions, expected, rtol=0, atol=0)
+        qpos.copy_(qpos + 0.2 * (expected - qpos))
+    preserved = term.raw_actions[1:].clone()
+    term.reset([0])
+    torch.testing.assert_close(term.raw_actions[1:], preserved)
+
+
+def test_binary_gripper_conversion_preserves_closed_zero_boundary():
+    """Legacy zero closes while existing default binary semantics stay unchanged."""
+    env = make_action_env(
+        num_envs=3, joint_names=("left", "right"), parts={"hand": (0, 1)}
+    )
+    term = ParallelGripperAction(
+        make_cfg(
+            ParallelGripperAction,
+            part_name="hand",
+            command_mode="binary",
+            open_command={"left": 0.04, "right": 0.04},
+            close_command={"left": 0.0, "right": 0.0},
+            open_on_zero=False,
+        ),
+        env,
+    )
+    term.process_actions(torch.tensor([[-1.0], [0.0], [1.0]]))
+    torch.testing.assert_close(
+        term.processed_actions, torch.tensor([[0.0, 0.0], [0.0, 0.0], [0.04, 0.04]])
+    )
+    qpos = env.robot.get_qpos().clone()
+    qpos[:, list(term.controlled_joint_ids)] = torch.tensor(
+        [[0.0, 0.0], [0.02, 0.02], [0.04, 0.04]]
+    )
+    term.process_joint_targets(qpos)
+    torch.testing.assert_close(term.raw_actions, torch.tensor([[-1.0], [-1.0], [1.0]]))

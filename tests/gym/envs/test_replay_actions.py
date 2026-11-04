@@ -416,3 +416,43 @@ def test_kinematic_task_replay_does_not_claim_measured_goal_acceptance():
         _TaskReplayEnv(), _trajectory(kind="raw_policy"), mode="kinematic"
     )
     assert replay._task_outcome_replay is False
+
+
+@pytest.mark.parametrize("completed", [False, True])
+def test_expert_opt_in_uses_policy_controller_with_full_joint_target(
+    completed: bool,
+) -> None:
+    from unittest.mock import MagicMock
+    from embodichain.lab.gym.envs.expert_trajectory import ExpertTrajectoryCfg
+
+    env = _ReplayEnv(num_envs=1)
+    env._demo_no_auto_reset = completed
+    env._demo_active_mask = torch.tensor([not completed])
+    from types import MethodType
+
+    env._mask_controller_demo_action = MethodType(
+        EmbodiedEnv._mask_controller_demo_action, env
+    )
+    env.cfg = SimpleNamespace(
+        expert_trajectory=ExpertTrajectoryCfg(use_action_manager=True)
+    )
+    manager = SimpleNamespace(
+        process_joint_targets=MagicMock(),
+        apply_action=MagicMock(),
+        action_trace=lambda: None,
+        action=torch.zeros(1, 7),
+    )
+    env.action_manager = manager
+    prepared = env._preprocess_action(ControllerAction(torch.tensor([[0.2, 0.3]])))
+    manager.process_joint_targets.assert_called_once()
+    torch.testing.assert_close(
+        manager.process_joint_targets.call_args.args[0],
+        (
+            torch.tensor([[0.0, 0.0, 0.0]])
+            if completed
+            else torch.tensor([[0.0, 0.2, 0.3]])
+        ),
+    )
+    env._step_action(prepared)
+    manager.apply_action.assert_called_once()
+    assert env._step_uses_action_manager
