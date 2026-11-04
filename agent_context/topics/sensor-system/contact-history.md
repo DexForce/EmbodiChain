@@ -56,6 +56,12 @@ Signed distance is an explicitly requested channel; an empty request retains
 the original five channels. Missing distance invalidates only that requested
 channel, while nonfinite active distances retain per-row unavailability.
 
+`joint_contact_observation.py` collects explicit B=1 joint position/velocity
+and contact facts through the same sensor hooks. It stores packed valid contacts,
+uses actual simulation time and keeps native source revision separate from its
+acquisition sequence. The integration binds window generations to its existing
+invocation/episode scope; no sensor declares skill success or task acceptance.
+
 `lab/sim/sensors/contact_timeline.py` owns bounded per-environment packed
 history, driven by an explicit host control clock. Keep it in the environment's
 sensor suite so `BaseEnv.step` drives the public observer port. It records no task

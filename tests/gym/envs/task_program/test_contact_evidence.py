@@ -889,3 +889,110 @@ def test_optional_contact_distances_preserve_default_channels_and_row_validity()
     source.data["distance"].zero_()
     assert distance.values[1, 0] == pytest.approx(-0.001)
     assert source.update_count == 3
+
+
+def test_joint_contact_observer_reuses_substep_sample_and_owns_window_records():
+    from embodichain.lab.sim.sensors.joint_contact_observation import (
+        JointContactObserver,
+    )
+    from embodichain.lab.sim.sensors.contact_sampling import CONTACT_DISTANCES
+
+    source = ContactSource(capacity=5)
+    source.data["distance"] = torch.tensor([[-0.001, 0.002, float("nan"), 0.0, 0.0]])
+    qpos, qvel = torch.tensor([0.12]), torch.tensor([0.01])
+    clock = [0.0]
+    observer = JointContactObserver(
+        ContactEvidenceSampler(source),
+        lambda: qpos,
+        lambda: clock[0],
+        joint_velocity=lambda: qvel,
+    )
+    generation = observer.begin_window("prepare")
+    initial = observer.capture(refresh=True)
+    assert source.update_count == 1
+    observer.set_phase("twist")
+    token = observer.before_sample()
+    clock[0] = 0.004
+    qpos[0] = 0.13
+    observer.after_sample(0.004, token)
+    records = observer.snapshot()
+    assert len(records) == 2
+    assert [record.phase for record in records] == ["prepare", "twist"]
+    assert records[-1].frame.timestamp == 0.004
+    assert records[-1].frame.observation_revision == 2
+    assert records[-1].frame.get(
+        "articulation.joint_position"
+    ).values.tolist() == pytest.approx([0.13])
+    assert initial.frame.get(
+        "articulation.joint_position"
+    ).values.tolist() == pytest.approx([0.12])
+    assert records[-1].frame.get(CONTACT_DISTANCES).values.tolist()[0] == pytest.approx(
+        [-0.001, 0.002]
+    )
+    assert source.update_count == 1
+    records[-1].frame.batches["articulation.joint_position"].values.fill_(100)
+    assert observer.snapshot()[-1].frame.get("articulation.joint_position").values[
+        0
+    ] == pytest.approx(0.13)
+    with pytest.raises(ValueError, match="consecutive substeps"):
+        observer.after_sample(0.004, observer.before_sample())
+    observer.reset([])
+    assert observer.generation == generation
+    observer.begin_window("next", max_samples=1)
+    observer.after_sample(0.004, token)
+    assert observer.snapshot() == ()
+    observer.capture(refresh=True)
+    assert observer.capture(refresh=True) is None
+    assert observer.overflow
+    assert source.update_count == 2
+    late = observer.before_sample()
+    observer.close()
+    observer.after_sample(0.004, late)
+    assert source.update_count == 2
+
+
+def test_joint_contact_channels_keep_missing_and_nonfinite_observations_unavailable():
+    from embodichain.lab.sim.sensors.joint_contact_observation import (
+        JointContactObserver,
+    )
+    from embodichain.lab.sim.sensors.contact_sampling import CONTACT_DISTANCES
+
+    source = ContactSource()
+    observer = JointContactObserver(
+        ContactEvidenceSampler(source),
+        lambda: torch.tensor([float("nan")]),
+        lambda: 1.0,
+    )
+    observer.begin_window("press")
+    record = observer.capture(refresh=True)
+    assert not record.frame.get("articulation.joint_position").valid.any()
+    assert not record.frame.get(CONTACT_DISTANCES).valid.any()
+    assert record.frame.get(CONTACT_NORMALS).valid.all()
+    with pytest.raises(ValueError, match="B=1"):
+        JointContactObserver(
+            ContactEvidenceSampler(ContactSource(count=2)),
+            lambda: torch.zeros(2),
+            lambda: 1.0,
+        )
+
+
+def test_joint_contact_observer_rejects_replaced_window_during_acquisition():
+    from embodichain.lab.sim.sensors.joint_contact_observation import (
+        JointContactObserver,
+    )
+
+    source = ContactSource()
+    holder = []
+
+    def read_joint():
+        holder[0].begin_window("replacement")
+        return torch.zeros(1)
+
+    observer = JointContactObserver(
+        ContactEvidenceSampler(source), read_joint, lambda: 1.0
+    )
+    holder.append(observer)
+    observer.begin_window("original")
+    with pytest.raises(ValueError, match="window changed"):
+        observer.capture(refresh=True)
+    assert observer.snapshot() == ()
