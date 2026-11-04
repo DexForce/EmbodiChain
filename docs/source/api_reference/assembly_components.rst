@@ -21,7 +21,7 @@ gravity feedforward and the held gripper target; additional action terms are
 rejected to avoid conflicting robot commands.
 
 Preparation and saved resources
-------------------------------
+-------------------------------
 
 .. currentmodule:: embodichain_tasks.manipulation.assembly.preparation
 
