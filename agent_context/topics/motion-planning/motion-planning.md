@@ -181,13 +181,15 @@ add a second hand-specific conversion. GraspKit owns collision-qualified end-reg
 selection through `pg_grasp.regions`; callers select a policy without supplying
 a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
 sampled closing geometry and contact fitting with explicit thresholds; robot/FK
-sampling and physical contact evidence remain Lab responsibilities. Tensor
-interpolation lives in `compute.geometry.gripper`. `pg_grasp.coordinated` owns
-bounded paired sampling with explicit contact settings and optional observed
-world bounds; clearance preference changes costs after population selection.
-`pg_grasp.urdf_surfaces` samples explicitly selected collision links without robot
-state. See [hand geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
-for deferred Robot capture and cache lifetime, and the [GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
+sampling and physical contact evidence remain Lab responsibilities.
+`SampledHandGeometry.at_width()` interpolates the supplied hand samples.
+`pg_grasp.coordinated` owns bounded paired sampling with explicit contact settings
+and optional observed world bounds; clearance preference changes costs after
+population selection. `pg_grasp.urdf_surfaces` samples explicitly selected
+collision links without robot state. See
+[hand geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
+for deferred Robot capture and cache lifetime, and the
+[GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
 for geometry ownership and the finite collision-check scope.
 
 `variants.py` is the common candidate-generation path for joint-space,

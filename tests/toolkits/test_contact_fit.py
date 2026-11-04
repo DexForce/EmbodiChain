@@ -24,7 +24,6 @@ import pytest
 import torch
 import trimesh
 
-from embodichain.compute.geometry.gripper import interpolate_hand_samples
 from embodichain.toolkits.graspkit.pg_grasp.contact_fit import (
     SampledHandGeometry,
     HandContactChecker,
@@ -80,9 +79,7 @@ def _checker(target=None):
 
 def test_sample_interpolation_preserves_gap_and_returns_owned_outputs():
     geometry = _geometry()
-    body, pads = interpolate_hand_samples(
-        geometry.body, geometry.pads, geometry.gaps, torch.tensor([0.06, 0.2, 0.005])
-    )
+    body, pads = geometry.at_width(torch.tensor([0.06, 0.2, 0.005]))
     torch.testing.assert_close(
         pads[:, 1, 0, 0] - pads[:, 0, 0, 0], torch.tensor([0.06, 0.12, 0.01])
     )
@@ -114,6 +111,12 @@ def test_finite_pad_fit_resolves_box_gap_then_qualifies_full_sweep(translated):
     # Source diagnostics retain the last checked open sample (80mm),
     # not the already-checked fitted contact endpoint (60.2mm).
     assert depth[0] == pytest.approx((0.08 - 0.06) / 2, abs=1e-6)
+    refined, refined_gaps, valid = checker.refine(
+        object_pose, original, torch.tensor([0.04])
+    )
+    torch.testing.assert_close(refined, poses, atol=0, rtol=0)
+    torch.testing.assert_close(refined_gaps, gaps, atol=0, rtol=0)
+    assert valid.tolist() == [True]
     torch.testing.assert_close(original, object_pose @ relative)
 
 
