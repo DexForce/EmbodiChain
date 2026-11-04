@@ -190,6 +190,47 @@ def test_ppo_normalization_handles_singleton_rollout_or_tail_batch(
     assert int(algorithm.optimizer.state[policy.log_std]["step"]) == expected_steps
 
 
+@pytest.mark.parametrize("normalize_per_minibatch", [False, True])
+def test_ppo_normalization_preserves_sample_std_for_larger_batches(
+    normalize_per_minibatch: bool,
+) -> None:
+    device = torch.device("cpu")
+    policy = ActorCritic(
+        4, 1, device, nn.Linear(4, 1, bias=False), nn.Linear(4, 1, bias=False)
+    )
+    with torch.no_grad():
+        for parameter in policy.parameters():
+            parameter.zero_()
+    rollout = RolloutBuffer(4, 1, 4, 1, device).start_rollout()
+    for value in rollout.values():
+        value.zero_()
+    rollout["obs"][:, 0] = torch.eye(4)
+    rollout["action"][:, 0] = 1.0
+    rollout["reward"][:, 0] = torch.tensor([-3.0, -1.0, 1.0, 3.0])
+    rollout["done"][:, 0] = True
+    rollout["terminated"][:, 0] = True
+    with torch.no_grad():
+        rollout["sample_log_prob"][:, 0] = policy.evaluate_actions(rollout[:, 0])[
+            "sample_log_prob"
+        ]
+    algorithm = _algorithm(
+        policy,
+        optimizer=OptimizerCfg(name="sgd", learning_rate=1.0),
+        batch_size=4,
+        vf_coef=0.0,
+        max_grad_norm=100.0,
+        normalize_advantage_per_mini_batch=normalize_per_minibatch,
+    )
+
+    algorithm.update(rollout)
+
+    # Rewards are advantages here; their sample variance is 20 / (4 - 1).
+    expected = torch.tensor([-3.0, -1.0, 1.0, 3.0]) / (20.0 / 3.0) ** 0.5
+    # Unit actions/std, zero means and one-hot inputs give grad_i = -adv_i / 4.
+    # One SGD step at lr=1 therefore exposes every normalized advantage.
+    torch.testing.assert_close(4 * policy.actor.weight.squeeze(0), expected)
+
+
 def test_observation_groups_preserve_order_and_configure_policy() -> None:
     observation = TensorDict(
         {
