@@ -1,0 +1,11 @@
+# Independent reference environment: CPython 3.12, no EmbodiChain/DexSim imports.
+# These are the numerical/runtime versions in mjfit's published benchmark.
+mjfit @ git+https://github.com/younghyopark/mjfit.git@5833f465896e1e06bc4be4f003be847f5183a4db
+mujoco==3.14.0
+mujoco-warp==3.14.0
+warp-lang==1.17.0
+numpy==2.5.3
+scipy==1.18.1
+mapbox_earcut==2.1.0
+PyYAML==6.0.3
+pytest==9.1.1

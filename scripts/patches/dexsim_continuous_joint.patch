@@ -1,0 +1,57 @@
+--- a/modules/dexsim/python/dexsim/spawn/adapters/newton_articulation_adapter.py
++++ b/modules/dexsim/python/dexsim/spawn/adapters/newton_articulation_adapter.py
+@@ -38,6 +38,7 @@
+     SkinWeightsDesc,
+ )
+ from dexsim.types import RigidBodyShape
++from dexsim.engine import JointType
+ 
+ from ._render_validation import validate_articulation_render_properties
+ from .common import (
+@@ -57,6 +58,9 @@
+ 
+ if TYPE_CHECKING:
+     from dexsim.engine.newton_physics.newton_backend import NewtonBackend
++
++
++PRESERVES_CONTINUOUS_URDF_LIMITS = True
+ 
+ 
+ @dataclass(frozen=True)
+@@ -623,8 +627,12 @@
+             axis=np.asarray(node.get_axis(), dtype=np.float32),
+             origin_pose=np.asarray(node.get_parent_pose(), dtype=np.float32),
+             target_pose=np.asarray(node.get_child_pose(), dtype=np.float32),
+-            lower_limit=float(node.get_lower_limit()),
+-            upper_limit=float(node.get_upper_limit()),
++            # Native Skeleton reports (0, 0) for an unlimited URDF hinge.
++            # Preserve the continuous-joint semantics at the typed boundary.
++            lower_limit=(-float("inf") if node.get_joint_type() == JointType.CONTINUOUS
++                         else float(node.get_lower_limit())),
++            upper_limit=(float("inf") if node.get_joint_type() == JointType.CONTINUOUS
++                         else float(node.get_upper_limit())),
+             # Some URDF exporters use zero for an unspecified limit.
+             velocity_limit=velocity_limit if velocity_limit > 0.0 else None,
+             effort_limit=effort_limit if effort_limit > 0.0 else None,
+--- a/modules/dexsim/python/dexsim/engine/newton_physics/articulation/articulation.py
++++ b/modules/dexsim/python/dexsim/engine/newton_physics/articulation/articulation.py
+@@ -834,7 +834,8 @@
+                 value = property_value(name, fallback)
+                 if value is not None:
+                     kwargs[name] = float(value)
+-            if joint.joint_type in (JointType.PRISMATIC, JointType.REVOLUTE):
++            if joint.joint_type in (JointType.PRISMATIC, JointType.REVOLUTE,
++                                    JointType.CONTINUOUS):
+                 for name, value in (
+                     ("limit_lower", joint.lower_limit),
+                     ("limit_upper", joint.upper_limit),
+@@ -873,7 +874,8 @@
+ 
+         _, _, qd_start, qd_size = self._joint_layout(int(joint_id))
+         if (qd_size and joint.joint_type
+-                not in (JointType.PRISMATIC, JointType.REVOLUTE)):
++                not in (JointType.PRISMATIC, JointType.REVOLUTE,
++                        JointType.CONTINUOUS)):
+             for source, target in (
+                 (joint.lower_limit, self._builder.joint_limit_lower),
+                 (joint.upper_limit, self._builder.joint_limit_upper),

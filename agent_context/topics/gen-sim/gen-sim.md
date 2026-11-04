@@ -142,6 +142,13 @@ without sampling. File/model coordinate adaptation remains owned here.
 
 ## Runtime and extension boundaries
 
+GenSim can consume precision assembly through the reusable
+`embodichain/toolkits/assembly/` API; see
+[assembly assets and precision](../assembly-assets/assembly-assets.md)
+for pinned mjfit adaptation, portable manifests and native/USD construction.
+It does not use Scene Engine inference or the general SimReady decomposition
+pipeline, because approximate recooking can consume an assembly's clearance.
+
 Blender operations use `gen_sim/_blender_runtime.py` to launch the standalone
 worker selected by `EMBODICHAIN_BLENDER_PYTHON`. The worker loads only Blender
 operations and their direct dependencies; it must not import the business
