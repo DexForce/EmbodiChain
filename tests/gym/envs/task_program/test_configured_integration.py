@@ -1204,6 +1204,12 @@ def test_relative_place_uses_fresh_reference_pose_and_verified_grasp() -> None:
     assert lowering.registered_effect.held_objects[0].relation is (
         HeldObjectRelation.DETACHED
     )
+    assert (
+        lowering.registered_effect.held_objects[0].release_before_segment == "retract"
+    )
+    assert lowering.registered_effect.held_objects[0].retain_during_segments == (
+        "approach",
+    )
     lookahead = lowerer.pick_lookahead_targets(
         call,
         picked_object=SceneObjectRef("can"),

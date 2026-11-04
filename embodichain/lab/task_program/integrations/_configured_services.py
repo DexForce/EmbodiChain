@@ -847,6 +847,8 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
                         relation=HeldObjectRelation.DETACHED,
                         object_id=route.object_id,
                         slot_id="primary",
+                        release_before_segment="retract",
+                        retain_during_segments=("approach",),
                     ),
                 ),
             ),
@@ -955,7 +957,7 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
     """Create fresh relative-placement lowerers from canonical scene refs."""
 
     call_id: ClassVar[str] = _PLACE_RELATIVE_CALL_ID
-    revision: ClassVar[str] = "1"
+    revision: ClassVar[str] = "2"
     target_descriptor: ClassVar[SkillDescriptor] = Place.descriptor()
 
     routes: tuple[_RelativePlaceRoute, ...]

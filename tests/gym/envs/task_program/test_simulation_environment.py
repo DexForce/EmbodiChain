@@ -1001,14 +1001,15 @@ def _pick_evidence_plan(action: Any, request: Any, context: Any) -> Any:
 
 
 def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
-    """Build one open frame and the matching held-object removal delta."""
-    positions = context.robot.qpos.unsqueeze(1).repeat(1, 2, 1)
-    positions[:, :, 1] = _HAND_OPEN_POSITION
+    """Keep the source grasp through approach, then open and retract."""
+    positions = context.robot.qpos.unsqueeze(1).repeat(1, 3, 1)
+    positions[:, 0, 1] = _HAND_GRASP_POSITION
+    positions[:, 1:, 1] = _HAND_OPEN_POSITION
     trajectory = TimedTrajectory.from_positions(
         positions,
         env_ids=context.env_ids,
         dt=torch.full(
-            (context.batch_size, 2),
+            (context.batch_size, 3),
             context.require_control_dt(),
             dtype=positions.dtype,
             device=positions.device,
@@ -1023,7 +1024,7 @@ def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
             held_object_updates={"manipulator": None},
         ),
         replannable=False,
-        segment_lengths={"release": 1, "retract": 1},
+        segment_lengths={"approach": 1, "release": 1, "retract": 1},
     )
 
 
@@ -1186,7 +1187,7 @@ def test_bridge_reuses_real_workflow_across_pick_and_place(
                 torch.full_like(robot.qpos[:, 1], _HAND_GRASP_POSITION),
             )
             if segment_index == 1:
-                cube.pose[:, 0, 3] = _RELEASE_SEPARATION
+                cube.pose[~robot.constraint_state, 0, 3] = _RELEASE_SEPARATION
         assert segment.validator().all()
         local_indices.append(
             [call["call_index"] for call in segment.metadata["runtime"]["calls"]]
@@ -1311,7 +1312,7 @@ def _run_evidence_pick_place(
         if result.current_call_index == 1:
             if verified_pick is None:
                 verified_pick = result.task_state.get_held_object("manipulator")
-            cube.pose[:, 0, 3] = _RELEASE_SEPARATION
+            cube.pose[~robot.constraint_state, 0, 3] = _RELEASE_SEPARATION
         assembly.clock.advance_after_env_step()
         result = assembly.runtime.step()
 

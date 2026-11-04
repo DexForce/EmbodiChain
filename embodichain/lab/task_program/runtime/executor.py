@@ -29,6 +29,8 @@ from embodichain.utils.math import pose_inv
 
 from embodichain.lab.sim.atomic_actions.bindings import EndpointBinding
 from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
+from embodichain.lab.sim.atomic_actions.invocation import ResolvedActionRequest
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan
 from embodichain.lab.sim.atomic_actions.effects import StateDelta
 from embodichain.lab.sim.atomic_actions.execution import (
     ExecutionEvent,
@@ -1170,6 +1172,30 @@ class SemanticCallExecutor:
                 nominal_source = self._nominal_source_factory.create_nominal_source(
                     plan_request, engine=self._engine
                 )
+        if effect_guards:
+            external_plan_transform = plan_transform
+
+            def validate_guarded_plan(
+                request: ResolvedActionRequest,
+                planning_context: PlanningContext,
+                plan: ActionPlan,
+            ) -> ActionPlan:
+                if external_plan_transform is not None:
+                    plan = external_plan_transform(request, planning_context, plan)
+                if not isinstance(plan, ActionPlan):
+                    raise TypeError("Plan transform must return an ActionPlan.")
+                if plan.plan_success.any():
+                    names = {segment.name for segment in plan.segments}
+                    for guard in effect_guards:
+                        missing = set(guard.active_segments) - names
+                        if missing:
+                            raise ValueError(
+                                f"Held-object guard {guard.guard_id!r} references "
+                                f"missing plan segments {sorted(missing)}."
+                            )
+                return plan
+
+            plan_transform = validate_guarded_plan
         session = self._engine.start(
             (invocation,),
             context,
