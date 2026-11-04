@@ -280,9 +280,28 @@ class JointContactObserver:
         self._records.append(record)
         return record.snapshot()
 
+    @property
+    def record_count(self) -> int:
+        """Return the append-only count within the current window generation."""
+        return len(self._records)
+
+    def snapshot_since(self, start: int) -> tuple[JointContactObservation, ...]:
+        """Return detached newly appended records from an exact generation offset.
+
+        Callers retain and check :attr:`generation` across reads. Existing records
+        never mutate within a generation; begin/reset/close advance the generation
+        before clearing storage. Serialized owners can project only new samples
+        without repeatedly copying full raw history.
+        """
+        if type(start) is not int or not 0 <= start <= len(self._records):
+            raise ValueError(
+                "Observation offset must address the current window prefix."
+            )
+        return tuple(record.snapshot() for record in self._records[start:])
+
     def snapshot(self) -> tuple[JointContactObservation, ...]:
         """Return detached records; callers separately retain generation/overflow."""
-        return tuple(record.snapshot() for record in self._records)
+        return self.snapshot_since(0)
 
     def begin_control_step(self) -> None:
         """Keep the window across control steps; the sensor owns interval counters."""

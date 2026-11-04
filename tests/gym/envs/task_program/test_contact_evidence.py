@@ -916,7 +916,11 @@ def test_joint_contact_observer_reuses_substep_sample_and_owns_window_records():
     qpos[0] = 0.13
     observer.after_sample(0.004, token)
     records = observer.snapshot()
-    assert len(records) == 2
+    assert len(records) == observer.record_count == 2
+    assert len(observer.snapshot_since(1)) == 1
+    assert observer.snapshot_since(2) == ()
+    with pytest.raises(ValueError, match="window prefix"):
+        observer.snapshot_since(-1)
     assert [record.phase for record in records] == ["prepare", "twist"]
     assert records[-1].frame.timestamp == 0.004
     assert records[-1].frame.observation_revision == 2

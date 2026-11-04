@@ -61,6 +61,9 @@ and contact facts through the same sensor hooks. It stores packed valid contacts
 uses actual simulation time and keeps native source revision separate from its
 acquisition sequence. The integration binds window generations to its existing
 invocation/episode scope; no sensor declares skill success or task acceptance.
+Within that generation records are append-only. `snapshot_since` returns owned
+new records for incremental projection; resets advance the generation before
+clearing history, and full `snapshot` retains its original ownership contract.
 
 `lab/sim/sensors/contact_timeline.py` owns bounded per-environment packed
 history, driven by an explicit host control clock. Keep it in the environment's
