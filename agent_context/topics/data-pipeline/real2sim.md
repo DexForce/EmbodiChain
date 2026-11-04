@@ -183,5 +183,7 @@ The original qualified tabletop owner retains its B=1/no-sensor contract.
 [Expansion Engine](../expansion-engine/expansion-engine.md) provides a separate
 World owner that binds each source runtime to one physical row and merges actual
 commands into one batched step. It reuses the same source preparation and measured
-qualification functions, and adds bounded native camera media, frozen artifacts
+qualification through `Real2SimTabletopSource` and explicit measured
+`Real2SimTabletopEpisodeEvidence`; the original owner adapts into the same interface.
+It adds bounded native camera media, frozen artifacts
 and LeRobot export. Source permissions and contact protections are unchanged.

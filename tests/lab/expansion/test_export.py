@@ -99,7 +99,7 @@ def test_export_includes_visual_children_without_new_physical_receipts(
             self.dataset_path = str(tmp_path / "exports" / "fake" / "dataset")
             Path(self.dataset_path).mkdir(parents=True)
 
-        def _persist_episode_payload(self, row, frames, actions, *, episode_metadata):
+        def persist_episode_payload(self, row, frames, actions, *, episode_metadata):
             captured.append(
                 (
                     episode_metadata,

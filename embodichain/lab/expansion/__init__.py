@@ -26,6 +26,9 @@ __all__ = [
     "ExpansionHost",
     "EpisodeSink",
     "ExpansionSession",
+    "ExpansionSessionCfg",
+    "ExpansionCoverage",
+    "EpisodeCoverage",
     "ExpansionRunCfg",
     "load_expansion_job",
     "preflight_expansion_job",
@@ -65,6 +68,10 @@ def __getattr__(name: str) -> object:
         raise AttributeError(name)
     owner = {
         "ExpansionRunCfg": "configured",
+        "ExpansionSession": "session",
+        "ExpansionSessionCfg": "session_cfg",
+        "ExpansionCoverage": "coverage",
+        "EpisodeCoverage": "coverage",
         "load_expansion_job": "configured",
         "preflight_expansion_job": "configured",
         "run_expansion_job": "workflow",
@@ -92,11 +99,7 @@ def __getattr__(name: str) -> object:
         "resolve_expansion_job": "configured",
         "build_expansion_report": "reporting",
     }.get(name, "engine")
-    module = (
-        "embodichain.lab.sim.motion.expansion.session"
-        if name == "ExpansionSession"
-        else f"{__name__}.{owner}"
-    )
+    module = f"{__name__}.{owner}"
     value = getattr(import_module(module), name)
     globals()[name] = value
     return value

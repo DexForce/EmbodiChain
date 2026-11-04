@@ -32,7 +32,7 @@ from .configured import ExpansionRunCfg
 from embodichain.utils import configclass
 from .contracts import EpisodeCandidate
 from .journal import RecipeAttempt
-from embodichain.lab.sim.motion.expansion.contracts import (
+from .contracts import (
     CandidateIdentity,
     CommitReceipt,
     ExpertEpisode,
@@ -40,7 +40,7 @@ from embodichain.lab.sim.motion.expansion.contracts import (
     CandidateSpec,
 )
 from embodichain.lab.sim.motion.expansion.coordinator import CandidateWorkItem
-from embodichain.lab.sim.motion.expansion.session import ExpansionSession
+from .session import ExpansionSession
 
 __all__ = [
     "ExpansionJobCfg",

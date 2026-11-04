@@ -1092,6 +1092,13 @@ and durable episode-boundary recovery. See the offline expansion example.
    resolve_expansion_job
    build_expansion_report
 
+
+.. autosummary::
+
+   ExpansionSessionCfg
+   ExpansionCoverage
+   EpisodeCoverage
+
 embodichain.lab.expansion.artifacts
 -----------------------------------
 
@@ -1149,6 +1156,18 @@ Immutable source, candidate, numerical episode and commit identities shared with
 .. autosummary::
 
    ExpansionEpisode
+
+embodichain.lab.expansion.coverage
+----------------------------------
+
+Coverage reservations belong to the session lifecycle. The default policy counts confirmed episode identities; trajectory geometry and manipulability require the explicit motion-owned policy.
+
+.. currentmodule:: embodichain.lab.expansion.coverage
+
+.. autosummary::
+
+   ExpansionCoverage
+   EpisodeCoverage
 
 embodichain.lab.expansion.engine
 -------------------------------
@@ -1298,6 +1317,33 @@ Reuse complete scene/workspace joint candidates without splitting their conditio
    JointSceneSource
    apply_joint_scene_candidates
 
+embodichain.lab.expansion.session
+---------------------------------
+
+Canonical source-independent candidate, budget, evidence and receipt state machine. Legacy motion imports re-export this exact class, and domain configuration adapters preserve their original coverage behavior.
+
+.. currentmodule:: embodichain.lab.expansion.session
+
+.. autosummary::
+
+   ExpansionSession
+   SessionConfigAdapter
+
+embodichain.lab.expansion.session_cfg
+-------------------------------------
+
+Source-independent session limits. These settings are separate from deployment-owned simulation configuration and from domain-specific trajectory augmentation settings.
+
+.. currentmodule:: embodichain.lab.expansion.session_cfg
+
+.. autosummary::
+
+   ExpansionSessionCfg
+   ExpansionExecutionCfg
+   ExpansionValidationCfg
+   ExpansionCollectionCfg
+   ExpansionPersistenceCfg
+
 embodichain.lab.expansion.visual
 --------------------------------
 
@@ -1365,6 +1411,17 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.sim.motion.expansion.session_coverage
+-----------------------------------------------------
+
+Adapt legacy phase-aligned geometry, timing and measured manipulability to the canonical session coverage protocol. Existing trajectory configurations select this adapter automatically.
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.session_coverage
+
+.. autosummary::
+
+   TrajectorySessionCoverage
 
 embodichain.lab.sim.scene.operations
 ----------------------------------

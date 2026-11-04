@@ -160,8 +160,10 @@ and candidates, sampled limit checks and coverage. `load_expansion_profile()`
 strictly decodes the task-local resource, separate from environment
 and Task Program deployments. `SourceAdapter` converts handwritten, planner or
 grounded Atomic sources; `CandidateCoordinator` expands, deduplicates and queues
-them. `ExpansionSession` owns identities, randomness, budgets,
-reservations and receipts. None owns physical slots, environment lifecycle or
+them. The canonical `lab.expansion.ExpansionSession` owns identities, randomness,
+budgets, reservations and receipts; the motion session module re-exports that exact
+class. Legacy configs supply `TrajectorySessionCoverage` for geometry/manipulability
+admission through the generic coverage port. None owns physical slots, environment lifecycle or
 persistence; host integrations own those boundaries. Keep expansion algorithms
 free of direct Gym imports.
 
@@ -179,7 +181,8 @@ default.
 The generic B=1 host orchestration and its restore/executor/sink ports live in
 `motion/execution.py`, alongside standalone playback. The runner drives injected
 host ports and applies `ExpansionSession` transitions; it does not move those
-state or coverage contracts out of `motion/expansion/`.
+domain algorithms out of `motion/expansion/`. Shared collection state and limits
+live in `lab.expansion`; trajectory coverage remains a motion-owned adapter.
 
 Motion-limit checks are not collision/task-success certification.
 `rotate_grasp_about_object_axis` and `perturb_approach_direction` change TCP

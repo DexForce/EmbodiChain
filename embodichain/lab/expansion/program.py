@@ -184,8 +184,7 @@ def collect_program_batch(
             or bridge.clock.step_dt != env.step_dt
         ):
             raise ValueError("bridges must be fresh and use the environment clock")
-        provider = bridge._runtime._observation_provider
-        if tuple(provider.env_ids.tolist()) != (row,):
+        if tuple(bridge.env_ids.tolist()) != (row,):
             raise ValueError(
                 "bridge runtime must bind exactly its assigned physical row"
             )
@@ -326,8 +325,6 @@ def collect_vector_program(
         recipe_indices=recipe_indices,
         isolate_policy_sessions=True,
     )
-    previous = env._active_task_program_bridge
-    env._active_task_program_bridge = bridge
     started = set()
     steps = 0
 
@@ -346,7 +343,7 @@ def collect_vector_program(
         )
         observe_step(ids, merged, observation)
 
-    try:
+    with env.task_program_bridge_scope(bridge):
         result = execute_demo_episode(
             env,
             segments=bridge.iter_segments(),
@@ -381,8 +378,6 @@ def collect_vector_program(
                 for row in env_ids
             ),
         )
-    finally:
-        env._active_task_program_bridge = previous
 
 
 class TaskProgramBatchExecutor:
@@ -410,8 +405,7 @@ class TaskProgramBatchExecutor:
         self.row_bridges = row_bridges
         self.expansion_profile, self.recipe_indices = expansion_profile, recipe_indices
         if row_bridges is not None and any(
-            bridge._program.program_id != program.program_id
-            for bridge in row_bridges.values()
+            bridge.program_id != program.program_id for bridge in row_bridges.values()
         ):
             raise ValueError("one batch must execute the same Task Program structure")
 

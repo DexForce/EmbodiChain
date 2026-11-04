@@ -16,7 +16,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence, Iterator
+from contextlib import contextmanager
 from math import isfinite, log
 from functools import wraps
 from datetime import datetime
@@ -3140,6 +3141,29 @@ class EmbodiedEnv(BaseEnv):
 
         """
         return self._checked_task_program_adapter().compile(program)
+
+    @contextmanager
+    def task_program_bridge_scope(
+        self, bridge: TaskProgramDemoBridge
+    ) -> Iterator[None]:
+        """Publish a borrowed bridge for one execution and restore the prior binding.
+
+        Args:
+            bridge: Bridge whose commands are consumed by this environment owner.
+
+        Yields:
+            No value. The caller retains reset, stepping and cleanup ownership.
+        """
+        from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
+
+        if not isinstance(bridge, TaskProgramDemoBridge):
+            raise TypeError("bridge must be a TaskProgramDemoBridge")
+        previous = self._active_task_program_bridge
+        self._active_task_program_bridge = bridge
+        try:
+            yield
+        finally:
+            self._active_task_program_bridge = previous
 
     def create_task_program_bridge(
         self,

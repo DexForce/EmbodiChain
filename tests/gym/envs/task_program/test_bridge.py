@@ -1544,6 +1544,10 @@ def test_atomic_demo_bridge_is_lazy_and_waits_with_hold_actions() -> None:
 def test_bridge_publishes_completion_only_after_normal_program_exhaustion() -> None:
     """Task success cannot observe a partial segment lifecycle as completion."""
     bridge, _, _ = _bridge(duration=STEP_DT)
+    assert bridge.program_id == "demo-program"
+    selected = bridge.env_ids
+    selected.zero_()
+    assert bridge.env_ids.tolist() == [7, 3]
     segments = iter(bridge.iter_segments())
 
     demo_segment = next(segments)
@@ -2564,3 +2568,30 @@ def test_validator_baseline_is_captured_lazily_before_runtime_start() -> None:
     tuple(demo_segment.actions)
     assert baselines == [(declaration, None)]
     assert demo_segment.validator().all()
+
+
+def test_environment_bridge_scope_restores_binding_after_failure() -> None:
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    bridge, _, _ = _bridge(duration=STEP_DT)
+    previous = object()
+    environment = SimpleNamespace(_active_task_program_bridge=previous)
+    with pytest.raises(RuntimeError, match="injected"):
+        with EmbodiedEnv.task_program_bridge_scope(environment, bridge):
+            assert environment._active_task_program_bridge is bridge
+            raise RuntimeError("injected execution failure")
+    assert environment._active_task_program_bridge is previous
+
+
+def test_fresh_bridge_reports_physical_binding_before_runtime_grounding():
+    from types import SimpleNamespace
+    from dataclasses import replace
+
+    bridge, runtime, _ = _bridge(duration=STEP_DT)
+    runtime._result = replace(runtime.result, env_ids=torch.tensor([0, 1]))
+    runtime.observation_provider = SimpleNamespace(env_ids=torch.tensor([7, 3]))
+    assert bridge.env_ids.tolist() == [7, 3]
+    owned = bridge.env_ids
+    owned.zero_()
+    assert runtime.observation_provider.env_ids.tolist() == [7, 3]

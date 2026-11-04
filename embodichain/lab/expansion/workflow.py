@@ -25,14 +25,13 @@ import resource
 import numpy as np
 import torch
 from embodichain.data_pipeline.recording.media import _atomic_json, _digest, _mkdir
-from embodichain.lab.sim.motion.expansion import (
-    ExpansionSession,
-    TrajectoryExpansionJobCfg,
-)
+from .session import ExpansionSession
+from .session_cfg import ExpansionSessionCfg
 from .configured import ExpansionRunCfg, preflight_expansion_job, resolve_expansion_job
 from .engine import ExpansionEngine, ExpansionJobCfg
 from .journal import ExpansionJournal
 from .persistence import ArtifactEpisodeSink
+from ._gym_utils import _images
 
 __all__ = ["run_expansion_job", "inspect_expansion_job", "resume_expansion_export"]
 
@@ -41,32 +40,6 @@ def _hash(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, default=str, allow_nan=False).encode()
     ).hexdigest()
-
-
-def _images(
-    observation: object, row: int, prefix: tuple[str, ...] = ()
-) -> dict[str, np.ndarray]:
-    frames = {}
-    if not hasattr(observation, "items"):
-        return frames
-    for key, value in observation.items():
-        name = prefix + (
-            (str(key),) if not isinstance(key, tuple) else tuple(map(str, key))
-        )
-        if isinstance(value, torch.Tensor):
-            if value.ndim >= 3 and name[-1].split("_", 1)[0] in {
-                "rgb",
-                "depth",
-                "color",
-                "mask",
-                "normal",
-                "position",
-                "disparity",
-            }:
-                frames["/".join(name)] = value[row].detach().cpu().numpy()
-        else:
-            frames.update(_images(value, row, name))
-    return frames
 
 
 class _RecordedSink:
@@ -382,7 +355,7 @@ def run_expansion_job(
                 if needs_collection and host is not None:
                     journal.stage("collection", "running")
                     session = ExpansionSession(
-                        TrajectoryExpansionJobCfg.from_mapping(
+                        ExpansionSessionCfg.from_mapping(
                             {
                                 "collection": {
                                     "target_committed_episodes": cfg.target_episodes

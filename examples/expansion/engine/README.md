@@ -65,6 +65,26 @@ identity and versioned sampling. `ExpansionEpisode` is the canonical ExpertEpiso
 envelope, including immutable metadata references to media and source attachments;
 there is no second numeric episode representation.
 
+## Session and host integration boundaries
+
+`ExpansionSession` and `ExpansionSessionCfg` are owned by `embodichain.lab.expansion`.
+Old `sim.motion.expansion` Session imports resolve to the identical class. Existing
+trajectory configs remain accepted and select their original phase-geometry and
+manipulability policy through `TrajectorySessionCoverage`; the new generic session
+config defaults to confirmed episode counting. Use an explicit domain coverage
+adapter when trajectory deduplication is required.
+
+The native `GymExpansionHost` facade owns one World and composes internal recipe,
+cohort preparation, frame-collection and episode-assembly components. Its public
+constructor and execution ports remain compatible. Components share an explicit
+context; the facade retains reset/close ownership.
+
+Adapters consume public bridge identity (`program_id`, owned `env_ids`) and an
+exception-safe `task_program_bridge_scope`. Real2Sim source validation accepts an
+explicit measured evidence object instead of a fake environment/buffer interface.
+LeRobot export calls the public `persist_episode_payload` method, which shares the
+existing writer journal, fragment deduplication and uncertain-commit handling.
+
 ## Shared scheduling and recovery
 
 Configured jobs and custom integrations use one `ExpansionEngine` scheduler.

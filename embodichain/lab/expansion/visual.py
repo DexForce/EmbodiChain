@@ -147,7 +147,7 @@ def _camera_calibration(env, row):
 
 
 def _calibrated_frames(env, observation, row, *, calibration=None):
-    from .workflow import _images
+    from ._gym_utils import _images
 
     result = _images(observation, row)
     for uid, values in (
@@ -353,7 +353,7 @@ def render_observation_variants(
     Returns:
         Verified observation-variant receipts. Physical episode counts do not change.
     """
-    from .workflow import _images
+    from ._gym_utils import _images
 
     root = Path(directory)
     registry = load_visual_profiles(profile_file)

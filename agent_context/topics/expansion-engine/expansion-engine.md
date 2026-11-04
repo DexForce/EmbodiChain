@@ -2,15 +2,17 @@
 
 `embodichain.lab.expansion` owns offline cross-domain data production. Trajectory
 algorithms stay in `sim.motion.expansion`; scene and workspace algorithms stay in
-`sim.scene`. The old motion contract imports re-export the shared immutable types.
+`sim.scene`. The old motion contract and session imports re-export the exact canonical types.
 
 | Change | Owner |
 |---|---|
 | CLI job commands | `embodichain/cli/expansion.py` |
 | Closed configuration and preflight | `embodichain/lab/expansion/configured.py` |
+| Canonical in-memory session, lifecycle limits and coverage port | `embodichain/lab/expansion/session.py`, `session_cfg.py`, `coverage.py` |
 | Shared scheduling, admission and commit ports | `embodichain/lab/expansion/engine.py` |
 | Job assembly, stage recovery and inspect | `embodichain/lab/expansion/workflow.py`, `stages.py` |
-| World preparation and measured execution | `embodichain/lab/expansion/host.py` |
+| Native World ownership and compatibility facade | `embodichain/lab/expansion/host.py` |
+| Native recipes, cohort preparation, step observation and episode assembly | `embodichain/lab/expansion/_gym_recipe.py`, `_gym_prepare.py`, `_gym_execution.py`, `_gym_frames.py`, `_gym_episode.py` |
 | Durable recipes, attempts and invocation budgets | `embodichain/lab/expansion/journal.py` |
 | Task Program execution with native or prototype motion | `embodichain/lab/expansion/program.py`, `real2sim.py` |
 | Source-pinned sampling and joint scene candidates | `embodichain/lab/expansion/recipes.py`, `scene.py` |
@@ -43,6 +45,27 @@ source configuration. Version 2 manifests use contained relative hashed referenc
 export includes media, calibration and source evidence in a portable dataset bundle.
 Legacy committed artifacts are readable in place and projected portably at export.
 Legacy collection migration must verify unchanged resolved deployment evidence.
+
+`ExpansionSession` imports no simulation or trajectory package. `ExpansionSessionCfg`
+owns collection, ready-pool, validation and pending-write limits; the default
+`EpisodeCoverage` counts confirmed episode identities. Legacy trajectory configs
+project into this contract and supply motion-owned `TrajectorySessionCoverage`,
+retaining phase geometry and manipulability admission. Existing imports name the
+same Session class; domain coverage algorithms remain in `motion.expansion`.
+
+The Gym facade is the sole World lifecycle owner. Its components share an explicit
+native context and cannot independently close/reset/step competing Worlds. Recipe
+sampling, whole-cohort preparation, active-row frame buffering and measured episode
+assembly have separate owners. Preserve the host constructor, port methods and
+existing readout properties used by benchmark/showcase instrumentation.
+
+`TaskProgramDemoBridge.program_id` and `env_ids` expose binding identity without
+runtime traversal. `EmbodiedEnv.task_program_bridge_scope()` restores the borrowed
+bridge even after failure. `Real2SimTabletopSource` and explicit
+`Real2SimTabletopEpisodeEvidence` share source qualification with the original B=1
+owner; do not impersonate private Gym trajectory buffers. Offline export uses
+`LeRobotRecorder.persist_episode_payload()` and retains the canonical recording
+journal/duplicate-submission behavior.
 
 Cohorts have fixed robot/joint topology, backend, clock, observation schema and
 World appearance. Native scene-atlas input retains the complete layout/installation

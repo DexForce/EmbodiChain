@@ -19,8 +19,8 @@
 from __future__ import annotations
 
 from bisect import bisect_right
-from collections.abc import Mapping
-from dataclasses import asdict, field, replace
+from collections.abc import Mapping, Callable
+from dataclasses import dataclass, asdict, field, replace
 import hashlib
 import json
 import math
@@ -75,6 +75,10 @@ from embodichain.utils.utility import load_config
 
 __all__ = [
     "Real2SimTabletopCollectionCfg",
+    "Real2SimTabletopEpisodeEvidence",
+    "Real2SimTabletopSource",
+    "Real2SimTabletopBindings",
+    "qualify_real2sim_tabletop_episode",
     "load_real2sim_tabletop_profile",
     "install_real2sim_tabletop_owner",
 ]
@@ -479,39 +483,192 @@ def _placement_heading_check(
     return angle <= tolerance_deg + 1e-9, {"placement_yaw_error_deg": angle}
 
 
-def _capture_tabletop_episode(
-    environment: object,
-    result: object,
+class Real2SimTabletopEpisodeEvidence:
+    """Owned measured evidence for one qualified source-bound physical row.
+
+    The callback computes arena-frame TCP transforms for this row. It is borrowed
+    only during qualification; it cannot reset or step the source environment.
+
+    Args:
+        qpos: Measured full-joint states with T+1 rows.
+        object_pose: Measured object xyz/xyzw poses with the same T+1 clock.
+        target_pose: Measured arena-frame target 4x4 pose.
+        joint_names: Exact full-articulation order.
+        step_dt: Authoritative control interval in seconds.
+        execution_trace: Acknowledged Task Program action references (T entries).
+        compute_batch_fk: Row-bound arena-frame batch FK callback.
+    """
+
+    def __init__(
+        self,
+        *,
+        qpos: torch.Tensor,
+        object_pose: torch.Tensor,
+        target_pose: torch.Tensor,
+        joint_names: tuple[str, ...],
+        step_dt: float,
+        execution_trace: tuple[dict[str, object], ...],
+        compute_batch_fk: Callable[..., torch.Tensor],
+    ) -> None:
+        if any(
+            not isinstance(value, torch.Tensor)
+            for value in (qpos, object_pose, target_pose)
+        ):
+            raise TypeError("tabletop measured states must be tensors")
+        if not joint_names or len(set(joint_names)) != len(joint_names):
+            raise ValueError("tabletop evidence requires unique ordered joint names")
+        if qpos.ndim != 2 or len(qpos) < 2 or qpos.shape[1] != len(joint_names):
+            raise ValueError(
+                "tabletop evidence requires T+1 full-joint measured states"
+            )
+        if object_pose.shape != (len(qpos), 7) or target_pose.shape != (4, 4):
+            raise ValueError("tabletop object/target evidence has invalid shape")
+        if len(execution_trace) != len(qpos) - 1:
+            raise ValueError(
+                "tabletop execution trace must contain T acknowledged commands"
+            )
+        if (
+            type(step_dt) not in (int, float)
+            or not math.isfinite(step_dt)
+            or step_dt <= 0
+            or not callable(compute_batch_fk)
+        ):
+            raise ValueError(
+                "tabletop evidence requires a positive clock and row-bound FK"
+            )
+        if any(
+            not bool(torch.isfinite(v).all()) for v in (qpos, object_pose, target_pose)
+        ):
+            raise ValueError("tabletop measured evidence must be finite")
+        self.qpos = qpos.detach().clone()
+        self.object_pose = object_pose.detach().clone()
+        self.target_pose = target_pose.detach().clone()
+        self.joint_names = tuple(joint_names)
+        self.step_dt = step_dt
+        self.execution_trace = tuple(dict(item) for item in execution_trace)
+        self.compute_batch_fk = compute_batch_fk
+
+
+@dataclass(frozen=True)
+class Real2SimTabletopBindings:
+    """Verified source declarations and geometry, independent of recorder or World state.
+
+    Construct through :class:`Real2SimTabletopSource` or the qualified collection
+    owner. This value retains trusted prototype/geometry handles without taking
+    ownership of the environment that prepared them.
+    """
+
+    profile: Real2SimTabletopCollectionCfg
+    prototypes: Mapping[int, Any]
+    call_indices: tuple[int, ...]
+    object_body: BoxCollisionBody
+    target_body: BoxCollisionBody
+    declarations: tuple[Any, ...]
+    joint_names: tuple[str, ...]
+
+
+class Real2SimTabletopSource:
+    """Prepared source bindings and physical qualification shared by collection hosts.
+
+    Args:
+        environment: Existing initialized environment; lifecycle stays with its owner.
+        profile: Qualified source, scene and acceptance declarations.
+        env_id: Exact physical row to bind without changing the World.
+    """
+
+    def __init__(
+        self,
+        environment: object,
+        profile: Real2SimTabletopCollectionCfg,
+        *,
+        env_id: int = 0,
+    ) -> None:
+        self.profile = profile
+        self.robot = environment.robot
+        self.env_id = env_id
+        (
+            self.adapter,
+            self.declarations,
+            self.call_indices,
+            self.object_body,
+            self.target_body,
+            self.checker,
+            self.prototypes,
+            self.unique_prototypes,
+        ) = _prepare_tabletop_sources(environment, profile, env_id=env_id)
+        self.bindings = Real2SimTabletopBindings(
+            profile,
+            self.prototypes,
+            self.call_indices,
+            self.object_body,
+            self.target_body,
+            self.declarations,
+            tuple(self.robot.joint_names),
+        )
+
+    def task_space_kinematics_factory(self) -> Callable:
+        """Return the existing source-preserving kinematics adapter for this row."""
+        return _task_space_kinematics_factory(self.robot, self.env_id)
+
+    def qualify(
+        self,
+        evidence: Real2SimTabletopEpisodeEvidence,
+        *,
+        state: Mapping[str, Any],
+        output_directory: str | Path,
+        observation_fields: Mapping[str, tuple[str, str]],
+    ) -> Real2SimCaptureRequest:
+        """Validate recorded evidence and retain canonical source attachments.
+
+        Args:
+            evidence: Owned states and acknowledged trace for this physical row.
+            state: Source binding/guard state belonging to this execution.
+            output_directory: Artifact destination owned by the host.
+            observation_fields: Sink observation schema for the capture request.
+        Returns:
+            Canonical source-qualified request; no episode is committed here.
+        """
+        return qualify_real2sim_tabletop_episode(
+            evidence,
+            source=self.bindings,
+            state=state,
+            output_directory=output_directory,
+            observation_fields=observation_fields,
+        )
+
+
+def qualify_real2sim_tabletop_episode(
+    evidence: Real2SimTabletopEpisodeEvidence,
     *,
-    profile: Real2SimTabletopCollectionCfg,
-    state: dict[str, Any],
-    prototypes: dict,
-    call_indices: tuple[int, ...],
-    object_body: BoxCollisionBody,
-    target_body: BoxCollisionBody,
-    observations: dict,
-    recorder: object,
-    declarations: tuple,
+    source: Real2SimTabletopBindings,
+    state: Mapping[str, Any],
+    output_directory: str | Path,
+    observation_fields: Mapping[str, tuple[str, str]],
 ) -> Real2SimCaptureRequest:
-    """Validate one recorded arena with the canonical source-qualified checks."""
-    length = int(environment._traj_steps[0].item())
-    if length != result.length or environment._traj_buffer.shape[1] <= length:
-        raise ValueError("realized state stream is incomplete")
-    states = environment._traj_buffer["states"]
-    qpos = states["robot", "qpos"][0, : length + 1]
-    objects = (
-        states["rigid_objects", profile.object_uid, "pose"][0, : length + 1]
-        .detach()
-        .cpu()
-        .numpy()
-    )
-    target_pose = (
-        environment.sim.get_rigid_object(profile.target_uid)
-        .get_local_pose(to_matrix=True)[0]
-        .detach()
-        .cpu()
-        .numpy()
-    )
+    """Validate measured states and source semantics without a recorder or World owner.
+
+    Args:
+        evidence: Full measured state stream, authoritative clock and acknowledged trace.
+        source: Already verified prototype declarations and exact physical geometry.
+        state: Runtime source/guard state retained by the execution binding.
+        output_directory: Host-owned destination for source and validation attachments.
+        observation_fields: Capture-sink observation field mapping.
+    Returns:
+        Canonical capture request containing unchanged source protections and checks.
+    """
+    if evidence.joint_names != source.joint_names:
+        raise ValueError(
+            "tabletop evidence joint order differs from its qualified source"
+        )
+    profile = source.profile
+    prototypes = source.prototypes
+    call_indices = source.call_indices
+    object_body, target_body = source.object_body, source.target_body
+    declarations = source.declarations
+    length = len(evidence.qpos) - 1
+    qpos = evidence.qpos
+    objects = evidence.object_pose.detach().cpu().numpy()
+    target_pose = evidence.target_pose.detach().cpu().numpy()
     tracer = state["tracer"]
     delegate = state["delegate"]
     guard = state["guard"]
@@ -523,7 +680,7 @@ def _capture_tabletop_episode(
         else {item.call_index: item.result.time_map for item in delegate.records}
     )
     arrays = build_real2sim_execution_trace(
-        environment._active_task_program_bridge.execution_trace,
+        evidence.execution_trace,
         tracer.motions,
         retime_maps=retime_maps,
     )
@@ -637,7 +794,7 @@ def _capture_tabletop_episode(
             raise ValueError("observed held-object interval is invalid")
         control_part, joint_ids = endpoint
         tcp = (
-            environment.robot.compute_batch_fk(
+            evidence.compute_batch_fk(
                 qpos=qpos[None, start : stop + 1, list(joint_ids)],
                 name=control_part,
                 to_matrix=True,
@@ -813,7 +970,7 @@ def _capture_tabletop_episode(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
     )
-    trace_dir = Path(recorder.dataset_full_path) / "meta" / "real2sim" / "host-traces"
+    trace_dir = Path(output_directory) / "meta" / "real2sim" / "host-traces"
     trace_dir.mkdir(parents=True, exist_ok=True)
     trace = trace_dir / (
         hashlib.sha256(
@@ -831,7 +988,7 @@ def _capture_tabletop_episode(
             stream,
             object_pose=objects,
             target_pose=target_pose,
-            timestamps=np.arange(length + 1, dtype=np.float64) * environment.step_dt,
+            timestamps=np.arange(length + 1, dtype=np.float64) * evidence.step_dt,
         )
         stream.flush()
         os.fsync(stream.fileno())
@@ -888,8 +1045,7 @@ def _capture_tabletop_episode(
                 rejected=dict(record.rejected),
                 locked_joint_indices=record.locked_joint_indices,
                 locked_joint_names=[
-                    environment.robot.joint_names[index]
-                    for index in record.locked_joint_indices
+                    evidence.joint_names[index] for index in record.locked_joint_indices
                 ],
                 motion_headroom_fraction=record.motion_headroom_fraction,
             )
@@ -914,7 +1070,7 @@ def _capture_tabletop_episode(
         validation,
         f"episode:{candidate}:{state['attempt_id']}",
         f"commit:{candidate}:{state['attempt_id']}",
-        observations,
+        observation_fields,
         "joint_position",
         {
             "origin": first.origin if len(origins) == 1 else "mixed",
@@ -957,6 +1113,56 @@ def _capture_tabletop_episode(
                 "calls": calls,
             },
         },
+    )
+
+
+def _capture_tabletop_episode(
+    environment: object,
+    result: object,
+    *,
+    profile: Real2SimTabletopCollectionCfg,
+    state: dict[str, Any],
+    prototypes: dict,
+    call_indices: tuple[int, ...],
+    object_body: BoxCollisionBody,
+    target_body: BoxCollisionBody,
+    observations: dict,
+    recorder: object,
+    declarations: tuple,
+) -> Real2SimCaptureRequest:
+    """Compatibility adapter for the original B=1 recorder-owned collection path."""
+    length = int(environment._traj_steps[0].item())
+    if length != result.length or environment._traj_buffer.shape[1] <= length:
+        raise ValueError("realized state stream is incomplete")
+    states = environment._traj_buffer["states"]
+    evidence = Real2SimTabletopEpisodeEvidence(
+        qpos=states["robot", "qpos"][0, : length + 1],
+        object_pose=states["rigid_objects", profile.object_uid, "pose"][
+            0, : length + 1
+        ],
+        target_pose=environment.sim.get_rigid_object(profile.target_uid).get_local_pose(
+            to_matrix=True
+        )[0],
+        joint_names=tuple(environment.robot.joint_names),
+        step_dt=environment.step_dt,
+        execution_trace=environment._active_task_program_bridge.execution_trace,
+        compute_batch_fk=environment.robot.compute_batch_fk,
+    )
+    bindings = Real2SimTabletopBindings(
+        profile,
+        prototypes,
+        call_indices,
+        object_body,
+        target_body,
+        declarations,
+        tuple(environment.robot.joint_names),
+    )
+    return qualify_real2sim_tabletop_episode(
+        evidence,
+        source=bindings,
+        state=state,
+        output_directory=recorder.dataset_full_path,
+        observation_fields=observations,
     )
 
 

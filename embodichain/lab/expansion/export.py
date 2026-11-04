@@ -456,7 +456,7 @@ def export_expansion_lerobot(
             metadata = _portable_metadata(metadata, dataset_root)
             frames = _ObservationFrames(episode, max_frame_bytes=frame_budget)
             try:
-                recorder._persist_episode_payload(
+                recorder.persist_episode_payload(
                     0, frames, episode.actions, episode_metadata=metadata
                 )
             finally:

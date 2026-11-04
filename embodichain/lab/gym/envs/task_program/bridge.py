@@ -1264,6 +1264,20 @@ class TaskProgramDemoBridge:
         self._execution_trace: list[dict[str, object]] | None = None
 
     @property
+    def program_id(self) -> str:
+        """Return the compiled program identity without exposing its runtime."""
+        return self._program.program_id
+
+    @property
+    def env_ids(self) -> torch.Tensor:
+        """Return owned physical environment IDs bound to this runtime."""
+        provider = getattr(self._runtime, "observation_provider", None)
+        bound = getattr(provider, "env_ids", None)
+        if isinstance(bound, torch.Tensor):
+            return bound.clone()
+        return self._runtime.result.env_ids.clone()
+
+    @property
     def clock(self) -> EnvironmentStepClock:
         """Return the environment-step clock used by this bridge."""
         return self._clock

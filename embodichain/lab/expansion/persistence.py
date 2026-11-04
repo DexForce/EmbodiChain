@@ -26,7 +26,7 @@ import tempfile
 import shutil
 import numpy as np
 from embodichain.lab.gym.envs._json import json_safe_copy
-from embodichain.lab.sim.motion.expansion.contracts import ExpertEpisode, CommitReceipt
+from .contracts import ExpertEpisode, CommitReceipt
 from embodichain.data_pipeline.recording.media import (
     _atomic_json,
     _mkdir,
