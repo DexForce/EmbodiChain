@@ -225,27 +225,17 @@ python -m pip install "embodichain[policy-deploy]" ${PIP_EXTRA_ARGS}
 
 For an editable checkout, use `-e ".[policy-deploy]"` in the second command.
 
-## Optional: FCL planning geometry (`planning-geometry`)
+## Newton planning geometry
 
-FCL-backed geometric queries require the `planning-geometry` extra:
+Native convex planning queries reuse the isolated Newton collision pipeline.
+They require the supported Newton runtime and do not require `python-fcl` or
+an additional FCL extra. Queries run on CPU independently of the live physics
+backend; missing Newton entry points fail before native scene capture.
 
-```bash
-python -m pip install "embodichain[planning-geometry]" ${PIP_EXTRA_ARGS}
-# From a checkout:
-python -m pip install -e ".[planning-geometry]" ${PIP_EXTRA_ARGS}
-```
-
-The extra pins `python-fcl==0.7.0.11`, the version qualified with the source
-geometry queries on Linux and Python 3.11. The base installation does not enable
-this capability. Missing or unusable FCL bindings produce an explicit dependency
-error; they do not produce a successful collision result or select another
-collision implementation.
-
-The PR #729 source implementation previously relied on this installed package
-without declaring it. Native/FCL migration qualification requires an environment
-with this extra. The standard Docker lock profiles are unchanged, and this
-qualification does not establish Python 3.12, standard-image, GPU or native
-physics coverage. Dependency-skipped FCL comparisons remain unqualified.
+Distance diagnostics are capped contact-band estimates, not global exact
+minimum distances. Precision intervals spanning a requested contact threshold
+remain unavailable. CPU query tests do not establish GPU or physical-task
+qualification.
 
 ## Optional: cuRobo V2 motion planning
 

@@ -26,9 +26,9 @@ from embodichain.lab.sim.scene import _collision_backends as backends
 
 
 @pytest.mark.parametrize(
-    "failure", [ModuleNotFoundError("fcl"), OSError("missing native library")]
+    "failure", [ModuleNotFoundError("newton"), OSError("missing native library")]
 )
-def test_missing_fcl_has_actionable_dependency_error_and_no_fallback(
+def test_missing_newton_has_actionable_dependency_error_and_no_fallback(
     monkeypatch, failure
 ):
     requested = []
@@ -38,22 +38,49 @@ def test_missing_fcl_has_actionable_dependency_error_and_no_fallback(
         raise failure
 
     monkeypatch.setattr(backends, "import_module", missing)
-    with pytest.raises(
-        ImportError, match=r"embodichain\[planning-geometry\]"
-    ) as caught:
-        backends._require_fcl()
-    assert requested == ["fcl"]
+    with pytest.raises(ImportError, match="Newton") as caught:
+        backends._require_newton()
+    assert requested == ["newton"]
     assert caught.value.__cause__ is failure
 
 
-def test_incomplete_fcl_binding_is_unavailable(monkeypatch):
+def test_incomplete_newton_binding_is_unavailable(monkeypatch):
     monkeypatch.setattr(backends, "import_module", lambda name: SimpleNamespace())
-    with pytest.raises(ImportError, match="No collision result is available"):
-        backends._require_fcl()
+    with pytest.raises(ImportError, match="collision pipeline"):
+        backends._require_newton()
 
 
-def test_installed_fcl_preflight():
+def test_installed_newton_preflight():
     pytest.importorskip(
-        "fcl", reason="actual FCL backend is not installed; coverage is unqualified"
+        "newton", reason="Newton runtime is not installed; coverage is unqualified"
     )
-    backends._require_fcl()
+    backends._require_newton()
+
+
+def test_newton_distance_band_keeps_threshold_uncertainty_and_closes_owned_state():
+    import numpy as np
+    import trimesh
+    from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
+    from embodichain.lab.sim.scene.feasibility.collision import (
+        UnsupportedFeasibilityError,
+    )
+
+    left, right = _ConvexCollection(), _ConvexCollection()
+    mesh = trimesh.creation.box((0.2, 0.2, 0.2))
+    left.add_object("payload", mesh)
+    pose = np.eye(4)
+    pose[0, 3] = 0.202
+    right.add_object("obstacle", mesh, transform=pose)
+    interval = left.distance_interval(right, 0.002001)
+    assert interval.lower < 0.002001 < interval.upper
+    with pytest.raises(UnsupportedFeasibilityError, match="precision interval"):
+        interval.below(0.002001)
+    pose[0, 3] = 1.0
+    right.set_transform("obstacle", pose)
+    far = left.distance_interval(right, 0.002001)
+    assert far.lower < 0.03 and far.upper == float("inf")
+    assert far.below(0.002001) is False
+    left.close()
+    right.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        left.distance_interval(right, 0.002001)
