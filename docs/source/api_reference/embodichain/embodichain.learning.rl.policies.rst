@@ -18,6 +18,9 @@ General MLP construction and feature normalization are provided separately by
    Policy
    ActorCritic
    ActorOnly
+   ObservationHistory
+   ProprioceptiveActorCriticCfg
+   ProprioceptiveActorCritic
    register_policy
    get_registered_policy_names
    get_policy_class
@@ -42,3 +45,13 @@ Observation normalization
 It uses the shared ``EmpiricalNormalizer``; policy buffers preserve the statistics
 in checkpoints. Observation selection and normalization-update timing remain
 part of the RL rollout contract.
+
+Temporal proprioception and training-only supervision
+-----------------------------------------------------
+
+``ProprioceptiveActorCritic`` compresses a fixed proprioceptive history with
+temporal convolutions and combines it with the current frame. Explicit actor
+and critic groups isolate privileged state. Contact labels are rollout-aligned
+training fields; their weighted decoder loss updates the encoder without
+entering the actor. ``export_actor`` omits critic and decoder. The policy uses
+the existing PPO, collector and checkpoint contracts.

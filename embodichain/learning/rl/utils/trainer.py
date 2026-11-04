@@ -136,6 +136,7 @@ class Trainer:
                 "distribution_param_dim",
                 None,
             ),
+            training_field_specs=getattr(policy_module, "training_field_specs", None),
         )
         self.collector = SyncCollector(
             env=self.env,
