@@ -1,0 +1,109 @@
+{
+  "schema": "embodichain-assembly-replay/v1",
+  "code_revision": "fb10cdaefb8b266bcccdfade7975053e9bf98ba0",
+  "source_assembly_revision": "65dc5ab3643d1d8ab24ce471aa4d3770418fa96b",
+  "main_revision": "f4adf88278ad434bc64d0b6e51a5ee37cb3672d8",
+  "checkpoint_sha256": "68c9625efbb7f85c07e22b1b2b0111e1a5e83d4ac386121927c57e0a898da116",
+  "selected_update": 850,
+  "selection": "unchanged historical validation-selected update; replay test does not select a checkpoint",
+  "asset_model": "default registered Rizon4S and full Robotiq2F85 mimic assets; bundled frozen URDF/materials",
+  "runtime": {
+    "python": "3.11",
+    "torch": "2.7.1+cu128",
+    "mujoco": "3.15.0",
+    "mujoco_warp": "3.15.0",
+    "newton": "1.7.0",
+    "warp_lang": "1.17.0",
+    "dexsim_python_revision": "528daf12fd44b9383b30165ac484cf79b574e873",
+    "dexsim_profile": "recorded historical source-contact overlay, unchanged native libraries; exact hashes retained in evidence/provenance",
+    "mujoco_warp_overlay": "EPA horizon 128, version- and source-hash-guarded helper",
+    "gpu": "NVIDIA GeForce RTX 5090 32 GiB"
+  },
+  "evaluation": {
+    "episodes": 8192,
+    "num_envs": 1024,
+    "seed": 20000,
+    "allocation": "balanced; 8 completions per arena",
+    "successes": 7275,
+    "metrics": {
+      "eval/avg_length": 44.3267822265625,
+      "eval/avg_reward": 1.8052978515625,
+      "eval/completed_episodes": 8192.0,
+      "eval/episodes_per_env_max": 8.0,
+      "eval/episodes_per_env_min": 8.0,
+      "eval/metrics/success.assembly.captured": 0.917236328125,
+      "eval/metrics/success.assembly.depth": 0.01585678632136478,
+      "eval/metrics/success.assembly.grasped": 0.8946533203125,
+      "eval/metrics/success.assembly.penetration": 3.502875783687838e-06,
+      "eval/metrics/success.assembly.radial_error": 0.001681215323152463,
+      "eval/metrics/success.assembly.tilt": 0.017064441032392352,
+      "eval/success_ci95_high": 0.894707999842371,
+      "eval/success_ci95_low": 0.8810512717278793,
+      "eval/success_rate": 0.8880615234375,
+      "eval/success_samples": 8192.0
+    }
+  },
+  "wheel_consumer": {
+    "episodes": 8192,
+    "num_envs": 1024,
+    "seed": 20000,
+    "source_successes": 7275,
+    "installed_wheel_successes": 7288,
+    "same_score": false,
+    "metrics": {
+      "eval/avg_length": 44.5372314453125,
+      "eval/avg_reward": 1.810546875,
+      "eval/completed_episodes": 8192.0,
+      "eval/episodes_per_env_max": 8.0,
+      "eval/episodes_per_env_min": 8.0,
+      "eval/metrics/success.assembly.captured": 0.9219970703125,
+      "eval/metrics/success.assembly.depth": 0.01592557853564358,
+      "eval/metrics/success.assembly.grasped": 0.8963623046875,
+      "eval/metrics/success.assembly.penetration": 3.624470350420644e-06,
+      "eval/metrics/success.assembly.radial_error": 0.0016546392112644082,
+      "eval/metrics/success.assembly.tilt": 0.01714781531280707,
+      "eval/success_ci95_high": 0.8962517007076952,
+      "eval/success_ci95_low": 0.8826799113880076,
+      "eval/success_rate": 0.8896484375,
+      "eval/success_samples": 8192.0
+    },
+    "small_sample_protocol": {
+      "episodes": 64,
+      "num_envs": 64,
+      "source_successes": 46,
+      "installed_successes": 42
+    },
+    "scope": "isolated wheel in a system-site-packages venv; Torch and explicit private SDK profile reused; source paths absent from PYTHONPATH"
+  },
+  "training_smoke": {
+    "initialization": "random, no resume",
+    "num_envs": 16,
+    "rollout_length": 8,
+    "updates": 2,
+    "global_step": 256,
+    "checkpoint_parameters_finite": true,
+    "full_training_rerun": false
+  },
+  "preview": {
+    "seeds": [
+      30000,
+      30001,
+      30002
+    ],
+    "episodes": 3,
+    "successes": 3,
+    "source": "native DexSim RGB; all predeclared episodes retained"
+  },
+  "limitations": [
+    "single geometry and training seed; not the heterogeneous paper distribution",
+    "95% engineering target is not met",
+    "solver iteration-budget warnings and SDK teardown entity accounting warning remain",
+    "native capacity/precision qualification for new SDK MR !1562 is separate and incomplete",
+    "full 1000-update training was not repeated during this split"
+  ],
+  "configuration_migration": [
+    "explicit native scene_preparation/resource_export declarations frozen",
+    "train gym_config points to ./gym.yaml for relocation",
+    "weights and physical resource files unchanged"
+  ]
+}
