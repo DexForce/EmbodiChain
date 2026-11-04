@@ -28,7 +28,7 @@ import torch
 
 from embodichain.lab.sim.evidence import PhysicalEvidenceRequest
 from embodichain.utils import configclass
-from .contact_sampling import (
+from .sampling import (
     CONTACT_ACTOR_IDS,
     CONTACT_VALID_MASK,
     CONTACT_NORMALS,

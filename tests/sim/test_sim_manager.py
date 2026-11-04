@@ -651,6 +651,7 @@ def test_sim_update_owns_physics_and_visualization_time(step: int) -> None:
     assert events == ["control", "physics", "capture"] * step
     assert sim._world.physics_updates == [physics_dt] * step
     assert sim._visualization_sim_step == step
+    assert sim.physics_step_index == step
     assert sim._visualization_sim_time == pytest.approx(step * physics_dt)
 
 

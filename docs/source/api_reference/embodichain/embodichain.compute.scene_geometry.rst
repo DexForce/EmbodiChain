@@ -96,6 +96,8 @@ Public kernel namespace
    triangle_geometry
    nearest_half_turn_pose
    rotate_rigid_grasp
+   transform_vertex_bounds
+   aabb_sphere_cover
 
 AABB arithmetic and group reductions
 ------------------------------------
@@ -125,6 +127,26 @@ Affine box transforms
 .. automodule:: embodichain.compute.geometry.transforms
    :members:
 
+Mesh envelopes
+--------------
+
+``transform_vertex_bounds`` projects the actual B=1 vertices before reducing
+bounds, rather than rotating a larger input AABB. ``aabb_sphere_cover`` covers
+the input AABB using the existing 27 circumscribed cell spheres. These pure
+tensor operations carry no simulation identity and do not certify cooked shapes
+or continuous collision freedom.
+
+.. currentmodule:: embodichain.compute.geometry.mesh_bounds
+
+.. autosummary::
+
+   transform_vertex_bounds
+   aabb_sphere_cover
+
+.. autofunction:: transform_vertex_bounds
+
+.. autofunction:: aabb_sphere_cover
+
 Triangle measurements
 ---------------------
 
@@ -145,6 +167,8 @@ These pure tensor operations select a half-turn grasp orientation and rotate
 a link with its rigidly attached TCP about a link-local axis. Atomic motion
 primitives and benchmark case generation share this algebra; physical
 validation and execution remain in their consuming layers.
+``rigid_pose_displacement`` returns corresponding translation distances and
+rotation angles without selecting elapsed time or stability thresholds.
 
 .. currentmodule:: embodichain.compute.geometry.rigid
 
@@ -153,6 +177,7 @@ validation and execution remain in their consuming layers.
 
    nearest_half_turn_pose
    rotate_rigid_grasp
+   rigid_pose_displacement
 
 .. automodule:: embodichain.compute.geometry.rigid
    :members:

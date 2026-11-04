@@ -25,9 +25,9 @@ import torch
 import warp as wp
 from tensordict import TensorDict
 
-from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
-from embodichain.lab.sim.sensors._warp.contact import scatter_contact_rows
-from embodichain.lab.sim.sensors.contact_history import ContactHistory
+from ..base_sensor import BaseSensor, SensorCfg
+from ._warp.scatter import scatter_contact_rows, scatter_contact_rows_with_loss
+from .history import ContactHistory
 from embodichain.utils import configclass, logger
 from embodichain.utils.device_utils import current_warp_stream
 
@@ -64,7 +64,7 @@ class ContactSamplingObserver(Protocol):
         ...
 
     def before_sample(self) -> object:
-        """Capture a source stamp before the native contact query is fetched."""
+        """Capture a source stamp before processing this physics-step sample."""
         ...
 
     def after_sample(self, dt: float, token: object) -> None:
@@ -148,7 +148,8 @@ class ContactSensor(BaseSensor):
 
     The sensor preserves every backend-emitted contact row that passes the
     backend's positive-impulse filter. Geometry-only Newton solvers retain all
-    candidate contact rows.
+    candidate contact rows. Repeated updates within one completed physics step
+    reuse the sample, unless the query's topology changes or the sensor resets.
     """
 
     SUPPORTED_DATA_TYPES = [
@@ -188,23 +189,29 @@ class ContactSensor(BaseSensor):
         self.device = device
         self.cfg = config
         self._query: ContactQuery | None = None
-        self._latest_contact_buffer: ContactBuffer | None = None
         self._metadata_actor_table: tuple[ContactActorInfo, ...] | None = None
         self._metadata_selected_ids: tuple[int, ...] | None = None
 
-        self._query_dropped_count = torch.zeros(1, dtype=torch.int32, device=device)
-        self._scatter_dropped_count = torch.zeros(
-            owner.num_envs, dtype=torch.int32, device=device
+        # Interval/latest rows share storage for one evidence-counter readback.
+        # The last column is query-wide; preceding columns are per-environment.
+        self._loss_counters = torch.zeros(
+            (2, owner.num_envs + 1), dtype=torch.int32, device=device
         )
-        self._sample_scatter_dropped_count = torch.zeros_like(
-            self._scatter_dropped_count
-        )
+        self._query_dropped_count = self._loss_counters[0, -1:]
+        self._scatter_dropped_count = self._loss_counters[0, :-1]
+        self._latest_query_dropped_count = self._loss_counters[1, -1:]
+        self._sample_scatter_dropped_count = self._loss_counters[1, :-1]
+        self._latest_loss_counters = self._loss_counters[1]
         self._histories: dict[str, ContactHistory] = {}
         self._sampling_observers: dict[str, ContactSamplingObserver] = {}
         self._sample_graph = None
         self._sample_graph_key = None
         self._sample_stream = None
         self._sample_torch_stream = None
+        self._last_update_key: tuple[int, int, int] | None = None
+        self._last_history_key: tuple[int, int, int] | None = None
+        self._last_contact_buffer: ContactBuffer | None = None
+        self._sample_ready_stream: torch.cuda.Stream | None = None
         self._num_contacts_per_env: torch.Tensor | None = None
         """Number of contacts per environment."""
 
@@ -364,18 +371,58 @@ class ContactSensor(BaseSensor):
         self._metadata_selected_ids = actor_ids
 
     def update(self, **kwargs) -> None:
-        """Update the sensor state based on the current simulation state.
+        """Sample contacts once per physics step and query topology.
 
-        This method is called periodically to ensure the sensor data is up-to-date.
+        Repeated calls reuse the scattered data and establish readiness on the
+        caller's CUDA stream. Resetting sensor buffers permits a fresh read of
+        the current backend snapshot without advancing contact history. This
+        does not recompute contacts after physical state writes: backend rules
+        still determine whether a solved contact snapshot is available.
 
         Args:
             **kwargs: Additional keyword arguments for sensor update.
         """
 
+        self._wait_for_sample()
+        capturing = (
+            self.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
+        )
+        key = None if capturing else self._contact_sample_key()
+        if not capturing and key == self._last_update_key:
+            return
         buffer = self._fetch_contacts()
         if not self.requires_substep_update:
             self._query_dropped_count.copy_(buffer.dropped_count_device)
             self._scatter_dropped_count.copy_(self._sample_scatter_dropped_count)
+        self._last_update_key = key
+        self._last_contact_buffer = None if capturing else buffer
+        if capturing:
+            self._last_history_key = None
+        else:
+            self._record_sample_stream()
+
+    def _contact_sample_key(self) -> tuple[int, int, int]:
+        """Consult public query metadata so topology refreshes cannot be skipped."""
+        assert self._query is not None
+        return (
+            self._sim.physics_step_index,
+            id(self._query.actors),
+            id(self._query.selected_actor_ids),
+        )
+
+    def _wait_for_sample(self) -> None:
+        if self._sample_ready_stream is not None:
+            # Outer capture cannot depend on an uncaptured producer event.
+            # The caller establishes dependencies before capture and replay.
+            if torch.cuda.is_current_stream_capturing():
+                return
+            caller = torch.cuda.current_stream(self.device)
+            if caller.cuda_stream != self._sample_ready_stream.cuda_stream:
+                caller.wait_stream(self._sample_ready_stream)
+
+    def _record_sample_stream(self) -> None:
+        if self.device.type == "cuda" and not torch.cuda.is_current_stream_capturing():
+            self._sample_ready_stream = torch.cuda.current_stream(self.device)
 
     def _fetch_contacts(self) -> ContactBuffer:
         buffer = self._read_contacts()
@@ -391,18 +438,21 @@ class ContactSensor(BaseSensor):
             buffer.device_counts[0] = buffer.count
             buffer.device_counts[1] = buffer.dropped_count
         self._sync_filter_actor_metadata()
-        # Each ContactQuery owns its output buffer, including device counts.
-        # Retain only its reference; reading latest loss performs no extra fetch.
-        self._latest_contact_buffer = buffer
         return buffer
 
     def _scatter_contacts(self, buffer: ContactBuffer) -> None:
+        if self.device.type == "cpu":
+            # A scalar CPU copy avoids a query-count branch on every scatter row.
+            self._latest_query_dropped_count.copy_(buffer.dropped_count_device)
+            kernel = scatter_contact_rows
+        else:
+            kernel = scatter_contact_rows_with_loss
         assert self._num_contacts_per_env is not None
         self._num_contacts_per_env.zero_()
         self._data_buffer["is_valid"].zero_()
         self._sample_scatter_dropped_count.zero_()
         wp.launch(
-            kernel=scatter_contact_rows,
+            kernel=kernel,
             dim=buffer.capacity,
             inputs=[
                 wp.from_torch(buffer.data),
@@ -422,8 +472,8 @@ class ContactSensor(BaseSensor):
                         "is_valid",
                     )
                 ],
-                wp.from_torch(buffer.count_device),
-                wp.from_torch(self._sample_scatter_dropped_count),
+                wp.from_torch(buffer.device_counts),
+                wp.from_torch(self._latest_loss_counters),
             ],
             device=str(self.device),
             stream=current_warp_stream(self.device),
@@ -442,18 +492,36 @@ class ContactSensor(BaseSensor):
 
     @property
     def latest_sample_dropped_contacts(self) -> int:
-        """Return query and scatter loss from the latest sensor fetch.
+        """Return query and scatter loss from the latest sampled snapshot.
 
-        Standalone ``update()`` preserves accumulated control-interval counters
-        when histories or observers are attached. This separate diagnostic still
-        exposes loss in that fetch, including before the first control interval.
-        Query storage is owned by this sensor's ContactQuery and reused only by
-        its subsequent fetches. Reading the counters may synchronize device work.
+        Unlike interval counters, this diagnostic also covers standalone refreshes
+        with observers attached. Reads respect the sampling stream and may
+        synchronize device work. Selective reset retains query-wide loss.
         """
-        loss = self._sample_scatter_dropped_count.sum()
-        if self._latest_contact_buffer is not None:
-            loss = loss + self._latest_contact_buffer.dropped_count_device.sum()
-        return int(loss.item())
+        self._wait_for_sample()
+        return int(
+            (
+                self._latest_query_dropped_count.sum()
+                + self._sample_scatter_dropped_count.sum()
+            ).item()
+        )
+
+    @property
+    def evidence_dropped_contacts(self) -> int:
+        """Return the maximum interval/latest loss with one counter readback.
+
+        The two diagnostics overlap and must not be added. Packed storage avoids
+        separate GPU reductions and scalar synchronizations. Reduction uses int64
+        on the host, matching the existing Torch integer sums. Counter reads wait
+        for the producing stream; negative counters invalidate acquisition.
+        """
+        self._wait_for_sample()
+        counters = self._loss_counters.cpu().numpy()
+        if not counters.any():
+            return 0
+        if (counters < 0).any():
+            raise ValueError("Contact dropped count must be nonnegative.")
+        return int(counters.sum(axis=1, dtype=np.int64).max())
 
     def get_arena_pose(self, to_matrix: bool = False) -> torch.Tensor | None:
         """Not used.
@@ -629,6 +697,7 @@ class ContactSensor(BaseSensor):
 
     def begin_control_step(self) -> None:
         """Start a new interval without discarding persistent contact timing."""
+        self._wait_for_sample()
         self._query_dropped_count.zero_()
         self._scatter_dropped_count.zero_()
         for history in self._histories.values():
@@ -636,6 +705,8 @@ class ContactSensor(BaseSensor):
         if self._sampling_observers:
             for observer in self._sampling_observers.values():
                 observer.begin_control_step()
+
+        self._record_sample_stream()
 
     def update_physics_step(self, dt: float) -> None:
         """Sample contacts and advance registered histories after physics.
@@ -645,30 +716,45 @@ class ContactSensor(BaseSensor):
         """
         if dt <= 0:
             raise ValueError("Contact sampling dt must be positive.")
+        self._wait_for_sample()
+        # Capturing records future work; Python cache keys cannot track replay.
+        capturing = (
+            self.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
+        )
         observers = self._sampling_observers
-        if (
-            observers
-            and self.device.type == "cuda"
-            and torch.cuda.is_current_stream_capturing()
-        ):
+        if observers and capturing:
             raise RuntimeError(
                 "Contact sampling observers require calls outside external CUDA capture."
             )
-        tokens = (
-            tuple(
+        key = None if capturing else self._contact_sample_key()
+        if not capturing and key == self._last_history_key:
+            return
+        # Keep the default history-only path free of observer snapshots and
+        # generator allocation. Capture a stable subscription set only when used.
+        tokens = None
+        if observers:
+            tokens = tuple(
                 (observer, observer.before_sample())
                 for observer in tuple(observers.values())
             )
-            if observers
-            else ()
+        buffer = (
+            self._last_contact_buffer
+            if not capturing and key == self._last_update_key
+            else self._read_contacts()
         )
-        self._update_physics_contacts(dt)
-        for observer, token in tokens:
-            observer.after_sample(dt, token)
+        assert buffer is not None
+        self._sample_physics_contacts(buffer, dt)
+        self._last_update_key = key
+        self._last_history_key = key
+        self._last_contact_buffer = None if capturing else buffer
+        if not capturing:
+            self._record_sample_stream()
+        if tokens is not None:
+            for observer, token in tokens:
+                observer.after_sample(dt, token)
 
-    def _update_physics_contacts(self, dt: float) -> None:
-        """Keep the existing contact/history device path independent of observers."""
-        buffer = self._read_contacts()
+    def _sample_physics_contacts(self, buffer: ContactBuffer, dt: float) -> None:
+        """Run the reduction on the existing caller/capture stream boundary."""
         if self.device.type != "cuda" or torch.cuda.is_current_stream_capturing():
             self._sample_contacts(buffer, dt)
             return
@@ -722,6 +808,9 @@ class ContactSensor(BaseSensor):
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear contact samples and histories only for the selected rows.
 
+        The next update may refresh the current backend snapshot. Clearing
+        these buffers does not reset physics or invalidate a solved snapshot.
+
         Args:
             env_ids: Rows to reset. None selects every row.
         """
@@ -732,6 +821,9 @@ class ContactSensor(BaseSensor):
                 self.device, non_blocking=True
             )
         )
+        if ids is not None and ids.numel() == 0:
+            return
+        self._wait_for_sample()
         for value in (
             self._data_buffer["is_valid"],
             self._num_contacts_per_env,
@@ -744,12 +836,17 @@ class ContactSensor(BaseSensor):
                 value.index_fill_(0, ids, 0)
         if env_ids is None:
             self._query_dropped_count.zero_()
-            self._latest_contact_buffer = None
+            self._latest_query_dropped_count.zero_()
         for history in self._histories.values():
             history.reset(ids)
         if self._sampling_observers:
             for observer in self._sampling_observers.values():
                 observer.reset(env_ids)
+
+        self._last_update_key = None
+        self._last_history_key = None
+        self._last_contact_buffer = None
+        self._record_sample_stream()
 
     def filter_by_user_ids(
         self, item_user_ids: torch.Tensor, env_ids: Sequence[int] | None = None

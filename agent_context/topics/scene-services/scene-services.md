@@ -14,6 +14,7 @@ semantic scene graph, generation model client or task lifecycle.
 | UID-based support geometry and group placement | `embodichain/lab/sim/scene/geometry.py`, `placement.py` |
 | Fixed-orientation XY constraints and solution status | `embodichain/lab/sim/scene/layout.py` |
 | Existing binding selection and cloned poses | `embodichain/lab/sim/scene/query.py` |
+| Exact native planar footprint observations | `embodichain/lab/sim/scene/planar_observation.py` |
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
@@ -27,8 +28,36 @@ The package facade resolves services lazily. Expansion has its own
 never simulation or GenSim models. Its `contact_support.py` computes a contact
 patch and COM distance from arrays; native acquisition and witness lifetimes
 belong to the [sensor integration](../sensor-system/contact-history.md).
+
+`scene.expansion` namespace. `compute.geometry` takes numerical geometry, never entity UIDs,
+simulation or GenSim models. Its `landing.py` CPU routines additionally consume
+Trimesh meshes and Shapely polygons for triangle-union floor and silhouette measurements.
 Scene CPU strategies own support
 selection, polygon search, greedy packing and SciPy SLSQP optimization.
+
+`NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
+recreate it after replacing either object or changing its model/scale. Queries
+take explicit observed poses and return footprint containment, area and vertical
+gap, without accepting a task or inferring contact support. Exact silhouette mode
+retains concavities and holes; convex-hull mode remains explicit. Acquisition
+errors remain unavailable evidence. Callers own thresholds, invocation/episode
+association, observation timing and evidence publication.
+
+`mesh_snapshot.py` captures scaled rigid visual vertices and ordered articulation
+collision-input components from explicit UID/link mappings. It reads no live
+poses and keeps unavailable geometry distinct from usable components. Neutral
+planner roles are metadata: `none` does not remove a selected physical input.
+Connected nonconvex inputs remain unavailable in this capture path. The separate
+`collision_sources.py` link-box adapter retains its conservative component AABB
+policy; it is not a native cooked-shape/contact oracle.
+`snapshot_collision_sources()` combines common shape descriptors and explicitly
+supplied same-observation poses through `world_to_frame`. Batched inputs require
+matching pose/transform batch axes and equal projected obstacle poses; otherwise
+the helper rejects them rather than selecting row zero. It returns B=1 providers
+for the declared shared geometry/world, not per-environment world providers.
+It preserves topology/shape order,
+applies no second scale, and supplies owned providers to existing planner APIs.
+See [collision worlds](../motion-planning/collision-worlds.md) for cuRobo query lifetimes.
 
 ## Construction and proposal flow
 

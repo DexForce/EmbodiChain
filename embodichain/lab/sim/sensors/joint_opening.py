@@ -87,6 +87,18 @@ class DriverOpeningBinding:
         ):
             raise ValueError("Opening tolerance must be finite and positive.")
 
+    def bind(self, robot: object) -> Callable[[int], Mapping[str, object]]:
+        """Bind the existing public per-row reader using explicit calibration.
+
+        Args:
+            robot: Robot supplying the declared joint layout and measured state.
+
+        Returns:
+            Per-environment opening facts with the original strict threshold.
+        """
+        reader = create_joint_opening_reader(robot, (self,))
+        return lambda env_id: reader(self.control_part, env_id)
+
 
 def create_joint_opening_reader(
     robot: object, bindings: tuple[DriverOpeningBinding, ...]
