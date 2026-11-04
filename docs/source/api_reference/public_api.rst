@@ -3723,3 +3723,13 @@ Historical assembly reference preparation
    :maxdepth: 1
 
    assembly_robot_reference
+
+Shared locomotion observation functor
+------------------------------------
+
+The observation package exposes task-built actor or critic state and preserves the
+existing locomotion configuration name while implementations move into a package.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observations
+
+.. autofunction:: velocity_locomotion_observation

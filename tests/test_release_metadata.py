@@ -83,6 +83,7 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
         "embodichain_robots.dexforce.w1",
     } <= set(packages)
     assert "embodichain_tasks.manipulation.tableware" in packages
+    assert "embodichain.lab.gym.envs.managers.observations" in packages
     assert "embodichain_tasks.tableware" not in packages
     assert all(package.partition(".")[0] in runtime_roots for package in packages)
     assert package_dir == {

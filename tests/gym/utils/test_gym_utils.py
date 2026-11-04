@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+
 import argparse
 from copy import deepcopy
 from pathlib import Path
@@ -2778,3 +2779,54 @@ def test_config_to_cfg_resolves_usd_source_files(monkeypatch, tmp_path):
         assert isinstance(asset.source, UsdSourceCfg)
         assert asset.source.file_path == str(tmp_path / "scene.usda")
         assert asset.source.source_prim_path == "/World/Asset"
+
+
+def test_checkpoint_resource_paths_resolve_from_config_owner(tmp_path, monkeypatch):
+    """Prepared robot and manifest paths survive a change of working directory."""
+    from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
+
+    owner = tmp_path / "run" / "configs"
+    resources = owner / "resources"
+    resources.mkdir(parents=True)
+    (resources / "robot.urdf").write_text('<robot name="frozen"/>')
+    (resources / "part.json").write_text("{}")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    raw = {
+        "id": "FrozenAssembly-v1",
+        "physics": "newton",
+        "robot": {"fpath": "./resources/robot.urdf"},
+        "env": {"extensions": {"assembly_manifest": "./resources/part.json"}},
+    }
+    resolved = _resolve_gym_components(raw, base_dir=owner).config
+    assert resolved["robot"]["fpath"] == str(resources / "robot.urdf")
+    assert resolved["env"]["extensions"]["assembly_manifest"] == str(
+        resources / "part.json"
+    )
+    assert raw["robot"]["fpath"] == "./resources/robot.urdf"
+
+
+@pytest.mark.parametrize("field", ["scene_preparation", "resource_export"])
+def test_configured_rl_rejects_changed_preparation_or_export(field):
+    from copy import deepcopy
+    from gymnasium.envs.registration import registry
+    from embodichain.lab.gym.utils.gym_utils import _register_configured_rl
+    from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
+
+    name = f"ConfigOperationIdentity-{field}-v0"
+    config = {
+        "id": name,
+        "physics": "newton",
+        "rl_task": {},
+        "env": {field: {"func": "fixture:prepare", "params": {"variant": 1}}},
+    }
+    try:
+        _register_configured_rl(config, 10)
+        changed = deepcopy(config)
+        changed["env"][field]["params"]["variant"] = 2
+        with pytest.raises(ValueError, match="different declaration"):
+            _register_configured_rl(changed, 10)
+    finally:
+        REGISTERED_ENVS.pop(name, None)
+        registry.pop(name, None)

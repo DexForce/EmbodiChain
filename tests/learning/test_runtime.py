@@ -76,7 +76,7 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
     built = GymEnvironment()
     monkeypatch.setattr(
         "embodichain.learning.rl.runtime.config_to_cfg",
-        lambda value, manager_modules: env_cfg,
+        lambda value, manager_modules, source_path=None: env_cfg,
     )
     monkeypatch.setattr(
         "embodichain.learning.rl.runtime.build_env",
@@ -117,7 +117,7 @@ def test_gym_runtime_preserves_task_renderer_when_override_is_omitted(
     original_render_cfg = env_cfg.sim_cfg.render_cfg
     monkeypatch.setattr(
         "embodichain.learning.rl.runtime.config_to_cfg",
-        lambda value, manager_modules: env_cfg,
+        lambda value, manager_modules, source_path=None: env_cfg,
     )
     monkeypatch.setattr(
         "embodichain.learning.rl.runtime.build_env",

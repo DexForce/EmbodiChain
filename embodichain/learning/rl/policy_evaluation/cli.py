@@ -94,6 +94,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--resource-root", help="External Profile resource root.")
     parser.add_argument("--episodes", type=int)
     parser.add_argument("--num-envs", type=int)
+    parser.add_argument(
+        "--episode-allocation",
+        choices=("first_completed", "balanced"),
+        default="first_completed",
+        help="Allocate evaluation episodes by completion order or fixed per-environment quotas.",
+    )
     count = parser.add_mutually_exclusive_group()
     count.add_argument("--control-steps", type=int)
     count.add_argument("--duration", type=float)
@@ -124,6 +130,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def run(args: argparse.Namespace) -> Path:
     """Run Headless or Viewer evaluation and write ``evaluation.json``."""
+    if getattr(args, "episode_allocation", "first_completed") != "first_completed" and (
+        args.viewer or args.profile is not None
+    ):
+        raise ValueError(
+            "Balanced episode allocation requires native headless evaluation."
+        )
     resolved = _resolve_input(args)
     if resolved.profile is not None:
         return _run_profile(args, resolved)
@@ -252,14 +264,16 @@ def _run_native_headless(
             num_episodes=episodes,
             device=native.device,
             seed=native.seed,
+            episode_allocation=getattr(args, "episode_allocation", "first_completed"),
         )
     finally:
         native.runtime.close()
         _flush_simulator(native.uses_simulator)
-    return write_evaluation_report(
-        _output_parent(args.output, resolved),
-        _headless_report(native, resolved, episodes, metrics),
+    report = _headless_report(native, resolved, episodes, metrics)
+    report["inputs"]["episode_allocation"] = getattr(
+        args, "episode_allocation", "first_completed"
     )
+    return write_evaluation_report(_output_parent(args.output, resolved), report)
 
 
 def _run_native_viewer(
