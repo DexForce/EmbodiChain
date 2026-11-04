@@ -550,7 +550,7 @@ def _verify_task(
     import gymnasium
     from embodichain.lab.gym.envs.demo import execute_demo_episode
     from embodichain.lab.gym.envs.types import ControllerAction
-    from embodichain.lab.sim.sensors.contact_sensor import (
+    from embodichain.lab.sim.sensors.contact.sensor import (
         ArticulationContactFilterCfg,
         ContactSensor,
         ContactSensorCfg,

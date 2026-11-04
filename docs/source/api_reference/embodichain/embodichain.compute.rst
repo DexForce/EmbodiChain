@@ -1,5 +1,4 @@
 embodichain.compute
-===================
 
 Shared array and tensor computations
 ------------------------------------
@@ -20,7 +19,7 @@ not load Torch or Warp. Domain packages load their required dependencies.
 
 Private ``_warp`` modules are implementation details, not a backend registry.
 Simulation-specific contact scattering belongs to
-``embodichain.lab.sim.sensors._warp.contact``.
+``embodichain.lab.sim.sensors.contact._warp.scatter``.
 
 Trajectory API
 --------------
@@ -186,13 +185,27 @@ compute function and Torch layer; failed solves retain their last iterate.
    :members:
 
 
-Sampled hand geometry
----------------------
+Planar floor and silhouette geometry
+------------------------------------
 
-.. currentmodule:: embodichain.compute.geometry.gripper
+.. currentmodule:: embodichain.compute.geometry.landing
 
-Interpolate fixed hand surfaces at requested pad gaps without robot, simulator,
-or task dependencies. Geometry validity is established at construction;
-the kernel preserves sample order and endpoint clamping.
+These CPU routines preserve actual floor triangles and payload silhouettes,
+including holes. They consume explicit numerical geometry without reading a
+robot or simulator. Landing selection retains its ordered clearance margins;
+measurements leave task acceptance and support thresholds to callers.
 
-.. autofunction:: interpolate_hand_samples
+.. autosummary::
+
+   planar_floor_region
+   select_container_landing
+   planar_placement_metrics
+   validate_planar_pose
+
+.. autofunction:: planar_floor_region
+
+.. autofunction:: select_container_landing
+
+.. autofunction:: planar_placement_metrics
+
+.. autofunction:: validate_planar_pose

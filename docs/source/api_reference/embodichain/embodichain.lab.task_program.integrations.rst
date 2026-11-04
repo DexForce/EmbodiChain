@@ -23,12 +23,17 @@ embodichain.lab.task_program.integrations
       SimulationTaskProgramAdapterFactory, ConfiguredHandOverPoseProvider,
       CuroboParallelCommandSafetyValidator, CuroboParallelSafetyValidatorFactory,
       SimulationSegmentPolicyPort, create_simulation_task_program_adapter,
+      InvocationPolicyBinding, BoundInvocationPolicies, task_program_fingerprint,
+
       ConfiguredTaskProgramDeployment, ConfiguredTaskProgramIntegration,
       load_configured_task_program_deployment
 
    .. autosummary::
 
       AntipodalGraspAffordanceBinding
+      InvocationPolicyBinding
+      BoundInvocationPolicies
+      task_program_fingerprint
       ConfiguredHandOverPoseProvider
       ConfiguredTaskProgramDeployment
       ConfiguredTaskProgramIntegration
@@ -273,6 +278,29 @@ Simulation bindings
 Implementation module exports
 -----------------------------
 
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.policies
+
+``SimulationSettleMonitorCfg`` adds an explicit measurement mode to the existing
+dynamic settle thresholds and cadence. Use it in a registration's
+``settle_presets`` table. ``pose_delta`` requires an explicitly bound native
+rigid object and the authoritative control ``step_dt``; provider-free catalog
+preflight rejects articulation targets. The first observation has no previous
+pose and remains unresolved. Inactive rows and timeout behavior retain the
+shared monitor contract.
+
+Plain ``DynamicSettleMonitorCfg`` values and the built-in preset table keep
+reported velocities and their existing identity/metadata. Names such as
+``contained_rigid_object`` do not select measurement behavior or install a preset.
+Configured JSON declarations must be decoded by their integration owner; this
+type does not register a second deployment configuration source.
+
+.. autosummary::
+
+   SimulationSettleMonitorCfg
+
+.. autoclass:: SimulationSettleMonitorCfg
+   :members:
+
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.parallel_safety
 
 .. autosummary::
@@ -325,3 +353,46 @@ Implementation module exports
 .. autofunction:: validate_immutable_extension_declaration
 
 .. autodata:: VersionedKey
+
+Occurrence policy bindings
+--------------------------
+
+An ``InvocationPolicyBinding`` selects an existing named profile preset for one
+sequential execution occurrence, identified by the complete compiled-program
+fingerprint and ``program_id/segment_id:segment_call_index``. Pass a tuple of these
+declarations to ``TaskProgramEnvironmentAdapter.create_bridge`` through its
+``invocation_policy_bindings`` keyword. Normal calls use their existing policies
+when the tuple is empty.
+
+The adapter validates identities and selections before execution. The compiler
+links and analyzes selected presets before constructing the final Atomic
+invocation, so repeated calls and cached analyses retain distinct selections.
+Selected presets must retain the original effect assurance. A selected preset's
+existing runner settings own that occurrence; unselected calls continue to use
+the host's runner override. Re-grounding preserves the original occurrence and
+selection. Derived workflow-recovery calls keep independent IDs and ordinary
+preset selection.
+
+Bindings targeting parallel branches are explicitly rejected. Unbound parallel
+calls remain supported. The compiled-program fingerprint uses the same format as
+nominal motion sources; it includes the instruction and integration selection.
+These declarations do not add YAML fields, execute providers, or mutate an engine.
+``validate_manifest`` checks profile identity, runtime-preset selection and each
+selected call's policy contract. A scene manifest carries entity metadata rather
+than the host's scene-registry selection ID; the standard adapter validates that
+selection, and hosts constructing a bridge directly retain that responsibility.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.invocation_policy
+
+.. autosummary::
+
+   InvocationPolicyBinding
+   BoundInvocationPolicies
+   task_program_fingerprint
+
+.. autoclass:: InvocationPolicyBinding
+
+.. autoclass:: BoundInvocationPolicies
+   :members: validate_program, validate_manifest
+
+.. autofunction:: task_program_fingerprint

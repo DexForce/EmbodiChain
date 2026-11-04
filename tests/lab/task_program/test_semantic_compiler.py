@@ -1780,3 +1780,69 @@ def test_workflow_is_factory_owned_and_cannot_cross_compilers() -> None:
         "semantic_program_stale",
         "semantic_workflow_owner_mismatch",
     }
+
+
+def test_occurrence_policy_is_relinked_before_grounding_and_revisions() -> None:
+    from dataclasses import replace
+
+    registry, providers = _scene_registry()
+    base = _profile()
+    options = _action_option_templates()
+    options["pick"] = PickUpOptions(lift_height=0.23)
+    profile = replace(
+        base,
+        presets={
+            **base.presets,
+            "careful": _preset(
+                "careful",
+                motion_policy=MotionPolicy(sample_count=81),
+                action_option_templates=options,
+            ),
+        },
+    )
+    compiler, _ = _compiler(registry, profile=profile)
+    call = Pick(object=SceneObjectRef("cube"))
+    workflow = compiler.analyze((call,), preset_ids=("careful",))
+    assert providers[0].calls == 0
+    analyzed = workflow.calls[0]
+    assert (
+        analyzed.bound.linked.preset_id == analyzed.bound.preset.preset_id == "careful"
+    )
+    assert analyzed.policy_preset_id == "careful"
+    for revision in (0, 1):
+        invocation = compiler.ground(
+            workflow,
+            0,
+            _context(registry),
+            invocation_id="task/repeat_1:0",
+            revision=revision,
+        ).invocation
+        assert invocation.invocation_id == "task/repeat_1:0"
+        assert invocation.revision == revision
+        assert invocation.motion_policy.sample_count == 81
+        assert invocation.skill_options.lift_height == pytest.approx(0.23)
+    default = compiler.analyze((call,))
+    assert default.calls[0].bound.preset.preset_id == "safe"
+    assert default.calls[0].policy_preset_id is None
+
+
+@pytest.mark.parametrize("preset_id", ["absent", "projected"])
+def test_occurrence_policy_rejects_unknown_preset_and_assurance_changes(
+    preset_id: str,
+) -> None:
+    from dataclasses import replace
+
+    registry, providers = _scene_registry()
+    base = _profile()
+    projected = _preset(
+        "projected", effect_assurance=EffectAssurance.PROJECTED, effect_monitors={}
+    )
+    compiler, _ = _compiler(
+        registry,
+        profile=replace(base, presets={**base.presets, "projected": projected}),
+    )
+    with pytest.raises(SemanticValidationError):
+        compiler.analyze(
+            (Pick(object=SceneObjectRef("cube")),), preset_ids=(preset_id,)
+        )
+    assert all(provider.calls == 0 for provider in providers)
