@@ -14,22 +14,24 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Native robot-held peg insertion task."""
+"""Configuration-owned peg insertion task registration."""
 
 from __future__ import annotations
-
-from embodichain.lab.gym.envs.assembly_env import BlindAssemblyEnv
+from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.utils.registration import register_env
 
-from .assets import build_task_assembly
+__all__: list[str] = []
 
-__all__ = ["BlindPegInsertionEnv"]
-
-
-@register_env("BlindPegInsertionRL-v1", max_episode_steps=250, supports_rl=True)
-class BlindPegInsertionEnv(BlindAssemblyEnv):
-    """Peg insertion through contact and proprioceptive feedback."""
-
-    assembly_kind = "peg"
-
-    _asset_builder = staticmethod(build_task_assembly)
+register_env(
+    "BlindPegInsertionRL-v1",
+    max_episode_steps=250,
+    supports_rl=True,
+    supports_handwritten_demo=False,
+    scene_preparation={
+        "func": "embodichain_tasks.manipulation.assembly.preparation:prepare_assembly_scene",
+        "params": {"kind": "peg"},
+    },
+    resource_export={
+        "func": "embodichain_tasks.manipulation.assembly.resources:export_assembly_resources"
+    },
+)(EmbodiedEnv)

@@ -266,9 +266,10 @@ fallback contract.
 
 Training snapshots freeze physical environment/embodiment/scene components
 relative to their declaring deployment before moving configs into a run.
-An optional unwrapped environment `export_checkpoint_gym_config` hook owns
-materialized task resources; assembly uses it to pin the actual robot and
-manifest. Explicit `./` resource paths resolve relative to the saved config,
+The optional `EmbodiedEnvCfg.resource_export` function owns materialized
+task resources. It receives the unwrapped environment, an owned frozen mapping
+and the destination directory; assembly uses it to pin the actual robot and
+manifest together with its preparation/export declarations. Explicit `./` resource paths resolve relative to the saved config,
 including robot `fpath`/solver `urdf_path` and `assembly_manifest`. Raw checkpoint context remains
 unchanged so resource packaging does not redefine resume compatibility.
 

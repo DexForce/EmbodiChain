@@ -26,15 +26,119 @@ from scipy.spatial.transform import Rotation
 import pytest
 import torch
 
-from embodichain.lab.gym.envs.assembly_env import BlindAssemblyEnv
+from embodichain_tasks.manipulation.assembly._state import AssemblyState
+from embodichain_tasks.manipulation.assembly.preparation import (
+    AssemblyScene,
+    prepare_assembly_scene,
+)
+from embodichain_tasks.manipulation.assembly._control import EncoderGravityCompensation
+from embodichain_tasks.manipulation.assembly.resources import export_assembly_resources
+from embodichain.lab.gym.envs.managers.observations._assembly import (
+    _proprioceptive_frame,
+)
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, register_manager_modules
 from embodichain.utils.utility import load_config
+
+
+def _state_fixture() -> AssemblyState:
+    state = object.__new__(AssemblyState)
+    state.env = SimpleNamespace(device=torch.device("cpu"), num_envs=1)
+    state.scene = SimpleNamespace()
+    state.env.assembly_state = state
+    return state
+
+
+@pytest.mark.parametrize(
+    "task",
+    ["BlindPegInsertionRL-v1", "BlindGearMeshingRL-v1", "BlindNutThreadingRL-v1"],
+)
+def test_assembly_registration_constructs_the_common_environment(task):
+    import embodichain_tasks
+    from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain.lab.gym.utils.registration import get_env_spec
+
+    assert get_env_spec(task).cls is EmbodiedEnv
+
+
+def test_condition_advances_once_and_observation_reads_do_not_advance():
+    from embodichain.lab.gym.envs.managers.assembly import (
+        assembly_success,
+        assembly_failure,
+    )
+
+    state, _ = _analytic_mating_state()
+    state._last_control_physics_step = 0
+    state.env.sim.physics_step_index = 20
+    assembly_success(state.env)
+    before = state._assembly_success_hold.clone()
+    revision = state._assembly_physics_revision
+    assembly_failure(state.env)
+    assembly_success(state.env)
+    state.refresh_assembly_state()
+    assert state._assembly_physics_revision == revision
+    torch.testing.assert_close(state._assembly_success_hold, before)
+    state.env.sim.physics_step_index = 40
+    assembly_success(state.env)
+    assert state._assembly_physics_revision == revision + 1
+
+
+def test_assembly_action_preserves_warmup_history_and_encoder_relative_targets():
+    from embodichain_tasks.manipulation.assembly._control import (
+        AssemblyJointPositionAction,
+    )
+
+    measured = torch.full((2, 7), 0.3)
+    torque = torch.full((2, 7), 0.5)
+    robot = SimpleNamespace(
+        get_qpos=lambda: measured,
+        get_joint_ids=lambda **kwargs: [7],
+        set_qpos=Mock(),
+        set_qf=Mock(),
+    )
+    env = SimpleNamespace(
+        robot=robot,
+        device=torch.device("cpu"),
+        num_envs=2,
+        _elapsed_steps=torch.tensor([0, 10]),
+        grasp_warmup_steps=10,
+        assembly_state=SimpleNamespace(
+            controller=SimpleNamespace(torques=lambda: torque),
+            scene=SimpleNamespace(_grasp_target_joint=0.6),
+        ),
+    )
+    term = object.__new__(AssemblyJointPositionAction)
+    term._env = env
+    term._joint_ids = tuple(range(7))
+    term._raw_actions = torch.zeros(2, 7)
+    term._previous_raw_actions = torch.zeros(2, 7)
+    term._processed_actions = torch.zeros(2, 7)
+    term._scale = torch.full((7,), 0.02)
+    term._clip, term._target_limits = None, None
+    actions = torch.ones(2, 7)
+    term.process_actions(actions)
+    term.apply_actions()
+    torch.testing.assert_close(actions, torch.ones(2, 7))
+    torch.testing.assert_close(term.raw_actions, torch.tensor([[0.0] * 7, [1.0] * 7]))
+    torch.testing.assert_close(
+        term.processed_actions, torch.tensor([[0.3] * 7, [0.32] * 7])
+    )
+    torch.testing.assert_close(robot.set_qf.call_args.args[0], torque)
+    assert robot.set_qpos.call_args_list[0].kwargs["name"] == "eef"
+    torch.testing.assert_close(
+        robot.set_qpos.call_args_list[0].args[0], torch.full((2, 1), 0.6)
+    )
+
+
+def _task_state(state):
+    state.refresh_assembly_state()
+    values = state._assembly_metrics
+    return values["success"], values["fail"], values
 
 
 def test_grasp_reset_uses_source_mimic_relations_without_joint_name_assumptions() -> (
     None
 ):
-    from embodichain.lab.gym.envs.assembly_env import _grasp_joint_reset
+    from embodichain.lab.gym.envs.managers.assembly import _grasp_joint_reset
 
     robot = SimpleNamespace(
         get_joint_ids=lambda **kwargs: [7],
@@ -95,6 +199,12 @@ def test_nominal_task_uses_production_component_loader(
     assert cfg.control_parts == ["arm"]
     assert cfg.extensions["gripper_model"] == "parallel_jaw"
     assert len(cfg.robot.control_parts["eef"]) == 2
+    gains = cfg.robot.joint_drive_props.stiffness
+    assert gains["joint1"] == 289.0
+    assert gains["gripper_right_jaw_joint"] == 5000.0
+    assert set(gains) == set(
+        cfg.robot.control_parts["arm"] + cfg.robot.control_parts["eef"]
+    )
     assert cfg.actions.arm_delta.params["part_name"] == "arm"
     assert cfg.extensions["require_heterogeneous_assets"] is False
     agent = load_config(
@@ -138,13 +248,13 @@ def test_task_assets_keep_real_mating_constraints(
 
 def test_official_proprioception_uses_world_linear_and_tcp_angular_velocity() -> None:
     """A rotated base distinguishes the two public-reference velocity frames."""
-    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
-    env._num_envs = 1
-    env.assembly_kind = "peg"
+    env = _state_fixture()
+    env.env.num_envs = 1
+    env.scene.assembly_kind = "peg"
     env._assembly_revision = 0
     env._assembly_observation_convention = "official_v1"
     q = torch.arange(1.0, 8.0).unsqueeze(0)
-    env.robot = SimpleNamespace(
+    env.env.robot = SimpleNamespace(
         get_qpos=lambda **kwargs: q, get_qvel=lambda **kwargs: q
     )
     env._assembly_q_center = q[0]
@@ -164,10 +274,10 @@ def test_official_proprioception_uses_world_linear_and_tcp_angular_velocity() ->
             [0.0, 0.0, 0.0, 1.0],
         ]
     )
-    env.action_manager = SimpleNamespace(
+    env.env.action_manager = SimpleNamespace(
         get_term=lambda name: SimpleNamespace(raw_actions=torch.full((1, 7), 0.7))
     )
-    actual = env.proprioceptive_frame()
+    actual = _proprioceptive_frame(env)
     expected = torch.tensor(
         [
             [0.0] * 7
@@ -182,14 +292,14 @@ def test_official_proprioception_uses_world_linear_and_tcp_angular_velocity() ->
 
 @pytest.mark.parametrize("kind", ["peg", "gear", "nut"])
 def test_partial_reset_recomputes_only_selected_proprioceptive_rows(kind: str) -> None:
-    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
-    env._num_envs = 2
-    env.assembly_kind = kind
+    env = _state_fixture()
+    env.env.num_envs = 2
+    env.scene.assembly_kind = kind
     env._assembly_revision = 0
     env._assembly_physics_revision = 0
     env._assembly_observation_convention = "legacy_v1"
     q = torch.zeros((2, 7))
-    env.robot = SimpleNamespace(
+    env.env.robot = SimpleNamespace(
         get_qpos=lambda **kwargs: q, get_qvel=lambda **kwargs: torch.zeros_like(q)
     )
     calls = []
@@ -201,13 +311,13 @@ def test_partial_reset_recomputes_only_selected_proprioceptive_rows(kind: str) -
         )
 
     env._assembly_chain = SimpleNamespace(jacobian=jacobian)
-    env.action_manager = None
-    before = env.proprioceptive_frame()
+    env.env.action_manager = None
+    before = _proprioceptive_frame(env)
     snapshot = before.clone()
     q[1, 0] = 0.5
     env._assembly_revision += 1
     env._assembly_frame_reset_ids = torch.tensor([1])
-    after = env.proprioceptive_frame()
+    after = _proprioceptive_frame(env)
     assert calls == [2, 1]
     torch.testing.assert_close(before, snapshot)
     torch.testing.assert_close(after[0], snapshot[0])
@@ -215,9 +325,9 @@ def test_partial_reset_recomputes_only_selected_proprioceptive_rows(kind: str) -
 
 
 def test_bilateral_grasp_requires_the_part_on_both_pads() -> None:
-    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
-    env.robot = SimpleNamespace(uid="robot")
-    env._moving_uid = "part"
+    env = _state_fixture()
+    env.env.robot = SimpleNamespace(uid="robot")
+    env.scene._moving_uid = "part"
     data = {
         "user_ids": torch.tensor([[[1, 3], [3, 2]], [[1, 3], [1, 2]]]),
         "distance": torch.zeros((2, 2)),
@@ -232,15 +342,31 @@ def test_bilateral_grasp_requires_the_part_on_both_pads() -> None:
             else torch.tensor([[3], [3]])
         ),
     )
-    env.get_sensor = lambda name: sensor
+    env.env.get_sensor = lambda name: sensor
     assert env._contact_grasp().tolist() == [True, False]
 
 
 def test_formal_geometry_gate_precedes_world_creation() -> None:
-    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
-    env.require_heterogeneous_assets = True
+    cfg = SimpleNamespace(extensions={"require_heterogeneous_assets": True})
     with pytest.raises(RuntimeError, match="per-arena"):
-        env._setup_scene()
+        prepare_assembly_scene(cfg, "peg")
+
+
+@pytest.mark.parametrize("field", ["enable_sensor", "rl_task"])
+def test_assembly_rejects_missing_contacts_or_competing_conditions_before_generation(
+    monkeypatch, field
+):
+    from embodichain.lab.gym.envs import EmbodiedEnvCfg
+    from embodichain.lab.gym.envs.managers.cfg import RLTaskCfg
+    from embodichain_tasks.manipulation.assembly import preparation
+
+    cfg = EmbodiedEnvCfg()
+    setattr(cfg, field, False if field == "enable_sensor" else RLTaskCfg())
+    generate = Mock(side_effect=AssertionError("must fail before generation"))
+    monkeypatch.setattr(preparation, "build_task_assembly", generate)
+    with pytest.raises(ValueError, match="require|owns"):
+        prepare_assembly_scene(cfg, "peg")
+    generate.assert_not_called()
 
 
 @pytest.mark.parametrize("capacities", [None, (256, 64)])
@@ -267,32 +393,29 @@ def test_assembly_sensor_capacity_defaults_and_development_override(
             for name, kind in (("peg", "free"), ("plate", "fixed"))
         ]
     )
-    monkeypatch.setattr(EmbodiedEnv, "_prepare_scene", lambda self, **kwargs: None)
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
     monkeypatch.setattr(AssemblyAsset, "load", lambda manifest: asset)
-    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
-    env.assembly_kind = "peg"
-    env.assembly_manifest = str(tmp_path / "asset.json")
-    env.cfg = SimpleNamespace(
-        seed=0,
-        extensions={},
-        sensor=[],
-        robot=SimpleNamespace(_pk_urdf_path="robot.urdf", gripper_model="parallel_jaw"),
-    )
-    env.robot = SimpleNamespace(uid="robot")
-    env.sim = SimpleNamespace(
-        is_newton_backend=True, add_rigid_object=Mock(), add_articulation=Mock()
-    )
+    options = {"assembly_manifest": str(tmp_path / "asset.json")}
     if capacities is not None:
-        env.assembly_contact_capacity, env.grasp_contact_capacity = capacities
-    try:
-        env._prepare_scene()
-        expected = (2048, 128) if capacities is None else capacities
-        assert (
-            tuple(sensor.max_contacts_per_env for sensor in env.cfg.sensor) == expected
+        options.update(
+            assembly_contact_capacity=capacities[0],
+            grasp_contact_capacity=capacities[1],
         )
-    finally:
-        if hasattr(env, "_assembly_directory"):
-            env._assembly_directory.cleanup()
+    cfg = SimpleNamespace(
+        seed=0,
+        extensions=options,
+        sensor=[],
+        rigid_object=[],
+        articulation=[],
+        sim_cfg=SimpleNamespace(physics_cfg=NewtonPhysicsCfg()),
+        robot=SimpleNamespace(
+            uid="robot", fpath="robot.urdf", _pk_urdf_path="robot.urdf"
+        ),
+    )
+    scene = AssemblyScene(cfg, "peg")
+    expected = (2048, 128) if capacities is None else capacities
+    assert tuple(sensor.max_contacts_per_env for sensor in scene.sensors) == expected
 
 
 @pytest.mark.parametrize(
@@ -305,22 +428,20 @@ def test_assembly_sensor_capacity_defaults_and_development_override(
     ],
 )
 def test_invalid_assembly_sensor_capacity_precedes_preparation(
-    name: str,
-    capacity: object,
+    name: str, capacity: object
 ) -> None:
-    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
-    setattr(env, name, capacity)
+    cfg = SimpleNamespace(extensions={name: capacity})
     with pytest.raises(ValueError, match=name):
-        env._prepare_scene()
+        AssemblyScene(cfg, "peg")
 
 
 def _analytic_mating_state(
     kind: str = "peg", grasped: bool = True, penetration: float = 0.0
-) -> tuple[BlindAssemblyEnv, torch.Tensor]:
-    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
-    env.assembly_kind = kind
-    env._num_envs = 1
-    env._moving_uid, env._fixture_uid = "peg", "plate"
+) -> tuple[AssemblyState, torch.Tensor]:
+    env = _state_fixture()
+    env.scene.assembly_kind = kind
+    env.env.num_envs = 1
+    env.scene._moving_uid, env.scene._fixture_uid = "peg", "plate"
     part = torch.eye(4).unsqueeze(0)
     part[:, 2, 3] = -0.01
     fixture = torch.eye(4).unsqueeze(0)
@@ -328,7 +449,7 @@ def _analytic_mating_state(
         "peg": SimpleNamespace(get_local_pose=lambda **kwargs: part),
         "plate": SimpleNamespace(get_local_pose=lambda **kwargs: fixture),
     }
-    env.sim = SimpleNamespace(
+    env.env.sim = SimpleNamespace(
         device=torch.device("cpu"), get_rigid_object=lambda uid: objects[uid]
     )
     env._assembly_revision = 0
@@ -338,9 +459,9 @@ def _analytic_mating_state(
     env._assembly_edge_points = torch.tensor(
         [[-0.004, -0.004, 0], [0.004, -0.004, 0], [0.004, 0.004, 0], [-0.004, 0.004, 0]]
     )
-    env._fixture_zmax = 0.0
-    env._moving_zmin = 0.0
-    env.assembly_asset = SimpleNamespace(
+    env.scene._fixture_zmax = 0.0
+    env.scene._moving_zmin = 0.0
+    env.scene.assembly_asset = SimpleNamespace(
         config={
             "clearance": 0.001,
             "plate_thickness": 0.01,
@@ -358,19 +479,19 @@ def _analytic_mating_state(
     env._assembly_new_milestones = torch.zeros((1, 4), dtype=torch.bool)
     env._assembly_milestones = torch.zeros((1, 4), dtype=torch.bool)
     env._assembly_success_hold = torch.zeros(1, dtype=torch.long)
-    env._elapsed_steps = torch.tensor([20])
+    env.env._elapsed_steps = torch.tensor([20])
     data = {
         "is_valid": torch.ones((1, 1), dtype=torch.bool),
         "distance": torch.tensor([[-penetration]]),
     }
-    env.get_sensor = lambda name: SimpleNamespace(
+    env.env.get_sensor = lambda name: SimpleNamespace(
         dropped_contacts=0, get_data=lambda: data
     )
     env._contact_grasp = lambda: torch.tensor([grasped])
     env._assembly_capture_angle = torch.full((1,), float("nan"))
     env._assembly_capture_depth = torch.full((1,), float("nan"))
     if kind == "nut":
-        env.assembly_asset.config.update(
+        env.scene.assembly_asset.config.update(
             pitch=0.004, major_diameter=0.036, nut_height=0.029
         )
     return env, part
@@ -380,19 +501,19 @@ def _analytic_mating_state(
 def test_partial_reset_recomputes_selected_assembly_geometry(
     monkeypatch, kind: str
 ) -> None:
-    from embodichain.lab.gym.envs import assembly_env as module
+    from embodichain_tasks.manipulation.assembly import _state as module
 
     env, one_part = _analytic_mating_state(kind)
     if kind == "gear":
-        env.assembly_asset.config.update(shaft_radius=0.004, bore_clearance=0.001)
-    env._num_envs = 2
+        env.scene.assembly_asset.config.update(shaft_radius=0.004, bore_clearance=0.001)
+    env.env.num_envs = 2
     part = one_part.repeat(2, 1, 1)
     fixture = torch.eye(4).repeat(2, 1, 1)
     objects = {
         "peg": SimpleNamespace(get_local_pose=lambda **kwargs: part),
         "plate": SimpleNamespace(get_local_pose=lambda **kwargs: fixture),
     }
-    env.sim = SimpleNamespace(
+    env.env.sim = SimpleNamespace(
         device=torch.device("cpu"), get_rigid_object=lambda uid: objects[uid]
     )
     for field in (
@@ -400,18 +521,18 @@ def test_partial_reset_recomputes_selected_assembly_geometry(
         "_assembly_previous_yaw",
         "_assembly_reset_rows",
         "_assembly_success_hold",
-        "_elapsed_steps",
         "_assembly_capture_angle",
         "_assembly_capture_depth",
     ):
         setattr(env, field, getattr(env, field).repeat(2))
+    env.env._elapsed_steps = env.env._elapsed_steps.repeat(2)
     env._assembly_new_milestones = env._assembly_new_milestones.repeat(2, 1)
     env._assembly_milestones = env._assembly_milestones.repeat(2, 1)
     data = {
         "is_valid": torch.ones((2, 1), dtype=torch.bool),
         "distance": torch.zeros((2, 1)),
     }
-    env.get_sensor = lambda name: SimpleNamespace(
+    env.env.get_sensor = lambda name: SimpleNamespace(
         dropped_contacts=0, get_data=lambda: data
     )
     env._contact_grasp = lambda: torch.ones(2, dtype=torch.bool)
@@ -423,7 +544,7 @@ def test_partial_reset_recomputes_selected_assembly_geometry(
         return original(samples, polygon)
 
     monkeypatch.setattr(module, "_signed_polygon_distance", measured)
-    env.compute_task_state()
+    _task_state(env)
     before = {key: value[0].clone() for key, value in env._assembly_metrics.items()}
     previous_metrics = dict(env._assembly_metrics)
     metric_snapshots = {key: value.clone() for key, value in previous_metrics.items()}
@@ -435,7 +556,7 @@ def test_partial_reset_recomputes_selected_assembly_geometry(
     env._assembly_reset_rows = torch.tensor([False, True])
     env._assembly_pending_reset_ids = torch.tensor([1])
     env._assembly_revision += 1
-    env.compute_task_state()
+    _task_state(env)
     assert observed == ([2, 1] if kind == "peg" else [])
     for key, value in previous_metrics.items():
         torch.testing.assert_close(value, metric_snapshots[key], equal_nan=True)
@@ -458,13 +579,13 @@ def test_seated_peg_requires_grasp_and_penetration_guard(
     for revision in range(3):
         env._assembly_revision = revision
         env._assembly_physics_revision = revision
-        success, _, metrics = env.compute_task_state()
+        success, _, metrics = _task_state(env)
     assert success.item() is expected
     assert metrics["depth"].item() == pytest.approx(0.01)
     assert env._assembly_labels.tolist() == [[2, 2, 2, 2]]
     previous = env._assembly_success_hold.clone()
     env._assembly_revision += 1
-    env.compute_task_state()
+    _task_state(env)
     assert torch.equal(env._assembly_success_hold, previous)
 
 
@@ -488,7 +609,7 @@ def test_peg_contact_labels_follow_signed_rim_and_surface_bands() -> None:
             [0.0058, 0.0058, -0.002],
         ]
     )
-    env.compute_task_state()
+    _task_state(env)
     assert env._assembly_labels.tolist() == [[0, 2, 1, 1, 2, 2, 0, 1, 0]]
 
 
@@ -505,7 +626,7 @@ def test_peg_seating_has_a_bounded_bottom_plane_interval(
     part[:, 2, 3] = -0.01 + plane_error
     for revision in range(3):
         env._assembly_revision = env._assembly_physics_revision = revision
-        success, _, _ = env.compute_task_state()
+        success, _, _ = _task_state(env)
     assert success.item() is expected
 
 
@@ -522,7 +643,7 @@ def test_peg_seating_checks_each_bottom_vertex_height() -> None:
     part[:, 2, 3] = -0.0103
     for revision in range(3):
         env._assembly_revision = env._assembly_physics_revision = revision
-        success, _, metrics = env.compute_task_state()
+        success, _, metrics = _task_state(env)
     # Even the highest corner passes the old one-sided 9 mm depth threshold;
     # the opposite corner is over 1 mm below the target and must reject it.
     assert metrics["captured"].item()
@@ -533,7 +654,7 @@ def test_peg_seating_checks_each_bottom_vertex_height() -> None:
 def test_nut_rotation_at_fixed_capture_depth_is_not_threading() -> None:
     env, part = _analytic_mating_state(kind="nut")
     part[:, 2, 3] = -0.002
-    env.compute_task_state()
+    _task_state(env)
     assert env._assembly_metrics["captured"].item()
     for revision in range(1, 5):
         angle = min(revision * torch.pi / 4, torch.pi / 2)
@@ -541,13 +662,13 @@ def test_nut_rotation_at_fixed_capture_depth_is_not_threading() -> None:
             [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
         )
         env._assembly_revision = env._assembly_physics_revision = revision
-        success, _, _ = env.compute_task_state()
+        success, _, _ = _task_state(env)
         assert success.item() is False
     # A genuine quarter turn advances one quarter of the 4 mm pitch.
     part[:, 2, 3] = -0.003
     for revision in range(5, 8):
         env._assembly_revision = env._assembly_physics_revision = revision
-        success, _, _ = env.compute_task_state()
+        success, _, _ = _task_state(env)
     assert success.item() is True
 
 
@@ -581,30 +702,34 @@ def test_encoder_gravity_feedforward_matches_mujoco_bias(
     path = tmp_path / "gravity.urdf"
     path.write_text(ET.tostring(urdf, encoding="unicode"))
     q = torch.tensor([[0.2, -0.1, 0.3, -0.2, 0.1, 0.4, -0.3]])
-    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
-    env._num_envs = 1
-    env.sim = SimpleNamespace(device=torch.device("cpu"))
-    env.sim_cfg = SimpleNamespace(physics_cfg=SimpleNamespace(gravity=[0, 0, -9.81]))
+    env = _state_fixture()
+    env.env.num_envs = 1
+    env.env.sim = SimpleNamespace(device=torch.device("cpu"))
+    env.env.sim_cfg = SimpleNamespace(
+        physics_cfg=SimpleNamespace(gravity=[0, 0, -9.81])
+    )
     root_pose = np.eye(4)
     root_pose[:3, :3] = rotation.as_matrix()
-    env.cfg = SimpleNamespace(
+    env.env.cfg = SimpleNamespace(
         robot=SimpleNamespace(
             _pk_urdf_path=str(path), init_rot=[0, 0, 0], init_local_pose=root_pose
         )
     )
-    env.robot = SimpleNamespace(
+    env.env.robot = SimpleNamespace(
         joint_names=[f"joint{i}" for i in range(1, 8)], get_qpos=lambda: q
     )
-    env.assembly_fidelity = {}
-    env._prepare_gravity_compensation()
-    actual = env._gravity_torques().numpy()[0]
+    env.scene.assembly_fidelity = {}
+    controller = EncoderGravityCompensation(env.env)
+    actual = controller.torques().numpy()[0]
     data = mujoco.MjData(reference)
     data.qpos[:] = q.numpy()[0]
     mujoco.mj_forward(reference, data)
     np.testing.assert_allclose(actual, data.qfrc_bias, atol=2e-5, rtol=2e-5)
 
 
-def test_manager_history_selective_reset_does_not_repeat_other_rows() -> None:
+def test_manager_history_selective_reset_does_not_repeat_other_rows(
+    monkeypatch,
+) -> None:
     from embodichain.lab.gym.envs.managers.observations import AssemblyProprioception
     from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
 
@@ -619,9 +744,20 @@ def test_manager_history_selective_reset_does_not_repeat_other_rows() -> None:
         refresh_assembly_state=lambda: None,
         proprioceptive_frame=lambda: frame.clone(),
     )
+    from embodichain.lab.gym.envs.managers.observations import _assembly as observations
+
+    env.assembly_state = SimpleNamespace(
+        scene=SimpleNamespace(assembly_kind="peg"),
+        _assembly_physics_revision=0,
+        _assembly_reset_rows=torch.ones(2, dtype=torch.bool),
+        refresh_assembly_state=lambda: None,
+    )
+    monkeypatch.setattr(
+        observations, "_proprioceptive_frame", lambda state: frame.clone()
+    )
     history = AssemblyProprioception(FunctorCfg(params={"history_length": 30}), env)
     history(env, {})
-    env._assembly_physics_revision = 1
+    env.assembly_state._assembly_physics_revision = 1
     frame[:, 0] = torch.tensor([3.0, 4.0])
     before = history(env, {})
     frame[0, 0] = 5.0
@@ -665,12 +801,14 @@ def test_checkpoint_task_resources_relocate_without_generator(
         (source.parent / model).mkdir()
         (source.parent / model / "LICENSE").write_text("fixture license " + model)
     (source.parent / "source_manifest.json").write_text('{"revision":"fixture"}')
-    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
-    env.cfg = SimpleNamespace(robot=SimpleNamespace(_pk_urdf_path=str(urdf)))
-    env.assembly_asset = AssemblyAsset(config={"kind": "peg"})
-    env.assembly_fidelity = {"source_gripper_dynamics_preserved": False}
+    env = _state_fixture()
+    env.env.cfg = SimpleNamespace(robot=SimpleNamespace(_pk_urdf_path=str(urdf)))
+    env.scene.assembly_asset = AssemblyAsset(config={"kind": "peg"})
+    env.scene.assembly_fidelity = {"source_gripper_dynamics_preserved": False}
     directory = tmp_path / "run" / "configs"
-    frozen = env.export_checkpoint_gym_config(
+    env.env.assembly_state = env
+    frozen = export_assembly_resources(
+        env.env,
         {
             "id": "BlindPegInsertionRL-v1",
             "physics": "newton",
@@ -692,7 +830,7 @@ def test_checkpoint_task_resources_relocate_without_generator(
     cfg = config_to_cfg(load_config(str(path)), source_path=path)
     assert cfg.robot.fpath == str(target / "resources" / "robot" / "robot.urdf")
     asset = AssemblyAsset.load(cfg.extensions["assembly_manifest"])
-    assert asset.content_hash == env.assembly_asset.content_hash
+    assert asset.content_hash == env.scene.assembly_asset.content_hash
     assert (
         target / "resources/robot/licenses/robotiq_2f85.LICENSE"
     ).read_text() == "fixture license robotiq_2f85"
@@ -710,7 +848,9 @@ def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
     import importlib
     import xml.etree.ElementTree as ET
     from embodichain_robots import FlexivRizon4SCfg
-    from embodichain.lab.gym.envs.assembly_env import _assembly_kinematic_chain
+    from embodichain.lab.gym.envs.managers.observations._assembly import (
+        _assembly_kinematic_chain,
+    )
     from embodichain.robot_registry import list_robot_cfgs
 
     def base_link(name: str, color: str, mass: str) -> str:
@@ -841,13 +981,12 @@ def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
 
 
 def test_exact_robot_dynamics_gate_belongs_to_task_environment(tmp_path: Path) -> None:
-    urdf = tmp_path / "robot.urdf"
-    urdf.write_text('<robot name="test"><link name="base"/></robot>')
-    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
-    env.require_exact_robot_dynamics = True
-    env.cfg = SimpleNamespace(robot=SimpleNamespace(_pk_urdf_path=str(urdf)))
-    with pytest.raises(ValueError, match="closed loops"):
-        env._setup_scene()
+    cfg = SimpleNamespace(
+        extensions={"require_exact_robot_dynamics": True},
+        robot=SimpleNamespace(_pk_urdf_path=str(tmp_path / "robot.urdf")),
+    )
+    with pytest.raises(ValueError, match="qualified robot dynamics"):
+        prepare_assembly_scene(cfg, "peg")
 
 
 def test_peg_task_floor_is_plate_attached_and_preserves_free_part() -> None:

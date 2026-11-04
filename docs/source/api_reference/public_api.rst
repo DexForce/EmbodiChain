@@ -994,18 +994,6 @@ spellings are aliases of the TaskSpec functions.
    validate_task_template
 
 
-embodichain.lab.gym.envs.assembly_env
--------------------------------------
-
-Shared simulator-backed blind assembly environment. Nominal development geometry and robot models are distinguished from formal reproduction prerequisites before scene construction.
-
-.. currentmodule:: embodichain.lab.gym.envs.assembly_env
-
-.. autosummary::
-
-   BlindAssemblyEnv
-
-
 embodichain.lab.gym.envs.base_env
 ---------------------------------
 
@@ -3386,44 +3374,6 @@ Public-generator composition of held pegs, perforated gears and nuts with physic
    build_task_assembly
 
 
-embodichain_tasks.manipulation.assembly.gear_meshing
-----------------------------------------------------
-
-Registered native simulator task for contact-rich assembly with proprioceptive policy observations and independently configured training profiles.
-
-.. currentmodule:: embodichain_tasks.manipulation.assembly.gear_meshing
-
-.. autosummary::
-
-   BlindGearMeshingEnv
-
-
-
-embodichain_tasks.manipulation.assembly.nut_threading
------------------------------------------------------
-
-Registered native simulator task for contact-rich assembly with proprioceptive policy observations and independently configured training profiles.
-
-.. currentmodule:: embodichain_tasks.manipulation.assembly.nut_threading
-
-.. autosummary::
-
-   BlindNutThreadingEnv
-
-
-
-embodichain_tasks.manipulation.assembly.peg_insertion
------------------------------------------------------
-
-Registered native simulator task for contact-rich assembly with proprioceptive policy observations and independently configured training profiles.
-
-.. currentmodule:: embodichain_tasks.manipulation.assembly.peg_insertion
-
-.. autosummary::
-
-   BlindPegInsertionEnv
-
-
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------
 
@@ -3572,6 +3522,7 @@ Historical assembly reference preparation
    :maxdepth: 1
 
    assembly_robot_reference
+   assembly_components
 
 Blind assembly observation functors
 -----------------------------------

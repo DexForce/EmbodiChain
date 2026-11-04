@@ -898,7 +898,7 @@ def test_gym_snapshot_export_hook_runs_on_unwrapped_environment(tmp_path):
     from types import SimpleNamespace
 
     class AssetEnvironment:
-        def export_checkpoint_gym_config(self, frozen_config, config_dir):
+        def export(self, env, frozen_config, config_dir):
             artifact = config_dir / "physical-asset.json"
             artifact.write_text('{"version": 4}')
             frozen_config.setdefault("env", {}).setdefault("extensions", {})[
@@ -907,7 +907,13 @@ def test_gym_snapshot_export_hook_runs_on_unwrapped_environment(tmp_path):
             return frozen_config
 
     gym_data = {"id": "test", "env": {}}
-    trainer = SimpleNamespace(rank=0, env=SimpleNamespace(unwrapped=AssetEnvironment()))
+    from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+    environment = AssetEnvironment()
+    environment.cfg = SimpleNamespace(
+        resource_export=FunctorCfg(func=environment.export)
+    )
+    trainer = SimpleNamespace(rank=0, env=SimpleNamespace(unwrapped=environment))
     checkpoint = tmp_path / "checkpoint.pt"
     checkpoint.write_bytes(b"snapshot fixture")
     _configure_checkpoints(

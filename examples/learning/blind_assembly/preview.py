@@ -229,7 +229,11 @@ def main() -> None:
             effective_fps=fps,
             configured_physics_dt=base.physics_dt,
             configured_control_dt=base.step_dt,
-            fidelity=getattr(base, "assembly_fidelity", {}),
+            fidelity=getattr(
+                getattr(getattr(base, "assembly_state", None), "scene", None),
+                "assembly_fidelity",
+                {},
+            ),
         )
 
         def capture(episode: int, step: int, phase: str) -> int:

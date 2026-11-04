@@ -28,6 +28,50 @@ import embodichain.lab.gym.envs.base_env as module
 pytestmark = pytest.mark.no_sim
 
 
+@pytest.mark.parametrize("from_registration", [False, True])
+def test_scene_preparation_owns_config_and_precedes_world(
+    monkeypatch, from_registration
+):
+    from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+    from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+    cfg = EmbodiedEnvCfg(extensions={"value": 1})
+    prepared = []
+
+    def prepare(owned, value):
+        assert owned is not cfg
+        owned.extensions["value"] = value.pop()
+        prepared.append(owned)
+        return owned
+
+    def construct(env, owned, **kwargs):
+        assert prepared == [owned]
+        assert owned.extensions["value"] == 2
+        raise RuntimeError("World boundary reached")
+
+    declaration = {"func": prepare, "params": {"value": [2]}}
+    kwargs = {"scene_preparation": declaration} if from_registration else {}
+    if not from_registration:
+        cfg.scene_preparation = FunctorCfg(**declaration)
+    monkeypatch.setattr(module.BaseEnv, "__init__", construct)
+    with pytest.raises(RuntimeError, match="World boundary reached"):
+        EmbodiedEnv(cfg, **kwargs)
+    assert cfg.extensions == {"value": 1}
+    assert declaration["params"]["value"] == [2]
+
+
+def test_invalid_preparation_result_never_constructs_world(monkeypatch):
+    from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+    from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+    construct = Mock()
+    monkeypatch.setattr(module.BaseEnv, "__init__", construct)
+    cfg = EmbodiedEnvCfg(scene_preparation=FunctorCfg(func=lambda cfg: {}))
+    with pytest.raises(TypeError, match="must return EmbodiedEnvCfg"):
+        EmbodiedEnv(cfg)
+    construct.assert_not_called()
+
+
 @pytest.mark.parametrize("phase", ["scene", "prepare", "robot"])
 def test_initialization_failure_destroys_owned_simulation(monkeypatch, phase):
     error = ValueError("invalid scene declaration")

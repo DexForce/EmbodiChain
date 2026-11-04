@@ -536,6 +536,8 @@ def _register_configured_rl(config: Mapping[str, Any], max_episode_steps: int) -
                 "rewards",
                 "actions",
                 "extensions",
+                "scene_preparation",
+                "resource_export",
                 "control_parts",
                 "active_joint_ids",
                 "sim_steps_per_control",
@@ -981,6 +983,16 @@ def config_to_cfg(
         "target_control_frequency", None
     )
     env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
+    from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+    for name in ("scene_preparation", "resource_export"):
+        declaration = config["env"].get(name)
+        if declaration is not None:
+            if not isinstance(declaration, dict):
+                raise TypeError(f"env.{name} must be a functor mapping.")
+            operation = FunctorCfg(**deepcopy(declaration))
+            operation.validate()
+            setattr(env_cfg, name, operation)
 
     # Initialize manager_modules with defaults + registered extensions
     default_manager_modules = get_manager_modules().copy()

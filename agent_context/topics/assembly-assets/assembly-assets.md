@@ -50,8 +50,15 @@ floor through public `bottom_thickness`; passive/raw generator defaults remain
 unchanged. Existing manifests pin their geometry, including an open bottom,
 and do not acquire later task defaults. Task registration, manager
 semantics and training deployment belong to the environment/RL owners. Each
-official task supplies its builder to `BlindAssemblyEnv`; the base environment
-loads prepared manifests directly and never imports the task extension.
+official task registers the common `EmbodiedEnv` with a scene-preparation
+function. The task's `preparation.py` expands a pinned manifest into ordinary
+background, rigid-object, articulation and sensor configs before World creation.
+A startup event binds shared state; `TerminationManager` advances it once per
+control transition. Observation and reward functors read that snapshot, while
+reset updates only selected rows. Actor feature computation stays in the
+observation package and reads encoder-derived state. The task's `resources.py`
+packages the manifest and prepared robot for checkpoint relocation. No
+assembly-specific environment class or environment-method replacement is used.
 
 `embodichain_benchmarks.assembly.robot_reference` prepares the historical public Rizon/Robotiq approximation
 from pinned source assets, with explicit gripper approximation and fidelity

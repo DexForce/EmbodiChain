@@ -790,14 +790,22 @@ def _configure_checkpoints(
         frozen_gym = _freeze_gym_config(gym_data, gym_config or config_path)
         environment = getattr(trainer, "env", None)
         environment = getattr(environment, "unwrapped", environment)
-        export_gym_config = getattr(environment, "export_checkpoint_gym_config", None)
-        if "task_program" not in gym_data and callable(export_gym_config):
+        operation = getattr(getattr(environment, "cfg", None), "resource_export", None)
+        if "task_program" not in gym_data and operation is not None:
+            from embodichain.utils.string import string_to_callable
+
+            operation.validate()
+            export_gym_config = (
+                string_to_callable(operation.func)
+                if isinstance(operation.func, str)
+                else operation.func
+            )
             config_dir.mkdir(parents=True, exist_ok=True)
-            frozen_gym = export_gym_config(frozen_gym, config_dir)
+            frozen_gym = export_gym_config(
+                environment, frozen_gym, config_dir, **operation.params
+            )
             if not isinstance(frozen_gym, dict):
-                raise TypeError(
-                    "export_checkpoint_gym_config must return a Gym configuration dict."
-                )
+                raise TypeError("resource_export must return a Gym configuration dict.")
         snapshots[gym_path] = frozen_gym
 
     def update_manifest(summary: dict) -> None:

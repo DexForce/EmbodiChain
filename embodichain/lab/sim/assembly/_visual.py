@@ -18,6 +18,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import contextmanager
+from collections.abc import Iterator
+from typing import TextIO
+import os
+import tempfile
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -34,6 +39,19 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 _VISUAL_FORMAT_VERSION = 2
+
+
+@contextmanager
+def _atomic_text(path: Path) -> Iterator[TextIO]:
+    """Publish complete preparation output for concurrent cache consumers."""
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            yield stream
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def write_visual_mesh(body: AssemblyBody, path: str | Path) -> Path:
@@ -71,7 +89,7 @@ def write_visual_mesh(body: AssemblyBody, path: str | Path) -> Path:
 
     target.parent.mkdir(parents=True, exist_ok=True)
     material_file = target.with_suffix(".mtl")
-    with material_file.open("w", encoding="utf-8") as stream:
+    with _atomic_text(material_file) as stream:
         for rgba, index in materials.items():
             stream.write(f"newmtl rgba_{index}\n")
             stream.write(
@@ -79,7 +97,7 @@ def write_visual_mesh(body: AssemblyBody, path: str | Path) -> Path:
             )
             stream.write(f"d {rgba[3]:.17g}\nNs 32\nillum 2\n\n")
 
-    with target.open("w", encoding="utf-8") as stream:
+    with _atomic_text(target) as stream:
         stream.write(f"mtllib {material_file.name}\no assembly_visual\ns off\n")
         stream.write(f"# assembly_visual_version {_VISUAL_FORMAT_VERSION}\n")
         for points, _, _, _, _ in surfaces:

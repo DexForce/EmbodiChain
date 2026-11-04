@@ -14,22 +14,24 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Native robot-held nut threading task."""
+"""Configuration-owned nut threading task registration."""
 
 from __future__ import annotations
-
-from embodichain.lab.gym.envs.assembly_env import BlindAssemblyEnv
+from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.utils.registration import register_env
 
-from .assets import build_task_assembly
+__all__: list[str] = []
 
-__all__ = ["BlindNutThreadingEnv"]
-
-
-@register_env("BlindNutThreadingRL-v1", max_episode_steps=750, supports_rl=True)
-class BlindNutThreadingEnv(BlindAssemblyEnv):
-    """Nut threading through contact and proprioceptive feedback."""
-
-    assembly_kind = "nut"
-
-    _asset_builder = staticmethod(build_task_assembly)
+register_env(
+    "BlindNutThreadingRL-v1",
+    max_episode_steps=250,
+    supports_rl=True,
+    supports_handwritten_demo=False,
+    scene_preparation={
+        "func": "embodichain_tasks.manipulation.assembly.preparation:prepare_assembly_scene",
+        "params": {"kind": "nut"},
+    },
+    resource_export={
+        "func": "embodichain_tasks.manipulation.assembly.resources:export_assembly_resources"
+    },
+)(EmbodiedEnv)

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import xml.etree.ElementTree as ET
 
 import numpy as np
+from ._visual import _atomic_text
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import ArticulationCfg
@@ -148,7 +149,7 @@ def to_articulation_configs(
                 continue
             mesh_path = output_path(f"{body.name}_{index}.obj")
             if geom.kind == "mesh":
-                with mesh_path.open("w", encoding="utf-8") as stream:
+                with _atomic_text(mesh_path) as stream:
                     for v in geom.vertices:
                         stream.write("v " + " ".join(map(str, v)) + "\n")
                     for f in geom.triangles:
@@ -192,7 +193,8 @@ def to_articulation_configs(
         )
         path = output_path(f"{body.name}.urdf")
         ET.indent(root)
-        ET.ElementTree(root).write(path, encoding="unicode")
+        with _atomic_text(path) as stream:
+            ET.ElementTree(root).write(stream, encoding="unicode")
         transform = np.eye(4)
         transform[:3, :3] = Rotation.from_quat(body.quaternion).as_matrix()
         transform[:3, 3] = body.position

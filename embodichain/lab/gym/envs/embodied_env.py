@@ -346,6 +346,16 @@ class EmbodiedEnvCfg(EnvCfg):
     ``trajectory_save_dir`` before an explicitly committed episode reset.
     Closing discards trajectories that were never committed."""
 
+    scene_preparation: FunctorCfg | None = None
+    """Optional preparation function ``func(cfg, **params) -> EmbodiedEnvCfg``.
+
+    Runs on an owned configuration before World creation. The result declares
+    ordinary scene entities and manager terms; it does not receive an environment.
+    """
+
+    resource_export: FunctorCfg | None = None
+    """Optional ``func(env, config, config_dir, **params)`` checkpoint packager."""
+
     rl_task: embodichain.lab.gym.envs.managers.RLTaskCfg | None = None
     """Optional measured RL success, failure and truncation conditions.
 
@@ -421,8 +431,35 @@ class EmbodiedEnv(BaseEnv):
         cfg: EmbodiedEnvCfg,
         *,
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
+        scene_preparation: dict[str, Any] | None = None,
+        resource_export: dict[str, Any] | None = None,
         **kwargs,
     ):
+        # Registered defaults and explicit config use the same pre-World path.
+        # Copy before preparation so one reusable configuration can build peers.
+        if (
+            scene_preparation is not None
+            or resource_export is not None
+            or cfg.scene_preparation is not None
+        ):
+            cfg = copy.deepcopy(cfg)
+            for name, default in (
+                ("scene_preparation", scene_preparation),
+                ("resource_export", resource_export),
+            ):
+                if getattr(cfg, name) is None and default is not None:
+                    setattr(cfg, name, FunctorCfg(**copy.deepcopy(default)))
+            if cfg.scene_preparation is not None:
+                operation = cfg.scene_preparation
+                operation.validate()
+                prepare = (
+                    string_to_callable(operation.func)
+                    if isinstance(operation.func, str)
+                    else operation.func
+                )
+                cfg = prepare(cfg, **operation.params)
+                if not isinstance(cfg, EmbodiedEnvCfg):
+                    raise TypeError("scene_preparation must return EmbodiedEnvCfg.")
         rl_task = getattr(cfg, "rl_task", None)
         if rl_task is not None:
             if not isinstance(rl_task, RLTaskCfg):

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+
 from pathlib import Path
 
 import numpy as np
@@ -397,3 +398,17 @@ def test_default_source_contacts_require_an_explicit_backend_comparison() -> Non
         to_rigid_config(body, backend="default", source_contact=True)
     cfg = to_rigid_config(body, backend="default", source_contact=False)
     assert cfg.attrs.mass_props.mass == 2.0
+
+
+def test_failed_asset_write_preserves_existing_complete_cache_file(tmp_path):
+    import pytest
+    from embodichain.lab.sim.assembly._visual import _atomic_text
+
+    path = tmp_path / "mesh.obj"
+    path.write_text("previous complete mesh")
+    with pytest.raises(RuntimeError, match="interrupted"):
+        with _atomic_text(path) as stream:
+            stream.write("incomplete replacement")
+            raise RuntimeError("interrupted")
+    assert path.read_text() == "previous complete mesh"
+    assert list(tmp_path.iterdir()) == [path]

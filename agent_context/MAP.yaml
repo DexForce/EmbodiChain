@@ -502,10 +502,10 @@ topics:
   - embodichain/toolkits/assembly/
   - embodichain/lab/sim/assembly/
   - extensions/embodichain_benchmarks/assembly/
-  - extensions/embodichain_tasks/embodichain_tasks/manipulation/assembly/assets.py
+  - extensions/embodichain_tasks/embodichain_tasks/manipulation/assembly/
   watch_paths: [embodichain/toolkits/assembly/, embodichain/lab/sim/assembly/,
     extensions/embodichain_benchmarks/assembly/,
-    extensions/embodichain_tasks/embodichain_tasks/manipulation/assembly/assets.py,
+    extensions/embodichain_tasks/embodichain_tasks/manipulation/assembly/,
     examples/sim/assembly/, scripts/benchmark/assembly/, tests/toolkits/assembly/,
     tests/sim/assembly/, tests/benchmark/assembly/]
   related_topics: [gen-sim, data-assets, simulation-system, env-framework, rl-learning]

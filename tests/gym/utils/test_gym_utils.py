@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+
 import argparse
 from copy import deepcopy
 from pathlib import Path
@@ -2804,3 +2805,28 @@ def test_checkpoint_resource_paths_resolve_from_config_owner(tmp_path, monkeypat
         resources / "part.json"
     )
     assert raw["robot"]["fpath"] == "./resources/robot.urdf"
+
+
+@pytest.mark.parametrize("field", ["scene_preparation", "resource_export"])
+def test_configured_rl_rejects_changed_preparation_or_export(field):
+    from copy import deepcopy
+    from gymnasium.envs.registration import registry
+    from embodichain.lab.gym.utils.gym_utils import _register_configured_rl
+    from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
+
+    name = f"ConfigOperationIdentity-{field}-v0"
+    config = {
+        "id": name,
+        "physics": "newton",
+        "rl_task": {},
+        "env": {field: {"func": "fixture:prepare", "params": {"variant": 1}}},
+    }
+    try:
+        _register_configured_rl(config, 10)
+        changed = deepcopy(config)
+        changed["env"][field]["params"]["variant"] = 2
+        with pytest.raises(ValueError, match="different declaration"):
+            _register_configured_rl(changed, 10)
+    finally:
+        REGISTERED_ENVS.pop(name, None)
+        registry.pop(name, None)
