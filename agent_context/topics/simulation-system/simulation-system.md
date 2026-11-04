@@ -48,6 +48,25 @@ tensor batches through the private Scene visual adapter. That boundary converts
 world matrices to arena-local poses and refreshes parent transforms and native
 IDs after topology changes.
 
+Explicit `visuals` replace root/body appearance; `link_visuals` replaces named
+articulation links. `cfg/visuals.py` owns the resource and element configs;
+`spawn/_visuals.py` compiles companion Mesh/Gaussian descriptors under the same
+SpawnScene and publishes their owner-relative transforms at the existing render
+boundary. Default physics is currently required. Source physics is retained;
+`RigidObject.get_semantic_mesh()` preserves its original surface or an explicit
+`semantic_shape` before source render meshes are cleared. Do not use visual
+vertices as an implicit semantic fallback for Gaussian-only appearance.
+The qualified DexSim integration build must supply `Scene.clear_visual_meshes`
+and shared Gaussian template replication; missing APIs fail before creation.
+`BatchEntity.set_gaussian_visual_state` stages per-element/per-environment gains,
+uniform geometry scale, visibility and LoD in the binding; reset baselines stay
+independent from current values across rebuilds. Capture metadata owns copies of
+that state. Flat-PLY point opacity/SH overrides create immutable resource variants
+at birth; selecting prepared elements changes appearance without uploading point
+arrays each frame. Variants remain separately resident and share only within
+their clone group; modifying points with an existing LoD sidecar is rejected.
+Gaussian USD loading remains deferred to qualified DexSim 0.6.0 support.
+
 `spawn/_usd_assets.py` materializes package textures into `SpawnScene`-owned
 files. They survive topology rebuilds and are deleted after native Scene closure;
 facade source configs retain the original package address.

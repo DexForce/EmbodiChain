@@ -150,6 +150,10 @@ class Camera(BaseSensor):
         *,
         owner: SimulationManager,
     ) -> None:
+        import weakref
+
+        self._owner = weakref.ref(owner)
+        self._capture_metadata: dict[str, object] = {}
         owner._require_native_renderer("Native cameras")
         self._world = owner.get_world()
         self._arenas = [owner.get_env(i) for i in range(owner.num_envs)]
@@ -252,8 +256,32 @@ class Camera(BaseSensor):
             **kwargs: Additional keyword arguments for sensor update.
         """
         fetch_only = kwargs.get("fetch_only", False)
+        owner_ref = getattr(self, "_owner", None)
+        owner = owner_ref() if owner_ref is not None else None
+        gaussian = (
+            getattr(getattr(owner, "_spawn_scene", None), "has_gaussians", False)
+            is True
+        )
+        if gaussian:
+            self._capture_metadata = {"valid": False}
+            owner._validate_gaussian_camera(self.cfg)
+        else:
+            self._capture_metadata = {}
         if not fetch_only:
+            if gaussian:
+                owner._invalidate_gaussian_captures(self.group_id)
+                owner._ensure_render_state()
             self._frame_buffer.apply()
+            if gaussian:
+                owner._capture_gaussian_status(self.group_id, camera=self)
+        if gaussian:
+            from copy import deepcopy
+
+            capture = getattr(owner, "_gaussian_captures", {}).get(self.group_id)
+            if capture is None:
+                raise RuntimeError(
+                    "No completed Gaussian capture for this camera group."
+                )
         self.cfg: CameraCfg
 
         if self.cfg.enable_color:
@@ -282,6 +310,26 @@ class Camera(BaseSensor):
             self._data_buffer["position"] = (
                 self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
             )
+        if gaussian:
+            self._capture_metadata = deepcopy(capture)
+            self._capture_metadata["valid"] = True
+
+    @property
+    def capture_metadata(self) -> dict[str, object]:
+        """Return owned Gaussian capture status, calibration and output semantics.
+
+        Empty for ordinary captures. A failed Gaussian update marks the capture
+        invalid and raises without publishing valid capture metadata.
+        Poses are arena-local OpenGL transforms in metres. Renderer identity is
+        effective; offscreen denoising records the configured mode because the
+        SDK has no per-group mode query. Image-buffer ownership is unchanged.
+
+        Returns:
+            An independent metadata snapshot, or an empty mapping for Mesh captures.
+        """
+        from copy import deepcopy
+
+        return deepcopy(getattr(self, "_capture_metadata", {}))
 
     def _detach_from_parent_nodes(self) -> None:
         """Retain camera views while their Spawn-owned parents are rebuilt."""

@@ -54,6 +54,11 @@ poses are converted from optical axes (+Z forward, +Y down) by flipping Y/Z.
 Convert optical-frame mount calibration before storing a parented `pos/quat`;
 do not infer image direction from `get_arena_pose()` without this conversion.
 
+For Gaussian scenes, `Camera.capture_metadata` retains completed-frame identity,
+calibration and output semantics separately from image tensors. Gym exposes the
+snapshot through `sensor_capture_metadata`. Capability checks and publication
+ordering follow [Gaussian composition](../simulation-system/rendering.md#gaussian-composition).
+
 ## Camera attachment boundary
 
 `resolve_parent_nodes()` parses a canonical link name or

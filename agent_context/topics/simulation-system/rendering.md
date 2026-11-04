@@ -149,6 +149,22 @@ Configuration tests do not prove GPU/NGX/NRD runtime support, which initializes
 on a rendered frame. Read exact renderer and algorithm defaults in the config
 source.
 
+## Gaussian composition
+
+`RenderCfg.gaussian` configures native CUDA raster before World construction.
+Gaussian resources enter through Spawn, and `SpawnScene.sync_visuals()` runs
+after physics publication and before CameraGroups consume the state. Each
+binding retains only instance transforms/visibility and immutable references;
+resource residency and cloning remain native-owned. Rebind on topology changes,
+retain reset baselines, and do not assume native batch failures roll back.
+
+Gaussian cameras currently support pinhole color and native view-Z depth.
+Hybrid standalone NRD, full Gaussian mask/normal/position/motion and StereoCamera
+metadata are rejected. Captured SH is not scene-light relighting. Completed
+CameraGroups retain their own status/calibration snapshot before another group
+can overwrite native last-frame status; failures prevent successful observations.
+Depth/alpha meanings come from the native output contract, not mesh assumptions.
+
 ## Startup summaries
 
 `sim/_startup_summary.py` collects read-only rows. Manager engine output follows

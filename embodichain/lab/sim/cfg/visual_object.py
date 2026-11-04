@@ -26,6 +26,7 @@ import numpy as np
 from embodichain.utils import configclass
 from ..shapes import ShapeCfg
 from .asset import ObjectBaseCfg
+from .visuals import VisualElementCfg
 from .source import UsdSourceCfg
 
 __all__ = ["VisualObjectCfg"]
@@ -42,6 +43,10 @@ class VisualObjectCfg(ObjectBaseCfg):
     visual-object creation uses only its appearance; USD physics is omitted.
     Whole-scene import instead preserves each entity's authored physical type.
     """
+
+    visuals: list[VisualElementCfg] | None = None
+    __annotations__["visuals"] = list[VisualElementCfg] | None
+    """Explicit render replacement; None preserves source appearance, [] removes it."""
 
     shape: ShapeCfg | None = None
     """Mesh, cube or sphere supplying the object's appearance."""

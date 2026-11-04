@@ -854,7 +854,11 @@ def config_to_cfg(
         raise TypeError("ground_plane_visible must be a bool or None.")
     env_cfg.ground_plane_visible = ground_plane_visible
 
+    from embodichain.lab.sim.cfg import GaussianRenderCfg
+
     render_config = deepcopy(config.get("render_cfg", {}))
+    if isinstance(render_config.get("gaussian"), dict):
+        render_config["gaussian"] = GaussianRenderCfg(**render_config["gaussian"])
     if isinstance(render_config.get("denoising"), dict):
         render_config["denoising"] = DenoisingCfg(**render_config["denoising"])
     if isinstance(render_config.get("dlss"), dict):

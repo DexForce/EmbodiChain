@@ -69,9 +69,13 @@ class ObjectBaseCfg:
         for key, value in init_dict.items():
             if hasattr(cfg, key):
                 attr = getattr(cfg, key)
-                if key == "source":
+                if key == "visuals":
+                    from .visuals import _visual_elements
+
+                    cfg.visuals = _visual_elements(value)
+                elif key == "source":
                     setattr(cfg, key, _usd_source_from_value(value))
-                elif key == "shape" and isinstance(value, Mapping):
+                elif key in {"shape", "semantic_shape"} and isinstance(value, Mapping):
                     from ..shapes import ShapeCfg
 
                     setattr(cfg, key, ShapeCfg.from_dict(dict(value)))

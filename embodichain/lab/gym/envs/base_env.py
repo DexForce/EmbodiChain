@@ -701,6 +701,23 @@ class BaseEnv(gym.Env):
         """
         pass
 
+    @property
+    def sensor_capture_metadata(self) -> dict[str, dict[str, object]]:
+        """Return capture identities and calibration separately from image tensors.
+
+        Recorders may serialize this snapshot beside observations. Gaussian
+        render/update failures propagate before an observation is returned.
+
+        Returns:
+            Sensor names mapped to their owned, nonempty capture metadata.
+        """
+        snapshots = {}
+        for name, sensor in self.sensors.items():
+            metadata = getattr(sensor, "capture_metadata", None)
+            if metadata:
+                snapshots[name] = metadata
+        return snapshots
+
     def _get_sensor_obs(self, **kwargs) -> TensorDict[str, any]:
         """Get the sensor observation from the environment.
 
