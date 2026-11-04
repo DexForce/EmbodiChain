@@ -21,12 +21,13 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 import math
 from typing import Any
 import torch
 from embodichain.compute.geometry.grip_contacts import classify_contacts
 from embodichain.lab.sim.evidence import PhysicalEvidenceRequest, PhysicalEvidenceBatch
-from embodichain.lab.sim.sensors.contact_sampling import (
+from embodichain.lab.sim.sensors.contact.sampling import (
     ContactEvidenceSampler,
     CONTACT_ACTOR_IDS,
     CONTACT_VALID_MASK,
@@ -34,7 +35,7 @@ from embodichain.lab.sim.sensors.contact_sampling import (
     CONTACT_IMPULSES,
 )
 
-__all__ = ["GripContactObserver"]
+__all__ = ["GripContactObserver", "DriverOpeningBinding"]
 _INVALID_CONTACT = (
     "Target grip contact is incomplete, one-sided, non-opposing, or saturated."
 )
@@ -46,6 +47,9 @@ _RELEASE_SCOPE = (
 def _identifier(value: str, name: str) -> None:
     if type(value) is not str or not value or value != value.strip():
         raise ValueError(f"{name} must be a non-empty exact identifier.")
+
+
+from embodichain.lab.sim.sensors.joint_opening import DriverOpeningBinding
 
 
 def _finite_trace_copy(value: Any, path: str, errors: list[dict[str, str]]) -> Any:

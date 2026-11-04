@@ -29,7 +29,7 @@ from embodichain.lab.sim.evidence import (
     PhysicalEvidenceFrame,
     PhysicalEvidenceRequest,
 )
-from .contact_sampling import (
+from .contact.sampling import (
     CONTACT_DISTANCES,
     CONTACT_VALID_MASK,
     DEFAULT_CHANNELS,

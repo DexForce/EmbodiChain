@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import hashlib
-import json
+
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -47,7 +47,7 @@ from embodichain.lab.task_program.semantics.calls import (
     Place,
     RegisteredSemanticCall,
 )
-from .catalog import _canonical_value
+from ._program_identity import task_program_fingerprint as _fingerprint
 
 __all__ = ["BoundTaskProgramNominalSources", "TracingTaskProgramNominalSources"]
 
@@ -277,24 +277,6 @@ class _ConfiguredTaskProgramNominalSources:
                 else self._host_collision_guard.validator.validate_refinement_support
             ),
         )
-
-
-def _fingerprint(program: CompiledTaskProgram) -> str:
-    if type(program) is not CompiledTaskProgram:
-        raise TypeError("program must be a CompiledTaskProgram")
-    payload = _canonical_value(
-        (
-            program.program_id,
-            program.instruction,
-            program.integration,
-            tuple(program.iter_segments()),
-        )
-    )
-    return hashlib.sha256(
-        json.dumps(
-            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
-        ).encode()
-    ).hexdigest()
 
 
 class BoundTaskProgramNominalSources:

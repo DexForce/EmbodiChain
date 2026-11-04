@@ -24,7 +24,7 @@ from typing import Any, ClassVar
 
 import torch
 
-from embodichain.lab.sim.sensors.contact_sensor import (
+from embodichain.lab.sim.sensors.contact.sensor import (
     ContactSensorCfg,
     ArticulationContactFilterCfg,
 )
@@ -53,7 +53,7 @@ from embodichain.lab.task_program.semantics.effects import (
 )
 from embodichain.lab.task_program.semantics.scene import SceneObjectRef, SceneRegistry
 from embodichain.utils import configclass
-from embodichain.lab.sim.sensors.contact_sampling import ContactEvidenceSampler
+from embodichain.lab.sim.sensors.contact.sampling import ContactEvidenceSampler
 
 __all__ = [
     "NativeGripEvidenceCfg",

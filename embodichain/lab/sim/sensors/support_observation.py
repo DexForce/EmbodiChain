@@ -33,8 +33,8 @@ from embodichain.lab.sim.evidence import (
     PhysicalEvidenceBatch,
     PhysicalEvidenceRequest,
 )
-from embodichain.lab.sim.sensors.contact_sensor import ContactSensor, ContactSensorCfg
-from .contact_sampling import (
+from embodichain.lab.sim.sensors.contact.sensor import ContactSensor, ContactSensorCfg
+from .contact.sampling import (
     CONTACT_ACTOR_IDS,
     CONTACT_IMPULSES,
     CONTACT_NORMALS,
@@ -297,6 +297,7 @@ class NativeSupportObservation:
         self._actor_pairs: list[dict[str, Any]] = []
         self._topology_revision: int | None = None
         self._sample_revision: int | None = None
+        self._legacy_sample_step: int | None = None
         self._last_sample: ContactEvidenceSample | None = None
         self._error: str | None = None
         self._closed = False
@@ -364,6 +365,7 @@ class NativeSupportObservation:
         """
         if self._closed:
             return
+        self._legacy_sample_step = None
         selected = torch.ones(len(self._witnesses), dtype=torch.bool)
         if env_ids is not None:
             selected.zero_().index_fill_(
@@ -696,6 +698,7 @@ class NativeSupportObservation:
             raise ValueError("COM tolerance must be finite and positive.")
         tolerance = self._tolerance if com_tolerance is None else float(com_tolerance)
         clocked = support_contract_revision is not None
+        sample_is_fresh = False
         if clocked and self._clock is None:
             error = ValueError("Native support execution clock unavailable.")
             self._unavailable(error)
@@ -737,7 +740,24 @@ class NativeSupportObservation:
                         timestamp, self._capture_revision, torch.arange(count)
                     )
                 )
-                self._capture(sample, object_pose, reference_pose)
+                step = self._simulation.physics_step_index
+                if type(step) is not int or step < 0:
+                    raise ValueError(
+                        "Native support requires a valid physics-step identity."
+                    )
+                if (
+                    self._last_sample is None
+                    or self._legacy_sample_step != step
+                    or sample.acquisition_error
+                    or sample.dropped_contacts
+                    or any(
+                        not bool(batch.valid.all())
+                        for batch in sample.frame.batches.values()
+                    )
+                ):
+                    self._capture(sample, object_pose, reference_pose)
+                    self._legacy_sample_step = step
+                    sample_is_fresh = True
             assert self._last_sample is not None
             if self.sensor.latest_sample_dropped_contacts:
                 raise ValueError("Native support contact query saturated.")
@@ -769,6 +789,9 @@ class NativeSupportObservation:
                     mask = self._last_sample.frame.batches[CONTACT_VALID_MASK].values[
                         row
                     ]
+                    if self._clock is None and not sample_is_fresh:
+                        # A cached contact cannot re-establish a witness invalidated by motion.
+                        mask = torch.zeros_like(mask)
                     patch = tuple(
                         self._last_sample.frame.batches[channel]
                         .values[row, mask]

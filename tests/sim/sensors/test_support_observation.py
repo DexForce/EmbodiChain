@@ -30,7 +30,7 @@ import warp as wp
 from dexsim.scene import ContactActorInfo, ContactBuffer, ContactQueryCapabilities
 from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
 from embodichain.lab.gym.envs.base_env import BaseEnv
-from embodichain.lab.sim.sensors.contact_sensor import ContactSensor, ContactSensorCfg
+from embodichain.lab.sim.sensors.contact.sensor import ContactSensor, ContactSensorCfg
 from embodichain.lab.sim.sensors.support_observation import (
     ContactWitness,
     NativeSupportObservation,
@@ -132,6 +132,10 @@ class _Simulation:
             )
         )
 
+    @property
+    def physics_step_index(self):
+        return self.revision
+
     def get_world(self):
         physics = SimpleNamespace(_get_contact_data_revision=lambda: self.revision)
         return SimpleNamespace(get_physics_scene=lambda: physics)
@@ -221,7 +225,9 @@ def test_legacy_support_owns_metadata_and_uses_actual_acquisition_clock():
     again = _observe(observer)
     assert again.support.values.all()
     assert again.metadata["rows"][0]["contacts_world"][0][0] == pytest.approx(-0.02)
-    assert sim.query.fetches == 2
+    assert (
+        sim.query.fetches == 1
+    )  # Same completed physics step reuses its contact snapshot.
 
 
 @pytest.mark.parametrize("moving", ["payload", "support"])
@@ -236,6 +242,12 @@ def test_positive_witness_survives_sleep_but_not_either_body_motion(moving):
     result = _observe(observer)
     assert result.support.valid.all()
     assert not result.support.values.any()
+    sim.query.buffer.count = 4 * sim.num_envs
+    sim.revision += 1
+    assert _observe(observer).support.values.all()
+    assert (
+        sim.query.fetches == 2
+    )  # New completed physics step can establish fresh support.
 
 
 def test_strong_support_requires_clock_complete_window_and_positive_witness():
@@ -741,7 +753,9 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
             False,
         ]
         assert metadata["stable_seconds"] == [0.0, 0.0]
-        assert sim.query.fetches == 28
+        assert (
+            sim.query.fetches == 1
+        )  # Same completed physics step reuses its contact snapshot.8
         registry.close()
         return
     assert commands == (3 if startup == "row_reset" else 2)

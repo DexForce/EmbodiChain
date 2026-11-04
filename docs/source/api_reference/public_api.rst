@@ -1030,6 +1030,47 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
+embodichain.lab.sim.motion.planners.curobo.payload
+--------------------------------------------------
+
+Runtime observation values for a fresh cuRobo query. Without payload, queries
+support the complete robot environment batch in canonical row order, with a
+shared static collision world and identical passive joint locks. Full joint
+state and world-to-base transforms belong to the query snapshot. Payload queries
+remain B=1; the carried body owns its identity, control part, local spheres and
+observed world pose. These values are separate from serialized configuration.
+Subsets, reordered environments, and per-environment worlds are unsupported.
+
+The owned motion factory closes backend-local attachments on exit and makes no
+skill-phase decisions. Queries require CUDA graphs off, a static snapshot world
+and preserved native samples. No-payload exact trajectory checks retain observed
+passive locks; arbitrary trajectory checks with payload fail closed because their
+separate checker does not own those attachments.
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.curobo.payload
+
+.. autosummary::
+
+   CuroboPayload
+   CuroboQuerySnapshot
+   curobo_motion_generator
+
+embodichain.lab.sim.scene.collision_sources
+-------------------------------------------
+
+Explicit collision descriptors and same-observation poses become owned planner
+providers through one caller-supplied world-to-frame transform. No pose getter
+is called and no scale is applied twice. The USD link-box reader preserves
+connected-component order and its conservative input-envelope policy.
+
+.. currentmodule:: embodichain.lab.sim.scene.collision_sources
+
+.. autosummary::
+
+   CollisionObjectSnapshot
+   read_articulation_link_boxes
+   snapshot_collision_sources
+
 embodichain.lab.sim.motion.ik
 -----------------------------
 
@@ -1104,6 +1145,8 @@ embodichain.lab.sim.scene.expansion.persistence
    load_scene_variants
 
 embodichain.lab.sim.sensors.contact_sampling
+
+embodichain.lab.sim.sensors.contact.sampling
 ---------------------------------------------------------------------
 
 ContactSensor acquisition into the existing PhysicalEvidenceFrame and
@@ -1117,12 +1160,16 @@ SDK contract is unavailable. Signed ``CONTACT_DISTANCES`` are opt-in;
 ``DEFAULT_CHANNELS`` retains the original five-channel request. Missing distance
 invalidates its explicit channel without invalidating other available channels.
 
+SDK contract is unavailable.
+
 ``sample`` keeps frame tensors on its request's environment-ID device. The
 ``collect`` provider port retains that same device contract. Host observers may
 request CPU frames; ``source_device`` records where the original numerical
 observation was produced. The common frame has no invocation field.
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact_sampling
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
 
 .. autosummary::
 
@@ -1133,6 +1180,7 @@ observation was produced. The common frame has no invocation field.
    CONTACT_POSITIONS
    CONTACT_DISTANCES
    DEFAULT_CHANNELS
+
    ContactEvidenceSample
    ContactEvidenceSampler
    ContactSourceStamp
@@ -1164,6 +1212,8 @@ interpretation. The observer neither computes success nor advances simulation.
    :members:
 
 embodichain.lab.sim.sensors.contact_timeline
+
+embodichain.lab.sim.sensors.contact.timeline
 ---------------------------------------------------------------------
 
 Bounded raw substep history attached with
@@ -1185,6 +1235,8 @@ Frontend code owns actor/semantic label maps, serialized report schema IDs and
 any task-success evaluation.
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact_timeline
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
 
 .. autosummary::
 
@@ -1238,6 +1290,7 @@ stability window. Normative task acceptance remains outside this module.
 .. autoclass:: SupportObservationRegistry
    :members:
 
+
 embodichain.lab.task_program.integrations.simulation.grip_evidence
 ------------------------------------------------------------------
 
@@ -1265,6 +1318,25 @@ serializers and TaskSpec evaluation belong outside this module.
    NativeGripEvidenceFactory
    NativeGripEvidenceProvider
    NativeGripObserver
+
+
+embodichain.lab.sim.scene.mesh_snapshot
+---------------------------------------
+
+Capture scaled rigid visual envelopes and ordered articulation collision-input
+components through plain UID/link mappings. Geometry stays in owning frames
+until supplied observations are projected. Planner roles are neutral metadata;
+missing or unsupported input geometry remains unavailable. These snapshots do
+not replace native cooked-shape, rest-offset, contact, or CCD evidence.
+
+.. currentmodule:: embodichain.lab.sim.scene.mesh_snapshot
+
+.. autosummary::
+
+   SceneMeshComponent
+   SceneMeshSnapshot
+   capture_scene_meshes
+   iter_scene_components
 
 embodichain.lab.task_program.integrations.simulation.handover
 -------------------------------------------------------------
@@ -2331,10 +2403,10 @@ embodichain.lab.sim.sensors.camera
    Camera
    CameraCfg
 
-embodichain.lab.sim.sensors.contact_sensor
+embodichain.lab.sim.sensors.contact.sensor
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact_sensor
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sensor
 
 .. autosummary::
 
@@ -3591,6 +3663,7 @@ No model-name or task-name inference is performed.
    DriverOpeningBinding
    create_joint_opening_reader
 
+
 embodichain.compute.geometry.grip_contacts
 ------------------------------------------
 
@@ -3615,3 +3688,19 @@ are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrat
 .. autosummary::
 
    GripContactObserver
+
+   DriverOpeningBinding
+
+``DriverOpeningBinding.bind(robot)`` validates the explicit joint order before
+creating a per-environment reader. It performs no qpos read during binding;
+observations require the entire hand row to be finite and retain the strict
+``abs(measured - open_qpos) < tolerance`` driver threshold. This calibration and
+release interpretation belong to Atomic, not to a separate sensor or reader
+factory. Integrations only select and bind the declared calibration.
+
+The former ``sensors.joint_opening`` module and standalone
+``create_joint_opening_reader`` export are removed. Declarations sealing the
+qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
+
+.. autoclass:: DriverOpeningBinding
+   :members:
