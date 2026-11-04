@@ -981,7 +981,7 @@ def _hand_over_generation(monkeypatch, *, endpoint_failure=None):
         dual, "snapshot_case_qpos", Mock(return_value=(full_start[:, :3], full_start))
     )
     monkeypatch.setattr(dual, "_randomized_target_pose", Mock(return_value=object_pose))
-    monkeypatch.setattr(dual, "parallel_jaw_sampler", Mock())
+    scenario.grasp_sampler = Mock()
     monkeypatch.setattr(dual, "_antipodal_semantics", Mock())
     monkeypatch.setattr(dual, "_compile_reference", Mock(return_value=reference))
 
@@ -1325,7 +1325,9 @@ def test_scenario_configures_every_gripper_and_freezes_each_hand_over_grasp():
         }
     )
 
-    scenario.configure_runtime(simulation, robot, Mock(), track, "left_arm")
+    scenario.configure_runtime(
+        simulation, robot, SimpleNamespace(embodiment=None), track, "left_arm"
+    )
 
     assert list(scenario._configured_grippers()) == ["left_eef", "right_eef"]
     assert scenario.end_effector_part == "left_eef"
@@ -1442,11 +1444,19 @@ def test_each_self_sampling_case_compiles_with_its_own_sample_count(
     if model_id is not None:
         assert sampler.gripper_model.model_id == model_id
         assert sampler.gripper_model.max_opening_width == pytest.approx(0.08)
-    assert scenario.require_engine().grasp_pose_generators["right_eef"] is sampler
+    receiver_sampler = scenario.require_engine().grasp_pose_generators["right_eef"]
+    assert isinstance(receiver_sampler, CaseSampleCountGraspPoseGenerator)
     engine = Mock(motion_generator=motion_generator)
-    engine.compile.side_effect = lambda *args, **kwargs: (
-        sampler.get_dual_arm_valid_grasp_poses()[0]
-    )
+
+    def compile_counts(*args, **kwargs):
+        counts = [
+            item.get_dual_arm_valid_grasp_poses()[0]
+            for item in (sampler, receiver_sampler)
+        ]
+        assert counts[0] == counts[1]
+        return counts[0]
+
+    engine.compile.side_effect = compile_counts
     scenario._engine = engine
 
     assert scenario.plan_case(adapter, cases["small"]) == 2_000

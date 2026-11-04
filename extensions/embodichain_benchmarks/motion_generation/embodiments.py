@@ -209,6 +209,8 @@ class YamlEmbodimentProvider:
             "runtime_services": spec.runtime_services,
             "resource_id": spec.resource_id,
         }
+        if spec.resource_bindings:
+            resolved["resource_bindings"] = spec.resource_bindings
         runtime_services = skill_profile.get("runtime_services", {})
         runtime_services = _mapping(
             runtime_services, name="embodiment runtime_services"

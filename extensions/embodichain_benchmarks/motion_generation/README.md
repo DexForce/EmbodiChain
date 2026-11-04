@@ -318,6 +318,15 @@ The fresh output directory contains `requests.json`, `resolved_suite.yaml`,
 Actual planner metadata records resolved motion limits and model/configuration
 identity; the cache remains independent of candidate checkpoint selection.
 
+Atomic physics defaults to legacy `joint_tracking_scope: full_robot`.
+For gripper tasks, select `physics.joint_tracking_scope: motion_control_parts`
+to evaluate the primary arm and every frozen secondary motion endpoint. This
+excludes contact-stalled gripper joints from the arm tracking RMS while keeping
+its configured tolerance unchanged. Grasp success still requires the target
+finger contacts. Trial metadata and the suite fingerprint retain this selection;
+use the same scope on both sides of a comparison. The component HandOver example
+selects this motion scope explicitly.
+
 ### Physical replay diagnostics
 
 Atomic tracks may opt into bounded measured evidence with
@@ -651,9 +660,33 @@ embodiment:
 
 The runner builds the component's simulation robot and preserves its TCP,
 motion endpoint and gripper command preset. Do not repeat inline `robot`
-configuration or conflicting track-level gripper commands. Multiple motion
-resources require an explicit `embodiment.resource_id`; this selects one
-resource, not a coordinated dual-arm benchmark. Relative component paths
+configuration or conflicting track-level gripper commands. Select one resource
+with `embodiment.resource_id`, or bind Atomic slots explicitly for coordination:
+
+```yaml
+embodiment:
+  component: embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140.yaml
+  resource_bindings:
+    source: right
+    destination: left
+  overrides:
+    init_pos: [-0.75, 0.0, 0.1]
+    init_rot: [0.0, 0.0, 180.0]
+```
+
+The example's deployment transform matches the existing HandOver scene's arm
+bases; its source position maps to resource `right`. The component retains its
+home joints, TCP, solver, drives and six-joint commands. Atomic tracks receive
+both endpoint pairs and grippers; domains may exchange the selected pairs for
+role mirroring, but cannot change their commands or mix arm/gripper endpoints.
+`resource_id` and `resource_bindings` are mutually exclusive. Other scenario
+types retain single-resource selection. Component grasp and hand-geometry
+services feed both reference generation and measured planning; task-owned
+sample counts remain sampling budgets. Do not repeat `grasp_model` when the
+component supplies its calibrated grasp service. The packaged
+`atomic_dual_franka_robotiq_hand_over` suite demonstrates this route with cuRobo
+and TOPPRA. Requalify physical results after changing calibration; component
+loading alone does not establish HandOver success. Relative component paths
 resolve from the suite file; packaged references work from any working
 directory. The resolved identity, bindings, capabilities, services and stable
 hash are recorded in the manifest.

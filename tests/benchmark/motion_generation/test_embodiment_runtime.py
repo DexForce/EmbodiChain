@@ -443,3 +443,103 @@ def test_example_has_nominal_and_position_domains() -> None:
     assert [resolve_atomic_batch_sizes(track) for track in tracks] == [[1], [2]]
     assert suite.planners[0].adapter == "curobo"
     assert "gripper" not in suite.tracks[0].config
+
+
+def test_dual_component_binds_roles_commands_geometry_and_mirrored_domain() -> None:
+    """Both hands must come from the component, including after exchanging roles."""
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
+        AtomicSkillScenario,
+    )
+
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
+    runner = BenchmarkRunner(suite, suite.planners, device="cpu")
+    provider = runner.robot_provider
+    cfg = provider.build_cfg()
+    track = runner.suite.tracks[0]
+    assert provider.control_part == "right_arm"
+    reordered = deepcopy(suite)
+    reordered.embodiment.resource_bindings = {"destination": "left", "source": "right"}
+    assert (
+        BenchmarkRunner(reordered, reordered.planners, device="cpu").control_part
+        == "right_arm"
+    )
+    assert track.config["control_parts"] == {
+        "source": {"motion": "right_arm", "grasp": "right_eef"},
+        "destination": {"motion": "left_arm", "grasp": "left_eef"},
+    }
+    assert [item["control_part"] for item in track.config["grippers"]] == [
+        "right_eef",
+        "left_eef",
+    ]
+    for item in track.config["grippers"]:
+        assert item["grasp_qpos"] == [0.7, -0.7, 0.7, -0.7, -0.7, 0.7]
+    assert cfg.solver_cfg["right_arm"].tcp[2][3] == pytest.approx(0.2)
+    assert cfg.joint_drive_props.stiffness["right_eef"] == 50.0
+    assert cfg.init_qpos[12:14] == [0.0, 0.0]
+    assert "grippers" not in suite.tracks[0].config
+    assert SuiteCfg.from_dict(
+        suite_to_dict(runner.suite)
+    ).embodiment.resource_bindings == {"source": "right", "destination": "left"}
+
+    mirrored = deepcopy(track)
+    mirrored.config["control_parts"] = {
+        "source": {"motion": "left_arm", "grasp": "left_eef"},
+        "destination": {"motion": "right_arm", "grasp": "right_eef"},
+    }
+    provider.configure_track(mirrored)
+    assert mirrored.config["control_parts"]["source"]["motion"] == "left_arm"
+    invalid = deepcopy(mirrored)
+    invalid.config["control_parts"]["source"]["grasp"] = "right_eef"
+    with pytest.raises(ValueError, match="control_parts"):
+        provider.configure_track(invalid)
+    invalid = deepcopy(track)
+    invalid.config["grippers"][0]["grasp_qpos"] = [0.5] * 6
+    with pytest.raises(ValueError, match="conflicts"):
+        provider.configure_track(invalid)
+
+    scenario = AtomicSkillScenario()
+    scenario.suite = runner.suite
+    scenario.track = track
+    scenario.end_effector_part = "right_eef"
+    scenario._gripper_states = {
+        part: (torch.zeros(6), torch.zeros(6)) for part in ("right_eef", "left_eef")
+    }
+    scenario._configure_embodiment_services()
+    assert scenario.grasp_model().model_id == "robotiq_arg2f_140"
+    assert scenario.grasp_model().max_opening_width == pytest.approx(0.128)
+    assert scenario.grasp_root_from_tcp()[2][3] == pytest.approx(0.2)
+    assert set(scenario._hand_geometry_cfgs) == {"left_eef", "right_eef"}
+    assert scenario._hand_geometry_cfgs["right_eef"].pad_link_names == (
+        "right_left_inner_finger_pad",
+        "right_inner_finger_pad",
+    )
+    assert tuple(scenario._hand_geometry_cfgs["right_eef"].closed_qpos) == (
+        0.7,
+        -0.7,
+        0.7,
+        -0.7,
+        -0.7,
+        0.7,
+    )
+    # Carry the same explicit geometry into the actual benchmark engine.
+    adapter = Mock()
+    adapter.require_motion_generator.return_value.device = torch.device("cpu")
+    scenario.prepare_planner(adapter, Mock())
+    assert set(scenario.require_engine().hand_geometry_cfgs) == {
+        "left_eef",
+        "right_eef",
+    }
+
+
+@pytest.mark.parametrize(
+    "bindings",
+    [
+        {"source": "left", "destination": "left"},
+        {"source": "left", "destination": "missing"},
+    ],
+)
+def test_component_rejects_invalid_coordinated_resource_selection(bindings) -> None:
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
+    suite.embodiment.resource_bindings = bindings
+    with pytest.raises(ValueError, match="distinct|Unknown"):
+        BenchmarkRunner(suite, suite.planners, device="cpu")

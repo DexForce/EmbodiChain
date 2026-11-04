@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
@@ -134,25 +136,105 @@ class AtomicSkillScenario(ScenarioProvider):
         self._fixtures: dict[str, AtomicObjectHandle] = {}
         self._engine: AtomicActionEngine | None = None
         self._case_grasp_generators: dict[str, ActiveCaseGraspPoseGenerator] = {}
-        self._case_grasp_sampler: CaseSampleCountGraspPoseGenerator | None = None
         self._reference_motion_generator: object | None = None
         self._runtime_entities_created = False
+        self._embodiment_grasp_factories = {}
+        self._hand_geometry_cfgs = {}
+        self._case_grasp_samplers: dict[str, CaseSampleCountGraspPoseGenerator] = {}
 
     def batch_sizes(self, suite: SuiteCfg, track: TrackCfg) -> list[int]:
         """Return the explicitly configured physical-execution batch sizes."""
         del suite
         return resolve_atomic_batch_sizes(track)
 
-    def grasp_model(self) -> ParallelJawGripperModelCfg | None:
-        """Resolve the track's mounted-hand geometry for preparation and replay.
+    def _configure_embodiment_services(self) -> None:
+        """Decode the component's calibrated services through their owning loader."""
+        self._embodiment_grasp_factories = {}
+        self._hand_geometry_cfgs = {}
+        if self.suite is None or self.suite.embodiment is None:
+            return
+        from ..embodiments import resolve_embodiment
+        from embodichain.lab.task_program.integrations.configured import (
+            _decode_robot_profile,
+            _decode_runtime_services,
+        )
+
+        resolution = resolve_embodiment(self.suite.embodiment, self.suite.robot)
+        if not resolution.runtime_services:
+            return
+        profile = resolution.skill_profile or {}
+        binding = _decode_robot_profile(
+            {
+                "profile_id": profile.get("profile_id", resolution.embodiment_id),
+                "resources": profile.get("resources", []),
+                "command_presets": profile.get("command_presets", []),
+                "defaults": {},
+                "presets": [],
+                "default_preset": None,
+            }
+        )
+        services = _decode_runtime_services(
+            dict(resolution.runtime_services),
+            robot_profile_binding=binding,
+        )
+        selected = self._configured_grippers()
+        self._embodiment_grasp_factories = {
+            part: factory
+            for part, factory in services.grasp_pose_generators
+            if part in selected
+        }
+        self._hand_geometry_cfgs = {
+            part: factory()
+            for part, factory in services.hand_geometries
+            if part in selected
+        }
+        if (
+            self._embodiment_grasp_factories
+            and self.track is not None
+            and "grasp_model" in self.track.config
+        ):
+            raise ValueError(
+                "track.grasp_model conflicts with component-owned grasp services."
+            )
+
+    def grasp_sampler(
+        self, sample_count: int, *, part: str | None = None
+    ) -> GraspPoseGenerator:
+        """Build a sampler using the selected hand's calibrated component service.
+
+        Args:
+            sample_count: Task-owned antipodal sampling budget.
+            part: Grasp control part; omission selects the primary gripper.
 
         Returns:
-            The explicit ``track.config.grasp_model`` catalogue entry, or
-            ``None`` to retain the existing PGI fixture geometry.
+            A fresh sampler with the component's geometry and TCP calibration.
+        """
+        factory = self._embodiment_grasp_factories.get(part or self.end_effector_part)
+        if factory is not None:
+            return replace(factory, sample_count=sample_count)()
+        return parallel_jaw_sampler(
+            sample_count,
+            gripper_model=self.grasp_model(),
+            root_from_tcp=self.grasp_root_from_tcp(),
+        )
+
+    def grasp_model(self) -> ParallelJawGripperModelCfg | None:
+        """Resolve primary-hand aperture limits for preparation and replay.
+
+        Returns:
+            Component-owned aperture limits, the explicit track catalogue entry,
+            or ``None`` to retain the existing PGI fixture geometry.
 
         Raises:
             ValueError: If an explicit model identifier is invalid.
         """
+        factory = self._embodiment_grasp_factories.get(self.end_effector_part)
+        if factory is not None:
+            return ParallelJawGripperModelCfg(
+                model_id=factory.model_id,
+                min_opening_width=factory.min_opening_width,
+                max_opening_width=factory.max_opening_width,
+            )
         model_id = None if self.track is None else self.track.config.get("grasp_model")
         if model_id is None:
             return None
@@ -161,13 +243,21 @@ class AtomicSkillScenario(ScenarioProvider):
         return get_parallel_jaw_gripper_model(model_id)
 
     def grasp_root_from_tcp(self) -> list[list[float]] | None:
-        """Bind mounted PGI geometry to this fixture's actual solver TCP.
+        """Resolve component calibration or bind the legacy mounted PGI TCP.
 
         PGI fixture roots attach at the arm flange, the solver end link. Their
         configured tool points differ (.15/.17 m and explicit overrides).
         Native Panda instead uses its actual named hand TCP from the asset;
         no PGI offset is applied to it.
         """
+        factory = self._embodiment_grasp_factories.get(self.end_effector_part)
+        if factory is not None:
+            values = factory.root_from_tcp
+            return (
+                None
+                if values is None
+                else [list(values[index : index + 4]) for index in range(0, 16, 4)]
+            )
         model = self.grasp_model()
         if model is not None and model.model_id != "dh_pgi_140_80":
             return None
@@ -183,6 +273,10 @@ class AtomicSkillScenario(ScenarioProvider):
         """Expose planner attribution before planning or evaluation can fail."""
         attribution = benchmark_motion_attribution(case.skill_id)
         values = {"timing_scope": "atomic_action_compile", **attribution}
+        physics = {} if self.track is None else self.track.config.get("physics", {})
+        values["joint_tracking_scope"] = physics.get(
+            "joint_tracking_scope", "full_robot"
+        )
         if self.track is not None:
             physics = dict(self.track.config.get("physics", {}))
             values["replay_clock"] = physics.get("clock", "fixed_samples")
@@ -327,6 +421,8 @@ class AtomicSkillScenario(ScenarioProvider):
             self._gripper_open, self._gripper_grasp = self._gripper_states[
                 self.end_effector_part
             ]
+
+        self._configure_embodiment_services()
 
     @staticmethod
     def _resolve_gripper(
@@ -523,27 +619,24 @@ class AtomicSkillScenario(ScenarioProvider):
         motion_generator = adapter.require_motion_generator()
         scene_entities = tuple(handle.entity for handle in self._objects.values())
         grasp_pose_generators: dict[str, GraspPoseGenerator] | None = None
-        self._case_grasp_sampler = None
+        self._case_grasp_samplers = {}
         sampling_counts = {
             grasp_sample_count(self._cases_by_id[case_id])
             for case_id, provider in self._case_providers.items()
             if provider.samples_grasps
         }
         if sampling_counts:
-            self._case_grasp_sampler = CaseSampleCountGraspPoseGenerator(
-                {
-                    count: parallel_jaw_sampler(
-                        count,
-                        gripper_model=self.grasp_model(),
-                        root_from_tcp=self.grasp_root_from_tcp(),
-                    )
-                    for count in sorted(sampling_counts)
-                },
-                default_count=max(sampling_counts),
-            )
-            grasp_pose_generators = {
-                part: self._case_grasp_sampler for part in grippers
+            self._case_grasp_samplers = {
+                part: CaseSampleCountGraspPoseGenerator(
+                    {
+                        count: self.grasp_sampler(count, part=part)
+                        for count in sorted(sampling_counts)
+                    },
+                    default_count=max(sampling_counts),
+                )
+                for part in grippers
             }
+            grasp_pose_generators = dict(self._case_grasp_samplers)
         slide_cases = [
             self._cases_by_id[case_id]
             for case_id, provider in self._case_providers.items()
@@ -596,12 +689,14 @@ class AtomicSkillScenario(ScenarioProvider):
                 scene_entities=scene_entities,
                 control_profiles=control_profiles,
                 grasp_pose_generators=grasp_pose_generators,
+                hand_geometry_cfgs=self._hand_geometry_cfgs or None,
             )
         else:
             self._engine = AtomicActionEngine(
                 motion_generator=motion_generator,
                 control_profiles=control_profiles,
                 grasp_pose_generators=grasp_pose_generators,
+                hand_geometry_cfgs=self._hand_geometry_cfgs or None,
             )
 
     def _configured_grippers(self) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
@@ -621,7 +716,7 @@ class AtomicSkillScenario(ScenarioProvider):
         del adapter
         self._engine = None
         self._case_grasp_generators = {}
-        self._case_grasp_sampler = None
+        self._case_grasp_samplers = {}
 
     def require_engine(self) -> AtomicActionEngine:
         """Return the prepared Atomic Action engine."""
@@ -839,15 +934,17 @@ class AtomicSkillScenario(ScenarioProvider):
             raise RuntimeError(f"No prepared frozen-grasp generator for {missing}.")
         for part, (target_pose, grasp_pose) in frozen.items():
             self._case_grasp_generators[part].activate(target_pose, grasp_pose)
-        sampler = self._case_grasp_sampler if provider.samples_grasps else None
-        if sampler is not None:
+        samplers = (
+            list(self._case_grasp_samplers.values()) if provider.samples_grasps else []
+        )
+        for sampler in samplers:
             sampler.activate(grasp_sample_count(case))
         try:
             return engine.compile(invocations, context=context)
         finally:
             for part in frozen:
                 self._case_grasp_generators[part].deactivate()
-            if sampler is not None:
+            for sampler in samplers:
                 sampler.deactivate()
 
     def plan_contract_error(self, result: object) -> str | None:

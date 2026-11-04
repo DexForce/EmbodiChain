@@ -185,6 +185,8 @@ class EmbodimentSpecCfg:
 
     component: str = ""
     resource_id: str | None = None
+    resource_bindings: dict[str, str] = {}
+    """Logical Atomic slots mapped to distinct component motion resources."""
     overrides: dict[str, Any] = {}
     initial_qpos: list[float] = []
     endpoint_bindings: dict[str, Any] = {}

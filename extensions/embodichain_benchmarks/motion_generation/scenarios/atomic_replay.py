@@ -114,6 +114,7 @@ class _PhysicsReplaySettings:
     hold_sim_steps: int
     joint_tracking_tolerance_rad: float
     clock: str = "fixed_samples"
+    joint_tracking_scope: str = "full_robot"
 
 
 class AtomicReplayRuntime:
@@ -281,7 +282,12 @@ class AtomicReplayRuntime:
                 physics.get("joint_tracking_tolerance_rad", 0.05)
             ),
             clock=str(physics.get("clock", "fixed_samples")),
+            joint_tracking_scope=str(physics.get("joint_tracking_scope", "full_robot")),
         )
+        if settings.joint_tracking_scope not in {"full_robot", "motion_control_parts"}:
+            raise ValueError(
+                "physics.joint_tracking_scope must be full_robot or motion_control_parts."
+            )
         if settings.clock not in {"fixed_samples", "compiled"}:
             raise ValueError("physics.clock must be fixed_samples or compiled.")
         if (
@@ -493,6 +499,25 @@ class AtomicReplayRuntime:
         dynamics_cleared = False
         squared_tracking_error: torch.Tensor | None = None
         tracking_value_count = 0
+        tracking_ids = list(range(trajectory.shape[-1]))
+        if collect_metrics and settings.joint_tracking_scope == "motion_control_parts":
+            parts = {self.control_part, *case.case_parameters.get("arm_waypoints", {})}
+            parts.update(
+                endpoints["motion"]
+                for endpoints in case.case_parameters.get("control_parts", {}).values()
+                if "motion" in endpoints
+            )
+            tracking_ids = sorted(
+                {
+                    joint_id
+                    for part in parts
+                    for joint_id in self.robot.get_joint_ids(name=part)
+                }
+            )
+            if not tracking_ids:
+                raise ValueError(
+                    "Motion tracking requires non-empty motion control parts."
+                )
         articulation_initial: torch.Tensor | None = None
         articulation_final: torch.Tensor | None = None
         articulation_peak: torch.Tensor | None = None
@@ -693,8 +718,10 @@ class AtomicReplayRuntime:
                 )
             if squared_tracking_error is not None:
                 observed = self.robot.get_qpos()
-                squared_tracking_error += ((observed - positions) ** 2).sum(dim=1)
-                tracking_value_count += observed.shape[1]
+                squared_tracking_error += (
+                    (observed[:, tracking_ids] - positions[:, tracking_ids]) ** 2
+                ).sum(dim=1)
+                tracking_value_count += len(tracking_ids)
             elapsed_steps += arrival_steps[waypoint_index]
             if diagnostics is not None and waypoint_index in diagnostics.sample_indices:
                 diagnostics.capture(
@@ -740,8 +767,10 @@ class AtomicReplayRuntime:
                 )
             if squared_tracking_error is not None:
                 observed = self.robot.get_qpos()
-                squared_tracking_error += ((observed - final_command) ** 2).sum(dim=1)
-                tracking_value_count += observed.shape[1]
+                squared_tracking_error += (
+                    (observed[:, tracking_ids] - final_command[:, tracking_ids]) ** 2
+                ).sum(dim=1)
+                tracking_value_count += len(tracking_ids)
             self._capture_replay_samples(
                 settling,
                 object_handle=object_handle,

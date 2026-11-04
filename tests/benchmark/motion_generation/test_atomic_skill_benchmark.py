@@ -1220,7 +1220,12 @@ def test_contact_benchmarks_use_attributed_ik_interpolation(skill_id: str) -> No
     assert benchmark_motion_attribution(skill_id) == expected
     assert AtomicSkillScenario().trial_metadata(
         replace(_atomic_case(), skill_id=skill_id)
-    ) == {**expected, "timing_scope": "atomic_action_compile", "timing_is_solved": True}
+    ) == {
+        **expected,
+        "timing_scope": "atomic_action_compile",
+        "timing_is_solved": True,
+        "joint_tracking_scope": "full_robot",
+    }
 
 
 def test_noncontact_benchmarks_retain_selected_planner_attribution() -> None:
@@ -3213,3 +3218,50 @@ def test_franka_panda_pgi_kinematic_chain_matches_the_assembled_solver() -> None
     torch.testing.assert_close(
         solver.get_fk(qpos), chain.forward_kinematics(qpos).get_matrix() @ tcp
     )
+
+
+@pytest.mark.parametrize("scope", ["full_robot", "motion_control_parts"])
+def test_replay_tracking_scope_measures_both_motion_parts_without_gripper_stall(scope):
+    """A contact-stalled hand is distinct from either arm's tracking error."""
+    robot = Mock()
+    robot.get_qpos.return_value = torch.tensor([[0.02, -0.04, 0.5, 0.5, 0.5, 0.5, 0.5]])
+    robot.get_joint_ids.side_effect = lambda name: {"arm": [0], "other_arm": [1]}[name]
+    runtime = AtomicReplayRuntime(
+        simulation=Mock(sim_config=Mock(physics_dt=0.01)),
+        robot=robot,
+        control_part="arm",
+        objects={},
+        articulations={},
+        gripper_states={},
+        track_config={
+            "physics": {
+                "steps_per_waypoint": 1,
+                "hold_steps": 1,
+                "hold_sim_steps": 1,
+                "joint_tracking_scope": scope,
+            }
+        },
+    )
+    case = replace(
+        _atomic_case(),
+        case_parameters={
+            "control_parts": {
+                "source": {"motion": "arm"},
+                "destination": {"motion": "other_arm"},
+            }
+        },
+    )
+    metrics = runtime.replay_physics(
+        _compiled_replay_batch([True], torch.zeros(1, 2, 7)),
+        case,
+        None,
+        collect_metrics=True,
+    )
+    expected_mse = (
+        (0.02**2 + 0.04**2) / 2
+        if scope == "motion_control_parts"
+        else (0.02**2 + 0.04**2 + 5 * 0.5**2) / 7
+    )
+    assert (
+        metrics.squared_tracking_error / metrics.tracking_value_count
+    ).item() == pytest.approx(expected_mse)

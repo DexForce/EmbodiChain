@@ -86,7 +86,6 @@ from .atomic_evaluation import (
     stage_evidence_batch,
     trace_validity,
 )
-from .atomic_grasps import parallel_jaw_sampler
 from .atomic_policy import with_plan_options
 from ..atomic_skill import register_atomic_skill_provider
 
@@ -638,6 +637,7 @@ def _compile_reference(
             for part, (open_state, grasp) in scenario._configured_grippers().items()
         },
         grasp_pose_generators=generators or None,
+        hand_geometry_cfgs=scenario._hand_geometry_cfgs or None,
     )
     plan_opts = ToppraPlanOptions(
         sample_method=TrajectorySampleMethod.QUANTITY,
@@ -1093,11 +1093,12 @@ class _HandOverCases(AtomicSkillCaseProvider):
             "control_parts": parts,
         }
         grasp_parts = [values["grasp"] for values in parts.values()]
-        sampler = parallel_jaw_sampler(
-            int(config.get("grasp_sample_count", 10_000)),
-            gripper_model=scenario.grasp_model(),
-            root_from_tcp=scenario.grasp_root_from_tcp(),
-        )
+        samplers = {
+            part: scenario.grasp_sampler(
+                int(config.get("grasp_sample_count", 10_000)), part=part
+            )
+            for part in grasp_parts
+        }
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(
             scenario,
@@ -1114,7 +1115,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
                 ),
             ),
             scene_entities=(handle.entity,),
-            grasp_generators={part: sampler for part in grasp_parts},
+            grasp_generators=samplers,
             record_grasp_parts=grasp_parts,
         )
         _require_hand_over_samples(reference, batch_size=batch_size)
@@ -1329,11 +1330,12 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
             "left_to_right_arm_direction": _left_to_right_direction(scenario, parts),
             "control_parts": parts,
         }
-        sampler = parallel_jaw_sampler(
-            int(parameters["grasp_sample_count"]),
-            gripper_model=scenario.grasp_model(),
-            root_from_tcp=scenario.grasp_root_from_tcp(),
-        )
+        samplers = {
+            values["grasp"]: scenario.grasp_sampler(
+                int(parameters["grasp_sample_count"]), part=values["grasp"]
+            )
+            for values in parts.values()
+        }
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(
             scenario,
@@ -1354,7 +1356,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
                 ),
             ),
             scene_entities=(handle.entity,),
-            grasp_generators={values["grasp"]: sampler for values in parts.values()},
+            grasp_generators=samplers,
         )
         targets, other_arms = _arm_waypoints(
             scenario, reference, [values["motion"] for values in parts.values()]

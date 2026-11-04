@@ -220,7 +220,9 @@ class BenchmarkRunner:
             from .robots.base import EmbodimentRobotProvider
 
             self.robot_provider = EmbodimentRobotProvider(
-                self.embodiment_resolution, suite.embodiment.resource_id
+                self.embodiment_resolution,
+                suite.embodiment.resource_id,
+                resource_bindings=suite.embodiment.resource_bindings,
             )
             suite.robot = deepcopy(self.robot_provider.spec)
             for track in suite.tracks:
