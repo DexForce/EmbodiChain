@@ -86,7 +86,8 @@ def test_csv_resampling_constant_translation_and_rotation(
     qpos[:, 0] = times
     qpos[:, 5] = np.sin(0.3 * times / 2)
     qpos[:, 6] = np.cos(0.3 * times / 2)
-    qpos[1::2, 3:7] *= -1
+    qpos[::2, 3:7] *= 2
+    qpos[1::2, 3:7] *= -0.5
     qpos[:, 7] = 2 * times
     source = tmp_path / "turn.csv"
     np.savetxt(source, qpos, delimiter=",")

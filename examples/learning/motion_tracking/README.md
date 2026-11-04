@@ -11,14 +11,17 @@ outputs can live outside the source checkout.
 
 ## Install the runtime
 
-Use the candidate source revision and the matching runtime wheels supplied with
-the review build. From the repository root, place those wheels in
-`runtime-wheels/`, then install EmbodiChain and its bundled tasks and models:
+Use a source checkout that includes the runtime prerequisites from #836 and the
+motion-tracking changes from #924. FastRT replay also requires #833. From the
+repository root, place the matching Python 3.11 SDK wheel supplied with the review
+build in `runtime-wheels/`, then install EmbodiChain and its bundled tasks and models:
 
 ```bash
 RUNTIME_WHEELS="$PWD/runtime-wheels"
 uv venv --python 3.11 .venv-g1
-uv pip install --python .venv-g1/bin/python --torch-backend cu130 \
+uv pip install --python .venv-g1/bin/python --torch-backend cu128 \
+  'torch>=2.7,<2.8' 'torchvision>=0.22,<0.23'
+uv pip install --python .venv-g1/bin/python \
   --find-links "$RUNTIME_WHEELS" "$RUNTIME_WHEELS"/dexsim_engine-*.whl .
 uv pip check --python .venv-g1/bin/python
 source .venv-g1/bin/activate
@@ -30,10 +33,13 @@ runtime build. Record the source
 revision and wheel filenames with the run results. The runtime build must provide
 native libraries compatible with the host's Python, CUDA driver and Linux ABI.
 
-The declared runtime includes `dexsim_engine==0.5.1`, PyTorch 2.10, TorchVision
-0.25 and TorchCodec 0.10. The CUDA 13.0 selection above matches the NVIDIA RTX PRO
-5000 training environment; select a PyTorch backend supported by the GPU and
-driver in use. The complete training recipe was run on a single 72 GiB GPU.
+The Python 3.11 dependency profile uses PyTorch 2.7, TorchVision 0.22 and
+TorchCodec 0.5. The first install command selects CUDA 12.8 wheels for Torch and
+TorchVision; the second installs TorchCodec's CPU decoder from PyPI. The SDK
+requirement from #836 is `dexsim_engine>=0.5.1,<0.6`; use the review build selected above.
+Earlier candidate installation checks used PyTorch 2.10, TorchVision 0.25 and
+TorchCodec 0.10. The complete training recipe was run on a single NVIDIA RTX PRO
+5000 with 72 GiB of memory.
 The functional recipe uses smaller networks, batches and replay storage.
 
 TorchCodec requires FFmpeg shared libraries, and the simulator requires EGL/OpenGL
@@ -112,9 +118,10 @@ CUDA_VISIBLE_DEVICES=0 embodichain run-example learning/motion_tracking/evaluate
   --trajectories outputs/pretrained-full40/trajectory.npz
 ```
 
-The published seed-0 model completed 40/40 full clips with a macro normalized
-return of 0.94054 on this motion library. The model bundle's `evaluation.json`
-records per-clip results and the measurement environment.
+The historical seed-0 evaluation completed 40/40 full clips with a macro
+normalized return of 0.94054. These results predate the reference-heading
+correction; evaluation with the corrected heading remains pending. The model
+bundle's `evaluation.json` records the original per-clip results and environment.
 
 Ordinary evaluation uses `--mode quality`. Each clip starts at its first frame
 with nominal physical parameters and deterministic FP32 policy actions, and runs

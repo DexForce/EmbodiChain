@@ -69,7 +69,8 @@ def resample_floating_trajectory(
     alpha = (t - lower.to(t.dtype)).clamp(0, 1).unsqueeze(-1)
     start, end = qpos[lower], qpos[lower + 1]
     linear = (1 - alpha) * start + alpha * end
-    qa, qb = start[:, 3:7], end[:, 3:7]
+    qa = torch.nn.functional.normalize(start[:, 3:7], dim=-1)
+    qb = torch.nn.functional.normalize(end[:, 3:7], dim=-1)
     dot = (qa * qb).sum(-1, keepdim=True)
     qb = torch.where(dot < 0, -qb, qb)
     dot = dot.abs().clamp(max=1.0)
