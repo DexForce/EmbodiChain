@@ -270,3 +270,8 @@ closed role/relation contract without contacting providers. Offline asset
 materialization owns selection and emits a new bound deployment before ordinary
 compilation. See [asset generalization](../asset-generalization/asset-generalization.md)
 for supported adaptations, provenance and integrity boundaries.
+
+Embodiment grasp services may explicitly select `approach_deviation_angle`,
+`max_candidates` and `center_mode` (`bounds` or `centroid`). Omitted fields
+retain toolkit defaults and the prior integration fingerprint. These numerical
+search declarations do not change contact/effect evidence requirements.

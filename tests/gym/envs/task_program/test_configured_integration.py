@@ -1680,6 +1680,107 @@ def test_grasp_generator_factory_defers_to_toolkit_policy_defaults() -> None:
     assert generator.annotation_cfg.force_refresh is False
 
 
+def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch):
+    from types import SimpleNamespace
+    import embodichain.toolkits.graspkit.pg_grasp as grasp
+    import embodichain.toolkits.graspkit.pg_grasp.model_geometry as geometry
+
+    marker = object()
+    monkeypatch.setattr(
+        geometry, "get_parallel_jaw_collision_geometry", lambda *a, **kw: marker
+    )
+    monkeypatch.setattr(
+        grasp,
+        "AntipodalGraspPoseGenerator",
+        lambda model, **kw: SimpleNamespace(model=model, **kw),
+    )
+    generator = _decode_grasp_generator(
+        {
+            "kind": "antipodal_parallel_jaw",
+            "model": "robotiq_arg2f_140",
+            "approach_deviation_angle": 0.3490658503988659,
+            "max_candidates": 500,
+            "center_mode": "centroid",
+        },
+        path="generator",
+    )()
+    assert generator.collision_geometry is marker
+    assert generator.algorithm_cfg.approach_deviation_angle == 0.3490658503988659
+    assert generator.algorithm_cfg.max_candidates == 500
+    assert generator.algorithm_cfg.center_mode == "centroid"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"approach_deviation_angle": -0.1},
+        {"approach_deviation_angle": float("nan")},
+        {"max_candidates": 0},
+        {"max_candidates": True},
+        {"center_mode": "guessed"},
+    ],
+)
+def test_grasp_search_declarations_reject_invalid_values_before_construction(value):
+    with pytest.raises((TypeError, ValueError)):
+        _decode_grasp_generator(
+            {"kind": "antipodal_parallel_jaw", "model": "robotiq_arg2f_140", **value},
+            path="generator",
+        )
+
+
+@pytest.mark.parametrize(
+    "profile,component",
+    [
+        ("dual_franka", "dual_franka_robotiq_arg2f_140"),
+        ("dual_ur10", "dual_ur10_robotiq_arg2f_140"),
+    ],
+)
+def test_migrated_robotiq_embodiments_preserve_frozen_physical_declarations(
+    profile, component
+):
+    from copy import deepcopy
+    import json
+
+    frozen = json.loads(
+        (Path(__file__).parent / "data/robotiq_embodiments_b0.json").read_text()
+    )[profile]["embodiment"]
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    config["embodiment"] = {
+        "component": f"../../../components/embodiments/{component}.yaml"
+    }
+    physical = _physical_components(path, config)
+    expected = deepcopy(frozen["simulation"])
+    actual = deepcopy(physical.config["robot"])
+    # Scene placement is an explicit deployment input, separate from the component's reference pose.
+    actual["init_pos"] = expected["init_pos"]
+    assert actual == expected
+    declaration = physical.embodiment_skill_profile
+    assert declaration is not None
+    services = declaration["runtime_services"]
+    assert (
+        services["grasp_pose_generators"]
+        == frozen["skill_profile"]["runtime_services"]["grasp_pose_generators"]
+    )
+    for side in ("left", "right"):
+        hand = services["hand_geometries"][f"{side}_eef"]
+        assert (
+            hand["sample_count"],
+            hand["body_max_edge"],
+            hand["pad_max_edge"],
+            hand["max_subdivisions"],
+        ) == (65, 0.01, 0.004, 10)
+    deployment = _load_configured_task_program_deployment(
+        task_program=physical.config["task_program"],
+        skill_profile=declaration,
+        base_dir=path.parent,
+    )
+    assert (
+        deployment.integration.registration.robot_profile_binding.profile_id
+        == component
+    )
+
+
 @pytest.mark.parametrize("field", ["opening_margin", "point_sample_density"])
 def test_grasp_generator_rejects_removed_box_collision_fields(field: str) -> None:
     with pytest.raises(ValueError, match=f"unsupported fields.*{field}"):

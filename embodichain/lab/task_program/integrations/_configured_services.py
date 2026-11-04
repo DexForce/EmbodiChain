@@ -368,6 +368,9 @@ class _AntipodalGraspPoseGeneratorFactory:
     root_from_tcp: tuple[float, ...] | None = None
     sample_count: int | None = None
     approach_direction_samples: int | None = None
+    approach_deviation_angle: float | None = None
+    max_candidates: int | None = None
+    center_mode: str | None = None
     filter_ground_collision: bool | None = None
     force_refresh: bool | None = None
 
@@ -392,6 +395,10 @@ class _AntipodalGraspPoseGeneratorFactory:
             algorithm_kwargs["approach_direction_samples"] = (
                 self.approach_direction_samples
             )
+        for name in ("approach_deviation_angle", "max_candidates", "center_mode"):
+            value = getattr(self, name)
+            if value is not None:
+                algorithm_kwargs[name] = value
 
         collision_kwargs: dict[str, object] = {}
         if self.filter_ground_collision is not None:
