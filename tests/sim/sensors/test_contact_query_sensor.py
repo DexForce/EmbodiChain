@@ -469,7 +469,7 @@ def test_contact_package_exports_and_sensor_config_registration():
     from importlib.util import find_spec
 
     assert ContactSensor is PackagedSensor is Implementation
-    assert find_spec("embodichain.lab.sim.sensors.contact.sensor") is None
+    assert find_spec("embodichain.lab.sim.sensors.contact_sensor") is None
     assert find_spec("embodichain.lab.sim.sensors.contact_history") is None
     config = SensorCfg.from_dict(
         {"sensor_type": "ContactSensor", "uid": "contacts", "rigid_uid_list": ["cube"]}

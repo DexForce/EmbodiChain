@@ -19,28 +19,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import json
 import numpy as np
 from scipy.spatial.transform import Rotation
 import torch
 import trimesh
-
-CASES = [
-    {"id": "bilateral", "revision": 1},
-    {"id": "halo_veto", "revision": 2, "body": "halo"},
-    {"id": "halo_diagnostic", "revision": 4, "body": "halo"},
-    {"id": "body_first", "revision": 4, "body": "first"},
-    {"id": "ambiguous_order", "revision": 4, "body": "ambiguous"},
-    {"id": "opening_allowed_r4", "revision": 4, "stroke": "already_touching"},
-    {"id": "opening_rejected_r5", "revision": 5, "stroke": "already_touching"},
-    {"id": "contact_not_reached", "revision": 6, "stroke": "never_touching"},
-    {"id": "depth_population", "revision": 6},
-    {"id": "deferred_source", "revision": 8},
-    {"id": "quality_level", "revision": 9},
-    {"id": "quality_under_limit", "revision": 9, "angle": 1.9},
-    {"id": "quality_over_limit", "revision": 9, "angle": 2.1},
-    {"id": "quality_gravity", "revision": 9, "gravity": [1, 0, 0]},
-    {"id": "quality_actual_axis", "revision": 9, "axis": 1, "angle": 20},
-]
 
 
 def query_inputs(case, part_type):
@@ -205,3 +189,11 @@ def decisions(value):
     if isinstance(value, (tuple, list)):
         return [decisions(item) for item in value]
     return value
+
+
+def decision_digest(value):
+    """Hash the same source decision/order contract without backend diagnostics."""
+    encoded = json.dumps(
+        decisions(value), sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    return hashlib.sha256(encoded.encode()).hexdigest()

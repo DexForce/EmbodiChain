@@ -17,7 +17,7 @@
 """Newton native hand query decisions, scopes and owned query lifetimes."""
 
 from __future__ import annotations
-from embodichain.lab.sim.scene import native_hand, _native_hand_capture as capture
+from embodichain.lab.sim.scene import native_hand
 from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
 
 from dataclasses import replace
@@ -42,8 +42,8 @@ from ._native_hand_fixture import (
     exercise,
     query_inputs,
     recording_manager,
-    decisions,
     stable_report,
+    decision_digest,
 )
 
 
@@ -57,10 +57,7 @@ def newton_available():
 
 def _reference():
     return json.loads(
-        Path(__file__)
-        .with_name("fixtures")
-        .joinpath("native_hand_f1_queries.json")
-        .read_text()
+        Path(__file__).with_name("fixtures").joinpath("native_hand_f1.json").read_text()
     )
 
 
@@ -78,21 +75,10 @@ def test_closing_results_candidate_axes_and_newton_query_order_match_f1_decision
     parts, target, options = query_inputs(case["case"], NativeContactPart)
     with NativeClosingQuery(parts, target, 0.0, scope=_scope(), **options) as query:
         actual = exercise(query, case["case"])
-        assert decisions(actual) == decisions(case["result"])
-        assert decisions(trace) == decisions(case["trace"])
-        before_close = query.report()
-        assert before_close["collision_backend"] == "newton.CollisionPipeline"
-        assert before_close["collision_backend_version"]
-        assert before_close["distance_semantics"] == "capped_conversion_interval/v1"
-    assert query.closed and query.report() == before_close
-    for operation in (
-        lambda: query.inspect(np.eye(4)),
-        lambda: query.mask(torch.eye(4)[None], torch.eye(4)[None]),
-        query.depth_offsets,
-        query.record_deferred_proposal,
-    ):
-        with pytest.raises(RuntimeError, match="closed"):
-            operation()
+        assert actual["inspect"]["valid"] is case["expected_valid"]
+        assert actual["inspect"]["reason"] == case["expected_reason"]
+        assert decision_digest(actual) == case["result_sha256"]
+        assert decision_digest(trace) == case["trace_sha256"]
 
 
 @pytest.mark.parametrize("index", [0, 1])
@@ -119,12 +105,12 @@ def test_opening_prefix_and_contact_halo_report_match_f1(
         scope=closing.scope,
     )
     closing.opening_screen = opening
-    assert decisions(opening.inspect(pose, source)) == decisions(case["result"])
-    assert decisions(opening.inspect(pose.copy(), source)) == decisions(
-        case["repeated"]
+    assert decision_digest(opening.inspect(pose, source)) == case["result_sha256"]
+    assert (
+        decision_digest(opening.inspect(pose.copy(), source)) == case["repeated_sha256"]
     )
-    assert decisions(stable_report(opening.report())) == decisions(case["report"])
-    assert decisions(trace) == decisions(case["trace"])
+    assert decision_digest(stable_report(opening.report())) == case["report_sha256"]
+    assert decision_digest(trace) == case["trace_sha256"]
     report = opening.report()
     closing.close()
     assert opening.closed and opening.report() == report
@@ -146,9 +132,9 @@ def test_rigid_scene_prefix_uses_original_pair_rest_and_query_order(
         "obstacle", 0.001, (trimesh.creation.box((0.5, 0.5, 0.05)),), pose
     )
     scene = NativeRigidRestScene(parts, [obstacle], scope=_scope())
-    assert decisions(scene.inspect(np.eye(4), 2)) == decisions(case["result"])
-    assert decisions(scene.inspect(np.eye(4), 2)) == decisions(case["repeated"])
-    assert decisions(trace) == decisions(case["trace"])
+    assert decision_digest(scene.inspect(np.eye(4), 2)) == case["result_sha256"]
+    assert decision_digest(scene.inspect(np.eye(4), 2)) == case["repeated_sha256"]
+    assert decision_digest(trace) == case["trace_sha256"]
     scene.close()
     with pytest.raises(RuntimeError, match="closed"):
         scene.inspect(np.eye(4), 2)
@@ -223,6 +209,19 @@ def test_returned_report_and_contact_grids_do_not_alias_caller_data(newton_avail
         result = query.inspect(np.eye(4))
         result["valid"] = False
         assert query.inspect(np.eye(4))["valid"] is True
+        before_close = query.report()
+        assert before_close["collision_backend"] == "newton.CollisionPipeline"
+        assert before_close["collision_backend_version"]
+        assert before_close["distance_semantics"] == "capped_conversion_interval/v1"
+    assert query.closed and query.report() == before_close
+    for operation in (
+        lambda: query.inspect(np.eye(4)),
+        lambda: query.mask(torch.eye(4)[None], torch.eye(4)[None]),
+        query.depth_offsets,
+        query.record_deferred_proposal,
+    ):
+        with pytest.raises(RuntimeError, match="closed"):
+            operation()
 
 
 def test_caller_part_lists_cannot_change_prepared_newton_queries(newton_available):

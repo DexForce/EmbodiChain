@@ -17,7 +17,7 @@
 """Native capture contracts using SDK-shaped ports, without launching simulation."""
 
 from __future__ import annotations
-from embodichain.lab.sim.scene import native_hand, _native_hand_capture as capture
+from embodichain.lab.sim.scene import native_hand
 from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
 
 from copy import deepcopy
@@ -50,7 +50,7 @@ from ._native_capture_fixture import (
     setup_case,
     parts_record,
 )
-from ._native_hand_fixture import decisions, recording_manager, stable_report
+from ._native_hand_fixture import decision_digest, recording_manager, stable_report
 
 
 @pytest.fixture
@@ -83,11 +83,8 @@ def test_cooked_capture_full_stroke_and_newton_preserve_pinned_source_decisions(
     ports, monkeypatch
 ):
     expected = json.loads(
-        Path(__file__)
-        .with_name("fixtures")
-        .joinpath("native_hand_f1_capture.json")
-        .read_text()
-    )
+        Path(__file__).with_name("fixtures").joinpath("native_hand_f1.json").read_text()
+    )["capture"]
     robot, simulation, cfg, opened, closed = ports
     before = (robot.qpos.clone(), opened.clone(), closed.clone(), cfg.copy())
     manager, trace = recording_manager(_ConvexCollection)
@@ -96,9 +93,11 @@ def test_cooked_capture_full_stroke_and_newton_preserve_pinned_source_decisions(
         assert parts_record(query) == expected["parts"]
         assert robot.calls == expected["fk_calls"]
         assert query.identity == expected["identity"]
-        assert decisions(query.inspect(np.eye(4))) == decisions(expected["result"])
-        assert decisions(stable_report(query.report())) == decisions(expected["report"])
-        assert decisions(trace) == decisions(expected["trace"])
+        assert decision_digest(query.inspect(np.eye(4))) == expected["result_sha256"]
+        assert (
+            decision_digest(stable_report(query.report())) == expected["report_sha256"]
+        )
+        assert decision_digest(trace) == expected["trace_sha256"]
         assert robot.reads == 0 and expected["source_state_reads"] == 1
     torch.testing.assert_close(robot.qpos, before[0])
     torch.testing.assert_close(opened, before[1])
