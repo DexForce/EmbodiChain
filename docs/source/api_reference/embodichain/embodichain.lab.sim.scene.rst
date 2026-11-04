@@ -402,14 +402,14 @@ embodichain.lab.sim.scene.native_hand
 
 These read-only services capture Default cooked convex/box shapes, native
 rest/contact offsets and the configured hand stroke through named FK. They reuse
-object-backend shape decoding and the existing hand-stroke sampler. Capture
+object-backend physical geometry/offset capture and the existing hand-stroke sampler. Capture
 requires the exact simulation-owned Robot, registered native UIDs and B1/env0;
 subsequent rigid reads reject replaced owners. No query, grasp policy or
 experiment revision is selected here.
 
 GraspKit owns discrete geometric qualification through an injected collision
-backend. Atomic Actions select the source Pick policy and compose query
-lifetimes. Captured geometry does not establish physical acquisition or release.
+backend. ``ActionPlanningServices`` binds an explicitly supplied geometric policy
+and owns query lifetimes. Captured geometry does not establish physical acquisition or release.
 
 .. currentmodule:: embodichain.lab.sim.scene.native_hand
 
@@ -417,7 +417,6 @@ lifetimes. Captured geometry does not establish physical acquisition or release.
    :nosignatures:
 
    NativeHandGeometry
-   NativeRigidGeometry
    capture_native_hand_geometry
    capture_native_rigid_geometry
    capture_native_rigid_obstacles

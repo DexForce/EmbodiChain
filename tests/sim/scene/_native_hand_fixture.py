@@ -26,8 +26,22 @@ from scipy.spatial.transform import Rotation
 import torch
 import trimesh
 
-from embodichain.lab.sim.atomic_actions.native_hand import _closing_policy
+from embodichain.toolkits.graspkit.pg_grasp.native_contact import ClosingContactPolicy
 from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
+
+
+def source_policy(revision):
+    """Decode only the pinned source fixture's historical experiment labels."""
+    return ClosingContactPolicy(
+        contact_halo=(
+            "ignore" if revision == 1 else "reject" if revision < 4 else "report"
+        ),
+        reject_open_pad_contact=revision >= 5,
+        depth_alternatives=revision >= 6,
+        opening_check=revision >= 3,
+        defer_source_proposals=revision >= 8,
+        horizontal_pad_line=revision == 9,
+    )
 
 
 def query_inputs(case, part_type):
@@ -67,7 +81,7 @@ def query_inputs(case, part_type):
             )
         )
     options = {
-        "policy": _closing_policy(case["revision"]),
+        "policy": source_policy(case["revision"]),
         "report_metadata": {"revision": case["revision"]},
         "target_contact_offset": 0.002,
         "collision_factory": _ConvexCollection,

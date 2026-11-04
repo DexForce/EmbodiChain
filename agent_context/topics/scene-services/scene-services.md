@@ -34,11 +34,12 @@ selection, polygon search, greedy packing and SciPy SLSQP optimization.
 `native_hand.py` captures cooked convex/box geometry and explicitly requested
 rest/contact offsets for the exact simulation-owned Robot and native rigid UIDs.
 It requires Default/B1/env0, checks named FK against native frames, and validates
-original owners before subsequent rigid reads. Shape decoding reuses the object
-backend; closing FK reuses [hand geometry](../robot-system/robot-system.md#sampled-hand-geometry).
+original owners before subsequent rigid reads. Strict shape conversion and offset
+reads belong to `objects/backends/collision.py`; closing FK reuses
+[hand geometry](../robot-system/robot-system.md#sampled-hand-geometry).
 It creates no collision query and selects no grasp policy. Geometric qualification
-belongs to [GraspKit](../motion-planning/motion-planning.md), with source revision
-selection and query/resource composition in [Atomic Actions](../atomic-actions/atomic-actions.md).
+belongs to [GraspKit](../motion-planning/motion-planning.md); query composition and
+cleanup belong to `ActionPlanningServices` in [Atomic Actions](../atomic-actions/atomic-actions.md).
 Captured shapes and nominal queries do not establish physical acquisition/release.
 
 `NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;

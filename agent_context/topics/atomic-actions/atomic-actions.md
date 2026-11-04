@@ -68,14 +68,14 @@ commands with the current resolved endpoint commands, including invocation
 overrides. [Robot geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
 defines the capture boundary. Task Program declarations do not enter Atomic APIs.
 
-`native_hand.py` composes the explicitly selected source Pick revisions 1–9 into
-GraspKit's typed closing policy. This opt-in preparation uses Scene's native shape
-capture and the existing isolated Newton backend, preserving the source 65-sample
-stroke when selected by its caller. Fresh query scope, opening grounding and
-capture ownership remain explicit. The prepared query closes its own resources
-and releases its capture token; it never destroys borrowed native entities or
-certifies acquisition/release. This helper installs no alternate skill registry
-and does not change ordinary PickUp defaults.
+`ActionPlanningServices.prepare_grasp_query()` resolves the declared hand
+calibration by target ID and binds Scene capture to GraspKit's typed geometric
+policy and the existing isolated Newton backend. The opt-in context manager
+closes all query resources on normal exit, failure or cancellation. Opening
+grounding and optional rigid-scene queries share the explicit observation scope;
+undeclared calibration fails before capture. It selects no experiment revisions,
+installs no alternate skill registry and leaves ordinary PickUp defaults unchanged.
+Historical revision mapping belongs only to the frozen regression fixture.
 
 `PickUpOptions.approach_direction` accepts one world vector or one vector per
 planning row. PickUp and AxisAlign normalize each row independently and use the

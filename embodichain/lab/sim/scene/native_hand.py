@@ -29,10 +29,11 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
-import trimesh
-from dexsim.types import RigidBodyShape
 
-from embodichain.lab.sim.objects.backends.collision import _from_physical_body
+from embodichain.lab.sim.objects.backends.collision import (
+    PhysicalCollisionGeometry,
+    capture_physical_collision_geometry,
+)
 from embodichain.lab.sim.utility.grasp_geometry import (
     RobotHandGeometryCfg,
     _resolve_hand_frame,
@@ -51,28 +52,10 @@ if TYPE_CHECKING:
 
 __all__ = [
     "NativeHandGeometry",
-    "NativeRigidGeometry",
     "capture_native_hand_geometry",
     "capture_native_rigid_geometry",
     "capture_native_rigid_obstacles",
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class NativeRigidGeometry:
-    """Captured body-local convex shapes, physical offsets and source identity.
-
-    Args:
-        meshes: Already-scaled collision shapes with local shape poses applied once.
-        rest_offset: Native body rest offset, in metres.
-        contact_offset: Optional native contact offset, requested explicitly.
-        path: Exact runtime source path, never inferred from an object label.
-    """
-
-    meshes: tuple[trimesh.Trimesh, ...]
-    rest_offset: float
-    contact_offset: float | None
-    path: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +73,7 @@ class NativeHandGeometry:
     """
 
     parts: tuple[NativeContactPart, ...]
-    target: NativeRigidGeometry
+    target: PhysicalCollisionGeometry
     object_pose: torch.Tensor
     identity: Mapping[str, object]
     _owners: tuple[object, object, object, object] = field(repr=False)
@@ -118,44 +101,6 @@ def _command(value: torch.Tensor, name: str) -> torch.Tensor:
     ):
         raise ValueError(f"{name} requires a finite floating (1, D) command.")
     return value.detach()
-
-
-def _native_meshes(body: Any) -> tuple[trimesh.Trimesh, ...]:
-    """Convert the shared native descriptor snapshots without changing precision."""
-    if body is None or not body.is_collision_enable():
-        return ()
-    shapes = _from_physical_body(
-        body,
-        object_uid="native query",
-        dtype=torch.float64,
-        convex_only=True,
-    )
-    result = []
-    for shape in shapes:
-        if shape.shape_type == RigidBodyShape.BOX:
-            half = shape.half_extents.numpy()
-            if half.shape != (3,) or not np.isfinite(half).all() or (half <= 0).any():
-                raise ValueError("Native box half extents must be finite and positive.")
-            mesh = trimesh.creation.box(2 * half)
-        else:
-            vertices, faces = shape.vertices.numpy(), shape.triangles.numpy()
-            if (
-                vertices.ndim != 2
-                or vertices.shape[1] != 3
-                or not len(vertices)
-                or faces.ndim != 2
-                or faces.shape[1] != 3
-                or not len(faces)
-                or (faces < 0).any()
-                or (faces >= len(vertices)).any()
-            ):
-                raise ValueError("Native mesh topology is unavailable.")
-            mesh = trimesh.Trimesh(vertices.copy(), faces.copy(), process=False)
-        if not np.isfinite(mesh.vertices).all():
-            raise ValueError("Native collision geometry is nonfinite.")
-        mesh.apply_transform(_rigid_pose(shape.local_pose))
-        result.append(mesh)
-    return tuple(result)
 
 
 def _require_simulation(simulation: SimulationManager, robot: Robot) -> None:
@@ -262,9 +207,8 @@ def capture_native_hand_geometry(
         raise ValueError("Native Robot identity is unavailable or ambiguous.")
     native_robot = robots[0]
     source = _source_handle(handles, source_uid, native_robot.arena_name)
-    target_body = source.native().get_physical_body()
-    target_meshes = _native_meshes(target_body)
-    if not target_meshes:
+    target = _capture_rigid(source, include_contact_offsets=include_contact_offsets)
+    if not target.meshes:
         raise ValueError("Native source has no enabled physical collision shapes.")
     if not set(links) <= set(native_robot.get_link_names()):
         raise ValueError("Native hand link topology is incomplete.")
@@ -300,34 +244,25 @@ def capture_native_hand_geometry(
     parts = []
     for index, name in enumerate(links):
         body = native_robot.render_articulation.get_physical_body(name)
-        meshes = _native_meshes(body)
-        if meshes:
+        geometry = capture_physical_collision_geometry(
+            body,
+            source_path=f"{native_robot.path}/{name}",
+            include_contact_offsets=include_contact_offsets,
+        )
+        if geometry.meshes:
             parts.append(
                 NativeContactPart(
                     name,
-                    meshes,
+                    geometry.meshes,
                     relative[:, index].detach().cpu().double().numpy(),
-                    float(body.get_rest_offset()),
+                    geometry.rest_offset,
                     name in cfg.pad_link_names,
-                    (
-                        float(body.get_contact_offset())
-                        if include_contact_offsets
-                        else None
-                    ),
+                    geometry.contact_offset,
                 )
             )
     return NativeHandGeometry(
         tuple(parts),
-        NativeRigidGeometry(
-            target_meshes,
-            float(target_body.get_rest_offset()),
-            (
-                float(target_body.get_contact_offset())
-                if include_contact_offsets
-                else None
-            ),
-            source.path,
-        ),
+        target,
         object_pose,
         {
             "simulation_uid": source_uid,
@@ -337,7 +272,7 @@ def capture_native_hand_geometry(
             "hand_part": cfg.hand_part,
             "native_hand_links": [p.name for p in parts],
             "native_hand_shapes": sum(len(p.meshes) for p in parts),
-            "native_target_shapes": len(target_meshes),
+            "native_target_shapes": len(target.meshes),
         },
         (simulation, robot, native_robot, source),
     )
@@ -374,7 +309,7 @@ def capture_native_rigid_geometry(
     uid: str,
     *,
     include_contact_offsets: bool,
-) -> NativeRigidGeometry:
+) -> PhysicalCollisionGeometry:
     """Read one same-arena rigid body's geometry under the captured hand ownership.
 
     Args:
@@ -398,18 +333,11 @@ def capture_native_rigid_geometry(
 
 def _capture_rigid(
     handle: Any, *, include_contact_offsets: bool
-) -> NativeRigidGeometry:
-    body = handle.native().get_physical_body()
-    meshes = _native_meshes(body)
-    return NativeRigidGeometry(
-        meshes,
-        float(body.get_rest_offset()) if meshes else 0.0,
-        (
-            float(body.get_contact_offset())
-            if meshes and include_contact_offsets
-            else None
-        ),
-        handle.path,
+) -> PhysicalCollisionGeometry:
+    return capture_physical_collision_geometry(
+        handle.native().get_physical_body(),
+        source_path=handle.path,
+        include_contact_offsets=include_contact_offsets,
     )
 
 

@@ -18,6 +18,10 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from dataclasses import dataclass
+
+import numpy as np
+import trimesh
 
 import torch
 from dexsim.engine import (
@@ -35,7 +39,108 @@ from dexsim.types import RigidBodyShape
 if TYPE_CHECKING:
     from ..rigid_object import CollisionShapeDesc
 
-__all__ = ["collision_shapes_from_entity", "collision_shapes_from_articulation_link"]
+__all__ = [
+    "collision_shapes_from_entity",
+    "collision_shapes_from_articulation_link",
+    "PhysicalCollisionGeometry",
+    "capture_physical_collision_geometry",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class PhysicalCollisionGeometry:
+    """Owned cooked convex/box geometry and original body offsets.
+
+    Args:
+        meshes: Already-scaled body-local collision meshes with shape poses applied.
+        rest_offset: Native rest offset in metres.
+        contact_offset: Native contact offset when explicitly requested.
+        path: Caller-supplied physical source address for diagnostics.
+    """
+
+    meshes: tuple[trimesh.Trimesh, ...]
+    rest_offset: float
+    contact_offset: float | None
+    path: str
+
+
+def capture_physical_collision_geometry(
+    physical_body: object,
+    *,
+    source_path: str,
+    include_contact_offsets: bool = False,
+) -> PhysicalCollisionGeometry:
+    """Read exact cooked convex/box geometry without an authored-input fallback.
+
+    Args:
+        physical_body: Native physical-body port exposing enabled collision shapes.
+        source_path: Physical address resolved by the host; not inferred here.
+        include_contact_offsets: Read contact offsets in addition to rest offsets.
+
+    Returns:
+        Independent float64 geometry and offsets. Missing or collision-disabled
+        bodies yield empty geometry, which does not establish clearance.
+
+    Raises:
+        ValueError: Shape type, topology, scale or local frame is unsupported.
+    """
+    meshes = _native_meshes(physical_body)
+    return PhysicalCollisionGeometry(
+        meshes,
+        float(physical_body.get_rest_offset()) if meshes else 0.0,
+        (
+            float(physical_body.get_contact_offset())
+            if meshes and include_contact_offsets
+            else None
+        ),
+        source_path,
+    )
+
+
+def _native_meshes(body: object) -> tuple[trimesh.Trimesh, ...]:
+    """Convert the shared native descriptor snapshots without changing precision."""
+    if body is None or not body.is_collision_enable():
+        return ()
+    shapes = _from_physical_body(
+        body,
+        object_uid="native query",
+        dtype=torch.float64,
+        convex_only=True,
+    )
+    result = []
+    for shape in shapes:
+        if shape.shape_type == RigidBodyShape.BOX:
+            half = shape.half_extents.numpy()
+            if half.shape != (3,) or not np.isfinite(half).all() or (half <= 0).any():
+                raise ValueError("Native box half extents must be finite and positive.")
+            mesh = trimesh.creation.box(2 * half)
+        else:
+            vertices, faces = shape.vertices.numpy(), shape.triangles.numpy()
+            if (
+                vertices.ndim != 2
+                or vertices.shape[1] != 3
+                or not len(vertices)
+                or faces.ndim != 2
+                or faces.shape[1] != 3
+                or not len(faces)
+                or (faces < 0).any()
+                or (faces >= len(vertices)).any()
+            ):
+                raise ValueError("Native mesh topology is unavailable.")
+            mesh = trimesh.Trimesh(vertices.copy(), faces.copy(), process=False)
+        if not np.isfinite(mesh.vertices).all():
+            raise ValueError("Native collision geometry is nonfinite.")
+        pose = shape.local_pose.numpy()
+        if (
+            not np.isfinite(pose).all()
+            or not np.allclose(pose[3], (0, 0, 0, 1))
+            or not np.allclose(pose[:3, :3].T @ pose[:3, :3], np.eye(3), atol=2e-5)
+            or not np.isclose(np.linalg.det(pose[:3, :3]), 1.0, atol=2e-5)
+        ):
+            raise ValueError("Native collision geometry requires a finite rigid pose.")
+        mesh.apply_transform(pose)
+        result.append(mesh)
+    return tuple(result)
 
 
 def collision_shapes_from_entity(

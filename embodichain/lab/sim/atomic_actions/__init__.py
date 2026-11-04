@@ -128,7 +128,7 @@ from .requirements import (
     SkillEndpointRequirement,
     SkillResourceSlot,
 )
-from .runtime import ActionPlanningServices
+from .runtime import ActionPlanningServices, GraspOpeningTarget
 from .runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
@@ -280,6 +280,7 @@ __all__ = [
     "ActionOptions",
     "ActionPlan",
     "ActionPlanningServices",
+    "GraspOpeningTarget",
     "Affordance",
     "AffordancePoseCandidates",
     "AffordanceSample",
