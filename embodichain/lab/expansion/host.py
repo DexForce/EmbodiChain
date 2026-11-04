@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 from collections.abc import Mapping, Callable
+from typing import Any
+from contextlib import ExitStack
 from pathlib import Path
 import time
 from embodichain.lab.expansion.configured import ExpansionRunCfg
@@ -42,7 +44,7 @@ from .journal import RecipeAttempt, ExpansionJournal
 from .session import ExpansionSession
 
 from ._gym_utils import _hash, _observation_schema
-from ._gym_context import GymHostContext
+from ._gym_context import GymHostContext, PreparedRow
 from ._gym_recipe import GymRecipeBuilder
 from ._gym_prepare import GymCohortPreparer
 from ._gym_execution import GymCohortExecutor
@@ -347,84 +349,84 @@ class GymExpansionHost:
         return self._context.capacity
 
     @property
-    def env(self):
+    def env(self) -> Any:
         """Expose the current native env for compatible host integrations."""
         return self._context.env
 
     @env.setter
-    def env(self, value):
+    def env(self, value: Any) -> None:
         self._context.env = value
 
     @property
-    def appearance(self):
+    def appearance(self) -> ExitStack | None:
         """Expose the current native appearance for compatible host integrations."""
         return self._context.appearance
 
     @appearance.setter
-    def appearance(self, value):
+    def appearance(self, value: ExitStack | None) -> None:
         self._context.appearance = value
 
     @property
-    def collision(self):
+    def collision(self) -> Any:
         """Expose the current native collision for compatible host integrations."""
         return self._context.collision
 
     @collision.setter
-    def collision(self, value):
+    def collision(self, value: Any) -> None:
         self._context.collision = value
 
     @property
-    def timings(self):
+    def timings(self) -> dict[str, float]:
         """Expose the current native timings for compatible host integrations."""
         return self._context.timings
 
     @timings.setter
-    def timings(self, value):
+    def timings(self, value: dict[str, float]) -> None:
         self._context.timings = value
 
     @property
-    def compatibility(self):
+    def compatibility(self) -> BatchCompatibility | None:
         """Expose the current native compatibility for compatible host integrations."""
         return self._context.compatibility
 
     @compatibility.setter
-    def compatibility(self, value):
+    def compatibility(self, value: BatchCompatibility | None) -> None:
         self._context.compatibility = value
 
     @property
-    def supported_operations(self):
+    def supported_operations(self) -> dict[str, OperatorCapability]:
         """Expose the current native supported_operations for compatible host integrations."""
         return self._context.supported_operations
 
     @supported_operations.setter
-    def supported_operations(self, value):
+    def supported_operations(self, value: dict[str, OperatorCapability]) -> None:
         self._context.supported_operations = value
 
     @property
-    def prepared(self):
+    def prepared(self) -> dict[int, PreparedRow]:
         """Expose the current native prepared for compatible host integrations."""
         return self._context.prepared
 
     @prepared.setter
-    def prepared(self, value):
+    def prepared(self, value: dict[int, PreparedRow]) -> None:
         self._context.prepared = value
 
     @property
-    def requests(self):
+    def requests(self) -> dict[int, RecipeAttempt]:
         """Expose the current native requests for compatible host integrations."""
         return self._context.requests
 
     @requests.setter
-    def requests(self, value):
+    def requests(self, value: dict[int, RecipeAttempt]) -> None:
         self._context.requests = value
 
     @property
-    def profile(self):
+    def profile(self) -> Any:
         """Expose the current native profile for compatible host integrations."""
         return self._context.profile
 
     @profile.setter
-    def profile(self, value):
+    def profile(self, value: Any) -> None:
         self._context.profile = value
 
     def recipe(self, ordinal: int) -> ExpansionRecipe:
