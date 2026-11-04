@@ -76,6 +76,9 @@ from embodichain.lab.task_program.semantics.profiles import EffectAssurance
 from embodichain.lab.sim.types import EnvAction
 
 if TYPE_CHECKING:
+    from embodichain.lab.task_program.integrations.invocation_policy import (
+        BoundInvocationPolicies,
+    )
     from embodichain.lab.task_program.integrations.expansion import (
         CombinedTaskProgramExpansionFactory,
         TaskProgramExpansionRecord,
@@ -534,6 +537,9 @@ class RuntimeCommandFrameEncoder:
 
     Args:
         qpos_provider: Full-qpos source aligned to a frame's explicit ``env_ids``.
+        hold_qpos_provider: Optional controller-target source used as the base
+            action for unaddressed joints. When omitted, the latest observed qpos
+            remains the compatibility fallback.
         transports: Optional additional transport encoders.  The built-in
             joint-position encoder precedes them when enabled.
         include_joint_position: Whether to install the built-in joint-position
@@ -547,6 +553,7 @@ class RuntimeCommandFrameEncoder:
         self,
         qpos_provider: CurrentQposProvider,
         *,
+        hold_qpos_provider: Callable[[torch.Tensor], torch.Tensor] | None = None,
         transports: Iterable[RuntimeTransportActionEncoder] = (),
         include_joint_position: bool = True,
         joint_command_mode: JointCommandMode = "position",
@@ -555,11 +562,14 @@ class RuntimeCommandFrameEncoder:
             raise TypeError("qpos_provider must implement CurrentQposProvider.")
         if type(include_joint_position) is not bool:
             raise TypeError("include_joint_position must be a bool.")
+        if hold_qpos_provider is not None and not callable(hold_qpos_provider):
+            raise TypeError("hold_qpos_provider must be callable or None.")
         if joint_command_mode not in ("position", "position_velocity"):
             raise ValueError(
                 "joint_command_mode must be 'position' or 'position_velocity'."
             )
         self._qpos_provider = qpos_provider
+        self._hold_qpos_provider = hold_qpos_provider
         self._joint_command_mode = joint_command_mode
         self._transports: dict[str, RuntimeTransportActionEncoder] = {}
         # Sorted stable IDs, owned qpos targets and per-ID validity. Store rows
@@ -674,9 +684,12 @@ class RuntimeCommandFrameEncoder:
 
     def _base_qpos(self, env_ids: torch.Tensor) -> torch.Tensor:
         """Capture and validate one owned full-qpos hold action."""
-        qpos = self._qpos_provider.current_qpos(env_ids)
+        if self._hold_qpos_provider is None:
+            qpos = self._qpos_provider.current_qpos(env_ids)
+        else:
+            qpos = self._hold_qpos_provider(env_ids)
         if not isinstance(qpos, torch.Tensor):
-            raise TypeError("CurrentQposProvider.current_qpos() must return a tensor.")
+            raise TypeError("The full-qpos hold provider must return a tensor.")
         if qpos.dim() != 2 or qpos.shape[0] != env_ids.shape[0] or qpos.shape[1] == 0:
             raise ValueError(
                 "Current qpos must have shape (batch_size, robot_dof) with non-zero DOF."
@@ -1003,6 +1016,61 @@ class _SegmentLifecycle:
     post_policy_success: torch.Tensor | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _RuntimeProgress:
+    """Lightweight lifecycle view used between immutable audit boundaries."""
+
+    status: SemanticExecutionStatus
+    current_call_index: int | None
+    env_ids: torch.Tensor
+    wait_duration: float
+
+    @property
+    def terminal(self) -> bool:
+        """Whether the runtime has reached a terminal audit boundary."""
+        return self.status in {
+            SemanticExecutionStatus.COMPLETED,
+            SemanticExecutionStatus.FAILED,
+            SemanticExecutionStatus.CANCELLED,
+        }
+
+
+def _runtime_progress(
+    value: SemanticExecutionResult | ParallelSemanticExecutionResult | Any,
+) -> _RuntimeProgress:
+    """Read the small progress surface without traversing audit history."""
+    status = getattr(value, "status", None)
+    if not isinstance(status, SemanticExecutionStatus):
+        raise TypeError("Runtime progress status must be a SemanticExecutionStatus.")
+    current_call_index = getattr(value, "current_call_index", None)
+    if current_call_index is not None and (
+        type(current_call_index) is not int or current_call_index < 0
+    ):
+        raise ValueError("Runtime progress call index must be non-negative or None.")
+    env_ids = getattr(value, "env_ids", None)
+    if (
+        not isinstance(env_ids, torch.Tensor)
+        or env_ids.dtype != torch.long
+        or env_ids.dim() != 1
+        or env_ids.numel() == 0
+    ):
+        raise ValueError("Runtime progress env_ids must be non-empty int64 IDs.")
+    wait_duration = getattr(value, "wait_duration", None)
+    if (
+        not isinstance(wait_duration, (int, float))
+        or isinstance(wait_duration, bool)
+        or not math.isfinite(float(wait_duration))
+        or float(wait_duration) < 0.0
+    ):
+        raise ValueError("Runtime progress wait_duration must be non-negative.")
+    return _RuntimeProgress(
+        status=status,
+        current_call_index=current_call_index,
+        env_ids=env_ids.clone(),
+        wait_duration=float(wait_duration),
+    )
+
+
 def _validate_runtime_result(
     result: SemanticExecutionResult | ParallelSemanticExecutionResult,
 ) -> SemanticExecutionResult | ParallelSemanticExecutionResult:
@@ -1064,6 +1132,9 @@ class TaskProgramDemoBridge:
             required before any parallel branch can start.
         isolate_policy_sessions: Request fresh state from ports that provide
             ``new_task_program_session``; ports without it retain their behavior.
+        invocation_policies: Optional program-bound sequential preset selections.
+            Direct bridge hosts must first validate their scene-registry selection;
+            the standard environment adapter performs that ownership check.
 
     Parallel blocks retain their branch lanes and explicit barrier.
     They are lowered through :class:`ParallelSemanticExecutor`; they are never
@@ -1083,6 +1154,7 @@ class TaskProgramDemoBridge:
         parallel_safety_validator: ParallelCommandSafetyValidator | None = None,
         expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None,
         isolate_policy_sessions: bool = False,
+        invocation_policies: BoundInvocationPolicies | None = None,
     ) -> None:
         if not isinstance(program, CompiledTaskProgramPort):
             raise TypeError("program must implement CompiledTaskProgramPort.")
@@ -1128,6 +1200,25 @@ class TaskProgramDemoBridge:
                 raise TypeError(
                     "expansion_trace_provider must be a supported expansion factory or None."
                 )
+        if invocation_policies is not None:
+            from embodichain.lab.task_program.integrations.invocation_policy import (
+                BoundInvocationPolicies,
+            )
+
+            if type(invocation_policies) is not BoundInvocationPolicies:
+                raise TypeError(
+                    "invocation_policies must be exactly BoundInvocationPolicies."
+                )
+            if type(program) is not CompiledTaskProgram or not isinstance(
+                runtime, SemanticCallExecutor
+            ):
+                raise TypeError(
+                    "Invocation policies require the standard compiled program and semantic runtime."
+                )
+            invocation_policies.validate_manifest(
+                program, runtime.compiler.integration.manifest
+            )
+        self._invocation_policies = invocation_policies
         sessions: dict[int, object] = {}
 
         def episode_port(port: object | None) -> object | None:
@@ -1412,7 +1503,9 @@ class TaskProgramDemoBridge:
         action: Any,
         *,
         segment: Any,
-        result: SemanticExecutionResult | ParallelSemanticExecutionResult,
+        result: (
+            SemanticExecutionResult | ParallelSemanticExecutionResult | _RuntimeProgress
+        ),
         action_kind: str | None = None,
     ) -> ControllerAction:
         """Own one action and attach stable program/runtime provenance."""
@@ -1484,6 +1577,7 @@ class TaskProgramDemoBridge:
             )
         self._active_segment_id = segment_id
         result: SemanticExecutionResult | ParallelSemanticExecutionResult | None = None
+        progress: _RuntimeProgress | None = None
         segment_runtime: (
             SequentialSemanticCallExecutorPort | ParallelSemanticExecutor
         ) = self._runtime
@@ -1513,7 +1607,17 @@ class TaskProgramDemoBridge:
                         if analysis.kind != "sequential_stretch":
                             continue
                         workflow = segment_runtime.compiler.analyze(
-                            analysis.calls, workflow_id=analysis.analysis_id
+                            analysis.calls,
+                            workflow_id=analysis.analysis_id,
+                            **(
+                                {
+                                    "preset_ids": self._invocation_policies._presets_for_analysis(
+                                        analysis
+                                    )
+                                }
+                                if self._invocation_policies is not None
+                                else {}
+                            ),
                         )
                         offset = 0
                         for index in analysis.segment_indices:
@@ -1553,43 +1657,66 @@ class TaskProgramDemoBridge:
                         execution_prefix_length=execution_prefix_length,
                     )
                 )
+            progress = _runtime_progress(result)
+
+            def advance_runtime() -> None:
+                """Advance while avoiding a full history snapshot when supported."""
+                nonlocal result, progress
+                lightweight_advance = (
+                    None if is_parallel else getattr(segment_runtime, "advance", None)
+                )
+                if callable(lightweight_advance):
+                    status = lightweight_advance()
+                    if not isinstance(status, SemanticExecutionStatus):
+                        raise TypeError(
+                            "Runtime advance() must return SemanticExecutionStatus."
+                        )
+                    progress = _runtime_progress(segment_runtime)
+                    if progress.terminal:
+                        result = _validate_runtime_result(segment_runtime.result)
+                        progress = _runtime_progress(result)
+                    return
+                result = _validate_runtime_result(segment_runtime.step())
+                progress = _runtime_progress(result)
 
             while True:
+                assert progress is not None
                 emitted = False
                 while self._sink.pending_count:
                     action = self._decorate_action(
                         self._sink.pop(),
                         segment=segment,
-                        result=result,
+                        result=progress,
                     )
                     yield from self._yield_and_advance(action, lifecycle)
                     emitted = True
 
-                if emitted and not result.terminal:
+                if emitted and not progress.terminal:
                     # The result's wait duration was measured before the action
                     # just consumed by Gym.  Refresh it against the advanced
                     # environment clock before deciding whether another hold is due.
-                    result = _validate_runtime_result(segment_runtime.step())
+                    advance_runtime()
                     continue
 
-                if result.terminal:
+                if progress.terminal:
                     break
 
-                if result.wait_duration > 0.0:
+                if progress.wait_duration > 0.0:
                     self._clock.steps_for_duration(
-                        result.wait_duration,
+                        progress.wait_duration,
                         field_name="SemanticExecutionResult.wait_duration",
                     )
                     hold = self._decorate_action(
-                        self._sink.wait_hold(result.env_ids),
+                        self._sink.wait_hold(progress.env_ids),
                         segment=segment,
-                        result=result,
+                        result=progress,
                         action_kind="runtime_wait_hold",
                     )
                     yield from self._yield_and_advance(hold, lifecycle)
 
-                result = _validate_runtime_result(segment_runtime.step())
+                advance_runtime()
 
+            assert result is not None
             self._record_runtime_result(lifecycle, result)
             self._retain_eligible_rows(result.success_mask)
             if is_parallel:

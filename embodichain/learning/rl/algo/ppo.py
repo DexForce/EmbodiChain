@@ -91,8 +91,10 @@ class PPO(BaseAlgorithm[TensorDict]):
 
         if not self.cfg.normalize_advantage_per_mini_batch:
             advantages = flat_rollout["advantage"]
+            # Preserve the sample standard deviation for larger batches while
+            # using a finite zero variance for a singleton.
             flat_rollout["advantage"] = (advantages - advantages.mean()) / (
-                advantages.std() + 1e-8
+                advantages.std(unbiased=advantages.numel() > 1) + 1e-8
             )
 
         total_actor_loss = 0.0
@@ -110,7 +112,8 @@ class PPO(BaseAlgorithm[TensorDict]):
                 batch_advantages = batch["advantage"]
                 if self.cfg.normalize_advantage_per_mini_batch:
                     batch_advantages = (batch_advantages - batch_advantages.mean()) / (
-                        batch_advantages.std() + 1e-8
+                        batch_advantages.std(unbiased=batch_advantages.numel() > 1)
+                        + 1e-8
                     )
                 batch_advantages = batch_advantages.detach()
 

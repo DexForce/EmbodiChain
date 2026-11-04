@@ -89,6 +89,10 @@ device per local rank, wraps the policy in
 keeps logging, evaluation, and checkpoint ownership on rank zero.
 Because action evaluation calls the underlying policy, algorithms explicitly
 average gradients before clipping and stepping; adaptive PPO uses global KL.
+GRPO removes post-terminal transitions before shuffling when
+`truncate_at_first_done` is enabled. Distributed GRPO weights losses and metrics
+by valid transition counts and keeps all ranks in the same optimizer steps;
+a rank with an empty local tail still joins gradient reduction for other ranks.
 All ranks participate in checkpoint operations and error synchronization.
 Resume requires the same world size and restores each rank's RNG and local
 normalization statistics alongside common policy/optimizer state.

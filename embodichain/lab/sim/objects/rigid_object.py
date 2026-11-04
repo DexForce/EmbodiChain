@@ -92,11 +92,13 @@ __all__ = ["CollisionShapeDesc", "RigidBodyData", "RigidObject", "RigidObjectCfg
 
 @dataclass
 class CollisionShapeDesc:
-    """Planner-independent snapshot of one DexSim physical collision shape.
+    """Planner-independent description of one owner-local collision shape.
 
-    Geometry values are copied from DexSim's runtime collision descriptor and
-    therefore already include its geometry scale. Consumers must not apply
-    :attr:`RigidObjectCfg.body_scale` again.
+    ``RigidObject`` snapshots copy values from DexSim's runtime collision
+    descriptor, including geometry scale. Explicit planning providers may also
+    construct input envelopes; their provenance belongs to that provider and
+    must not be confused with native cooked geometry. Consumers must not apply
+    :attr:`RigidObjectCfg.body_scale` again to either already-scaled description.
 
     Attributes:
         name: Stable shape name within the owning rigid object.

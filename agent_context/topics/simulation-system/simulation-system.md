@@ -90,6 +90,11 @@ not advance time, and object/environment reset does not rewind it. A fresh
 manager starts at zero. Episode-relative Task Program clocks can have an offset;
 physical evidence must validate that mapping instead of mixing timestamp domains.
 
+`physics_step_index` counts completed manager substeps before each
+`after_substep` callback, including runs without rendering. Reads, selected
+resets and topology rebuilds leave it unchanged. Consumers that cache
+topology-dependent state must also validate their binding, not only this count.
+
 ## Quaternion and pose convention
 
 EmbodiChain domain-facing quaternions are `(x, y, z, w)` (`xyzw`); public 7D
