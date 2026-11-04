@@ -32,15 +32,18 @@ from embodichain.gen_sim.task_spec.evidence import (
     evaluate_supported_placement_evidence,
 )
 
-__all__ = ["project_placement_evidence_binding"]
+__all__ = [
+    "project_placement_evidence_binding",
+    "project_configured_placement_evidence_binding",
+]
 
 
-def project_placement_evidence_binding(
+def _project_placement_evidence_binding(
     spec: TaskSpec | Mapping[str, Any],
     graph: Mapping[str, Any],
     validation: Mapping[str, Any],
     program: Mapping[str, Any],
-    constraints: Mapping[str, Any],
+    condition: Mapping[str, Any],
     occurrences: Mapping[str, Mapping[str, Any]],
     *,
     predicate_id: str,
@@ -60,7 +63,7 @@ def project_placement_evidence_binding(
         graph: Frozen graph whose role/group selection was validated.
         validation: Matching graph-validation content identities and coverage.
         program: Exact serialized program snapshot, without removing validators.
-        constraints: Frozen source constraint declaration.
+        condition: Plain resolved owner condition declaration.
         occurrences: Plain compiled descriptors keyed by graph node ID. Each
             contains ``segment_name`` and ``source_path``. The selected release
             additionally contains its exact ``invocation_id``, resolved
@@ -86,15 +89,14 @@ def project_placement_evidence_binding(
         KeyError: A required compiled occurrence or declaration is absent.
     """
     normalized = TaskSpec.from_dict(spec)
-    graph, validation, program, constraints, occurrences = (
+    graph, validation, program, condition, occurrences = (
         json_snapshot(value)
-        for value in (graph, validation, program, constraints, occurrences)
+        for value in (graph, validation, program, condition, occurrences)
     )
     for key, value in (
         ("task_spec_digest", normalized.to_dict()),
         ("graph_digest", graph),
         ("program_digest", program),
-        ("constraints_digest", constraints),
     ):
         if validation.get(key) != canonical_hash(value):
             raise ValueError(f"Frozen evidence projection has a different {key}.")
@@ -203,7 +205,6 @@ def project_placement_evidence_binding(
         != nodes[release_node_id]["call"]["resources"]["primary"]
     ):
         raise ValueError("Resolved release resource differs from the declared call.")
-    condition = constraints["presets"][stability_preset]
     if not any(
         policy.get("kind") == "wait_stable"
         and policy.get("preset") == stability_preset
@@ -253,3 +254,133 @@ def project_placement_evidence_binding(
     # that static selection without collecting or evaluating physical samples.
     evaluate_supported_placement_evidence(normalized, result, {}, program=program)
     return result
+
+
+def project_configured_placement_evidence_binding(
+    spec: TaskSpec | Mapping[str, Any],
+    graph: Mapping[str, Any],
+    validation: Mapping[str, Any],
+    program: Mapping[str, Any],
+    occurrences: Mapping[str, Mapping[str, Any]],
+    *,
+    condition: Mapping[str, Any],
+    predicate_id: str,
+    release_node_id: str,
+    boundary_node_id: str,
+    evidence_scope: str,
+    stability_preset: str,
+    observation_kind: str,
+    evidence_format: str = "raw_snapshot",
+    episode_ids: Sequence[int] | None = None,
+    num_envs: int = 1,
+) -> SupportedPlacementEvidenceBinding:
+    """Project configured owner declarations without a second constraint file.
+
+    Args:
+        spec: Frozen normative TaskSpec.
+        graph: Validated semantic graph and role lineage.
+        validation: Matching program/spec/graph digests and complete coverage.
+        program: Exact serialized program, retaining policies and validators.
+        occurrences: Plain compiled invocation/segment descriptors keyed by node.
+        condition: Detached public declaration from the configured owner's named
+            settle preset. The full condition participates in the evidence binding
+            hash; the configured deployment separately identifies all owner
+            declarations. No old constraints payload or digest is required.
+        predicate_id: Exact goal or milestone predicate identity.
+        release_node_id: Compiled release selection in the declared group.
+        boundary_node_id: Explicit final or recorded boundary selection.
+        evidence_scope: Explicit supported physical proof contract.
+        stability_preset: Exact configured name referenced by the support policy.
+        observation_kind: Final or recorded observation, matching the predicate.
+        evidence_format: Raw snapshot or explicit historical record format.
+        episode_ids: Initialized row identities, required for raw evaluation.
+        num_envs: Ordered native environment count.
+
+    Returns:
+        Owned normative declaration with unchanged condition values and exact
+        invocation/occurrence identities. No simulator is created or sampled.
+    """
+    return _project_placement_evidence_binding(
+        spec,
+        graph,
+        validation,
+        program,
+        condition,
+        occurrences,
+        predicate_id=predicate_id,
+        release_node_id=release_node_id,
+        boundary_node_id=boundary_node_id,
+        evidence_scope=evidence_scope,
+        stability_preset=stability_preset,
+        observation_kind=observation_kind,
+        evidence_format=evidence_format,
+        episode_ids=episode_ids,
+        num_envs=num_envs,
+    )
+
+
+def project_placement_evidence_binding(
+    spec: TaskSpec | Mapping[str, Any],
+    graph: Mapping[str, Any],
+    validation: Mapping[str, Any],
+    program: Mapping[str, Any],
+    constraints: Mapping[str, Any],
+    occurrences: Mapping[str, Mapping[str, Any]],
+    *,
+    predicate_id: str,
+    release_node_id: str,
+    boundary_node_id: str,
+    evidence_scope: str,
+    stability_preset: str,
+    observation_kind: str,
+    evidence_format: str = "raw_snapshot",
+    episode_ids: Sequence[int] | None = None,
+    num_envs: int = 1,
+) -> SupportedPlacementEvidenceBinding:
+    """Project a frozen B0 declaration for source-comparison re-evaluation.
+
+    Args:
+        spec: Frozen normative TaskSpec.
+        graph: Frozen validated semantic graph.
+        validation: Matching source program/spec/graph/constraints digests.
+        program: Complete serialized source program.
+        constraints: Frozen B0 source declaration whose original identity is
+            verified. New bundles use configured owner declarations through
+            :func:`project_configured_placement_evidence_binding` instead.
+        occurrences: Plain compiled invocation and segment descriptors.
+        predicate_id: Exact goal or milestone predicate.
+        release_node_id: Explicit release occurrence in the declared group.
+        boundary_node_id: Explicit observation boundary.
+        evidence_scope: Explicit physical qualification contract.
+        stability_preset: Exact source preset referenced by its policy.
+        observation_kind: Final or recorded observation.
+        evidence_format: Explicit raw or historical snapshot format.
+        episode_ids: Optional static binding, required for raw evaluation.
+        num_envs: Ordered native environment count.
+
+    Returns:
+        The same normalized evidence binding as the configured-owner entry point.
+        This source-comparison adapter does not read or emit bundle files.
+    """
+    source = json_snapshot(constraints)
+    if validation.get("constraints_digest") != canonical_hash(source):
+        raise ValueError(
+            "Frozen evidence projection has a different constraints_digest."
+        )
+    return project_configured_placement_evidence_binding(
+        spec,
+        graph,
+        validation,
+        program,
+        occurrences,
+        condition=source["presets"][stability_preset],
+        predicate_id=predicate_id,
+        release_node_id=release_node_id,
+        boundary_node_id=boundary_node_id,
+        evidence_scope=evidence_scope,
+        stability_preset=stability_preset,
+        observation_kind=observation_kind,
+        evidence_format=evidence_format,
+        episode_ids=episode_ids,
+        num_envs=num_envs,
+    )

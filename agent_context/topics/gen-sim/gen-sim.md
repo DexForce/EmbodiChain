@@ -175,3 +175,10 @@ environment files.
 
 Select provider-backed or simulator conversion tests only when that runtime
 boundary changes; source/unit checks do not establish remote service quality.
+
+Placement declaration projection for new bundles uses
+`project_configured_placement_evidence_binding` with the public configured owner's
+resolved condition and compiled occurrence descriptors. The final builder must
+not load or emit `constraints.json`. The original `project_placement_evidence_binding`
+only validates the frozen B0 constraints payload for source-comparison fixtures;
+it delegates the semantic projection and is not a second runtime policy owner.
