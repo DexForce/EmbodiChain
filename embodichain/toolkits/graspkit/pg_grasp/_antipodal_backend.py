@@ -92,6 +92,7 @@ class _AntipodalMeshBackend:
         use_largest_connected_component: bool,
         filter_ground_collision: bool,
         approach_alignment_angle: float | None = None,
+        check_collision: bool = True,
     ) -> None:
         """Initialize the private backend for one target-local mesh.
 
@@ -104,6 +105,8 @@ class _AntipodalMeshBackend:
             max_deviation_angle: Maximum approach-axis deviation in radians.
             approach_direction_samples: Number of approach variants per pair.
             max_candidates: Maximum number of ranked candidates to retain.
+            check_collision: Construct and use the fixed-hand checker; false
+                serves explicit unqualified proposal queries only.
             interactive_annotation: Whether to select a region through Viser.
             viser_port: Port for interactive annotation.
             use_largest_connected_component: Whether to retain only the largest
@@ -121,12 +124,14 @@ class _AntipodalMeshBackend:
             process=False,
             force="mesh",
         )
-        self._collision_checker = GripperCollisionChecker(
-            object_mesh_verts=vertices,
-            object_mesh_faces=triangles,
-            cfg=collision_cfg,
-            collision_geometry=collision_geometry,
-        )
+        self._collision_checker = None
+        if check_collision:
+            self._collision_checker = GripperCollisionChecker(
+                object_mesh_verts=vertices,
+                object_mesh_faces=triangles,
+                cfg=collision_cfg,
+                collision_geometry=collision_geometry,
+            )
         self._sampler_cfg = sampler_cfg
         self._center_mode = sampler_cfg.center_mode
         self._max_deviation_angle = max_deviation_angle
@@ -846,22 +851,28 @@ class _AntipodalMeshBackend:
         valid_centers = valid_centers[nms_indices]
         valid_pair_ids = valid_pair_ids[nms_indices]
 
-        is_colliding, max_penetration = self._collision_checker.query(
-            object_pose,
-            valid_grasp_poses,
-            is_filter_ground_collision=self._filter_ground_collision,
-            is_visual=visualize_collision,
-            collision_threshold=0.0,
-        )
-        if is_colliding.logical_not().sum() == 0:
-            logger.log_warning("No valid antipodal pairs after collision filtering.")
-            return empty()
-
+        if self._collision_checker is not None:
+            is_colliding, max_penetration = self._collision_checker.query(
+                object_pose,
+                valid_grasp_poses,
+                is_filter_ground_collision=self._filter_ground_collision,
+                is_visual=visualize_collision,
+                collision_threshold=0.0,
+            )
+            if is_colliding.logical_not().sum() == 0:
+                logger.log_warning(
+                    "No valid antipodal pairs after collision filtering."
+                )
+                return empty()
+            valid_grasp_poses = valid_grasp_poses[~is_colliding]
+            valid_open_lengths = valid_open_lengths[~is_colliding]
+            valid_centers = valid_centers[~is_colliding]
+            valid_pair_ids = valid_pair_ids[~is_colliding]
         return _GraspGeometry(
-            valid_grasp_poses[~is_colliding],
-            valid_open_lengths[~is_colliding],
-            valid_centers[~is_colliding],
-            valid_pair_ids[~is_colliding],
+            valid_grasp_poses,
+            valid_open_lengths,
+            valid_centers,
+            valid_pair_ids,
             directions,
         )
 

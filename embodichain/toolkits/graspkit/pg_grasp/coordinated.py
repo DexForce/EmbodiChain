@@ -27,7 +27,11 @@ import torch
 
 from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.utils import configclass, logger
-from .pose_generator import AntipodalGraspPoseGenerator
+from .pose_generator import (
+    AntipodalGraspPoseGenerator,
+    _mesh_geometry_key,
+    _validate_mesh_geometry,
+)
 from .contact_fit import SampledHandGeometry, HandContactChecker, TriangleSurfaceQuery
 
 __all__ = [
@@ -206,66 +210,45 @@ def grasp_clearance_costs(
         return costs
 
 
-class _ProposalQuery:
-    """Defer proposal qualification to the paired-hand contact checker."""
+class _HandSampler:
+    """Compose explicit proposals with one hand's contact refinement."""
 
-    def query(
-        self,
-        obj_pose: torch.Tensor,
-        poses: torch.Tensor,
-        **kwargs: Any,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        return torch.zeros(
-            len(poses), dtype=torch.bool, device=poses.device
-        ), poses.new_zeros(len(poses))
-
-
-class _HandSampler(AntipodalGraspPoseGenerator):
     def __init__(
         self,
         delegate: AntipodalGraspPoseGenerator,
         geometry: SampledHandGeometry,
         role: str,
         cfg: CoordinatedGraspCfg,
+        surface_queries: dict[tuple[object, ...], TriangleSurfaceQuery],
     ) -> None:
-        super().__init__(
-            delegate.gripper_model,
-            algorithm_cfg=delegate.algorithm_cfg,
-            collision_cfg=delegate.collision_cfg,
-            annotation_cfg=delegate.annotation_cfg,
-            collision_geometry=delegate.collision_geometry,
-        )
+        self._delegate = delegate
         self._geometry = geometry
         self._cfg = cfg
         self._role = role
-        self._validators: dict[tuple, HandContactChecker] = {}
-
-    def _backend(
-        self, mesh_vertices: torch.Tensor, mesh_triangles: torch.Tensor
-    ) -> Any:
-        # Confine the private GraspKit adapter to this module and a private cache.
-        backend = super()._backend(mesh_vertices, mesh_triangles)
-        key = self._geometry_key(mesh_vertices, mesh_triangles)
-        if key not in self._validators:
-            self._validators[key] = HandContactChecker(
-                self._geometry,
-                TriangleSurfaceQuery(
-                    mesh_vertices,
-                    mesh_triangles,
-                    normal_probe_distance=self._cfg.normal_probe_distance,
-                ),
-                contact_tolerance=self._cfg.contact_tolerance,
-                minimum_normal_cosine=self._cfg.minimum_normal_cosine,
-            )
-            backend._collision_checker = _ProposalQuery()
-        return backend
+        self._surface_queries = surface_queries
+        self._validators: dict[tuple[object, ...], HandContactChecker] = {}
 
     def get_dual_arm_valid_grasp_poses(
         self, *, cargo_bounds: torch.Tensor | None = None, **kwargs: Any
     ) -> list[dict[str, dict[str, object]] | None]:
-        proposals = super().get_dual_arm_valid_grasp_poses(**kwargs)
-        key = self._geometry_key(kwargs["mesh_vertices"], kwargs["mesh_triangles"])
+        vertices, triangles = kwargs["mesh_vertices"], kwargs["mesh_triangles"]
+        key = _mesh_geometry_key(vertices, triangles)
+        if key not in self._surface_queries:
+            _validate_mesh_geometry(vertices, triangles)
+            self._surface_queries[key] = TriangleSurfaceQuery(
+                vertices,
+                triangles,
+                normal_probe_distance=self._cfg.normal_probe_distance,
+            )
+        if key not in self._validators:
+            self._validators[key] = HandContactChecker(
+                self._geometry,
+                self._surface_queries[key],
+                contact_tolerance=self._cfg.contact_tolerance,
+                minimum_normal_cosine=self._cfg.minimum_normal_cosine,
+            )
         checker = self._validators[key]
+        proposals = self._delegate.get_dual_arm_grasp_proposals(**kwargs)
         output = []
         for row, proposal in enumerate(proposals):
             if proposal is None:
@@ -308,16 +291,9 @@ class _HandSampler(AntipodalGraspPoseGenerator):
                     trial[:, :3, 3] -= (
                         trial[:, :3, 2] * (fraction * insertion[subset])[:, None]
                     )
-                    fitted, gaps = checker.fit_contacts(
+                    fitted, gaps, kept = checker.refine(
                         kwargs["obj_poses"][row], trial, widths[selected]
                     )
-                    rejected, _ = checker.query(
-                        kwargs["obj_poses"][row],
-                        fitted,
-                        gaps,
-                        is_filter_ground_collision=self.collision_cfg.filter_ground_collision,
-                    )
-                    kept = ~rejected
                     if kept.any():
                         accepted_poses.append(fitted[kept])
                         accepted_widths.append(gaps[kept])
@@ -349,17 +325,12 @@ class _HandSampler(AntipodalGraspPoseGenerator):
             output.append(result)
         return output
 
-    def get_valid_grasp_poses(self, **kwargs: Any) -> Any:
-        raise RuntimeError("The paired proposal sampler cannot serve single-arm calls.")
-
-    get_best_grasp_poses = get_valid_grasp_poses
-    get_grasp_candidates = get_valid_grasp_poses
-
 
 class CoordinatedGraspSampler:
     """Fit and qualify two hand populations from data-only geometry inputs.
 
-    Each hand retains its own mesh-query cache. The right proposal stream
+    Each object mesh has one surface query shared by both hand refiners.
+    Each hand retains its own proposal and refinement caches. The right proposal stream
     starts from the left stream's initial Torch RNG state, and the process RNG
     advances exactly as for the left query alone. No robot or scene is read.
     """
@@ -397,8 +368,9 @@ class CoordinatedGraspSampler:
             for value in (left_geometry, right_geometry)
         ):
             raise TypeError("Paired contact sampling requires sampled hand geometry.")
-        self._left = _HandSampler(left, left_geometry, "left", owned)
-        self._right = _HandSampler(right, right_geometry, "right", owned)
+        surfaces: dict[tuple[object, ...], TriangleSurfaceQuery] = {}
+        self._left = _HandSampler(left, left_geometry, "left", owned, surfaces)
+        self._right = _HandSampler(right, right_geometry, "right", owned, surfaces)
 
     def get_dual_arm_valid_grasp_poses(
         self,

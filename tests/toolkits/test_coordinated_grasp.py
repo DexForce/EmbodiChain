@@ -32,7 +32,10 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     ParallelJawGraspCollisionCfg,
 )
 from embodichain.toolkits.graspkit.pg_grasp import coordinated
-from embodichain.toolkits.graspkit.pg_grasp.contact_fit import SampledHandGeometry
+from embodichain.toolkits.graspkit.pg_grasp.contact_fit import (
+    SampledHandGeometry,
+    HandContactChecker,
+)
 
 
 def _cfg() -> coordinated.CoordinatedGraspCfg:
@@ -109,7 +112,7 @@ def _ports(monkeypatch, *, reject_all=False) -> list[dict]:
                 }
             )
 
-    class Checker:
+    class Checker(HandContactChecker):
         def __init__(
             self, geometry, target, *, contact_tolerance, minimum_normal_cosine
         ):
@@ -179,8 +182,6 @@ def _ports(monkeypatch, *, reject_all=False) -> list[dict]:
                 poses = torch.eye(4).repeat(70, 1, 1)
                 poses[:, 0, 3] = object_pose[0, 3] + sign * ids * 0.01
                 poses[:, 2, 3] = 0.2
-                rejected, _ = self._collision_checker.query(object_pose, poses)
-                assert not rejected.any()
                 widths, costs = 0.04 + ids * 0.00001, ids.float()
                 costs[2] = torch.inf
                 costs[33] = torch.inf
@@ -192,7 +193,10 @@ def _ports(monkeypatch, *, reject_all=False) -> list[dict]:
                 }
             return result
 
-    def backend(generator, *args):
+    def backend(generator, *args, proposals_only=False):
+        assert (
+            proposals_only
+        ), "paired refinement must explicitly request unqualified proposals"
         return backends.setdefault(
             id(generator), Backend(generator.gripper_model.model_id)
         )
@@ -252,7 +256,16 @@ def test_paired_population_query_trace_and_rng_match_pinned_source(
             **_query(case["rows"]), cargo_bounds=bounds
         )
         next_random = torch.rand(4)
-    assert trace == case["trace"]
+    # Object-query construction is shared now. Keep every proposal, fit and
+    # qualification event exactly equal to the frozen algorithm trace.
+    assert [event for event in trace if event["op"] != "surface"] == [
+        event for event in case["trace"] if event["op"] != "surface"
+    ]
+    surfaces = [event for event in trace if event["op"] == "surface"]
+    assert len(surfaces) == 1
+    assert surfaces[0] == next(
+        event for event in case["trace"] if event["op"] == "surface"
+    )
     _assert_rows(actual, case["output"])
     torch.testing.assert_close(
         next_random, torch.tensor(case["next_random"]), rtol=0, atol=0
@@ -335,3 +348,17 @@ def test_inferred_ground_policy_requires_an_explicit_supported_configuration():
         coordinated.CoordinatedGraspSampler(
             left, _delegate("right"), _geometry("left"), _geometry("right"), cfg=_cfg()
         )
+
+
+def test_shared_target_query_is_rebuilt_when_mesh_changes(monkeypatch):
+    trace = _ports(monkeypatch)
+    sampler = _sampler()
+    query = _query()
+    sampler.get_dual_arm_valid_grasp_poses(**query)
+    sampler.get_dual_arm_valid_grasp_poses(**query)
+    assert sum(event["op"] == "surface" for event in trace) == 1
+    assert sum(event["op"] == "checker" for event in trace) == 2
+    query["mesh_vertices"].add_(0.001)
+    sampler.get_dual_arm_valid_grasp_poses(**query)
+    assert sum(event["op"] == "surface" for event in trace) == 2
+    assert sum(event["op"] == "checker" for event in trace) == 4

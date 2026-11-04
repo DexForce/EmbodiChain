@@ -183,7 +183,12 @@ a Task Engine implementation. The original mesh-region path remains the default.
 sampled closing geometry and contact fitting with explicit thresholds; robot/FK
 sampling and physical contact evidence remain Lab responsibilities.
 `SampledHandGeometry.at_width()` interpolates the supplied hand samples.
-`pg_grasp.coordinated` owns bounded paired sampling with explicit contact settings
+The public `get_dual_arm_grasp_proposals()` path retains candidate generation
+and ranking while leaving geometric qualification to the caller; normal
+validated queries retain their existing checker. `pg_grasp.coordinated` composes
+these proposals with `HandContactChecker.refine()` and shares one target-surface
+query across both hands for the same mesh identity/version. It owns bounded
+paired sampling with explicit contact settings
 and optional observed world bounds; clearance preference changes costs after
 population selection. `pg_grasp.urdf_surfaces` samples explicitly selected
 collision links without robot state. See

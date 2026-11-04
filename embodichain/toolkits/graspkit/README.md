@@ -68,6 +68,18 @@ collision, swept paths or physical grasp success.
 These are contact-pair eligibility bounds. The actual URDF/open-state geometry
 owns collision checking.
 
+## Explicit contact refinement
+
+The ordinary generator continues to check its fixed pre-grasp collision geometry.
+`get_dual_arm_grasp_proposals()` is an explicit alternative for callers that own
+a later qualification stage: it returns angle/NMS/ranking-qualified proposals,
+without target/ground collision or closing-contact qualification.
+`CoordinatedGraspSampler` composes these proposals with
+`HandContactChecker.refine()`, preserving candidate order and population bounds.
+Its left/right refiners share one target-surface query per mesh identity/version,
+while retaining their own geometry and diagnostics. Model geometry sampling and
+runtime ownership remain with Lab.
+
 ## Versioned geometry sources
 
 The source archives are the official assets selected by

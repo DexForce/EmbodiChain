@@ -453,3 +453,69 @@ def test_box_side_region_projects_hint_onto_opposed_faces_without_oracle() -> No
         )
     with pytest.raises(ValueError, match="dimensions"):
         project_box_side_grasp(hint, np.array([0.10, -0.05, 0.04]), cfg)
+
+
+def test_explicit_proposals_skip_fixed_checker_and_keep_validated_queries_isolated(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        _antipodal_backend as implementation,
+    )
+
+    constructions = []
+
+    class RejectAll:
+        def __init__(self, **kwargs):
+            constructions.append(kwargs)
+
+        def query(self, obj_pose, poses, **kwargs):
+            return torch.ones(len(poses), dtype=torch.bool), torch.zeros(len(poses))
+
+    def annotate(backend):
+        # Two independent 60 mm antipodal pairs on opposite object sides.
+        backend._hit_point_pairs = torch.tensor(
+            [
+                [[0.0, -0.03, 0.0], [0.0, 0.03, 0.0]],
+                [[0.05, -0.03, 0.0], [0.05, 0.03, 0.0]],
+            ]
+        )
+        return backend._hit_point_pairs
+
+    monkeypatch.setattr(implementation, "GripperCollisionChecker", RejectAll)
+    monkeypatch.setattr(
+        _AntipodalMeshBackend,
+        "_get_cache_dir",
+        lambda *args: str(tmp_path / "unprepared.npy"),
+    )
+    monkeypatch.setattr(_AntipodalMeshBackend, "annotate", annotate)
+    generator = _generator()
+    vertices, triangles = _geometry()
+    query = dict(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+        obj_poses=torch.eye(4)[None],
+        left_to_right_arm_direction=torch.tensor([1.0, 0, 0]),
+        approach_direction=torch.tensor([0.0, 0, -1]),
+    )
+    with torch.random.fork_rng():
+        torch.manual_seed(741)
+        raw = generator.get_dual_arm_grasp_proposals(**query)[0]
+        rng = torch.random.get_rng_state().clone()
+        assert constructions == []
+        assert all(item["is_success"] for item in raw.values())
+        checked = generator.get_dual_arm_valid_grasp_poses(**query)[0]
+        assert len(constructions) == 1
+        assert all(not item["is_success"] for item in checked.values())
+        torch.manual_seed(741)
+        replay = generator.get_dual_arm_grasp_proposals(**query)[0]
+        assert len(constructions) == 1
+        assert torch.equal(torch.random.get_rng_state(), rng)
+    for role in ("left", "right"):
+        torch.testing.assert_close(
+            raw[role]["open_lengths"], torch.full_like(raw[role]["open_lengths"], 0.06)
+        )
+        for key in ("grasp_poses", "open_lengths", "total_cost"):
+            torch.testing.assert_close(
+                raw[role][key], replay[role][key], atol=0, rtol=0
+            )

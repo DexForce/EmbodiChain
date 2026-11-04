@@ -97,6 +97,12 @@ Contact-aperture bounds, grasp algorithm, collision policy and annotation/cache
 policy have separate owners. Internal candidates use the canonical contact
 frame; public pose outputs use the geometry's declared runtime TCP.
 
+``get_dual_arm_grasp_proposals()`` exposes unqualified paired proposals for an
+explicit downstream refinement stage. It retains angle eligibility, NMS,
+ranking, population budgets and runtime-TCP conversion, while constructing no
+fixed-hand collision checker. Ordinary validated queries retain their separate
+checked backend and existing behavior.
+
 .. autosummary::
    :nosignatures:
 
@@ -304,6 +310,12 @@ Paired grasp sampling
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.coordinated
+
+Paired refinement composes the public proposal API with
+``HandContactChecker.refine()``; it does not overwrite generator internals.
+One immutable target-surface query is shared by the two hand refiners for each
+mesh identity/version. Each hand retains independent candidate and diagnostic
+state. Mesh mutation creates a new query and new refiners.
 
 The data-only sampler combines two existing antipodal generators with explicit
 sampled hand geometry and contact settings. It preserves paired proposal RNG
