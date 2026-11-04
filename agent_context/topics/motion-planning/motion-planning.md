@@ -16,6 +16,7 @@
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
+| Contact-qualified paired grasp sampling and explicit URDF surfaces | `embodichain/toolkits/graspkit/pg_grasp/coordinated.py`, `urdf_surfaces.py` in that directory |
 | Bounded interaction pose refinement before expansion | `embodichain/lab/sim/motion/refinement.py`, with numeric fitting in `compute/trajectory/refinement.py`; [Real2Sim boundary](../data-pipeline/real2sim.md) |
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
@@ -41,6 +42,13 @@ capabilities or planner registration. Read [collision worlds](collision-worlds.m
 when changing obstacle identity, cache generation or dynamic scene binding.
 [IK solvers](../ik-solvers/ik-solvers.md) own candidate/frame contracts;
 [Atomic Skills](../atomic-actions/atomic-actions.md) own motion execution policy.
+
+Native convex queries reuse the shared isolated Newton collision pipeline.
+`lab/sim/scene/_collision_backends.py::_require_newton` checks availability before
+capture; no FCL extra or backend fallback is selected. Distance diagnostics are
+capped intervals under the query precision policy. A threshold inside an interval
+remains unavailable, never a fabricated contact or free path. CPU comparisons
+remain separate from GPU and physical-task qualification.
 
 ## Timing and batch boundary
 
@@ -178,7 +186,28 @@ hands provide their own geometry. Sampling/collision stays in the canonical
 contact frame, and public poses map once to the declared runtime TCP. Do not
 add a second hand-specific conversion. GraspKit owns collision-qualified end-region
 selection through `pg_grasp.regions`; callers select a policy without supplying
-a Task Engine implementation. The original mesh-region path remains the default. See the [GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
+a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
+sampled closing geometry and contact fitting with explicit thresholds; robot/FK
+sampling and physical contact evidence remain Lab responsibilities.
+`SampledHandGeometry.at_width()` interpolates the supplied hand samples.
+The public `get_dual_arm_grasp_proposals()` path retains candidate generation
+and ranking while leaving geometric qualification to the caller; normal
+validated queries retain their existing checker. `pg_grasp.coordinated` composes
+these proposals with `HandContactChecker.refine()` and shares one target-surface
+query across both hands for the same mesh identity/version. It owns bounded
+paired sampling with explicit contact settings
+and optional observed world bounds; clearance preference changes costs after
+population selection. A proposal `role` skips unused pose/NMS/ranking work while
+preserving both sides' original direction draws and the selected population.
+Raw/validated backends share read-only annotations, with separate collision state.
+Mesh mutation retires superseded versions; hosts call `clear_cache()` between
+unrelated asset cohorts to release distinct-mesh queries/backends while keeping
+sampled hand geometry. `pg_grasp.urdf_surfaces` samples explicitly selected
+collision links without robot state, sharing shape/origin decoding with fixed
+geometry while retaining each sampling policy's original point population. See
+[hand geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
+for deferred Robot capture and cache lifetime, and the
+[GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
 for geometry ownership and the finite collision-check scope.
 
 `variants.py` is the common candidate-generation path for joint-space,

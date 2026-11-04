@@ -898,7 +898,7 @@ class CuroboPlanner(BasePlanner):
 
     Args:
         cfg: Configuration for the cuRobo planner.
-        query_snapshot: Optional owned B=1 observation for a fresh static-world
+        query_snapshot: Optional owned environment-batched observation for a fresh static-world
             query. Its frame applies to world snapshots, goals and payload.
 
     Raises:
@@ -1638,8 +1638,10 @@ class CuroboPlanner(BasePlanner):
         if getattr(self, "_query_closed", False):
             raise RuntimeError("The observed cuRobo query lifetime is closed.")
         self._validate_query_cfg(self.cfg)
-        if batch_size != 1:
-            raise ValueError("Observed cuRobo queries support only B=1.")
+        if batch_size != snapshot.full_qpos.shape[0]:
+            raise ValueError("Observed query batch must match its snapshot.")
+        if batch_size > 1 and batch_size != self.robot.num_instances:
+            raise ValueError("Observed batch must match robot.num_instances.")
         selected = getattr(self, "_query_control_part", None)
         if selected is not None and selected != control_part:
             raise ValueError("A query snapshot belongs to one control part.")
@@ -1680,19 +1682,39 @@ class CuroboPlanner(BasePlanner):
         managers: list[Any] = []
         self._payload_managers[id(backend)] = managers
         try:
-            for model in _attachment_models(backend.planner):
+            models = _attachment_models(backend.planner)
+            for model in models:
                 managers.append(
                     AttachmentManager(
                         model,
                         device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
                     )
                 )
-            for manager in managers:
+            for model, manager in zip(models, managers, strict=True):
+                local_spheres = spheres
+                pose_offset = native_pose
+                if len(spheres) == 1:
+                    # cuRobo 0.8 squeezes a singleton point into shape (3,).
+                    # Supply link-local spheres to its no-transform update path;
+                    # keep the radius and the reserved link's capacity unchanged.
+                    model_state = self._bindings.JointState.from_position(
+                        state.position, joint_names=model.joint_names
+                    )
+                    fk = model.compute_kinematics(model_state)
+                    if fk.tool_poses is None:
+                        raise ValueError("Payload attachment requires tool poses.")
+                    tool_pose = fk.tool_poses.get_link_pose(model.tool_frames[0])
+                    offset = tool_pose.inverse().multiply(native_pose)
+                    centers = offset.transform_points(spheres[:, :3].contiguous())
+                    local_spheres = torch.cat(
+                        (centers.reshape(1, 3), spheres[:, 3:]), dim=-1
+                    )
+                    pose_offset = None
                 manager.update(
-                    spheres,
+                    local_spheres,
                     state,
                     link_name=_PAYLOAD_LINK,
-                    world_objects_pose_offset=native_pose,
+                    world_objects_pose_offset=pose_offset,
                 )
         except BaseException:
             error = self._detach_payload(backend)
@@ -2894,8 +2916,8 @@ class CuroboPlanner(BasePlanner):
         batch_size = world_pose.shape[0]
         snapshot = getattr(self, "_query_snapshot", None)
         if snapshot is not None:
-            if batch_size != 1:
-                raise ValueError("Observed cuRobo queries support only B=1.")
+            if batch_size != snapshot.full_qpos.shape[0]:
+                raise ValueError("Observed query batch must match its snapshot.")
             return snapshot.world_to_base.to(world_pose) @ world_pose
         if sim_base_pose_inv is None:
             sim_base_pose = self._get_sim_base_pose(backend, batch_size)
@@ -2940,8 +2962,8 @@ class CuroboPlanner(BasePlanner):
         """Return ``(B, 4, 4)`` world poses of a control part's solver base."""
         snapshot = getattr(self, "_query_snapshot", None)
         if snapshot is not None:
-            if batch_size != 1:
-                raise ValueError("Observed cuRobo queries support only B=1.")
+            if batch_size != snapshot.full_qpos.shape[0]:
+                raise ValueError("Observed query batch must match its snapshot.")
             # Derive the legacy intermediate frame from the explicit observation.
             # Final goal/payload projection uses world_to_base directly, and no
             # live robot pose is reread during this query.
