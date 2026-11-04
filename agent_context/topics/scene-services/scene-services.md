@@ -34,8 +34,12 @@ planner roles are metadata: `none` does not remove a selected physical input.
 Connected nonconvex inputs remain unavailable in this capture path. The separate
 `collision_sources.py` link-box adapter retains its conservative component AABB
 policy; it is not a native cooked-shape/contact oracle.
-`snapshot_collision_sources()` combines shape descriptors and explicitly supplied
-same-observation poses through `world_to_frame`. It preserves topology/shape order,
+`snapshot_collision_sources()` combines common shape descriptors and explicitly
+supplied same-observation poses through `world_to_frame`. Batched inputs require
+matching pose/transform batch axes and equal projected obstacle poses; otherwise
+the helper rejects them rather than selecting row zero. It returns B=1 providers
+for the declared shared geometry/world, not per-environment world providers.
+It preserves topology/shape order,
 applies no second scale, and supplies owned providers to existing planner APIs.
 See [collision worlds](../motion-planning/collision-worlds.md) for cuRobo query lifetimes.
 
