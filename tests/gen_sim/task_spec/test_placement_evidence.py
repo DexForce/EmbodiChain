@@ -1057,3 +1057,83 @@ def test_recorded_full_footprint_uses_recomputed_seeded_pose_without_borrowing_h
     )[0]
     assert result.status is EvaluationStatus.UNAVAILABLE
     assert "own policy snapshot" in result.reason
+
+
+@pytest.mark.parametrize("input_format", ["historical_record", "raw_snapshot"])
+@pytest.mark.parametrize("supported", [False, True])
+def test_final_legacy_support_survives_unexecuted_park_but_milestone_does_not(
+    input_format, supported
+):
+    from dataclasses import replace
+    from embodichain.gen_sim.task_spec import MilestoneSpec
+
+    original_spec, original_binding, evidence, program = _legacy_evidence()
+    milestone = replace(original_spec.goal[0], predicate_id="past_place")
+    spec = replace(
+        original_spec, milestones=(MilestoneSpec("placed_once", (milestone,)),)
+    )
+    binding = replace(
+        original_binding,
+        task_spec_digest=canonical_hash(spec.to_dict()),
+        evidence_format=input_format,
+        episode_ids=(0,) if input_format == "raw_snapshot" else None,
+        boundary_segment_id="place",
+        boundary_source_path=("program", "items", 0),
+        binding_hash="",
+    )
+    # The release effect completed, then Place's post-policy failed and Park
+    # never ran. B0 still evaluates current final support, independently of
+    # program success; a full-group milestone remains unestablished.
+    evidence["segments"] = evidence["segments"][:1]
+    evidence["segments"][0].update(active=[True], successes=[False])
+    evidence["record"]["accepted"] = [supported]
+    evidence["record"]["measurements"]["supported"] = [supported]
+    if input_format == "raw_snapshot":
+        native = evidence.pop("record")["measurements"]
+        for key in ("released", "reference_uid", "relation"):
+            native.pop(key)
+        evidence.update(
+            native_support=native,
+            episode_ids=[0],
+            support_acquisition=dict(
+                evidence_id="support.com_patch",
+                values=[supported],
+                valid=[True],
+                acquisition_errors=[None],
+                timestamp=0.2,
+                env_ids=[0],
+                observation_revision=3,
+                clock_domain="simulation_time",
+            ),
+        )
+    outcome = evaluate_supported_placement_evidence(
+        spec, binding, evidence, program=program
+    )[0]
+    assert outcome.status is (
+        EvaluationStatus.SATISFIED if supported else EvaluationStatus.FAILED
+    )
+    past = replace(
+        binding,
+        predicate_id="past_place",
+        observation_kind="recorded",
+        boundary_segment_id="park",
+        boundary_source_path=("program", "items", 1),
+        required_execution=tuple(
+            {"segment_id": name, "source_path": ["program", "items", index]}
+            for index, name in enumerate(("place", "park"))
+        ),
+        binding_hash="",
+    )
+    assert (
+        evaluate_supported_placement_evidence(spec, past, evidence, program=program)[
+            0
+        ].status
+        is EvaluationStatus.UNAVAILABLE
+    )
+    evidence["segments"][0]["metadata"]["runtime"]["calls"][0]["effects"] = []
+    assert (
+        evaluate_supported_placement_evidence(spec, binding, evidence, program=program)[
+            0
+        ].status
+        is EvaluationStatus.UNAVAILABLE
+    )
