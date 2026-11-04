@@ -79,11 +79,11 @@ class _NormalizationEnv:
         )
 
 
-def _policy(*, normalize: bool = False) -> ActorCritic:
+def _policy(*, normalize: bool = False, device: str = "cpu") -> ActorCritic:
     return ActorCritic(
         obs_dim=2,
         action_dim=1,
-        device=torch.device("cpu"),
+        device=torch.device(device),
         actor=nn.Linear(2, 1),
         critic=nn.Linear(3, 1),
         critic_obs_dim=3,
@@ -146,6 +146,48 @@ def test_ppo_updates_normalizers_after_using_the_rollout_distribution() -> None:
         torch.full((1, 3), 2.5),
     )
     assert all(torch.isfinite(torch.tensor(value)) for value in losses.values())
+
+
+@pytest.mark.parametrize(
+    ("num_envs", "normalize_per_minibatch", "device"),
+    [
+        (1, False, "cpu"),
+        (3, True, "cpu"),
+        pytest.param(3, True, "cuda", marks=pytest.mark.gpu),
+    ],
+)
+def test_ppo_normalization_handles_singleton_rollout_or_tail_batch(
+    num_envs: int, normalize_per_minibatch: bool, device: str
+) -> None:
+    env = _NormalizationEnv()
+    env.num_envs = num_envs
+    env.device = torch.device(device)
+    policy = _policy(device=device)
+    buffer = RolloutBuffer(
+        num_envs=num_envs,
+        rollout_len=1,
+        obs_dim=2,
+        action_dim=1,
+        device=env.device,
+        critic_obs_dim=3,
+    )
+    rollout = SyncCollector(env, policy, env.device).collect(
+        1, rollout=buffer.start_rollout()
+    )
+    algorithm = _algorithm(
+        policy,
+        device=device,
+        batch_size=2,
+        normalize_advantage_per_mini_batch=normalize_per_minibatch,
+    )
+
+    losses = algorithm.update(rollout)
+
+    assert all(torch.isfinite(torch.tensor(value)) for value in losses.values())
+    assert all(torch.isfinite(parameter).all() for parameter in policy.parameters())
+    # Both singleton rollouts and an uneven 2+1 partition consume every sample.
+    expected_steps = (num_envs + 1) // 2
+    assert int(algorithm.optimizer.state[policy.log_std]["step"]) == expected_steps
 
 
 def test_observation_groups_preserve_order_and_configure_policy() -> None:
