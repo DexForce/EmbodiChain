@@ -23,12 +23,17 @@ embodichain.lab.task_program.integrations
       SimulationTaskProgramAdapterFactory, ConfiguredHandOverPoseProvider,
       CuroboParallelCommandSafetyValidator, CuroboParallelSafetyValidatorFactory,
       SimulationSegmentPolicyPort, create_simulation_task_program_adapter,
+      InvocationPolicyBinding, BoundInvocationPolicies, task_program_fingerprint,
+
       ConfiguredTaskProgramDeployment, ConfiguredTaskProgramIntegration,
       load_configured_task_program_deployment
 
    .. autosummary::
 
       AntipodalGraspAffordanceBinding
+      InvocationPolicyBinding
+      BoundInvocationPolicies
+      task_program_fingerprint
       ConfiguredHandOverPoseProvider
       ConfiguredTaskProgramDeployment
       ConfiguredTaskProgramIntegration
@@ -253,6 +258,13 @@ Simulation bindings
 .. autoclass:: SimulationTaskProgramFactory
    :members:
 
+``capture_root_pose=True`` includes an owned arena-local robot root transform
+in each synchronized planning observation. The default leaves it unset and
+does not query root poses. ``hold_qpos_source="observed"`` preserves the default
+captured-position holds without another robot read. Explicit ``drive_target``
+mode reads controller targets for unaddressed joints; safe stops still use
+measured positions from their planning context.
+
 .. autoclass:: SimulationTaskProgramAdapterFactory
    :members:
 
@@ -348,3 +360,46 @@ type does not register a second deployment configuration source.
 .. autofunction:: validate_immutable_extension_declaration
 
 .. autodata:: VersionedKey
+
+Occurrence policy bindings
+--------------------------
+
+An ``InvocationPolicyBinding`` selects an existing named profile preset for one
+sequential execution occurrence, identified by the complete compiled-program
+fingerprint and ``program_id/segment_id:segment_call_index``. Pass a tuple of these
+declarations to ``TaskProgramEnvironmentAdapter.create_bridge`` through its
+``invocation_policy_bindings`` keyword. Normal calls use their existing policies
+when the tuple is empty.
+
+The adapter validates identities and selections before execution. The compiler
+links and analyzes selected presets before constructing the final Atomic
+invocation, so repeated calls and cached analyses retain distinct selections.
+Selected presets must retain the original effect assurance. A selected preset's
+existing runner settings own that occurrence; unselected calls continue to use
+the host's runner override. Re-grounding preserves the original occurrence and
+selection. Derived workflow-recovery calls keep independent IDs and ordinary
+preset selection.
+
+Bindings targeting parallel branches are explicitly rejected. Unbound parallel
+calls remain supported. The compiled-program fingerprint uses the same format as
+nominal motion sources; it includes the instruction and integration selection.
+These declarations do not add YAML fields, execute providers, or mutate an engine.
+``validate_manifest`` checks profile identity, runtime-preset selection and each
+selected call's policy contract. A scene manifest carries entity metadata rather
+than the host's scene-registry selection ID; the standard adapter validates that
+selection, and hosts constructing a bridge directly retain that responsibility.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.invocation_policy
+
+.. autosummary::
+
+   InvocationPolicyBinding
+   BoundInvocationPolicies
+   task_program_fingerprint
+
+.. autoclass:: InvocationPolicyBinding
+
+.. autoclass:: BoundInvocationPolicies
+   :members: validate_program, validate_manifest
+
+.. autofunction:: task_program_fingerprint

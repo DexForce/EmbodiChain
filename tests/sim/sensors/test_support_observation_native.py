@@ -28,7 +28,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.sensors.contact_sensor import ContactSensorCfg
+from embodichain.lab.sim.sensors.contact.sensor import ContactSensorCfg
 from embodichain.lab.sim.sensors.support_observation import (
     SupportObservationRegistry,
 )

@@ -45,6 +45,7 @@ __all__: list[str] = []
 _RUNTIME_SERVICE_FIELDS = frozenset(
     {
         "grasp_pose_generators",
+        "hand_geometries",
         "handover_pose_providers",
         "registered_semantic_lowerers",
         "control_part_evidence",
@@ -212,6 +213,22 @@ def _merge_runtime_services(
         generators[target_id] = generator
     if generators:
         result["grasp_pose_generators"] = generators
+
+    profile_hands = _owned_mapping(
+        skill_profile.get("hand_geometries", {}),
+        path="embodiment component.skill_profile.runtime_services.hand_geometries",
+    )
+    task_hands = _owned_mapping(
+        task.get("hand_geometries", {}),
+        path="integration.runtime_services.hand_geometries",
+    )
+    duplicates = sorted(set(profile_hands) & set(task_hands))
+    if duplicates:
+        raise ValueError(
+            f"Hand geometry targets must have exactly one owner; duplicates: {duplicates}."
+        )
+    if profile_hands or task_hands:
+        result["hand_geometries"] = {**profile_hands, **task_hands}
 
     for field_name in (
         "handover_pose_providers",
