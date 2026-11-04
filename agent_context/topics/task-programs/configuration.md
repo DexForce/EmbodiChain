@@ -165,6 +165,19 @@ catalog lookup. The catalog is owned by
 collision fields to use GraspKit defaults; task-specific tuning belongs in
 the allowlisted `grasp_pose_generator_overrides` mapping.
 
+`runtime_services.hand_geometries` declares explicit hand calibration by grasp
+endpoint target ID. Its `sampled_parallel_jaw` entries reference an existing
+endpoint command preset and declare motion/hand parts, the hand root, ordered
+pad links and sampling bounds. `_configured_hand_geometry.py` strictly decodes
+these values and creates owned `RobotHandGeometryCfg` data without reading a
+robot or capturing geometry. An embodiment and task cannot both own the same
+target, and this calibration has no partial override map. Omission preserves
+the original integration fingerprint. Live assembly passes the data through
+the existing Atomic planning services; current invocation commands remain
+authoritative when a skill samples closing motion. See the
+[Lab capture contract](../robot-system/robot-system.md#sampled-hand-geometry)
+for supported topology, geometry and cache lifetime.
+
 The reference embodiment `skill_profile.contract_id` and `profile_id` values
 are unversioned. Versioned Gym, task-integration, or scene-registry IDs are
 separate identity domains and do not imply a skill-profile version.

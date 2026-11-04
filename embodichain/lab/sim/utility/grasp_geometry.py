@@ -76,11 +76,28 @@ class RobotHandGeometryCfg:
     max_subdivisions: int = MISSING
     """Maximum subdivision depth for each selected collision mesh."""
 
+    def validate_values(self) -> None:
+        """Validate and normalize complete static capture settings without FK.
+
+        List-valued link names and commands become owned tuples. Robot topology,
+        collision shapes and the fixed-TCP boundary are checked at capture time.
+
+        Raises:
+            TypeError: Required configuration values remain unresolved.
+            ValueError: A name, command or sampling bound is invalid.
+        """
+        _validate_cfg_values(self)
+
 
 def _owned_cfg(cfg: RobotHandGeometryCfg) -> RobotHandGeometryCfg:
     if not isinstance(cfg, RobotHandGeometryCfg):
         raise TypeError("cfg must be RobotHandGeometryCfg.")
     result = deepcopy(cfg)
+    result.validate_values()
+    return result
+
+
+def _validate_cfg_values(result: RobotHandGeometryCfg) -> None:
     result.validate()
     for name in ("motion_part", "hand_part", "hand_root_link"):
         if type(getattr(result, name)) is not str or not getattr(result, name):
@@ -122,7 +139,6 @@ def _owned_cfg(cfg: RobotHandGeometryCfg) -> RobotHandGeometryCfg:
             or not (math.isfinite(value) and value > 0)
         ):
             raise ValueError(f"{name} must be finite and positive.")
-    return result
 
 
 def _capture(robot: Robot, cfg: RobotHandGeometryCfg) -> SampledHandGeometry:
