@@ -116,6 +116,11 @@ class AssemblyJointPositionAction(RelativeJointPositionAction):
     """
 
     def process_actions(self, actions: torch.Tensor) -> None:
+        """Apply the per-row warmup mask before measured-position delta scaling.
+
+        Args:
+            actions: Batched seven-joint policy requests; the input is unchanged.
+        """
         masked = actions.clone()
         masked[
             self._env._elapsed_steps < int(getattr(self._env, "grasp_warmup_steps", 10))
@@ -123,6 +128,7 @@ class AssemblyJointPositionAction(RelativeJointPositionAction):
         super().process_actions(masked)
 
     def apply_actions(self) -> None:
+        """Apply encoder feedforward, held grasp and the processed arm target."""
         state = self._env.assembly_state
         self._env.robot.set_qf(state.controller.torques(), name="arm")
         self._env.robot.set_qpos(

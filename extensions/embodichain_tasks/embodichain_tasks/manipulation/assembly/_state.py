@@ -511,5 +511,10 @@ class AssemblyState:
 
 
 def initialize_assembly(env: Any, env_ids: Any) -> None:
-    """Bind state after ordinary entities and sensors are prepared."""
+    """Bind state after ordinary entities and sensors are prepared.
+
+    Args:
+        env: Common environment owning the prepared scene and managers.
+        env_ids: Startup selection supplied by EventManager; state covers all rows.
+    """
     env.assembly_state = AssemblyState(env)

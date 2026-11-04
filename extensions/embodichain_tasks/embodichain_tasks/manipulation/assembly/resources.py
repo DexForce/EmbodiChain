@@ -32,6 +32,14 @@ def export_assembly_resources(
     Replay therefore uses this exact model preparation and needs neither
     mjfit nor the source-model cache. The bundle records its engineering
     fidelity and never upgrades the nominal model's qualification.
+
+    Args:
+        env: Common environment containing the initialized assembly state.
+        config: Owned, component-resolved Gym configuration to freeze.
+        config_dir: Destination run configuration directory.
+
+    Returns:
+        Configuration using relative references to the bundled resources.
     """
     state = env.assembly_state
     from copy import deepcopy
