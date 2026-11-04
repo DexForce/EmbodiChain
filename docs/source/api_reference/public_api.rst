@@ -1163,7 +1163,7 @@ SDK contract is unavailable.
 request CPU frames; ``source_device`` records where the original numerical
 observation was produced. The common frame has no invocation field.
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact_sampling
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
 
@@ -1202,7 +1202,7 @@ substep caps also bound empty histories.
 Frontend code owns actor/semantic label maps, serialized report schema IDs and
 any task-success evaluation.
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact_timeline
+.. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
 
