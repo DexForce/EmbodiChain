@@ -109,3 +109,22 @@ domains still have zero end-to-end success. Role mirroring fails **0/1** for
 both backends. Task-success gains therefore do not establish full motion
 validity or full Atomic benchmark acceptance. Qualification covers one soda-can
 asset, two seeds, one repetition, and this Franka/Robotiq assembly only.
+
+## Successful recorded replay
+
+[![Play the successful calibrated HandOver replay](media/franka_robotiq_handover_curobo.png)](media/franka_robotiq_handover_curobo.mp4)
+
+[Success video (MP4)](media/franka_robotiq_handover_curobo.mp4) ·
+[Recorded-replay measurements](media/franka_robotiq_handover_curobo.json).
+
+This additional nominal seed-11 demonstration uses the packaged calibrated
+component and cuRobo at source commit `1367655db`. The actual recorded physics
+pass was evaluated, with all five stages passing: grasped, transferred,
+handed_over, receiver_released and placed. End-to-end validity also passes.
+The clip is uncut and uses simulation time: 48.30 s, 966 frames, 960×720 at
+20 fps (simulated task duration 48.32 s). H.264/yuv420p, FastRT 8 spp with
+OptiX denoising. Only renderer/camera settings differ from the qualification;
+robot, task, motion limits and scoring use the packaged suite.
+This illustrative replay does not enter or change the 50-environment success
+rates above. The JSON records its source, individual stage measurements and
+video hash separately from the qualification evidence.

@@ -1,0 +1,181 @@
+{
+  "video": "franka_robotiq_handover_curobo.mp4",
+  "algorithm": "curobo",
+  "case_id": "atomic-skill:hand_over:soda_can_left_to_right:b1:s11",
+  "seed": 11,
+  "suite": "atomic_dual_franka_robotiq_hand_over",
+  "component": "embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140_handover.yaml",
+  "renderer": "fast-rt/optix 8spp",
+  "fps": 20,
+  "width": 960,
+  "height": 720,
+  "outcomes": [
+    {
+      "env_index": 0,
+      "planning_success": true,
+      "finite": true,
+      "ordered_waypoints_reached": true,
+      "motion_valid": true,
+      "completed_waypoint_ratio": 1.0,
+      "final_translation_err_mm": 0.00020540483196693286,
+      "final_rotation_err_deg": 1.6141778543011245e-05,
+      "waypoint_translation_err_mm_mean": 9.125318341895454,
+      "waypoint_translation_err_mm_p95": 9.330422836114469,
+      "waypoint_translation_err_mm_max": 9.330422836114469,
+      "waypoint_rotation_err_deg_mean": 0.6956539092247517,
+      "waypoint_rotation_err_deg_p95": 2.5178076621344467,
+      "waypoint_rotation_err_deg_max": 2.5178076621344467,
+      "joint_limit_violation": false,
+      "max_normalized_joint_violation": 0.0,
+      "joint_path_length_rad": 2.7762610912323,
+      "cartesian_path_length_m": 0.6288843750953674,
+      "path_efficiency": 0.8409081323549803,
+      "failure_code": null,
+      "planner_failure_code": null,
+      "execution_success": true,
+      "task_success": true,
+      "task_completion_time_s": 48.32,
+      "joint_tracking_rmse_rad": 0.0039665233343839645,
+      "object_lift_delta_m": -1.1920928955078125e-07,
+      "articulation_joint_initial": null,
+      "articulation_joint_final": null,
+      "articulation_joint_delta": null,
+      "articulation_joint_peak_signed_delta": null,
+      "articulation_joint_effect_end": null,
+      "object_rotation_peak_signed_rad": null,
+      "replan_count": 0,
+      "min_translation_err_mm": 0.00020540483196693286,
+      "min_rotation_err_deg": 7.388002904290805e-06,
+      "trajectory_moved": true,
+      "waypoint_min_translation_err_mm": [
+        4.6566128730773926e-05,
+        0.0002633980461169301,
+        0.00018337996374948794,
+        0.00020540483196693286
+      ],
+      "waypoint_min_rotation_err_deg": [
+        7.388002904290805e-06,
+        7.388002904290805e-06,
+        7.388002904290805e-06,
+        7.388002904290805e-06
+      ],
+      "waypoint_min_rotation_err_deg_at_position": [
+        7.388002904290805e-06,
+        8.004128084388927e-06,
+        9.322644971936839e-06,
+        1.6141778543011245e-05
+      ],
+      "waypoint_min_translation_err_mm_at_orientation": [
+        4.6566128730773926e-05,
+        0.0002633980461169301,
+        0.00018337996374948794,
+        0.00020540483196693286
+      ],
+      "executed_final_translation_err_mm": 7.31710958480835,
+      "executed_final_rotation_err_deg": 0.9308319091796875,
+      "max_joint_velocity_rad_s": 0.19684529304504395,
+      "velocity_utilization": 0.9842264652252197,
+      "velocity_limit_violation": false,
+      "max_joint_acceleration_rad_s2": 0.31834352016448975,
+      "acceleration_utilization": 0.6366870403289795,
+      "acceleration_limit_violation": false,
+      "max_joint_jerk_rad_s3": 1.533128023147583,
+      "jerk_utilization": null,
+      "jerk_limit_violation": null,
+      "dynamic_measurement_status": "finite",
+      "dynamic_limits_satisfied": true,
+      "stages": [
+        {
+          "stage_id": "grasped",
+          "status": "passed",
+          "failure_code": null,
+          "measurements": {
+            "grasp_established": true
+          },
+          "evidence_source": "contact_sensor:target_finger_contacts_and_state",
+          "observation_window": "grasp_end"
+        },
+        {
+          "stage_id": "transferred",
+          "status": "passed",
+          "failure_code": null,
+          "measurements": {
+            "both_grasps_established": true,
+            "min_height_above_support_m": 0.0014623403549194336
+          },
+          "evidence_source": "contact_sensor:target_finger_contacts_and_state",
+          "observation_window": "transfer_end"
+        },
+        {
+          "stage_id": "handed_over",
+          "status": "passed",
+          "failure_code": null,
+          "measurements": {
+            "giver_released": true,
+            "receiver_retained": true,
+            "min_height_above_support_m": 0.15105026960372925
+          },
+          "evidence_source": "contact_sensor:target_finger_contacts_and_state",
+          "observation_window": "handover_end"
+        },
+        {
+          "stage_id": "receiver_released",
+          "status": "passed",
+          "failure_code": null,
+          "measurements": {
+            "release_established": true
+          },
+          "evidence_source": "measured_proxy:receiver_gripper_joint_state",
+          "observation_window": "terminal_settle"
+        },
+        {
+          "stage_id": "placed",
+          "status": "passed",
+          "failure_code": null,
+          "measurements": {
+            "xy_error_m": 0.001956141320988536,
+            "signed_z_error_m": -0.06000012159347534,
+            "min_height_above_support_m": -1.1920928955078125e-07
+          },
+          "evidence_source": "simulation_state:terminal_object_pose_trace",
+          "observation_window": "terminal_settle"
+        }
+      ],
+      "failure_stage": null,
+      "physical_skill_success": true,
+      "physical_failure_code": null,
+      "evaluation_protocol": "atomic-skill-v3",
+      "timed_motion_valid": true,
+      "constraint_metrics": {},
+      "geometry_valid": true,
+      "start_state_valid": true,
+      "start_joint_error_rad": 0.0,
+      "reference_path_deviation_mm_mean": null,
+      "reference_path_deviation_mm_max": null,
+      "policy_steps_used": null,
+      "policy_completion_step": null,
+      "policy_waypoint_arrival_steps": [],
+      "end_to_end_success": true
+    }
+  ],
+  "formal_population": false,
+  "note": "This evidence scores the actual untimed recorded replay; separate from the 50-scene qualification.",
+  "source_commit": "1367655db2631142efaf2e8fad9e6dde04e0fd32",
+  "video_sha256": "c65b4a7fc6bb56ddba21eff643f33eeea1cc5e0cbb8d1cf520c0eee3c6e7b405",
+  "stream": {
+    "programs": [],
+    "streams": [
+      {
+        "width": 960,
+        "height": 720,
+        "r_frame_rate": "20/1",
+        "nb_frames": "966"
+      }
+    ],
+    "format": {
+      "duration": "48.300000",
+      "size": "722892"
+    }
+  },
+  "visual_inspection": "Eight sequential frames and final frame inspected: pickup, lift, dual contact, handover, receiver release and placement visible; no cuts or speed changes."
+}
