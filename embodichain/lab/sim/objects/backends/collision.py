@@ -36,7 +36,7 @@ from dexsim.types import RigidBodyShape
 if TYPE_CHECKING:
     from ..rigid_object import CollisionShapeDesc
 
-__all__ = ["collision_shapes_from_entity"]
+__all__ = ["collision_shapes_from_entity", "collision_shapes_from_articulation_link"]
 
 
 def collision_shapes_from_entity(
@@ -127,6 +127,64 @@ def collision_shapes_from_entity(
     raise RuntimeError(
         f"RigidObject {object_uid!r} has no accessible physical collision "
         "descriptor."
+    )
+
+
+def collision_shapes_from_articulation_link(
+    entity: object, link_name: str, *, object_uid: str
+) -> list[CollisionShapeDesc]:
+    """Read materialized physical shapes of one named articulation link.
+
+    Args:
+        entity: Spawn-bound articulation or native backend handle.
+        link_name: Asset-defined physical link name.
+        object_uid: Logical articulation ID used in diagnostics.
+    Returns:
+        Link-local, already-scaled collision descriptors, including native
+        convex/decomposed shapes. A link without collision geometry returns empty.
+    Raises:
+        RuntimeError: When the backend cannot expose physical collision geometry.
+    """
+    from ..rigid_object import CollisionShapeDesc
+
+    native = entity.native() if callable(getattr(entity, "native", None)) else entity
+    binding = getattr(entity, "_physics_binding", None)
+    physical_ports = (
+        binding,
+        native if native is not entity else None,
+        entity if binding is None else None,
+    )
+    for port in physical_ports:
+        getter = getattr(port, "get_physical_body", None)
+        if callable(getter):
+            body = getter(link_name)
+            return (
+                []
+                if body is None
+                else _from_physical_body(body, object_uid=f"{object_uid}/{link_name}")
+            )
+    for port in physical_ports:
+        getter = getattr(port, "get_collision_mesh", None)
+        if callable(getter):
+            mesh = getter(link_name)
+            if mesh is None:
+                return []
+            vertices, triangles = mesh
+            return [
+                CollisionShapeDesc(
+                    name="collision_mesh",
+                    shape_type=RigidBodyShape.MESH,
+                    local_pose=torch.eye(4),
+                    vertices=torch.as_tensor(vertices, dtype=torch.float32)
+                    .reshape(-1, 3)
+                    .clone(),
+                    triangles=torch.as_tensor(triangles, dtype=torch.int32)
+                    .reshape(-1, 3)
+                    .clone(),
+                )
+            ]
+    raise RuntimeError(
+        f"Articulation {object_uid!r} cannot expose physical collision geometry for {link_name!r}"
     )
 
 

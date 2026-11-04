@@ -474,6 +474,9 @@ def test_base_env_preserves_terminal_rows_before_reused_reset_storage(
         device=torch.device("cpu"),
         reset=reset,
     )
+    env._get_termination_flags = lambda obs, info: BaseEnv._get_termination_flags(
+        env, obs, info
+    )
     _, _, _, _, info = BaseEnv.step(env, torch.zeros(3, 1))
     torch.testing.assert_close(
         info["terminal_observation"]["state"], torch.tensor([[3.0], [7.0]])

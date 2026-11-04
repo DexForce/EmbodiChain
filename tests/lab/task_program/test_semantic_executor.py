@@ -539,6 +539,7 @@ class _Compiler(SemanticCallCompiler):
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[object, ...] = ("workflow",),
     ) -> _Grounded:
@@ -568,7 +569,7 @@ class _Compiler(SemanticCallCompiler):
                 max_action_retries=0,
                 action_timeout=100.0,
             ),
-            invocation_id=f"{workflow.workflow_id}:{call_index}",
+            invocation_id=invocation_id or f"{workflow.workflow_id}:{call_index}",
             revision=revision,
         )
         target = torch.full((BATCH_SIZE, 1), float(call_index + 1))
@@ -607,6 +608,7 @@ class _Compiler(SemanticCallCompiler):
             self.monitors.append(monitor)
         analyzed = SimpleNamespace(
             call=call,
+            policy_preset_id=None,
             effect_assurance=(
                 EffectAssurance.VERIFIED
                 if self._install_effect_monitor
@@ -676,6 +678,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[object, ...] = ("workflow",),
     ) -> _Grounded:
@@ -745,7 +748,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
             motion_policy=motion_policy,
             tracking_policy=tracking_policy,
             recovery_policy=recovery_policy,
-            invocation_id=f"{workflow.workflow_id}:{decision_index}",
+            invocation_id=invocation_id or f"{workflow.workflow_id}:{decision_index}",
             revision=revision,
         )
         expectation = HeldObjectStateExpectation(
@@ -798,6 +801,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
         )
         analyzed = SimpleNamespace(
             call=call,
+            policy_preset_id=None,
             effect_assurance=EffectAssurance.VERIFIED,
             effect_monitor_ref=None,
             bound=SimpleNamespace(
@@ -941,6 +945,7 @@ def _system(
     runtime_runner_cfg: ExecutionRunnerCfg | None = None,
     install_effect_monitor: bool = True,
     plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+    nominal_source_factory=None,
 ) -> _System:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -979,6 +984,7 @@ def _system(
         clock=clock,
         runner_cfg=runtime_runner_cfg,
         plan_transform_factory=plan_transform_factory,
+        nominal_source_factory=nominal_source_factory,
     )
     return _System(
         runtime,
@@ -1026,6 +1032,33 @@ def test_executor_without_transform_factory_is_unchanged() -> None:
 
     assert result.status is SemanticExecutionStatus.RUNNING
     assert system.action.plan_count == 1
+
+
+def test_executor_selects_nominal_source_before_native_planning() -> None:
+    class Source:
+        def instantiate(self, request, context):
+            raise AssertionError("unsupported skill should reject before source use")
+
+    class Factory:
+        def __init__(self):
+            self.requests = []
+
+        def create_nominal_source(self, request, *, engine):
+            self.requests.append(request)
+            return Source()
+
+    factory = Factory()
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+        nominal_source_factory=factory,
+    )
+    result = system.runtime.start(_call("generation"), workflow_id="nominal-workflow")
+    assert result.status is SemanticExecutionStatus.FAILED
+    assert "does not support external nominal" in result.message
+    assert factory.requests[0].workflow_id == "nominal-workflow"
+    assert factory.requests[0].analysis_call_index == 0
+    assert system.action.plan_count == 0
 
 
 def _workflow_recovery_system(
@@ -1119,6 +1152,42 @@ def test_runtime_analyzes_once_and_uses_one_fresh_session_per_call(
     assert system.observation.calls == 4
 
 
+def test_verified_call_without_effect_completes_without_a_monitor() -> None:
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+    )
+    native = system.action._plan
+    system.action._plan = lambda request, context: replace(native(request, context), expected_effects=StateDelta(), effect_verification=None)  # type: ignore[method-assign]
+    result = system.runtime.start(_call("no_effect"))
+    system.runtime._grounded.analyzed.effect_assurance = EffectAssurance.VERIFIED
+    for _ in range(5):
+        if result.status is not SemanticExecutionStatus.RUNNING:
+            break
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+    assert result.status is SemanticExecutionStatus.COMPLETED
+    assert system.collector.calls == []
+
+
+def test_verified_unmonitored_effect_fails_without_projecting_state() -> None:
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+    )
+    result = system.runtime.start(_call("unexpected_effect"))
+    system.runtime._grounded.analyzed.effect_assurance = EffectAssurance.VERIFIED
+    for _ in range(5):
+        if result.status is not SemanticExecutionStatus.RUNNING:
+            break
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+    assert result.status is SemanticExecutionStatus.FAILED
+    assert result.task_state.get_articulation_joint_state("fixture", "joint") is None
+
+
 def test_runtime_projects_planned_effect_when_grounded_call_has_no_monitor() -> None:
     system = _system(
         (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
@@ -1162,14 +1231,28 @@ def test_runtime_uses_selected_preset_runner_cfg_without_override(
     assert captured_cfgs[0].command_timeout == 3.0
 
 
-def test_runtime_runner_cfg_override_wins_over_selected_preset(
+@pytest.mark.parametrize(
+    ("explicit_policy", "expected_timeout"), [(False, 5.0), (True, 3.0)]
+)
+def test_runtime_runner_ownership_respects_explicit_occurrence_policy(
     monkeypatch: pytest.MonkeyPatch,
+    explicit_policy: bool,
+    expected_timeout: float,
 ) -> None:
     system = _system(
         (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
         preset_runner_cfg=ExecutionRunnerCfg(command_timeout=3.0),
         runtime_runner_cfg=ExecutionRunnerCfg(command_timeout=5.0),
     )
+    if explicit_policy:
+        original_ground = system.compiler.ground
+
+        def selected_ground(*args, **kwargs):
+            grounded = original_ground(*args, **kwargs)
+            grounded.analyzed.policy_preset_id = "runtime_test_preset"
+            return grounded
+
+        monkeypatch.setattr(system.compiler, "ground", selected_ground)
     captured_cfgs: list[ExecutionRunnerCfg] = []
     original_runner = runtime_module.ExecutionRunner
 
@@ -1185,7 +1268,7 @@ def test_runtime_runner_cfg_override_wins_over_selected_preset(
 
     assert result.status is SemanticExecutionStatus.COMPLETED
     assert len(captured_cfgs) == 1
-    assert captured_cfgs[0].command_timeout == 5.0
+    assert captured_cfgs[0].command_timeout == expected_timeout
 
 
 def test_runtime_analyzes_downstream_calls_but_executes_only_requested_prefix() -> None:
@@ -2435,6 +2518,11 @@ def test_bridge_analyzes_a_sequential_stretch_once_and_grounds_each_call(
     assert bridge.completion_mask.all()
     assert compiler.analyze_count == 1
     assert compiler.ground_count == segment_count
+    assert [invocation.invocation_id for invocation in compiler.invocations] == [
+        f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}"
+        for segment in compiled.iter_segments()
+        for call in segment.calls
+    ]
     assert len(set(compiler.ground_timestamps)) == segment_count
     assert [
         invocation.goal.target_position for invocation in compiler.invocations

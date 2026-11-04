@@ -2642,6 +2642,58 @@ def test_launcher_omissions_preserve_runtime_configuration() -> None:
     assert merge_args_with_gym_config(args, config) == config
 
 
+def test_configured_real2sim_profile_resolves_from_task_before_dataset_override(
+    tmp_path, monkeypatch
+) -> None:
+    """The launch selector survives parsing without becoming an EnvCfg field."""
+    path = tmp_path / "deployment/task.yaml"
+    path.parent.mkdir()
+    save_config(
+        path,
+        {
+            "id": "ConfiguredSource-v0",
+            "physics": "default",
+            "real2sim": {"profile": "profiles/collection.yaml"},
+            "env": {"dataset": {}},
+        },
+    )
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(["--gym-config", str(path)])
+    args.expansion_dataset_dir = str(tmp_path / "data")
+    observed = {}
+
+    def parse(config, **kwargs):
+        observed.update(config)
+        return SimpleNamespace()
+
+    monkeypatch.setattr("embodichain.lab.gym.utils.gym_utils.config_to_cfg", parse)
+    monkeypatch.chdir(tmp_path)
+    _, resolved, _ = build_env_cfg_from_args(args)
+    assert resolved["real2sim"]["profile"] == str(
+        path.parent / "profiles/collection.yaml"
+    )
+    assert resolved["env"]["dataset"] == {}
+    assert "real2sim" not in observed
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [None, {}, {"profile": ""}, {"profile": "a.yaml", "provider": "arbitrary"}],
+)
+def test_configured_real2sim_rejects_invalid_launch_selection(
+    tmp_path, binding
+) -> None:
+    path = tmp_path / "task.yaml"
+    save_config(
+        path, {"id": "InvalidSource-v0", "physics": "default", "real2sim": binding}
+    )
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    with pytest.raises(ValueError, match="real2sim"):
+        build_env_cfg_from_args(parser.parse_args(["--gym-config", str(path)]))
+
+
 def test_launcher_explicit_runtime_overrides_win() -> None:
     parser = argparse.ArgumentParser()
     add_env_launcher_args_to_parser(parser, require_gym_config=True)

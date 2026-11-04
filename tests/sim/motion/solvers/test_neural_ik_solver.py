@@ -21,7 +21,9 @@ import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain_robots.franka.panda import FrankaPandaCfg
+from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+    _create_franka_native_hand_cfg,
+)
 from embodichain.lab.sim.motion.solvers import NeuralIKSolverCfg
 from embodichain.lab.sim.motion.solvers.neural_ik_solver import _build_mlp
 from embodichain.utils.utility import reset_all_seeds
@@ -55,7 +57,7 @@ class TestNeuralIKSolver:
         config = SimulationManagerCfg(headless=True, device="cpu")
         self.sim = SimulationManager(config)
 
-        cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
+        cfg = _create_franka_native_hand_cfg()
         cfg.solver_cfg["arm"] = NeuralIKSolverCfg(
             end_link_name="fr3_hand_tcp",
             root_link_name="base",

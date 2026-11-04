@@ -111,9 +111,8 @@ class ContactSensor(BaseSensor):
 
     The sensor preserves every backend-emitted contact row that passes the
     backend's positive-impulse filter. Geometry-only Newton solvers retain all
-    candidate contact rows. Updates reuse the last completed physics step's
-    sample. Creation and reset leave affected rows invalid until another
-    physics step completes; reading observations never advances physics.
+    candidate contact rows. Repeated updates within one completed physics step
+    reuse the sample, unless the query's topology changes or the sensor resets.
     """
 
     SUPPORTED_DATA_TYPES = [
@@ -168,9 +167,10 @@ class ContactSensor(BaseSensor):
         self._sample_graph_key = None
         self._sample_stream = None
         self._sample_torch_stream = None
-        self._last_update_step = owner.physics_step_index
-        self._last_history_step = owner.physics_step_index
+        self._last_update_key: tuple[int, int, int] | None = None
+        self._last_history_key: tuple[int, int, int] | None = None
         self._last_contact_buffer: ContactBuffer | None = None
+        self._sample_ready_stream: torch.cuda.Stream | None = None
         self._num_contacts_per_env: torch.Tensor | None = None
         """Number of contacts per environment."""
 
@@ -330,26 +330,58 @@ class ContactSensor(BaseSensor):
         self._metadata_selected_ids = actor_ids
 
     def update(self, **kwargs) -> None:
-        """Sample a new completed physics step, otherwise reuse cached data.
+        """Sample contacts once per physics step and query topology.
 
-        Same-step calls, including reads after reset, do not query the SDK.
-        Selected reset rows remain invalid while untouched rows retain their
-        most recent sample. A caller using a registered history should use the
-        physics-substep callback to advance its timing reductions.
+        Repeated calls reuse the scattered data and establish readiness on the
+        caller's CUDA stream. Resetting sensor buffers permits a fresh read of
+        the current backend snapshot without advancing contact history. This
+        does not recompute contacts after physical state writes: backend rules
+        still determine whether a solved contact snapshot is available.
 
         Args:
             **kwargs: Additional keyword arguments for sensor update.
         """
 
-        step = self._sim.physics_step_index
-        if step == self._last_update_step:
+        self._wait_for_sample()
+        capturing = (
+            self.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
+        )
+        key = None if capturing else self._contact_sample_key()
+        if not capturing and key == self._last_update_key:
             return
         buffer = self._fetch_contacts()
         if not self._histories:
             self._query_dropped_count.copy_(buffer.dropped_count_device)
             self._scatter_dropped_count.copy_(self._sample_scatter_dropped_count)
-        self._last_update_step = step
-        self._last_contact_buffer = buffer
+        self._last_update_key = key
+        self._last_contact_buffer = None if capturing else buffer
+        if capturing:
+            self._last_history_key = None
+        else:
+            self._record_sample_stream()
+
+    def _contact_sample_key(self) -> tuple[int, int, int]:
+        """Consult public query metadata so topology refreshes cannot be skipped."""
+        assert self._query is not None
+        return (
+            self._sim.physics_step_index,
+            id(self._query.actors),
+            id(self._query.selected_actor_ids),
+        )
+
+    def _wait_for_sample(self) -> None:
+        if self._sample_ready_stream is not None:
+            # Outer capture cannot depend on an uncaptured producer event.
+            # The caller establishes dependencies before capture and replay.
+            if torch.cuda.is_current_stream_capturing():
+                return
+            caller = torch.cuda.current_stream(self.device)
+            if caller.cuda_stream != self._sample_ready_stream.cuda_stream:
+                caller.wait_stream(self._sample_ready_stream)
+
+    def _record_sample_stream(self) -> None:
+        if self.device.type == "cuda" and not torch.cuda.is_current_stream_capturing():
+            self._sample_ready_stream = torch.cuda.current_stream(self.device)
 
     def _fetch_contacts(self) -> ContactBuffer:
         buffer = self._read_contacts()
@@ -540,10 +572,12 @@ class ContactSensor(BaseSensor):
 
     def begin_control_step(self) -> None:
         """Start a new interval without discarding persistent contact timing."""
+        self._wait_for_sample()
         self._query_dropped_count.zero_()
         self._scatter_dropped_count.zero_()
         for history in self._histories.values():
             history.begin_control_step()
+        self._record_sample_stream()
 
     def update_physics_step(self, dt: float) -> None:
         """Sample contacts and advance registered histories after physics.
@@ -553,22 +587,29 @@ class ContactSensor(BaseSensor):
         """
         if dt <= 0:
             raise ValueError("Contact sampling dt must be positive.")
-        step = self._sim.physics_step_index
-        if step == self._last_history_step:
+        self._wait_for_sample()
+        # Capturing records future work; Python cache keys cannot track replay.
+        capturing = (
+            self.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
+        )
+        key = None if capturing else self._contact_sample_key()
+        if not capturing and key == self._last_history_key:
             return
         buffer = (
             self._last_contact_buffer
-            if step == self._last_update_step
+            if not capturing and key == self._last_update_key
             else self._read_contacts()
         )
         assert buffer is not None
         self._sample_physics_contacts(buffer, dt)
-        self._last_update_step = step
-        self._last_history_step = step
-        self._last_contact_buffer = buffer
+        self._last_update_key = key
+        self._last_history_key = key
+        self._last_contact_buffer = None if capturing else buffer
+        if not capturing:
+            self._record_sample_stream()
 
     def _sample_physics_contacts(self, buffer: ContactBuffer, dt: float) -> None:
-        """Schedule the existing reduction without changing sample ownership."""
+        """Run the reduction on the existing caller/capture stream boundary."""
         if self.device.type != "cuda" or torch.cuda.is_current_stream_capturing():
             self._sample_contacts(buffer, dt)
             return
@@ -622,6 +663,9 @@ class ContactSensor(BaseSensor):
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear contact samples and histories only for the selected rows.
 
+        The next update may refresh the current backend snapshot. Clearing
+        these buffers does not reset physics or invalidate a solved snapshot.
+
         Args:
             env_ids: Rows to reset. None selects every row.
         """
@@ -634,6 +678,7 @@ class ContactSensor(BaseSensor):
         )
         if ids is not None and ids.numel() == 0:
             return
+        self._wait_for_sample()
         for value in (
             self._data_buffer["is_valid"],
             self._num_contacts_per_env,
@@ -648,12 +693,10 @@ class ContactSensor(BaseSensor):
             self._query_dropped_count.zero_()
         for history in self._histories.values():
             history.reset(ids)
-        # SDK solver reset invalidates the complete same-step contact snapshot.
-        # Preserve other rows in our own buffers until a new step can be queried.
-        step = self._sim.physics_step_index
-        self._last_update_step = step
-        self._last_history_step = step
+        self._last_update_key = None
+        self._last_history_key = None
         self._last_contact_buffer = None
+        self._record_sample_stream()
 
     def filter_by_user_ids(
         self, item_user_ids: torch.Tensor, env_ids: Sequence[int] | None = None

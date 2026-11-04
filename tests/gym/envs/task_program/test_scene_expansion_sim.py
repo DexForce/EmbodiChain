@@ -144,7 +144,19 @@ def _run_scene_expansion_smoke(output: Path) -> None:
             )
 
         result = execute_scene_variant(
-            env, variant, prepare_scene=host, measured_validator=measured_placement
+            env,
+            variant,
+            prepare_scene=host,
+            measured_validator=measured_placement,
+            trace_actions=True,
+        )
+        execution_trace = env._active_task_program_bridge.execution_trace
+        assert len(execution_trace) == int(env._traj_steps[0])
+        assert all(row["step"] == index for index, row in enumerate(execution_trace))
+        assert all(
+            row["plan_index"] >= 0
+            for row in execution_trace
+            if row["kind"] == "runtime_command"
         )
         snapshot = host.initial_state
         assert snapshot is not None

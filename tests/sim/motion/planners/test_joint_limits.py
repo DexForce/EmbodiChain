@@ -336,6 +336,7 @@ def test_invalid_acceleration_request_fails_before_planning(value: float) -> Non
 @pytest.mark.parametrize("planner_type", ["toppra", "trapezoidal"])
 def test_facade_and_direct_plans_apply_robot_limits(planner_type: str) -> None:
     robot = _Robot()
+    expected_dtype = torch.float64 if planner_type == "toppra" else torch.float32
     planner_class, cfg_class = (
         (ToppraPlanner, ToppraPlannerCfg)
         if planner_type == "toppra"
@@ -366,7 +367,10 @@ def test_facade_and_direct_plans_apply_robot_limits(planner_type: str) -> None:
         else:
             assert result.positions.shape[1] > 2
             assert bool((result.dt[:, 1:] <= options.sample_interval + 1e-6).all())
-        torch.testing.assert_close(result.positions[:, -1], states[-1].qpos)
+        assert result.positions.dtype == expected_dtype
+        torch.testing.assert_close(
+            result.positions[:, -1], states[-1].qpos.to(expected_dtype)
+        )
         assert bool(
             (
                 result.velocities.abs().amax(dim=(0, 1))

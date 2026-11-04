@@ -21,19 +21,9 @@ the registered default Rizon4S and Robotiq2F85 assets through
 and at most 1000 updates. It retains the full mimic hand and uses the preset's
 explicit MuJoCo-Warp linkage compliance profile. This is a single-geometry
 development experiment, separate from the earlier parallel-jaw checkpoints.
-For capacity and nonfinite-state guards, run the same config through
-`scripts/benchmark/assembly/train_peg.py`; final assessment uses
-`scripts/benchmark/assembly/eval_peg.py` with balanced episode allocation.
-
-The trainer's compatibility validation counts the first completed episodes;
-completion speeds can therefore affect its ranking. Before final testing, use
-`python -m scripts.benchmark.assembly.select_peg --run RUN --output SELECTION`
-to evaluate every saved update with balanced development quotas. Its default
-protocol uses 512 episodes, 64 arenas and seed 10000, and selects by success
-rate with earlier updates breaking ties. Pass the selected checkpoint path to
-`eval_peg.py` with a separate test seed. The optional learning-report
-`--selection-report SELECTION/selection.json` keeps both curves distinct and
-checks that independent testing used the selected weights and another seed.
+Select checkpoints on validation episodes before independent testing. Use the
+native `embodichain eval-policy` command with `--episode-allocation balanced`
+for fixed per-environment quotas, and keep validation and test seeds separate.
 
 The actor receives 33 encoder-derived values per frame, 30 historical frames
 and the current frame. The critic sees actual mating pose, geometric progress

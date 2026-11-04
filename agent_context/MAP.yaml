@@ -51,7 +51,7 @@ topics:
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
     task_instruction, resolve_demo_instruction,
-    show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标]
+    show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
   - embodichain/cli/main.py
@@ -87,7 +87,7 @@ topics:
     reward manager, event manager, action manager, dataset manager, 观测 functor, 观测管理器, 管理器]
   keywords: [FunctorCfg, ObservationCfg, RewardCfg, ActionTermCfg, ObservationManager, RewardManager,
     EventManager, ActionManager, ActionDescriptor, ActionTermDescriptor, ParallelGripperAction,
-    DatasetManager, SceneEntityCfg]
+    DatasetManager, SceneEntityCfg, TerminationManager, ConditionResult]
   paths: [topics/manager-functor/manager-functor.md]
   source_of_truth:
   - embodichain/lab/gym/envs/managers/action_manager.py
@@ -127,9 +127,8 @@ topics:
   title: Robot System
   aliases: [robot system, robot config, robot catalog, list robot, robot preview, 机器人配置, 机器人系统, 机型解析, 列出机器人, 机器人预览]
   keywords: [UnitreeGo1Cfg, UnitreeGo2Cfg, UnitreeG1Cfg, UnitreeH12Cfg, ANYmalCCfg, MicroDuckCfg, load_locomotion_robot_profile, RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg, ARX5Cfg, ARX5, FlexivRizon4SCfg, FlexivRizon4S,
-    FrankaPandaCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
-    asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot,
-    FlexivRizon4SCfg, Rizon4S]
+    FrankaCfg, FrankaPandaCfg, URRobotCfg, BrainCoRevo1Cfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
+    asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot, FlexivRizon4SCfg, Rizon4S]
   paths: [topics/robot-system/robot-system.md]
   source_of_truth:
   - embodichain/lab/sim/objects/robot.py
@@ -190,8 +189,10 @@ topics:
   aliases: [motion planning, motion generation benchmark, motion benchmark, 运动生成评测, trajectory planning, trajectory playback, fixed-cadence trajectory playback, motion expansion,
     trajectory expansion, trajectory augmentation, expansion profile, configured trajectory expansion,
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
-    轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体]
+    轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体, kinematic trajectory refinement, 轨迹修正]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
+    CuroboPayload, CuroboQuerySnapshot, curobo_motion_generator,
+    interpolation_mode, ik_seed_mode, resolve_continuous_ik_path, search_cost_scope, RejectedMotionCandidate,
     expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
     load_expansion_profile, SourceAdapter, CandidateCoordinator, CandidateTrajectoryBatch,
     ManipulabilityBands, manipulability_guided_residual, manipulability coverage bands,
@@ -204,6 +205,10 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
   - embodichain/lab/sim/motion/motion_generator.py
+  - embodichain/lab/sim/motion/ik.py
+  - embodichain/lab/sim/motion/limits.py
+  - embodichain/lab/sim/motion/search.py
+  - embodichain/lab/sim/motion/refinement.py
   - extensions/embodichain_benchmarks/motion_generation/
   - embodichain/cli/benchmark.py
   - embodichain/lab/sim/motion/execution.py
@@ -217,6 +222,7 @@ topics:
   - embodichain/compute/kinematics/_warp/trapezoidal.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_planner.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_yaml.py
+  - embodichain/lab/sim/motion/planners/curobo/payload.py
   - embodichain/lab/task_program/semantics/scene.py
   - embodichain/lab/sim/motion/expansion/
   - embodichain/compute/trajectory/
@@ -225,6 +231,7 @@ topics:
     embodichain/compute/kinematics/_path_derivatives.py,
     tests/sim/motion/test_motion_generator.py,
     tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
+    embodichain/lab/sim/motion/ik.py, embodichain/lab/sim/motion/limits.py, embodichain/lab/sim/motion/search.py,
     tests/sim/motion/expansion/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,
     tests/sim/motion/planners/, tests/compute/, examples/expansion/trajectory/, examples/expansion/README.md]
   related_topics: [simulation-system, robot-system, ik-solvers, atomic-actions]
@@ -233,6 +240,7 @@ topics:
   title: Scene Services
   aliases: [sim.scene, scene services, procedural scene, 场景服务, 程序化场景, 场景布局, 场景快照]
   keywords: [SceneFragment, SceneRecipe, GeneratedScene, SupportRegion, LayoutProblem,
+    SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,
     solve_layout, capture_state, restore_state, settle_scene, check_layout,
@@ -242,26 +250,38 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/scene/
   - embodichain/compute/geometry/
+  - embodichain/lab/sim/objects/backends/_collision_inputs.py
   watch_paths: [embodichain/lab/sim/scene/, embodichain/compute/geometry/,
     tests/sim/scene/, tests/compute/geometry/]
   related_topics: [simulation-system, scene-expansion, gen-sim, task-programs]
   status: active
 - id: scene-expansion
   title: Scene Expansion
-  aliases: [scene expansion, scene augmentation, scene variant, 场景扩增, 场景变体]
+  aliases: [scene expansion, scene augmentation, scene variant, scene robot feasibility, feasible region search, 场景扩增, 场景变体, 联合可行区域搜索]
   keywords: [SceneLayoutInput, SceneRandomizationPolicyCfg, prepare_scene_randomization, generate_scene_variants, apply_scene_variants, load_scene_variants, SceneExpansionCfg, ScenePoseChange, SceneVariant, FixedSceneCandidateSource,
+    SceneRobotFeasibilityCfg, TaskFeasibilityRequest, FeasibilityAtlas, RobotWorkspaceProposalSource, NewtonCollisionChecker, search-scene-feasibility,
     ScenePreparationResult, SceneVariantEpisodeResult, execute_scene_variant,
     SimulationSceneExpansionHost, SimulationSceneInitialState, episode_prepare]
   paths: [topics/scene-expansion/scene-expansion.md]
   source_of_truth:
+  - embodichain/lab/sim/scene/feasibility/
   - embodichain/lab/sim/scene/expansion/
+  - embodichain/lab/task_program/integrations/feasibility.py
+  - embodichain/lab/task_program/integrations/simulation/feasibility.py
+  - embodichain/lab/task_program/integrations/simulation/feasibility_geometry.py
   - embodichain/lab/task_program/integrations/scene_expansion.py
   - embodichain/lab/task_program/integrations/simulation/scene_expansion.py
   - embodichain/lab/task_program/integrations/simulation/workspace.py
   - embodichain/lab/gym/envs/base_env.py
   - embodichain/lab/gym/envs/embodied_env.py
   - embodichain/lab/gym/envs/demo.py
-  watch_paths: [embodichain/lab/sim/scene/expansion/,
+  watch_paths: [embodichain/lab/sim/scene/feasibility/, embodichain/compute/geometry/planar.py,
+    embodichain/compute/geometry/_warp/contact_query.py,
+    embodichain/lab/task_program/integrations/feasibility.py,
+    embodichain/lab/task_program/integrations/simulation/feasibility.py,
+    embodichain/lab/task_program/integrations/simulation/feasibility_geometry.py,
+    tests/sim/scene/feasibility/, tests/gym/envs/task_program/test_feasibility.py,
+    embodichain/lab/sim/scene/expansion/,
     embodichain/lab/task_program/integrations/scene_expansion.py,
     embodichain/lab/task_program/integrations/simulation/scene_expansion.py,
     embodichain/lab/task_program/integrations/simulation/workspace.py,
@@ -276,7 +296,7 @@ topics:
   aliases: [neural dynamics, neural robot dynamics, NeRD, RigidFormer, 神经动力学, 动力学模型训练, NeRD 示例, RigidFormer 示例]
   keywords: [NeRDStateCodec, NeRDModel, DynamicsGenerationCfg,
     DynamicsShardWriter, DynamicsWindowDataset, DynamicsTrainer, embodichain_models,
-    learning/nerd, nerd reference assets, RigidFormerModel,
+    learning/nerd, nerd reference assets, RigidFormerModel, MOViSequenceSource, build_rigidformer_trainer,
     官方训练精度对比]
   paths: [topics/neural-dynamics/neural-dynamics.md]
   source_of_truth:
@@ -286,16 +306,18 @@ topics:
   - examples/learning/nerd/_support/
   - examples/learning/nerd/configs/
   - extensions/embodichain_models/embodichain_models/dynamics/rigidformer/
-  watch_paths: [extensions/embodichain_models/, examples/learning/nerd/,
-    docs/source/features/neural_dynamics.md,
-    docs/source/api_reference/model_catalogs.rst]
-  related_topics: [supervised-learning, learning-layers, data-pipeline, data-assets]
+  - examples/learning/rigidformer/
+  watch_paths: [extensions/embodichain_models/, examples/learning/nerd/, examples/learning/rigidformer/,
+    docs/source/features/neural_dynamics.md, docs/source/features/neural_dynamics/,
+    docs/source/guides/neural_dynamics.md, docs/source/api_reference/model_catalogs.rst,
+    docs/source/api_reference/model_rigidformer.rst]
+  related_topics: [supervised-learning, robot-world-model, learning-layers, data-pipeline, data-assets]
   status: active
 - id: learning-layers
   title: Differentiable Learning Layers
-  aliases: [learning layers, differentiable IK layer, 可微 IK, 训练层, 学习模块分层]
-  keywords: [DifferentiableIKLayer, KinematicsLayer, SerialChainKinematics, DifferentiableIKCfg,
-    solve_dls_ik, damped_least_squares_step, Jacobian gradient, dJ/dq, learn_grasp_yaw, grasp yaw, 抓取角度优化, 抓取姿态学习]
+  aliases: [learning layers, differentiable retiming layer, 可微重定时, differentiable FK layer, differentiable IK layer, 可微 FK, 可微 IK, 训练层, 学习模块分层]
+  keywords: [DifferentiableFKLayer, DifferentiableIKLayer, DifferentiableRetimingLayer, SerialChainKinematics, DifferentiableIKCfg,
+    solve_dls_ik, damped_least_squares_step, Jacobian gradient, dJ/dq, learn_grasp_yaw, learn_pose_reaching, grasp yaw, 抓取角度优化, 抓取姿态学习]
   paths: [topics/learning-layers/learning-layers.md]
   source_of_truth:
   - embodichain/compute/kinematics/dls.py
@@ -307,10 +329,15 @@ topics:
   - embodichain/learning/models/
   - examples/learning/differentiable_ik/learn_grasp_yaw.py
   - examples/learning/differentiable_ik/view_learned_yaw.py
+  - examples/learning/differentiable_fk/learn_pose_reaching.py
+  - examples/learning/differentiable_fk/view_pose_reaching.py
+  - examples/learning/differentiable_toppra/optimize_path.py
+  - examples/learning/differentiable_toppra/view_path_optimization.py
   watch_paths: [embodichain/compute/kinematics/, embodichain/learning/layers/,
     embodichain/learning/models/, embodichain/learning/__init__.py,
-    tests/compute/kinematics/, tests/learning/layers/, examples/learning/differentiable_ik/]
-  related_topics: [ik-solvers, rl-learning]
+    tests/compute/kinematics/, tests/learning/layers/, examples/learning/differentiable_ik/,
+    examples/learning/differentiable_fk/, examples/learning/differentiable_toppra/]
+  related_topics: [ik-solvers, rl-learning, supervised-learning]
   status: active
 - id: rl-learning
   title: RL Learning Pipeline
@@ -407,13 +434,16 @@ topics:
   keywords: [TaskProgramCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
-    joint_command_mode]
+    joint_command_mode, InvocationPolicyBinding, BoundInvocationPolicies,
+    ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
   - embodichain/lab/task_program/
   - embodichain/lab/task_program/semantics/integration.py
   - embodichain/lab/task_program/semantics/calls.py
   - embodichain/lab/task_program/integrations/configured.py
+  - embodichain/lab/task_program/integrations/invocation_policy.py
+  - embodichain/lab/task_program/integrations/composition.py
   - embodichain/lab/task_program/integrations/_configured_composition.py
   - embodichain/lab/gym/envs/task_program/
   - embodichain/agents/mllm/task_program.py
@@ -424,22 +454,39 @@ topics:
     extensions/embodichain_tasks/configs/tasks/manipulation/, tests/lab/task_program/]
   related_topics: [atomic-actions, env-framework, simulation-system, motion-planning, sensor-system, data-pipeline]
   status: active
+- id: task-spec
+  title: Task Specification
+  aliases: [task specification, normative task specification, 任务规范, 任务规范校验]
+  keywords: [TaskSpec, TaskSpecCache, TaskRequirement, MilestoneSpec, evaluate_task_spec,
+    validate_task_spec, semantic_hash, certificate_ready]
+  paths: [topics/task-spec/task-spec.md]
+  source_of_truth:
+  - embodichain/gen_sim/task_spec/spec.py
+  - embodichain/gen_sim/task_spec/expressions.py
+  - embodichain/gen_sim/task_spec/validation.py
+  - embodichain/gen_sim/task_spec/registry.py
+  - embodichain/gen_sim/task_spec/canonicalization.py
+  watch_paths: [embodichain/gen_sim/task_spec/, tests/gen_sim/task_spec/]
+  related_topics: [gen-sim, task-programs]
+  status: active
 - id: gen-sim
   title: Gen Sim
-  aliases: [gen sim, Scene Engine, SimReady, scene generation, scene editing, scene-randomization,
+  aliases: [gen sim, Scene Engine, Asset Engine, SimReady, scene generation, scene editing, scene-randomization,
     grouped scene randomization, GPU场景扩增, 批量场景扩增, 组内扩增, 组内场景扩增, intra-group augmentation, 分组场景随机化, 场景生成, 场景编辑, 生成式仿真]
   keywords: [generate_scene_from_image, edit_scene, SceneExporter, scene-export/v1, SceneRandomizationCfg,
     randomize_scene, prepare_scene_baseline, scene-randomization, load_layouts, preview_layouts, ingest_one_asset,
-    ParserManager, SessionProcessRegistry, Gradio]
+    ParserManager, SceneBlueprintPackage, analyze_image, materialize_blueprint, SessionProcessRegistry, Gradio]
   paths: [topics/gen-sim/gen-sim.md]
   source_of_truth:
   - embodichain/gen_sim/scene_engine/cli/start.py
   - embodichain/gen_sim/scene_engine/pipeline/generate.py
   - embodichain/gen_sim/scene_engine/pipeline/edit.py
+  - embodichain/gen_sim/scene_engine/pipeline/api.py
   - embodichain/gen_sim/scene_engine/pipeline/utils/scene_exporter.py
   - embodichain/gen_sim/scene_engine/pipeline/utils/scene_importer.py
   - embodichain/gen_sim/scene_engine/randomization/
-  - embodichain/gen_sim/simready_pipeline/pipeline/ingest.py
+  - embodichain/gen_sim/asset_engine/pipeline/ingest.py
+  - embodichain/gen_sim/asset_engine/pipeline/articulation.py
   - embodichain/gen_sim/gradio_ui/app_processes.py
   - embodichain/gen_sim/gradio_ui/app_env.py
   watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, tests/gen_sim/]
@@ -466,11 +513,12 @@ topics:
 - id: data-assets
   title: Data Assets
   aliases: [data assets, data path, asset download, 数据资产, 资产下载, 数据路径]
-  keywords: [get_data_path, get_data_class, EmbodiChainDataset, TabletopFourBases, demo assets, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
+  keywords: [get_data_path, get_data_class, _resolve_data_reference, EmbodiChainDataset, TabletopFourBases, Real2SimCarton, Real2SimCartonV1, demo assets, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
     CATEGORY_MODULES, embodichain.assets, ROBOT_ASSETS, 资产注册, download lock, get_registry, DefaultMaterials, list_default_materials, get_default_material_info]
   paths: [topics/data-assets/data-assets.md]
   source_of_truth:
   - embodichain/data/dataset.py
+  - embodichain/data/_references.py
   - embodichain/data/_asset_registry.py
   - extensions/embodichain_robots/_asset_catalog.py
   - embodichain/data/constants.py
@@ -478,6 +526,7 @@ topics:
   - embodichain/data/__init__.py
   - embodichain/data/assets/__init__.py
   - embodichain/data/assets/materials.py
+  - embodichain/data/assets/demo_assets.py
   - embodichain/data/default_materials.py
   - embodichain/data/default_materials.json
   - embodichain/_material_catalog.py
@@ -486,7 +535,7 @@ topics:
   status: active
 - id: data-pipeline
   title: Data Pipeline
-  aliases: [online data, online dataset, async recorder, dataset persistence, simple BC demo, ODS documentation, ODS 文档, 数据管线, 在线数据, 数据集持久化, 数据保存,
+  aliases: [real2sim motion, real2sim trajectory, real2sim, 真实轨迹原型, online data, online dataset, async recorder, dataset persistence, simple BC demo, ODS documentation, ODS 文档, 数据管线, 在线数据, 数据集持久化, 数据保存,
     深度视频, 数据集校验, 数据集转换, 数据集划分]
   keywords: [OnlineDataEngine, OnlineDataset, sample_batch, sample_batch_with_context, lock_index, LeRobotRecorder, AsyncLeRobotRecorder,
     DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice,
@@ -495,12 +544,13 @@ topics:
     ODSFlowController, ODSFlowControllerCfg, get_flow_status, ODS 供数控制,
     episode_sample_budget, OnlineDataBudgetExhaustedError, ODS 自动配置, BatchSource, SequenceSpecCfg,
     OnlineDataSource, TensorDataSource, LeRobotDataSource, OfflineDataset, SequenceDataset,
-    DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, 数据集加载, 离线加载]
+    DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, Real2SimTrajectory, NormalizedReal2SimUnit, SkillMotionPrototype, TrajectoryTimeMap, DROID, DroidEpisode, export_real2sim_replay_manifest, 数据集加载, 离线加载]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
   - embodichain/data_pipeline/engine/data.py
   - embodichain/data_pipeline/engine/language.py
   - embodichain/data_pipeline/configuration.py
+  - embodichain/data_pipeline/real2sim/
   - embodichain/data_pipeline/runtime.py
   - embodichain/data_pipeline/datasets/online_data.py
   - embodichain/data_pipeline/datasets/sequence.py
@@ -570,13 +620,15 @@ topics:
 
 - id: supervised-learning
   title: Supervised Learning
-  aliases: [supervised learning, SL learning, 监督学习, 统一监督学习]
-  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, SequenceBatchSource, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
+  aliases: [supervised learning, SL learning, visual ACT, 视觉模仿学习, 监督学习, 统一监督学习]
+  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, SequenceBatchSource, ACT, LeRobot ACT, lerobot-train, ACTInferencePolicy, build_act_train_config, load_act_policy, distributed_run, torchrun, DDP, 单机多卡, 分布式监督学习]
   paths: [topics/supervised-learning/supervised-learning.md]
   source_of_truth:
   - embodichain/learning/sl/
   - embodichain/cli/main.py
-  watch_paths: [embodichain/learning/sl/, tests/learning/sl/]
+  - extensions/embodichain_models/embodichain_models/policy/act/
+  - examples/learning/act/
+  watch_paths: [embodichain/learning/sl/, tests/learning/sl/, extensions/embodichain_models/embodichain_models/policy/act/, examples/learning/act/, tests/models/policy/]
   related_topics: [learning-layers, data-pipeline, rl-learning, neural-dynamics, robot-world-model]
   status: active
 - id: robot-world-model
@@ -590,6 +642,6 @@ topics:
   - examples/learning/rwm/
   watch_paths: [extensions/embodichain_models/embodichain_models/dynamics/rwm/,
     examples/learning/rwm/, tests/models/dynamics/rwm/,
-    docs/source/api_reference/rwm.rst]
+    docs/source/features/neural_dynamics/rwm.md, docs/source/api_reference/rwm.rst]
   related_topics: [supervised-learning, learning-layers, neural-dynamics]
   status: active

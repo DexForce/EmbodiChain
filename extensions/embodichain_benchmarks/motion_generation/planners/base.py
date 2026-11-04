@@ -87,6 +87,13 @@ class PlannerAdapter(ABC):
     """Uniform lifecycle around a motion-planning implementation."""
 
     capabilities: frozenset[str] = frozenset()
+    configuration_features: frozenset[str] = frozenset()
+    """Optional configuration contracts understood by this implementation.
+
+    Hosts can query these before creating a simulator or constructing an
+    adapter. They describe accepted configuration semantics, while instance
+    ``capabilities`` describes case support under the selected configuration.
+    """
     model_revision: str = "N/A"
     fixed_batch_size: int | None = None
     """Required execution batch size, if the loaded model fixes it."""

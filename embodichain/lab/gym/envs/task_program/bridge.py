@@ -76,6 +76,9 @@ from embodichain.lab.task_program.semantics.profiles import EffectAssurance
 from embodichain.lab.sim.types import EnvAction
 
 if TYPE_CHECKING:
+    from embodichain.lab.task_program.integrations.invocation_policy import (
+        BoundInvocationPolicies,
+    )
     from embodichain.lab.task_program.integrations.expansion import (
         CombinedTaskProgramExpansionFactory,
         TaskProgramExpansionRecord,
@@ -1062,6 +1065,11 @@ class TaskProgramDemoBridge:
         runner_cfg: Runner transport policy selected by the runtime preset.
         parallel_safety_validator: Optional authoritative physical-safety gate
             required before any parallel branch can start.
+        isolate_policy_sessions: Request fresh state from ports that provide
+            ``new_task_program_session``; ports without it retain their behavior.
+        invocation_policies: Optional program-bound sequential preset selections.
+            Direct bridge hosts must first validate their scene-registry selection;
+            the standard environment adapter performs that ownership check.
 
     Parallel blocks retain their branch lanes and explicit barrier.
     They are lowered through :class:`ParallelSemanticExecutor`; they are never
@@ -1080,6 +1088,8 @@ class TaskProgramDemoBridge:
         runner_cfg: ExecutionRunnerCfg | None = None,
         parallel_safety_validator: ParallelCommandSafetyValidator | None = None,
         expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None,
+        isolate_policy_sessions: bool = False,
+        invocation_policies: BoundInvocationPolicies | None = None,
     ) -> None:
         if not isinstance(program, CompiledTaskProgramPort):
             raise TypeError("program must implement CompiledTaskProgramPort.")
@@ -1104,6 +1114,8 @@ class TaskProgramDemoBridge:
             raise TypeError("validator_port must implement SegmentValidatorPort.")
         if runner_cfg is not None and not isinstance(runner_cfg, ExecutionRunnerCfg):
             raise TypeError("runner_cfg must be an ExecutionRunnerCfg or None.")
+        if type(isolate_policy_sessions) is not bool:
+            raise TypeError("isolate_policy_sessions must be a boolean")
         if parallel_safety_validator is not None and not isinstance(
             parallel_safety_validator, ParallelCommandSafetyValidator
         ):
@@ -1123,6 +1135,54 @@ class TaskProgramDemoBridge:
                 raise TypeError(
                     "expansion_trace_provider must be a supported expansion factory or None."
                 )
+        if invocation_policies is not None:
+            from embodichain.lab.task_program.integrations.invocation_policy import (
+                BoundInvocationPolicies,
+            )
+
+            if type(invocation_policies) is not BoundInvocationPolicies:
+                raise TypeError(
+                    "invocation_policies must be exactly BoundInvocationPolicies."
+                )
+            if type(program) is not CompiledTaskProgram or not isinstance(
+                runtime, SemanticCallExecutor
+            ):
+                raise TypeError(
+                    "Invocation policies require the standard compiled program and semantic runtime."
+                )
+            invocation_policies.validate_manifest(
+                program, runtime.compiler.integration.manifest
+            )
+        self._invocation_policies = invocation_policies
+        sessions: dict[int, object] = {}
+
+        def episode_port(port: object | None) -> object | None:
+            if port is None:
+                return None
+            factory = getattr(port, "new_task_program_session", None)
+            if factory is None:
+                return port
+            if not callable(factory):
+                raise TypeError("new_task_program_session must be callable")
+            key = id(port)
+            if key not in sessions:
+                session = factory()
+                if session is port:
+                    raise ValueError("a task program session must own fresh port state")
+                sessions[key] = session
+            return sessions[key]
+
+        if isolate_policy_sessions:
+            post_policy_port = episode_port(post_policy_port)
+            validator_port = episode_port(validator_port)
+        if post_policy_port is not None and not isinstance(
+            post_policy_port, SegmentPostPolicyPort
+        ):
+            raise TypeError("post-policy session must implement SegmentPostPolicyPort")
+        if validator_port is not None and not isinstance(
+            validator_port, SegmentValidatorPort
+        ):
+            raise TypeError("validator session must implement SegmentValidatorPort")
         self._program = program
         self._runtime = runtime
         self._sink = command_sink
@@ -1136,6 +1196,7 @@ class TaskProgramDemoBridge:
         self._eligible_mask: torch.Tensor | None = None
         self._program_completed = False
         self._sequential_workflows: dict[int, tuple[SemanticWorkflow, int]] = {}
+        self._execution_trace: list[dict[str, object]] | None = None
 
     @property
     def clock(self) -> EnvironmentStepClock:
@@ -1146,6 +1207,61 @@ class TaskProgramDemoBridge:
     def program_completed(self) -> bool:
         """Return whether every compiled segment completed its full lifecycle."""
         return self._program_completed
+
+    def enable_execution_trace(self) -> None:
+        """Enable B=1 source tracing before the first command is consumed.
+
+        The trace is recorded only after each yielded action resumes following
+        ``env.step``. Untraceable runtime commands fail rather than becoming
+        synthetic source observations. Parallel workflows are unsupported.
+        """
+        if self._clock.step_index != 0 or self._active_segment_id is not None:
+            raise ValueError("execution tracing must be enabled before the first step")
+        if self._execution_trace is not None:
+            raise ValueError("execution tracing is already enabled")
+        if not isinstance(self._runtime, SemanticCallExecutor):
+            raise TypeError(
+                "execution tracing requires the sequential semantic runtime"
+            )
+        if self._runtime.result.env_ids.numel() != 1:
+            raise ValueError("execution tracing currently requires B=1")
+        if any(
+            getattr(segment, "parallel_block", None) is not None
+            for segment in self._program.iter_segments()
+        ):
+            raise ValueError("execution tracing does not support parallel programs")
+        self._execution_trace = []
+
+    @property
+    def execution_trace(self) -> tuple[dict[str, object], ...]:
+        """Return owned per-action references captured after consumed steps."""
+        if self._execution_trace is None:
+            raise ValueError("execution tracing was not enabled")
+        return tuple(dict(item) for item in self._execution_trace)
+
+    def _record_consumed_action(self, action: ControllerAction) -> None:
+        if self._execution_trace is None:
+            return
+        metadata = action.metadata
+        kind = metadata.get("bridge_action_kind")
+        reference = (
+            metadata.get("plan_reference") if kind == "runtime_command" else None
+        )
+        if kind == "runtime_command" and not isinstance(reference, Mapping):
+            raise TaskProgramBridgeError(
+                "a consumed runtime command has no plan reference"
+            )
+        self._execution_trace.append(
+            {
+                "step": self._clock.step_index,
+                "call_index": -1 if reference is None else reference["call_index"],
+                "plan_index": -1 if reference is None else reference["plan_index"],
+                "invocation_id": (
+                    None if reference is None else reference["invocation_id"]
+                ),
+                "kind": kind,
+            }
+        )
 
     @property
     def expansion_records(self) -> tuple[TaskProgramExpansionRecord, ...]:
@@ -1320,6 +1436,22 @@ class TaskProgramDemoBridge:
             metadata = {}
         if action_kind is not None:
             metadata["bridge_action_kind"] = action_kind
+        if (
+            self._execution_trace is not None
+            and metadata.get("bridge_action_kind") == "runtime_command"
+        ):
+            if not isinstance(self._runtime, SemanticCallExecutor):
+                raise TaskProgramBridgeError("runtime command cannot be traced")
+            reference = self._runtime.last_sent_plan_reference
+            if reference is None:
+                raise TaskProgramBridgeError(
+                    "runtime command has no plan waypoint reference"
+                )
+            metadata["plan_reference"] = {
+                "call_index": reference[0],
+                "invocation_id": reference[1],
+                "plan_index": reference[2],
+            }
         metadata.update(
             {
                 "task_program_id": self._program.program_id,
@@ -1344,6 +1476,7 @@ class TaskProgramDemoBridge:
         lifecycle.yielded_action_count += 1
         yield action
         if lifecycle.pending_action is not None:
+            self._record_consumed_action(action)
             self._clock.advance_after_env_step()
             lifecycle.pending_action = None
 
@@ -1392,7 +1525,17 @@ class TaskProgramDemoBridge:
                         if analysis.kind != "sequential_stretch":
                             continue
                         workflow = segment_runtime.compiler.analyze(
-                            analysis.calls, workflow_id=analysis.analysis_id
+                            analysis.calls,
+                            workflow_id=analysis.analysis_id,
+                            **(
+                                {
+                                    "preset_ids": self._invocation_policies._presets_for_analysis(
+                                        analysis
+                                    )
+                                }
+                                if self._invocation_policies is not None
+                                else {}
+                            ),
                         )
                         offset = 0
                         for index in analysis.segment_indices:
@@ -1562,6 +1705,7 @@ class TaskProgramDemoBridge:
         if pending is not None:
             pending = pending.snapshot()
         if pending is not None and last_action_consumed:
+            self._record_consumed_action(pending)
             self._clock.advance_after_env_step()
         lifecycle.pending_action = None
 

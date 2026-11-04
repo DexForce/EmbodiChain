@@ -43,7 +43,7 @@ embodichain simready \
 ```
 
 Select the source preparation strategy in
-``embodichain/gen_sim/simready_pipeline/configs/gen_config.json`` via
+``embodichain/gen_sim/asset_engine/configs/gen_config.json`` via
 ``ingest.source_preparation.mode``. Supported modes are ``blender`` and
 ``trimesh``.
 
@@ -268,7 +268,7 @@ embodichain run-task --gym_config config.yaml \
 The Viser panel supports environment visibility, camera-frustum selection, RGB
 preview, and overlay visibility. For supported object types, programmatic
 configuration, remote access, and performance details, see
-:doc:`../overview/sim/viser_visualization`.
+{doc}`../overview/sim/visualization/viser`.
 
 ### Preview Mode
 

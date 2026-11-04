@@ -546,6 +546,17 @@ def test_motion_policy_forwards_explicit_planning_budgets() -> None:
     assert options.plan_opts is None
 
 
+def test_motion_policy_can_delegate_acceleration_to_selected_backend() -> None:
+    policy = MotionPolicy(strategy="motion_gen", acceleration_limit=None)
+    options = policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 6), control_part="arm"
+    )
+    assert options.acceleration_limit is None
+    assert MotionPolicy(strategy="motion_gen").acceleration_limit == 0.5
+    with pytest.raises(ValueError, match="acceleration_limit"):
+        MotionPolicy(strategy="ik_interp", acceleration_limit=None)
+
+
 @pytest.mark.parametrize("name", ["velocity_limit", "acceleration_limit"])
 @pytest.mark.parametrize("value", [0, -1, True, float("nan"), float("inf"), "0.2"])
 def test_motion_policy_rejects_invalid_planning_budgets(

@@ -11,7 +11,9 @@
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
+| Bare Franka arm selection and explicit tool assembly | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
+| Independent Revo1 hand or shared hand asset names | `extensions/embodichain_robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
@@ -35,6 +37,15 @@ and backward-compatible asset IDs are owned by
 [data assets](../data-assets/data-assets.md). The core
 `embodichain.lab.sim.robots` package exposes only generic dual-arm composition.
 
+EEF models follow the same vendor/model ownership. A standalone hand can be a
+`Robot`, while EEF describes its role when mounted on another robot.
+`BrainCoRevo1` has `left`/`right` variants (right by default), six native active
+joints in `eef`, and four source mimic followers. It declares no serial-chain
+FK/IK or tool TCP. Native identifiers in the model's private `_specs.py` are
+shared with W1; W1's `hand_specs.py` retains installation transforms, assembled
+name mapping and the historical root/end conventions. W1 hand release IDs
+remain adapter versions rather than manufacturer product revisions.
+
 Catalog listing defers robot classes and asset downloads; resolution imports
 one `RobotCfg` subclass and isolates its defaults/overrides. Gym, workspace
 analysis, dual-arm composition, and preview share `embodichain/robot_registry.py`.
@@ -42,6 +53,14 @@ Selectors use exact registered IDs; aliases and `Cfg` suffixes are not accepted.
 An explicit `variant` applies profile defaults before caller overrides, while
 omission preserves existing construction behavior. See
 [catalog contracts](catalogs.md) for entry points, metadata and model profiles.
+
+`FrankaCfg` with `arm_model: panda` supplies the bare original-Panda arm. The
+Robotiq embodiment explicitly adds its tool asset and all linkage followers.
+Its flange mount/TCP must match the source calibration; an
+existing similarly named Franka/FR3 or Panda-Hand configuration is not equivalent.
+Observed aperture mapping does not substitute a full-close actuator command for
+measured linkage positions. See [Real2Sim motion](../data-pipeline/real2sim.md)
+for coupled contact prediction and transfer qualification.
 
 Locomotion presets and pure Torch task contracts share backend-free model
 profiles. For source/contract joint ordering, drive ownership and solver limits,
@@ -107,7 +126,8 @@ declare capabilities. Custom keys, including `hand`, remain valid and are not
 automatically aliased. URDF component names such as `left_hand` and native link
 or joint names belong to the asset namespace and are independent of this rule.
 
-Panda's default `hand` group is now `eef`; Aloha Mini, Tianji Marvin and the
+Bare Franka presets declare only `arm`; their explicit hand embodiments add
+`eef`. Aloha Mini, Tianji Marvin and the
 official dual-UR5 embodiment use `left_eef` / `right_eef` in place of
 `left_hand` / `right_hand`. Callers of those defaults must update named-part
 queries, drive overrides, endpoint bindings and service keys together. Existing
@@ -228,6 +248,7 @@ metadata. Acceleration budgets and missing-speed fallback belong to the
 | Removed legacy imports and lazy canonical robot imports | `tests/sim/robots/test_imports.py` |
 | Bundled robot package discovery/staging | `tests/test_robot_package.py` |
 | Config merge, W1 versions/TCP round-trips, chain DOFs | `tests/sim/objects/test_robot_cfg.py` |
+| Standalone Revo1 variants, native control/mimic contract and mounted reuse | `tests/sim/robots/test_brainco_revo1.py` |
 | W1 V030 component assembly, source FK agreement and configured FEP branches | `tests/sim/robots/test_dexforce_w1_v030.py` |
 | Dual-arm source/assembled frames and properties | `tests/sim/objects/test_dual_arm.py` |
 | Runtime part/joint/frame behavior | `tests/sim/objects/test_robot.py` |

@@ -10,6 +10,7 @@
 | Reward manager + built-in functors | `managers/reward_manager.py`, `managers/rewards.py` |
 | Event manager + built-in functors | `managers/event_manager.py`, `managers/events.py` |
 | Action manager + built-in terms | `managers/action_manager.py`, `managers/actions.py` |
+| RL termination manager + condition functors | `managers/termination_manager.py`, `managers/conditions.py` |
 | Dataset manager + built-in recorders | `managers/dataset_manager.py`, `managers/datasets.py`, `managers/async_datasets.py` |
 | Randomization functors (event sub-type) | `managers/randomization/` (spatial, visual, physics, geometry) |
 
@@ -38,6 +39,7 @@ At init, the manager resolves every `FunctorCfg.func` (string → callable or cl
 | `RewardManager` | `RewardCfg` | `add`, `replace` | `compute(obs, action, info) → (reward, info_dict)` |
 | `EventManager` | `EventCfg` | `startup`, `reset`, `interval`, user-defined | `apply(mode, env_ids)` |
 | `ActionManager` | `ActionTermCfg` | Ordered flat slices | `process_action(action)`, then `apply_action()` |
+| `TerminationManager` | `ConditionCfg` in `RLTaskCfg` | success/failure/truncation groups | `compute(time_out, ignore_terminations=...)` then cached flags/snapshots |
 | `DatasetManager` | `DatasetFunctorCfg` | `save` | `apply(mode, env_ids)` |
 
 ---
@@ -73,6 +75,7 @@ and implement the same call contract; use them for persistent state or buffers.
 |---|---|---|
 | Observation | `env, obs` | Added tensor or modified observations, according to mode |
 | Reward | `env, obs, action, info` | Reward tensor |
+| Condition | `env, **params` | `ConditionResult` with truth, validity and measurements |
 | Event / randomization | `env, env_ids` | Side effects; normally `None` |
 | Dataset | `env, env_ids` | Persistence side effects |
 | Action term | `process_actions(actions)`, then `apply_actions()` | Stores one raw slice, then writes its owned robot resources |
@@ -101,6 +104,15 @@ application, physics, event `interval`, observation, and reward in that order.
 `ControllerAction` bypasses the manager and uses the direct controller boundary;
 the full loop and reset ordering are owned by
 [environment execution](../env-framework/execution.md).
+
+Condition functors receive `env, **params` and return a `ConditionResult` from
+`envs/objectives`. Stateful conditions use `Functor.reset(env_ids)` like other
+manager terms. Built-in conditions bind rigid objects and validate geometric
+parameters in their `Functor` constructors, before reset targets exist; the
+manager has no task-specific condition checks. Metrics retain their schema;
+snapshots do not invoke functors.
+The host's termination and replay rules belong to
+[configured RL execution](../env-framework/execution.md#configured-manipulation-rl-outcomes).
 
 `DatasetManager.apply("save", env_ids)` runs from episode initialization/reset,
 not as a `step(obs, action, done, info)` method. Recorder queues, explicit commit
@@ -132,6 +144,9 @@ focused environment integration case when invocation order changes.
 - Incorrect interval rows: distinguish global and per-row interval counters.
 - Corrupted asynchronous recordings: snapshot owned CPU payloads before rollout
   buffers are cleared; follow the recorder's persistence contract.
+- Source-bound Real2Sim recordings need the synchronous receipt and typed
+  action-trace contract in [Real2Sim motion](../data-pipeline/real2sim.md),
+  not the ordinary reset-time recorder alone.
 
 ### Flat action ownership
 

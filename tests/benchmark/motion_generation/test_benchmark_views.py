@@ -473,7 +473,6 @@ def test_explicit_scenario_mapping_separates_scopes_and_mixed_reports(tmp_path) 
         "motion_planning_time_and_memory",
         "motion_planning_success_and_metrics",
         "motion_planning_leaderboard",
-        "motion_planning_common_leaderboard",
         "motion_planning_workload_summary",
         "motion_planning_measured_difficulty",
         "atomic_skills_time_and_memory",
@@ -501,9 +500,47 @@ def test_explicit_scenario_mapping_separates_scopes_and_mixed_reports(tmp_path) 
         tmp_path / "report.md", SuiteCfg(), result
     ).read_text()
     assert "## Motion Planning" in report and "## Atomic Skills" in report
-    assert report.count("\n| ---") == 9
-    assert "### Common Joint / FullPose comparison" in report
+    assert report.count("\n| ---") == 8
     assert "nominal" in report.lower()
+
+
+def test_motion_leaderboards_include_partial_and_mixed_constraints(tmp_path) -> None:
+    families = ("joint", "pose", "position", "orientation", "mixed")
+    cases = [
+        replace(_case(), case_id=family, case_parameters={"target_type": family})
+        for family in families
+    ]
+    outcomes = [
+        replace(
+            _outcome(timed=family not in {"position", "orientation"}),
+            ordered_waypoints_reached=family != "orientation",
+        )
+        for family in families
+    ]
+    result = aggregate_results(
+        [_record(case, outcome=outcome) for case, outcome in zip(cases, outcomes)],
+        [_metadata("solved")],
+        cases,
+        1,
+        track_scenarios={"neutral": "free_space"},
+    )
+
+    for table, expected_rate in (
+        ("motion_planning_leaderboard", 4 / 5),
+        ("motion_timing_leaderboard", 3 / 5),
+    ):
+        row = result[table][0]
+        assert row["attributed_cases"] == 5
+        assert row["coverage_rate"] == 1.0
+        assert row["overall_success_rate"] == pytest.approx(expected_rate)
+    assert {
+        row["target_type"] for row in result["motion_planning_workload_summary"]
+    } == set(families)
+    assert "motion_planning_common_leaderboard" not in result
+    report = write_markdown_report(
+        tmp_path / "report.md", SuiteCfg(), result
+    ).read_text()
+    assert "Common Joint / FullPose comparison" not in report
 
 
 @pytest.mark.parametrize(

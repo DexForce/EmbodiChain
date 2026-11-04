@@ -202,6 +202,8 @@ def main():
                 "data/*.json",
             ],
             "embodichain_robots": [
+                "README.md",
+                "**/README.md",
                 "_ssik_artifacts/*.py",
                 "_ssik_artifacts/*.json",
                 "_ssik_artifacts/LICENSE.txt",
@@ -213,7 +215,7 @@ def main():
             "embodichain_robots.anybotics.anymal_c": ["profile.json"],
             "embodichain_robots.pollen_robotics.microduck": ["profile.json"],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
-            "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
+            "embodichain.gen_sim.asset_engine.configs": ["*.json"],
             "embodichain_tasks.configs": [
                 "**/*.json",
                 "**/*.yaml",

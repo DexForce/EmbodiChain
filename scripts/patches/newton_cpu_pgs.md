@@ -88,6 +88,6 @@ CPU-only smoke measurements from the isolated dependency copy:
   acceptance.
 
 The immutable source benchmarks in
-`scripts/benchmark/assembly/gear_reference.py` run independently of this
+`scripts/benchmark/assembly/precision.py --backends mujoco_cpu` run independently of this
 patch. Always retain source PGS, source CG and integrated profiles as
 separate evidence; switching to CG must be explicit and measured.

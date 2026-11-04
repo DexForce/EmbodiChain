@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 import torch
@@ -37,6 +37,7 @@ from ..trajectory_ops import build_pose_plan_states
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.lab.sim.motion.planners.utils import PlanResult
 
     from ..policies import MotionPolicy
 
@@ -134,12 +135,43 @@ def hold_inactive_cartesian_rows(
     )
 
 
+def _hold_arrival_stops(
+    positions: torch.Tensor,
+    arrivals: torch.Tensor,
+    lengths: torch.Tensor,
+) -> torch.Tensor:
+    """Encode stops in position-only composite paths as one-tick holds.
+
+    Composition may discard endpoint samples, so terminal declared stops also
+    need a retained pair. Existing timed holds already supply that pair; other
+    rows' zero-time padding does not. All source samples stay in order.
+    """
+    _, count, dofs = positions.shape
+    samples = torch.arange(count, device=positions.device)[None]
+    valid = samples < lengths[:, None]
+    stops = torch.zeros_like(valid, dtype=torch.long)
+    stops.scatter_add_(1, arrivals.clamp_min(0).long(), (arrivals >= 0).long())
+    stationary = (positions[:, 1:] == positions[:, :-1]).all(dim=-1)
+    stationary &= valid[:, 1:]
+    held = torch.zeros_like(valid)
+    held[:, :-1] |= stationary
+    held[:, 1:] |= stationary
+    copies = valid.long() + ((stops > 0) & ~held & valid).long()
+    ends = copies.cumsum(dim=1)
+    output_lengths = ends[:, -1]
+    query = torch.arange(int(output_lengths.max()), device=positions.device)[None]
+    query = torch.minimum(query, output_lengths[:, None] - 1).contiguous()
+    indices = torch.searchsorted(ends.contiguous(), query, right=True)
+    return positions.gather(1, indices[:, :, None].expand(-1, -1, dofs))
+
+
 def resample_planned_trajectory(
     trajectory: torch.Tensor,
     sample_count: int,
     *,
     dt: torch.Tensor | None = None,
     control_dt: float | None = None,
+    arrival_indices: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Put a planner path on a composite action's control-time grid.
 
@@ -154,10 +186,18 @@ def resample_planned_trajectory(
         sample_count: Required number of output samples.
         dt: Optional native arrival intervals with shape ``(B, N)``.
         control_dt: Destination control interval, required together with ``dt``.
+        arrival_indices: Optional ordered target indices ``(B, K)`` to retain
+            exactly on the destination grid. Missing visits use a -1 suffix.
+            Each visit without a stationary neighbor adds one control-period
+            hold, including terminal visits that can become composite interiors.
+            These pairs retain zero velocity targets after position-only assembly.
 
     Returns:
-        A control-grid path with at least ``sample_count`` samples when timing
-        is supplied, otherwise exactly ``sample_count`` distance samples.
+        A float32 control-command path with at least ``sample_count`` samples
+        when timing is supplied, otherwise exactly ``sample_count`` distance
+        samples. Interpolation retains the planner's precision until the final
+        conversion to the existing float32 simulation-command representation;
+        compiled dynamic checks apply to those converted samples.
 
     Raises:
         TypeError: If ``trajectory`` is not a floating-point tensor.
@@ -176,20 +216,35 @@ def resample_planned_trajectory(
     if sample_count < 1:
         raise ValueError("sample_count must be positive.")
     if trajectory.shape[0] == 0:
-        return trajectory.new_empty((0, sample_count, trajectory.shape[2]))
+        return trajectory.new_empty(
+            (0, sample_count, trajectory.shape[2]), dtype=torch.float32
+        )
     if (dt is None) != (control_dt is None):
         raise ValueError("dt and control_dt must be supplied together.")
+    if arrival_indices is not None and dt is None:
+        raise ValueError("Arrival preservation requires explicit trajectory timing.")
     if dt is not None:
         assert control_dt is not None
-        retimed, _, _, _ = retime_to_control_grid(trajectory, dt, control_dt)
+        if arrival_indices is None:
+            retimed, _, _, _ = retime_to_control_grid(trajectory, dt, control_dt)
+        else:
+            from embodichain.compute.trajectory._arrival_timing import (
+                _resample_at_arrivals,
+            )
+
+            grid = _resample_at_arrivals(trajectory, dt, control_dt, arrival_indices)
+            retimed = _hold_arrival_stops(
+                grid["positions"], grid["waypoint_indices"], grid["valid_lengths"]
+            )
+        retimed = retimed.to(torch.float32)
         if retimed.shape[1] >= sample_count:
             return retimed
         padding = retimed[:, -1:].expand(-1, sample_count - retimed.shape[1], -1)
         return torch.cat([retimed, padding], dim=1)
     if trajectory.shape[1] == sample_count:
-        return trajectory
+        return trajectory.to(torch.float32)
     if trajectory.shape[1] == 1:
-        return trajectory.expand(-1, sample_count, -1).clone()
+        return trajectory.expand(-1, sample_count, -1).to(torch.float32).clone()
     resampled = resample_with_distance(
         trajectory,
         sample_count,
@@ -201,7 +256,7 @@ def resample_planned_trajectory(
     resampled = resampled.to(dtype=trajectory.dtype).clone()
     resampled[:, 0] = trajectory[:, 0]
     resampled[:, -1] = trajectory[:, -1]
-    return resampled
+    return resampled.to(torch.float32)
 
 
 def assemble_full_robot_trajectory(
@@ -220,7 +275,7 @@ def assemble_full_robot_trajectory(
         n_waypoints,
     ).clone()
     for joint_ids, trajectory in part_trajectories:
-        full[:, :, list(joint_ids)] = trajectory
+        full[:, :, list(joint_ids)] = trajectory.to(full)
     return full
 
 
@@ -243,18 +298,78 @@ def plan_named_arm_trajectory(
             interpolation_dt=interpolation_dt,
         ),
     )
+    return _named_arm_result(result, n_waypoints, interpolation_dt, control_part)
+
+
+def _named_arm_result(
+    result: PlanResult,
+    n_waypoints: int,
+    interpolation_dt: float | None,
+    control_part: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Retain a named arm's solved timing on the shared execution grid."""
     if not isinstance(result.success, torch.Tensor):
         raise TypeError("Motion planning success must be a torch.Tensor.")
     if result.positions is None:
         raise ValueError("Motion planning result must contain joint positions.")
     if result.dt is None:
         raise ValueError("Motion planning result must contain arrival intervals.")
-    return result.success, resample_planned_trajectory(
-        result.positions,
-        n_waypoints,
-        dt=result.dt,
-        control_dt=interpolation_dt,
+    from embodichain.compute.trajectory._trace import _trajectory_scope
+
+    with _trajectory_scope(control_part=control_part):
+        return result.success, resample_planned_trajectory(
+            result.positions,
+            n_waypoints,
+            dt=result.dt,
+            control_dt=interpolation_dt,
+            arrival_indices=result.waypoint_indices,
+        )
+
+
+def plan_named_arm_trajectories(
+    motion_generator: MotionGenerator,
+    requests: Mapping[str, tuple[torch.Tensor, torch.Tensor, int]],
+    motion_policy: MotionPolicy,
+    interpolation_dt: float | None,
+) -> tuple[dict[str, tuple[torch.Tensor, torch.Tensor]], dict[str, object] | None]:
+    """Plan independent arm requests and retain any packed-policy diagnostics.
+
+    Args:
+        motion_generator: Generator owning the selected planner backend.
+        requests: Part names mapped to start joints, target poses and sample count.
+        motion_policy: Common backend and execution policy.
+        interpolation_dt: Host command period used to preserve solved timing.
+
+    Returns:
+        Per-part success/trajectory pairs and optional shared policy-batch facts.
+        The caller still owns stage ordering and full-task failure propagation.
+    """
+    targets = {
+        part: build_pose_plan_states(poses) for part, (_, poses, _) in requests.items()
+    }
+    options = {
+        part: motion_policy.to_motion_gen_options(
+            start_qpos=start,
+            control_part=part,
+            sample_count=count,
+            interpolation_dt=interpolation_dt,
+        )
+        for part, (start, _, count) in requests.items()
+    }
+    results = motion_generator.generate_multi_part(targets, options)
+    trajectories = {
+        part: _named_arm_result(result, requests[part][2], interpolation_dt, part)
+        for part, result in results.items()
+    }
+    batching = [result.policy_batching for result in results.values()]
+    if any(item != batching[0] for item in batching[1:]):
+        raise ValueError("A grouped planner must report one consistent policy batch.")
+    diagnostics = (
+        None
+        if batching[0] is None
+        else {"control_parts": list(requests), **batching[0]}
     )
+    return trajectories, diagnostics
 
 
 def pad_trajectory_to_length(
@@ -295,8 +410,10 @@ def split_joint_trajectory_at_pose(
     second_sample_count: int,
     dt: torch.Tensor | None = None,
     control_dt: float | None = None,
+    arrival_indices: torch.Tensor | None = None,
+    split_target_index: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Split and resample a joint path at its closest target-pose sample.
+    """Split at a declared target visit, or the closest pose when none is supplied.
 
     The split sample is included at both segment boundaries so a hand-command
     gap can hold the arm at that pose.
@@ -308,6 +425,10 @@ def split_joint_trajectory_at_pose(
         control_part: Controlled robot part used for forward kinematics.
         first_sample_count: Output samples before the hand-command gap.
         second_sample_count: Output samples after the hand-command gap.
+        dt: Optional per-sample time intervals, shape ``(B, N)``.
+        control_dt: Destination command period, required together with ``dt``.
+        arrival_indices: Optional strictly ordered target visits ``(B, K)``.
+        split_target_index: Target column identifying the intended occurrence.
 
     Returns:
         The resampled trajectory segments before and after the split pose.
@@ -350,6 +471,58 @@ def split_joint_trajectory_at_pose(
         progress_error[None],
         torch.full_like(progress_error[None], trajectory.shape[1]),
     ).argmin(dim=1)
+
+    first_arrivals = second_arrivals = None
+    if arrival_indices is not None:
+        if (
+            arrival_indices.ndim != 2
+            or arrival_indices.shape[0] != trajectory.shape[0]
+            or arrival_indices.dtype not in (torch.int32, torch.int64)
+            or arrival_indices.device != trajectory.device
+        ):
+            raise ValueError(
+                "arrival_indices must be integer (B, K) on the path device."
+            )
+        valid = arrival_indices >= 0
+        if bool(
+            ((arrival_indices < -1) | (arrival_indices >= trajectory.shape[1])).any()
+        ) or bool(
+            (
+                valid[:, 1:]
+                & (~valid[:, :-1] | (arrival_indices[:, 1:] <= arrival_indices[:, :-1]))
+            ).any()
+        ):
+            raise ValueError(
+                "arrival_indices must be a strictly ordered prefix followed by -1."
+            )
+        if dt is None or control_dt is None:
+            raise ValueError("Arrival-aware splitting requires explicit timing.")
+        if (
+            split_target_index is None
+            or not 0 <= split_target_index < arrival_indices.shape[1]
+        ):
+            raise ValueError(
+                "An arrival-aware split requires a valid split_target_index."
+            )
+        selected = arrival_indices[:, split_target_index]
+        # Failed rows still compile diagnostic placeholders; their planning
+        # failure mask is retained by the caller and prevents physical execution.
+        split_indices = torch.where(selected >= 0, selected, split_indices)
+        first_arrivals = arrival_indices[:, : split_target_index + 1]
+        later = arrival_indices[:, split_target_index + 1 :]
+        second_arrivals = torch.where(later >= 0, later - split_indices[:, None], -1)
+
+    from embodichain.compute.trajectory._trace import _record_trajectory
+
+    _record_trajectory(
+        "action_split",
+        control_part=control_part,
+        split_target_index=split_target_index,
+        source_arrival_indices=arrival_indices,
+        split_indices=split_indices,
+        first_arrival_indices=first_arrivals,
+        second_arrival_indices=second_arrivals,
+    )
 
     sample_indices = torch.arange(trajectory.shape[1], device=trajectory.device)
     first_indices = torch.minimum(sample_indices[None], split_indices[:, None])
@@ -401,12 +574,14 @@ def split_joint_trajectory_at_pose(
             first_sample_count,
             dt=first_dt,
             control_dt=control_dt,
+            arrival_indices=first_arrivals,
         ),
         resample_planned_trajectory(
             second,
             second_sample_count,
             dt=second_dt,
             control_dt=control_dt,
+            arrival_indices=second_arrivals,
         ),
     )
 
@@ -416,6 +591,7 @@ __all__ = [
     "assemble_full_robot_trajectory",
     "pad_trajectory_to_length",
     "plan_named_arm_trajectory",
+    "plan_named_arm_trajectories",
     "resample_planned_trajectory",
     "require_shared_task_state_key",
     "repeat_qpos",

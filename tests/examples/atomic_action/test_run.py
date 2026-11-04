@@ -44,7 +44,10 @@ from examples.sim.atomic_action.support import (
 )
 from embodichain.lab.sim.atomic_actions import TimedTrajectory
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain_robots.franka import panda as franka_panda
+from embodichain_benchmarks.motion_generation import _atomic_fixtures
+from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+    _create_franka_native_hand_cfg,
+)
 from embodichain.utils.string import resolve_matching_names
 
 from examples.sim.atomic_action import scenario, tcp_presets
@@ -68,7 +71,7 @@ NATIVE_FRANKA_FINGER_LINKS = ("fr3_leftfinger", "fr3_rightfinger")
 @pytest.fixture
 def sample_franka_cfg(monkeypatch: pytest.MonkeyPatch) -> RobotCfg:
     # Configuration tests do not need to download or load the URDF assets.
-    monkeypatch.setattr(franka_panda, "get_data_path", lambda path: path)
+    monkeypatch.setattr(_atomic_fixtures, "get_data_path", lambda path: path)
     return create_franka_panda_robot_cfg()
 
 
@@ -110,7 +113,7 @@ def test_franka_sample_contact_override_matches_replacement_pgi_fingers(
 def test_franka_sample_keeps_contact_attributes_and_native_preset_independent(
     sample_franka_cfg: RobotCfg,
 ) -> None:
-    native_cfg = franka_panda.FrankaPandaCfg.from_dict({})
+    native_cfg = _create_franka_native_hand_cfg()
     native_contact = native_cfg.link_attrs["newton_gripper_contacts"]
     sample_contact = sample_franka_cfg.link_attrs["newton_gripper_contacts"]
     assert sample_contact.attrs.to_dict() == native_contact.attrs.to_dict()
@@ -118,7 +121,7 @@ def test_franka_sample_keeps_contact_attributes_and_native_preset_independent(
     # A later sample construction and mutation must not change native defaults.
     create_franka_panda_robot_cfg()
     sample_contact.link_names_expr.clear()
-    fresh_native = franka_panda.FrankaPandaCfg.from_dict({})
+    fresh_native = _create_franka_native_hand_cfg()
     for cfg in (native_cfg, fresh_native):
         contact = cfg.link_attrs["newton_gripper_contacts"]
         _, matched_links = resolve_matching_names(
@@ -196,7 +199,7 @@ def test_franka_tcp_calibration_does_not_change_other_fixtures(
         (0.0, 0.0, 1.0, 0.19),
         (0.0, 0.0, 0.0, 1.0),
     )
-    monkeypatch.setattr(franka_panda, "get_data_path", lambda path: path)
+    monkeypatch.setattr(_atomic_fixtures, "get_data_path", lambda path: path)
     monkeypatch.setattr(tcp_presets, "FRANKA_PGI_TCP", calibrated)
     cfg = create_tutorial_robot_cfg("franka", tcp_point="grasp")
     assert torch.equal(
@@ -217,7 +220,7 @@ def test_franka_tcp_calibration_does_not_change_other_fixtures(
 def test_franka_explicit_tcp_z_is_applied_instead_of_ignored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(franka_panda, "get_data_path", lambda path: path)
+    monkeypatch.setattr(_atomic_fixtures, "get_data_path", lambda path: path)
     original = tcp_presets.FRANKA_PGI_TCP
     cfg = create_franka_panda_robot_cfg(tcp_z=0.19)
     assert torch.as_tensor(cfg.solver_cfg["arm"].tcp)[2, 3] == pytest.approx(0.19)
@@ -233,7 +236,7 @@ def test_dual_franka_uses_fixture_pose_with_mounting_rotation(
         (0.0, 0.0, 1.0, 0.19),
         (0.0, 0.0, 0.0, 1.0),
     )
-    monkeypatch.setattr(franka_panda, "get_data_path", lambda path: path)
+    monkeypatch.setattr(_atomic_fixtures, "get_data_path", lambda path: path)
     monkeypatch.setattr(tcp_presets, "FRANKA_PGI_HANDOVER_TCP", calibrated)
     cfg = create_dual_tutorial_robot_cfg(
         robot_type="franka", uid="calibration_test", urdf_name="calibration_test"
@@ -253,7 +256,7 @@ def test_legacy_dual_pgi_z_override_preserves_fixture_rotation(
         (0.0, 0.0, 1.0, 0.19),
         (0.0, 0.0, 0.0, 1.0),
     )
-    monkeypatch.setattr(franka_panda, "get_data_path", lambda path: path)
+    monkeypatch.setattr(_atomic_fixtures, "get_data_path", lambda path: path)
     monkeypatch.setattr(tcp_presets, "FRANKA_PGI_HANDOVER_TCP", calibrated)
     cfg = create_dual_tutorial_robot_cfg(
         robot_type="franka",
@@ -475,10 +478,14 @@ def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry() -> No
     from examples.sim.atomic_action import handover
     from examples.sim.atomic_action.support import (
         create_parallel_jaw_grasp_pose_generator,
+        create_tutorial_robot_cfg,
     )
 
     generator = create_parallel_jaw_grasp_pose_generator(
-        n_sample=32, force_refresh=False, gripper_model=handover.HANDOVER_GRIPPER_MODEL
+        n_sample=32,
+        force_refresh=False,
+        robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur10")),
+        gripper_model=handover.HANDOVER_GRIPPER_MODEL,
     )
     assert generator.gripper_model.model_id == "robotiq_2f_140"
     assert generator.gripper_model.max_opening_width == 0.14
@@ -486,9 +493,15 @@ def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry() -> No
     geometry.max_opening_width = 0.12
     assert generator.gripper_model.max_opening_width == 0.14
     assert handover.HANDOVER_GRIPPER_MODEL.max_opening_width == 0.14
+    collision_geometry = generator.collision_geometry
+    original_points = collision_geometry.points.clone()
+    collision_geometry.points.add_(1.0)
+    assert torch.equal(generator.collision_geometry.points, original_points)
     assert (
         create_parallel_jaw_grasp_pose_generator(
-            n_sample=32, force_refresh=False
+            n_sample=32,
+            force_refresh=False,
+            robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur5")),
         ).gripper_model.model_id
         == "dh_pgi_140_80"
     )

@@ -56,8 +56,7 @@ requires seating through the plate and lateral alignment, not just falling the
 initial spawn gap. Source gear PGS remains unsupported by MuJoCo Warp. Select `--solver cg`
 explicitly for the measured Warp comparison profile. To retain the source PGS,
 select `--use-mujoco-cpu --solver pgs` and apply the separate optional Newton
-CPU patch described below. The executor and solver choice remain in each trace. See [VISUAL_VALIDATION.md](VISUAL_VALIDATION.md)
-for actual measured cases and qualification limits.
+CPU patch described below. The executor and solver choice remain in each trace. Generated traces report the selected solver and measured outcome.
 
 For the native DexSim rendering window, use a desktop display and the patched
 SDK runtime described below. The preview uses Hybrid rendering, 16 samples per
@@ -137,67 +136,14 @@ Constrained probes disable the global ground. Passive probes author the source
 floor's friction and contact parameters through `ground_plane_attrs`; this
 avoids measuring a different floor under an otherwise identical assembly.
 
-The pinned historical environment is reproducible from
+The pinned historical reference environment is described in
 [`reference-requirements.txt`](../../../scripts/benchmark/assembly/reference-requirements.txt).
-It is independent of the installed EmbodiChain runtime; current-runtime
-measurements record their actual versions. See [IMPLEMENTATION.md](IMPLEMENTATION.md)
-for measured evidence and outstanding qualification limits.
+It is independent of the installed EmbodiChain runtime; each run records its
+actual versions. Generated measurements and recordings belong in `outputs/`.
+These examples do not establish paper-level training or precision qualification.
 
-## Official many-pegs scene and hinged gears
-
-`many_pegs` uses the pinned public sampler/build/grid calls. Its default is the
-official 25 primitive assemblies, seed 0 and 0.3 m grid spacing: 50 rigid bodies
-with 1050 body collision pieces plus one host-owned floor. This is one physical
-scene with 25 cells. It is separate from heterogeneous per-arena RL replication.
+For heterogeneous cells in one scene:
 
 ```bash
-embodichain run-example sim/assembly/many_pegs --native-window --native-record --timestep .00025 --playback-speed .05 --output outputs/many_pegs
-embodichain run-example sim/assembly/many_pegs --count 25 --clearance .0002 --max-error .00002 --contact-capacity 16384 --timestep .00025 --native-window --native-record --output outputs/many_pegs_200um
-embodichain run-example sim/assembly/visual_demo --config spur_pair --solver cg --duration 1.5 --native-window --native-record --playback-speed .3 --output outputs/gears_warp_cg
-embodichain run-example sim/assembly/visual_demo --config spur_pair --solver pgs --use-mujoco-cpu --duration 1.5 --native-window --native-record --playback-speed .3 --output outputs/gears_cpu_pgs
+embodichain run-example sim/assembly/many_pegs --native-window --output outputs/many_pegs
 ```
-
-The CPU PGS command requires the optional
-[`newton_cpu_pgs.patch`](../../../scripts/patches/newton_cpu_pgs.md) in addition
-to the DexSim patches. It retains PGS, fixes CPU contact-property staging and
-avoids a stale CPU midphase BVH. It does not add GPU PGS support. Original
-dependency packages are not modified automatically. Both gear profiles retain
-real unlimited hinges and apply torque only; the follower has no prescribed
-angle or velocity. Source URDF passive damping/friction are retained separately
-from PD gains. Native moving-link visuals use body-local OBJ/MTL normals.
-
-`--camera-eye X Y Z` and `--camera-target X Y Z` override both the native window
-and its matching recording camera. Default framing fits the grid or gear pair.
-Manifests passed with `--config path/to/asset.json` load their fixed geometry
-without generation. Curve accuracy overrides are preparation-only, and saved
-assets record the original sampled configuration and actual curved shape specs.
-
-A successful default grid does not establish micron-scale precision. The
-20/50/100/200 µm precision profiles use chord error 0.1 times clearance and keep
-all convex pieces. CPU and USD validation pass, but the current native stack
-rejects a genuinely three-dimensional thin convex piece at 20 µm and has
-nonfinite states in some refined profiles. These are recorded failures, not
-replaced by coarser curves, removed pieces or enlarged clearances. Native
-health unavailable through the Scene facade remains explicitly unverified.
-
-The source/native gear benchmark commands are:
-
-```bash
-python -m scripts.benchmark.assembly.gear_reference --manifests outputs/gear_assets/*.json
-python -m scripts.benchmark.assembly.gear_native --manifests outputs/gear_assets/*.json --profiles cpu_pgs warp_cg --output outputs/gear_alignment
-```
-
-The native benchmark confines private solver diagnostics to the experiment
-harness and records warnings, overflow, runtime resets, actual model parameters,
-static contact boundaries and full trajectories. Its diagnostic pass is kept
-separate from the public Scene facade qualification. Timing with per-step
-diagnostics or rendering is not a steady-state throughput measurement.
-
-Solver calibration accepts `--solver-tolerance` and `--multiccd` /
-`--no-multiccd`; omitted options preserve backend defaults. The benchmark
-records requested and effective settings because Warp clamps small tolerances.
-Independent Warp references additionally declare
-`--warp-reference-initialization cpu_compiled|warp_recomputed`. The latter
-executes public `mujoco_warp.set_const_0` before the initial forward, matching
-Newton's GPU-derived constant initialization. Both protocols remain separate
-results; CPU source constants are not silently overwritten to obtain a pass.

@@ -37,7 +37,7 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -61,11 +61,18 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
     _named_rigid_objects,
 )
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult, PlanState
+from .payload import (
+    CuroboQuerySnapshot,
+    _PAYLOAD_LINK,
+    _attachment_models,
+    _query_robot_config,
+)
 
 if TYPE_CHECKING:
     from typing import Any
 
     from embodichain.lab.sim.objects import RigidObject
+    from embodichain.lab.sim.scene.collision_sources import CollisionObjectSnapshot
 
 __all__ = [
     "CuroboAutoGenCfg",
@@ -152,11 +159,15 @@ class CuroboWorldCfg:
     scene-YAML path.
     """
 
-    rigid_objects: list[RigidObject] | Mapping[str, RigidObject] | None = None
-    """Live objects to export into the auto-generated collision scene.
+    rigid_objects: (
+        list[RigidObject] | Mapping[str, RigidObject | CollisionObjectSnapshot] | None
+    ) = None
+    """Live objects or explicit snapshots defining the collision scene.
 
     The adapter reads :meth:`RigidObject.get_collision_shapes`, so planning uses
-    the physical geometry seen by DexSim rather than combined visual meshes.
+    supplied shape descriptors rather than combined visual meshes. Live rigid
+    objects supply their runtime geometry; explicit snapshots retain their
+    input provenance and may be conservative component envelopes.
     A mapping is the registry-backed form: each mapping key is the authoritative
     obstacle ID even when it differs from :attr:`RigidObject.uid`. The list form
     derives IDs from ``uid`` (or ``obstacle_<index>`` when absent). Poses are
@@ -514,6 +525,15 @@ class CuroboPlanOptions(PlanOptions):
     max_acceleration: float | list[float] | None = None
     """Per-plan joint acceleration budget, intersected by the motion facade."""
 
+    waypoint_modalities: list[str] | None = None
+    """Optional per-waypoint joint/position/orientation/pose semantics.
+
+    Omitted values retain full-pose Cartesian targets. Partial Cartesian goals
+    change terminal costs and convergence tests only; they impose no additional
+    path constraint. Position-only targets require the cuRobo tool and TCP
+    origins to coincide.
+    """
+
 
 # =============================================================================
 # Pure conversion / validation helpers (no cuRobo import required)
@@ -777,6 +797,7 @@ def _require_curobo(log_level: str = "error") -> "Any":
         collision_mod = importlib.import_module("curobo.collision_checking")
         scene_mod = importlib.import_module("curobo.scene")
         types_mod = importlib.import_module("curobo.types")
+        criteria_mod = importlib.import_module("curobo._src.cost.tool_pose_criteria")
     except ModuleNotFoundError as exc:
         raise ImportError(
             "cuRobo V2 is required for the 'curobo' planner but was not found. "
@@ -803,6 +824,7 @@ def _require_curobo(log_level: str = "error") -> "Any":
         Pose=types_mod.Pose,
         GoalToolPose=types_mod.GoalToolPose,
         DeviceCfg=types_mod.DeviceCfg,
+        ToolPoseCriteria=criteria_mod.ToolPoseCriteria,
         Scene=scene_mod.Scene,
     )
 
@@ -879,6 +901,8 @@ class CuroboPlanner(BasePlanner):
 
     Args:
         cfg: Configuration for the cuRobo planner.
+        query_snapshot: Optional owned environment-batched observation for a fresh static-world
+            query. Its frame applies to world snapshots, goals and payload.
 
     Raises:
         ImportError: If cuRobo V2 is not installed.
@@ -887,6 +911,8 @@ class CuroboPlanner(BasePlanner):
     """
 
     supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
+    supports_heterogeneous_waypoints = True
+    """Sequential segments retain their individual pose or joint backend."""
     supports_collision_world_updates = True
     supports_joint_trajectory_validation = True
 
@@ -936,6 +962,12 @@ class CuroboPlanner(BasePlanner):
         Returns:
             A boolean ``(B, T)`` mask on the trajectory device.
         """
+        snapshot = getattr(self, "_query_snapshot", None)
+        if snapshot is not None and snapshot.payload is not None:
+            raise NotImplementedError(
+                "Payload snapshots require untouched planner samples; arbitrary "
+                "trajectory validation has no attached checker."
+            )
         if (
             not isinstance(trajectory, torch.Tensor)
             or not trajectory.is_floating_point()
@@ -945,6 +977,7 @@ class CuroboPlanner(BasePlanner):
         ):
             raise ValueError("trajectory must be finite floating shape (B, T, D).")
         batch_size, horizon, dof = trajectory.shape
+        self._validate_query_backend(control_part, batch_size)
         backend = next(
             (
                 cached
@@ -989,7 +1022,7 @@ class CuroboPlanner(BasePlanner):
 
         if backend.collision_checker is None:
             checker_cfg = self._bindings.RobotCollisionCheckerCfg.load_from_config(
-                robot_config=self._load_runtime_robot_config(
+                robot_config=self._query_runtime_robot_config(
                     backend.profile.robot_config_path
                 ),
                 scene_collision_checker=backend.planner.scene_collision_checker,
@@ -1044,7 +1077,34 @@ class CuroboPlanner(BasePlanner):
                 samples.append(valid[:, 0].to(torch.bool))
         return torch.stack(samples, dim=1).to(trajectory.device)
 
-    def __init__(self, cfg: CuroboPlannerCfg) -> None:
+    def __init__(
+        self,
+        cfg: CuroboPlannerCfg,
+        *,
+        query_snapshot: CuroboQuerySnapshot | None = None,
+    ) -> None:
+        if (
+            query_snapshot is not None
+            and type(query_snapshot) is not CuroboQuerySnapshot
+        ):
+            raise TypeError("query_snapshot must be CuroboQuerySnapshot or None.")
+        self._query_snapshot = (
+            None if query_snapshot is None else replace(query_snapshot)
+        )
+        self._query_control_part: str | None = None
+        self._query_closed = False
+        self._payload_managers: dict[int, list[Any]] = {}
+        if query_snapshot is not None:
+            self._validate_query_cfg(cfg)
+            if (
+                query_snapshot.payload is not None
+                and query_snapshot.payload.object_id in (cfg.world.rigid_objects or {})
+            ):
+                raise ValueError(
+                    "Exclude the attached payload from the world snapshot."
+                )
+            self.supports_collision_world_updates = False
+            self.supports_joint_trajectory_validation = query_snapshot.payload is None
         super().__init__(cfg)
         self.cfg: CuroboPlannerCfg = cfg
         self._configured_max_velocity = cfg.max_velocity
@@ -1349,6 +1409,7 @@ class CuroboPlanner(BasePlanner):
         planning_mode: MoveType = MoveType.EEF_MOVE,
     ) -> "_CuroboBackend":
         """Return a cached in-process backend for one goal-buffer shape."""
+        self._validate_query_backend(control_part, batch_size)
         multi_env = bool(self.cfg.world.multi_env)
         key = (control_part, int(batch_size), multi_env, planning_mode)
         limits_key = self._robot_yaml_cache_key(
@@ -1358,8 +1419,20 @@ class CuroboPlanner(BasePlanner):
         if cached is not None:
             if cached.motion_limits_key == limits_key:
                 return cached
-            self._close_planner(cached.planner)
-            del self._backend_cache[key]
+            if getattr(self, "_query_snapshot", None) is not None:
+                detach_error = self._detach_payload(cached)
+                try:
+                    self._close_planner(cached.planner)
+                except Exception as error:
+                    if detach_error is None:
+                        detach_error = error
+                finally:
+                    del self._backend_cache[key]
+                if detach_error is not None:
+                    raise detach_error
+            else:
+                self._close_planner(cached.planner)
+                del self._backend_cache[key]
 
         profile = self._materialize_profile(control_part)
         sim_joint_names = self._resolve_sim_joint_names(control_part)
@@ -1448,6 +1521,14 @@ class CuroboPlanner(BasePlanner):
                         f"cuRobo capture coordinator release failed: {exc}"
                     )
 
+        try:
+            self._attach_payload(backend)
+        except BaseException:
+            try:
+                self._close_planner(backend.planner)
+            except Exception as error:
+                logger.log_warning(f"cuRobo query cleanup failed: {error}")
+            raise
         backend.motion_limits_key = limits_key
         self._backend_cache[key] = backend
         logger.log_info(
@@ -1469,7 +1550,7 @@ class CuroboPlanner(BasePlanner):
         planning_mode: MoveType,
     ) -> "_CuroboBackend":
         """Construct and validate one cuRobo planner on the selected CUDA device."""
-        robot_config = self._load_runtime_robot_config(profile.robot_config_path)
+        robot_config = self._query_runtime_robot_config(profile.robot_config_path)
         with torch.cuda.device(self._curobo_device):
             planner_cfg = self._bindings.MotionPlannerCfg.create(
                 robot=robot_config,
@@ -1514,6 +1595,137 @@ class CuroboPlanner(BasePlanner):
             use_cuda_graph=use_cuda_graph,
             planning_mode=planning_mode,
         )
+
+    @staticmethod
+    def _validate_query_cfg(cfg: CuroboPlannerCfg) -> None:
+        if (
+            cfg.use_cuda_graph
+            or not cfg.preserve_plan_samples
+            or cfg.world.multi_env
+            or cfg.world.dynamic_obstacle_names
+        ):
+            raise ValueError(
+                "Query snapshots require CUDA graphs off, preserved planner samples "
+                "and a single static collision world."
+            )
+        if cfg.world.rigid_objects:
+            from embodichain.lab.sim.scene.collision_sources import (
+                CollisionObjectSnapshot,
+            )
+
+            if not isinstance(cfg.world.rigid_objects, Mapping) or any(
+                type(source) is not CollisionObjectSnapshot
+                for source in cfg.world.rigid_objects.values()
+            ):
+                raise ValueError(
+                    "Observed queries require explicit CollisionObjectSnapshot mappings; "
+                    "live pose getters are not consumed."
+                )
+
+    def _validate_query_backend(self, control_part: str, batch_size: int) -> None:
+        snapshot = getattr(self, "_query_snapshot", None)
+        if snapshot is None:
+            return
+        if getattr(self, "_query_closed", False):
+            raise RuntimeError("The observed cuRobo query lifetime is closed.")
+        self._validate_query_cfg(self.cfg)
+        if batch_size != snapshot.full_qpos.shape[0]:
+            raise ValueError("Observed query batch must match its snapshot.")
+        if batch_size > 1 and batch_size != self.robot.num_instances:
+            raise ValueError("Observed batch must match robot.num_instances.")
+        selected = getattr(self, "_query_control_part", None)
+        if selected is not None and selected != control_part:
+            raise ValueError("A query snapshot belongs to one control part.")
+        if (
+            snapshot.payload is not None
+            and snapshot.payload.control_part != control_part
+        ):
+            raise ValueError("Payload control_part does not match the query.")
+        self._query_control_part = control_part
+
+    def _query_runtime_robot_config(self, path: str) -> dict:
+        config = self._load_runtime_robot_config(path)
+        snapshot = getattr(self, "_query_snapshot", None)
+        return (
+            config
+            if snapshot is None
+            else _query_robot_config(config, snapshot, self.robot.joint_names)
+        )
+
+    def _attach_payload(self, backend: _CuroboBackend) -> None:
+        snapshot = getattr(self, "_query_snapshot", None)
+        if snapshot is None or snapshot.payload is None:
+            return
+        from curobo._src.collision.attachment_manager import AttachmentManager
+
+        payload = snapshot.payload
+        object_pose = payload.object_pose.to(
+            device=self._curobo_device, dtype=torch.float32
+        )
+        base_pose = self._sim_world_to_curobo_base_pose(object_pose, backend)
+        position, quaternion = _matrix_to_position_quaternion(base_pose)
+        native_pose = self._bindings.Pose(position=position, quaternion=quaternion)
+        ids = [self.robot.joint_names.index(name) for name in backend.sim_joint_names]
+        state = self._to_curobo_joint_state(snapshot.full_qpos[:, ids], backend)
+        spheres = payload.spheres.to(
+            device=self._curobo_device, dtype=torch.float32
+        ).clone()
+        managers: list[Any] = []
+        self._payload_managers[id(backend)] = managers
+        try:
+            models = _attachment_models(backend.planner)
+            for model in models:
+                managers.append(
+                    AttachmentManager(
+                        model,
+                        device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
+                    )
+                )
+            for model, manager in zip(models, managers, strict=True):
+                local_spheres = spheres
+                pose_offset = native_pose
+                if len(spheres) == 1:
+                    # cuRobo 0.8 squeezes a singleton point into shape (3,).
+                    # Supply link-local spheres to its no-transform update path;
+                    # keep the radius and the reserved link's capacity unchanged.
+                    model_state = self._bindings.JointState.from_position(
+                        state.position, joint_names=model.joint_names
+                    )
+                    fk = model.compute_kinematics(model_state)
+                    if fk.tool_poses is None:
+                        raise ValueError("Payload attachment requires tool poses.")
+                    tool_pose = fk.tool_poses.get_link_pose(model.tool_frames[0])
+                    offset = tool_pose.inverse().multiply(native_pose)
+                    centers = offset.transform_points(spheres[:, :3].contiguous())
+                    local_spheres = torch.cat(
+                        (centers.reshape(1, 3), spheres[:, 3:]), dim=-1
+                    )
+                    pose_offset = None
+                manager.update(
+                    local_spheres,
+                    state,
+                    link_name=_PAYLOAD_LINK,
+                    world_objects_pose_offset=pose_offset,
+                )
+        except BaseException:
+            error = self._detach_payload(backend)
+            if error is not None:
+                logger.log_warning(f"cuRobo attachment cleanup failed: {error}")
+            raise
+
+    def _detach_payload_id(self, identity: int) -> Exception | None:
+        first_error: Exception | None = None
+        managers = getattr(self, "_payload_managers", {}).pop(identity, ())
+        for manager in managers:
+            try:
+                manager.detach(link_name=_PAYLOAD_LINK)
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        return first_error
+
+    def _detach_payload(self, backend: _CuroboBackend) -> Exception | None:
+        return self._detach_payload_id(id(backend))
 
     @staticmethod
     def _load_runtime_robot_config(robot_config_path: str) -> dict:
@@ -2108,6 +2320,21 @@ class CuroboPlanner(BasePlanner):
         alive = torch.ones(B, dtype=torch.bool, device=self._curobo_device)
         current = start.clone()
 
+        modalities = options.waypoint_modalities
+        if modalities is not None:
+            if len(modalities) != len(target_states):
+                raise ValueError("waypoint_modalities must match the target count.")
+            for target, modality in zip(target_states, modalities):
+                expected = (
+                    {"joint"}
+                    if target.move_type == MoveType.JOINT_MOVE
+                    else {"position", "orientation", "pose"}
+                )
+                if modality not in expected:
+                    raise ValueError(
+                        "Waypoint modality is incompatible with its move type."
+                    )
+
         for seg_idx, target in enumerate(target_states):
             self._validate_segment_batch(target, B, seg_idx)
             backend = backends[target.move_type]
@@ -2118,9 +2345,22 @@ class CuroboPlanner(BasePlanner):
                         f"Segment {seg_idx} EEF_MOVE target missing xpos.",
                         ValueError,
                     )
-                goal = self._to_curobo_pose_goal(
-                    target.xpos, backend, sim_base_pose_inv
-                )
+                modality = "pose" if modalities is None else modalities[seg_idx]
+                self._set_pose_modality(backend, modality)
+                # Never pass an unused component into frame conversion or the
+                # native optimizer, even when its terminal cost is disabled.
+                xpos = target.xpos
+                if modality != "pose":
+                    xpos = (
+                        torch.eye(4, device=xpos.device, dtype=xpos.dtype)
+                        .expand_as(xpos)
+                        .clone()
+                    )
+                    if modality == "position":
+                        xpos[:, :3, 3] = target.xpos[:, :3, 3]
+                    else:
+                        xpos[:, :3, :3] = target.xpos[:, :3, :3]
+                goal = self._to_curobo_pose_goal(xpos, backend, sim_base_pose_inv)
                 start_time = time.time()
                 capture_mode = (
                     _torch_cuda_graph_capture_mode(
@@ -2586,6 +2826,29 @@ class CuroboPlanner(BasePlanner):
             position, joint_names=curobo_names
         )
 
+    def _set_pose_modality(self, backend: "_CuroboBackend", modality: str) -> None:
+        """Update native terminal pose costs, including reset after partial goals."""
+        if modality == "position":
+            transform = self._tool_to_frame_matrix(backend)
+            if transform is not None and bool((transform[:3, 3].abs() > 1.0e-8).any()):
+                raise ValueError(
+                    "cuRobo position-only goals require coincident tool/TCP origins."
+                )
+        if getattr(backend, "pose_modality", "pose") == modality:
+            return
+        weights = {
+            "position": [1.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+            "orientation": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            "pose": [1.0] * 6,
+        }[modality]
+        criteria = self._bindings.ToolPoseCriteria(
+            terminal_pose_axes_weight_factor=weights,
+            non_terminal_pose_axes_weight_factor=[0.0] * 6,
+            device_cfg=self._bindings.DeviceCfg(device=str(self._curobo_device)),
+        )
+        backend.planner.update_tool_pose_criteria({backend.tool_frame: criteria})
+        backend.pose_modality = modality
+
     def _to_curobo_pose_goal(
         self,
         xpos: torch.Tensor,
@@ -2679,6 +2942,11 @@ class CuroboPlanner(BasePlanner):
                 ValueError,
             )
         batch_size = world_pose.shape[0]
+        snapshot = getattr(self, "_query_snapshot", None)
+        if snapshot is not None:
+            if batch_size != snapshot.full_qpos.shape[0]:
+                raise ValueError("Observed query batch must match its snapshot.")
+            return snapshot.world_to_base.to(world_pose) @ world_pose
         if sim_base_pose_inv is None:
             sim_base_pose = self._get_sim_base_pose(backend, batch_size)
             sim_base_pose_inv = pose_inv(sim_base_pose)
@@ -2720,6 +2988,16 @@ class CuroboPlanner(BasePlanner):
         self, backend: "_CuroboBackend", batch_size: int
     ) -> torch.Tensor:
         """Return ``(B, 4, 4)`` world poses of a control part's solver base."""
+        snapshot = getattr(self, "_query_snapshot", None)
+        if snapshot is not None:
+            if batch_size != snapshot.full_qpos.shape[0]:
+                raise ValueError("Observed query batch must match its snapshot.")
+            # Derive the legacy intermediate frame from the explicit observation.
+            # Final goal/payload projection uses world_to_base directly, and no
+            # live robot pose is reread during this query.
+            fixed = self._sim_base_to_curobo_matrix(backend)[None]
+            world_to_base = snapshot.world_to_base.to(fixed)
+            return pose_inv(pose_inv(fixed) @ world_to_base)
         control_part = backend.control_part
         root_link_name = backend.profile.sim_base_link_name
         if root_link_name is None:
@@ -2773,6 +3051,10 @@ class CuroboPlanner(BasePlanner):
         """
         if poses is None:
             return
+        if getattr(self, "_query_snapshot", None) is not None and poses:
+            raise NotImplementedError(
+                "Observed cuRobo collision worlds are immutable; create a fresh query."
+            )
         _validate_dynamic_obstacles(poses, list(self.cfg.world.dynamic_obstacle_names))
         backends = (
             [backend] if backend is not None else list(self._backend_cache.values())
@@ -2910,6 +3192,25 @@ class CuroboPlanner(BasePlanner):
 
     def close(self) -> None:
         """Destroy every cached in-process cuRobo planner."""
+        if getattr(self, "_query_snapshot", None) is not None:
+            if getattr(self, "_query_closed", False):
+                return
+            self._query_closed = True
+            first_error: Exception | None = None
+            for identity in tuple(getattr(self, "_payload_managers", {})):
+                error = self._detach_payload_id(identity)
+                if first_error is None:
+                    first_error = error
+            for backend in list(getattr(self, "_backend_cache", {}).values()):
+                try:
+                    self._close_planner(backend.planner)
+                except Exception as error:
+                    if first_error is None:
+                        first_error = error
+            getattr(self, "_backend_cache", {}).clear()
+            if first_error is not None:
+                raise first_error
+            return
         for backend in list(self._backend_cache.values()):
             self._close_planner(backend.planner)
         self._backend_cache.clear()

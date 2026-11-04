@@ -818,7 +818,7 @@
       ],
       "documentation": [
         {
-          "docname": "overview/sim/viser_visualization",
+          "docname": "overview/sim/visualization/viser",
           "label": "Browser visualization guide"
         }
       ],
@@ -2001,7 +2001,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 17,
@@ -2010,7 +2010,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
+          "docname": "features/generative_sim/asset_engine",
           "label": "SimReady pipeline documentation"
         }
       ]
@@ -2783,7 +2783,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/parser/base.py",
+          "path": "embodichain/gen_sim/asset_engine/parser/base.py",
           "symbol": "ParserManager",
           "start_line": 46,
           "end_line": 46,
@@ -2792,7 +2792,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
+          "docname": "features/generative_sim/asset_engine",
           "label": "SimReady pipeline documentation"
         }
       ]
@@ -3368,7 +3368,7 @@
           "label": "Official model library"
         },
         {
-          "docname": "features/neural_dynamics",
+          "docname": "features/neural_dynamics/nerd",
           "label": "NeRD data and training workflow"
         }
       ]
@@ -3397,7 +3397,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/neural_dynamics",
+          "docname": "features/neural_dynamics/nerd",
           "label": "NeRD showcase commands"
         }
       ]
@@ -3486,6 +3486,38 @@
         {
           "docname": "api_reference/rwm",
           "label": "RWM state, objectives, prediction, replay and SL recipe"
+        },
+        {
+          "docname": "features/neural_dynamics/rwm",
+          "label": "RWM principles and usage"
+        }
+      ]
+    },
+    {
+      "id": "task-spec",
+      "label": "TaskSpec",
+      "kind": "module",
+      "topic_ids": [
+        "task-spec"
+      ],
+      "summary": "Defines simulator-independent task requirements, milestones, semantic identity and evidence evaluation.",
+      "details": "TaskSpec describes required outcomes independently of an action sequence, robot or simulator. It validates normative declarations, caches them by semantic hash and evaluates supplied observations; runtime acquisition and execution belong to integrations.",
+      "boundaries": [
+        "TaskSpec owns normative task semantics and evaluation, not simulation state acquisition, motion planning or program execution."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_spec/spec.py",
+          "symbol": "TaskSpec",
+          "start_line": 335,
+          "end_line": 335,
+          "excerpt": "class TaskSpec:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/public_api",
+          "label": "TaskSpec protocol API"
         }
       ]
     }
@@ -3690,9 +3722,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 768,
-          "end_line": 776,
-          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n            plan_transform_factory=plan_transform_factory,\n        )"
+          "start_line": 777,
+          "end_line": 786,
+          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n            plan_transform_factory=plan_transform_factory,\n            nominal_source_factory=nominal_source_factory,\n        )"
         }
       ]
     },
@@ -3769,9 +3801,9 @@
         {
           "path": "embodichain/lab/task_program/runtime/executor.py",
           "symbol": "SemanticCallExecutor._prepare_grounded_call",
-          "start_line": 969,
-          "end_line": 974,
-          "excerpt": "        session = self._engine.start(\n            (invocation,),\n            context,\n            eligible_mask=active_mask,\n            plan_transform=plan_transform,\n        )"
+          "start_line": 1130,
+          "end_line": 1136,
+          "excerpt": "        session = self._engine.start(\n            (invocation,),\n            context,\n            eligible_mask=active_mask,\n            plan_transform=plan_transform,\n            nominal_source=nominal_source,\n        )"
         }
       ]
     },
@@ -4145,8 +4177,8 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "config_to_cfg",
-          "start_line": 489,
-          "end_line": 489,
+          "start_line": 696,
+          "end_line": 696,
           "excerpt": "    env_cfg = EmbodiedEnvCfg()"
         },
         {
@@ -4402,7 +4434,7 @@
           "symbol": "<module>",
           "start_line": 48,
           "end_line": 48,
-          "excerpt": "        target=\"embodichain.gen_sim.simready_pipeline.cli.start:main\","
+          "excerpt": "        target=\"embodichain.gen_sim.asset_engine.cli.start:main\","
         }
       ]
     },
@@ -5269,7 +5301,7 @@
       "scope": "Caller supplies the ParserManager instance.",
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "ingest_one_asset",
           "start_line": 178,
           "end_line": 178,
@@ -5988,7 +6020,8 @@
         "neural-dynamics",
         "supervised-learning",
         "nerd-showcase",
-        "robot-world-model"
+        "robot-world-model",
+        "task-spec"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -6184,7 +6217,8 @@
             "scene-export",
             "simready",
             "asset-parsers",
-            "gen-sim-sessions"
+            "gen-sim-sessions",
+            "task-spec"
           ]
         },
         {
@@ -6692,7 +6726,8 @@
         "workspace-analyzer",
         "scene-services",
         "compute",
-        "scene-expansion"
+        "scene-expansion",
+        "task-spec"
       ],
       "edge_ids": [
         "simulation-constructs-robot",
@@ -6782,6 +6817,13 @@
             "scene-services",
             "compute",
             "scene-expansion"
+          ]
+        },
+        {
+          "id": "task-specification",
+          "label": "Normative task specification",
+          "node_ids": [
+            "task-spec"
           ]
         }
       ]

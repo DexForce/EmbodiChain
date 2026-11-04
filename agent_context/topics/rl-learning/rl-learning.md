@@ -72,7 +72,9 @@ Select this path with `trainer.gym_config`.
 
 Simulator environments use standard rollouts. A differentiable algorithm on
 this path is rejected. Simulator tasks with a supported training configuration
-declare `supports_rl=True` in `@register_env`. Task listing is implemented
+declare `supports_rl=True` in `@register_env`, or use a configuration-owned
+manipulation deployment with root `rl_task`; its loader registers the common
+host automatically. Task listing is implemented
 in `embodichain/cli/list_task.py`; capability and config discovery belong to
 [environment configuration](../env-framework/configuration.md).
 
@@ -191,17 +193,10 @@ measurement. These rollout fields have explicit dimensions in the buffer.
 
 `evaluate_episodes` retains `first_completed` allocation as its compatibility
 default. Optional `balanced` allocation fixes per-arena quotas before stepping,
-preventing completion-time censoring when episode durations differ. Strict peg
-final assessment and the assembly suite opt into balanced quotas via the native
-headless `eval-policy --episode-allocation balanced`; training validation keeps
-the compatibility default.
-Optional `on_episode` receives CPU records only for scored completions; strict peg evaluation persists and verifies these records as a hashed JSONL file.
-
-Saved peg checkpoints can be ranked by the native balanced evaluator through
-`scripts/benchmark/assembly/select_peg.py` before independent testing. The
-learning report's `--selection-report` keeps this ranking separate from the
-trainer's compatibility diagnostics and verifies the final weight hash and
-independent seed. Selection never uses final-test episodes.
+preventing completion-time censoring when episode durations differ. The native
+`eval-policy --episode-allocation balanced` exposes this protocol. The optional
+`on_episode` callback receives CPU records only for scored completions. Select
+checkpoints on validation data before independent testing with separate seeds.
 
 Read [training and extension](training.md) for evaluation, checkpoints,
 distributed ownership, official examples and adding algorithms/policies/envs.
@@ -241,13 +236,6 @@ lightweight APG component must not eagerly load the simulator-backed Trainer.
 
 ## Invariants
 
-Simulator `train_from_config(..., on_trainer_ready=...)` invokes optional
-instrumentation after checkpoint restoration and before collection, under the
-normal runtime cleanup boundary. The callback receives the native Trainer,
-including train/evaluation environments; lightweight environment routing rejects
-it. `scripts/benchmark/assembly/train_peg.py` uses this hook for read-only native
-capacity checks before auto-reset, while preserving the native PPO path.
-
 Blind assembly uses the registered `proprioceptive_actor_critic` policy with
 explicit actor/critic groups. Assembly observations and training labels live in
 `embodichain.lab.gym.envs.managers.observations`, which provides the existing
@@ -266,9 +254,8 @@ Contact labels travel as state-aligned training-only rollout fields. PPO's
 optional auxiliary decoder loss recomputes the latent during minibatch updates
 so gradients reach the encoder. Normalization statistics stay fixed through
 collection and every PPO epoch, then update for the next rollout. Actor export
-excludes the critic and decoder. See `examples/learning/blind_assembly/` for the
-public-reference record, nominal development recipe, suite generation and policy
-capacity. Inference alignment and tensor capacity do not qualify task learning
+excludes the critic and decoder. See `examples/learning/blind_assembly/` for training, actor export and native
+policy preview. Inference alignment and tensor capacity do not qualify task learning
 or simulator throughput.
 
 Auto-reset timeouts retain completed-row terminal observations and row IDs.

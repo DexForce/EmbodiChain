@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import math
-from typing import Literal
+from typing import Literal, Protocol
 
 import torch
 
@@ -33,13 +33,50 @@ from embodichain.utils import configclass, logger
 from ._antipodal_backend import _AntipodalMeshBackend
 from .antipodal_sampler import AntipodalSamplerCfg
 from .gripper_collision_checker import GripperCollisionCfg
+from .fixed_geometry import FixedGripperCollisionGeometry
 
 __all__ = [
     "AntipodalGraspPoseGenerator",
     "AntipodalGraspPoseGeneratorCfg",
+    "GraspRegionSelector",
     "GraspAnnotationCfg",
     "ParallelJawGraspCollisionCfg",
 ]
+
+
+class GraspRegionSelector(Protocol):
+    """Filter a qualified fallback region before candidate ranking and top-K.
+
+    The callback runs only when a requested mesh-axis region has no qualified
+    geometry. It may select existing rows and a ranking center, never introduce
+    poses or bypass angle, NMS, ground or collision qualification.
+    """
+
+    def __call__(
+        self,
+        *,
+        centers: torch.Tensor,
+        pair_ids: torch.Tensor,
+        pair_centers: torch.Tensor,
+        axis: torch.Tensor,
+        positive: bool,
+        center_mode: Literal["bounds", "centroid"],
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Select a subset or reject the fallback.
+
+        Args:
+            centers: Qualified candidate centers, shape (K, 3).
+            pair_ids: Original contact-pair indices for those K candidates.
+            pair_centers: Complete cached-pair centers, shape (N, 3).
+            axis: Normalized requested region axis, shape (3,).
+            positive: Requested side of that axis.
+            center_mode: Generator's existing center convention.
+
+        Returns:
+            Boolean mask (K,) and finite ranking center (3,), on the input
+            device, or None to reject. Inputs must not be modified.
+        """
+        ...
 
 
 def _real_number(value: float, *, field_name: str, minimum: float) -> float:
@@ -73,7 +110,7 @@ class AntipodalGraspPoseGeneratorCfg:
     """Maximum candidate deviation from the requested approach direction."""
 
     approach_alignment_angle: float | None = None
-    """Hard TCP-Z approach angle in radians, applied before NMS and ranking.
+    """Hard canonical approach-Z angle, applied before NMS and ranking.
 
     ``None`` retains the unconstrained candidate pool. Proposal cones remain
     controlled separately by ``approach_deviation_angle``.
@@ -125,36 +162,17 @@ class AntipodalGraspPoseGeneratorCfg:
 
 @configclass
 class ParallelJawGraspCollisionCfg:
-    """Collision-check policy independent of physical gripper dimensions."""
-
-    point_sample_density: float = 0.01
-    """Sampling density passed to the parallel-jaw collision model."""
+    """Target-object collision policy; sampling belongs to explicit geometry."""
 
     max_decomposition_hulls: int = 16
     """Maximum convex hull count used for target-mesh decomposition."""
-
-    opening_margin: float = 0.01
-    """Additional opening used while checking finger collisions in metres."""
 
     filter_ground_collision: bool = True
     """Whether candidates intersecting the inferred support plane are removed."""
 
     def __post_init__(self) -> None:
-        self.point_sample_density = _real_number(
-            self.point_sample_density,
-            field_name="point_sample_density",
-            minimum=0.0,
-        )
-        if self.point_sample_density == 0.0:
-            raise ValueError("point_sample_density must be positive.")
         self.max_decomposition_hulls = _positive_int(
-            self.max_decomposition_hulls,
-            field_name="max_decomposition_hulls",
-        )
-        self.opening_margin = _real_number(
-            self.opening_margin,
-            field_name="opening_margin",
-            minimum=0.0,
+            self.max_decomposition_hulls, field_name="max_decomposition_hulls"
         )
         if type(self.filter_ground_collision) is not bool:
             raise TypeError("filter_ground_collision must be a bool.")
@@ -196,6 +214,11 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     single-mesh backend per tensor-backed mesh, allowing callers to reuse
     sampled annotations without placing live generator state on a scene
     affordance or exposing a second generator API.
+
+    ``collision_geometry`` is mandatory and describes actual collision meshes
+    at the declared pre-grasp opening. Internal sampling and collision use its
+    canonical contact frame; every public pose result is transformed once to
+    the geometry's runtime TCP. Widths, costs and failure masks are preserved.
     """
 
     def __init__(
@@ -205,6 +228,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         algorithm_cfg: AntipodalGraspPoseGeneratorCfg | None = None,
         collision_cfg: ParallelJawGraspCollisionCfg | None = None,
         annotation_cfg: GraspAnnotationCfg | None = None,
+        collision_geometry: FixedGripperCollisionGeometry,
     ) -> None:
         super().__init__(gripper_model)
         self._algorithm_cfg = deepcopy(
@@ -226,12 +250,15 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             )
         if not isinstance(self._annotation_cfg, GraspAnnotationCfg):
             raise TypeError("annotation_cfg must be a GraspAnnotationCfg or None.")
-        if self._collision_cfg.opening_margin >= self._gripper_model.max_opening_width:
-            raise ValueError(
-                "collision opening_margin must be less than the model's "
-                "max_opening_width."
-            )
+        if not isinstance(collision_geometry, FixedGripperCollisionGeometry):
+            raise TypeError("collision_geometry must be explicit fixed mesh geometry.")
+        self._collision_geometry = deepcopy(collision_geometry)
         self._backends: dict[tuple[object, ...], _AntipodalMeshBackend] = {}
+
+    @property
+    def collision_geometry(self) -> FixedGripperCollisionGeometry:
+        """Return owned geometry/provenance for the declared pre-grasp opening."""
+        return deepcopy(self._collision_geometry)
 
     @property
     def algorithm_cfg(self) -> AntipodalGraspPoseGeneratorCfg:
@@ -331,15 +358,9 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 center_mode=algorithm.center_mode,
             ),
             collision_cfg=GripperCollisionCfg(
-                max_open_length=model.max_opening_width,
-                finger_length=model.finger_length,
-                y_thickness=model.finger_width,
-                x_thickness=model.finger_thickness,
-                root_z_width=model.palm_depth,
-                point_sample_dense=collision.point_sample_density,
-                max_decomposition_hulls=collision.max_decomposition_hulls,
-                open_check_margin=collision.opening_margin,
+                max_decomposition_hulls=collision.max_decomposition_hulls
             ),
+            collision_geometry=self._collision_geometry,
             max_deviation_angle=algorithm.approach_deviation_angle,
             approach_alignment_angle=algorithm.approach_alignment_angle,
             approach_direction_samples=algorithm.approach_direction_samples,
@@ -433,8 +454,14 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        axis_region_selector: GraspRegionSelector | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return ranked candidates, optionally from one projected axis end."""
+        """Return candidates with an optional invocation-local region selector."""
+        region_options = (
+            {}
+            if axis_region_selector is None
+            else {"axis_region_selector": axis_region_selector}
+        )
         return [
             (poses, costs)
             for poses, _, costs in self.get_grasp_candidates(
@@ -444,6 +471,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 approach_direction=approach_direction,
                 obj_longest_axis=obj_longest_axis,
                 is_positive_part=is_positive_part,
+                **region_options,
             )
         ]
 
@@ -456,8 +484,20 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        axis_region_selector: GraspRegionSelector | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        """Expose candidate opening widths alongside their poses and costs."""
+        """Expose aligned candidates without changing configured region defaults.
+
+        The selector sees only qualified fallback geometry before top-K.
+        Default calls retain the original backend keyword shape.
+        """
+        if axis_region_selector is not None and not callable(axis_region_selector):
+            raise TypeError("axis_region_selector must be callable or None.")
+        region_options = (
+            {}
+            if axis_region_selector is None
+            else {"axis_region_selector": axis_region_selector}
+        )
         backend = self._backend(mesh_vertices, mesh_triangles)
         poses = self._object_poses(obj_poses, device=backend.device)
         directions = self._approach_directions(
@@ -509,6 +549,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 approach_direction=directions[index],
                 obj_longest_axis=None if axes is None else axes[index],
                 is_positive_part=bool(positive_parts[index].item()),
+                **region_options,
             )
             if grasp_poses.shape == (4, 4):
                 grasp_poses = grasp_poses.unsqueeze(0)
@@ -529,7 +570,13 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                     dtype=torch.float32,
                     device=backend.device,
                 )
-            results.append((grasp_poses, widths, costs))
+            results.append(
+                (
+                    self._collision_geometry.canonical_to_tcp_poses(grasp_poses),
+                    widths,
+                    costs,
+                )
+            )
         return results
 
     def get_best_grasp_poses(
@@ -568,7 +615,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 opening_widths.append(0.0)
         return (
             torch.tensor(successes, dtype=torch.bool, device=backend.device),
-            torch.stack(grasp_poses),
+            self._collision_geometry.canonical_to_tcp_poses(torch.stack(grasp_poses)),
             torch.tensor(
                 opening_widths,
                 dtype=torch.float32,
@@ -606,12 +653,23 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             batch_size=1,
             device=backend.device,
         )[0]
-        return [
-            backend.get_dual_arm_valid_grasp_poses(
+        results = []
+        for index, object_pose in enumerate(poses):
+            result = backend.get_dual_arm_valid_grasp_poses(
                 object_pose=object_pose,
                 approach_direction=directions[index],
                 left_to_right_arm_direction=arm_direction,
                 middle_empty_ratio=ratio,
             )
-            for index, object_pose in enumerate(poses)
-        ]
+            if result is not None:
+                result = {
+                    part: {
+                        **values,
+                        "grasp_poses": self._collision_geometry.canonical_to_tcp_poses(
+                            values["grasp_poses"]
+                        ),
+                    }
+                    for part, values in result.items()
+                }
+            results.append(result)
+        return results

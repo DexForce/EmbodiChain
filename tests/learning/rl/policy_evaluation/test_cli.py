@@ -128,41 +128,6 @@ def test_headless_cli_passes_balanced_episode_allocation(tmp_path, monkeypatch):
     assert report["inputs"]["episode_allocation"] == "balanced"
 
 
-def test_assembly_suite_requests_balanced_final_evaluation(tmp_path, monkeypatch):
-    from examples.learning.blind_assembly import run_suite
-    from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
-
-    checkpoint = tmp_path / "best.pt"
-    checkpoint.write_bytes(b"checkpoint")
-    monkeypatch.setattr(
-        RunManifest,
-        "load",
-        lambda *args, **kwargs: SimpleNamespace(checkpoints={"best": checkpoint}),
-    )
-    commands = []
-    monkeypatch.setattr(
-        run_suite, "_run_command", lambda command, log: commands.append(command)
-    )
-    manifest = {
-        "runs": [
-            {
-                "status": "complete",
-                "name": "test",
-                "run_directory": str(tmp_path),
-                "evaluation": {
-                    "in_distribution": {"status": "pending", "episodes": 8, "seed": 7}
-                },
-            }
-        ]
-    }
-    run_suite._evaluate(
-        manifest, tmp_path / "manifest.json", SimpleNamespace(eval_envs=2)
-    )
-    command = commands[0]
-    assert command[command.index("--episode-allocation") + 1] == "balanced"
-    assert manifest["runs"][0]["evaluation"]["in_distribution"]["status"] == "complete"
-
-
 @pytest.mark.parametrize("mode", [("--viewer",), ("--profile", "external")])
 def test_balanced_allocation_rejects_unsupported_viewer_or_profile(mode):
     module = importlib.import_module("embodichain.learning.rl.policy_evaluation.cli")

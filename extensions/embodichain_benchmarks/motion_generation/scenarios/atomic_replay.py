@@ -32,6 +32,7 @@ from ..contracts import (
     ReplayObservationWindow,
 )
 from .atomic_evaluation import signed_rotation_about_axis
+from ._replay_diagnostics import ReplayDiagnostics, resolve_diagnostics_config
 
 if TYPE_CHECKING:
     from embodichain.lab.sim import SimulationManager
@@ -58,6 +59,7 @@ class _ReplayMetrics:
     articulation_joint_effect_end: torch.Tensor | None = None
     object_rotation_peak_signed_rad: torch.Tensor | None = None
     replay_traces: Mapping[str, ReplayObservationTrace] = field(default_factory=dict)
+    replay_diagnostics: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -248,6 +250,7 @@ class AtomicReplayRuntime:
                 part: states[1].clone() for part, states in self._gripper_states.items()
             },
             replay_traces=replay_metrics.replay_traces,
+            replay_diagnostics=replay_metrics.replay_diagnostics,
         )
 
     def _physics_settings(self) -> _PhysicsReplaySettings:
@@ -430,6 +433,33 @@ class AtomicReplayRuntime:
         articulation_handle = self._articulations.get(case.object_id or "")
         settings = self._physics_settings()
         arrival_steps = self._arrival_steps(compiled, settings)
+        diagnostics_config = resolve_diagnostics_config(
+            dict(self._track_config.get("physics", {}))
+        )
+        diagnostics = None
+        if collect_metrics and diagnostics_config["enabled"]:
+            diagnostics = ReplayDiagnostics(
+                diagnostics_config,
+                compiled,
+                case,
+                self.simulation,
+                self.robot,
+                self._objects,
+                self.control_part,
+                tuple(self._gripper_states),
+            )
+            diagnostics.capture(
+                waypoint_index=-1,
+                elapsed_s=0.0,
+                command=trajectory[:, 0],
+                phase="initial",
+            )
+        elapsed_steps = 0
+        physics_dt = (
+            float(self.simulation.sim_config.physics_dt)
+            if diagnostics is not None
+            else 0.0
+        )
         lift_start = None if provider is None else provider.lift_segment_start(compiled)
         dynamics_cleared = False
         squared_tracking_error: torch.Tensor | None = None
@@ -621,6 +651,14 @@ class AtomicReplayRuntime:
                 observed = self.robot.get_qpos()
                 squared_tracking_error += ((observed - positions) ** 2).sum(dim=1)
                 tracking_value_count += observed.shape[1]
+            elapsed_steps += arrival_steps[waypoint_index]
+            if diagnostics is not None and waypoint_index in diagnostics.sample_indices:
+                diagnostics.capture(
+                    waypoint_index=waypoint_index,
+                    elapsed_s=elapsed_steps * physics_dt,
+                    command=positions,
+                    phase="command_end",
+                )
             if (
                 object_handle is not None
                 and lift_start is not None
@@ -667,6 +705,16 @@ class AtomicReplayRuntime:
                 articulation_handle=articulation_handle,
                 articulation_joint_name=articulation_joint_name,
             )
+        if diagnostics is not None:
+            diagnostics.capture(
+                waypoint_index=waypoint_count,
+                elapsed_s=(
+                    elapsed_steps + settings.hold_steps * settings.hold_sim_steps
+                )
+                * physics_dt,
+                command=final_command,
+                phase="settled",
+            )
         if collect_metrics:
             if squared_tracking_error is None:
                 raise RuntimeError("Timed replay lost its tracking accumulator.")
@@ -686,6 +734,7 @@ class AtomicReplayRuntime:
                 object_rotation_peak_signed_rad=(
                     None if rotation_peak is None else rotation_peak * rotation_sign
                 ),
+                replay_diagnostics={} if diagnostics is None else diagnostics.finish(),
                 replay_traces={
                     observation_id: accumulator.finish()
                     for observation_id, accumulator in trace_accumulators.items()

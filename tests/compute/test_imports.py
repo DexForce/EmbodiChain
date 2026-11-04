@@ -30,6 +30,18 @@ import warp as wp
     [
         ("embodichain.compute", ["warp", "torch", "embodichain.lab"]),
         (
+            "embodichain.compute.geometry.mesh_bounds",
+            ["embodichain.lab", "embodichain.gen_sim", "dexsim"],
+        ),
+        (
+            "embodichain.compute.kinematics.ik_path",
+            ["embodichain.lab", "embodichain.gen_sim", "dexsim"],
+        ),
+        (
+            "embodichain.compute.trajectory.limits",
+            ["embodichain.lab", "embodichain.gen_sim", "dexsim"],
+        ),
+        (
             "embodichain.compute.geometry.rigid",
             ["embodichain.lab", "dexsim"],
         ),
@@ -48,6 +60,10 @@ import warp as wp
         (
             "embodichain.compute.kinematics._warp.trapezoidal",
             ["embodichain.lab", "embodichain.utils.warp", "dexsim"],
+        ),
+        (
+            "embodichain.learning.layers.toppra",
+            ["embodichain.lab", "dexsim", "tensordict"],
         ),
         ("embodichain.utils.warp", ["embodichain.lab", "dexsim"]),
     ],

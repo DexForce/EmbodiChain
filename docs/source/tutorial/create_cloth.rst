@@ -111,6 +111,6 @@ the source triangles, so its topology matches the simulated cloth surface.
 Deformable updates are sampled separately from rigid-body poses; adjust
 ``--viser-soft-body-fps`` to balance smoothness and browser/upload cost.
 
-See :doc:`/overview/sim/viser_visualization` for details.
+See :doc:`/overview/sim/visualization/viser` for details.
 
 Now that we have a basic understanding of how to create a cloth scene, let's move on to more advanced topics.

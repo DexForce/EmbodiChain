@@ -34,10 +34,18 @@ arm count and simulation anchoring. Missing variant fields inherit the parent;
 explicit `None` stays unknown. Classification differences prevent variant rows
 from being grouped. Never infer these fields from paths or control-group names.
 
-Only the stock `FrankaPanda` hand is an official Panda preset. The former PGI
-preset is removed; examples and benchmark fixtures own their explicit Panda/PGI
-assemblies, including flange FK, TCP, drives and finger contacts. Flat concrete
-robot configuration module paths are retired; root class exports remain stable.
+`Franka` resolves the bare-arm `FrankaCfg` in `franka/cfg.py`. `arm_model`
+selects `fr3` (default) or `panda`; both expose seven joints in `arm`, no finger
+group, and a flange TCP. `FrankaPanda` remains a legacy selector for the
+historical FR3 arm (`robot_type: panda`), now also bare. Native-hand and Robotiq
+embodiments add the hand URDF, group, drives, inertia/contact calibration and
+solver TCP through ordinary RobotCfg overrides, exactly as UR assemblies do.
+The native hand is a pinned subtree derivative of the integrated FR3 asset;
+model-owned asset generation retains the original file and a derivation report.
+Bare dual-arm selection has fourteen arm joints. Tool-equipped benchmark
+providers append separate left/right hand components. Robotiq observed-aperture
+conversion remains tool-owned and does not select a robot class. PGI fixtures
+remain example/benchmark-owned. Root public class exports remain available.
 
 `resolve_robot_cfg(..., variant=...)` selects a declared profile's defaults
 between catalog defaults and caller overrides. Omitting the variant keeps

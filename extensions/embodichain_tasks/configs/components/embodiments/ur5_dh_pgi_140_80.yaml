@@ -81,7 +81,6 @@ skill_profile:
       eef:
         kind: antipodal_parallel_jaw
         sample_count: 1000
-        opening_margin: 0.002
-        point_sample_density: 0.012
+        point_spacing: 0.012
         filter_ground_collision: false
         model: dh_pgi_140_80

@@ -376,8 +376,8 @@ Choosing where to start
      - :doc:`sim_assets` and the object pages underneath it
    * - Add RGB, depth, stereo, segmentation, or contact observations
      - :doc:`sensors/index`
-   * - Inspect a headless or remote scene in a browser
-     - :doc:`viser_visualization`
+   * - Inspect or manipulate a scene through a native window or browser
+     - :doc:`visualization/index`
    * - Tune native rendering, DLSS, or frame timing
      - :doc:`sim_manager/rendering/index`
    * - Solve kinematics or generate a timed robot trajectory
@@ -416,6 +416,6 @@ See Also
    sim_manager.md
    sim_assets.md
    sensors/index
-   viser_visualization.md
+   visualization/index
    motion/index
    atomic_actions/index

@@ -11,19 +11,24 @@ once with an `after_substep` observer. The manager invokes the observer after
 each world update, preserving its preparation, profiling and camera-capture
 boundary. Observation reads reuse the sampled sensor buffer.
 
-`ContactSensor` owns sample caching using the manager's public
-`physics_step_index`. Ordinary Gym observation reads call `sensor.update()`;
-the sensor queries at most once for each newly observed physics step. Repeated
-reads reuse its buffer. Creation and reset suppress SDK queries until the next
-physics step, since solver reset invalidates the current contact snapshot.
-Selected reset rows are invalidated while untouched rows retain their last
-sample; an empty reset leaves cache eligibility unchanged. Standalone and replay
-updates use the same sensor logic without Gym-specific sampling state.
+`ContactSensor` deduplicates raw reads and history reductions separately using
+`SimulationManager.physics_step_index` and the query's current actor binding.
+Reading a raw sample before its history callback does not consume the history
+update. Query metadata is checked even on cache hits so topology rebuilds cannot
+retain old contacts. Cached CUDA reads wait for the producing stream. Caller-owned
+CUDA graph capture bypasses raw/history deduplication and records the query read
+and reductions on the capture stream. Capture invalidates eager cache keys rather
+than marking unexecuted work as a completed sample; replay does not execute Python
+cache bookkeeping. Callers own replay scheduling and establish stream dependencies before capture
+and replay. Capture skips eager producer waits and never records its stream as
+a completed producer, including control-interval initialization and reset.
 
-Histories retain per-substep sampling. Raw contact refresh and history reduction
-track their completed steps separately so reading a raw sample cannot suppress
-its history update, and duplicate callbacks do not advance history twice.
-Ordinary sensors do not acquire a decimation-factor query overhead.
+Sensor reset clears only selected rows and invalidates this cache; it does not
+reset the physics solver. An explicit `update()` may therefore refresh a valid
+settled snapshot without advancing history, as scene preparation requires.
+It cannot recompute solved contacts after physical state writes; the backend's
+contact-availability rules still apply. Empty selections do not invalidate the
+cache. `BaseEnv` retains its ordinary acquisition and substep scheduling.
 
 CUDA queries use `fetch_async()` and device-resident counts. Sparse Warp kernels
 process valid contact rows, using precomputed sorted environment/actor indices;

@@ -99,6 +99,10 @@ def split_result(result: PlanResult, row: int, *, retimed: bool) -> PlanResult:
         "policy_rollout_lengths": lengths[row : row + 1].clone(),
     }
     if result.positions is not None:
+        for name in ("waypoint_indices", "policy_waypoint_indices"):
+            value = getattr(result, name)
+            if value is not None:
+                updates[name] = value[row : row + 1].clone()
         if result.dt is None:
             raise ValueError("Quality batch output requires timing.")
         if retimed:

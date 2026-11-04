@@ -93,9 +93,7 @@ def test_contact_sensor_consumes_scene_query_and_explicit_env_ids() -> None:
 
     sensor = ContactSensor(cfg, torch.device("cpu"), owner=owner)
     sensor.update()
-    assert query.fetch_calls == 0
-    owner.physics_step_index += 1
-    sensor.update()
+    assert query.fetch_calls == 1
     original_ids = sensor.item_user_ids
     original_env_ids = sensor.item_env_ids
     assert query.actor_info_calls == len(query.selected_actor_ids)
@@ -217,22 +215,12 @@ def test_scatter_overflow_is_counted_separately_and_reset_by_selected_row():
     assert sensor.dropped_contacts == 0
 
 
-@pytest.mark.parametrize("with_history_peer", [False, True])
-def test_contact_sensor_owns_step_cache_and_reset_observation(with_history_peer):
-    """Gym and standalone reads use one sample per step without reset queries."""
+def test_contact_cache_preserves_gym_and_standalone_refresh_after_reset():
+    """Reset invalidates the cache, while empty reset and repeated reads do not."""
     query = _FakeQuery()
-    query.available = False
     sensor = _sensor_for_query(query)
     owner = sensor._sim
-    history_calls = []
     sensors = {"contact": sensor}
-    if with_history_peer:
-        sensors["history"] = SimpleNamespace(
-            requires_substep_update=True,
-            begin_control_step=lambda: None,
-            update_physics_step=lambda dt: history_calls.append(dt),
-            get_data=lambda: {"touch": torch.zeros(2)},
-        )
 
     def advance(dt, count, after_substep=None, **kwargs):
         for _ in range(count):
@@ -254,39 +242,38 @@ def test_contact_sensor_owns_step_cache_and_reset_observation(with_history_peer)
         _profiler=SimpleNamespace(section=lambda *args: nullcontext()),
     )
     BaseEnv._get_sensor_obs(env)
-    assert query.fetch_calls == 0
+    BaseEnv._get_sensor_obs(env)
+    assert query.fetch_calls == 1
     BaseEnv._advance_physics(env)
-    assert owner.physics_step_index == 20 and query.fetch_calls == 0
-    assert len(history_calls) == (20 if with_history_peer else 0)
+    assert owner.physics_step_index == 20 and query.fetch_calls == 1
     BaseEnv._get_sensor_obs(env)
     sensor.update()
-    assert query.fetch_calls == 1
+    assert query.fetch_calls == 2
     untouched = sensor.get_data()[1].clone()
 
-    query.available = False
     sensor.reset([0])
-    BaseEnv._get_sensor_obs(env)
-    sensor.update()
-    assert query.fetch_calls == 1 and owner.physics_step_index == 20
     assert not sensor.get_data()["is_valid"][0].any()
     for name, value in untouched.items():
         torch.testing.assert_close(sensor.get_data()[name][1], value)
+    # Scene preparation clears sensor history after settling, then explicitly
+    # refreshes raw evidence from the still-valid completed physics step.
+    BaseEnv._get_sensor_obs(env)
+    assert query.fetch_calls == 3 and owner.physics_step_index == 20
+    assert sensor.get_data()["is_valid"][:, 0].all()
+    sensor.reset([])
+    sensor.update()
+    assert query.fetch_calls == 3
 
     # Replay advances the manager directly rather than through env.step().
     owner.update(0.001, 1)
     BaseEnv._get_sensor_obs(env)
-    assert query.fetch_calls == 2
+    assert query.fetch_calls == 4
     assert sensor.get_data()["is_valid"][:, 0].all()
 
-    query.available = False
     sensor.reset()
-    sensor.update()
-    assert query.fetch_calls == 2
     assert not sensor.get_data()["is_valid"].any()
-    owner.update(0.001, 1)
-    sensor.reset([])
     sensor.update()
-    assert query.fetch_calls == 3
+    assert query.fetch_calls == 5
     assert sensor.get_data()["is_valid"][:, 0].all()
 
 
@@ -314,3 +301,18 @@ def test_failed_contact_query_does_not_poison_step_cache():
     sensor.update()
     assert query.fetch_calls == 1
     assert sensor.get_data()["is_valid"][:, 0].all()
+
+
+def test_same_step_topology_change_refreshes_sample_and_actor_metadata():
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    sensor.update()
+    assert sensor.total_current_contacts == 2
+    query._actors[7] = ContactActorInfo(7, "arena_0/other", None, "arena_0", 0)
+    query.actors = tuple(query._actors.values())
+    query.buffer.count = 0  # A rebuilt model has no solved contacts yet.
+    sensor.update()
+    assert query.fetch_calls == 2
+    assert sensor.total_current_contacts == 0
+    assert not sensor.get_data()["is_valid"].any()
+    assert sensor.item_env_ids.tolist() == [0, 0]

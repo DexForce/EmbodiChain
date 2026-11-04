@@ -1,0 +1,77 @@
+id: HandOver-DualUR5-FeasibilityExample-v1
+physics: default
+max_episodes: 1
+max_episode_steps: 3200
+num_envs: 1
+arena_space: 3.0
+physics_config:
+  enable_ccd: true
+env:
+  sim_steps_per_control: 4
+  events:
+    settle_bar_on_reset:
+      func: wait_for_dynamic_objects_to_settle
+      mode: reset
+      params:
+        entity_cfgs:
+        - uid: bar
+        min_steps: 10
+        max_steps: 120
+        timeout_behavior: raise
+light:
+  direct:
+  - uid: main_light
+    light_type: sun
+    color: [0.8, 0.8, 0.8]
+    intensity: 5.0
+    direction: [0.0, 0.0, -1.0]
+background:
+- uid: support_surface
+  shape:
+    shape_type: Cube
+    size: [0.6, 1.0, 0.04]
+  body_type: static
+  init_pos: [0.6, 0.0, 0.73]
+  attrs:
+    material_props:
+      static_friction: 0.95
+      dynamic_friction: 0.9
+- uid: pickup_stand
+  shape:
+    shape_type: Cube
+    size: [0.08, 0.02, 0.04]
+  body_type: static
+  init_pos: [0.45, 0.02, 0.77]
+rigid_object:
+- uid: bar
+  shape:
+    shape_type: Cube
+    size: [0.18, 0.05, 0.05]
+  body_type: dynamic
+  init_pos: [0.45, 0.02, 0.815]
+  attrs:
+    mass_props:
+      mass: 0.05
+    rigid_props:
+      linear_damping: 0.5
+      angular_damping: 1.0
+      min_position_iters: 32
+      min_velocity_iters: 8
+    material_props:
+      dynamic_friction: 0.97
+      static_friction: 0.99
+rigid_object_group: []
+articulation: []
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy:
+    component: extensions/embodichain_tasks/configs/components/execution_policies/motion_gen_verified.yaml
+    overrides:
+      motion:
+        velocity_limit: 0.5
+embodiment:
+  component: extensions/embodichain_tasks/configs/components/embodiments/dual_ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_pos: [1.45, 0.0, 0.25]
+    init_rot: [0.0, 0.0, -90.0]
