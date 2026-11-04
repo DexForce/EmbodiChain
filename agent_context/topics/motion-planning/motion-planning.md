@@ -42,12 +42,12 @@ when changing obstacle identity, cache generation or dynamic scene binding.
 [IK solvers](../ik-solvers/ik-solvers.md) own candidate/frame contracts;
 [Atomic Skills](../atomic-actions/atomic-actions.md) own motion execution policy.
 
-FCL query consumers opt into `embodichain[planning-geometry]`; `pyproject.toml`
-owns the qualified backend pin without adding it to core dependencies.
-The shared lazy preflight is `lab/sim/scene/_collision_backends.py::_require_fcl`.
-Missing bindings raise explicitly; another collision backend or a dummy success
-does not substitute for the requested query. Actual-FCL comparisons require the
-extra and must report dependency skips as unqualified coverage.
+Native convex queries reuse the shared isolated Newton collision pipeline.
+`lab/sim/scene/_collision_backends.py::_require_newton` checks availability before
+capture; no FCL extra or backend fallback is selected. Distance diagnostics are
+capped intervals under the query precision policy. A threshold inside an interval
+remains unavailable, never a fabricated contact or free path. CPU comparisons
+remain separate from GPU and physical-task qualification.
 
 ## Timing and batch boundary
 
