@@ -55,6 +55,7 @@ from embodichain.utils.math import (
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import RigidObject, Robot
+    from embodichain.lab.sim.scene.collision_sources import CollisionObjectSnapshot
 
 __all__ = [
     "generate_curobo_robot_yaml",
@@ -116,8 +117,12 @@ def _write_velocity_limited_urdf(
 
 
 def _named_rigid_objects(
-    rigid_objects: Sequence[RigidObject] | Mapping[str, RigidObject] | None,
-) -> list[tuple[str, RigidObject]]:
+    rigid_objects: (
+        Sequence[RigidObject]
+        | Mapping[str, RigidObject | CollisionObjectSnapshot]
+        | None
+    ),
+) -> list[tuple[str, RigidObject | CollisionObjectSnapshot]]:
     """Return canonical obstacle names paired with their live objects."""
     if isinstance(rigid_objects, Mapping):
         return list(rigid_objects.items())
@@ -605,7 +610,9 @@ def _validate_forced_representation(
 
 
 def generate_curobo_world_scene(
-    rigid_objects: Sequence[RigidObject] | Mapping[str, RigidObject],
+    rigid_objects: (
+        Sequence[RigidObject] | Mapping[str, RigidObject | CollisionObjectSnapshot]
+    ),
     *,
     env_id: int = 0,
     representation: str = "auto",
@@ -626,7 +633,8 @@ def generate_curobo_world_scene(
     supported.
 
     Args:
-        rigid_objects: Live obstacles whose physical shapes define the world.
+        rigid_objects: Live obstacles or explicit collision snapshots defining the world.
+            Snapshot provenance does not imply native-cooked geometry.
             Mapping keys are authoritative obstacle IDs. A sequence derives
             each ID from the object's ``uid`` (or ``obstacle_<index>``).
         env_id: Environment row used for geometry and initial poses.
@@ -1128,7 +1136,9 @@ def _world_collision_sphere_data(world_scene: Any) -> tuple[torch.Tensor, torch.
 
 
 def visualize_curobo_world_collision_model(
-    rigid_objects: Sequence[RigidObject] | Mapping[str, RigidObject],
+    rigid_objects: (
+        Sequence[RigidObject] | Mapping[str, RigidObject | CollisionObjectSnapshot]
+    ),
     world_scene: Any,
     env_id: int = 0,
     *,
@@ -1180,7 +1190,11 @@ def visualize_curobo_world_collision_model(
 def visualize_curobo_collision_models(
     robot: Robot,
     robot_yaml_path: str,
-    rigid_objects: Sequence[RigidObject] | Mapping[str, RigidObject] | None = None,
+    rigid_objects: (
+        Sequence[RigidObject]
+        | Mapping[str, RigidObject | CollisionObjectSnapshot]
+        | None
+    ) = None,
     world_scene: Any | None = None,
     env_id: int = 0,
 ) -> None:

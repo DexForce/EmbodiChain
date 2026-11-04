@@ -7,7 +7,8 @@ embodichain.lab.task_program
    :exclude-members: TaskProgramCfg, TaskProgramIntegrationCfg, PoseCfg, TargetRefCfg,
       CyclicPoseTargetCfg, PickCfg, PlaceCfg, HandOverCfg, RegisteredSemanticCallCfg,
       InvokeCfg, SequenceCfg, RepeatCfg, SegmentCfg, ParallelCfg, BarrierCfg,
-      WaitStablePostCfg, ObjectNearTargetValidatorCfg, ObjectLiftedValidatorCfg,
+      WaitStablePostCfg, ObjectNearTargetValidatorCfg,
+      ObjectNearRelativeTargetValidatorCfg, ObjectLiftedValidatorCfg,
       ObjectRelativePositionValidatorCfg, ObjectUprightValidatorCfg,
       ArticulationJointPositionValidatorCfg, load_task_program, loads_task_program_json,
       parse_task_program_json, decode_task_program, validate_task_program,
@@ -35,6 +36,7 @@ embodichain.lab.task_program
       BarrierCfg
       WaitStablePostCfg
       ObjectNearTargetValidatorCfg
+      ObjectNearRelativeTargetValidatorCfg
       ArticulationJointPositionValidatorCfg
       TaskProgramCompiler
       CompiledTaskProgram
@@ -196,6 +198,14 @@ Schema
    :no-index-entry:
 
 .. autoclass:: ObjectNearTargetValidatorCfg
+   :members:
+
+.. py:class:: ObjectNearRelativeTargetValidatorCfg
+   :module: embodichain.lab.task_program.language.schema
+   :no-typesetting:
+   :no-index-entry:
+
+.. autoclass:: ObjectNearRelativeTargetValidatorCfg
    :members:
 
 .. py:class:: ObjectLiftedValidatorCfg
