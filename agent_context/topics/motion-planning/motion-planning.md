@@ -359,6 +359,12 @@ compile and replay on their declared command clock; compiled replay consumes
 arrival intervals on physics ticks and preserves observation segment indices.
 Legacy fixed-sample replay remains explicit in trial metadata. The benchmark
 README and design contract own population and protocol details.
+Physical grasp/retention scoring consumes synchronized, target-filtered finger
+contacts rather than gripper joint-position proxies. Explicit `finger_links`
+belong to benchmark gripper settings; missing bindings or truncated queries are
+unavailable evidence. The collector and target/role binding live in
+`scenarios/_grasp_contacts.py`; contact geometry, distance conventions and current
+scoring version are specified in the benchmark README and `evaluation.py`.
 Run host calls serially within a process. `run_benchmark(workers>1)` isolates
 quality shards with spawned processes after freezing the full input corpus;
 `prepare_case_manifest()` can prepare that corpus without running planners.

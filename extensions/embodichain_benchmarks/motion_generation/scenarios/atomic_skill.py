@@ -70,6 +70,7 @@ from .atomic_objects import (
 from .base import ScenarioEvaluation, ScenarioProvider
 from .atomic_replay import AtomicReplayRuntime
 from ._replay_diagnostics import resolve_diagnostics_config
+from ._grasp_contacts import contact_configuration
 from .atomic_grasps import (
     _AntipodalGraspSearchError,
     ActiveCaseGraspPoseGenerator,
@@ -186,6 +187,12 @@ class AtomicSkillScenario(ScenarioProvider):
             physics = dict(self.track.config.get("physics", {}))
             values["replay_clock"] = physics.get("clock", "fixed_samples")
             values["physical_replay_diagnostics"] = resolve_diagnostics_config(physics)
+            values["grasp_contact_configuration"] = {
+                part: {"finger_links": list(links), "distance_threshold_m": threshold}
+                for part, (links, threshold) in contact_configuration(
+                    self.track.config
+                ).items()
+            }
             if self.simulation is not None:
                 values["replay_control_period_s"] = float(
                     self.simulation.sim_config.physics_dt
@@ -315,6 +322,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 if part in self._gripper_states:
                     raise ValueError(f"Gripper {part!r} is configured twice.")
                 self._gripper_states[part] = (open_state, grasp_state)
+            contact_configuration(track.config)
             self.end_effector_part = next(iter(self._gripper_states))
             self._gripper_open, self._gripper_grasp = self._gripper_states[
                 self.end_effector_part
@@ -1091,6 +1099,11 @@ class AtomicSkillScenario(ScenarioProvider):
                 "timing_scope": "atomic_action_compile",
                 **benchmark_motion_attribution(case.skill_id),
                 "physics_validation": "common_joint_target_replay",
+                **(
+                    {"grasp_contacts": dict(observation.grasp_contact_metadata)}
+                    if observation is not None and observation.grasp_contact_metadata
+                    else {}
+                ),
                 **(
                     {"physical_replay_trace": dict(observation.replay_diagnostics)}
                     if observation is not None and observation.replay_diagnostics

@@ -167,10 +167,12 @@ def test_default_history_enables_substep_sampling_and_preserves_interval_drops()
     assert not history.contact.any()
     assert history.found.all()
     assert sensor.dropped_contacts == 3
+    assert sensor.dropped_contacts_mask.tolist() == [True, True]
     sensor.update()  # Observation refresh must not replace interval diagnostics.
     assert sensor.dropped_contacts == 3
     sensor.begin_control_step()
     assert sensor.dropped_contacts == 0
+    assert not sensor.dropped_contacts_mask.any()
 
 
 def test_scatter_overflow_is_counted_separately_and_reset_by_selected_row():
@@ -181,6 +183,9 @@ def test_scatter_overflow_is_counted_separately_and_reset_by_selected_row():
     query.buffer.data[2] = query.buffer.data[1]
     sensor = _sensor_for_query(query, capacity=1)
     sensor.create_history("feet", torch.tensor([[4], [7]]))
+    sensor.begin_control_step()
+    sensor.update_physics_step(0.01)
+    assert sensor.dropped_contacts_mask.tolist() == [True, False]
     sensor.begin_control_step()
     query.buffer.dropped_count = 2
     sensor.update_physics_step(0.01)

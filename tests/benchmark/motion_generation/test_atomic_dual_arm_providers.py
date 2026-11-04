@@ -76,6 +76,26 @@ def _pose(x: float, y: float = 0.0, z: float = 0.0) -> torch.Tensor:
     return pose
 
 
+def _contact_trace(
+    *, contact_distances=None, contact_target="object", contact_targets=None, **channels
+):
+    """Fixture contacts are 1 mm on both fingers, independent of joint values."""
+    if contact_distances is None:
+        contact_distances = {
+            part: torch.full((*qpos.shape[:2], 2), 0.001)
+            for part, qpos in channels.get("gripper_qpos", {}).items()
+        }
+    return ReplayObservationTrace(
+        **channels,
+        gripper_contact_distances=contact_distances,
+        gripper_contact_targets=(
+            contact_targets
+            if contact_targets is not None
+            else {part: contact_target for part in contact_distances}
+        ),
+    )
+
+
 def _case(skill_id: str, **parameters: object) -> BenchmarkCase:
     return BenchmarkCase(
         suite_version="test_v1",
@@ -174,14 +194,14 @@ def test_hand_over_physical_evaluator_uses_phase_local_observations(
             "right_hand": torch.tensor([1.0]),
         },
         replay_traces={
-            "handover_pickup": ReplayObservationTrace(
+            "handover_pickup": _contact_trace(
                 gripper_qpos={"left_hand": holding, "right_hand": released}
             ),
-            "handover_transfer": ReplayObservationTrace(
+            "handover_transfer": _contact_trace(
                 object_pose=object_trace,
                 gripper_qpos={"left_hand": holding, "right_hand": holding},
             ),
-            "handover_exchange": ReplayObservationTrace(
+            "handover_exchange": _contact_trace(
                 object_pose=object_trace,
                 gripper_qpos={"left_hand": released, "right_hand": holding},
             ),
@@ -234,14 +254,14 @@ def test_hand_over_requires_receiver_release_at_terminal_target() -> None:
             "right_hand": torch.tensor([1.0]),
         },
         replay_traces={
-            "handover_pickup": ReplayObservationTrace(
+            "handover_pickup": _contact_trace(
                 gripper_qpos={"left_hand": holding, "right_hand": released}
             ),
-            "handover_transfer": ReplayObservationTrace(
+            "handover_transfer": _contact_trace(
                 object_pose=object_trace,
                 gripper_qpos={"left_hand": holding, "right_hand": holding},
             ),
-            "handover_exchange": ReplayObservationTrace(
+            "handover_exchange": _contact_trace(
                 object_pose=object_trace,
                 gripper_qpos={"left_hand": released, "right_hand": holding},
             ),
@@ -264,22 +284,22 @@ def test_hand_over_requires_receiver_release_at_terminal_target() -> None:
 
 
 @pytest.mark.parametrize(
-    ("offset", "yaw", "left_qpos", "right_qpos", "failure_stage"),
+    ("offset", "yaw", "left_distance", "right_distance", "failure_stage"),
     [
-        (0.005, 0.0, 0.02, 0.02, None),
-        (0.02, 0.0, 0.02, 0.02, "moved"),
-        (0.0, math.pi / 2, 0.02, 0.02, "moved"),
-        (0.0, 0.0, 0.02, 0.026, "dual_grasped"),
-        (0.0, 0.0, 0.0255, 0.02, "dual_grasped"),
-        (0.0, 0.0, 0.0, 0.02, "dual_grasped"),
-        (0.0, 0.0, None, 0.02, "dual_grasped"),
+        (0.005, 0.0, 0.001, 0.001, None),
+        (0.02, 0.0, 0.001, 0.001, "moved"),
+        (0.0, math.pi / 2, 0.001, 0.001, "moved"),
+        (0.0, 0.0, 0.001, float("inf"), "dual_grasped"),
+        (0.0, 0.0, 0.005, 0.001, "dual_grasped"),
+        (0.0, 0.0, float("inf"), 0.001, "dual_grasped"),
+        (0.0, 0.0, None, 0.001, "dual_grasped"),
     ],
 )
 def test_coordinated_pickment_evaluator_uses_all_physical_stages(
     offset: float,
     yaw: float,
-    left_qpos: float | None,
-    right_qpos: float,
+    left_distance: float | None,
+    right_distance: float,
     failure_stage: str | None,
 ) -> None:
     initial = _pose(0.0).unsqueeze(0)
@@ -289,9 +309,11 @@ def test_coordinated_pickment_evaluator_uses_all_physical_stages(
     final[:, 0, 3] += offset
     final[:, :3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.0, 0.0, yaw]))
     move = torch.stack((lift[-1], final))
-    grippers = {"right_hand": torch.full((2, 1, 1), right_qpos)}
-    if left_qpos is not None:
-        grippers["left_hand"] = torch.full((2, 1, 1), left_qpos)
+    grippers = {"right_hand": torch.full((2, 1, 1), 0.02)}
+    contacts = {"right_hand": torch.full((2, 1, 2), right_distance)}
+    if left_distance is not None:
+        grippers["left_hand"] = torch.full((2, 1, 1), 0.02)
+        contacts["left_hand"] = torch.full((2, 1, 2), left_distance)
     case = _case(
         "coordinated_pickment",
         control_parts={
@@ -311,12 +333,15 @@ def test_coordinated_pickment_evaluator_uses_all_physical_stages(
             "right_hand": torch.tensor([0.026]),
         },
         replay_traces={
-            "dual_pick_grasp": ReplayObservationTrace(gripper_qpos=grippers),
+            "dual_pick_grasp": _contact_trace(
+                gripper_qpos=grippers, contact_distances=contacts
+            ),
             "dual_pick_lift": ReplayObservationTrace(object_pose=lift),
             "dual_pick_move": ReplayObservationTrace(object_pose=move),
-            "dual_pick_settle": ReplayObservationTrace(
+            "dual_pick_settle": _contact_trace(
                 object_pose=final.unsqueeze(0).repeat(2, 1, 1, 1),
                 gripper_qpos=grippers,
+                contact_distances=contacts,
             ),
         },
     )
@@ -364,12 +389,12 @@ def test_coordinated_pickment_rechecks_target_after_settle() -> None:
             "right_hand": torch.tensor([1.0]),
         },
         replay_traces={
-            "dual_pick_grasp": ReplayObservationTrace(
+            "dual_pick_grasp": _contact_trace(
                 gripper_qpos={"left_hand": holding, "right_hand": holding}
             ),
             "dual_pick_lift": ReplayObservationTrace(object_pose=lift),
             "dual_pick_move": ReplayObservationTrace(object_pose=move),
-            "dual_pick_settle": ReplayObservationTrace(
+            "dual_pick_settle": _contact_trace(
                 object_pose=settled_wrong,
                 gripper_qpos={"left_hand": holding, "right_hand": holding},
             ),
@@ -445,11 +470,12 @@ def test_coordinated_placement_evaluator_uses_named_support_pose_trace(
                 object_pose=pose_trace,
                 scene_object_poses=support_traces,
             ),
-            "coordinated_place_release": ReplayObservationTrace(
+            "coordinated_place_release": _contact_trace(
+                contact_targets={"left_hand": "object", "right_hand": "support"},
                 gripper_qpos={
                     "left_hand": placing_released,
                     "right_hand": support_held,
-                }
+                },
             ),
             "coordinated_place_settle": ReplayObservationTrace(
                 object_pose=pose_trace,
@@ -522,11 +548,12 @@ def test_coordinated_placement_alignment_uses_world_height_offsets() -> None:
                 object_pose=aligned_placing_trace,
                 scene_object_poses={"support": aligned_support_trace},
             ),
-            "coordinated_place_release": ReplayObservationTrace(
+            "coordinated_place_release": _contact_trace(
+                contact_targets={"left_hand": "object", "right_hand": "support"},
                 gripper_qpos={
                     "left_hand": placing_released,
                     "right_hand": support_held,
-                }
+                },
             ),
             "coordinated_place_settle": ReplayObservationTrace(
                 object_pose=resting_placing_trace,
@@ -586,11 +613,12 @@ def test_coordinated_placement_rechecks_relative_target_after_release() -> None:
                 object_pose=aligned_trace,
                 scene_object_poses={"support": support_trace},
             ),
-            "coordinated_place_release": ReplayObservationTrace(
+            "coordinated_place_release": _contact_trace(
+                contact_targets={"left_hand": "object", "right_hand": "support"},
                 gripper_qpos={
                     "left_hand": placing_released,
                     "right_hand": support_held,
-                }
+                },
             ),
             "coordinated_place_settle": ReplayObservationTrace(
                 object_pose=settled_wrong,
