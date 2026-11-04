@@ -36,6 +36,7 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Parallel scheduling and safety boundary | `embodichain/lab/task_program/runtime/parallel.py`, `parallel_executor.py` |
 | Semantic Calls, scene, profile, effects, evidence | `embodichain/lab/task_program/semantics/` |
 | Immutable catalog and extension declarations | `embodichain/lab/task_program/integrations/catalog.py`, `extensions.py` |
+| Program-bound occurrence policy selection | `embodichain/lab/task_program/integrations/invocation_policy.py` |
 | Environment adapter and runtime assembly | `embodichain/lab/task_program/integrations/environment.py` |
 | Expansion source adapter, candidate transform and records | `embodichain/lab/task_program/integrations/expansion.py` |
 | Physical Gym component composition | `embodichain/lab/gym/utils/_component_composition.py` |
@@ -43,6 +44,9 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Component resolution and policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
+| Physical acquisition and history | `embodichain/lab/sim/sensors/contact/sampling.py`, `contact/timeline.py` |
+| Physical grip interpretation | `embodichain/lab/sim/atomic_actions/grip_evidence.py` |
+| Evidence declarations and semantic adaptation | `embodichain/lab/task_program/integrations/simulation/grip_evidence.py` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 | Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
 | Episode selection, recording, final success | `embodichain/lab/gym/envs/embodied_env.py`, `demo.py` |

@@ -608,6 +608,7 @@ class _Compiler(SemanticCallCompiler):
             self.monitors.append(monitor)
         analyzed = SimpleNamespace(
             call=call,
+            policy_preset_id=None,
             effect_assurance=(
                 EffectAssurance.VERIFIED
                 if self._install_effect_monitor
@@ -800,6 +801,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
         )
         analyzed = SimpleNamespace(
             call=call,
+            policy_preset_id=None,
             effect_assurance=EffectAssurance.VERIFIED,
             effect_monitor_ref=None,
             bound=SimpleNamespace(
@@ -1229,14 +1231,28 @@ def test_runtime_uses_selected_preset_runner_cfg_without_override(
     assert captured_cfgs[0].command_timeout == 3.0
 
 
-def test_runtime_runner_cfg_override_wins_over_selected_preset(
+@pytest.mark.parametrize(
+    ("explicit_policy", "expected_timeout"), [(False, 5.0), (True, 3.0)]
+)
+def test_runtime_runner_ownership_respects_explicit_occurrence_policy(
     monkeypatch: pytest.MonkeyPatch,
+    explicit_policy: bool,
+    expected_timeout: float,
 ) -> None:
     system = _system(
         (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
         preset_runner_cfg=ExecutionRunnerCfg(command_timeout=3.0),
         runtime_runner_cfg=ExecutionRunnerCfg(command_timeout=5.0),
     )
+    if explicit_policy:
+        original_ground = system.compiler.ground
+
+        def selected_ground(*args, **kwargs):
+            grounded = original_ground(*args, **kwargs)
+            grounded.analyzed.policy_preset_id = "runtime_test_preset"
+            return grounded
+
+        monkeypatch.setattr(system.compiler, "ground", selected_ground)
     captured_cfgs: list[ExecutionRunnerCfg] = []
     original_runner = runtime_module.ExecutionRunner
 
@@ -1252,7 +1268,7 @@ def test_runtime_runner_cfg_override_wins_over_selected_preset(
 
     assert result.status is SemanticExecutionStatus.COMPLETED
     assert len(captured_cfgs) == 1
-    assert captured_cfgs[0].command_timeout == 5.0
+    assert captured_cfgs[0].command_timeout == expected_timeout
 
 
 def test_runtime_analyzes_downstream_calls_but_executes_only_requested_prefix() -> None:

@@ -293,6 +293,7 @@ class AnalyzedSemanticCall:
     downstream_object_targets: tuple[SemanticObjectTarget, ...] = ()
     requires_verified_held_object: bool = False
     requires_fresh_observation: bool = True
+    policy_preset_id: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.index) is not int or self.index < 0:
@@ -337,6 +338,12 @@ class AnalyzedSemanticCall:
             raise TypeError("requires_verified_held_object must be a bool.")
         if type(self.requires_fresh_observation) is not bool:
             raise TypeError("requires_fresh_observation must be a bool.")
+        if self.policy_preset_id is not None:
+            _validate_identifier(self.policy_preset_id, field_name="policy_preset_id")
+            if self.policy_preset_id != self.bound.preset.preset_id:
+                raise ValueError(
+                    "Occurrence preset must match the freshly linked call."
+                )
 
     @property
     def call(self) -> SemanticCallSpec:
@@ -936,6 +943,7 @@ class SemanticCallCompiler:
         *,
         workflow_id: str = "semantic_workflow",
         path: tuple[PathPart, ...] = ("workflow",),
+        preset_ids: tuple[str | None, ...] | None = None,
     ) -> SemanticWorkflow:
         """Statically link calls and infer look-ahead/effect dependencies.
 
@@ -943,6 +951,8 @@ class SemanticCallCompiler:
             calls: Ordered exact semantic call values.
             workflow_id: Stable caller-selected workflow identifier.
             path: Root diagnostic path.
+            preset_ids: Optional occurrence-aligned named selections. A ``None``
+                entry retains normal integration policy and runner ownership.
 
         Returns:
             Factory-owned provider-free workflow analysis.
@@ -972,6 +982,18 @@ class SemanticCallCompiler:
         if not all(type(call) in allowed_types for call in supplied):
             raise TypeError("calls must contain exact supported semantic call values.")
 
+        if preset_ids is None:
+            selections = (None,) * len(supplied)
+        elif type(preset_ids) is tuple and len(preset_ids) == len(supplied):
+            selections = preset_ids
+            for selection in selections:
+                if selection is not None:
+                    _validate_identifier(selection, field_name="preset_ids")
+        else:
+            raise ValueError(
+                "preset_ids must be an exact tuple aligned with workflow calls."
+            )
+
         bound_calls: list[BoundSemanticCall] = []
         for index, call in enumerate(supplied):
             if type(call) is RegisteredSemanticCall and (
@@ -988,6 +1010,11 @@ class SemanticCallCompiler:
                 self._integration.link_call(
                     call,
                     path=(*path, index, "call"),
+                    **(
+                        {"preset_id": selections[index]}
+                        if selections[index] is not None
+                        else {}
+                    ),
                 )
             )
         for index, bound in enumerate(bound_calls):
@@ -1095,6 +1122,7 @@ class SemanticCallCompiler:
                     bound=bound,
                     effect_kind=effect_kind,
                     effect_assurance=bound.preset.effect_assurance,
+                    policy_preset_id=selections[index],
                     symbolic_writes=symbolic_writes,
                     opaque_symbolic_effect=opaque_symbolic_effect,
                     effect_monitor_ref=effect_monitor_ref,

@@ -5,6 +5,7 @@
 | Change or question | Start here |
 |---|---|
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
+| Explicit hand geometry capture and lazy paired grasp ownership | `embodichain/lab/sim/utility/grasp_geometry.py` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
 | Available robot configs and variants | `extensions/embodichain_robots/_catalog.py`; `extensions/embodichain_robots/__init__.py` owns lazy exports |
 | Locomotion assets, standing poses, drives and reference frames | `extensions/embodichain_robots/locomotion_profiles.py` reads each vendor/model's `profile.json`; model packages own `cfg.py` and `assets.py` |
@@ -183,6 +184,32 @@ has its own backend synchronization boundary.
 IK support, read [IK contracts](../ik-solvers/ik-solvers.md). Pose conventions
 are owned by [simulation](../simulation-system/simulation-system.md); external
 library adapters own conversions.
+
+## Sampled hand geometry
+
+`utility/grasp_geometry.py` adapts a runtime Robot to GraspKit's sampled closing
+surfaces. `RobotHandGeometryCfg` explicitly selects the motion/hand control parts,
+hand-root and pad links, joint commands and sampling bounds. Control names never
+imply capabilities. Commands cover every moving hand-subtree joint, including
+mimic followers, in the resolved control-part order. Named full-articulation FK
+uses the first measured row as its reference posture without changing robot state.
+The hand root and solver end link must connect through fixed URDF joints;
+fixed virtual TCP links may lie upstream or downstream. A stationary opposite-arm
+TCP is not a valid hand reference. The declared TCP must also remain fixed
+throughout hand actuation. Model-specific commands and TCP
+calibration remain in concrete robot/embodiment configuration.
+
+`RobotCoordinatedGraspProvider` captures both hands on its first paired query.
+Retain that provider with its owning Robot/environment adapter across bridge,
+engine and episode resets while the model, calibration and commands are unchanged.
+Single-arm facade calls never trigger capture. A different Robot needs its own
+providers; model names are not cache identities. The provider's `clear_cache()`
+releases asset-query state without reading the Robot or recapturing its hand
+geometry; it does not replace rebuilding after calibration/command changes.
+GraspKit receives explicit
+sampled data and numeric queries, while scene observation and cargo membership
+remain caller-owned. The source-equivalence and lifetime coverage lives in
+`tests/sim/utility/test_grasp_geometry.py`.
 
 ## Physics and motion integration
 
