@@ -26,7 +26,7 @@ import warp as wp
 from tensordict import TensorDict
 
 from ..base_sensor import BaseSensor, SensorCfg
-from ._warp.scatter import scatter_contact_rows
+from ._warp.scatter import scatter_contact_rows, scatter_contact_rows_with_loss
 from .history import ContactHistory
 from embodichain.utils import configclass, logger
 from embodichain.utils.device_utils import current_warp_stream
@@ -192,13 +192,16 @@ class ContactSensor(BaseSensor):
         self._metadata_actor_table: tuple[ContactActorInfo, ...] | None = None
         self._metadata_selected_ids: tuple[int, ...] | None = None
 
-        self._query_dropped_count = torch.zeros(1, dtype=torch.int32, device=device)
-        self._scatter_dropped_count = torch.zeros(
-            owner.num_envs, dtype=torch.int32, device=device
+        # Interval/latest rows share storage for one evidence-counter readback.
+        # The last column is query-wide; preceding columns are per-environment.
+        self._loss_counters = torch.zeros(
+            (2, owner.num_envs + 1), dtype=torch.int32, device=device
         )
-        self._sample_scatter_dropped_count = torch.zeros_like(
-            self._scatter_dropped_count
-        )
+        self._query_dropped_count = self._loss_counters[0, -1:]
+        self._scatter_dropped_count = self._loss_counters[0, :-1]
+        self._latest_query_dropped_count = self._loss_counters[1, -1:]
+        self._sample_scatter_dropped_count = self._loss_counters[1, :-1]
+        self._latest_loss_counters = self._loss_counters[1]
         self._histories: dict[str, ContactHistory] = {}
         self._sampling_observers: dict[str, ContactSamplingObserver] = {}
         self._sample_graph = None
@@ -438,12 +441,18 @@ class ContactSensor(BaseSensor):
         return buffer
 
     def _scatter_contacts(self, buffer: ContactBuffer) -> None:
+        if self.device.type == "cpu":
+            # A scalar CPU copy avoids a query-count branch on every scatter row.
+            self._latest_query_dropped_count.copy_(buffer.dropped_count_device)
+            kernel = scatter_contact_rows
+        else:
+            kernel = scatter_contact_rows_with_loss
         assert self._num_contacts_per_env is not None
         self._num_contacts_per_env.zero_()
         self._data_buffer["is_valid"].zero_()
         self._sample_scatter_dropped_count.zero_()
         wp.launch(
-            kernel=scatter_contact_rows,
+            kernel=kernel,
             dim=buffer.capacity,
             inputs=[
                 wp.from_torch(buffer.data),
@@ -463,8 +472,8 @@ class ContactSensor(BaseSensor):
                         "is_valid",
                     )
                 ],
-                wp.from_torch(buffer.count_device),
-                wp.from_torch(self._sample_scatter_dropped_count),
+                wp.from_torch(buffer.device_counts),
+                wp.from_torch(self._latest_loss_counters),
             ],
             device=str(self.device),
             stream=current_warp_stream(self.device),
@@ -480,6 +489,39 @@ class ContactSensor(BaseSensor):
         return int(
             (self._query_dropped_count.sum() + self._scatter_dropped_count.sum()).item()
         )
+
+    @property
+    def latest_sample_dropped_contacts(self) -> int:
+        """Return query and scatter loss from the latest sampled snapshot.
+
+        Unlike interval counters, this diagnostic also covers standalone refreshes
+        with observers attached. Reads respect the sampling stream and may
+        synchronize device work. Selective reset retains query-wide loss.
+        """
+        self._wait_for_sample()
+        return int(
+            (
+                self._latest_query_dropped_count.sum()
+                + self._sample_scatter_dropped_count.sum()
+            ).item()
+        )
+
+    @property
+    def evidence_dropped_contacts(self) -> int:
+        """Return the maximum interval/latest loss with one counter readback.
+
+        The two diagnostics overlap and must not be added. Packed storage avoids
+        separate GPU reductions and scalar synchronizations. Reduction uses int64
+        on the host, matching the existing Torch integer sums. Counter reads wait
+        for the producing stream; negative counters invalidate acquisition.
+        """
+        self._wait_for_sample()
+        counters = self._loss_counters.cpu().numpy()
+        if not counters.any():
+            return 0
+        if (counters < 0).any():
+            raise ValueError("Contact dropped count must be nonnegative.")
+        return int(counters.sum(axis=1, dtype=np.int64).max())
 
     def get_arena_pose(self, to_matrix: bool = False) -> torch.Tensor | None:
         """Not used.
@@ -781,6 +823,7 @@ class ContactSensor(BaseSensor):
                 value.index_fill_(0, ids, 0)
         if env_ids is None:
             self._query_dropped_count.zero_()
+            self._latest_query_dropped_count.zero_()
         for history in self._histories.values():
             history.reset(ids)
         if self._sampling_observers:

@@ -120,6 +120,17 @@ sparse Warp kernels. The ``dropped_contacts`` diagnostic sums query loss and
 scatter overflow across the current control interval; standalone updates
 without a history report the most recent sample.
 
+``latest_sample_dropped_contacts`` reports the latest fetch's query and scatter
+loss even when observers retain interval counters. Evidence sampling rejects
+either diagnostic and takes their maximum to avoid double counting. Full reset
+clears latest loss; selective reset retains query-wide loss. Diagnostic reads
+respect sampling-stream dependencies and may synchronize device work.
+``evidence_dropped_contacts`` combines both diagnostics with one packed readback
+and int64 host reduction. Latest query loss is retained by the existing CUDA scatter
+kernel, including empty-contact samples and graph replay; CPU uses a scalar copy
+to avoid a per-row branch. The standard
+sampler uses this path; custom sources retain the separate-counter fallback.
+
 Sampling observers
 ------------------
 

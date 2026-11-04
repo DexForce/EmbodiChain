@@ -162,3 +162,49 @@ def scatter_contact_rows(
             True,
             dropped,
         )
+
+
+@wp.kernel(enable_backward=False)
+def scatter_contact_rows_with_loss(
+    contact_data: wp.array(dtype=wp.float32, ndim=2),
+    user_ids: wp.array(dtype=wp.int32, ndim=2),
+    env_ids: wp.array(dtype=wp.int32),
+    num_contacts_per_env: wp.array(dtype=wp.int32),
+    max_contacts_per_env: int,
+    position: wp.array(dtype=wp.float32, ndim=3),
+    normal: wp.array(dtype=wp.float32, ndim=3),
+    friction: wp.array(dtype=wp.float32, ndim=3),
+    impulse: wp.array(dtype=wp.float32, ndim=2),
+    distance: wp.array(dtype=wp.float32, ndim=2),
+    user_ids_out: wp.array(dtype=wp.int32, ndim=3),
+    is_valid: wp.array(dtype=wp.bool, ndim=2),
+    counts: wp.array(dtype=wp.int32),
+    dropped: wp.array(dtype=wp.int32),
+):
+    """Scatter and retain query loss without a separate device copy.
+
+    ``counts`` contains the SDK valid/dropped counts. ``dropped`` contains one
+    per-environment scatter count followed by the latest query count. Write the
+    query count even when no valid rows exist; sensor query capacity is positive.
+    """
+    i = wp.tid()
+    if i == 0:
+        dropped[dropped.shape[0] - 1] = counts[1]
+    if i < counts[0]:
+        _scatter_contact_row(
+            i,
+            contact_data,
+            user_ids,
+            env_ids,
+            num_contacts_per_env,
+            max_contacts_per_env,
+            position,
+            normal,
+            friction,
+            impulse,
+            distance,
+            user_ids_out,
+            is_valid,
+            True,
+            dropped,
+        )
