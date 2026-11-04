@@ -180,6 +180,7 @@ def _legacy_evidence():
         boundary_source_path=("program", "items", 1),
         evidence_scope="native_contact_support",
         observation_kind="final",
+        evidence_format="historical_record",
         condition={
             "entity": "cube",
             "reference": "pad",
@@ -460,13 +461,23 @@ def test_milestone_requires_the_projected_execution_prefix_in_addition_to_geomet
 def test_raw_lab_snapshot_leaves_release_and_acceptance_composition_to_taskspec():
     spec, binding, evidence, program = _legacy_evidence()
     raw_binding = binding.to_dict()
-    raw_binding.update(episode_ids=[3], binding_hash="")
+    raw_binding.update(episode_ids=[3], evidence_format="raw_snapshot", binding_hash="")
     binding = SupportedPlacementEvidenceBinding.from_dict(raw_binding)
     evidence["episode_ids"] = [3]
     native = evidence.pop("record")["measurements"]
     for name in ("released", "reference_uid", "relation"):
         native.pop(name)
     evidence["native_support"] = native
+    evidence["support_acquisition"] = dict(
+        evidence_id="support.com_patch",
+        values=[True],
+        valid=[True],
+        acquisition_errors=[None],
+        timestamp=1.2,
+        env_ids=[0],
+        observation_revision=7,
+        clock_domain="simulation_time",
+    )
     result = evaluate_supported_placement_evidence(
         spec, binding, evidence, program=program
     )[0]
@@ -589,6 +600,123 @@ def test_single_placement_proof_cannot_replace_transfer_or_coordinated_transport
         evaluate_supported_placement_evidence(spec, binding, evidence, program=program)
 
 
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing_channel",
+        "missing_values",
+        "foreign_channel",
+        "negative_timestamp",
+        "foreign_clock",
+        "contradictory_values",
+        "add_record",
+        "change_format",
+    ],
+)
+def test_raw_support_contract_cannot_omit_acquisition_or_downgrade_to_history(damage):
+    from dataclasses import replace
+
+    spec, old, evidence, program = _legacy_evidence()
+    binding = replace(
+        old, evidence_format="raw_snapshot", episode_ids=(0,), binding_hash=""
+    )
+    historical = evidence.pop("record")
+    native = deepcopy(historical["measurements"])
+    for name in ("released", "reference_uid", "relation"):
+        native.pop(name)
+    evidence.update(
+        native_support=native,
+        episode_ids=[0],
+        support_acquisition=dict(
+            evidence_id="support.com_patch",
+            values=[True],
+            valid=[True],
+            acquisition_errors=[None],
+            timestamp=1.2,
+            env_ids=[0],
+            observation_revision=7,
+            clock_domain="simulation_time",
+        ),
+    )
+    if damage == "missing_channel":
+        evidence.pop("support_acquisition")
+    elif damage == "missing_values":
+        evidence["support_acquisition"].pop("values")
+    elif damage == "foreign_channel":
+        evidence["support_acquisition"]["evidence_id"] = "other"
+    elif damage == "negative_timestamp":
+        evidence["support_acquisition"]["timestamp"] = -1.0
+    elif damage == "foreign_clock":
+        evidence["support_acquisition"]["clock_domain"] = "environment_step"
+    elif damage == "contradictory_values":
+        evidence["support_acquisition"]["values"] = [False]
+    elif damage == "add_record":
+        evidence["record"] = historical
+    else:
+        raw = binding.to_dict()
+        raw["evidence_format"] = "historical_record"
+        with pytest.raises(ValueError, match="binding_hash"):
+            SupportedPlacementEvidenceBinding.from_dict(raw)
+        return
+    result = evaluate_supported_placement_evidence(
+        spec, binding, evidence, program=program
+    )[0]
+    assert result.status is EvaluationStatus.UNAVAILABLE
+
+
+def test_old_binding_version_requires_explicit_reconstruction():
+    _, binding, _, _ = _legacy_evidence()
+    raw = binding.to_dict()
+    raw.pop("evidence_format")
+    raw["schema_version"] = "task_spec.placement_evidence_binding/v1"
+    raw["binding_hash"] = canonical_hash(
+        {key: value for key, value in raw.items() if key != "binding_hash"}
+    )
+    with pytest.raises(ValueError, match="rebuild bindings"):
+        SupportedPlacementEvidenceBinding.from_dict(raw)
+
+
+def test_report_cannot_mix_new_runtime_and_historical_input_contracts():
+    from dataclasses import replace
+    from embodichain.gen_sim.task_spec import MilestoneSpec
+    from embodichain.gen_sim.task_spec.evidence import (
+        evaluate_placement_evidence_report,
+    )
+
+    spec, original, _, program = _legacy_evidence()
+    milestone = replace(spec.goal[0], predicate_id="past_place")
+    spec = replace(spec, milestones=(MilestoneSpec("past", (milestone,)),))
+    common = dict(
+        task_spec_digest=canonical_hash(spec.to_dict()),
+        episode_ids=(0,),
+        binding_hash="",
+    )
+    goal = replace(original, evidence_format="raw_snapshot", **common)
+    past = replace(
+        original,
+        predicate_id="past_place",
+        observation_kind="recorded",
+        required_execution=(
+            {"segment_id": "park", "source_path": ["program", "items", 1]},
+        ),
+        **common,
+    )
+    with pytest.raises(ValueError, match="cannot mix raw and historical"):
+        evaluate_placement_evidence_report(
+            spec, (goal, past), {}, program=program, num_envs=1
+        )
+
+
+def test_raw_timeline_cannot_borrow_the_native_com_patch_contract():
+    from dataclasses import replace
+
+    _, binding, _, _ = _sampled_window_evidence()
+    with pytest.raises(ValueError, match="Raw sampled-timeline"):
+        replace(
+            binding, evidence_format="raw_snapshot", episode_ids=(0,), binding_hash=""
+        )
+
+
 def _strong_evidence(*, region=False, historical=False):
     from dataclasses import replace
     import math
@@ -621,6 +749,7 @@ def _strong_evidence(*, region=False, historical=False):
         old,
         task_spec_digest=canonical_hash(spec.to_dict()),
         evidence_scope="native_supported_placement",
+        evidence_format="historical_record" if historical else "raw_snapshot",
         condition=condition,
         episode_ids=(0,),
         binding_hash="",
@@ -742,6 +871,17 @@ def _strong_evidence(*, region=False, historical=False):
         boundary_poses=evidence["boundary_poses"],
         episode_ids=[0],
     )
+    if not historical:
+        raw["support_acquisition"] = dict(
+            evidence_id="support.com_patch",
+            values=[True],
+            valid=[True],
+            acquisition_errors=[None],
+            timestamp=0.2,
+            env_ids=[0],
+            observation_revision=10,
+            clock_domain="environment_step",
+        )
     if region:
         landing = dict(
             scope="measured_planar_landing_region",
@@ -806,6 +946,9 @@ def test_strong_support_rechecks_raw_load_window_and_declared_footprint(
         "changed_patch",
         "wide_native_tolerance",
         "stale_boundary",
+        "missing_raw",
+        "wrong_acquisition_clock",
+        "wrong_acquisition_time",
     ],
 )
 def test_strong_support_never_substitutes_derived_claims_for_qualified_sources(damage):
@@ -822,6 +965,12 @@ def test_strong_support_never_substitutes_derived_claims_for_qualified_sources(d
         evidence["native_support"]["rows"][0]["upward_impulse"] = 2.0
     elif damage == "wide_native_tolerance":
         evidence["native_support"]["rows"][0]["com_tolerance_m"] = 0.1
+    elif damage == "missing_raw":
+        evidence["native_support"]["rows"][0].pop("raw_contacts")
+    elif damage == "wrong_acquisition_clock":
+        evidence["support_acquisition"]["clock_domain"] = "simulation_time"
+    elif damage == "wrong_acquisition_time":
+        evidence["support_acquisition"]["timestamp"] = 0.24
     else:
         evidence["boundary_poses"]["cube"][0][0][3] = 0.02
     result = evaluate_supported_placement_evidence(
