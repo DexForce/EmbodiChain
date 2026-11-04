@@ -30,8 +30,8 @@ import sys
 from types import SimpleNamespace
 import torch
 from embodichain.lab.sim.evidence import PhysicalEvidenceRequest, PhysicalEvidenceBatch
-from embodichain.lab.sim.sensors.contact_sampling import ContactEvidenceSampler
-from embodichain.lab.sim.sensors.contact_timeline import ContactTimeline
+from embodichain.lab.sim.sensors.contact.sampling import ContactEvidenceSampler
+from embodichain.lab.sim.sensors.contact.timeline import ContactTimeline
 from embodichain.lab.sim.atomic_actions.grip_evidence import GripContactObserver
 from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceBatch as ExistingBatch
 assert ExistingBatch is PhysicalEvidenceBatch

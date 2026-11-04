@@ -26,15 +26,15 @@ import torch
 
 from embodichain.lab.gym.envs.base_env import BaseEnv
 from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
-from embodichain.lab.sim.sensors.contact_sensor import ContactSensor
-from embodichain.lab.sim.sensors.contact_sampling import (
+from embodichain.lab.sim.sensors.contact.sensor import ContactSensor
+from embodichain.lab.sim.sensors.contact.sampling import (
     CONTACT_ACTOR_IDS,
     CONTACT_VALID_MASK,
     CONTACT_NORMALS,
     CONTACT_IMPULSES,
     ContactEvidenceSampler,
 )
-from embodichain.lab.sim.sensors.contact_timeline import (
+from embodichain.lab.sim.sensors.contact.timeline import (
     ContactTimeline,
     ContactTimelineCfg,
 )

@@ -20,7 +20,7 @@ not load Torch or Warp. Domain packages load their required dependencies.
 
 Private ``_warp`` modules are implementation details, not a backend registry.
 Simulation-specific contact scattering belongs to
-``embodichain.lab.sim.sensors._warp.contact``.
+``embodichain.lab.sim.sensors.contact._warp.scatter``.
 
 Trajectory API
 --------------

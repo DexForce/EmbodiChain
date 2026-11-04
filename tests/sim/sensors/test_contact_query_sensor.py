@@ -286,7 +286,7 @@ def test_sampling_observers_reject_external_capture_before_callbacks(monkeypatch
 
 def test_contact_sampler_normal_update_fetches_once_before_reading_data():
     from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
-    from embodichain.lab.sim.sensors.contact_sampling import (
+    from embodichain.lab.sim.sensors.contact.sampling import (
         ContactEvidenceSampler,
         CONTACT_VALID_MASK,
     )
@@ -455,3 +455,28 @@ def test_sampling_observers_share_the_physics_step_cache_with_history(raw_first)
         assert query.fetch_calls == index + 1
         assert events == ["before", ("after", 0.01)] * (index + 1)
     assert history.contact_count.tolist() == [2, 2]
+
+
+def test_contact_package_preserves_public_imports_and_sensor_config_registration():
+    from embodichain.lab.sim.sensors import SensorCfg
+    from embodichain.lab.sim.sensors.contact import (
+        ContactHistory,
+        ContactSensor as PackagedSensor,
+        ContactSensorCfg as PackagedCfg,
+    )
+    from embodichain.lab.sim.sensors.contact.sensor import (
+        ContactSensor as Implementation,
+    )
+    from embodichain.lab.sim.sensors.contact_sensor import (
+        ContactSensor as ExistingSensor,
+    )
+    from embodichain.lab.sim.sensors.contact_history import (
+        ContactHistory as ExistingHistory,
+    )
+
+    assert ContactSensor is PackagedSensor is ExistingSensor is Implementation
+    assert ContactHistory is ExistingHistory
+    config = SensorCfg.from_dict(
+        {"sensor_type": "ContactSensor", "uid": "contacts", "rigid_uid_list": ["cube"]}
+    )
+    assert type(config) is ContactSensorCfg is PackagedCfg

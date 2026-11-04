@@ -1141,7 +1141,7 @@ embodichain.lab.sim.scene.expansion.persistence
    save_scene_variants
    load_scene_variants
 
-embodichain.lab.sim.sensors.contact_sampling
+embodichain.lab.sim.sensors.contact.sampling
 ---------------------------------------------------------------------
 
 ContactSensor acquisition into the existing PhysicalEvidenceFrame and
@@ -1158,7 +1158,7 @@ SDK contract is unavailable.
 request CPU frames; ``source_device`` records where the original numerical
 observation was produced. The common frame has no invocation field.
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact_sampling
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
 
 .. autosummary::
 
@@ -1172,7 +1172,7 @@ observation was produced. The common frame has no invocation field.
    ContactSourceStamp
    native_contact_revision
 
-embodichain.lab.sim.sensors.contact_timeline
+embodichain.lab.sim.sensors.contact.timeline
 ---------------------------------------------------------------------
 
 Bounded raw substep history attached with
@@ -1193,7 +1193,7 @@ substep caps also bound empty histories.
 Frontend code owns actor/semantic label maps, serialized report schema IDs and
 any task-success evaluation.
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact_timeline
+.. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
 
 .. autosummary::
 
@@ -2271,10 +2271,10 @@ embodichain.lab.sim.sensors.camera
    Camera
    CameraCfg
 
-embodichain.lab.sim.sensors.contact_sensor
+embodichain.lab.sim.sensors.contact.sensor
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact_sensor
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sensor
 
 .. autosummary::
 

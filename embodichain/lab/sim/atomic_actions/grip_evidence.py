@@ -26,7 +26,7 @@ from typing import Any
 import torch
 from embodichain.compute.geometry.grip_contacts import classify_contacts
 from embodichain.lab.sim.evidence import PhysicalEvidenceRequest, PhysicalEvidenceBatch
-from embodichain.lab.sim.sensors.contact_sampling import (
+from embodichain.lab.sim.sensors.contact.sampling import (
     ContactEvidenceSampler,
     CONTACT_ACTOR_IDS,
     CONTACT_VALID_MASK,

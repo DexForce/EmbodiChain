@@ -154,12 +154,12 @@ topics:
   - embodichain/lab/sim/sensors/camera.py
   - embodichain/lab/sim/sensors/stereo.py
   - embodichain/lab/sim/sensors/attachment.py
-  - embodichain/lab/sim/sensors/contact_sensor.py
-  - embodichain/lab/sim/sensors/contact_sampling.py
-  - embodichain/lab/sim/sensors/contact_timeline.py
+  - embodichain/lab/sim/sensors/contact/sensor.py
+  - embodichain/lab/sim/sensors/contact/sampling.py
+  - embodichain/lab/sim/sensors/contact/timeline.py
   - embodichain/lab/sim/sensors/joint_opening.py
   - embodichain/lab/sim/evidence.py
-  - embodichain/lab/sim/sensors/_warp/contact.py
+  - embodichain/lab/sim/sensors/contact/_warp/scatter.py
   - embodichain/compute/image/
   watch_paths: [embodichain/lab/sim/sensors/, embodichain/compute/image/, tests/sim/sensors/]
   related_topics: [simulation-system, robot-system, env-framework, sim-visualization]

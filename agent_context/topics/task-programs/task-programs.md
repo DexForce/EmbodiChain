@@ -44,7 +44,7 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Component resolution and policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
-| Physical acquisition and history | `embodichain/lab/sim/sensors/contact_sampling.py`, `contact_timeline.py` |
+| Physical acquisition and history | `embodichain/lab/sim/sensors/contact/sampling.py`, `contact/timeline.py` |
 | Physical grip interpretation | `embodichain/lab/sim/atomic_actions/grip_evidence.py` |
 | Evidence declarations and semantic adaptation | `embodichain/lab/task_program/integrations/simulation/grip_evidence.py` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |

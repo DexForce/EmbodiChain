@@ -28,7 +28,7 @@ import torch
 
 from embodichain.lab.sim.evidence import PhysicalEvidenceRequest
 from embodichain.utils import configclass
-from .contact_sampling import (
+from .sampling import (
     CONTACT_ACTOR_IDS,
     CONTACT_VALID_MASK,
     CONTACT_NORMALS,
@@ -175,7 +175,7 @@ class ContactTimeline:
                 self._blocked_rows.add(row)
 
     def before_sample(self) -> ContactSourceStamp | None:
-        """Capture the source revision before ContactSensor fetches the substep."""
+        """Capture the source revision before ContactSensor processes the substep."""
         return None if self._index is None else self.sampler.source_stamp()
 
     def after_sample(self, dt: float, token: object) -> None:
@@ -183,7 +183,7 @@ class ContactTimeline:
 
         Args:
             dt: Physics substep duration in seconds.
-            token: Source stamp captured before this same sample was fetched.
+            token: Source stamp captured before processing this same substep.
         """
         if self._index is None:
             return
