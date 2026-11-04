@@ -191,7 +191,7 @@ topics:
 - id: expansion-engine
   title: Expansion Engine
   aliases: [Expansion Engine, offline expansion, 扩增引擎, 批量专家采集]
-  keywords: [ExpansionEngine, ExpansionRunCfg, ExpansionJobCfg, ArtifactEpisodeSink, MediaSpool, render_observation_variants]
+  keywords: [ExpansionEngine, ExpansionRunCfg, ExpansionJobCfg, ExpansionSession, ExpansionSessionCfg, ExpansionCoverage, EpisodeCoverage, GymExpansionHost, ArtifactEpisodeSink, MediaSpool, render_observation_variants]
   paths: [topics/expansion-engine/expansion-engine.md]
   source_of_truth:
   - embodichain/lab/expansion/
@@ -209,7 +209,7 @@ topics:
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
     CuroboPayload, CuroboQuerySnapshot, curobo_motion_generator,
     interpolation_mode, ik_seed_mode, resolve_continuous_ik_path, search_cost_scope, RejectedMotionCandidate,
-    expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
+    expansion, TrajectorySessionCoverage, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
     load_expansion_profile, SourceAdapter, CandidateCoordinator, CandidateTrajectoryBatch,
     ManipulabilityBands, manipulability_guided_residual, manipulability coverage bands,
     TrajectoryVariant, plan_trajectory_variants, apply_trajectory_variant, expand_trajectory_variants,
