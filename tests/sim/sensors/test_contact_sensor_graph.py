@@ -67,6 +67,7 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
         query = _CudaQuery(device)
         owner = SimpleNamespace(
             num_envs=2,
+            physics_step_index=0,
             arena_offsets=torch.zeros((2, 3), device=device),
             _spawn_scene=SimpleNamespace(
                 handles=lambda uid: tuple(
@@ -89,25 +90,30 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
         )
         sensor.begin_control_step()
 
+        def sample() -> None:
+            owner.physics_step_index += 1
+            sensor.update_physics_step(0.1)
+            sensor.update_physics_step(0.1)
+
         def assert_air_time(value: float) -> None:
             torch.testing.assert_close(
                 history.current_air_time,
                 torch.full((2, 1), value, device=device),
             )
 
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is None
         assert_air_time(0.1)
-        sensor.update_physics_step(0.1)
+        sample()
         graph = sensor._sample_graph
         assert graph is not None
         assert_air_time(0.2)
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is graph
         assert_air_time(0.3)
 
         query.buffer.device_counts[0] = 2
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is graph
         assert history.contact.all()
         assert history.found.all()
@@ -145,17 +151,180 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
 
         sensor.begin_control_step()
         history.force_threshold = 3.0
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is None
         assert not history.contact.any()
         assert not history.found.any()
         assert_air_time(0.1)
-        sensor.update_physics_step(0.1)
+        sample()
         recaptured = sensor._sample_graph
         assert recaptured is not None and recaptured is not graph
         assert_air_time(0.2)
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is recaptured
         assert not history.contact.any()
         assert_air_time(0.3)
     caller.synchronize()
+
+
+@pytest.mark.parametrize("history_sample", [False, True])
+def test_cached_sample_is_ready_on_another_cuda_stream(history_sample: bool) -> None:
+    """A cached update must wait for the producer's outstanding device work."""
+    wp.init()
+    device = torch.device("cuda:0")
+    query = _CudaQuery(device)
+    query.buffer.device_counts[0] = 2
+    owner = SimpleNamespace(
+        num_envs=2,
+        physics_step_index=0,
+        arena_offsets=torch.zeros((2, 3), device=device),
+        _spawn_scene=SimpleNamespace(
+            handles=lambda uid: tuple(
+                SimpleNamespace(path=actor.path) for actor in query.actors
+            )
+        ),
+        spawn_result=SimpleNamespace(create_contact_query=lambda *a, **kw: query),
+    )
+    sensor = ContactSensor(
+        ContactSensorCfg(
+            uid="contacts", rigid_uid_list=["cube"], max_contacts_per_env=2
+        ),
+        device,
+        owner=owner,
+    )
+    history = (
+        sensor.create_history("feet", torch.tensor([[10], [20]], device=device))
+        if history_sample
+        else None
+    )
+
+    def sample() -> None:
+        if history_sample:
+            sensor.update_physics_step(0.1)
+        else:
+            sensor.update()
+
+    sample()  # Compile kernels before arranging the delayed producer.
+    sensor.reset()
+    torch.cuda.synchronize(device)
+    owner.physics_step_index += 1
+    producer = torch.cuda.Stream(device=device)
+    consumer = torch.cuda.Stream(device=device)
+    with torch.cuda.stream(producer):
+        torch.cuda._sleep(200_000_000)
+        sample()
+    with torch.cuda.stream(consumer):
+        sample()
+        observed = sensor.get_data()["is_valid"].clone()
+        force = history.force.clone() if history is not None else None
+    consumer.synchronize()
+    assert observed.tolist() == [[True, False], [True, False]]
+    if force is not None:
+        torch.testing.assert_close(
+            force,
+            torch.tensor([[[0.0, 0.0, 2.0]], [[0.0, 0.0, 2.0]]], device=device),
+        )
+    producer.synchronize()
+
+
+@pytest.mark.parametrize("history_sample", [False, True])
+@pytest.mark.parametrize("capture_after_advance", [False, True])
+@pytest.mark.parametrize("capture_mode", ["same_stream", "other_stream", "lifecycle"])
+def test_outer_capture_preserves_sampling_and_eager_refresh(
+    history_sample: bool, capture_after_advance: bool, capture_mode: str
+) -> None:
+    """Warmup must not suppress captured fetch/scatter/history or eager refresh."""
+    wp.init()
+    device = torch.device("cuda:0")
+    query = _CudaQuery(device)
+    source = query.buffer.data.clone()
+
+    def fetch_async() -> ContactBuffer:
+        # Model a backend whose query must copy fresh device data on each replay.
+        query.buffer.data.copy_(source)
+        return query.buffer
+
+    query.fetch_async = fetch_async
+    owner = SimpleNamespace(
+        num_envs=2,
+        physics_step_index=0,
+        arena_offsets=torch.zeros((2, 3), device=device),
+        _spawn_scene=SimpleNamespace(
+            handles=lambda uid: tuple(
+                SimpleNamespace(path=actor.path) for actor in query.actors
+            )
+        ),
+        spawn_result=SimpleNamespace(create_contact_query=lambda *a, **kw: query),
+    )
+    sensor = ContactSensor(
+        ContactSensorCfg(
+            uid="contacts", rigid_uid_list=["cube"], max_contacts_per_env=2
+        ),
+        device,
+        owner=owner,
+    )
+    history = (
+        sensor.create_history("feet", torch.tensor([[10], [20]], device=device))
+        if history_sample
+        else None
+    )
+
+    def sample() -> None:
+        if history_sample:
+            sensor.update_physics_step(0.1)
+        else:
+            sensor.update()
+
+    def assert_sample(impulse: float) -> None:
+        assert sensor.get_data()["is_valid"].tolist() == [[True, False], [True, False]]
+        torch.testing.assert_close(
+            sensor.get_data()["impulse"][:, 0],
+            torch.full_like(sensor.get_data()["impulse"][:, 0], impulse),
+        )
+        if history is not None:
+            torch.testing.assert_close(
+                history.force,
+                torch.tensor(
+                    [[[0.0, 0.0, impulse / 0.1]], [[0.0, 0.0, impulse / 0.1]]],
+                    device=device,
+                ),
+            )
+
+    stream = torch.cuda.Stream(device=device)
+    stream.wait_stream(torch.cuda.current_stream(device))
+    producer = (
+        stream if capture_mode == "same_stream" else torch.cuda.Stream(device=device)
+    )
+    producer.wait_stream(torch.cuda.current_stream(device))
+    with torch.cuda.stream(producer):
+        sample()
+    # Even a completed producer must not introduce an uncaptured event into capture.
+    producer.synchronize()
+    with torch.cuda.stream(stream):
+        if capture_after_advance:
+            owner.physics_step_index += 1
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            if capture_mode == "lifecycle":
+                sensor.reset()
+                sensor.begin_control_step()
+            sample()
+        # Capture has not executed a new sample. Same-step eager calls must work.
+        query.buffer.device_counts[0] = 2
+        source[:2, 9] = 0.3
+        sample()
+        assert_sample(0.3)
+        sensor.reset()
+        for impulse in (0.2, 0.5):
+            owner.physics_step_index += 1
+            source[:2, 9] = impulse
+            graph.replay()
+            assert_sample(impulse)
+        if history is not None:
+            torch.testing.assert_close(
+                history.contact_count,
+                torch.full_like(
+                    history.contact_count, 1 if capture_mode == "lifecycle" else 2
+                ),
+            )
+    stream.synchronize()
