@@ -1,0 +1,99 @@
+--- a/modules/dexsim/python/dexsim/spawn/descs.py
++++ b/modules/dexsim/python/dexsim/spawn/descs.py
+@@ -841,11 +841,29 @@
+     body_scale: np.ndarray = field(
+         default_factory=lambda: np.ones(3, dtype=np.float32))
+ 
++    # Preparation-time replacements for selected replicated environment indices.
++    # Each resolved instance discards this map before copying/grouping.
++    env_variants: dict[int, ObjectDesc] = field(default_factory=dict, kw_only=True)
++
++    def for_environment(self, env_id: int) -> ObjectDesc:
++        """Resolve one complete rigid variant while keeping its logical name."""
++        selected = self.env_variants.get(env_id, self)
++        if selected is not self and selected.env_variants:
++            raise ValueError("Nested ObjectDesc.env_variants are unsupported.")
++        return replace(selected, name=self.name, per_env=True, env_variants={})
++
+     def __post_init__(self) -> None:
+         self.pose = _pose_array(self.pose)
+         self.scale = _scale_array(self.scale)
+         self.body_scale = _scale_array(self.body_scale)
+         self._validate_body_scale()
++        if self.env_variants and not self.per_env:
++            raise ValueError("ObjectDesc.env_variants requires per_env=True.")
++        for env_id, variant in self.env_variants.items():
++            if isinstance(env_id, bool) or not isinstance(env_id, int) or env_id < 0:
++                raise ValueError("ObjectDesc.env_variants keys must be non-negative environment indices.")
++            if not isinstance(variant, ObjectDesc) or variant.env_variants:
++                raise ValueError("ObjectDesc.env_variants must contain flat ObjectDesc replacements.")
+ 
+     def _validate_body_scale(self, value: Any | None = None) -> None:
+         """Check the current or proposed scale before changing a physical object."""
+--- a/modules/dexsim/python/dexsim/spawn/_copy.py
++++ b/modules/dexsim/python/dexsim/spawn/_copy.py
+@@ -102,6 +102,7 @@
+         collisions=list(desc.collisions),
+         physics=desc.physics,
+         per_env=desc.per_env,
++        env_variants=dict(desc.env_variants),
+         usd=desc.usd,
+         scale=desc.scale.copy(),
+         body_scale=desc.body_scale.copy(),
+--- a/modules/dexsim/python/dexsim/spawn/builder.py
++++ b/modules/dexsim/python/dexsim/spawn/builder.py
+@@ -1295,11 +1295,19 @@
+         scene.materials.update(copy_materials(scene_desc.materials))
+         replicated_scenes[env_name] = scene
+ 
++    env_index_by_name = {name: index for index, name in enumerate(env_names)}
+     for template in scene_desc.mesh_objects:
++        if template.env_variants and (
++            replicate_plan is None or max(template.env_variants) >= len(env_names)
++        ):
++            raise ValueError("ObjectDesc.env_variants exceeds the replication count.")
+         targets = (env_names if replicate_plan is not None and template.per_env
+                    else ["default"])
+         for arena_name in targets:
+-            desc = copy_object_desc(template)
++            resolved = (template.for_environment(env_index_by_name[arena_name])
++                        if arena_name in env_index_by_name and template.env_variants
++                        else template)
++            desc = copy_object_desc(resolved)
+             setattr(desc, "_spawn_template_name", template.name)  # noqa: B010
+             replicated_scenes.get(arena_name,
+                                   global_scene).add_mesh_object(desc)
+--- a/modules/dexsim/python/dexsim/spawn/adapters/newton_adapter.py
++++ b/modules/dexsim/python/dexsim/spawn/adapters/newton_adapter.py
+@@ -531,15 +531,20 @@
+             articulations[(handle.arena_name,
+                            template_name)] = handle.articulation_desc
+ 
++    env_index_by_name = {name: index for index, name in enumerate(env_names)}
+     object_templates: dict[str, MeshObjectDesc] = {}
+     articulation_templates: dict[str, ArticulationDesc] = {}
+     for template in builder.mesh_objects:
++        if template.env_variants and max(template.env_variants) >= len(env_names):
++            raise ValueError("ObjectDesc.env_variants exceeds the replication count.")
+         targets = (env_names if replicate is not None and template.per_env else
+                    ["default"])
+         for arena_name in targets:
+             desc = (None if
+                     ("object", template.name) in replaced else objects.get(
+                         (arena_name, template.name)))
++            if desc is None and template.env_variants:
++                desc = copy_object_desc(template.for_environment(env_index_by_name[arena_name]))
+             if desc is None:
+                 desc = _shared_template_desc(
+                     object_templates,
+--- a/modules/dexsim/python/dexsim/spawn/adapters/dexsim_adapter.py
++++ b/modules/dexsim/python/dexsim/spawn/adapters/dexsim_adapter.py
+@@ -192,6 +192,8 @@
+         return self._create_result(builder, world)
+ 
+     def add(self, builder: "SceneBuilder", desc: object) -> None:
++        if getattr(desc, "env_variants", None):
++            raise NotImplementedError("ObjectDesc.env_variants currently requires the Newton backend.")
+         result = builder.result
+         if result is None or not isinstance(
+                 desc,

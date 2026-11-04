@@ -222,7 +222,17 @@ def main():
                 "**/README.md",
             ],
         },
-        data_files=get_example_data_files(),
+        data_files=[
+            *get_example_data_files(),
+            (
+                "share/embodichain/assembly_patches",
+                [
+                    path.relative_to(THIS_DIR).as_posix()
+                    for path in sorted((THIS_DIR / "scripts" / "patches").iterdir())
+                    if path.suffix in {".patch", ".md", ".py"}
+                ],
+            ),
+        ],
         cmdclass=cmdclass,
         include_package_data=False,
     )

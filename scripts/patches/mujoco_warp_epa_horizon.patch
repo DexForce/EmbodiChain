@@ -1,0 +1,12 @@
+diff --git a/mujoco_warp/_src/types.py b/mujoco_warp/_src/types.py
+--- a/mujoco_warp/_src/types.py
++++ b/mujoco_warp/_src/types.py
+@@ -28,7 +28,7 @@
+ MJ_MINMU = mujoco.mjMINMU  # minimum friction
+ MJ_MINAWAKE = mujoco.mjMINAWAKE  # minimum number of timesteps before sleeping
+ # maximum size (by number of edges) of an horizon in EPA algorithm
+-MJ_MAX_EPAHORIZON = 24
++MJ_MAX_EPAHORIZON = 128
+ # maximum average number of trianglarfaces EPA can insert at each iteration
+ MJ_MAX_EPAFACES = 5
+ 

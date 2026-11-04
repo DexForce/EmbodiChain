@@ -1,0 +1,86 @@
+--- a/modules/dexsim/python/dexsim/spawn/descs.py
++++ b/modules/dexsim/python/dexsim/spawn/descs.py
+@@ -470,6 +470,10 @@
+     # None uses the MuJoCo Warp default of 3.
+     condim: int | None = None
+     priority: int | None = field(default=None, kw_only=True)
++    # Raw MuJoCo contact parameters; preserve values rather than recooking ke/kd.
++    solref: tuple[float, float] | None = field(default=None, kw_only=True)
++    solimp: tuple[float, float, float, float, float] | None = field(default=None, kw_only=True)
++    solmix: float | None = field(default=None, kw_only=True)
+ 
+     # --- Solver-agnostic shape config ---
+     # Use RigidBodyPhysicsDesc.density for backend-neutral density.
+@@ -524,7 +528,7 @@
+     "mujoco_warp":
+         frozenset({
+             "ke", "kd", "mu", "kh", "mu_torsional", "mu_rolling", "condim",
+-            "priority"
++            "priority", "solref", "solimp", "solmix"
+         }),
+ }
+ 
+@@ -533,7 +537,7 @@
+ # ignore shape-config keys.
+ NEWTON_CONTACT_FIELDS: frozenset[str] = frozenset({
+     "ke", "kd", "kf", "ka", "mu", "kh", "restitution", "mu_torsional",
+-    "mu_rolling", "condim", "priority"
++    "mu_rolling", "condim", "priority", "solref", "solimp", "solmix"
+ })
+ 
+ 
+--- a/modules/dexsim/python/dexsim/engine/newton_physics/rigid_body/body.py
++++ b/modules/dexsim/python/dexsim/engine/newton_physics/rigid_body/body.py
+@@ -899,7 +899,7 @@
+ def _newton_shape_cfg_from_desc(shape_desc, *, mesh_sdf: bool = False):
+     cfg = newton.ModelBuilder.ShapeConfig()
+     for field_info in dataclass_fields(shape_desc):
+-        if field_info.name in {"condim", "priority", "use_native_mesh_loader"}:
++        if field_info.name in {"condim", "priority", "solref", "solimp", "solmix", "use_native_mesh_loader"}:
+             continue
+         value = getattr(shape_desc, field_info.name)
+         if value is None:
+@@ -923,8 +923,8 @@
+ def _mujoco_contact_attributes(
+     builder: newton.ModelBuilder,
+     shape_config: Any | None,
+-) -> dict[str, int] | None:
+-    """Build explicit MuJoCo contact dimension and priority attributes."""
++) -> dict[str, Any] | None:
++    """Build explicit MuJoCo contact parameters without changing their semantics."""
+     values = {}
+     for field, attribute in (("condim", "mujoco:condim"),
+                              ("priority", "mujoco:geom_priority")):
+@@ -941,6 +941,32 @@
+             )
+         if attribute in builder.custom_attributes:
+             values[attribute] = int(value)
++    for field, attribute, length in (
++        ("solref", "mujoco:solref", 2),
++        ("solimp", "mujoco:geom_solimp", 5),
++        ("solmix", "mujoco:geom_solmix", None),
++    ):
++        value = None if shape_config is None else getattr(shape_config, field, None)
++        if value is None:
++            continue
++        if attribute not in builder.custom_attributes:
++            raise NotImplementedError(f"The active Newton solver does not support {attribute}.")
++        if length is None:
++            if not np.isfinite(value) or value < 0:
++                raise ValueError("MuJoCo solmix must be finite and non-negative.")
++            values[attribute] = float(value)
++            continue
++        array = np.asarray(value, dtype=float)
++        if array.shape != (length,) or not np.isfinite(array).all():
++            raise ValueError(f"MuJoCo {field} requires {length} finite values.")
++        values[attribute] = tuple(float(x) for x in array)
++        if field == "solref":
++            if not (np.all(array > 0) or np.all(array < 0)):
++                raise ValueError("MuJoCo solref requires matching nonzero signs.")
++            if "mujoco:solref_mode" not in builder.custom_attributes:
++                raise NotImplementedError("Newton does not support raw solref mode.")
++            # Newton SOLREF_MODE_RAW: bypass the ShapeConfig ke/kd conversion.
++            values["mujoco:solref_mode"] = 1
+     return values or None
+ 
+ 

@@ -71,6 +71,7 @@ def test_map_registers_the_supported_context_domains() -> None:
         "task-programs",
         "task-spec",
         "gen-sim",
+        "assembly-assets",
         "data-assets",
         "asset-generalization",
         "data-pipeline",
