@@ -43,6 +43,13 @@ when changing obstacle identity, cache generation or dynamic scene binding.
 [IK solvers](../ik-solvers/ik-solvers.md) own candidate/frame contracts;
 [Atomic Skills](../atomic-actions/atomic-actions.md) own motion execution policy.
 
+Native convex queries reuse the shared isolated Newton collision pipeline.
+`lab/sim/scene/_collision_backends.py::_require_newton` checks availability before
+capture; no FCL extra or backend fallback is selected. Distance diagnostics are
+capped intervals under the query precision policy. A threshold inside an interval
+remains unavailable, never a fabricated contact or free path. CPU comparisons
+remain separate from GPU and physical-task qualification.
+
 ## Timing and batch boundary
 
 Planning is environment-batched: waypoint qpos is `(B, dof)`, TCP transforms
@@ -181,13 +188,26 @@ add a second hand-specific conversion. GraspKit owns collision-qualified end-reg
 selection through `pg_grasp.regions`; callers select a policy without supplying
 a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
 sampled closing geometry and contact fitting with explicit thresholds; robot/FK
-sampling and physical contact evidence remain Lab responsibilities. Tensor
-interpolation lives in `compute.geometry.gripper`. `pg_grasp.coordinated` owns
-bounded paired sampling with explicit contact settings and optional observed
-world bounds; clearance preference changes costs after population selection.
-`pg_grasp.urdf_surfaces` samples explicitly selected collision links without robot
-state. See [hand geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
-for deferred Robot capture and cache lifetime, and the [GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
+sampling and physical contact evidence remain Lab responsibilities.
+`SampledHandGeometry.at_width()` interpolates the supplied hand samples.
+The public `get_dual_arm_grasp_proposals()` path retains candidate generation
+and ranking while leaving geometric qualification to the caller; normal
+validated queries retain their existing checker. `pg_grasp.coordinated` composes
+these proposals with `HandContactChecker.refine()` and shares one target-surface
+query across both hands for the same mesh identity/version. It owns bounded
+paired sampling with explicit contact settings
+and optional observed world bounds; clearance preference changes costs after
+population selection. A proposal `role` skips unused pose/NMS/ranking work while
+preserving both sides' original direction draws and the selected population.
+Raw/validated backends share read-only annotations, with separate collision state.
+Mesh mutation retires superseded versions; hosts call `clear_cache()` between
+unrelated asset cohorts to release distinct-mesh queries/backends while keeping
+sampled hand geometry. `pg_grasp.urdf_surfaces` samples explicitly selected
+collision links without robot state, sharing shape/origin decoding with fixed
+geometry while retaining each sampling policy's original point population. See
+[hand geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
+for deferred Robot capture and cache lifetime, and the
+[GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
 for geometry ownership and the finite collision-check scope.
 
 `variants.py` is the common candidate-generation path for joint-space,

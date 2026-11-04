@@ -18,9 +18,11 @@
 
 from __future__ import annotations
 
+import gc
 import json
 from pathlib import Path
 from unittest.mock import Mock
+import weakref
 
 import pytest
 import torch
@@ -32,7 +34,10 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     ParallelJawGraspCollisionCfg,
 )
 from embodichain.toolkits.graspkit.pg_grasp import coordinated
-from embodichain.toolkits.graspkit.pg_grasp.contact_fit import SampledHandGeometry
+from embodichain.toolkits.graspkit.pg_grasp.contact_fit import (
+    SampledHandGeometry,
+    HandContactChecker,
+)
 
 
 def _cfg() -> coordinated.CoordinatedGraspCfg:
@@ -109,10 +114,11 @@ def _ports(monkeypatch, *, reject_all=False) -> list[dict]:
                 }
             )
 
-    class Checker:
+    class Checker(HandContactChecker):
         def __init__(
             self, geometry, target, *, contact_tolerance, minimum_normal_cosine
         ):
+            self.target = target
             self.role = "left" if float(geometry.body[0, 0, 0]) > 0 else "right"
             trace.append(
                 {
@@ -179,8 +185,6 @@ def _ports(monkeypatch, *, reject_all=False) -> list[dict]:
                 poses = torch.eye(4).repeat(70, 1, 1)
                 poses[:, 0, 3] = object_pose[0, 3] + sign * ids * 0.01
                 poses[:, 2, 3] = 0.2
-                rejected, _ = self._collision_checker.query(object_pose, poses)
-                assert not rejected.any()
                 widths, costs = 0.04 + ids * 0.00001, ids.float()
                 costs[2] = torch.inf
                 costs[33] = torch.inf
@@ -192,7 +196,10 @@ def _ports(monkeypatch, *, reject_all=False) -> list[dict]:
                 }
             return result
 
-    def backend(generator, *args):
+    def backend(generator, *args, proposals_only=False):
+        assert (
+            proposals_only
+        ), "paired refinement must explicitly request unqualified proposals"
         return backends.setdefault(
             id(generator), Backend(generator.gripper_model.model_id)
         )
@@ -246,13 +253,22 @@ def test_paired_population_query_trace_and_rng_match_pinned_source(
     trace = _ports(monkeypatch, reject_all=case_name == "rejected")
     sampler = _sampler()
     bounds = torch.tensor(case["cargo_bounds"]) if case["cargo_bounds"] else None
-    with torch.random.fork_rng():
+    with torch.random.fork_rng(devices=[]):
         torch.manual_seed(fixture["seed"])
         actual = sampler.get_dual_arm_valid_grasp_poses(
             **_query(case["rows"]), cargo_bounds=bounds
         )
         next_random = torch.rand(4)
-    assert trace == case["trace"]
+    # Object-query construction is shared now. Keep every proposal, fit and
+    # qualification event exactly equal to the frozen algorithm trace.
+    assert [event for event in trace if event["op"] != "surface"] == [
+        event for event in case["trace"] if event["op"] != "surface"
+    ]
+    surfaces = [event for event in trace if event["op"] == "surface"]
+    assert len(surfaces) == 1
+    assert surfaces[0] == next(
+        event for event in case["trace"] if event["op"] == "surface"
+    )
     _assert_rows(actual, case["output"])
     torch.testing.assert_close(
         next_random, torch.tensor(case["next_random"]), rtol=0, atol=0
@@ -335,3 +351,110 @@ def test_inferred_ground_policy_requires_an_explicit_supported_configuration():
         coordinated.CoordinatedGraspSampler(
             left, _delegate("right"), _geometry("left"), _geometry("right"), cfg=_cfg()
         )
+
+
+def test_shared_target_query_is_rebuilt_when_mesh_changes(monkeypatch):
+    trace = _ports(monkeypatch)
+    sampler = _sampler()
+    query = _query()
+    sampler.get_dual_arm_valid_grasp_poses(**query)
+    sampler.get_dual_arm_valid_grasp_poses(**query)
+    assert sum(event["op"] == "surface" for event in trace) == 1
+    assert sum(event["op"] == "checker" for event in trace) == 2
+    for version in range(1, 5):
+        old_surface = weakref.ref(next(iter(sampler._left._surface_queries.values())))
+        old_checkers = [
+            weakref.ref(next(iter(hand._validators.values())))
+            for hand in (sampler._left, sampler._right)
+        ]
+        query["mesh_vertices"].add_(0.001)
+        sampler.get_dual_arm_valid_grasp_poses(**query)
+        gc.collect()
+        assert old_surface() is None
+        assert all(reference() is None for reference in old_checkers)
+        assert sum(event["op"] == "surface" for event in trace) == version + 1
+        assert sum(event["op"] == "checker" for event in trace) == 2 * (version + 1)
+
+    retained = [weakref.ref(value) for value in sampler._left._surface_queries.values()]
+    sampler.clear_cache()
+    gc.collect()
+    assert all(reference() is None for reference in retained)
+    before = len(trace)
+    sampler.get_dual_arm_valid_grasp_poses(**query)
+    assert sum(event["op"] == "surface" for event in trace[before:]) == 1
+    assert sum(event["op"] == "checker" for event in trace[before:]) == 2
+
+
+def test_real_contact_refinement_accepts_opposed_box_grasps_without_fixed_checker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import trimesh
+    from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGeneratorCfg
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        _antipodal_backend as implementation,
+    )
+
+    nms = Mock(wraps=implementation.pose_nms)
+    monkeypatch.setattr(implementation, "pose_nms", nms)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError(
+            "Paired contact refinement constructed a fixed-hand checker"
+        )
+
+    def annotate(backend):
+        backend._hit_point_pairs = torch.tensor(
+            [
+                [[-0.075, -0.03, 0.0], [-0.075, 0.03, 0.0]],
+                [[0.075, -0.03, 0.0], [0.075, 0.03, 0.0]],
+            ]
+        )
+        return backend._hit_point_pairs
+
+    monkeypatch.setattr(implementation, "GripperCollisionChecker", forbidden)
+    monkeypatch.setattr(
+        implementation._AntipodalMeshBackend,
+        "_get_cache_dir",
+        lambda *args: str(tmp_path / "unprepared.npy"),
+    )
+    monkeypatch.setattr(implementation._AntipodalMeshBackend, "annotate", annotate)
+
+    def delegate(role):
+        return AntipodalGraspPoseGenerator(
+            ParallelJawGripperModelCfg(model_id=role),
+            collision_geometry=FixedGripperCollisionGeometry(
+                torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
+            ),
+            collision_cfg=ParallelJawGraspCollisionCfg(filter_ground_collision=False),
+            algorithm_cfg=AntipodalGraspPoseGeneratorCfg(approach_direction_samples=1),
+        )
+
+    mesh = trimesh.creation.box(extents=[0.2, 0.06, 0.1])
+    sampler = coordinated.CoordinatedGraspSampler(
+        delegate("left"),
+        delegate("right"),
+        _geometry("left"),
+        _geometry("right"),
+        cfg=_cfg(),
+    )
+    result = sampler.get_dual_arm_valid_grasp_poses(
+        mesh_vertices=torch.tensor(mesh.vertices, dtype=torch.float32),
+        mesh_triangles=torch.tensor(mesh.faces),
+        obj_poses=torch.eye(4)[None],
+        left_to_right_arm_direction=torch.tensor([1.0, 0, 0]),
+        approach_direction=torch.tensor([0.0, 0, -1]),
+    )[0]
+    assert nms.call_count == 2  # Only the side consumed by each hand is materialized.
+    for role, x in (("left", -0.075), ("right", 0.075)):
+        assert result[role]["is_success"]
+        torch.testing.assert_close(
+            result[role]["open_lengths"], torch.tensor([0.0602]), atol=1e-6, rtol=0
+        )
+        torch.testing.assert_close(
+            result[role]["grasp_poses"][:, 0, 3], torch.tensor([x]), atol=1e-6, rtol=0
+        )
+    native_query = weakref.ref(next(iter(sampler._left._surface_queries.values())))
+    sampler.clear_cache()
+    gc.collect()
+    assert native_query() is None

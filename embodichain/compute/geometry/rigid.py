@@ -28,7 +28,38 @@ from embodichain.utils.math import (
     pose_inv,
 )
 
-__all__ = ["nearest_half_turn_pose", "rotate_rigid_grasp"]
+__all__ = ["nearest_half_turn_pose", "rotate_rigid_grasp", "rigid_pose_displacement"]
+
+
+def rigid_pose_displacement(
+    pose: torch.Tensor, reference: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Measure translation and rotation magnitudes between corresponding poses.
+
+    Args:
+        pose: Rigid transforms, shape ``(B, 4, 4)``.
+        reference: Previous transforms with the same shape, dtype and device.
+
+    Returns:
+        Translation distances in metres and rotation angles in radians, each
+        shaped ``(B,)``. Nonfinite input remains nonfinite evidence; this function
+        does not choose a stability threshold or certify transform validity.
+    """
+    if (
+        pose.ndim != 3
+        or pose.shape[-2:] != (4, 4)
+        or reference.shape != pose.shape
+        or reference.device != pose.device
+        or reference.dtype != pose.dtype
+        or not pose.is_floating_point()
+    ):
+        raise ValueError(
+            "Pose pairs must share floating (B, 4, 4) shape, dtype and device."
+        )
+    translation = torch.linalg.vector_norm(pose[:, :3, 3] - reference[:, :3, 3], dim=-1)
+    rotation = reference[:, :3, :3].transpose(-1, -2) @ pose[:, :3, :3]
+    cosine = (rotation.diagonal(dim1=-2, dim2=-1).sum(dim=-1) - 1.0) * 0.5
+    return translation, torch.acos(cosine.clamp(min=-1.0, max=1.0))
 
 
 def nearest_half_turn_pose(

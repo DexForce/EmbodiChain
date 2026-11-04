@@ -610,11 +610,13 @@ class SemanticIntegrationManifest:
         call: SemanticCallSpec,
         *,
         path: tuple[PathPart, ...] = ("call",),
+        preset_id: str | None = None,
     ) -> LinkedSemanticCall:
         """Resolve static refs, affordances, and declared resource structure.
 
         This method never observes scene providers, constructs an engine,
-        samples a grasp, or runs a planner.
+        samples a grasp, or runs a planner. An explicit ``preset_id`` selects
+        a declared occurrence policy without changing effect assurance.
         """
         if not isinstance(call, SemanticCallSpec):
             raise TypeError("call must be a SemanticCallSpec.")
@@ -707,10 +709,34 @@ class SemanticIntegrationManifest:
             normalized_call.resources,
             path=(*path, "resources"),
         )
-        preset_id = self._resolve_declared_preset(
+        default_preset_id = self._resolve_declared_preset(
             descriptor,
             path=(*path, "preset"),
         )
+        if preset_id is None:
+            preset_id = default_preset_id
+        else:
+            _validate_identifier(preset_id, field_name="preset_id")
+            if preset_id not in self.robot_profile.presets:
+                raise SemanticValidationError(
+                    SemanticDiagnostic(
+                        "unknown_preset",
+                        (*path, "preset"),
+                        f"Unknown occurrence policy preset {preset_id!r}.",
+                        tuple(self.robot_profile.presets),
+                    )
+                )
+            if (
+                self.robot_profile.presets[preset_id].effect_assurance
+                is not self.robot_profile.presets[default_preset_id].effect_assurance
+            ):
+                raise SemanticValidationError(
+                    SemanticDiagnostic(
+                        "occurrence_effect_assurance_mismatch",
+                        (*path, "preset"),
+                        "Occurrence policy selection must preserve the declared effect assurance.",
+                    )
+                )
         preset = self.robot_profile.presets[preset_id]
         if descriptor.call_id not in preset.action_option_templates:
             option_path = (
@@ -1207,8 +1233,9 @@ class BoundSemanticIntegration:
         call: SemanticCallSpec,
         *,
         path: tuple[PathPart, ...] = ("call",),
+        preset_id: str | None = None,
     ) -> BoundSemanticCall:
-        """Resolve one call against exact installed skills, resources, and preset."""
+        """Resolve a call and optional named occurrence preset before grounding."""
         try:
             self._robot_profile.assert_current()
         except RuntimeError as exc:
@@ -1219,7 +1246,7 @@ class BoundSemanticIntegration:
                     str(exc),
                 )
             ) from exc
-        linked = self._manifest.link_call(call, path=path)
+        linked = self._manifest.link_call(call, path=path, preset_id=preset_id)
         installed = self._engine.skills.get(linked.descriptor.skill_id)
         if installed is None or installed != linked.descriptor.target_descriptor:
             raise SemanticValidationError(

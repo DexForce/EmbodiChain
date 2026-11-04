@@ -24,6 +24,8 @@ verifies the resulting trajectories and dynamic obstacle updates.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 import torch
 
@@ -46,6 +48,7 @@ from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
 )
 from embodichain.lab.sim.motion.planners import PlanState
+from embodichain.lab.sim.motion.planners.utils import MoveType
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (  # noqa: E402
     CuroboPlanOptions,
     CuroboPlanner,
@@ -318,4 +321,309 @@ def test_curobo_v2_multi_env_worlds_are_independent():
         if planner is not None:
             planner.close()
         sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+
+
+def test_observed_payload_buffers_and_query_lifetimes(
+    record_property: Callable[[str, object], None],
+) -> None:
+    """Qualify singleton/multi-sphere attachment and GC at a host batch boundary."""
+    import gc
+    import weakref
+
+    from embodichain.compute.geometry.mesh_bounds import aabb_sphere_cover
+    from embodichain.lab.sim.motion.planners.curobo.payload import (
+        CuroboPayload,
+        CuroboQuerySnapshot,
+        _attachment_models,
+        curobo_motion_generator,
+    )
+    from embodichain.lab.sim.scene.collision_sources import snapshot_collision_sources
+
+    sim, robot, block = _make_sim_robot()
+    original_gc_enabled = gc.isenabled()
+    try:
+        full_qpos = robot.get_qpos().clone()
+        start = robot.get_qpos(name=CONTROL_PART).clone()
+        target = start.clone()
+        target[:, 0] += JOINT_1_TARGET_DELTA_RAD
+        world_to_base = torch.linalg.inv(
+            robot.get_control_part_base_pose(CONTROL_PART, to_matrix=True)
+        )
+        # Nonzero sphere center and rotated/translated object pose detect a
+        # workaround that drops the frame transform or attaches at the TCP.
+        object_pose = robot.compute_fk(qpos=start, name=CONTROL_PART, to_matrix=True)
+        offset = torch.eye(4, device=start.device).unsqueeze(0)
+        offset[0, :3, :3] = torch.tensor(
+            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            device=start.device,
+        )
+        offset[0, :3, 3] = torch.tensor([0.01, -0.02, 0.03], device=start.device)
+        object_pose = object_pose @ offset
+        world = snapshot_collision_sources(
+            {"obstacle": block.get_collision_shapes()},
+            {"obstacle": block.get_local_pose(to_matrix=True)},
+            world_to_base,
+        )
+        cfg = CuroboPlannerCfg(
+            robot_uid=ROBOT_UID,
+            use_cuda_graph=False,
+            preserve_plan_samples=True,
+            warmup_iterations=0,
+            world=CuroboWorldCfg(rigid_objects=world),
+        )
+        retained = []
+        weak_buffers = []
+
+        class CallerFailure(Exception):
+            pass
+
+        def run_query(sphere_count: int, fail_caller: bool = False) -> None:
+            """Drop all native locals before testing the collection boundary."""
+            spheres = torch.tensor([[0.002, 0.003, 0.004, 0.005]], device=start.device)
+            if sphere_count == 27:
+                axis = torch.tensor([-0.01, 0.01], device=start.device)
+                spheres = aabb_sphere_cover(torch.cartesian_prod(axis, axis, axis))
+            snapshot = CuroboQuerySnapshot(
+                full_qpos=full_qpos,
+                world_to_base=world_to_base,
+                payload=CuroboPayload(
+                    object_id="carried",
+                    control_part=CONTROL_PART,
+                    spheres=spheres,
+                    object_pose=object_pose,
+                ),
+            )
+            with curobo_motion_generator(cfg, query_snapshot=snapshot) as mg:
+                mg.planner.prepare_backend(
+                    control_part=CONTROL_PART,
+                    batch_size=1,
+                    move_type=MoveType.JOINT_MOVE,
+                )
+                backend = next(iter(mg.planner._backend_cache.values()))
+                models = _attachment_models(backend.planner)
+                for model in models:
+                    params = model.config.kinematics_config
+                    weak_buffers.append(weakref.ref(params.link_spheres))
+                    indices = params.get_sphere_index_from_link_name("gen_sim_payload")
+                    state = mg.planner._to_curobo_joint_state(start, backend)
+                    tool = model.compute_kinematics(state).tool_poses.get_link_pose(
+                        model.tool_frames[0]
+                    )
+                    transform = (
+                        torch.linalg.inv(tool.get_matrix())
+                        @ world_to_base
+                        @ object_pose
+                    )
+                    expected = (
+                        spheres[:, :3] @ transform[0, :3, :3].T + transform[0, :3, 3]
+                    )
+                    actual = params.link_spheres[0, indices]
+                    torch.testing.assert_close(
+                        actual[:, :3], expected, atol=1e-6, rtol=1e-5
+                    )
+                    torch.testing.assert_close(
+                        actual[:, 3], spheres[:, 3], atol=0, rtol=0
+                    )
+                result = mg.generate(
+                    [PlanState.from_qpos(target)],
+                    MotionGenOptions(
+                        start_qpos=start,
+                        control_part=CONTROL_PART,
+                        plan_opts=CuroboPlanOptions(control_part=CONTROL_PART),
+                    ),
+                )
+                assert bool(result.success.all())
+                assert torch.allclose(result.positions[:, -1], target, atol=0.02)
+                retained.append(
+                    (
+                        result.positions,
+                        result.positions.clone(),
+                        result.dt,
+                        result.dt.clone(),
+                    )
+                )
+                if fail_caller:
+                    raise CallerFailure
+            assert not mg.planner._payload_managers
+            assert not mg.planner._backend_cache
+            mg.planner.close()  # Idempotent after detaching and native destruction.
+
+        gc.collect()
+        # Make delayed collection reproducible, independent of Python thresholds.
+        gc.disable()
+        settled_bytes = []
+        for iteration in range(6):
+            if iteration == 5:
+                with pytest.raises(CallerFailure):
+                    run_query(1, fail_caller=True)
+            else:
+                run_query(1 if iteration % 2 == 0 else 27)
+            torch.cuda.synchronize()
+            # The host owns this batch boundary; close does not promise to
+            # collect native optimizer/graph-planner Python callback cycles.
+            gc.collect()
+            torch.cuda.synchronize()
+            assert all(ref() is None for ref in weak_buffers)
+            settled_bytes.append(torch.cuda.memory_allocated())
+            assert all(
+                torch.equal(a, b) and torch.equal(dt, copy_dt)
+                for a, b, dt, copy_dt in retained
+            )
+            assert torch.equal(robot.get_qpos(), full_qpos)
+        # Exclude first-use allocator/library initialization. Six tiny retained
+        # trajectories are far below this allowance; one old native query was ~50 MiB.
+        record_property("settled_allocated_bytes", settled_bytes)
+        record_property("native_buffer_weakrefs", len(weak_buffers))
+        assert max(settled_bytes[2:]) - min(settled_bytes[2:]) < 8 * 1024**2
+    finally:
+        if original_gc_enabled:
+            gc.enable()
+        gc.collect()
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.parametrize("batch_size", [2, 4])
+def test_observed_shared_world_native_batch(batch_size: int) -> None:
+    """Exercise native batch planning, explicit row frames and owned results."""
+    import gc
+    import weakref
+    from embodichain.lab.sim.motion.planners.curobo.payload import (
+        CuroboQuerySnapshot,
+        curobo_motion_generator,
+    )
+    from embodichain.lab.sim.scene.collision_sources import snapshot_collision_sources
+
+    sim, robot, block = _make_sim_robot(num_envs=batch_size)
+    retained = []
+    try:
+        full = robot.get_qpos().clone()
+        start = robot.get_qpos(name=CONTROL_PART).clone()
+        target = start.clone()
+        target[:, 0] += torch.linspace(0.04, 0.12, batch_size, device=start.device)
+        real_frame = torch.linalg.inv(
+            robot.get_control_part_base_pose(CONTROL_PART, to_matrix=True)
+        )
+        # Use distinct explicit observed frames to catch a row-zero broadcast.
+        frames = torch.eye(4, device=start.device).repeat(batch_size, 1, 1)
+        frames[:, 0, 3] = torch.arange(batch_size, device=start.device)
+        frames[1, :3, :3] = torch.tensor(
+            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], device=start.device
+        )
+        base_goal = real_frame @ robot.compute_fk(
+            qpos=target, name=CONTROL_PART, to_matrix=True
+        )
+        goals = torch.linalg.inv(frames) @ base_goal
+        shared_pose = real_frame[:1] @ block.get_local_pose(to_matrix=True)[:1]
+        world = snapshot_collision_sources(
+            {"obstacle": block.get_collision_shapes()},
+            {"obstacle": torch.linalg.inv(frames) @ shared_pose},
+            frames,
+        )
+        cfg = CuroboPlannerCfg(
+            robot_uid=ROBOT_UID,
+            use_cuda_graph=False,
+            preserve_plan_samples=True,
+            warmup_iterations=0,
+            max_attempts=2,
+            world=CuroboWorldCfg(rigid_objects=world),
+        )
+        snapshot = CuroboQuerySnapshot(full_qpos=full, world_to_base=frames)
+        for kind in (MoveType.JOINT_MOVE, MoveType.EEF_MOVE):
+            with curobo_motion_generator(cfg, query_snapshot=snapshot) as mg:
+                meta = mg.planner.prepare_backend(
+                    control_part=CONTROL_PART, batch_size=batch_size, move_type=kind
+                )
+                backend = next(iter(mg.planner._backend_cache.values()))
+                assert isinstance(
+                    backend.planner, mg.planner._bindings.BatchMotionPlanner
+                )
+                assert meta["batch_size"] == batch_size
+                buffer_ref = weakref.ref(
+                    backend.planner.kinematics.config.kinematics_config.link_spheres
+                )
+                result = mg.generate(
+                    [
+                        (
+                            PlanState.from_qpos(target)
+                            if kind == MoveType.JOINT_MOVE
+                            else PlanState.from_xpos(goals)
+                        )
+                    ],
+                    MotionGenOptions(
+                        start_qpos=start,
+                        control_part=CONTROL_PART,
+                        plan_opts=CuroboPlanOptions(control_part=CONTROL_PART),
+                    ),
+                )
+                assert result.success.tolist() == [True] * batch_size
+                torch.testing.assert_close(
+                    result.positions[:, 0], start, atol=1e-3, rtol=0
+                )
+                actual_goal = real_frame @ robot.compute_fk(
+                    qpos=result.positions[:, -1], name=CONTROL_PART, to_matrix=True
+                )
+                torch.testing.assert_close(
+                    actual_goal[:, :3, 3], base_goal[:, :3, 3], atol=0.02, rtol=0
+                )
+                if kind == MoveType.JOINT_MOVE:
+                    torch.testing.assert_close(
+                        result.positions[:, -1], target, atol=1e-3, rtol=0
+                    )
+                relative_rotation = (
+                    actual_goal[:, :3, :3].transpose(-1, -2) @ base_goal[:, :3, :3]
+                )
+                angle = torch.acos(
+                    (
+                        (relative_rotation.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2
+                    ).clamp(-1, 1)
+                )
+                assert (angle < 0.05).all()
+                assert (
+                    torch.isfinite(result.positions).all()
+                    and torch.isfinite(result.dt).all()
+                )
+                assert (result.dt >= 0).all() and (result.duration > 0).all()
+                assert mg.planner.validate_joint_trajectory(
+                    result.positions, control_part=CONTROL_PART
+                ).all()
+                retained.append(
+                    (
+                        result.positions,
+                        result.positions.clone(),
+                        result.dt,
+                        result.dt.clone(),
+                    )
+                )
+                if batch_size == 2 and kind == MoveType.EEF_MOVE:
+                    mixed_goals = goals.clone()
+                    mixed_goals[1, :3, 3] = 50.0  # Beyond the arm workspace.
+                    mixed = mg.generate(
+                        [PlanState.from_xpos(mixed_goals)],
+                        MotionGenOptions(
+                            start_qpos=start,
+                            control_part=CONTROL_PART,
+                            plan_opts=CuroboPlanOptions(control_part=CONTROL_PART),
+                        ),
+                    )
+                    assert mixed.success.tolist() == [True, False]
+                    torch.testing.assert_close(
+                        mixed.positions[1],
+                        start[1].expand_as(mixed.positions[1]),
+                        atol=0,
+                        rtol=0,
+                    )
+                    assert (mixed.dt[1] == 0).all()
+            del backend, mg
+            gc.collect()
+            torch.cuda.synchronize()
+            assert buffer_ref() is None
+            assert all(
+                torch.equal(a, b) and torch.equal(c, d) for a, b, c, d in retained
+            )
+        torch.testing.assert_close(robot.get_qpos(), full, atol=0, rtol=0)
+    finally:
+        gc.collect()
+        sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()

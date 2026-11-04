@@ -262,6 +262,8 @@ def test_single_arm_does_not_capture_and_geometry_reuses_the_same_environment_ow
             queries.append(kwargs)
             return [None]
 
+        clear_cache = Mock()
+
     monkeypatch.setattr(capture, "CoordinatedGraspSampler", Sampler)
     robot, cfg = _case(tmp_path)
     left, right = _delegate(), _delegate()
@@ -270,6 +272,8 @@ def test_single_arm_does_not_capture_and_geometry_reuses_the_same_environment_ow
     provider = capture.RobotCoordinatedGraspProvider(
         left, right, left_capture, right_capture, cfg=_paired_cfg()
     )
+    provider.clear_cache()
+    Sampler.clear_cache.assert_not_called()
     facade = CoordinatedGraspPoseGenerator(left, provider)
     single = [(torch.eye(4)[None], torch.zeros(1))]
     left.get_valid_grasp_poses = Mock(return_value=single)
@@ -287,6 +291,9 @@ def test_single_arm_does_not_capture_and_geometry_reuses_the_same_environment_ow
     assert second_facade.get_dual_arm_valid_grasp_poses(**_query(None)) == [None]
     assert robot.reads == 2 and len(robot.calls) == 2 and len(constructed) == 1
     assert queries[0]["cargo_bounds"] is bounds and queries[1]["cargo_bounds"] is None
+    provider.clear_cache()
+    Sampler.clear_cache.assert_called_once_with()
+    assert robot.reads == 2 and len(robot.calls) == 2
 
     other = _Robot(Path(robot.cfg.fpath))
     other_left = capture.RobotHandGeometryProvider(other, cfg=cfg)

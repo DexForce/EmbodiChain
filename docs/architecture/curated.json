@@ -3033,8 +3033,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
           "symbol": "AntipodalGraspPoseGenerator",
-          "start_line": 172,
-          "end_line": 172,
+          "start_line": 282,
+          "end_line": 282,
           "excerpt": "class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):"
         }
       ],
@@ -3059,8 +3059,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
           "symbol": "_AntipodalMeshBackend",
-          "start_line": 56,
-          "end_line": 56,
+          "start_line": 70,
+          "end_line": 70,
           "excerpt": "class _AntipodalMeshBackend:"
         }
       ],
@@ -5483,8 +5483,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
           "symbol": "AntipodalGraspPoseGenerator._backend",
-          "start_line": 303,
-          "end_line": 303,
+          "start_line": 386,
+          "end_line": 386,
           "excerpt": "        backend = _AntipodalMeshBackend("
         }
       ]
@@ -5501,8 +5501,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
           "symbol": "AntipodalGraspPoseGenerator._backend",
-          "start_line": 299,
-          "end_line": 299,
+          "start_line": 382,
+          "end_line": 382,
           "excerpt": "        model = self._gripper_model"
         }
       ]
@@ -5537,8 +5537,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
           "symbol": "_AntipodalMeshBackend.__init__",
-          "start_line": 118,
-          "end_line": 118,
+          "start_line": 152,
+          "end_line": 152,
           "excerpt": "        self._antipodal_sampler = AntipodalSampler(cfg=sampler_cfg)"
         }
       ]
@@ -5548,16 +5548,16 @@
       "source": "grasp-backend",
       "target": "grasp-collision",
       "relation": "constructs",
-      "description": "Creates the mesh-specific sampling or collision service.",
+      "description": "Constructs the fixed-hand collision service for validated queries; explicit proposals omit it.",
       "provenance": "source-reviewed",
-      "scope": "Private mesh backend composition behind the public generator.",
+      "scope": "Private mesh backend composition behind the public generator, guarded by the validated-query mode.",
       "evidence": [
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
           "symbol": "_AntipodalMeshBackend.__init__",
-          "start_line": 105,
-          "end_line": 105,
-          "excerpt": "        self._collision_checker = GripperCollisionChecker("
+          "start_line": 135,
+          "end_line": 136,
+          "excerpt": "        if check_collision:\n            self._collision_checker = GripperCollisionChecker("
         }
       ]
     },

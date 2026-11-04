@@ -7,6 +7,11 @@ installation, launcher, or task recipe; use the [official RLinf
 EmbodiChain guide](https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/embodichain.html)
 for that workflow.
 
+The current upstream example trains a state-based MLP with PPO on CartPole.
+It is a concrete starting point for the worker integration, not a qualification
+of every pretrained VLA or WAM policy. See {doc}`training_frameworks` for all
+training routes and {doc}`lerobot` for the official ACT imitation workflow.
+
 ## Choose a training stack
 
 The two stacks serve different experiment lifecycles. Use this as a workflow
@@ -41,7 +46,7 @@ deployment as the EmbodiChain CLI:
 - The deployment's observation and action spaces remain the source of truth;
   the RLinf policy dimensions and mapping must match them.
 
-See the [task package registration contract](https://github.com/DexForce/EmbodiChain/blob/main/embodichain_tasks/README.md#how-registration-works)
+See the [task package registration contract](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/README.md#how-registration-works)
 for discovery and initialization details. See the
 {doc}`configuration guide </guides/configuration>` for inline and componentized
 Gym deployment paths.
@@ -50,7 +55,7 @@ The official RLinf recipe may move at a different pace from EmbodiChain. Older
 versions of that recipe use the retired
 `configs/agents/rl/basic/<task>/gym_config.json` layout. Current EmbodiChain
 deployments live under
-`embodichain_tasks/configs/tasks/<category>/<task>/env.json` or a corresponding
+`extensions/embodichain_tasks/configs/tasks/<category>/<task>/env.json` or a corresponding
 task deployment selected by the project configuration conventions.
 
 ## Current compatibility boundary
