@@ -882,3 +882,42 @@ def test_timeline_reset_propagates_sensor_index_errors_before_mutating_history(i
     with pytest.raises(type(expected.value)):
         timeline.reset(indices)
     assert timeline.snapshot() == before
+
+
+@pytest.mark.parametrize("loss", [0, 3, -1])
+def test_sampler_combined_loss_diagnostic_does_not_read_legacy_counters(loss):
+    source = ContactSource()
+
+    class CombinedSource:
+        def __getattr__(self, name):
+            return getattr(source, name)
+
+        @property
+        def evidence_dropped_contacts(self):
+            return loss
+
+        @property
+        def dropped_contacts(self):
+            raise AssertionError("Combined acquisition must not synchronize twice.")
+
+        @property
+        def latest_sample_dropped_contacts(self):
+            raise AssertionError("Combined acquisition must not synchronize twice.")
+
+    sample = ContactEvidenceSampler(CombinedSource()).sample(
+        PhysicalEvidenceRequest(1.0, 0, torch.tensor([0]))
+    )
+    assert sample.frame.get(CONTACT_NORMALS).valid.tolist() == [loss == 0]
+    if loss:
+        assert sample.frame.get(CONTACT_NORMALS).acquisition_errors[0]
+
+
+@pytest.mark.parametrize("loss", [3, -1])
+def test_custom_source_latest_loss_fallback_retains_unavailable_evidence(loss):
+    source = ContactSource()
+    source.latest_sample_dropped_contacts = loss
+    sample = ContactEvidenceSampler(source).sample(
+        PhysicalEvidenceRequest(1.0, 0, torch.tensor([0]))
+    )
+    assert sample.frame.get(CONTACT_NORMALS).valid.tolist() == [False]
+    assert sample.frame.get(CONTACT_NORMALS).acquisition_errors[0]

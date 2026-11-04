@@ -162,8 +162,25 @@ def reference_class(ref: str) -> tuple[type[ContactSensor], str, str]:
             "from embodichain.lab.sim.sensors._warp.contact_history import",
             "from ._warp.history import",
         )
-        if ast.dump(ast.parse(before), include_attributes=False) != ast.dump(
-            ast.parse((sensor_root / current_name).read_text()),
+        previous_tree = ast.parse(before)
+        current_tree = ast.parse((sensor_root / current_name).read_text())
+        if current_name == "contact/_warp/scatter.py" and not any(
+            isinstance(node, ast.FunctionDef)
+            and node.name == "scatter_contact_rows_with_loss"
+            for node in previous_tree.body
+        ):
+            # The candidate adds a fused entry point. The reference still calls
+            # the original kernel, whose complete implementation must match.
+            current_tree.body = [
+                node
+                for node in current_tree.body
+                if not (
+                    isinstance(node, ast.FunctionDef)
+                    and node.name == "scatter_contact_rows_with_loss"
+                )
+            ]
+        if ast.dump(previous_tree, include_attributes=False) != ast.dump(
+            current_tree,
             include_attributes=False,
         ):
             raise ValueError(f"Shared dependency differs from main: {current_name}")
@@ -178,6 +195,9 @@ def reference_class(ref: str) -> tuple[type[ContactSensor], str, str]:
         type_ignores=[],
     )
     namespace = dict(vars(sensor_module))
+    from embodichain.lab.sim.sensors.contact._warp.scatter import scatter_contact_rows
+
+    namespace["scatter_contact_rows"] = scatter_contact_rows
     exec(compile(ast.fix_missing_locations(module), path, "exec"), namespace)
     return (
         namespace["ReferenceContactSensor"],
