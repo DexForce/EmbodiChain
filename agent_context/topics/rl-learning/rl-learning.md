@@ -236,20 +236,27 @@ lightweight APG component must not eagerly load the simulator-backed Trainer.
 
 ## Invariants
 
-The registered `proprioceptive_actor_critic` policy separates actor, critic and
-training-only label groups. `architecture_version` preserves history ordering
-and normalizer semantics: `legacy_v1` accepts previous history followed by the
-current frame; `official_v1` accepts current followed by history including
-current. Equal dimensions do not establish feature or checkpoint equivalence.
-Environment observation producers must use the matching layout and convention.
+Blind assembly uses the registered `proprioceptive_actor_critic` policy with
+explicit actor/critic groups. Assembly observations and training labels live in
+`embodichain.lab.gym.envs.managers.observations`, which provides the existing
+config names. Its `architecture_version` preserves checkpoint
+semantics: omitted versions retain `legacy_v1` with previous history followed by
+current; `official_v1` matches the author's public actor export with current
+followed by history including current. Deployments must pair the policy version
+with the manager's `history_layout` and environment's
+`proprioception_convention`; equal tensor dimensions do not imply equal feature
+semantics. The peg study nominal and development configurations opt into the
+official version; other assembly profiles retain their declared legacy version.
+The official inference normalizer follows the exported formula, while its
+training-statistics updates and privileged critic remain native conventions.
 
-Named training fields travel with the observation that produced each action.
-PPO's optional auxiliary decoder loss recomputes the latent in each minibatch
-so encoder gradients remain connected. Normalization statistics remain frozen
-through collection and all PPO epochs, then update for the next rollout.
-Actor export excludes critic and contact decoder; inference alignment does
-not qualify task learning or simulator throughput.
-
+Contact labels travel as state-aligned training-only rollout fields. PPO's
+optional auxiliary decoder loss recomputes the latent during minibatch updates
+so gradients reach the encoder. Normalization statistics stay fixed through
+collection and every PPO epoch, then update for the next rollout. Actor export
+excludes the critic and decoder. See `examples/learning/blind_assembly/` for training, actor export and native
+policy preview. Inference alignment and tensor capacity do not qualify task learning
+or simulator throughput.
 
 Auto-reset timeouts retain completed-row terminal observations and row IDs.
 The collector evaluates the terminal state before using its value for timeout
@@ -261,8 +268,8 @@ Training snapshots freeze physical environment/embodiment/scene components
 relative to their declaring deployment before moving configs into a run.
 The optional `EmbodiedEnvCfg.resource_export` function owns materialized
 task resources. It receives the unwrapped environment, an owned frozen mapping
-and the destination directory; consumers use it to pin materialized resources together with their
-preparation/export declarations. Explicit `./` resource paths resolve relative to the saved config,
+and the destination directory; assembly uses it to pin the actual robot and
+manifest together with its preparation/export declarations. Explicit `./` resource paths resolve relative to the saved config,
 including robot `fpath`/solver `urdf_path` and `assembly_manifest`. Raw checkpoint context remains
 unchanged so resource packaging does not redefine resume compatibility.
 

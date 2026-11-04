@@ -195,6 +195,7 @@ def main():
                 "configs/*.yaml",
             ],
             "embodichain.data": ["default_materials.json"],
+            "embodichain_robots.flexiv.rizon4s": ["rizon4s_sources.json"],
             "embodichain.compute.kinematics._warp": [
                 "ssik_LICENSE.txt",
                 "data/*.npz",

@@ -3724,16 +3724,6 @@ Historical assembly reference preparation
 
    assembly_robot_reference
 
-Shared locomotion observation functor
-------------------------------------
-
-The observation package exposes task-built actor or critic state and preserves the
-existing locomotion configuration name while implementations move into a package.
-
-.. currentmodule:: embodichain.lab.gym.envs.managers.observations
-
-.. autofunction:: velocity_locomotion_observation
-
 embodichain.learning.rl.policies.proprioceptive_actor_critic
 ------------------------------------------------------------
 
@@ -3746,3 +3736,91 @@ Temporal encoder policy, selective observation-history storage and weighted trai
    ObservationHistory
    ProprioceptiveActorCriticCfg
    ProprioceptiveActorCritic
+
+embodichain.lab.gym.envs.managers.assembly
+------------------------------------------
+
+Stateful proprioceptive history, privileged labels, reset and milestone rewards used by the registered assembly tasks. Actor observation groups exclude labels and fixture truth.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.assembly
+
+.. autosummary::
+
+   AssemblyProprioception
+   assembly_privileged_state
+   assembly_contact_labels
+   reset_assembly
+   assembly_milestone_reward
+
+
+
+embodichain_tasks.manipulation.assembly.assets
+----------------------------------------------
+
+Public-generator composition of held pegs, perforated gears and nuts with physically mating fixtures. Task topology changes are recorded in asset provenance.
+
+.. currentmodule:: embodichain_tasks.manipulation.assembly.assets
+
+.. autosummary::
+
+   build_task_assembly
+
+
+
+Blind assembly observation functors
+-----------------------------------
+
+These task-specific observations maintain proprioceptive history and provide
+privileged mating state and contact labels for training. Only the proprioceptive
+observation belongs to the actor input.
+
+.. currentmodule:: embodichain_tasks.manipulation.assembly.obs
+
+.. autosummary::
+
+   AssemblyProprioception
+   assembly_privileged_state
+   assembly_contact_labels
+
+.. autoclass:: AssemblyProprioception
+   :members: reset
+   :no-index:
+
+.. autofunction:: assembly_privileged_state
+
+.. autofunction:: assembly_contact_labels
+
+
+Shared observation functors
+---------------------------
+
+The observation manager resolves general, assembly and locomotion functors
+through one package. Assembly contact labels and privileged state are intended
+for training; policy configuration controls which observations reach the actor.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observations
+
+.. autosummary::
+
+   AssemblyProprioception
+   assembly_privileged_state
+   assembly_contact_labels
+   velocity_locomotion_observation
+
+.. autoclass:: AssemblyProprioception
+   :members: reset
+
+.. autofunction:: assembly_privileged_state
+
+.. autofunction:: assembly_contact_labels
+
+.. autofunction:: velocity_locomotion_observation
+
+
+Assembly task component callables
+--------------------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   assembly_components

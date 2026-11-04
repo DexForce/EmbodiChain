@@ -8,6 +8,7 @@ import GenSim, simulation runtime, task packages or benchmark helpers.
 |---|---|
 | Pinned mjfit provider, manifests, sampling and USD format export | `embodichain/toolkits/assembly/` |
 | Native compound configs and actual hinge articulations | `embodichain/lab/sim/assembly/` |
+| Robot-held mating geometry recipes | `extensions/embodichain_tasks/embodichain_tasks/manipulation/assembly/assets.py` |
 | Reference execution, analytic probes and measurement | `extensions/embodichain_benchmarks/assembly/` |
 
 `build_assembly` produces source body-local geometry, independent visual parts,
@@ -42,6 +43,29 @@ Native visual cache paths include the asset hash and `_VISUAL_FORMAT_VERSION`;
 bump the visual version when changing the rendered file format so the SDK
 cannot reuse a stale imported mesh.
 
+The application-owned `assets.py:build_task_assembly` composes robot-held task geometry using public generators,
+including perforated gear cores and bosses. It records the changed topology
+separately from the passive generator output. Peg tasks request a local support
+floor through public `bottom_thickness`; passive/raw generator defaults remain
+unchanged. Existing manifests pin their geometry, including an open bottom,
+and do not acquire later task defaults. Task registration, manager
+semantics and training deployment belong to the environment/RL owners. Each
+official task registers the common `EmbodiedEnv` with a scene-preparation
+function. The task's `preparation.py` expands a pinned manifest into ordinary
+background, rigid-object, articulation and sensor configs before World creation.
+A startup event binds shared state; `TerminationManager` advances it once per
+control transition. Observation and reward functors read that snapshot, while
+reset updates only selected rows. Actor feature computation stays in the
+observation package and reads encoder-derived state. The task's `resources.py`
+packages the manifest and prepared robot for checkpoint relocation. No
+assembly-specific environment class or environment-method replacement is used.
+
+`embodichain_benchmarks.assembly.robot_reference` prepares the historical public Rizon/Robotiq approximation
+from pinned source assets, with explicit gripper approximation and fidelity
+metadata. Preparation is optional and runs before config loading; replay uses
+frozen resources. Default arm/tool assembly belongs to task embodiment YAML,
+not this converter or a combined robot preset.
+
 `embodichain_benchmarks.assembly.precision` checks geometry/USD ownership and runs passive source/native
 comparisons. MuJoCo Warp references declare their constants protocol through
 `PrecisionRunCfg.warp_reference_initialization`: `cpu_compiled` preserves the
@@ -65,7 +89,7 @@ warnings, unsupported shapes and missing overflow accounting remain explicit.
 the source benchmark runner is `scripts/benchmark/assembly/precision.py`.
 
 Focused coverage lives under `tests/toolkits/assembly/`, `tests/sim/assembly/`,
-`tests/benchmark/assembly/`.
+`tests/benchmark/assembly/` and `tests/gym/envs/tasks/test_blind_assembly.py`.
 Portable-format tests explicitly block simulator, task, benchmark and generator
 imports. Existing manifest schemas and content identities are independent of
 Python module locations.
