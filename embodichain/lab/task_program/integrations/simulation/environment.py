@@ -36,7 +36,7 @@ from copy import deepcopy
 from dataclasses import dataclass, fields
 import math
 from types import MappingProxyType
-from typing import Protocol, TYPE_CHECKING
+from typing import Literal, Protocol, TYPE_CHECKING
 
 import torch
 
@@ -406,7 +406,20 @@ class SharedTickSceneProvider(SceneProvider):
 
 
 class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
-    """Gym planning observations backed by live robot and shared scene state."""
+    """Gym planning observations backed by live robot and shared scene state.
+
+    Args:
+        robot: Live robot supplying the synchronized observation.
+        scene_provider: Provider sharing scene observations within a host tick.
+        clock: Environment control clock.
+        env_ids: Stable IDs in native robot row order.
+        owner_token: Factory identity used to reject mixed runtime components.
+        capture_root_pose: Capture the robot's arena-local root transform in
+            each observation. The default leaves ``RobotObservation.root_pose``
+            unset and performs no root-pose query.
+        hold_qpos_source: Use the latest captured observation by default, or
+            explicitly read live controller position targets for normal holds.
+    """
 
     def __init__(
         self,
@@ -416,11 +429,17 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         env_ids: torch.Tensor,
         *,
         owner_token: object,
+        capture_root_pose: bool = False,
+        hold_qpos_source: Literal["observed", "drive_target"] = "observed",
     ) -> None:
         if type(scene_provider) is not SharedTickSceneProvider:
             raise TypeError("scene_provider must be exactly SharedTickSceneProvider.")
         if type(clock) is not EnvironmentStepClock:
             raise TypeError("clock must be exactly EnvironmentStepClock.")
+        if type(capture_root_pose) is not bool:
+            raise TypeError("capture_root_pose must be a bool.")
+        if hold_qpos_source not in ("observed", "drive_target"):
+            raise ValueError("hold_qpos_source must be observed or drive_target.")
         qpos = _full_robot_tensor(robot, "get_qpos", required=True)
         assert qpos is not None
         if (
@@ -438,6 +457,8 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         self._clock = clock
         self._env_ids = env_ids.clone()
         self._owner_token = owner_token
+        self._capture_root_pose = capture_root_pose
+        self._hold_qpos_source = hold_qpos_source
         super().__init__(self._capture)
 
     @property
@@ -453,6 +474,60 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
     def is_owned_by(self, owner_token: object) -> bool:
         """Return whether this provider belongs to one factory instance."""
         return self._owner_token is owner_token
+
+    def hold_qpos(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Return the configured source for unaddressed robot joint holds.
+
+        The default delegates to the latest captured observation without a new
+        robot read. ``drive_target`` reads controller targets explicitly, keeping
+        tracking error from changing an idle manipulator's commanded position.
+
+        Args:
+            env_ids: Ordered subset of this provider's stable environment IDs.
+
+        Returns:
+            Owned full hold positions in the requested order.
+        """
+        if self._hold_qpos_source == "observed":
+            return self.current_qpos(env_ids)
+        if (
+            not isinstance(env_ids, torch.Tensor)
+            or env_ids.dtype != torch.long
+            or env_ids.dim() != 1
+            or env_ids.numel() == 0
+        ):
+            raise ValueError("env_ids must be a non-empty one-dimensional long tensor.")
+        if env_ids.device != self._env_ids.device:
+            raise ValueError("env_ids must share the simulation environment device.")
+        if torch.unique(env_ids).numel() != env_ids.numel():
+            raise ValueError("env_ids must be unique.")
+        row_by_id = {
+            int(env_id): row
+            for row, env_id in enumerate(self._env_ids.detach().cpu().tolist())
+        }
+        try:
+            rows = [
+                row_by_id[int(env_id)] for env_id in env_ids.detach().cpu().tolist()
+            ]
+        except KeyError as exc:
+            raise ValueError(
+                f"Environment ID {int(exc.args[0])} is absent from the simulation."
+            ) from exc
+        target_qpos = self._robot.get_qpos(target=True)
+        if (
+            not isinstance(target_qpos, torch.Tensor)
+            or not target_qpos.is_floating_point()
+            or target_qpos.shape
+            != (self._env_ids.numel(), int(getattr(self._robot, "dof", 0)))
+            or target_qpos.device != self._env_ids.device
+            or not bool(torch.isfinite(target_qpos).all().item())
+        ):
+            raise ValueError(
+                "robot.get_qpos(target=True) must return finite floating full-qpos "
+                "shape (num_envs, robot_dof) on the simulation device."
+            )
+        index = torch.tensor(rows, dtype=torch.long, device=target_qpos.device)
+        return target_qpos.index_select(0, index).clone()
 
     def _capture(self, task_state: TaskState) -> PlanningContext:
         """Capture one synchronized robot and scene observation."""
@@ -482,12 +557,19 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             timestamp=timestamp,
             env_ids=self._env_ids.clone(),
         )
+        root_pose = None
+        if self._capture_root_pose:
+            root_pose = self._robot.get_local_pose(to_matrix=True)
+            if not isinstance(root_pose, torch.Tensor):
+                raise TypeError("Robot root observation must be a tensor.")
+            root_pose = root_pose.to(qpos)
         return PlanningContext(
             robot=RobotObservation(
                 timestamp=timestamp,
                 qpos=qpos,
                 qvel=qvel,
                 qeffort=qeffort,
+                root_pose=root_pose,
             ),
             task=task_state,
             scene=scene,
@@ -518,6 +600,10 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         hand_geometry_cfgs: Explicit hand calibration settings keyed by grasp target ID.
         translation_threshold: Material scene translation threshold.
         rotation_threshold: Material scene rotation threshold.
+        capture_root_pose: Capture an owned arena-local robot root transform in
+            each planning observation. Disabled by default.
+        hold_qpos_source: Source for normal controller holds. ``observed`` keeps
+            the captured-qpos behavior; ``drive_target`` explicitly reads targets.
 
     The Gym cadence is attached to each live :class:`PlanningContext`.  Motion
     policy presets describe behavior; they do not own the environment's
@@ -538,11 +624,17 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
         translation_threshold: float = 1.0e-4,
         rotation_threshold: float = 1.0e-3,
+        capture_root_pose: bool = False,
+        hold_qpos_source: Literal["observed", "drive_target"] = "observed",
     ) -> None:
         if type(registration) is not SimulationTaskProgramRegistration:
             raise TypeError(
                 "registration must be exactly SimulationTaskProgramRegistration."
             )
+        if type(capture_root_pose) is not bool:
+            raise TypeError("capture_root_pose must be a bool.")
+        if hold_qpos_source not in ("observed", "drive_target"):
+            raise ValueError("hold_qpos_source must be observed or drive_target.")
         registration.assert_unchanged()
         selected_scene_binding = registration.scene_binding
         selected_profile_binding = registration.robot_profile_binding
@@ -614,6 +706,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             field_name="rotation_threshold",
         )
         self._owner_token = object()
+        self._capture_root_pose = capture_root_pose
+        self._hold_qpos_source = hold_qpos_source
 
         qpos = _full_robot_tensor(robot, "get_qpos", required=True)
         assert qpos is not None
@@ -644,6 +738,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
         translation_threshold: float = 1.0e-4,
         rotation_threshold: float = 1.0e-3,
+        capture_root_pose: bool = False,
+        hold_qpos_source: Literal["observed", "drive_target"] = "observed",
     ) -> SimulationTaskProgramFactory:
         """Create a registered factory from the standard Gym environment surface."""
         simulation = getattr(environment, "sim", None)
@@ -683,6 +779,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             hand_geometry_cfgs=hand_geometry_cfgs,
             translation_threshold=translation_threshold,
             rotation_threshold=rotation_threshold,
+            capture_root_pose=capture_root_pose,
+            hold_qpos_source=hold_qpos_source,
         )
 
     @property
@@ -799,6 +897,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             clock,
             self._env_ids,
             owner_token=self._owner_token,
+            capture_root_pose=self._capture_root_pose,
+            hold_qpos_source=self._hold_qpos_source,
         )
 
     def create_effect_evidence_providers(
