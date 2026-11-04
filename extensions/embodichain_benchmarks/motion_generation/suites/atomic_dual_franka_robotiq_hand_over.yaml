@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_dual_franka_robotiq_hand_over
-suite_version: atomic_dual_franka_robotiq_hand_over_component_v1
+suite_version: atomic_dual_franka_robotiq_hand_over_component_v2
 profile: smoke
 planners:
 - id: toppra
@@ -12,7 +12,8 @@ planners:
   adapter: curobo
   role: primary_baseline
   enabled: true
-  config: {}
+  config:
+    use_cuda_graph: false
 protocol:
   report_schema_version: '3'
   joint_velocity_limit_rad_s: 0.2
@@ -98,7 +99,7 @@ tracks:
         - -0.22
         - 0.06
 embodiment:
-  component: embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140.yaml
+  component: embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140_handover.yaml
   resource_bindings:
     source: right
     destination: left

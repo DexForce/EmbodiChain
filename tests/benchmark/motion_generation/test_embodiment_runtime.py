@@ -445,13 +445,24 @@ def test_example_has_nominal_and_position_domains() -> None:
     assert "gripper" not in suite.tracks[0].config
 
 
-def test_dual_component_binds_roles_commands_geometry_and_mirrored_domain() -> None:
+@pytest.mark.parametrize("tuned", [False, True], ids=["frozen", "handover"])
+def test_dual_component_binds_roles_commands_geometry_and_mirrored_domain(
+    tuned: bool,
+) -> None:
     """Both hands must come from the component, including after exchanging roles."""
     from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
         AtomicSkillScenario,
     )
 
     suite = load_suite("atomic_dual_franka_robotiq_hand_over")
+    if not tuned:
+        suite.embodiment.component = (
+            "embodichain_tasks/configs/components/embodiments/"
+            "dual_franka_robotiq_arg2f_140.yaml"
+        )
+    closure = 0.5 if tuned else 0.7
+    tcp_z = 0.21 if tuned else 0.2
+    grasp_qpos = [closure, -closure, closure, -closure, -closure, closure]
     runner = BenchmarkRunner(suite, suite.planners, device="cpu")
     provider = runner.robot_provider
     cfg = provider.build_cfg()
@@ -472,10 +483,18 @@ def test_dual_component_binds_roles_commands_geometry_and_mirrored_domain() -> N
         "left_eef",
     ]
     for item in track.config["grippers"]:
-        assert item["grasp_qpos"] == [0.7, -0.7, 0.7, -0.7, -0.7, 0.7]
-    assert cfg.solver_cfg["right_arm"].tcp[2][3] == pytest.approx(0.2)
-    assert cfg.joint_drive_props.stiffness["right_eef"] == 50.0
-    assert cfg.init_qpos[12:14] == [0.0, 0.0]
+        assert item["grasp_qpos"] == grasp_qpos
+    assert cfg.solver_cfg["right_arm"].tcp[2][3] == pytest.approx(tcp_z)
+    assert cfg.joint_drive_props.stiffness["right_eef"] == (1000.0 if tuned else 50.0)
+    assert cfg.init_qpos[12:14] == ([0.741, 0.741] if tuned else [0.0, 0.0])
+    for arm in ("left_arm", "right_arm"):
+        assert cfg.solver_cfg[arm].class_type == (
+            "FEPSolver" if tuned else "PytorchSolver"
+        )
+        assert cfg.joint_drive_props.max_effort[arm] == (100000.0 if tuned else 10000.0)
+    for hand in ("left_eef", "right_eef"):
+        assert cfg.joint_drive_props.damping[hand] == (100.0 if tuned else 5.0)
+        assert cfg.joint_drive_props.max_effort[hand] == (10000.0 if tuned else 500.0)
     assert "grippers" not in suite.tracks[0].config
     assert SuiteCfg.from_dict(
         suite_to_dict(runner.suite)
@@ -506,20 +525,17 @@ def test_dual_component_binds_roles_commands_geometry_and_mirrored_domain() -> N
     }
     scenario._configure_embodiment_services()
     assert scenario.grasp_model().model_id == "robotiq_arg2f_140"
-    assert scenario.grasp_model().max_opening_width == pytest.approx(0.128)
-    assert scenario.grasp_root_from_tcp()[2][3] == pytest.approx(0.2)
+    assert scenario.grasp_model().max_opening_width == pytest.approx(
+        0.14 if tuned else 0.128
+    )
+    assert scenario.grasp_root_from_tcp()[2][3] == pytest.approx(tcp_z)
     assert set(scenario._hand_geometry_cfgs) == {"left_eef", "right_eef"}
     assert scenario._hand_geometry_cfgs["right_eef"].pad_link_names == (
         "right_left_inner_finger_pad",
         "right_inner_finger_pad",
     )
-    assert tuple(scenario._hand_geometry_cfgs["right_eef"].closed_qpos) == (
-        0.7,
-        -0.7,
-        0.7,
-        -0.7,
-        -0.7,
-        0.7,
+    assert tuple(scenario._hand_geometry_cfgs["right_eef"].closed_qpos) == tuple(
+        grasp_qpos
     )
     # Carry the same explicit geometry into the actual benchmark engine.
     adapter = Mock()
@@ -543,3 +559,40 @@ def test_component_rejects_invalid_coordinated_resource_selection(bindings) -> N
     suite.embodiment.resource_bindings = bindings
     with pytest.raises(ValueError, match="distinct|Unknown"):
         BenchmarkRunner(suite, suite.planners, device="cpu")
+
+
+def test_handover_generalization_preserves_qualified_population() -> None:
+    """Package the measured 50-environment design without dropping hard domains."""
+    from embodichain_benchmarks.motion_generation.config import (
+        resolve_atomic_batch_sizes,
+    )
+
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over_spatial_generalization")
+    assert suite.embodiment.component.endswith(
+        "dual_franka_robotiq_arg2f_140_handover.yaml"
+    )
+    expected = {
+        "nominal": 1,
+        "bilateral_role_mirror": 1,
+        **{
+            name: 8
+            for name in (
+                "object_xy",
+                "object_yaw",
+                "target_relative_pose",
+                "task_frame_planar",
+                "object_target_position",
+                "target_relative_shell",
+            )
+        },
+    }
+    actual = {
+        track.domain.id: sum(resolve_atomic_batch_sizes(track))
+        * len(track.config["seeds"])
+        for track in suite.evaluation_tracks()
+    }
+    assert actual == expected
+    assert sum(actual.values()) == 50
+    for track in suite.evaluation_tracks():
+        assert track.config["physics"]["joint_tracking_scope"] == "motion_control_parts"
+        assert track.config["physics"]["joint_tracking_tolerance_rad"] == 0.05

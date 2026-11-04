@@ -796,3 +796,73 @@ Python environment:
 ```bash
 python -m pytest -q tests/benchmark/motion_generation
 ```
+
+### Qualified Franka + Robotiq 140 HandOver calibration
+
+`atomic_dual_franka_robotiq_hand_over` selects the dedicated
+`dual_franka_robotiq_arg2f_140_handover` component. Its operation-specific drive
+limits, FEP redundancy search, home joint7=0.741 rad, Rz90 TCP/contact origin
+Z=0.21 m, signed six-joint closure of 0.5 rad, and antipodal sampler settings
+are the complete qualified calibration bundle. The frozen #948 component
+`dual_franka_robotiq_arg2f_140` remains available with its original values.
+Both components mount the same `Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf`.
+This comparison does not establish an individual parameter's contribution.
+
+The explicit `root_from_contact_frame` preserves the contact calibration
+independently of `root_from_tcp`. The latter alone relabels the tool and does
+not move the physical contact centre. Omission of the new field retains the
+existing registered model geometry and provenance.
+
+Run the packaged 50-environment design (8 domains, seeds 11/23; CPU physics
+and CUDA cuRobo, with CUDA graphs disabled):
+
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+python -m embodichain benchmark motion-generation \
+  --suite atomic_dual_franka_robotiq_hand_over_spatial_generalization \
+  --algorithms toppra curobo --device cpu --headless \
+  --output-root outputs/benchmarks/franka-robotiq-handover/calibrated
+```
+
+To run the frozen-calibration baseline with identical protocol and domains,
+write a suite that changes only the component and report identity:
+
+```python
+from pathlib import Path
+import yaml
+from embodichain_benchmarks.motion_generation.config import load_suite, suite_to_dict
+
+suite = suite_to_dict(load_suite("atomic_dual_franka_robotiq_hand_over_spatial_generalization"))
+suite["name"] += "_frozen"
+suite["suite_version"] += "_frozen"
+suite["embodiment"]["component"] = (
+    "embodichain_tasks/configs/components/embodiments/"
+    "dual_franka_robotiq_arg2f_140.yaml"
+)
+output = Path("outputs/benchmarks/franka-robotiq-handover/frozen.yaml")
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(yaml.safe_dump(suite, sort_keys=False))
+```
+
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+python -m embodichain benchmark motion-generation \
+  --suite outputs/benchmarks/franka-robotiq-handover/frozen.yaml \
+  --algorithms toppra curobo --device cpu --headless \
+  --output-root outputs/benchmarks/franka-robotiq-handover/frozen
+```
+
+The native HandOver primary metric is `physical_skill_success`: the required
+physical task stages complete. `end_to_end_success` is a separate diagnostic,
+which additionally gates on planning, motion validity and controller execution.
+Neither metric changes its scoring between calibration conditions. Arm tracking
+uses `motion_control_parts` (0.05 rad); finger contact/release is evaluated by
+the physical-stage evaluator, so contact-limited closure is not mistaken for
+an arm tracking error.
+
+In the recorded paired run, task success was TOPPRA 34/50 → 41/50 and cuRobo
+33/50 → 42/50. Geometry validity remained 30/50 in both conditions. The role
+mirror case still failed for both backends. This is one object and two seeds,
+not full Atomic acceptance or a performance claim. See the
+[qualification report](../../../scripts/benchmark/tech_reports/motion_generation/franka_robotiq_handover_20261104.md)
+for the denominator, environment, additional diagnostics and limitations.
