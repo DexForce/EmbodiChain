@@ -36,7 +36,7 @@ from copy import deepcopy
 from dataclasses import dataclass, fields
 import math
 from types import MappingProxyType
-from typing import Protocol, TYPE_CHECKING
+from typing import Literal, Protocol, TYPE_CHECKING
 
 import torch
 
@@ -96,6 +96,7 @@ from .policies import SimulationSegmentPolicyPort
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
     from embodichain.toolkits.graspkit import GraspPoseGenerator
 
 
@@ -405,7 +406,20 @@ class SharedTickSceneProvider(SceneProvider):
 
 
 class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
-    """Gym planning observations backed by live robot and shared scene state."""
+    """Gym planning observations backed by live robot and shared scene state.
+
+    Args:
+        robot: Live robot supplying the synchronized observation.
+        scene_provider: Provider sharing scene observations within a host tick.
+        clock: Environment control clock.
+        env_ids: Stable IDs in native robot row order.
+        owner_token: Factory identity used to reject mixed runtime components.
+        capture_root_pose: Capture the robot's arena-local root transform in
+            each observation. The default leaves ``RobotObservation.root_pose``
+            unset and performs no root-pose query.
+        hold_qpos_source: Use the latest captured observation by default, or
+            explicitly read live controller position targets for normal holds.
+    """
 
     def __init__(
         self,
@@ -415,11 +429,17 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         env_ids: torch.Tensor,
         *,
         owner_token: object,
+        capture_root_pose: bool = False,
+        hold_qpos_source: Literal["observed", "drive_target"] = "observed",
     ) -> None:
         if type(scene_provider) is not SharedTickSceneProvider:
             raise TypeError("scene_provider must be exactly SharedTickSceneProvider.")
         if type(clock) is not EnvironmentStepClock:
             raise TypeError("clock must be exactly EnvironmentStepClock.")
+        if type(capture_root_pose) is not bool:
+            raise TypeError("capture_root_pose must be a bool.")
+        if hold_qpos_source not in ("observed", "drive_target"):
+            raise ValueError("hold_qpos_source must be observed or drive_target.")
         qpos = _full_robot_tensor(robot, "get_qpos", required=True)
         assert qpos is not None
         if (
@@ -441,6 +461,8 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         self._clock = clock
         self._env_ids = env_ids.clone()
         self._owner_token = owner_token
+        self._capture_root_pose = capture_root_pose
+        self._hold_qpos_source = hold_qpos_source
         super().__init__(self._capture)
 
     @property
@@ -456,6 +478,62 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
     def is_owned_by(self, owner_token: object) -> bool:
         """Return whether this provider belongs to one factory instance."""
         return self._owner_token is owner_token
+
+    def hold_qpos(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Return the configured source for unaddressed robot joint holds.
+
+        The default delegates to the latest captured observation without a new
+        robot read. ``drive_target`` reads controller targets explicitly, keeping
+        tracking error from changing an idle manipulator's commanded position.
+
+        Args:
+            env_ids: Ordered subset of this provider's stable environment IDs.
+
+        Returns:
+            Owned full hold positions in the requested order.
+        """
+        if self._hold_qpos_source == "observed":
+            return self.current_qpos(env_ids)
+        if (
+            not isinstance(env_ids, torch.Tensor)
+            or env_ids.dtype != torch.long
+            or env_ids.dim() != 1
+            or env_ids.numel() == 0
+        ):
+            raise ValueError("env_ids must be a non-empty one-dimensional long tensor.")
+        if env_ids.device != self._env_ids.device:
+            raise ValueError("env_ids must share the simulation environment device.")
+        if torch.unique(env_ids).numel() != env_ids.numel():
+            raise ValueError("env_ids must be unique.")
+        row_by_id = {
+            int(env_id): row
+            for row, env_id in enumerate(self._env_ids.detach().cpu().tolist())
+        }
+        try:
+            rows = [
+                row_by_id[int(env_id)] for env_id in env_ids.detach().cpu().tolist()
+            ]
+        except KeyError as exc:
+            raise ValueError(
+                f"Environment ID {int(exc.args[0])} is absent from the simulation."
+            ) from exc
+        target_qpos = self._robot.get_qpos(target=True)
+        if (
+            not isinstance(target_qpos, torch.Tensor)
+            or not target_qpos.is_floating_point()
+            or target_qpos.shape
+            != (self._world_batch_size, int(getattr(self._robot, "dof", 0)))
+            or target_qpos.device != self._env_ids.device
+            or not bool(torch.isfinite(target_qpos).all().item())
+        ):
+            raise ValueError(
+                "robot.get_qpos(target=True) must return finite floating full-qpos "
+                "shape (num_envs, robot_dof) on the simulation device."
+            )
+        index = self._env_ids.index_select(
+            0, torch.tensor(rows, dtype=torch.long, device=self._env_ids.device)
+        )
+        return target_qpos.index_select(0, index).clone()
 
     def _capture(self, task_state: TaskState) -> PlanningContext:
         """Capture one synchronized robot and scene observation."""
@@ -485,6 +563,12 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             timestamp=timestamp,
             env_ids=self._env_ids.clone(),
         )
+        root_pose = None
+        if self._capture_root_pose:
+            root_pose = self._robot.get_local_pose(to_matrix=True)
+            if not isinstance(root_pose, torch.Tensor):
+                raise TypeError("Robot root observation must be a tensor.")
+            root_pose = root_pose.to(qpos)
         return PlanningContext(
             robot=RobotObservation(
                 timestamp=timestamp,
@@ -492,6 +576,11 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
                 qvel=qvel.index_select(0, self._env_ids),
                 qeffort=(
                     None if qeffort is None else qeffort.index_select(0, self._env_ids)
+                ),
+                root_pose=(
+                    None
+                    if root_pose is None
+                    else root_pose.index_select(0, self._env_ids)
                 ),
             ),
             task=task_state,
@@ -520,8 +609,13 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             planners and isolated tests.
         grasp_pose_generators: Standalone grasp-pose services keyed by grasp
             endpoint target ID, normally a robot control-part name.
+        hand_geometry_cfgs: Explicit hand calibration settings keyed by grasp target ID.
         translation_threshold: Material scene translation threshold.
         rotation_threshold: Material scene rotation threshold.
+        capture_root_pose: Capture an owned arena-local robot root transform in
+            each planning observation. Disabled by default.
+        hold_qpos_source: Source for normal controller holds. ``observed`` keeps
+            the captured-qpos behavior; ``drive_target`` explicitly reads targets.
 
     The Gym cadence is attached to each live :class:`PlanningContext`.  Motion
     policy presets describe behavior; they do not own the environment's
@@ -539,13 +633,20 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         planner_cfg: BasePlannerCfg | None = None,
         motion_generator_factory: MotionGeneratorFactory | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
+        hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
         translation_threshold: float = 1.0e-4,
         rotation_threshold: float = 1.0e-3,
+        capture_root_pose: bool = False,
+        hold_qpos_source: Literal["observed", "drive_target"] = "observed",
     ) -> None:
         if type(registration) is not SimulationTaskProgramRegistration:
             raise TypeError(
                 "registration must be exactly SimulationTaskProgramRegistration."
             )
+        if type(capture_root_pose) is not bool:
+            raise TypeError("capture_root_pose must be a bool.")
+        if hold_qpos_source not in ("observed", "drive_target"):
+            raise ValueError("hold_qpos_source must be observed or drive_target.")
         registration.assert_unchanged()
         selected_scene_binding = registration.scene_binding
         selected_profile_binding = registration.robot_profile_binding
@@ -565,6 +666,10 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             grasp_pose_generators, Mapping
         ):
             raise TypeError("grasp_pose_generators must be a mapping or None.")
+        if hand_geometry_cfgs is not None and not isinstance(
+            hand_geometry_cfgs, Mapping
+        ):
+            raise TypeError("hand_geometry_cfgs must be a mapping or None.")
         if joint_command_mode not in ("position", "position_velocity"):
             raise ValueError(
                 "joint_command_mode must be 'position' or 'position_velocity'."
@@ -600,6 +705,9 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self._grasp_pose_generators = (
             {} if grasp_pose_generators is None else dict(grasp_pose_generators)
         )
+        self._hand_geometry_cfgs = (
+            {} if hand_geometry_cfgs is None else deepcopy(dict(hand_geometry_cfgs))
+        )
         self._endpoint_adapters = selected_endpoint_adapters
         self._translation_threshold = _non_negative_finite(
             translation_threshold,
@@ -610,6 +718,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             field_name="rotation_threshold",
         )
         self._owner_token = object()
+        self._capture_root_pose = capture_root_pose
+        self._hold_qpos_source = hold_qpos_source
 
         qpos = _full_robot_tensor(robot, "get_qpos", required=True)
         assert qpos is not None
@@ -624,6 +734,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             selected_scene_binding,
             settle_presets=selected_settle_presets,
             env_ids=self._env_ids,
+            step_dt=self._step_dt,
         )
 
     def for_env_ids(self, env_ids: tuple[int, ...]) -> SimulationTaskProgramFactory:
@@ -650,6 +761,9 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             planner_cfg=self._planner_cfg,
             motion_generator_factory=self._motion_generator_factory,
             grasp_pose_generators=self._grasp_pose_generators,
+            hand_geometry_cfgs=self._hand_geometry_cfgs,
+            capture_root_pose=self._capture_root_pose,
+            hold_qpos_source=self._hold_qpos_source,
             translation_threshold=self._translation_threshold,
             rotation_threshold=self._rotation_threshold,
         )
@@ -663,6 +777,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             settle_presets=self._registration.settle_presets,
             env_ids=factory._env_ids,
             select_rows=True,
+            step_dt=self._step_dt,
         )
         return factory
 
@@ -682,8 +797,11 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         planner_config: Mapping[str, object] | None = None,
         motion_generator_factory: MotionGeneratorFactory | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
+        hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
         translation_threshold: float = 1.0e-4,
         rotation_threshold: float = 1.0e-3,
+        capture_root_pose: bool = False,
+        hold_qpos_source: Literal["observed", "drive_target"] = "observed",
     ) -> SimulationTaskProgramFactory:
         """Create a registered factory from the standard Gym environment surface."""
         simulation = getattr(environment, "sim", None)
@@ -720,8 +838,11 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             planner_cfg=planner_cfg,
             motion_generator_factory=motion_generator_factory,
             grasp_pose_generators=grasp_pose_generators,
+            hand_geometry_cfgs=hand_geometry_cfgs,
             translation_threshold=translation_threshold,
             rotation_threshold=rotation_threshold,
+            capture_root_pose=capture_root_pose,
+            hold_qpos_source=hold_qpos_source,
         )
 
     @property
@@ -813,6 +934,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             control_profiles=profile.action_control_profiles(),
             grasp_pose_generators=self._grasp_pose_generators,
             **profiling,
+            hand_geometry_cfgs=self._hand_geometry_cfgs,
         )
         self._registration.validate_engine(engine)
         return engine
@@ -851,6 +973,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             clock,
             self._env_ids,
             owner_token=self._owner_token,
+            capture_root_pose=self._capture_root_pose,
+            hold_qpos_source=self._hold_qpos_source,
         )
 
     def create_effect_evidence_providers(
@@ -1042,6 +1166,8 @@ class SimulationTaskProgramAdapterFactory:
         registration: Immutable provider-free task integration.
         grasp_pose_generator_factories: Zero-argument factories keyed by runtime
             grasp endpoint target ID. Each environment receives fresh services.
+        hand_geometry_cfg_factories: Zero-argument factories for explicit hand
+            calibration settings. No geometry is captured by these factories.
         planner_config: Optional execution-policy planner declaration. The live
             factory supplies the selected robot and simulation instance values.
     """
@@ -1052,6 +1178,7 @@ class SimulationTaskProgramAdapterFactory:
         Callable[[], GraspPoseGenerator],
     ]
     _planner_config: Mapping[str, object] | None
+    _hand_geometry_cfg_factories: Mapping[str, Callable[[], RobotHandGeometryCfg]]
 
     def __init__(
         self,
@@ -1059,6 +1186,9 @@ class SimulationTaskProgramAdapterFactory:
         *,
         grasp_pose_generator_factories: (
             Mapping[str, Callable[[], GraspPoseGenerator]] | None
+        ) = None,
+        hand_geometry_cfg_factories: (
+            Mapping[str, Callable[[], RobotHandGeometryCfg]] | None
         ) = None,
         planner_config: Mapping[str, object] | None = None,
     ) -> None:
@@ -1089,7 +1219,29 @@ class SimulationTaskProgramAdapterFactory:
                     "grasp_pose_generator_factories values must be callable."
                 )
             factories[target_id] = factory
+        if hand_geometry_cfg_factories is not None and not isinstance(
+            hand_geometry_cfg_factories, Mapping
+        ):
+            raise TypeError("hand_geometry_cfg_factories must be a mapping or None.")
+        geometry_factories = {}
+        for target_id, factory in (hand_geometry_cfg_factories or {}).items():
+            if (
+                type(target_id) is not str
+                or not target_id
+                or target_id != target_id.strip()
+            ):
+                raise ValueError(
+                    "Hand geometry factory keys must be non-empty exact identifiers."
+                )
+            if not callable(factory):
+                raise TypeError(
+                    "Hand geometry configuration factories must be callable."
+                )
+            geometry_factories[target_id] = factory
         object.__setattr__(self, "_registration", registration)
+        object.__setattr__(
+            self, "_hand_geometry_cfg_factories", MappingProxyType(geometry_factories)
+        )
         object.__setattr__(
             self,
             "_grasp_pose_generator_factories",
@@ -1131,6 +1283,20 @@ class SimulationTaskProgramAdapterFactory:
             "registration": self._registration,
             "grasp_pose_generators": generators,
         }
+        if self._hand_geometry_cfg_factories:
+            from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
+
+            geometry_cfgs = {}
+            for target_id, factory in self._hand_geometry_cfg_factories.items():
+                cfg = factory()
+                if not isinstance(cfg, RobotHandGeometryCfg):
+                    raise TypeError(
+                        "A hand geometry factory must return RobotHandGeometryCfg."
+                    )
+                cfg = deepcopy(cfg)
+                cfg.validate_values()
+                geometry_cfgs[target_id] = cfg
+            kwargs["hand_geometry_cfgs"] = geometry_cfgs
         if self._planner_config is not None:
             kwargs["planner_config"] = self._planner_config
         return create_simulation_task_program_adapter(environment, **kwargs)
@@ -1144,6 +1310,7 @@ def create_simulation_task_program_adapter(
     planner_config: Mapping[str, object] | None = None,
     motion_generator_factory: MotionGeneratorFactory | None = None,
     grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
+    hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
     translation_threshold: float = 1.0e-4,
     rotation_threshold: float = 1.0e-3,
 ) -> TaskProgramEnvironmentAdapter:
@@ -1163,6 +1330,7 @@ def create_simulation_task_program_adapter(
         motion_generator_factory: Optional factory for one fresh motion generator.
         grasp_pose_generators: Standalone grasp-pose services keyed by grasp
             endpoint target ID.
+        hand_geometry_cfgs: Explicit hand calibrations keyed by grasp endpoint target ID.
         translation_threshold: Scene translation revision threshold.
         rotation_threshold: Scene rotation revision threshold.
 
@@ -1176,6 +1344,7 @@ def create_simulation_task_program_adapter(
         planner_config=planner_config,
         motion_generator_factory=motion_generator_factory,
         grasp_pose_generators=grasp_pose_generators,
+        hand_geometry_cfgs=hand_geometry_cfgs,
         translation_threshold=translation_threshold,
         rotation_threshold=rotation_threshold,
     )

@@ -229,3 +229,6 @@ scripts/benchmark/rl/reports/*
 # Rebuilt by the architecture Sphinx extension
 /docs/source/_static/architecture/
 /docs/source/_static/.architecture-build-*/
+
+# Local ACT experiment outputs; existing tracked historical files are unchanged.
+/examples/learning/act/results/

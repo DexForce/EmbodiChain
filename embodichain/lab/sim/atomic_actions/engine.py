@@ -42,6 +42,7 @@ from .tracking import TrackingPolicy, TrackingRuntime
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
     from embodichain.toolkits.graspkit import GraspPoseGenerator
     from embodichain.lab.sim.motion.expansion import (
         MappedRetimeResult,
@@ -80,6 +81,7 @@ class AtomicActionEngine:
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
+        hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
@@ -94,6 +96,8 @@ class AtomicActionEngine:
             grasp_pose_generators: Standalone grasp-pose services keyed by the
                 runtime target ID of each grasp endpoint, normally its robot
                 control-part name.
+            hand_geometry_cfgs: Explicit hand calibrations keyed by grasp endpoint
+                target ID. Settings are copied; construction performs no hand FK.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
             tracking_runtime: Optional exact-version feedback, projector, and
@@ -116,6 +120,7 @@ class AtomicActionEngine:
             tracking_runtime=tracking_runtime,
             grasp_pose_generators=grasp_pose_generators,
             env_ids=env_ids,
+            hand_geometry_cfgs=hand_geometry_cfgs,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}
@@ -162,6 +167,11 @@ class AtomicActionEngine:
     def grasp_pose_generators(self) -> Mapping[str, GraspPoseGenerator]:
         """Standalone grasp-pose services installed for endpoint targets."""
         return self._planning_services.grasp_pose_generators
+
+    @property
+    def hand_geometry_cfgs(self) -> Mapping[str, RobotHandGeometryCfg]:
+        """Return independently owned explicit hand calibrations by target ID."""
+        return self._planning_services.hand_geometry_cfgs
 
     @property
     def actions(self) -> dict[str, AtomicAction]:

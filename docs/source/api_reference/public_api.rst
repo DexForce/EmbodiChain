@@ -32,6 +32,32 @@ Offline job preflight, run, resume and verified inspection commands.
 
    main
 
+embodichain.compute.kinematics.ik_path
+--------------------------------------
+
+Bounded fixed-time branch search for one Cartesian path. Solver callbacks own
+kinematics; this numeric routine preserves serial/batched seed order and accepts
+no simulation objects. Failure means the bounded search did not produce a path.
+
+.. currentmodule:: embodichain.compute.kinematics.ik_path
+
+.. autosummary::
+
+   resolve_seeded_ik_path
+
+embodichain.compute.trajectory.limits
+-------------------------------------
+
+Per-environment sampled joint-speed checks with explicit arrival intervals.
+The result checks finite positions and declared speeds; it does not establish
+continuous collision freedom or acceleration compliance.
+
+.. currentmodule:: embodichain.compute.trajectory.limits
+
+.. autosummary::
+
+   joint_velocity_validity
+
 embodichain.data
 ----------------
 
@@ -308,6 +334,103 @@ Simulation-independent camera dimensions used to reconstruct recording features 
 
    RecordedCamera
 
+embodichain.gen_sim.asset_engine.cli.start
+-----------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.cli.start
+
+.. autosummary::
+
+   cli_ingest_single
+   main
+
+embodichain.gen_sim.asset_engine.clients
+----------------------------------------
+
+Asset-owned service client for generating and downloading articulated USDC assets.
+Close the client after use to release its HTTP session.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.clients.articulated_generation
+---------------------------------------------------------------
+
+HTTP generation client with bounded retry attempts, health checks, and validation
+of returned articulation artifacts before publication.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients.articulated_generation
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.configs
+----------------------------------------
+
+Read Asset Engine settings from the shared GenSim dotenv file. Legacy Scene
+Engine articulation keys remain accepted as aliases.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.configs.environment
+----------------------------------------------------
+
+Resolves requested Asset Engine dotenv keys and reports missing configuration
+without mutating process environment variables.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs.environment
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.pipeline
+-----------------------------------------
+
+Generate articulated assets from scene-independent asset records. The operation
+updates their USDC path and scale metadata after normalization.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.asset_engine.pipeline.articulation
+------------------------------------------------------
+
+Materializes functional articulated records through the Asset Engine client.
+Records provide source observations and coarse scales; the owning scene pipeline
+continues to control layout and export.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline.articulation
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.asset_engine.utils.geometry_utils
+----------------------------------------------------------
+
+File-based OBJ cleanup and simplification through the isolated Blender runtime.
+The caller retains ownership of its input and destination asset paths.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.utils.geometry_utils
+
+.. autosummary::
+
+   process_obj
+
+.. autofunction:: process_obj
+
 embodichain.gen_sim.env
 -----------------------
 
@@ -493,6 +616,18 @@ baseline and saves successful candidates with a completion manifest.
 
    main
 
+embodichain.gen_sim.scene_engine.configs.environment
+----------------------------------------------------
+
+Read Scene Engine settings from the shared GenSim dotenv file through the common
+parser, retaining the existing Scene Engine key names.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.configs.environment
+
+.. autosummary::
+
+   read_scene_engine_env_values
+
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 
@@ -502,6 +637,60 @@ embodichain.gen_sim.scene_engine.core.scene_edit_plan
 
    SceneEditOperation
    SceneEditPlan
+
+embodichain.gen_sim.scene_engine.errors
+---------------------------------------
+
+Identifies Scene Engine service failures separately from input or scene-schema
+validation failures.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.errors
+
+.. autosummary::
+
+   SceneServiceError
+
+embodichain.gen_sim.scene_engine.pipeline
+-----------------------------------------
+
+Stage-oriented Scene Engine API. Analyze an image or edit into an in-process
+blueprint with a persisted audit document, then materialize its assets and layout.
+Materialization copies the supplied scene/graph and closes only clients it owns.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
+
+embodichain.gen_sim.scene_engine.pipeline.api
+---------------------------------------------
+
+Blueprint value objects and their implementation entry points. Image and edit
+blueprints have separate versioned schemas and content identities. Materialization
+returns the exported scene configuration; it does not construct a Gym task.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.api
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
 
 embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
 -------------------------------------------------------------------------------
@@ -682,15 +871,165 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 
    save_layouts
 
-embodichain.gen_sim.simready_pipeline.cli.start
------------------------------------------------
+embodichain.gen_sim.task_spec
+-----------------------------
 
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.cli.start
+Simulator-independent task identity, predicate evaluation and content-addressed
+storage. TaskSpec describes roles, initial and final conditions, invariants,
+bounded temporal conditions and ordered milestones; callers supply observations.
+Missing evidence remains unavailable and cannot produce a certificate.
+
+``TaskSpec.from_dict`` decodes existing instances through the same semantic-hash
+validation as JSON documents and returns independent nested values. Use a new
+TaskSpec (for example, ``dataclasses.replace``) when intentionally changing its
+normative conditions; mutating a nested value invalidates the previous identity.
+Valid documents retain their hashes. Task identifiers, instructions and metadata
+are provenance rather than normative identity.
+
+.. currentmodule:: embodichain.gen_sim.task_spec
 
 .. autosummary::
 
-   cli_ingest_single
-   main
+   CANONICALIZATION_VERSION
+   EVALUATION_STATUSES
+   KNOWN_PREDICATES
+   MILESTONE_SCHEMA
+   PREDICATE_OPERATORS
+   TASK_SPEC_SCHEMA
+   EvaluationReport
+   EvaluationStatus
+   MilestoneSpec
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   RoleSpec
+   TaskRequirement
+   TaskSpec
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+   TaskSpecValidationError
+   TaskTemplate
+   TemporalCondition
+   TemporalSpec
+   canonical_hash
+   canonical_json
+   canonicalize
+   evaluate_predicate
+   evaluate_task_spec
+   evaluate_task_template
+   evaluate_temporal_condition
+   json_snapshot
+   lookup_observation
+   validate_task_spec
+   validate_task_template
+
+embodichain.gen_sim.task_spec.canonicalization
+----------------------------------------------
+
+Deterministic JSON snapshots and SHA-256 identities. Nonfinite numbers,
+callables, byte strings and unordered sets are rejected before serialization.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.canonicalization
+
+.. autosummary::
+
+   CANONICALIZATION_VERSION
+   canonical_hash
+   canonical_json
+   canonicalize
+   json_snapshot
+
+embodichain.gen_sim.task_spec.contracts
+---------------------------------------
+
+Logical role requirements for downstream grounding, including cardinality,
+affordances, attributes and declared initial state. No simulator handles are
+stored in these contracts.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.contracts
+
+.. autosummary::
+
+   RoleSpec
+
+embodichain.gen_sim.task_spec.expressions
+-----------------------------------------
+
+A finite vocabulary of observation-backed predicates and bounded temporal
+conditions. Evaluations distinguish satisfied, failed, unknown, unavailable and
+not-run outcomes; an incomplete always-window cannot certify success.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.expressions
+
+.. autosummary::
+
+   EVALUATION_STATUSES
+   KNOWN_PREDICATES
+   PREDICATE_OPERATORS
+   EvaluationStatus
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   TemporalCondition
+   TemporalSpec
+   evaluate_predicate
+   evaluate_temporal_condition
+   lookup_observation
+
+embodichain.gen_sim.task_spec.registry
+--------------------------------------
+
+Validated TaskSpec documents are stored by semantic hash using atomic file
+replacement. Reads reject corrupt or mismatched identities. Metadata differences
+do not create different semantic identities; existing cache entries are reused
+unless replacement is requested.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.registry
+
+.. autosummary::
+
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+
+embodichain.gen_sim.task_spec.spec
+----------------------------------
+
+Normative task models and their canonical JSON form. Milestone dependencies
+must form an acyclic graph; each milestone requires its predicates to hold in one
+snapshot strictly after its predecessors. ``TaskTemplate`` is an alias of
+``TaskSpec`` for callers using the earlier spelling.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.spec
+
+.. autosummary::
+
+   MILESTONE_SCHEMA
+   TASK_SPEC_SCHEMA
+   MilestoneSpec
+   TaskRequirement
+   TaskSpec
+   TaskTemplate
+
+embodichain.gen_sim.task_spec.validation
+----------------------------------------
+
+Validate documents or instances, then evaluate caller-provided snapshots and
+trajectories. A certificate is ready only when all required checks are satisfied.
+These functions do not acquire physical evidence or execute a task. The template
+spellings are aliases of the TaskSpec functions.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.validation
+
+.. autosummary::
+
+   EvaluationReport
+   TaskSpecValidationError
+   evaluate_task_spec
+   evaluate_task_template
+   validate_task_spec
+   validate_task_template
 
 embodichain.lab.expansion
 ------------------------
@@ -1073,6 +1412,93 @@ Native failures may leave partial changes, requiring the host to stop execution.
 
    capture_physics_properties
 
+embodichain.lab.sim.motion.planners.curobo.payload
+--------------------------------------------------
+
+Runtime observation values for a fresh cuRobo query. Without payload, queries
+support the complete robot environment batch in canonical row order, with a
+shared static collision world and identical passive joint locks. Full joint
+state and world-to-base transforms belong to the query snapshot. Payload queries
+remain B=1; the carried body owns its identity, control part, local spheres and
+observed world pose. These values are separate from serialized configuration.
+Subsets, reordered environments, and per-environment worlds are unsupported.
+
+The owned motion factory closes backend-local attachments on exit and makes no
+skill-phase decisions. Queries require CUDA graphs off, a static snapshot world
+and preserved native samples. No-payload exact trajectory checks retain observed
+passive locks; arbitrary trajectory checks with payload fail closed because their
+separate checker does not own those attachments.
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.curobo.payload
+
+.. autosummary::
+
+   CuroboPayload
+   CuroboQuerySnapshot
+   curobo_motion_generator
+
+embodichain.lab.sim.scene.collision_sources
+-------------------------------------------
+
+Explicit collision descriptors and same-observation poses become owned planner
+providers through one caller-supplied world-to-frame transform. No pose getter
+is called and no scale is applied twice. The USD link-box reader preserves
+connected-component order and its conservative input-envelope policy.
+
+.. currentmodule:: embodichain.lab.sim.scene.collision_sources
+
+.. autosummary::
+
+   CollisionObjectSnapshot
+   read_articulation_link_boxes
+   snapshot_collision_sources
+
+embodichain.lab.sim.motion.ik
+-----------------------------
+
+Stateful adapters connect the numeric branch search to a MotionGenerator and
+Robot. Cartesian target sampling preserves every requested waypoint within an
+explicit sample budget. Continuous recovery is restricted to one environment
+and restores the caller's RNG state without changing requested timing.
+
+.. currentmodule:: embodichain.lab.sim.motion.ik
+
+.. autosummary::
+
+   resolve_continuous_ik_path
+   sample_cartesian_targets
+
+embodichain.lab.sim.motion.limits
+---------------------------------
+
+Strictly intersect runtime speed limits with the assembled URDF's named joint
+caps. Missing or nonpositive authored limits are rejected rather than replaced
+with an inferred default.
+
+.. currentmodule:: embodichain.lab.sim.motion.limits
+
+.. autosummary::
+
+   authored_joint_velocity_limits
+
+embodichain.lab.sim.motion.search
+---------------------------------
+
+Explicit call-local search ledgers and cooperative wall deadlines. Nested
+scopes reuse the outer ledger, timings may overlap, and native work is not
+preempted. Hosts choose budgets; no deadline is enabled by default.
+
+.. currentmodule:: embodichain.lab.sim.motion.search
+
+.. autosummary::
+
+   PlanningBudgetExceeded
+   SearchCost
+   current_search_cost
+   search_cost_scope
+   record_search
+   measure_search
+
 embodichain.lab.sim.scene.expansion.layout
 ------------------------------------------
 
@@ -1099,6 +1525,111 @@ embodichain.lab.sim.scene.expansion.persistence
    LoadedSceneVariants
    save_scene_variants
    load_scene_variants
+
+embodichain.lab.sim.sensors.contact.sampling
+---------------------------------------------------------------------
+
+ContactSensor acquisition into the existing PhysicalEvidenceFrame and
+PhysicalEvidenceBatch contracts. The first axis follows explicit native environment
+IDs; a valid-contact mask accompanies raw actor pairs, Arena-frame positions and
+normals, and native impulses. Per-channel validity distinguishes unsupported
+capabilities, nonfinite active data, saturation and source drift from measured
+negative observations. Native contact revision remains separate from runtime
+observation revision. The Default-only revision reader fails explicitly when its
+SDK contract is unavailable.
+
+``sample`` keeps frame tensors on its request's environment-ID device. The
+``collect`` provider port retains that same device contract. Host observers may
+request CPU frames; ``source_device`` records where the original numerical
+observation was produced. The common frame has no invocation field.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
+
+.. autosummary::
+
+   CONTACT_ACTOR_IDS
+   CONTACT_VALID_MASK
+   CONTACT_NORMALS
+   CONTACT_IMPULSES
+   CONTACT_POSITIONS
+   ContactEvidenceSample
+   ContactEvidenceSampler
+   ContactSourceStamp
+   native_contact_revision
+
+embodichain.lab.sim.sensors.contact.timeline
+---------------------------------------------------------------------
+
+Bounded raw substep history attached with
+``sensor.add_sampling_observer(name, timeline)``. The host supplies a control
+clock returning completed steps and elapsed control time, or None while inactive,
+and makes the sensor available in its environment sensor suite. BaseEnv.step
+then drives the existing begin/substep hooks; the observer never fetches a second
+time or advances physics.
+
+Records retain only packed valid contacts on CPU. Reset clears selected
+environments and advances their generations, leaving other rows intact. Loss,
+missing source revisions, incomplete intervals and capacity exhaustion remain
+explicit. The contact-row budget is a soft threshold checked before each whole sample;
+no native sample is truncated. With N environments and per-environment sensor
+capacity C, charged rows stay below ``max_contact_rows + N*C``. Once the threshold
+is reached, the next sample records unavailable capacity loss. Control-step and
+substep caps also bound empty histories.
+Frontend code owns actor/semantic label maps, serialized report schema IDs and
+any task-success evaluation.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
+
+.. autosummary::
+
+   ContactTimeline
+   ContactTimelineCfg
+
+embodichain.lab.task_program.integrations.simulation.grip_evidence
+------------------------------------------------------------------
+
+Target-specific paired-pad observations using explicit semantic/native object
+bindings and control-part/pad-link declarations. NativeGripEvidenceFactory uses
+the public control-part provider injection API and preserves its provider ID and
+revision. Each provider owns its observer and bounded raw-query trace.
+
+Physical interpretation revision 1 preserves the opposed positive-impulse
+criterion and absent-positive-contact observations. Revision 2 requires explicit
+opening calibration and opt-in; its one-sided open-hand release observation is
+not geometric separation or acquisition evidence. Driver indices and joint names
+are supplied by the robot/profile owner, with no model-name or suffix inference.
+
+Host frames receive all normal public ownership/validity checks. Grip arithmetic
+still runs on the original sensor device and BinaryEffectObservation returns on
+the caller's context device. Raw trace data remains observational; application
+serializers and TaskSpec evaluation belong outside this module.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.grip_evidence
+
+.. autosummary::
+
+   NativeGripEvidenceCfg
+   NativeGripEvidenceFactory
+   NativeGripEvidenceProvider
+   NativeGripObserver
+
+embodichain.lab.sim.scene.mesh_snapshot
+---------------------------------------
+
+Capture scaled rigid visual envelopes and ordered articulation collision-input
+components through plain UID/link mappings. Geometry stays in owning frames
+until supplied observations are projected. Planner roles are neutral metadata;
+missing or unsupported input geometry remains unavailable. These snapshots do
+not replace native cooked-shape, rest-offset, contact, or CCD evidence.
+
+.. currentmodule:: embodichain.lab.sim.scene.mesh_snapshot
+
+.. autosummary::
+
+   SceneMeshComponent
+   SceneMeshSnapshot
+   capture_scene_meshes
+   iter_scene_components
 
 embodichain.lab.task_program.integrations.simulation.handover
 -------------------------------------------------------------
@@ -2098,6 +2629,7 @@ embodichain.lab.sim.motion.planners.utils
    MoveType
    PlanState
    PlanResult
+   RejectedMotionCandidate
    normalize_success_mask
    calculate_point_allocations
    interpolate_xpos
@@ -2124,10 +2656,10 @@ embodichain.lab.sim.sensors.camera
    Camera
    CameraCfg
 
-embodichain.lab.sim.sensors.contact_sensor
+embodichain.lab.sim.sensors.contact.sensor
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact_sensor
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sensor
 
 .. autosummary::
 
@@ -3356,3 +3888,57 @@ Typed physical predicates provide shared distance and height measurements for RL
 .. autofunction:: evaluate_near_target
 
 .. autofunction:: evaluate_below_height
+
+embodichain.lab.sim.evidence
+----------------------------
+
+Shared physical observation values. Atomic public imports refer to these same
+classes; sensor acquisition never imports Task Program or Atomic implementation.
+
+.. currentmodule:: embodichain.lab.sim.evidence
+
+.. autosummary::
+
+   PhysicalEvidenceRequest
+   PhysicalEvidenceBatch
+   PhysicalEvidenceFrame
+
+embodichain.compute.geometry.grip_contacts
+------------------------------------------
+
+Pure bilateral contact arithmetic on explicitly supplied actor pairs, normals
+and impulses. Invalid or ambiguous data remains distinct from a measured negative.
+
+.. currentmodule:: embodichain.compute.geometry.grip_contacts
+
+.. autosummary::
+
+   classify_contacts
+
+embodichain.lab.sim.atomic_actions.grip_evidence
+------------------------------------------------
+
+Shared physical grip interpretation consumes a PhysicalEvidenceRequest and
+explicit actor bindings, without Semantic Call or Task Program types. Results
+are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrations.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.grip_evidence
+
+.. autosummary::
+
+   GripContactObserver
+   DriverOpeningBinding
+
+``DriverOpeningBinding.bind(robot)`` validates the explicit joint order before
+creating a per-environment reader. It performs no qpos read during binding;
+observations require the entire hand row to be finite and retain the strict
+``abs(measured - open_qpos) < tolerance`` driver threshold. This calibration and
+release interpretation belong to Atomic, not to a separate sensor or reader
+factory. Integrations only select and bind the declared calibration.
+
+The former ``sensors.joint_opening`` module and standalone
+``create_joint_opening_reader`` export are removed. Declarations sealing the
+qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
+
+.. autoclass:: DriverOpeningBinding
+   :members:

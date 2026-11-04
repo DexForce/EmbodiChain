@@ -54,6 +54,11 @@ from .catalog import (
     IntegrationFingerprintMismatch,
     SimulationTaskProgramRegistration,
 )
+from .composition import (
+    ConfiguredTaskProgramDeployment,
+    ConfiguredTaskProgramIntegration,
+    load_configured_task_program_deployment,
+)
 from .extensions import (
     ControlPartEvidenceProviderDeclaration,
     ControlPartEvidenceProviderFactory,
@@ -81,8 +86,17 @@ from .simulation.policies import (
     default_simulation_settle_presets,
 )
 
+from .invocation_policy import (
+    BoundInvocationPolicies,
+    InvocationPolicyBinding,
+    task_program_fingerprint,
+)
+
 __all__ = [
     "AntipodalGraspAffordanceBinding",
+    "BoundInvocationPolicies",
+    "InvocationPolicyBinding",
+    "task_program_fingerprint",
     "ContainerAffordanceBinding",
     "ControlPartCommandPreset",
     "ControlPartEvidenceProviderDeclaration",
@@ -90,6 +104,8 @@ __all__ = [
     "ControlPartEndpointBinding",
     "ControlPartResourceBinding",
     "ConfiguredHandOverPoseProvider",
+    "ConfiguredTaskProgramDeployment",
+    "ConfiguredTaskProgramIntegration",
     "CuroboParallelCommandSafetyValidator",
     "CuroboParallelSafetyValidatorFactory",
     "EndpointAdapterDeclaration",
@@ -128,4 +144,5 @@ __all__ = [
     "VersionedKey",
     "create_simulation_task_program_adapter",
     "default_simulation_settle_presets",
+    "load_configured_task_program_deployment",
 ]

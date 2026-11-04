@@ -7,6 +7,8 @@
 | Planning interface, options and batch validation | `embodichain/lab/sim/motion/planners/base_planner.py` |
 | Timed inputs/results | `embodichain/lab/sim/motion/planners/utils.py` → `PlanState`, `PlanResult` |
 | Strategy, IK preparation, result normalization | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator` |
+| Fixed-time continuous IK and Cartesian target sampling | `embodichain/lab/sim/motion/ik.py`; numeric branch search in `compute/kinematics/ik_path.py` |
+| Explicit search measurements and cooperative deadlines | `embodichain/lab/sim/motion/search.py` |
 | Joint-path timing | `embodichain/lab/sim/motion/planners/toppra_planner.py`, `trapezoidal_planner.py` in that directory |
 | Cartesian geometry and scalar timing | `embodichain/lab/sim/motion/planners/se3.py`, `bezier.py`, `_scalar_time_law.py`, `_blend_constraints.py` in that directory |
 | Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
@@ -14,6 +16,7 @@
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
+| Contact-qualified paired grasp sampling and explicit URDF surfaces | `embodichain/toolkits/graspkit/pg_grasp/coordinated.py`, `urdf_surfaces.py` in that directory |
 | Bounded interaction pose refinement before expansion | `embodichain/lab/sim/motion/refinement.py`, with numeric fitting in `compute/trajectory/refinement.py`; [Real2Sim boundary](../data-pipeline/real2sim.md) |
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
@@ -40,6 +43,13 @@ when changing obstacle identity, cache generation or dynamic scene binding.
 [IK solvers](../ik-solvers/ik-solvers.md) own candidate/frame contracts;
 [Atomic Skills](../atomic-actions/atomic-actions.md) own motion execution policy.
 
+Native convex queries reuse the shared isolated Newton collision pipeline.
+`lab/sim/scene/_collision_backends.py::_require_newton` checks availability before
+capture; no FCL extra or backend fallback is selected. Distance diagnostics are
+capped intervals under the query precision policy. A threshold inside an interval
+remains unavailable, never a fabricated contact or free path. CPU comparisons
+remain separate from GPU and physical-task qualification.
+
 ## Timing and batch boundary
 
 Planning is environment-batched: waypoint qpos is `(B, dof)`, TCP transforms
@@ -59,6 +69,25 @@ joint/EEF moves. Limited interpolation uses minimum-jerk rest-to-rest segments
 and treats the requested count as a lower bound. Required Cartesian IK
 failures fail the row; waypoints are never discarded to salvage success.
 Unsupported routes raise instead of silently selecting another strategy.
+
+`interpolation_mode="fixed_grid"` explicitly preserves the requested count and
+arrival intervals. It requires absent scalar velocity/acceleration overrides,
+intersects runtime speeds with every controlled joint's authored URDF cap, and
+rejects overspeed rows without retiming. `ik_seed_mode="sequential"` preserves
+previous-valid-posture seeds, callback order and RNG consumption; batched IK and
+adaptive timing remain defaults. Non-default modes require `ik_interp`.
+Failed execution rows hold their start. `PlanResult.rejected_candidate` retains
+owned original positions, intervals and rejected-row identities for retries and
+audit; checking the zero-speed hold is not evidence that the candidate passed.
+
+The bounded `resolve_continuous_ik_path()` adapter preserves a single path's
+time grid and restores the caller's random stream. Its numerical seed search
+accepts only B=1 and performs no simulation or state mutation.
+Treat perturbed IK seeds as numerical hints, not executed waypoints: velocity
+checks compare each candidate to the actual preceding posture. Search ledgers
+share an outer caller-owned deadline across nested previews and isolate separate
+contexts. They do not replace `_budget.py`'s existing automatic planning hooks,
+preempt native work, or certify physical task success.
 
 Normalization must preserve the meaning of timing, derivatives, failure rows
 and backend diagnostics together. Read the
@@ -162,7 +191,30 @@ service requires explicit URDF collision geometry at the caller's open joint
 state. Builtin asset/TCP mappings live in `pg_grasp/model_geometry.py`; custom
 hands provide their own geometry. Sampling/collision stays in the canonical
 contact frame, and public poses map once to the declared runtime TCP. Do not
-add a second hand-specific conversion. See the [GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
+add a second hand-specific conversion. GraspKit owns collision-qualified end-region
+selection through `pg_grasp.regions`; callers select a policy without supplying
+a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
+sampled closing geometry and contact fitting with explicit thresholds; robot/FK
+sampling and physical contact evidence remain Lab responsibilities.
+`SampledHandGeometry.at_width()` interpolates the supplied hand samples.
+The public `get_dual_arm_grasp_proposals()` path retains candidate generation
+and ranking while leaving geometric qualification to the caller; normal
+validated queries retain their existing checker. `pg_grasp.coordinated` composes
+these proposals with `HandContactChecker.refine()` and shares one target-surface
+query across both hands for the same mesh identity/version. It owns bounded
+paired sampling with explicit contact settings
+and optional observed world bounds; clearance preference changes costs after
+population selection. A proposal `role` skips unused pose/NMS/ranking work while
+preserving both sides' original direction draws and the selected population.
+Raw/validated backends share read-only annotations, with separate collision state.
+Mesh mutation retires superseded versions; hosts call `clear_cache()` between
+unrelated asset cohorts to release distinct-mesh queries/backends while keeping
+sampled hand geometry. `pg_grasp.urdf_surfaces` samples explicitly selected
+collision links without robot state, sharing shape/origin decoding with fixed
+geometry while retaining each sampling policy's original point population. See
+[hand geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
+for deferred Robot capture and cache lifetime, and the
+[GraspKit contract](../../../embodichain/toolkits/graspkit/README.md)
 for geometry ownership and the finite collision-check scope.
 
 `variants.py` is the common candidate-generation path for joint-space,

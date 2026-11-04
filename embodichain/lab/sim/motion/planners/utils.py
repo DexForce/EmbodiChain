@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import torch
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from scipy.spatial.transform import Rotation, Slerp
 from enum import Enum
 from typing import Union, List
@@ -31,6 +31,7 @@ __all__ = [
     "MoveType",
     "PlanState",
     "PlanResult",
+    "RejectedMotionCandidate",
     "normalize_success_mask",
     "calculate_point_allocations",
     "interpolate_xpos",
@@ -182,6 +183,37 @@ class MoveType(Enum):
     PAUSE = 4  # Pause for a specified duration (use pause_seconds in PlanState)
 
 
+@dataclass(frozen=True, slots=True)
+class RejectedMotionCandidate:
+    """Owned candidate evidence retained when execution rows become safe holds.
+
+    Args:
+        positions: Original candidate joint samples, shape ``(B, T, D)``.
+        dt: Original arrival intervals, shape ``(B, T)``.
+        env_mask: Rows rejected by fixed-grid validation, shape ``(B,)``.
+
+    These tensors are detached snapshots for audit and bounded retries. They are
+    not an executable trajectory or a certificate of motion feasibility.
+    """
+
+    positions: torch.Tensor
+    dt: torch.Tensor
+    env_mask: torch.Tensor
+
+    def __post_init__(self) -> None:
+        if (
+            self.positions.ndim != 3
+            or self.dt.shape != self.positions.shape[:2]
+            or self.env_mask.shape != self.positions.shape[:1]
+            or self.env_mask.dtype != torch.bool
+            or self.dt.device != self.positions.device
+            or self.env_mask.device != self.positions.device
+        ):
+            raise ValueError("Rejected candidate samples, timing and rows must match.")
+        for name in ("positions", "dt", "env_mask"):
+            object.__setattr__(self, name, getattr(self, name).detach().clone())
+
+
 @dataclass
 class PlanResult:
     r"""Data class representing the result of a motion plan (env-batched).
@@ -255,8 +287,17 @@ class PlanResult:
     calls for the group, not a separate latency or count for each result.
     """
 
+    rejected_candidate: RejectedMotionCandidate | None = field(
+        default=None, kw_only=True
+    )
+    """Original rejected samples, retained separately from executable holds."""
+
     def __post_init__(self) -> None:
         """Validate trajectory timing and optional original policy traces."""
+        if self.rejected_candidate is not None and not isinstance(
+            self.rejected_candidate, RejectedMotionCandidate
+        ):
+            raise TypeError("rejected_candidate must be a RejectedMotionCandidate.")
         rollout, lengths = self.policy_rollout_positions, self.policy_rollout_lengths
         if rollout is not None or lengths is not None:
             if not isinstance(rollout, torch.Tensor) or rollout.dim() != 3:

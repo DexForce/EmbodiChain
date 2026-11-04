@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -47,6 +48,7 @@ from .tracking import (
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
 
 
 class ActionPlanningServices:
@@ -64,7 +66,20 @@ class ActionPlanningServices:
         tracking_runtime: TrackingRuntime | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         env_ids: tuple[int, ...] | None = None,
+        *,
+        hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
     ) -> None:
+        """Retain shared services and snapshot caller-owned calibration data.
+
+        Args:
+            motion_generator: Motion backend and exact owning robot.
+            control_profiles: Direct-core command profiles by control part.
+            tracking_runtime: Optional shared endpoint tracking services.
+            grasp_pose_generators: Existing grasp services by endpoint target ID.
+            env_ids: Optional ordered physical simulation rows used by planning.
+            hand_geometry_cfgs: Explicit Lab hand settings by grasp target ID;
+                copied independently without capturing geometry or reading state.
+        """
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
         self._device = resolve_runtime_device(motion_generator.device)
@@ -90,6 +105,9 @@ class ActionPlanningServices:
         )
         self._grasp_pose_generators = self._snapshot_grasp_pose_generators(
             {} if grasp_pose_generators is None else grasp_pose_generators
+        )
+        self._hand_geometry_cfgs = self._snapshot_hand_geometry_cfgs(
+            {} if hand_geometry_cfgs is None else hand_geometry_cfgs
         )
 
     @property
@@ -152,6 +170,63 @@ class ActionPlanningServices:
                 f"{target_id!r}; available targets are "
                 f"{sorted(self._grasp_pose_generators)}."
             ) from exc
+
+    @property
+    def hand_geometry_cfgs(self) -> Mapping[str, RobotHandGeometryCfg]:
+        """Return independently owned hand calibrations by grasp target ID."""
+        return MappingProxyType(deepcopy(self._hand_geometry_cfgs))
+
+    def hand_geometry_cfg(self, target_id: str) -> RobotHandGeometryCfg:
+        """Resolve an owned hand calibration without capturing robot geometry.
+
+        Args:
+            target_id: Runtime grasp endpoint target ID.
+
+        Returns:
+            An independent configuration whose pad-link order is preserved.
+            Consumers sampling an invocation's closing stroke must replace its
+            open/closed commands with the current resolved endpoint commands.
+
+        Raises:
+            KeyError: No explicit calibration is installed for the target.
+        """
+        try:
+            return deepcopy(self._hand_geometry_cfgs[target_id])
+        except KeyError as exc:
+            raise KeyError(
+                f"No hand geometry calibration is installed for endpoint target "
+                f"{target_id!r}; available targets are "
+                f"{sorted(self._hand_geometry_cfgs)}."
+            ) from exc
+
+    @staticmethod
+    def _snapshot_hand_geometry_cfgs(
+        values: Mapping[str, RobotHandGeometryCfg],
+    ) -> dict[str, RobotHandGeometryCfg]:
+        if not isinstance(values, Mapping):
+            raise TypeError("hand_geometry_cfgs must be a mapping or None.")
+        if not values:
+            return {}
+        from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
+
+        configs = {}
+        for target_id, cfg in values.items():
+            if (
+                type(target_id) is not str
+                or not target_id
+                or target_id != target_id.strip()
+            ):
+                raise ValueError(
+                    "hand_geometry_cfgs keys must be non-empty strings without outer whitespace."
+                )
+            if not isinstance(cfg, RobotHandGeometryCfg):
+                raise TypeError(
+                    "hand_geometry_cfgs values must be RobotHandGeometryCfg instances."
+                )
+            owned = deepcopy(cfg)
+            owned.validate_values()
+            configs[target_id] = owned
+        return configs
 
     @staticmethod
     def _snapshot_grasp_pose_generators(

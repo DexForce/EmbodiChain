@@ -40,6 +40,9 @@ import torch
 import yaml
 
 from embodichain.data import get_data_path
+from embodichain.data_pipeline.real2sim._geometry import (
+    _canonical_robot_geometry_sha256,
+)
 from embodichain.data_pipeline.real2sim import (
     JointSpec,
     PhaseAnnotation,
@@ -102,6 +105,31 @@ def write_json(path: Path, value: object) -> None:
 
 def write_yaml(path: Path, value: object) -> None:
     path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
+
+
+def require_prepared(prepared: Path) -> None:
+    """Reject incomplete or unqualified preparation before scheduling work."""
+    path = prepared / "qualification.json"
+    if not path.is_file():
+        raise ValueError(
+            f"prepared input is incomplete: missing {path}; run preparation first"
+        )
+    qualification = json.loads(path.read_text(encoding="utf-8"))
+    if qualification.get("admitted") is not True:
+        failed = [
+            name
+            for name, passed in qualification.get("checks", {}).items()
+            if not passed
+        ]
+        raise ValueError(
+            f"prepared input failed qualification: {', '.join(failed) or 'admitted is false'}; "
+            f"inspect {path} and rebuild preparation"
+        )
+    for name in ("task.measured.yaml", "profile.measured.yaml"):
+        if not (prepared / name).is_file():
+            raise ValueError(
+                f"prepared input is incomplete: missing {prepared / name}; rebuild preparation"
+            )
 
 
 def acquire(directory: Path) -> None:
@@ -190,8 +218,6 @@ def robot_evidence(robot, bodies) -> tuple[dict, tuple[JointSpec, ...]]:
         dict(
             joint_names=list(names),
             robot_geometry_sha256=checker.geometry_sha256,
-            geometry_identity_scheme="physical-urdf-v2",
-            legacy_robot_geometry_sha256=checker.legacy_geometry_sha256,
             object_geometry_sha256=bodies[0].geometry_sha256,
             target_geometry_sha256=bodies[1].geometry_sha256,
             urdf_path=robot.cfg.fpath,
@@ -462,11 +488,12 @@ def prepare(source_directory: Path, output: Path) -> None:
             }
             and tuple(snapshot["joint_names"][:7])
             == tuple(f"Joint{i}" for i in range(1, 8)),
-            # Physical-URDF v2 identity: generated comments/cache paths are not
-            # physical geometry. Locked Panda/Robotiq archives and the published
-            # joint, inertial, drive and calibration evidence remain unchanged.
+            # The shared geometry identity supports explicitly pinned legacy
+            # aliases; source and physical calibration still require qualification.
             source_geometry_identity=snapshot["robot_geometry_sha256"]
-            == "7ff24e7c93b15267a71c200b47a28959b95a25e9924d30304383418ac7445d79",
+            == _canonical_robot_geometry_sha256(
+                "6b08aff1b8de77edfd1deab3da3f139d2ecfb20838bd21cf2d6207058c0d4d82"
+            ),
         )
         qualification["admitted"] = all(qualification["checks"].values())
         qualification.update(

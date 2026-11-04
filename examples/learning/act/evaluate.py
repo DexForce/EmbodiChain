@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import shutil
@@ -35,21 +34,27 @@ from ._environment import close_env, make_env, task_identity
 def _load_policy(
     path: Path, device: str, *, panel: str, seeds: list[int]
 ) -> tuple[Any, int]:
-    from embodichain_models.policy.act import ACTCfg, ACTPolicy
+    from embodichain_models.policy.act import load_act_policy
 
-    # Checkpoints contain optimizer and RNG state; only load trusted local files.
-    state = torch.load(path, map_location="cpu", weights_only=False)
-    signature = state["signature"]
-    if (
-        signature.get("recipe") != "visual-act-v1"
-        or signature.get("task_identity") != task_identity()
-    ):
-        raise ValueError("Checkpoint task or recipe does not match this environment")
-    recorded = signature.get("scene_seeds") or {}
+    model = load_act_policy(path, device)
+    _validate_policy_identity(model.metadata, path, panel=panel, seeds=seeds)
+    return model, int(model.metadata["update"])
+
+
+def _validate_policy_identity(
+    signature: dict[str, Any], path: Path, *, panel: str, seeds: list[int]
+) -> None:
+    if signature.get("task_identity") != task_identity():
+        raise ValueError("Checkpoint task does not match this environment")
+    recorded = signature["scene_seeds"]
     if panel != "overfit" and set(seeds) & set(
-        recorded.get("train", []) + recorded.get("validation", [])
+        recorded["train"] + recorded["validation"]
     ):
         raise ValueError("Evaluation seeds overlap the training or validation corpus")
+    if panel == "test" and set(seeds) & set(
+        signature.get("selection", {}).get("seeds", [])
+    ):
+        raise ValueError("Test seeds overlap the checkpoint selection panel")
     selection = path.parent / "evaluation.json"
     if panel == "test" and selection.exists():
         previous = json.loads(selection.read_text())
@@ -57,11 +62,6 @@ def _load_policy(
             previous["seeds"]
         ):
             raise ValueError("Test seeds overlap the checkpoint selection panel")
-    cfg = dict(signature["model"])
-    cfg["pretrained_backbone"] = False  # The checkpoint supplies all weights.
-    model = ACTPolicy(ACTCfg(**cfg))
-    model.load_state_dict(state["learner"]["model"])
-    return model.to(device).eval(), int(state["learner"]["num_updates"])
 
 
 def _interval(successes: int, total: int) -> list[float]:
@@ -86,8 +86,6 @@ def _rollouts(
     video_dir: Path | None,
     shuffled: Any = None,
 ) -> dict[str, Any]:
-    from embodichain_models.policy.act import ACTTemporalEnsembler
-
     raw = env.unwrapped
     raw._replay_no_auto_reset = True
     low = torch.as_tensor(env.action_space.low, device=device)
@@ -97,13 +95,8 @@ def _rollouts(
     elapsed = []
     for episode_index, seed in enumerate(seeds):
         obs, _ = env.reset(seed=seed, options={"save_data": False})
-        ensemble = (
-            ACTTemporalEnsembler(
-                model.cfg.horizon, 1, model.cfg.action_dim, device=device
-            )
-            if model
-            else None
-        )
+        if model is not None:
+            model.reset()
         initial_state = obs["robot"]["qpos"].clone()
         frames: list[Any] = []
         record_video = video_dir is not None and (
@@ -126,6 +119,8 @@ def _rollouts(
                     "observation.images.cam_high",
                     ids[min(step, len(ids) - 1)].unsqueeze(0),
                 ).to(device)
+            if rgb.is_cuda:
+                torch.cuda.synchronize(rgb.device)
             before = time.perf_counter()
             with torch.inference_mode():
                 if mode == "fixed":
@@ -133,8 +128,8 @@ def _rollouts(
                         (initial_state[:, :7], initial_state.new_full((1, 1), -1.0)), -1
                     )
                 else:
-                    assert model is not None and ensemble is not None
-                    action = ensemble.update(model.predict(rgb, obs["robot"]["qpos"]))
+                    assert model is not None
+                    action = model.select_action(rgb, obs["robot"]["qpos"])
                 action = torch.maximum(torch.minimum(action, high), low)
             if action.is_cuda:
                 torch.cuda.synchronize(action.device)
@@ -180,7 +175,12 @@ def _rollouts(
         "strict_success_rate": sum(int(row["strict_success"]) for row in rows)
         / len(rows),
         "mean_goal_distance": sum(row["goal_distance"] for row in rows) / len(rows),
+        "first_policy_seconds": elapsed[0],
         "mean_policy_seconds": sum(elapsed) / len(elapsed),
+        "median_policy_seconds": sorted(elapsed)[len(elapsed) // 2],
+        "p95_policy_seconds": sorted(elapsed)[
+            min(len(elapsed) - 1, int(0.95 * len(elapsed)))
+        ],
         "episodes_detail": rows,
     }
 
@@ -188,9 +188,11 @@ def _rollouts(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     choice = parser.add_mutually_exclusive_group(required=True)
-    choice.add_argument("--checkpoint", type=Path)
+    choice.add_argument("--checkpoint", "--policy-dir", dest="checkpoint", type=Path)
     choice.add_argument(
-        "--run", type=Path, help="Select among step_*.pt using development scenes"
+        "--run",
+        type=Path,
+        help="Select native LeRobot checkpoints using development scenes",
     )
     choice.add_argument("--baseline", choices=("fixed", "untrained"))
     parser.add_argument(
@@ -201,6 +203,11 @@ def main() -> None:
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--video", action="store_true")
+    parser.add_argument(
+        "--reference-checkpoint",
+        type=Path,
+        help="Native policy supplying architecture and statistics for the untrained baseline",
+    )
     parser.add_argument(
         "--shuffle-images-report",
         type=Path,
@@ -250,8 +257,27 @@ def main() -> None:
     try:
         env = make_env(args.device, camera=True)
         if args.run:
+            completion = args.run / "training_report.json"
+            if not completion.is_file():
+                raise ValueError(
+                    "Complete an official LeRobot training run before development selection"
+                )
+            recipe = json.loads((args.run / "recipe.json").read_text())
+            if (
+                json.loads(completion.read_text())["updates"]
+                != recipe["training_config"]["steps"]
+            ):
+                raise ValueError(
+                    "The current native training/resume budget has not completed"
+                )
             checkpoints = sorted(
-                args.run.glob("step_*.pt"), key=lambda p: int(p.stem.split("_")[1])
+                (
+                    path / "pretrained_model"
+                    for path in (args.run / "lerobot/checkpoints").iterdir()
+                    if path.name.isdigit()
+                    and (path / "pretrained_model/embodichain_act.json").is_file()
+                ),
+                key=lambda path: int(path.parent.name),
             )
             if not checkpoints:
                 raise ValueError("No step checkpoints found")
@@ -265,15 +291,32 @@ def main() -> None:
                 )
                 mode = "policy"
             elif args.baseline == "untrained":
-                from embodichain_models.policy.act import ACTCfg, ACTPolicy
+                from embodichain_models.policy.act import load_act_policy
 
+                if args.reference_checkpoint is None:
+                    parser.error(
+                        "The untrained baseline requires --reference-checkpoint"
+                    )
                 torch.manual_seed(19001)
-                model = (
-                    ACTPolicy(ACTCfg(pretrained_backbone=False)).to(args.device).eval()
+                model = load_act_policy(
+                    args.reference_checkpoint, args.device, untrained=True
+                )
+                _validate_policy_identity(
+                    model.metadata,
+                    args.reference_checkpoint,
+                    panel=args.panel,
+                    seeds=seeds,
                 )
                 mode, update = "untrained", 0
             else:
                 model, mode, update = None, "fixed", 0
+            if model is not None:
+                from ._environment import schema_for_env
+
+                if model.metadata["schema"] != schema_for_env(env):
+                    raise ValueError(
+                        "Policy and live environment action/state contracts differ"
+                    )
             video_dir = None
             if args.video:
                 video_dir = args.output / f"videos-{update}"
@@ -290,9 +333,8 @@ def main() -> None:
             report.update(
                 checkpoint=str(path.resolve()) if path else None,
                 update=update,
-                checkpoint_sha256=(
-                    hashlib.sha256(path.read_bytes()).hexdigest() if path else None
-                ),
+                smoke=bool(model.metadata.get("smoke", False)) if model else False,
+                checkpoint_sha256=(model.metadata["policy_sha256"] if path else None),
             )
             evaluations.append(report)
             del model
@@ -305,11 +347,36 @@ def main() -> None:
                     -item["update"],
                 ),
             )
-            shutil.copyfile(best["checkpoint"], args.output / "best.pt")
+            shutil.copytree(best["checkpoint"], args.output / "best")
+            selected_manifest = args.output / "best/embodichain_act.json"
+            selected_metadata = json.loads(selected_manifest.read_text())
+            selected_metadata["selection"] = {"panel": "development", "seeds": seeds}
+            selected_manifest.write_text(json.dumps(selected_metadata, indent=2) + "\n")
         else:
             best = evaluations[0]
         result = {
             "panel": args.panel,
+            "baseline": args.baseline,
+            "reference_checkpoint": (
+                str(args.reference_checkpoint.resolve())
+                if args.reference_checkpoint
+                else None
+            ),
+            "runtime": {
+                "torch": str(torch.__version__),
+                "cuda": torch.version.cuda,
+                "device": args.device,
+                "gpu": (
+                    torch.cuda.get_device_name(args.device)
+                    if args.device.startswith("cuda")
+                    else None
+                ),
+                "peak_torch_bytes": (
+                    torch.cuda.max_memory_allocated(args.device)
+                    if args.device.startswith("cuda")
+                    else None
+                ),
+            },
             "task_identity": task_identity(),
             "seeds": seeds,
             "shuffled_images": (

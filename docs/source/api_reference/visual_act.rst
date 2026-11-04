@@ -1,46 +1,39 @@
 :orphan:
 
-Visual action chunking and PushCube
-==================================
+Official LeRobot ACT and PushCube
+========================================
 
-These interfaces train a conditional variational action-chunking policy from
-current RGB/proprioception and recorded future actions. The episode collector
-and simulator evaluation are owned by the ``examples/learning/act`` example.
-Numeric windows and RGB frames share one
-:class:`~embodichain.data_pipeline.datasets.LeRobotDataSource`; configure its
-``image_keys`` and use ``read_images`` for bounded, frame-aligned RGB access.
-The visual deployment reuses
-:class:`~embodichain_tasks.manipulation.push_cube.PushCubeEnv`; its reset events,
-task thresholds and handwritten expert parameters are selected by configuration.
+The ACT integration uses LeRobot 0.6.1 on Python 3.12. EmbodiChain owns
+collection, declared action contracts, corpus provenance and simulator evaluation.
+LeRobot owns its model, processors, training loop and native checkpoints.
+The example invokes the upstream trainer directly; it does not use the shared SL trainer.
+
+Load a ``pretrained_model`` directory with its ``embodichain_act.json`` manifest.
+Call ``reset()`` after every environment reset. The adapter returns physical
+commands on the requested device and uses the official temporal ensemble.
+
+Historical EmbodiChain ACT ``.pt`` checkpoints require retraining.
 
 .. autosummary::
 
-   embodichain_models.policy.act.ACTCfg
-   embodichain_models.policy.act.ACTPolicy
-   embodichain_models.policy.act.ACTObjective
-   embodichain_models.policy.act.ACTTemporalEnsembler
-   embodichain_models.policy.act.ACTSequenceSource
-   embodichain_models.policy.act.build_act_trainer
-   embodichain_models.policy.act.model.ACTCfg
-   embodichain_models.policy.act.model.ACTPolicy
-   embodichain_models.policy.act.model.ACTObjective
-   embodichain_models.policy.act.data.ACTSequenceSource
-   embodichain_models.policy.act.rollout.ACTTemporalEnsembler
-   embodichain_models.policy.act.sl_recipe.build_act_trainer
+   embodichain_models.policy.act.ACTInferencePolicy
+   embodichain_models.policy.act.build_act_train_config
+   embodichain_models.policy.act.dataset_fingerprint
+   embodichain_models.policy.act.load_act_policy
+   embodichain_models.policy.act.policy_fingerprint
+   embodichain_models.policy.act.runtime.ACTInferencePolicy
+   embodichain_models.policy.act.runtime.load_act_policy
+   embodichain_models.policy.act.runtime.policy_fingerprint
+   embodichain_models.policy.act.training.build_act_train_config
+   embodichain_models.policy.act.training.dataset_fingerprint
 
-.. autoclass:: embodichain_models.policy.act.ACTCfg
+.. autoclass:: embodichain_models.policy.act.ACTInferencePolicy
    :members:
 
-.. autoclass:: embodichain_models.policy.act.ACTPolicy
-   :members:
+.. autofunction:: embodichain_models.policy.act.build_act_train_config
 
-.. autoclass:: embodichain_models.policy.act.ACTObjective
-   :members:
+.. autofunction:: embodichain_models.policy.act.dataset_fingerprint
 
-.. autoclass:: embodichain_models.policy.act.ACTTemporalEnsembler
-   :members:
+.. autofunction:: embodichain_models.policy.act.load_act_policy
 
-.. autoclass:: embodichain_models.policy.act.ACTSequenceSource
-   :members:
-
-.. autofunction:: embodichain_models.policy.act.build_act_trainer
+.. autofunction:: embodichain_models.policy.act.policy_fingerprint

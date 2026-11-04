@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import math
-from typing import Literal
+from typing import Literal, Protocol, TypeVar
 
 import torch
 
@@ -38,9 +38,117 @@ from .fixed_geometry import FixedGripperCollisionGeometry
 __all__ = [
     "AntipodalGraspPoseGenerator",
     "AntipodalGraspPoseGeneratorCfg",
+    "GraspRegionSelector",
     "GraspAnnotationCfg",
     "ParallelJawGraspCollisionCfg",
 ]
+
+_CacheValue = TypeVar("_CacheValue")
+
+
+def _validate_mesh_geometry(
+    mesh_vertices: torch.Tensor,
+    mesh_triangles: torch.Tensor,
+) -> None:
+    """Validate one target-local indexed triangle mesh."""
+    if (
+        not isinstance(mesh_vertices, torch.Tensor)
+        or not mesh_vertices.is_floating_point()
+        or mesh_vertices.dim() != 2
+        or mesh_vertices.shape[1] != 3
+        or mesh_vertices.shape[0] == 0
+        or not bool(torch.isfinite(mesh_vertices).all().item())
+    ):
+        raise ValueError(
+            "mesh_vertices must be a non-empty finite floating tensor "
+            "with shape (N, 3)."
+        )
+    if (
+        not isinstance(mesh_triangles, torch.Tensor)
+        or mesh_triangles.dtype == torch.bool
+        or mesh_triangles.is_floating_point()
+        or mesh_triangles.dim() != 2
+        or mesh_triangles.shape[1] != 3
+        or mesh_triangles.shape[0] == 0
+    ):
+        raise ValueError(
+            "mesh_triangles must be a non-empty integer tensor with " "shape (M, 3)."
+        )
+    if mesh_triangles.device != mesh_vertices.device:
+        raise ValueError("mesh_vertices and mesh_triangles must share a device.")
+    if (
+        bool((mesh_triangles < 0).any().item())
+        or int(mesh_triangles.max().item()) >= mesh_vertices.shape[0]
+    ):
+        raise ValueError("mesh_triangles reference invalid vertex indices.")
+
+
+def _mesh_geometry_key(
+    mesh_vertices: torch.Tensor,
+    mesh_triangles: torch.Tensor,
+) -> tuple[object, ...]:
+    """Return an in-process identity key that detects tensor mutation."""
+    return (
+        str(mesh_vertices.device),
+        mesh_vertices.dtype,
+        tuple(mesh_vertices.shape),
+        mesh_vertices.data_ptr(),
+        mesh_vertices._version,
+        mesh_triangles.dtype,
+        tuple(mesh_triangles.shape),
+        mesh_triangles.data_ptr(),
+        mesh_triangles._version,
+        id(mesh_vertices),
+        id(mesh_triangles),
+    )
+
+
+def _drop_stale_mesh_versions(
+    cache: dict[tuple[object, ...], _CacheValue], key: tuple[object, ...]
+) -> None:
+    """Release superseded versions of the same vertex/index tensor objects.
+
+    Call only on a cache miss, keeping repeated unchanged queries constant-time.
+    Separate meshes and triangulations retain their own entries.
+    """
+    for previous in tuple(cache):
+        if previous != key and previous[-2:] == key[-2:]:
+            del cache[previous]
+
+
+class GraspRegionSelector(Protocol):
+    """Filter a qualified fallback region before candidate ranking and top-K.
+
+    The callback runs only when a requested mesh-axis region has no qualified
+    geometry. It may select existing rows and a ranking center, never introduce
+    poses or bypass angle, NMS, ground or collision qualification.
+    """
+
+    def __call__(
+        self,
+        *,
+        centers: torch.Tensor,
+        pair_ids: torch.Tensor,
+        pair_centers: torch.Tensor,
+        axis: torch.Tensor,
+        positive: bool,
+        center_mode: Literal["bounds", "centroid"],
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Select a subset or reject the fallback.
+
+        Args:
+            centers: Qualified candidate centers, shape (K, 3).
+            pair_ids: Original contact-pair indices for those K candidates.
+            pair_centers: Complete cached-pair centers, shape (N, 3).
+            axis: Normalized requested region axis, shape (3,).
+            positive: Requested side of that axis.
+            center_mode: Generator's existing center convention.
+
+        Returns:
+            Boolean mask (K,) and finite ranking center (3,), on the input
+            device, or None to reject. Inputs must not be modified.
+        """
+        ...
 
 
 def _real_number(value: float, *, field_name: str, minimum: float) -> float:
@@ -174,10 +282,10 @@ class GraspAnnotationCfg:
 class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     """Reusable antipodal generator for any parallel-jaw gripper model.
 
-    Target meshes are supplied per call. The service lazily owns one private
-    single-mesh backend per tensor-backed mesh, allowing callers to reuse
-    sampled annotations without placing live generator state on a scene
-    affordance or exposing a second generator API.
+    Target meshes are supplied per call. Private qualification modes share
+    immutable mesh annotations while retaining independent collision state.
+    Callers reuse these annotations without placing live generator state on
+    a scene affordance or exposing a second generator API.
 
     ``collision_geometry`` is mandatory and describes actual collision meshes
     at the declared pre-grasp opening. Internal sampling and collision use its
@@ -218,6 +326,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             raise TypeError("collision_geometry must be explicit fixed mesh geometry.")
         self._collision_geometry = deepcopy(collision_geometry)
         self._backends: dict[tuple[object, ...], _AntipodalMeshBackend] = {}
+        self._proposal_backends: dict[tuple[object, ...], _AntipodalMeshBackend] = {}
 
     @property
     def collision_geometry(self) -> FixedGripperCollisionGeometry:
@@ -239,73 +348,36 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         """Return an owned annotation-policy snapshot."""
         return deepcopy(self._annotation_cfg)
 
-    @staticmethod
-    def _validate_geometry(
-        mesh_vertices: torch.Tensor,
-        mesh_triangles: torch.Tensor,
-    ) -> None:
-        """Validate one target-local indexed triangle mesh."""
-        if (
-            not isinstance(mesh_vertices, torch.Tensor)
-            or not mesh_vertices.is_floating_point()
-            or mesh_vertices.dim() != 2
-            or mesh_vertices.shape[1] != 3
-            or mesh_vertices.shape[0] == 0
-            or not bool(torch.isfinite(mesh_vertices).all().item())
-        ):
-            raise ValueError(
-                "mesh_vertices must be a non-empty finite floating tensor "
-                "with shape (N, 3)."
-            )
-        if (
-            not isinstance(mesh_triangles, torch.Tensor)
-            or mesh_triangles.dtype == torch.bool
-            or mesh_triangles.is_floating_point()
-            or mesh_triangles.dim() != 2
-            or mesh_triangles.shape[1] != 3
-            or mesh_triangles.shape[0] == 0
-        ):
-            raise ValueError(
-                "mesh_triangles must be a non-empty integer tensor with "
-                "shape (M, 3)."
-            )
-        if mesh_triangles.device != mesh_vertices.device:
-            raise ValueError("mesh_vertices and mesh_triangles must share a device.")
-        if (
-            bool((mesh_triangles < 0).any().item())
-            or int(mesh_triangles.max().item()) >= mesh_vertices.shape[0]
-        ):
-            raise ValueError("mesh_triangles reference invalid vertex indices.")
+    def clear_cache(self) -> None:
+        """Release all mesh backends while retaining configuration and hand geometry.
 
-    @staticmethod
-    def _geometry_key(
-        mesh_vertices: torch.Tensor,
-        mesh_triangles: torch.Tensor,
-    ) -> tuple[object, ...]:
-        """Return an in-process identity key that detects tensor mutation."""
-        return (
-            str(mesh_vertices.device),
-            mesh_vertices.dtype,
-            tuple(mesh_vertices.shape),
-            mesh_vertices.data_ptr(),
-            mesh_vertices._version,
-            mesh_triangles.dtype,
-            tuple(mesh_triangles.shape),
-            mesh_triangles.data_ptr(),
-            mesh_triangles._version,
-        )
+        Disk annotations remain available. The next query prepares its backend
+        lazily, using the configured annotation/refresh policy.
+        """
+        self._backends.clear()
+        self._proposal_backends.clear()
 
     def _backend(
         self,
         mesh_vertices: torch.Tensor,
         mesh_triangles: torch.Tensor,
+        *,
+        proposals_only: bool = False,
     ) -> _AntipodalMeshBackend:
         """Return the lazily prepared backend for one mesh."""
-        self._validate_geometry(mesh_vertices, mesh_triangles)
-        key = self._geometry_key(mesh_vertices, mesh_triangles)
-        backend = self._backends.get(key)
+        _validate_mesh_geometry(mesh_vertices, mesh_triangles)
+        key = _mesh_geometry_key(mesh_vertices, mesh_triangles)
+        cache = self._proposal_backends if proposals_only else self._backends
+        backend = cache.get(key)
         if backend is not None:
             return backend
+
+        for entries in (self._backends, self._proposal_backends):
+            _drop_stale_mesh_versions(entries, key)
+        other_cache = self._backends if proposals_only else self._proposal_backends
+        prepared = other_cache.get(key)
+        if prepared is not None and not prepared.is_prepared:
+            prepared = None
 
         model = self._gripper_model
         algorithm = self._algorithm_cfg
@@ -335,10 +407,12 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 annotation.use_largest_connected_component
             ),
             filter_ground_collision=collision.filter_ground_collision,
+            check_collision=not proposals_only,
+            prepared=prepared,
         )
-        if annotation.force_refresh or not backend.is_prepared:
+        if prepared is None and (annotation.force_refresh or not backend.is_prepared):
             backend.annotate()
-        self._backends[key] = backend
+        cache[key] = backend
         return backend
 
     def prepare_mesh(
@@ -418,8 +492,14 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        axis_region_selector: GraspRegionSelector | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return ranked candidates, optionally from one projected axis end."""
+        """Return candidates with an optional invocation-local region selector."""
+        region_options = (
+            {}
+            if axis_region_selector is None
+            else {"axis_region_selector": axis_region_selector}
+        )
         return [
             (poses, costs)
             for poses, _, costs in self.get_grasp_candidates(
@@ -429,6 +509,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 approach_direction=approach_direction,
                 obj_longest_axis=obj_longest_axis,
                 is_positive_part=is_positive_part,
+                **region_options,
             )
         ]
 
@@ -441,8 +522,20 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        axis_region_selector: GraspRegionSelector | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        """Expose candidate opening widths alongside their poses and costs."""
+        """Expose aligned candidates without changing configured region defaults.
+
+        The selector sees only qualified fallback geometry before top-K.
+        Default calls retain the original backend keyword shape.
+        """
+        if axis_region_selector is not None and not callable(axis_region_selector):
+            raise TypeError("axis_region_selector must be callable or None.")
+        region_options = (
+            {}
+            if axis_region_selector is None
+            else {"axis_region_selector": axis_region_selector}
+        )
         backend = self._backend(mesh_vertices, mesh_triangles)
         poses = self._object_poses(obj_poses, device=backend.device)
         directions = self._approach_directions(
@@ -494,6 +587,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 approach_direction=directions[index],
                 obj_longest_axis=None if axes is None else axes[index],
                 is_positive_part=bool(positive_parts[index].item()),
+                **region_options,
             )
             if grasp_poses.shape == (4, 4):
                 grasp_poses = grasp_poses.unsqueeze(0)
@@ -578,6 +672,74 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         middle_empty_ratio: float = 0.4,
     ) -> list[dict[str, dict[str, object]] | None]:
         """Return antipodal candidate sets separated for a left/right pair."""
+        return self._dual_arm_candidates(
+            mesh_vertices=mesh_vertices,
+            mesh_triangles=mesh_triangles,
+            obj_poses=obj_poses,
+            left_to_right_arm_direction=left_to_right_arm_direction,
+            approach_direction=approach_direction,
+            middle_empty_ratio=middle_empty_ratio,
+            proposals_only=False,
+        )
+
+    def get_dual_arm_grasp_proposals(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        left_to_right_arm_direction: torch.Tensor,
+        approach_direction: torch.Tensor,
+        middle_empty_ratio: float = 0.4,
+        role: Literal["left", "right"] | None = None,
+    ) -> list[dict[str, dict[str, object]] | None]:
+        """Generate paired proposals for a caller-owned qualification stage.
+
+        Args:
+            mesh_vertices: Object-local target vertices.
+            mesh_triangles: Matching triangular indices.
+            obj_poses: Batched object-to-world transforms.
+            left_to_right_arm_direction: World-space pairing direction.
+            approach_direction: World-space approach direction.
+            middle_empty_ratio: Existing middle-region exclusion ratio.
+            role: Retain only this side's candidates, or both when omitted.
+                Both sides' original direction draws are consumed in either
+                mode; unrequested pose construction, NMS and ranking are skipped.
+
+        Returns:
+            The ordinary paired candidate records in the declared runtime TCP.
+            Angle eligibility, NMS, ranking, population bounds and RNG order are
+            retained. Target/ground collision and closing-contact checks are
+            deliberately absent; ``is_success`` only means proposals exist.
+            Callers must qualify candidates before planning or execution.
+            With an explicit role, each non-None row contains only that role.
+        """
+        if role is not None and role not in ("left", "right"):
+            raise ValueError("role must be 'left', 'right', or None.")
+        return self._dual_arm_candidates(
+            mesh_vertices=mesh_vertices,
+            mesh_triangles=mesh_triangles,
+            obj_poses=obj_poses,
+            left_to_right_arm_direction=left_to_right_arm_direction,
+            approach_direction=approach_direction,
+            middle_empty_ratio=middle_empty_ratio,
+            proposals_only=True,
+            role=role,
+        )
+
+    def _dual_arm_candidates(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        left_to_right_arm_direction: torch.Tensor,
+        approach_direction: torch.Tensor,
+        middle_empty_ratio: float = 0.4,
+        proposals_only: bool,
+        role: Literal["left", "right"] | None = None,
+    ) -> list[dict[str, dict[str, object]] | None]:
+        """Return antipodal candidate sets separated for a left/right pair."""
         if isinstance(middle_empty_ratio, bool) or not isinstance(
             middle_empty_ratio, (int, float)
         ):
@@ -585,7 +747,11 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         ratio = float(middle_empty_ratio)
         if not math.isfinite(ratio) or not 0.0 <= ratio < 1.0:
             raise ValueError("middle_empty_ratio must be finite and in [0, 1).")
-        backend = self._backend(mesh_vertices, mesh_triangles)
+        backend = (
+            self._backend(mesh_vertices, mesh_triangles, proposals_only=True)
+            if proposals_only
+            else self._backend(mesh_vertices, mesh_triangles)
+        )
         poses = self._object_poses(obj_poses, device=backend.device)
         directions = self._approach_directions(
             approach_direction,
@@ -604,6 +770,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 approach_direction=directions[index],
                 left_to_right_arm_direction=arm_direction,
                 middle_empty_ratio=ratio,
+                **({"role": role} if role is not None else {}),
             )
             if result is not None:
                 result = {

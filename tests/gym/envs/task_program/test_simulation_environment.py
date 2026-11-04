@@ -306,6 +306,7 @@ class _Robot:
 
     def __init__(self) -> None:
         self.qpos = torch.zeros(_BATCH_SIZE, _ROBOT_DOF)
+        self.target_qpos = self.qpos.clone()
 
     def get_qpos(
         self,
@@ -313,8 +314,8 @@ class _Robot:
         target: bool = False,
     ) -> torch.Tensor:
         """Return full or control-part positions."""
-        del target
-        return self.qpos if name is None else self.qpos[:, :1]
+        qpos = self.target_qpos if target else self.qpos
+        return qpos if name is None else qpos[:, :1]
 
     def get_qvel(
         self,
@@ -882,7 +883,9 @@ def _motion_generator(robot: _Robot) -> MotionGenerator:
     return generator
 
 
-def _factory() -> tuple[SimulationTaskProgramFactory, _Robot]:
+def _factory(
+    *, capture_root_pose: bool = False, hold_qpos_source: str = "observed"
+) -> tuple[SimulationTaskProgramFactory, _Robot]:
     """Create one production factory around CPU-only test doubles."""
     robot = _Robot()
     simulation = _Simulation(robot)
@@ -897,6 +900,8 @@ def _factory() -> tuple[SimulationTaskProgramFactory, _Robot]:
             registration,
             step_dt=_STEP_DT,
             motion_generator_factory=lambda: _motion_generator(robot),
+            capture_root_pose=capture_root_pose,
+            hold_qpos_source=hold_qpos_source,
         ),
         robot,
     )
@@ -996,14 +1001,15 @@ def _pick_evidence_plan(action: Any, request: Any, context: Any) -> Any:
 
 
 def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
-    """Build one open frame and the matching held-object removal delta."""
-    positions = context.robot.qpos.unsqueeze(1).repeat(1, 2, 1)
-    positions[:, :, 1] = _HAND_OPEN_POSITION
+    """Keep the source grasp through approach, then open and retract."""
+    positions = context.robot.qpos.unsqueeze(1).repeat(1, 3, 1)
+    positions[:, 0, 1] = _HAND_GRASP_POSITION
+    positions[:, 1:, 1] = _HAND_OPEN_POSITION
     trajectory = TimedTrajectory.from_positions(
         positions,
         env_ids=context.env_ids,
         dt=torch.full(
-            (context.batch_size, 2),
+            (context.batch_size, 3),
             context.require_control_dt(),
             dtype=positions.dtype,
             device=positions.device,
@@ -1018,7 +1024,7 @@ def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
             held_object_updates={"manipulator": None},
         ),
         replannable=False,
-        segment_lengths={"release": 1, "retract": 1},
+        segment_lengths={"approach": 1, "release": 1, "retract": 1},
     )
 
 
@@ -1151,6 +1157,7 @@ def test_bridge_reuses_real_workflow_across_pick_and_place(
     original_analyze, original_ground = compiler.analyze, compiler.ground
     analyses = []
     grounded_indices = []
+    execution_ids = []
 
     def analyze(calls, **kwargs):
         workflow = original_analyze(calls, **kwargs)
@@ -1160,6 +1167,10 @@ def test_bridge_reuses_real_workflow_across_pick_and_place(
     def ground(workflow, index, context, **kwargs):
         value = original_ground(workflow, index, context, **kwargs)
         grounded_indices.append(index)
+        execution_ids.append(value.invocation.invocation_id)
+        assert value.effect_spec.invocation_id == value.invocation.invocation_id
+        for boundary in (*value.effect_guards, *value.effect_gates):
+            assert boundary.effect_spec.invocation_id == value.invocation.invocation_id
         return value
 
     monkeypatch.setattr(compiler, "analyze", analyze)
@@ -1176,7 +1187,7 @@ def test_bridge_reuses_real_workflow_across_pick_and_place(
                 torch.full_like(robot.qpos[:, 1], _HAND_GRASP_POSITION),
             )
             if segment_index == 1:
-                cube.pose[:, 0, 3] = _RELEASE_SEPARATION
+                cube.pose[~robot.constraint_state, 0, 3] = _RELEASE_SEPARATION
         assert segment.validator().all()
         local_indices.append(
             [call["call_index"] for call in segment.metadata["runtime"]["calls"]]
@@ -1185,6 +1196,11 @@ def test_bridge_reuses_real_workflow_across_pick_and_place(
     assert len(analyses) == 1
     assert grounded_indices == [0, 1]
     assert local_indices == [[0], [0]]
+    assert execution_ids == [
+        f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}"
+        for segment in compiled.iter_segments()
+        for call in segment.calls
+    ]
     assert len(analyses[0].calls[0].downstream_object_targets) == 1
 
 
@@ -1296,7 +1312,7 @@ def _run_evidence_pick_place(
         if result.current_call_index == 1:
             if verified_pick is None:
                 verified_pick = result.task_state.get_held_object("manipulator")
-            cube.pose[:, 0, 3] = _RELEASE_SEPARATION
+            cube.pose[~robot.constraint_state, 0, 3] = _RELEASE_SEPARATION
         assembly.clock.advance_after_env_step()
         result = assembly.runtime.step()
 
@@ -1490,12 +1506,54 @@ def test_mllm_and_config_share_invocations_and_verified_results(
     _assert_typed_equivalent(config_result, mllm_result)
 
 
-def test_simulation_factory_builds_shared_observation_and_evidence_ports() -> None:
+@pytest.mark.parametrize("capture_root_pose", [False, True])
+@pytest.mark.parametrize("env_ids", [None, (2, 0), (1,)])
+def test_simulation_root_capture_is_explicit_and_owns_the_same_tick_snapshot(
+    monkeypatch: pytest.MonkeyPatch, capture_root_pose: bool, env_ids
+) -> None:
+    factory, robot = _factory(capture_root_pose=capture_root_pose)
+    root_pose = torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
+    root_pose[:, 0, 3] = torch.tensor([0.0, 1.0, 2.0])
+    reads = []
+
+    def get_local_pose(*, to_matrix):
+        reads.append(to_matrix)
+        return root_pose
+
+    monkeypatch.setattr(robot, "get_local_pose", get_local_pose, raising=False)
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    if env_ids is not None:
+        factory = factory.for_env_ids(env_ids)
+    selected = list(range(_BATCH_SIZE)) if env_ids is None else list(env_ids)
+    observation = factory.create_planning_observation_provider(
+        scene_registry=factory.create_scene_registry(),
+        engine=engine,
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
+    context = observation.observe(TaskState.empty(len(selected), robot.device))
+    assert context.robot.timestamp == context.scene.timestamp == 0.0
+    assert reads == ([True] if capture_root_pose else [])
+    if capture_root_pose:
+        assert torch.equal(context.robot.root_pose, root_pose[selected])
+        root_pose[:, 0, 3].add_(3.0)
+        assert context.robot.root_pose[:, 0, 3].tolist() == [float(i) for i in selected]
+    else:
+        assert context.robot.root_pose is None
+
+
+@pytest.mark.parametrize("hold_qpos_source", ["observed", "drive_target"])
+@pytest.mark.parametrize("env_ids", [None, (2, 0)])
+def test_simulation_factory_builds_shared_observation_and_evidence_ports(
+    monkeypatch: pytest.MonkeyPatch, hold_qpos_source: str, env_ids
+) -> None:
     """Observation and both built-in evidence providers share one scene source."""
-    factory, robot = _factory()
+    factory, robot = _factory(hold_qpos_source=hold_qpos_source)
     registry = factory.create_scene_registry()
     profile = factory.create_robot_skill_profile()
     engine = factory.create_atomic_action_engine(profile)
+    if env_ids is not None:
+        factory = factory.for_env_ids(env_ids)
+    selected = list(range(_BATCH_SIZE)) if env_ids is None else list(env_ids)
     clock = EnvironmentStepClock(_STEP_DT)
 
     observation = factory.create_planning_observation_provider(
@@ -1504,7 +1562,7 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports() -> No
         clock=clock,
     )
     assert type(observation) is SimulationPlanningObservationProvider
-    context = observation.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+    context = observation.observe(TaskState.empty(len(selected), robot.device))
     providers = tuple(
         factory.create_effect_evidence_providers(
             scene_registry=registry,
@@ -1514,7 +1572,33 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports() -> No
     )
     assert context.robot.timestamp == pytest.approx(0.0)
     assert context.control_dt == pytest.approx(_STEP_DT)
-    assert torch.equal(observation.current_qpos(context.env_ids), robot.qpos)
+    assert torch.equal(observation.current_qpos(context.env_ids), robot.qpos[selected])
+    reads = []
+    original_get_qpos = robot.get_qpos
+
+    def get_qpos(*, target=False):
+        reads.append(target)
+        return original_get_qpos(target=target)
+
+    monkeypatch.setattr(robot, "get_qpos", get_qpos)
+    robot.target_qpos.fill_(0.25)
+    assert torch.equal(
+        observation.hold_qpos(context.env_ids),
+        (
+            robot.target_qpos[selected]
+            if hold_qpos_source == "drive_target"
+            else context.robot.qpos
+        ),
+    )
+    robot.target_qpos[:, 0] = torch.tensor([0.0, 1.0, 2.0])
+    selected_hold = observation.hold_qpos(torch.tensor([2, 0]))
+    assert selected_hold[:, 0].tolist() == (
+        [2.0, 0.0] if hold_qpos_source == "drive_target" else [0.0, 0.0]
+    )
+    selected_hold.zero_()
+    assert robot.target_qpos[:, 0].tolist() == [0.0, 1.0, 2.0]
+    assert reads == ([True, True] if hold_qpos_source == "drive_target" else [])
+    monkeypatch.setattr(robot, "get_qpos", original_get_qpos)
     assert len(providers) == 2
     assert all(
         getattr(provider, "_scene_provider") is observation.scene_provider
@@ -1551,7 +1635,7 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports() -> No
         ),
     )[query.evidence_id]
     assert type(evidence) is BinaryEffectEvidenceBatch
-    assert evidence.valid.tolist() == [False] * _BATCH_SIZE
+    assert evidence.valid.tolist() == [False] * len(selected)
     assert all(error is not None for error in evidence.acquisition_errors)
 
 
@@ -1564,6 +1648,56 @@ def test_simulation_factory_returns_exact_environment_adapter() -> None:
     assert type(adapter) is TaskProgramEnvironmentAdapter
     assert adapter.step_dt == pytest.approx(_STEP_DT)
     assert factory.segment_policy_port is not None
+
+
+@pytest.mark.parametrize("env_ids", [None, (2,)])
+def test_simulation_factory_preserves_owned_hand_calibration_across_engines(
+    env_ids,
+) -> None:
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
+
+    robot = _EvidenceRobot()
+    environment = SimpleNamespace(sim=_Simulation(robot), robot=robot, step_dt=_STEP_DT)
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"), _evidence_profile_binding()
+    )
+    cfg = RobotHandGeometryCfg(
+        motion_part="arm",
+        hand_part="hand",
+        hand_root_link="tool_root",
+        pad_link_names=("contact_b", "contact_a"),
+        open_qpos=(_HAND_OPEN_POSITION,),
+        closed_qpos=(_HAND_GRASP_POSITION,),
+        sample_count=65,
+        body_max_edge=0.01,
+        pad_max_edge=0.004,
+        max_subdivisions=10,
+    )
+
+    def generator_factory():
+        generator = _motion_generator(robot)
+        generator._env_ids = env_ids
+        return generator
+
+    factory = SimulationTaskProgramFactory.from_environment(
+        environment,
+        registration=registration,
+        motion_generator_factory=generator_factory,
+        hand_geometry_cfgs={"hand": cfg},
+    )
+    if env_ids is not None:
+        factory = factory.for_env_ids(env_ids)
+    cfg.pad_link_names = ("changed", "input")
+    profile = factory.create_robot_skill_profile()
+    engines = [factory.create_atomic_action_engine(profile) for _ in range(2)]
+    for engine in engines:
+        calibrated = engine.planning_services.hand_geometry_cfg("hand")
+        assert calibrated.pad_link_names == ("contact_b", "contact_a")
+        assert calibrated.open_qpos == (_HAND_OPEN_POSITION,)
+        calibrated.closed_qpos = (99,)
+    assert engines[0].planning_services.hand_geometry_cfg("hand").closed_qpos == (
+        _HAND_GRASP_POSITION,
+    )
 
 
 def test_simulation_factory_uses_environment_expert_joint_command_mode() -> None:
@@ -1872,9 +2006,10 @@ def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
         analyzed: Any,
         effect_spec: Any,
         *,
+        registered_effect: Any = None,
         path: tuple[Any, ...],
     ) -> tuple[()]:
-        del self, analyzed, effect_spec, path
+        del self, analyzed, effect_spec, registered_effect, path
         return ()
 
     def without_in_flight_guards(
@@ -1883,9 +2018,10 @@ def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
         effect_spec: Any,
         context: Any,
         *,
+        registered_effect: Any = None,
         path: tuple[Any, ...],
     ) -> tuple[()]:
-        del self, analyzed, effect_spec, context, path
+        del self, analyzed, effect_spec, context, registered_effect, path
         return ()
 
     assembly.compiler._ground_phase_effect_gates = MethodType(

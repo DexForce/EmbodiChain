@@ -14,140 +14,148 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Behavioral contracts for ACT padding, gradients and temporal execution."""
+"""Portable upstream policies, preprocessing, reset and control contracts."""
 
 from __future__ import annotations
 
-import math
+from importlib.metadata import version
+import json
+from pathlib import Path
 import subprocess
 import sys
 
+import pytest
 import torch
 
-from embodichain.learning.sl import SupervisedBatch
-from embodichain_models.policy.act import (
-    ACTCfg,
-    ACTObjective,
-    ACTPolicy,
-    ACTTemporalEnsembler,
+from embodichain_models.policy.act import load_act_policy, policy_fingerprint
+
+pytestmark = pytest.mark.skipif(
+    version("lerobot") != "0.6.1",
+    reason="Official ACT integration requires LeRobot 0.6.1",
 )
 
 
-def _model() -> ACTPolicy:
-    return ACTPolicy(
-        ACTCfg(
-            state_dim=3,
-            action_dim=2,
-            horizon=4,
-            hidden_dim=32,
-            heads=4,
-            encoder_layers=1,
-            decoder_layers=1,
-            feedforward_dim=64,
-            latent_dim=4,
-            dropout=0.0,
-            pretrained_backbone=False,
-        )
+@pytest.fixture
+def artifact(act_data, tmp_path: Path):
+    from embodichain_models.policy.act import build_act_train_config
+    from lerobot.policies.act.modeling_act import ACTPolicy
+    from lerobot.policies.act.processor_act import make_act_pre_post_processors
+
+    root, schema = act_data
+    cfg = build_act_train_config(
+        root,
+        tmp_path / "run",
+        schema=schema,
+        image_key="observation.images.camera",
+        device="cpu",
+        smoke=True,
+        num_workers=0,
     )
+    stats = {
+        "observation.state": {"mean": torch.zeros(2), "std": torch.ones(2)},
+        "observation.images.camera": {
+            "mean": torch.full((3, 1, 1), 0.5),
+            "std": torch.full((3, 1, 1), 0.25),
+        },
+        "action": {"mean": torch.tensor([1.0, 2.0]), "std": torch.tensor([2.0, 3.0])},
+    }
+    policy = ACTPolicy(cfg.policy).eval()
+    pre, post = make_act_pre_post_processors(cfg.policy, stats)
+    output = tmp_path / "policy"
+    policy.save_pretrained(output)
+    pre.save_pretrained(output)
+    post.save_pretrained(output)
+    manifest = {
+        "recipe": "lerobot-act-v1",
+        "schema": schema,
+        "image_key": "observation.images.camera",
+        "backbone_initialization": None,
+        "policy_sha256": policy_fingerprint(output),
+    }
+    (output / "embodichain_act.json").write_text(json.dumps(manifest))
+    return output, policy, pre, post
 
 
-def test_public_policy_import_does_not_load_simulation():
-    code = (
-        "import sys; from embodichain_models.policy.act import ACTPolicy; "
-        "assert not any(n == 'dexsim' or n.startswith(('dexsim.', 'embodichain.lab.sim')) "
-        "for n in sys.modules)"
-    )
+def test_import_does_not_initialize_simulation():
     subprocess.run(
-        [sys.executable, "-c", code], check=True, capture_output=True, text=True
+        [
+            sys.executable,
+            "-c",
+            "from embodichain_models.policy.act import load_act_policy; import sys; assert 'dexsim' not in sys.modules",
+        ],
+        check=True,
     )
 
 
-def test_padded_actions_do_not_affect_posterior_or_loss_and_gradients_reach_model():
-    torch.manual_seed(12)
-    model = _model().eval()
-    rgb = torch.randint(0, 256, (2, 3, 64, 64), dtype=torch.uint8)
-    state = torch.randn(2, 3)
-    actions = torch.randn(2, 4, 2)
-    valid = torch.tensor([[True, True, False, False], [True, True, True, False]])
-    altered = actions.clone()
-    altered[~valid] = 1000.0
-    objective = ACTObjective(kl_weight=10)
-
-    torch.manual_seed(3)
-    first = objective.compute_loss(
-        model, SupervisedBatch({"rgb": rgb, "state": state}, actions, {"valid": valid})
-    )
-    torch.manual_seed(3)
-    second = objective.compute_loss(
-        model, SupervisedBatch({"rgb": rgb, "state": state}, altered, {"valid": valid})
-    )
-    torch.testing.assert_close(first.loss, second.loss)
-    first.loss.backward()
-    assert model.backbone[0].weight.grad is not None
-    assert model.backbone[0].weight.grad.abs().sum() > 0
-    assert model.posterior_stats.weight.grad is not None
-    assert model.posterior_stats.weight.grad.abs().sum() > 0
-
-
-def test_inference_is_deterministic_and_denormalizes_actions():
-    torch.manual_seed(8)
-    model = _model().eval()
-    model.set_normalization(
-        torch.zeros(3),
-        torch.ones(3),
-        torch.tensor([2.0, -1.0]),
-        torch.tensor([0.5, 2.0]),
-    )
-    rgb = torch.zeros(1, 3, 64, 64, dtype=torch.uint8)
-    state = torch.zeros(1, 3)
-    with torch.no_grad():
-        normalized, mu, logvar = model(rgb, state)
-        actual = model.predict(rgb, state)
-    assert mu is None and logvar is None
-    torch.testing.assert_close(
-        actual, normalized * torch.tensor([0.5, 2.0]) + torch.tensor([2.0, -1.0])
-    )
-
-
-def test_objective_matches_independent_masked_l1_and_kl_values():
-    class KnownPrediction(torch.nn.Module):
-        action_mean = torch.zeros(2)
-        action_std = torch.ones(2)
-
-        def forward(self, rgb, state, *, actions, valid):
-            return (
-                torch.zeros_like(actions),
-                torch.tensor([[0.0, 0.0], [1.0, 0.0]]),
-                torch.zeros(2, 2),
+def test_native_reload_matches_upstream_processors_and_reset(artifact):
+    root, policy, pre, post = artifact
+    rgb = torch.full((1, 3, 32, 32), 128, dtype=torch.uint8)
+    state = torch.tensor([[0.2, 0.4]])
+    with torch.inference_mode():
+        policy.reset()
+        expected = post(
+            policy.select_action(
+                pre(
+                    {
+                        "observation.images.camera": rgb.float() / 255,
+                        "observation.state": state,
+                    }
+                )
             )
+        )
+    loaded = load_act_policy(root)
+    torch.testing.assert_close(loaded.select_action(rgb, state), expected)
+    loaded.select_action(rgb, state + 1)
+    loaded.reset()
+    torch.testing.assert_close(loaded.select_action(rgb, state), expected)
+    assert loaded.select_action(rgb, state).device.type == "cpu"
 
-    actions = torch.tensor([[[2.0, 4.0], [999.0, 999.0]], [[1.0, 1.0], [3.0, 3.0]]])
-    valid = torch.tensor([[True, False], [True, True]])
-    result = ACTObjective(kl_weight=10.0).compute_loss(
-        KnownPrediction(),
-        SupervisedBatch(
-            {"rgb": torch.empty(2, 3, 1, 1), "state": torch.empty(2, 1)},
-            actions,
-            {"valid": valid},
-        ),
+
+def test_artifact_mutation_and_legacy_checkpoints_are_rejected(
+    artifact, tmp_path: Path
+):
+    root, *_ = artifact
+    with (root / "policy_preprocessor.json").open("a") as stream:
+        stream.write(" ")
+    with pytest.raises(ValueError, match="fingerprint"):
+        load_act_policy(root)
+    legacy = tmp_path / "legacy.pt"
+    legacy.write_bytes(b"legacy")
+    with pytest.raises(ValueError, match="Historical"):
+        load_act_policy(legacy)
+
+
+def test_validation_uses_frozen_stats_and_valid_element_weighting(artifact, act_data):
+    root, *_ = artifact
+    data, _ = act_data
+    loaded = load_act_policy(root)
+    with torch.no_grad():
+        loaded.policy.model.action_head.weight.zero_()
+        loaded.policy.model.action_head.bias.zero_()
+    report = loaded.evaluate_dataset(data, batch_size=2)
+    # Two length-three episodes yield 12 valid future frames, each with two
+    # action elements. Frozen mean=[1,2], std=[2,3] gives total absolute error 10.
+    assert report["valid_action_elements"] == 24
+    assert report["action_l1"] == pytest.approx(10 / 24, abs=1e-6)
+
+
+def test_portable_policy_manifest_prevents_train_and_selection_seed_overlap(artifact):
+    from examples.learning.act._environment import task_identity
+    from examples.learning.act.evaluate import _validate_policy_identity
+
+    root, *_ = artifact
+    manifest = root / "embodichain_act.json"
+    metadata = json.loads(manifest.read_text())
+    metadata.update(
+        task_identity=task_identity(),
+        scene_seeds={"train": [100000], "validation": [200000]},
+        selection={"panel": "development", "seeds": [300000]},
     )
-    torch.testing.assert_close(result.metrics["action_l1"], torch.tensor(2.5))
-    torch.testing.assert_close(result.metrics["kl"], torch.tensor(0.25))
-    torch.testing.assert_close(result.loss, torch.tensor(5.0))
-
-
-def test_ensemble_aligns_overlapping_chunks_and_resets_individual_rows():
-    ensemble = ACTTemporalEnsembler(3, 2, 1, decay=0.2)
-    first = torch.tensor([[[0.0], [2.0], [4.0]], [[5.0], [7.0], [9.0]]])
-    second = torch.tensor([[[10.0], [12.0], [14.0]], [[15.0], [17.0], [19.0]]])
-    torch.testing.assert_close(ensemble.update(first), torch.tensor([[0.0], [5.0]]))
-    ensemble.reset(torch.tensor([1]))
-    actual = ensemble.update(second)
-    expected_first = (2.0 * math.exp(0.2) + 10.0) / (math.exp(0.2) + 1.0)
-    torch.testing.assert_close(actual, torch.tensor([[expected_first], [15.0]]))
-    ensemble.reset()
-    torch.testing.assert_close(ensemble.update(first), torch.tensor([[0.0], [5.0]]))
-
-    extreme = ACTTemporalEnsembler(3, 1, 1, decay=10000.0)
-    extreme.update(first[:1])
-    torch.testing.assert_close(extreme.update(second[:1]), torch.tensor([[2.0]]))
+    manifest.write_text(json.dumps(metadata))
+    loaded = load_act_policy(root)
+    # No evaluation.json accompanies this directory: isolation must travel with it.
+    for seed in [100000, 200000, 300000]:
+        with pytest.raises(ValueError, match="overlap"):
+            _validate_policy_identity(loaded.metadata, root, panel="test", seeds=[seed])
+    _validate_policy_identity(loaded.metadata, root, panel="test", seeds=[400000])
+    _validate_policy_identity(loaded.metadata, root, panel="overfit", seeds=[100000])

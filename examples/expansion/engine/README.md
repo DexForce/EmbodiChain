@@ -149,10 +149,11 @@ embodichain dataset validate DATASET_PATH --check-media --media-frame-counts
 ## Real2Sim
 
 Prepare the pinned DROID carton example using its unchanged raw recordings and
-qualification annotations. The stable physical geometry fingerprint excludes URDF
-comments, rendering-only material/visual sections and generated file locations; it
-still includes physical geometry bytes, joint structure and inertial properties.
-Old exact raw-file fingerprints remain accepted only when they match exactly.
+qualification annotations. The shared geometry fingerprint identifies collision
+mesh content and named joint structure independently of assembly comments,
+visual sections, inertial values and cache locations. Inertial and dynamic
+parameters remain separate measured evidence. Exact legacy byte identities and
+independently pinned aliases follow the upstream Real2Sim qualification contract.
 Never edit a source pin to bypass qualification.
 
 ```bash

@@ -28,10 +28,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
-import xml.etree.ElementTree as ET
 
 import numpy as np
 import torch
+
+from embodichain.data_pipeline.real2sim._geometry import (
+    _canonical_robot_geometry_sha256,
+    _robot_geometry_sha256,
+)
 
 __all__ = [
     "BoxCollisionBody",
@@ -40,50 +44,6 @@ __all__ = [
     "SampledCollisionReport",
     "SampledRobotCollisionChecker",
 ]
-
-
-def _physical_urdf_digest(path: Path, mesh_paths: Sequence[Path]) -> str:
-    """Hash physical XML and collision bytes independently of generated comments."""
-    root = ET.fromstring(path.read_bytes())
-    root.attrib.pop("name", None)
-    for element in root.iter():
-        for child in list(element):
-            if child.tag in {"visual", "material"}:
-                element.remove(child)
-        element.text = (
-            element.text.strip() if element.text and element.text.strip() else None
-        )
-        element.tail = None
-        if element.tag == "mesh":
-            filename = element.attrib.get("filename", "")
-            direct = Path(filename.removeprefix("file://"))
-            if not direct.is_absolute():
-                direct = path.parent / direct
-            if direct.is_file():
-                candidates = [direct]
-            else:
-                suffix = filename.removeprefix("package://").lstrip("/")
-                candidates = [
-                    mesh for mesh in mesh_paths if mesh.as_posix().endswith(suffix)
-                ]
-                if not candidates:
-                    candidates = [
-                        mesh for mesh in mesh_paths if mesh.name == Path(filename).name
-                    ]
-            digests = {
-                hashlib.sha256(mesh.read_bytes()).hexdigest() for mesh in candidates
-            }
-            if len(digests) != 1:
-                raise ValueError(
-                    f"Cannot uniquely identify collision mesh {filename!r}"
-                )
-            element.attrib["filename"] = "sha256:" + next(iter(digests))
-        attrs = sorted(element.attrib.items())
-        element.attrib.clear()
-        element.attrib.update(attrs)
-    return hashlib.sha256(
-        b"embodichain:physical-urdf:v2\0" + ET.tostring(root)
-    ).hexdigest()
 
 
 def _pose(value: object, name: str) -> np.ndarray:
@@ -270,6 +230,10 @@ class SampledRobotCollisionChecker:
     All other robot self pairs and robot/scene pairs are evaluated. Object
     paths are explicit per-sample world poses and are never silently frozen.
 
+    ``geometry_sha256`` identifies named joints and collision content without
+    assembly headers or cache locations. Source validation supports exact v1
+    byte identities and independently pinned aliases for portable rebuilds.
+
     Args:
         urdf_path: Full fixed-base robot URDF including its end effector.
         joint_names: Complete simulator joint order, including mimic joints.
@@ -361,8 +325,6 @@ class SampledRobotCollisionChecker:
                     self_pairs.append((first, second, pair))
         self._self_pairs = tuple(self_pairs)
         self.excluded_self_pairs = tuple(sorted(excluded))
-        digest = hashlib.sha256()
-        digest.update(path.read_bytes())
         primitive_paths = {
             "BOX",
             "SPHERE",
@@ -379,11 +341,12 @@ class SampledRobotCollisionChecker:
                 if item.meshPath and item.meshPath not in primitive_paths
             }
         )
+        legacy = hashlib.sha256(path.read_bytes())
         for mesh in mesh_paths:
-            digest.update(mesh.name.encode("utf-8"))
-            digest.update(hashlib.sha256(mesh.read_bytes()).digest())
-        self.legacy_geometry_sha256 = digest.hexdigest()
-        self.geometry_sha256 = _physical_urdf_digest(path, mesh_paths)
+            legacy.update(mesh.name.encode("utf-8"))
+            legacy.update(hashlib.sha256(mesh.read_bytes()).digest())
+        self._legacy_geometry_sha256 = legacy.hexdigest()
+        self.geometry_sha256 = _robot_geometry_sha256(path, tuple(mesh_paths))
 
     @property
     def bodies(self) -> tuple[BoxCollisionBody | PlaneCollisionBody, ...]:
@@ -425,12 +388,16 @@ class SampledRobotCollisionChecker:
             recorded = getattr(source, name)
             if recorded is None:
                 raise ValueError(f"source {name} is unverified")
-            if recorded != actual and not (
-                name == "robot_geometry_sha256"
-                and recorded == self.legacy_geometry_sha256
-            ):
+            if name == "robot_geometry_sha256":
+                # Unknown v1 sources remain usable when their original bytes
+                # still match exactly. Only pinned aliases tolerate rebuilds.
+                if recorded == self._legacy_geometry_sha256:
+                    continue
+                recorded = _canonical_robot_geometry_sha256(recorded)
+            if recorded != actual:
                 raise ValueError(
-                    f"source {name} does not match current physical geometry"
+                    f"source {name} does not match current physical geometry: "
+                    f"recorded={getattr(source, name)}, resolved={recorded}, actual={actual}"
                 )
 
     def first_link_body_contact(

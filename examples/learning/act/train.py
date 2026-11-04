@@ -14,13 +14,18 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Train visual ACT offline using EmbodiChain's supervised trainer."""
+"""Train the official LeRobot ACT and retain EmbodiChain task/data provenance."""
 
 from __future__ import annotations
 
 import argparse
+from importlib.metadata import version
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
+import time
 from typing import Any
 
 from ._environment import task_identity
@@ -37,6 +42,17 @@ def _report(path: Path) -> dict[str, Any]:
     return report
 
 
+def _policies(output: Path) -> list[Path]:
+    return sorted(
+        (
+            p / "pretrained_model"
+            for p in (output / "lerobot/checkpoints").glob("*")
+            if p.name.isdigit() and (p / "pretrained_model/model.safetensors").is_file()
+        ),
+        key=lambda p: int(p.parent.name),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--train-report", type=Path, required=True)
@@ -47,13 +63,22 @@ def main() -> None:
     parser.add_argument("--updates", type=int, default=30000)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--eval-every", type=int, default=2000)
+    parser.add_argument("--num-workers", type=int)
     parser.add_argument("--smoke", action="store_true")
-    parser.add_argument("--resume", type=Path)
+    parser.add_argument(
+        "--resume", type=Path, help="Native checkpoint's pretrained_model directory"
+    )
     args = parser.parse_args()
+    if sys.version_info[:2] != (3, 12):
+        parser.error("This example is qualified on Python 3.12 with LeRobot 0.6.1")
+    if min(args.updates, args.batch_size, args.eval_every) < 1:
+        parser.error("updates, batch-size and eval-every must be positive")
     train = _report(args.train_report)
     validation = _report(args.validation_report) if args.validation_report else None
-    if not args.smoke and validation is None:
-        parser.error("A separate --validation-report is required for full training")
+    if not args.smoke and (validation is None or train.get("smoke", False)):
+        parser.error(
+            "Full training requires qualified training and separate validation reports"
+        )
     if validation is not None:
         if train["schema"] != validation["schema"]:
             raise ValueError("Training and validation schemas differ")
@@ -61,56 +86,181 @@ def main() -> None:
             r["seed"] for r in validation["records"]
         }:
             raise ValueError("Training and validation scene seeds overlap")
-    model = {} if not args.smoke else {"pretrained_backbone": False}
-    config = {
-        "factory": "embodichain_models.policy.act.sl_recipe:build_act_trainer",
+        if not args.smoke and validation.get("smoke", False):
+            raise ValueError("Full training requires a qualified validation corpus")
+    from embodichain_models.policy.act import (
+        build_act_train_config,
+        dataset_fingerprint,
+        load_act_policy,
+        policy_fingerprint,
+    )
+    import torch
+
+    # The wrapper performs CPU image conversion during post-training validation.
+    # Bound its pool as well as the upstream subprocess's pool on large hosts.
+    torch.set_num_threads(int(os.environ.get("OMP_NUM_THREADS", "2")))
+
+    output = args.output.resolve()
+    cfg = build_act_train_config(
+        train["dataset"],
+        output / "lerobot",
+        schema=train["schema"],
+        device=args.device,
+        seed=args.seed,
+        updates=args.updates,
+        batch_size=args.batch_size,
+        save_freq=args.eval_every,
+        num_workers=(
+            args.num_workers
+            if args.num_workers is not None
+            else (0 if args.smoke else 4)
+        ),
+        smoke=args.smoke,
+    )
+    native = cfg.to_dict()
+    recipe = {
+        "recipe": "lerobot-act-v1",
+        "schema": train["schema"],
         "task_identity": train["task_identity"],
+        "image_key": "observation.images.cam_high",
+        "smoke": args.smoke,
+        "backbone_initialization": cfg.policy.pretrained_backbone_weights,
         "scene_seeds": {
             "train": [r["seed"] for r in train["records"]],
             "validation": (
                 [] if validation is None else [r["seed"] for r in validation["records"]]
             ),
         },
-        "model": model,
-        "data": {
-            "train_path": train["dataset"],
-            "validation_path": None if validation is None else validation["dataset"],
-            "schema": train["schema"],
-            "image_key": "observation.images.cam_high",
+        "datasets": {
+            "train": {
+                "path": train["dataset"],
+                "sha256": dataset_fingerprint(train["dataset"]),
+            },
+            "validation": (
+                None
+                if validation is None
+                else {
+                    "path": validation["dataset"],
+                    "sha256": dataset_fingerprint(validation["dataset"]),
+                }
+            ),
         },
-        "objective": {"kl_weight": 10.0},
-        "optimizer": {
-            "learning_rate": 1e-4,
-            "backbone_learning_rate": 1e-5,
-            "weight_decay": 1e-4,
-            "max_grad_norm": 1.0,
-        },
-        "trainer": {
-            "total_updates": args.updates,
-            "batch_size": args.batch_size,
-            "device": args.device,
-            "seed": args.seed,
-            "output_dir": str(args.output.resolve()),
-            "checkpoint_interval": args.eval_every,
-            "validation_interval": args.eval_every if validation else 0,
+        "training_config": native,
+        "versions": {
+            p: version(p)
+            for p in (
+                "lerobot",
+                "torch",
+                "torchvision",
+                "torchcodec",
+                "dexsim-engine",
+                "numpy",
+            )
         },
     }
     if args.resume is None:
-        args.output.mkdir(parents=True, exist_ok=False)
-        (args.output / "recipe.json").write_text(json.dumps(config, indent=2) + "\n")
+        output.mkdir(parents=True, exist_ok=False)
+        resume_step = 0
     else:
-        previous = json.loads((args.output / "recipe.json").read_text())
+        previous = json.loads((output / "recipe.json").read_text())
+        original_steps = previous["training_config"].pop("steps")
+        compared = json.loads(json.dumps(recipe))
+        compared["training_config"].pop("steps")
+        if previous != compared or args.updates < original_steps:
+            raise ValueError(
+                "Resume requires the same recipe, source contents and a nondecreasing update budget"
+            )
+        resume = args.resume.resolve()
+        checkpoint_root = (output / "lerobot/checkpoints").resolve()
         if (
-            previous.get("factory")
-            == "embodichain_models.policies.act.sl_recipe:build_act_trainer"
+            not resume.is_relative_to(checkpoint_root)
+            or resume.parent != (checkpoint_root / "last").resolve()
         ):
-            previous["factory"] = config["factory"]
-        if previous != config:
-            raise ValueError("Resume requires the original training recipe")
-    from embodichain.learning.sl.workflow import train_from_config
-
-    result = train_from_config(config, resume=str(args.resume) if args.resume else None)
-    print(json.dumps(result, indent=2), flush=True)
+            raise ValueError("Resume must use this run's latest native checkpoint")
+        if not (resume.parent / "training_state").is_dir():
+            raise ValueError("Resume requires a native checkpoint with training_state")
+        resume_step = json.loads(
+            (resume.parent / "training_state/training_step.json").read_text()
+        )["step"]
+        if resume_step > args.updates:
+            raise ValueError(
+                "Native checkpoint already exceeds the requested update budget"
+            )
+        saved_config = json.loads((resume / "train_config.json").read_text())
+        for key in ("dataset", "seed", "batch_size", "num_workers"):
+            if saved_config[key] != native[key]:
+                raise ValueError(f"Native resume configuration differs: {key}")
+        for key, value in native["policy"].items():
+            if key != "pretrained_path" and saved_config["policy"].get(key) != value:
+                raise ValueError(f"Native resume policy configuration differs: {key}")
+    (output / "recipe.json").write_text(json.dumps(recipe, indent=2) + "\n")
+    config_path = output / "lerobot_config.json"
+    config_path.write_text(json.dumps(native, indent=2) + "\n")
+    if args.resume is None:
+        command = [
+            sys.executable,
+            "-m",
+            "lerobot.scripts.lerobot_train",
+            f"--config_path={config_path}",
+        ]
+    else:
+        command = [
+            sys.executable,
+            "-m",
+            "lerobot.scripts.lerobot_train",
+            f"--config_path={resume / 'train_config.json'}",
+            "--resume=true",
+            f"--steps={args.updates}",
+            f"--output_dir={output / 'lerobot'}",
+        ]
+    env = dict(os.environ)
+    env.setdefault("OMP_NUM_THREADS", "2")
+    env.setdefault("MKL_NUM_THREADS", "2")
+    env["ACCELERATE_MIXED_PRECISION"] = "no"
+    started = time.monotonic()
+    if resume_step < args.updates:
+        subprocess.run(command, check=True, env=env)
+    for item in recipe["datasets"].values():
+        if item is not None and dataset_fingerprint(item["path"]) != item["sha256"]:
+            raise ValueError("Recorded source contents changed during training")
+    policies = _policies(output)
+    if not policies:
+        raise RuntimeError("The official trainer did not publish a native checkpoint")
+    for policy in policies:
+        manifest = {
+            **recipe,
+            "update": int(policy.parent.name),
+            "policy_sha256": policy_fingerprint(policy),
+        }
+        (policy / "embodichain_act.json").write_text(
+            json.dumps(manifest, indent=2) + "\n"
+        )
+    if validation is not None:
+        diagnostics = []
+        for policy in policies:
+            loaded = load_act_policy(policy, args.device)
+            diagnostics.append(
+                {
+                    "update": int(policy.parent.name),
+                    **loaded.evaluate_dataset(validation["dataset"]),
+                }
+            )
+            del loaded
+        (output / "offline_validation.json").write_text(
+            json.dumps(diagnostics, indent=2) + "\n"
+        )
+    report = {
+        "trainer": "lerobot.scripts.lerobot_train",
+        "wall_seconds": time.monotonic() - started,
+        "resume_step": resume_step,
+        "invocation_updates": args.updates - resume_step,
+        "last_policy": str(policies[-1]),
+        "updates": args.updates,
+        "native_checkpoints": len(policies),
+        "versions": recipe["versions"],
+    }
+    (output / "training_report.json").write_text(json.dumps(report, indent=2) + "\n")
+    print(json.dumps(report, indent=2), flush=True)
 
 
 if __name__ == "__main__":

@@ -18,7 +18,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -128,7 +129,9 @@ def test_collision_requires_explicit_pose_and_complete_phase_mapping(
         )
 
 
-def test_source_requires_matching_robot_and_object_geometry(tmp_path: Path) -> None:
+def test_source_requires_matching_robot_and_object_geometry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     checker = _checker(tmp_path)
     body = BoxCollisionBody("object", (0.1, 0.1, 0.1), np.eye(4))
     source = Real2SimTrajectory(
@@ -152,8 +155,31 @@ def test_source_requires_matching_robot_and_object_geometry(tmp_path: Path) -> N
         object_geometry_sha256=body.geometry_sha256,
     )
     checker.validate_source_geometry(source, object_uid="object")
-    from dataclasses import replace
+    original_bytes_digest = hashlib.sha256(_URDF.encode()).hexdigest()
+    checker.validate_source_geometry(
+        replace(source, robot_geometry_sha256=original_bytes_digest),
+        object_uid="object",
+    )
+    from embodichain.data_pipeline.real2sim._geometry import _LEGACY_ROBOT_GEOMETRY
 
+    legacy = "c" * 64
+    monkeypatch.setitem(_LEGACY_ROBOT_GEOMETRY, legacy, checker.geometry_sha256)
+    checker.validate_source_geometry(
+        replace(source, robot_geometry_sha256=legacy), object_uid="object"
+    )
+    (tmp_path / "fixture.urdf").write_text(
+        _URDF.replace('size="0.2 0.2 0.2"', 'size="0.3 0.2 0.2"')
+    )
+    changed = SampledRobotCollisionChecker(
+        tmp_path / "fixture.urdf",
+        joint_names=("slide",),
+        bodies=checker.bodies,
+        world_from_base=np.eye(4),
+    )
+    with pytest.raises(ValueError, match="robot_geometry_sha256 does not match"):
+        changed.validate_source_geometry(
+            replace(source, robot_geometry_sha256=legacy), object_uid="object"
+        )
     with pytest.raises(ValueError, match="object_geometry_sha256 does not match"):
         checker.validate_source_geometry(
             replace(source, object_geometry_sha256="a" * 64), object_uid="object"
@@ -162,6 +188,102 @@ def test_source_requires_matching_robot_and_object_geometry(tmp_path: Path) -> N
         checker.validate_source_geometry(
             replace(source, robot_geometry_sha256=None), object_uid="object"
         )
+    with pytest.raises(
+        ValueError, match="robot_geometry_sha256 does not match.*actual="
+    ):
+        checker.validate_source_geometry(
+            replace(source, robot_geometry_sha256="a" * 64), object_uid="object"
+        )
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        "<!-- Generation Time: 2030-01-01; ASSEMBLY_SIGNATURE: another-cache -->\n"
+        + _URDF,
+        _URDF.replace('xyz="-2 0 0"', 'xyz="-2.0 -0.0 0.000"'),
+        _URDF.replace('<robot name="collision_fixture">', '<robot name="rebuilt">'),
+        _URDF.replace(
+            '<link name="finger">',
+            '<link name="finger"><visual><geometry><sphere radius="7"/></geometry></visual>',
+        ),
+    ],
+    ids=("assembly_metadata", "numeric_spelling", "assembly_label", "visual_only"),
+)
+def test_robot_geometry_identity_survives_nonphysical_rebuilds(
+    tmp_path: Path, replacement: str
+) -> None:
+    original = _checker(tmp_path)
+    path = tmp_path / "relocated" / "rebuilt.urdf"
+    path.parent.mkdir()
+    path.write_text(replacement)
+    rebuilt = SampledRobotCollisionChecker(
+        path,
+        joint_names=("slide",),
+        bodies=original.bodies,
+        world_from_base=np.eye(4),
+    )
+    assert rebuilt.geometry_sha256 == original.geometry_sha256
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        _URDF.replace('size="0.2 0.2 0.2"', 'size="0.3 0.2 0.2"'),
+        _URDF.replace('xyz="-2 0 0"', 'xyz="-1 0 0"'),
+        _URDF.replace('<axis xyz="1 0 0"/>', '<axis xyz="0 1 0"/>'),
+        _URDF.replace(
+            '<parent link="base"/>', '<origin xyz="0.1 0 0"/><parent link="base"/>'
+        ),
+    ],
+    ids=("collision_dimensions", "collision_origin", "joint_axis", "mount_transform"),
+)
+def test_robot_geometry_identity_detects_physical_changes(
+    tmp_path: Path, replacement: str
+) -> None:
+    original = _checker(tmp_path)
+    path = tmp_path / "changed.urdf"
+    path.write_text(replacement)
+    changed = SampledRobotCollisionChecker(
+        path,
+        joint_names=("slide",),
+        bodies=original.bodies,
+        world_from_base=np.eye(4),
+    )
+    assert changed.geometry_sha256 != original.geometry_sha256
+
+
+def test_robot_geometry_identity_tracks_mesh_content_and_scale(tmp_path: Path) -> None:
+    mesh = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
+    identities = []
+    for index, (vertices, scale) in enumerate(
+        (
+            (mesh, "1 1 1"),
+            (mesh, "1 1 1"),
+            (mesh.replace("v 1 0 0", "v 2 0 0"), "1 1 1"),
+            (mesh, "2 1 1"),
+        )
+    ):
+        directory = tmp_path / str(index)
+        directory.mkdir()
+        mesh_path = directory / f"renamed-{index}.obj"
+        mesh_path.write_text(vertices)
+        urdf = _URDF.replace(
+            '<box size="0.2 0.2 0.2"/>',
+            f'<mesh filename="{mesh_path}" scale="{scale}"/>',
+        )
+        path = directory / "fixture.urdf"
+        path.write_text(urdf)
+        checker = SampledRobotCollisionChecker(
+            path,
+            joint_names=("slide",),
+            bodies=(BoxCollisionBody("object", (0.1, 0.1, 0.1), np.eye(4)),),
+            world_from_base=np.eye(4),
+        )
+        identities.append(checker.geometry_sha256)
+    assert identities[0] == identities[1]
+    assert identities[2] != identities[0]
+    assert identities[3] != identities[0]
 
 
 def test_contact_sweep_finds_expected_box_contact(tmp_path: Path) -> None:
@@ -479,39 +601,3 @@ def test_coupled_revolute_projection_stops_both_fingers_at_first_contact(
         projector.project_held(commands, measured)
     with pytest.raises(ValueError, match="coupling"):
         tolerant.project_held(commands + [0, 0.0004], measured)
-
-
-def test_geometry_identity_ignores_generated_comments_but_tracks_physical_changes(
-    tmp_path,
-):
-    from embodichain.lab.sim.motion.expansion.real2sim_collision import (
-        _physical_urdf_digest,
-    )
-
-    a, b = tmp_path / "a.urdf", tmp_path / "b.urdf"
-    a.write_text(
-        '<robot name="generated-a"><!-- generated yesterday --><link name="base"><collision><geometry><box size="1 2 3"/></geometry></collision></link></robot>'
-    )
-    b.write_text(
-        '<robot name="generated-b">\n<!-- generated today -->\n<link name="base">\n<collision><geometry><box size="1 2 3"/></geometry></collision></link></robot>'
-    )
-    assert _physical_urdf_digest(a, ()) == _physical_urdf_digest(b, ())
-    b.write_text(b.read_text().replace('size="1 2 3"', 'size="1 2 4"'))
-    assert _physical_urdf_digest(a, ()) != _physical_urdf_digest(b, ())
-
-
-def test_collision_mesh_identity_uses_content_and_preserves_scale(tmp_path):
-    from embodichain.lab.sim.motion.expansion.real2sim_collision import (
-        _physical_urdf_digest,
-    )
-
-    first, second = tmp_path / "old.mesh", tmp_path / "new.mesh"
-    first.write_bytes(b"physical geometry")
-    second.write_bytes(first.read_bytes())
-    a, b = tmp_path / "a.urdf", tmp_path / "b.urdf"
-    template = '<robot><link name="base"><collision><geometry><mesh filename="{}" scale="1 1 1"/></geometry></collision></link></robot>'
-    a.write_text(template.format(first))
-    b.write_text(template.format(second))
-    assert _physical_urdf_digest(a, ()) == _physical_urdf_digest(b, ())
-    second.write_bytes(b"changed physical geometry")
-    assert _physical_urdf_digest(a, ()) != _physical_urdf_digest(b, ())
