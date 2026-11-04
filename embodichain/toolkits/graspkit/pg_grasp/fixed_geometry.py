@@ -33,7 +33,8 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from scipy.spatial.transform import Rotation
 import torch
-import trimesh
+
+from ._urdf_geometry import _load_collision_geometry, _origin_transform
 
 __all__ = ["FixedGripperCollisionGeometry"]
 
@@ -50,16 +51,6 @@ def _rigid_transform(value: object, *, error_message: str) -> np.ndarray:
     ):
         raise ValueError(error_message)
     return transform
-
-
-def _origin(element: ET.Element | None) -> np.ndarray:
-    result = np.eye(4)
-    if element is not None:
-        result[:3, :3] = Rotation.from_euler(
-            "xyz", np.fromstring(element.get("rpy", "0 0 0"), sep=" ")
-        ).as_matrix()
-        result[:3, 3] = np.fromstring(element.get("xyz", "0 0 0"), sep=" ")
-    return result
 
 
 def _surface_points(triangles: np.ndarray, spacing: float) -> np.ndarray:
@@ -223,7 +214,7 @@ class FixedGripperCollisionGeometry:
                     f"Link {name!r} is not below gripper root {root_link!r}."
                 )
             joint = joints[name]
-            transform = _origin(joint.find("origin"))
+            transform = _origin_transform(joint.find("origin"))
             kind = joint.attrib["type"]
             if kind in {"prismatic", "revolute", "continuous"}:
                 position = joint_position(joint)
@@ -276,49 +267,19 @@ class FixedGripperCollisionGeometry:
             if not collisions:
                 raise ValueError(f"Link {name!r} has no collision geometry.")
             for collision in collisions:
-                mesh_node = collision.find("geometry/mesh")
-                if mesh_node is None:
-                    box = collision.find("geometry/box")
-                    if box is None:
-                        raise ValueError(
-                            "Fixed collision templates require meshes or authored URDF boxes."
-                        )
-                    size = np.fromstring(box.get("size", ""), sep=" ")
-                    if (
-                        size.shape != (3,)
-                        or not np.isfinite(size).all()
-                        or (size <= 0).any()
-                    ):
-                        raise ValueError(
-                            "URDF collision box dimensions must be positive and finite."
-                        )
-                    # Exact triangulation of an authored physical box (e.g.
-                    # rubber finger pads), never a fitted envelope of a mesh.
-                    mesh = trimesh.creation.box(extents=size)
-                    mesh_path = None
-                    scale = np.ones(3)
-                else:
-                    filename = mesh_node.attrib["filename"]
-                    mesh_path = Path(
-                        (mesh_paths or {}).get(filename, path.parent / filename)
-                    ).resolve(strict=True)
+                vertices, faces, origin, mesh_path = _load_collision_geometry(
+                    collision, path.parent, mesh_paths=mesh_paths
+                )
+                if mesh_path is not None:
                     files[str(mesh_path)] = hashlib.sha256(
                         mesh_path.read_bytes()
                     ).hexdigest()
-                    mesh = trimesh.load(mesh_path, force="mesh", process=False)
-                    scale = np.fromstring(mesh_node.get("scale", "1 1 1"), sep=" ")
                 transform = (
-                    grasp_from_tcp
-                    @ tcp_from_root
-                    @ root_from_link(name)
-                    @ _origin(collision.find("origin"))
+                    grasp_from_tcp @ tcp_from_root @ root_from_link(name) @ origin
                 )
-                vertices = np.asarray(mesh.vertices) * scale
                 # Choose the surface grid before rigid transforms. TCP changes
                 # must not change ceil(edge/spacing) or duplicate elimination.
-                samples = _surface_points(
-                    vertices[np.asarray(mesh.faces)], point_spacing
-                )
+                samples = _surface_points(vertices[faces], point_spacing)
                 vertices = vertices @ transform[:3, :3].T + transform[:3, 3]
                 samples = samples @ transform[:3, :3].T + transform[:3, 3]
                 pieces.append(samples)
@@ -327,7 +288,7 @@ class FixedGripperCollisionGeometry:
                         "link": name,
                         "mesh_path": str(mesh_path) if mesh_path is not None else None,
                         "geometry_kind": (
-                            "mesh" if mesh_node is not None else "urdf_box"
+                            "mesh" if mesh_path is not None else "urdf_box"
                         ),
                         "grasp_from_mesh": transform.tolist(),
                         "bounds_m": [
