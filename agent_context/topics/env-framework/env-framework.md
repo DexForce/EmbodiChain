@@ -38,6 +38,16 @@ rewards and contact termination rules remain in the task package; robot defaults
 and the distinct asset/contract joint orders are owned by
 [robot-system](../robot-system/robot-system.md).
 
+Reference-motion tracking is owned by
+`extensions/embodichain_tasks/embodichain_tasks/locomotion/tracking/`.
+`g1_motion.py` owns simulator state, reference-frame progress, selected-row resets
+and pre-action/terminal snapshots; unusable nonfinite successors hard-terminate
+and are excluded from WM supervision. `_task.py` owns tensor objectives shared
+with model-driven rollouts. The task's `ReferenceJointPositionAction` records
+policy outputs separately from the reference-combined setpoint and executed
+joint target. Read the task configuration's README for data preparation,
+training and per-clip evaluation commands.
+
 ## Launcher argument ownership
 
 `embodichain run-task` is the sole task execution command, dispatched to

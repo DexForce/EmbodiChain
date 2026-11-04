@@ -34,7 +34,7 @@ from embodichain.learning.rl.gradients import (
 )
 from embodichain.learning.rl.policies import Policy
 from embodichain.learning.rl.normalization import RunningObservationNormalizer
-from embodichain.learning.rl.utils import flatten_dict_observation
+from embodichain.learning.rl.utils import flatten_observation_groups
 
 __all__ = [
     "DifferentiableCollector",
@@ -45,7 +45,14 @@ __all__ = [
 
 @dataclass(frozen=True)
 class DifferentiableTransition:
-    """One graph-preserving environment transition."""
+    """One graph-preserving environment transition.
+
+    ``terminal_critic_observation`` is the full successor batch before auto-reset.
+    ``next_critic_observation`` corresponds to the returned environment observation.
+    ``continuation`` is a differentiable probability; hard termination is
+    applied separately. ``valid`` and ``next_valid`` mark available task data
+    at the current and successor states. Missing masks default to one.
+    """
 
     observation: torch.Tensor
     policy_output: TensorDict
@@ -54,6 +61,12 @@ class DifferentiableTransition:
     truncated: torch.Tensor
     next_observation: torch.Tensor
     info: dict[str, Any]
+    critic_observation: torch.Tensor | None = None
+    next_critic_observation: torch.Tensor | None = None
+    terminal_critic_observation: torch.Tensor | None = None
+    continuation: torch.Tensor | None = None
+    valid: torch.Tensor | None = None
+    next_valid: torch.Tensor | None = None
 
     @property
     def action(self) -> torch.Tensor:
@@ -211,7 +224,7 @@ class DifferentiableCollector:
         )
 
         for _ in range(num_steps):
-            observation = self._flatten_observation(self._observation)
+            observation = self._flatten_observation(self._observation).clone()
             policy_observation = (
                 self.observation_normalizer.normalize(observation)
                 if self.observation_normalizer is not None
@@ -222,6 +235,8 @@ class DifferentiableCollector:
                 batch_size=[self.env.num_envs],
                 device=self.device,
             )
+            critic_observation = self._critic_observation(self._observation).clone()
+            policy_input["critic_obs"] = critic_observation
             policy_output = self.policy.get_differentiable_action(
                 policy_input,
                 deterministic=deterministic,
@@ -246,6 +261,12 @@ class DifferentiableCollector:
             next_observation, reward, terminated, truncated, info = self.env.step(
                 action
             )
+            next_critic_observation = self._critic_observation(next_observation).clone()
+            terminal_critic_observation = (
+                self._critic_observation(info["terminal_observation"]).clone()
+                if "terminal_observation" in info
+                else None
+            )
             transition = DifferentiableTransition(
                 observation=observation,
                 policy_output=policy_output,
@@ -254,6 +275,12 @@ class DifferentiableCollector:
                 truncated=truncated.to(self.device),
                 next_observation=self._flatten_observation(next_observation),
                 info=info,
+                critic_observation=critic_observation,
+                next_critic_observation=next_critic_observation,
+                terminal_critic_observation=terminal_critic_observation,
+                continuation=info.get("continuation"),
+                valid=info.get("valid"),
+                next_valid=info.get("next_valid"),
             )
             transitions.append(transition)
             self._observation = next_observation
@@ -279,4 +306,23 @@ class DifferentiableCollector:
             raise RuntimeError("The differentiable collector has no observation.")
         if isinstance(observation, torch.Tensor):
             return observation.to(self.device)
-        return flatten_dict_observation(observation.to(self.device))
+        return flatten_observation_groups(
+            observation.to(self.device), getattr(self.policy, "actor_obs_groups", None)
+        )
+
+    def _critic_observation(
+        self, observation: DifferentiableObservation
+    ) -> torch.Tensor:
+        if getattr(self.policy, "uses_separate_critic_obs", False):
+            if isinstance(observation, torch.Tensor):
+                return observation.to(self.device)
+            return flatten_observation_groups(
+                observation.to(self.device),
+                getattr(self.policy, "critic_obs_groups", None),
+            )
+        actor_observation = self._flatten_observation(observation)
+        return (
+            self.observation_normalizer.normalize(actor_observation)
+            if self.observation_normalizer is not None
+            else actor_observation
+        )
