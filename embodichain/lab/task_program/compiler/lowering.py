@@ -444,7 +444,7 @@ class SemanticWorkflow:
 
 @dataclass(frozen=True, slots=True)
 class RegisteredHeldObjectEffect:
-    """One registered held relation, optionally acquiring before named motion.
+    """One registered held relation with optional acquisition or release phases.
 
     Acquisition phases use the existing verified gate and planned-effect guard.
     Empty phase declarations preserve terminal-only extension behavior.
@@ -458,8 +458,10 @@ class RegisteredHeldObjectEffect:
             and releases internally to start without an incoming verified hold.
         acquire_before_segment: Optional exact Atomic plan segment preceded by
             a verified acquisition gate.
-        retain_during_segments: Ordered unique segments guarded against loss;
-            the first must match ``acquire_before_segment``.
+        retain_during_segments: Ordered unique segments guarded against loss.
+            Acquisition starts at its gate; release retains the verified input hold.
+        release_before_segment: Optional exact segment preceded by verified
+            detachment, such as retracting after relative placement.
     """
 
     expectation_id: str
@@ -469,6 +471,7 @@ class RegisteredHeldObjectEffect:
     allow_missing_detached_baseline: bool = False
     acquire_before_segment: str | None = None
     retain_during_segments: tuple[str, ...] = ()
+    release_before_segment: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         for field_name in ("expectation_id", "object_id", "slot_id"):
@@ -490,11 +493,17 @@ class RegisteredHeldObjectEffect:
         if type(self.retain_during_segments) is not tuple:
             raise TypeError("retain_during_segments must be an exact tuple.")
         segments = self.retain_during_segments
-        if bool(segments) != (self.acquire_before_segment is not None):
+        acquiring = self.acquire_before_segment is not None
+        releasing = self.release_before_segment is not None
+        if acquiring and releasing:
             raise ValueError(
-                "Registered acquisition requires both a gate and retention phases."
+                "A held relation cannot declare both acquisition and release gates."
             )
-        if self.acquire_before_segment is not None:
+        if bool(segments) != (acquiring or releasing):
+            raise ValueError(
+                "Registered phase checks require both a gate and retention phases."
+            )
+        if acquiring:
             if self.relation is not HeldObjectRelation.ATTACHED:
                 raise ValueError(
                     "Only attached effects can declare acquisition phases."
@@ -502,14 +511,27 @@ class RegisteredHeldObjectEffect:
             _validate_identifier(
                 self.acquire_before_segment, field_name="acquire_before_segment"
             )
-            for segment in segments:
-                _validate_identifier(segment, field_name="retain_during_segments")
-            if segments[0] != self.acquire_before_segment or len(set(segments)) != len(
-                segments
-            ):
+            if segments[0] != self.acquire_before_segment:
                 raise ValueError(
                     "Retention phases must start at acquisition and be unique."
                 )
+        if releasing:
+            if (
+                self.relation is not HeldObjectRelation.DETACHED
+                or self.allow_missing_detached_baseline
+            ):
+                raise ValueError(
+                    "Release phase checks require an incoming verified hold."
+                )
+            _validate_identifier(
+                self.release_before_segment, field_name="release_before_segment"
+            )
+            if self.release_before_segment in segments:
+                raise ValueError("Release boundary cannot retain the released object.")
+        for segment in segments:
+            _validate_identifier(segment, field_name="retain_during_segments")
+        if len(set(segments)) != len(segments):
+            raise ValueError("Retention phases must be unique.")
         object.__setattr__(self, "retain_during_segments", segments)
 
 
@@ -543,10 +565,8 @@ class RegisteredSemanticEffect:
             raise ValueError("Registered effect expectation IDs must be unique.")
         if len({value.slot_id for value in held_objects}) != len(held_objects):
             raise ValueError("Registered effect resource slots must be unique.")
-        if sum(value.acquire_before_segment is not None for value in held_objects) > 1:
-            raise ValueError(
-                "Registered acquisition supports one phased held relation."
-            )
+        if sum(bool(value.retain_during_segments) for value in held_objects) > 1:
+            raise ValueError("Registered effects support one phased held relation.")
         relations = {value.relation for value in held_objects}
         if self.effect_kind is SemanticEffectKind.ATTACH and relations != {
             HeldObjectRelation.ATTACHED
@@ -2279,6 +2299,15 @@ class SemanticCallCompiler:
                 )
                 for item in registered_effect.held_objects
                 if item.acquire_before_segment is not None
+            ) + tuple(
+                (
+                    f"{item.expectation_id}_released",
+                    item.release_before_segment,
+                    item.expectation_id,
+                    HeldObjectRelation.DETACHED,
+                )
+                for item in registered_effect.held_objects
+                if item.release_before_segment is not None
             )
         else:
             return ()
@@ -2478,16 +2507,20 @@ class SemanticCallCompiler:
                     f"{item.expectation_id}_attached",
                     item.expectation_id,
                     item.retain_during_segments,
-                    HeldObjectGuardBaseline.PLANNED_EFFECT,
+                    (
+                        HeldObjectGuardBaseline.PLANNED_EFFECT
+                        if item.acquire_before_segment is not None
+                        else HeldObjectGuardBaseline.VERIFIED_TASK_STATE
+                    ),
                     (
                         self._held_expectation(
                             effect_spec, item.expectation_id
                         ).task_state_key,
                     ),
-                    True,
+                    item.acquire_before_segment is not None,
                 )
                 for item in registered_effect.held_objects
-                if item.acquire_before_segment is not None
+                if item.retain_during_segments
             )
         else:
             return ()
@@ -2505,6 +2538,10 @@ class SemanticCallCompiler:
                 effect_spec,
                 expectation_id=expectation_id,
             )
+            if baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE:
+                self._validate_guard_verified_baseline(
+                    self._held_expectation(guard_spec, expectation_id), context
+                )
             try:
                 monitor = self._effect_monitor_registry.create(
                     guard_spec,

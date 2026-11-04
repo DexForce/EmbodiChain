@@ -153,6 +153,20 @@ def _world_displacement(
     return normalized
 
 
+def _world_displacement(
+    value: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    """Validate one finite non-zero world-frame displacement."""
+    if type(value) is not tuple or len(value) != 3:
+        raise TypeError("world_displacement must be an exact three-value tuple.")
+    normalized = tuple(float(item) for item in value)
+    if not all(math.isfinite(item) for item in normalized):
+        raise ValueError("world_displacement must contain only finite values.")
+    if math.sqrt(sum(item * item for item in normalized)) <= 1.0e-6:
+        raise ValueError("world_displacement must be non-zero.")
+    return normalized
+
+
 def _slide_target_pose_mode(value: object) -> str:
     """Validate how a configured Slide resolves its target pose."""
     if type(value) is not str or value not in _SLIDE_TARGET_POSE_MODES:
@@ -339,6 +353,9 @@ class _AntipodalGraspPoseGeneratorFactory:
     root_from_tcp: tuple[float, ...] | None = None
     sample_count: int | None = None
     approach_direction_samples: int | None = None
+    approach_deviation_angle: float | None = None
+    max_candidates: int | None = None
+    center_mode: str | None = None
     filter_ground_collision: bool | None = None
     force_refresh: bool | None = None
 
@@ -363,6 +380,10 @@ class _AntipodalGraspPoseGeneratorFactory:
             algorithm_kwargs["approach_direction_samples"] = (
                 self.approach_direction_samples
             )
+        for name in ("approach_deviation_angle", "max_candidates", "center_mode"):
+            value = getattr(self, name)
+            if value is not None:
+                algorithm_kwargs[name] = value
 
         collision_kwargs: dict[str, object] = {}
         if self.filter_ground_collision is not None:
@@ -818,6 +839,8 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
                         relation=HeldObjectRelation.DETACHED,
                         object_id=route.object_id,
                         slot_id="primary",
+                        release_before_segment="retract",
+                        retain_during_segments=("approach",),
                     ),
                 ),
             ),
@@ -926,7 +949,7 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
     """Create fresh relative-placement lowerers from canonical scene refs."""
 
     call_id: ClassVar[str] = _PLACE_RELATIVE_CALL_ID
-    revision: ClassVar[str] = "1"
+    revision: ClassVar[str] = "2"
     target_descriptor: ClassVar[SkillDescriptor] = Place.descriptor()
 
     routes: tuple[_RelativePlaceRoute, ...]

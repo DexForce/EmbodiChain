@@ -292,6 +292,10 @@ class _ReleasingInspectLowerer(_InspectLowerer):
 
     effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.RELEASE
 
+    def __init__(self, *, phase_checks: bool = False) -> None:
+        super().__init__()
+        self.phase_checks = phase_checks
+
     def lower(
         self,
         call: RegisteredSemanticCall,
@@ -316,6 +320,14 @@ class _ReleasingInspectLowerer(_InspectLowerer):
                         relation=HeldObjectRelation.DETACHED,
                         object_id="cube",
                         slot_id="primary",
+                        **(
+                            {
+                                "release_before_segment": "retract",
+                                "retain_during_segments": ("approach",),
+                            }
+                            if self.phase_checks
+                            else {}
+                        ),
                     ),
                 ),
             ),
@@ -1569,7 +1581,10 @@ def test_registered_acquisition_rejects_string_and_multiple_phase_guards() -> No
         )
 
 
-def test_registered_release_requires_object_held_in_every_eligible_row() -> None:
+@pytest.mark.parametrize("phase_checks", [False, True])
+def test_registered_release_requires_object_held_in_every_eligible_row(
+    phase_checks: bool,
+) -> None:
     """Registered release calls cannot consume inactive held-state rows."""
     registry, _ = _scene_registry()
     templates = _action_option_templates(registered=True)
@@ -1590,7 +1605,7 @@ def test_registered_release_requires_object_held_in_every_eligible_row() -> None
     compiler, _ = _compiler(
         registry,
         registered=True,
-        registered_lowerers=(_ReleasingInspectLowerer(),),
+        registered_lowerers=(_ReleasingInspectLowerer(phase_checks=phase_checks),),
         profile=profile,
     )
     pick_compiler, _ = _compiler(registry)
@@ -1619,6 +1634,24 @@ def test_registered_release_requires_object_held_in_every_eligible_row() -> None
         eligible_mask=torch.tensor([True, False]),
     )
     assert grounded.eligible_mask.tolist() == [True, False]
+
+    if phase_checks:
+        gate, guard = grounded.effect_gates[0], grounded.effect_guards[0]
+        assert gate.segment_name == "retract"
+        assert grounded.invocation.phase_effect_gates == (gate.requirement,)
+        assert (
+            gate.effect_spec.state_expectations[0].relation
+            is HeldObjectRelation.DETACHED
+        )
+        assert guard.active_segments == ("approach",)
+        assert guard.baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE
+        assert not guard.retry_action
+        assert (
+            guard.effect_spec.state_expectations[0].relation
+            is HeldObjectRelation.ATTACHED
+        )
+    else:
+        assert grounded.effect_gates == grounded.effect_guards == ()
 
 
 def test_ground_wraps_effect_monitor_factory_contract_failure_with_path() -> None:

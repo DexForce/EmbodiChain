@@ -1001,14 +1001,15 @@ def _pick_evidence_plan(action: Any, request: Any, context: Any) -> Any:
 
 
 def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
-    """Build one open frame and the matching held-object removal delta."""
-    positions = context.robot.qpos.unsqueeze(1).repeat(1, 2, 1)
-    positions[:, :, 1] = _HAND_OPEN_POSITION
+    """Keep the source grasp through approach, then open and retract."""
+    positions = context.robot.qpos.unsqueeze(1).repeat(1, 3, 1)
+    positions[:, 0, 1] = _HAND_GRASP_POSITION
+    positions[:, 1:, 1] = _HAND_OPEN_POSITION
     trajectory = TimedTrajectory.from_positions(
         positions,
         env_ids=context.env_ids,
         dt=torch.full(
-            (context.batch_size, 2),
+            (context.batch_size, 3),
             context.require_control_dt(),
             dtype=positions.dtype,
             device=positions.device,
@@ -1023,7 +1024,7 @@ def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
             held_object_updates={"manipulator": None},
         ),
         replannable=False,
-        segment_lengths={"release": 1, "retract": 1},
+        segment_lengths={"approach": 1, "release": 1, "retract": 1},
     )
 
 
@@ -1186,7 +1187,7 @@ def test_bridge_reuses_real_workflow_across_pick_and_place(
                 torch.full_like(robot.qpos[:, 1], _HAND_GRASP_POSITION),
             )
             if segment_index == 1:
-                cube.pose[:, 0, 3] = _RELEASE_SEPARATION
+                cube.pose[~robot.constraint_state, 0, 3] = _RELEASE_SEPARATION
         assert segment.validator().all()
         local_indices.append(
             [call["call_index"] for call in segment.metadata["runtime"]["calls"]]
@@ -1311,7 +1312,7 @@ def _run_evidence_pick_place(
         if result.current_call_index == 1:
             if verified_pick is None:
                 verified_pick = result.task_state.get_held_object("manipulator")
-            cube.pose[:, 0, 3] = _RELEASE_SEPARATION
+            cube.pose[~robot.constraint_state, 0, 3] = _RELEASE_SEPARATION
         assembly.clock.advance_after_env_step()
         result = assembly.runtime.step()
 
@@ -1636,6 +1637,45 @@ def test_simulation_factory_returns_exact_environment_adapter() -> None:
     assert type(adapter) is TaskProgramEnvironmentAdapter
     assert adapter.step_dt == pytest.approx(_STEP_DT)
     assert factory.segment_policy_port is not None
+
+
+def test_simulation_factory_preserves_owned_hand_calibration_across_engines() -> None:
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
+
+    robot = _EvidenceRobot()
+    environment = SimpleNamespace(sim=_Simulation(robot), robot=robot, step_dt=_STEP_DT)
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"), _evidence_profile_binding()
+    )
+    cfg = RobotHandGeometryCfg(
+        motion_part="arm",
+        hand_part="hand",
+        hand_root_link="tool_root",
+        pad_link_names=("contact_b", "contact_a"),
+        open_qpos=(_HAND_OPEN_POSITION,),
+        closed_qpos=(_HAND_GRASP_POSITION,),
+        sample_count=65,
+        body_max_edge=0.01,
+        pad_max_edge=0.004,
+        max_subdivisions=10,
+    )
+    factory = SimulationTaskProgramFactory.from_environment(
+        environment,
+        registration=registration,
+        motion_generator_factory=lambda: _motion_generator(robot),
+        hand_geometry_cfgs={"hand": cfg},
+    )
+    cfg.pad_link_names = ("changed", "input")
+    profile = factory.create_robot_skill_profile()
+    engines = [factory.create_atomic_action_engine(profile) for _ in range(2)]
+    for engine in engines:
+        calibrated = engine.planning_services.hand_geometry_cfg("hand")
+        assert calibrated.pad_link_names == ("contact_b", "contact_a")
+        assert calibrated.open_qpos == (_HAND_OPEN_POSITION,)
+        calibrated.closed_qpos = (99,)
+    assert engines[0].planning_services.hand_geometry_cfg("hand").closed_qpos == (
+        _HAND_GRASP_POSITION,
+    )
 
 
 def test_simulation_factory_uses_environment_expert_joint_command_mode() -> None:

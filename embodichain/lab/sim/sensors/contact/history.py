@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 import torch
 import warp as wp
 
-from embodichain.lab.sim.sensors._warp.contact_history import (
+from ._warp.history import (
     reduce_contact_rows,
     reduce_contact_batch,
     finish_contact_sample,

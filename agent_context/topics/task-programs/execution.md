@@ -50,6 +50,18 @@ Keep these boundaries separate:
 2. segment post-policy: environment advancement such as settling; and
 3. segment validator: task or dataset acceptance.
 
+Native grip evidence is an explicit simulation integration in
+`integrations/simulation/grip_evidence.py`. Its factory owns immutable object/pad
+declarations and creates the standard control-part provider through its public
+observer hook. The semantic adapter translates clauses to the physical
+`atomic_actions.grip_evidence.GripContactObserver`; sensors own acquisition/history
+and compute owns bilateral contact arithmetic. It retains provider IDs and physical algorithm revisions; revision
+2's open-hand interpretation requires explicit driver calibration and opt-in.
+No task labels or control-part suffixes select a policy. Sampling/timeline lifecycle
+and per-row availability belong to the [contact boundary](../sensor-system/contact-history.md).
+Raw traces are observations, while report serialization and TaskSpec verdicts
+remain frontend responsibilities.
+
 Stateful segment validators capture their incoming evidence through the optional
 `begin_segment` port immediately before runtime planning starts. Lift checks use
 that segment's measured baseline, including for lazy and repeated segments;
@@ -144,6 +156,13 @@ to expose shared Atomic Skills; do not place task-local motion generators in a
 lowerer.
 Registered held effects use compiler-owned expectations, monitor grounding,
 acquisition gates and retention guards. A lowerer may explicitly preserve
+
+acquisition/release gates and retention guards. A registered release may retain
+its incoming verified hold through declared approach phases and require measured
+detachment before retracting. Relative Place declares the same checks as ordinary
+Place. Runtime validates every guard phase against each successful final plan,
+after optional transforms and before dispatch, including retries. Failed plans
+retain their original planning diagnostics. A lowerer may explicitly preserve
 symbolic state only when it declares no effect contract. Declaring a held
 effect or phase does not certify physical attachment or weaken the selected
 assurance; verified acquisition still requires its measured monitor. A release
@@ -157,3 +176,30 @@ model cannot choose integrations, robot resources, live providers, or
 executable lowerers. The current frontend permits the constrained node/call
 subset enforced by its decoder; Task Program itself supports the complete
 language.
+
+## Evidence ownership across integrations
+
+Task Engine selects declared evidence requirements and named policies from skill,
+effect and TaskSpec contracts. It emits deployment declarations through the public
+configured deployment loader; it does not construct sensors, infer pad links from
+robot names, interpret impulses, or mutate runtime provider state. Robot/hand
+calibration belongs to embodiment runtime services; task object mappings belong
+to the integration and execution thresholds belong to the selected policy.
+
+The integration resolves those declarations against exact native owners and
+adapts semantic clauses to shared physical requests. Sensor acquisition/history
+lives in `lab.sim.sensors`; physical grip interpretation lives in
+`lab.sim.atomic_actions.grip_evidence`, including `DriverOpeningBinding.bind`
+for calibrated hand-opening observations. Factories bind those declarations
+before creating sensor resources; sensors do not own release predicates or
+experiment labels. Contact arithmetic lives in
+`compute.geometry.grip_contacts`. `lab.sim.evidence` is the common frame/batch/request
+owner. Existing Atomic public imports refer to the same types. No raw acquisition
+module imports Task Program or Task Engine. Invocation and episode associations
+are maintained by the execution host rather than fields on shared raw frames.
+
+Changes after the contact-evidence extraction must import the sensor modules
+rather than the removed integration-local contact_evidence/contact_timeline paths.
+Factories may create or reuse matching sensor declarations; lifecycle, scope,
+capacity, unavailable data and selective resets remain sensor contracts. Do not
+turn missing acquisition into a measured negative or a successful effect.

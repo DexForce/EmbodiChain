@@ -46,7 +46,12 @@ class GRPOCfg(AlgorithmCfg):
 
 
 class GRPO(BaseAlgorithm[TensorDict]):
-    """Group Relative Policy Optimization on top of TensorDict rollouts."""
+    """Group Relative Policy Optimization on top of TensorDict rollouts.
+
+    Minibatches contain only transitions selected by the sequence mask.
+    Distributed ranks share optimizer steps and weight gradients and metrics
+    by their valid transition counts, including ranks with empty tail batches.
+    """
 
     def __init__(self, cfg: GRPOCfg, policy):
         if cfg.group_size < 2:
@@ -176,6 +181,14 @@ class GRPO(BaseAlgorithm[TensorDict]):
         rollout["seq_return"][:, :-1] = step_returns
 
         flat_rollout = transition_view(rollout, flatten=True)
+        flat_rollout = flat_rollout[flat_rollout["seq_mask"].bool()]
+        distributed = isinstance(self.policy, torch.nn.parallel.DistributedDataParallel)
+        max_transitions = flat_rollout.batch_size[0]
+        if distributed:
+            count = torch.tensor(max_transitions, device=self.device)
+            torch.distributed.all_reduce(count, op=torch.distributed.ReduceOp.MAX)
+            max_transitions = int(count.item())
+        batch_count = (max_transitions + self.cfg.batch_size - 1) // self.cfg.batch_size
 
         total_actor_loss = 0.0
         total_entropy = 0.0
@@ -183,9 +196,26 @@ class GRPO(BaseAlgorithm[TensorDict]):
         total_weight = 0.0
 
         for _ in range(self.cfg.n_epochs):
-            for batch in iterate_minibatches(
+            batches = iterate_minibatches(
                 flat_rollout, self.cfg.batch_size, self.device
-            ):
+            )
+            for _ in range(batch_count):
+                batch = next(batches, flat_rollout[:0])
+                weight = float(batch.batch_size[0])
+                loss_scale = 1.0
+                if distributed:
+                    global_weight = torch.tensor(weight, device=self.device)
+                    torch.distributed.all_reduce(global_weight)
+                    # _sync_gradients averages ranks; recover the mean over
+                    # valid transitions when rank-local counts differ.
+                    loss_scale = (
+                        torch.distributed.get_world_size() * weight / global_weight
+                    )
+                if weight == 0:
+                    # Other ranks still have data: participate with no local
+                    # gradients, without evaluating an empty policy batch.
+                    self._step_optimizer(None)
+                    continue
                 old_logprobs = batch["sample_log_prob"].clone()
                 advantages = batch["advantage"].detach()
                 seq_mask_batch = batch["seq_mask"].float()
@@ -224,21 +254,22 @@ class GRPO(BaseAlgorithm[TensorDict]):
                     + self.cfg.ent_coef * entropy_loss
                 )
 
-                self.optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                self._sync_gradients()
-                torch.nn.utils.clip_grad_norm_(
-                    self.policy.parameters(), self.cfg.max_grad_norm
-                )
-                self.optimizer.step()
+                self._step_optimizer(loss * loss_scale)
 
-                weight = float(denom.item())
                 total_actor_loss += actor_loss.item() * weight
                 masked_entropy = (entropy * seq_mask_batch).sum() / denom
                 total_entropy += masked_entropy.item() * weight
                 total_kl += kl.item() * weight
                 total_weight += weight
 
+        if distributed:
+            totals = torch.tensor(
+                [total_actor_loss, total_entropy, total_kl, total_weight],
+                dtype=torch.float64,
+                device=self.device,
+            )
+            torch.distributed.all_reduce(totals)
+            total_actor_loss, total_entropy, total_kl, total_weight = totals.tolist()
         self._step_scheduler()
         return {
             "actor_loss": total_actor_loss / max(1.0, total_weight),
@@ -246,3 +277,12 @@ class GRPO(BaseAlgorithm[TensorDict]):
             "approx_ref_kl": total_kl / max(1.0, total_weight),
             "learning_rate": self.current_learning_rate(),
         }
+
+    def _step_optimizer(self, loss: torch.Tensor | None) -> None:
+        """Apply shared gradients, including ranks with no local valid samples."""
+        self.optimizer.zero_grad(set_to_none=True)
+        if loss is not None:
+            loss.backward()
+        self._sync_gradients()
+        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.cfg.max_grad_norm)
+        self.optimizer.step()

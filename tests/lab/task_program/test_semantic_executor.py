@@ -2136,10 +2136,12 @@ def test_phase_effect_gate_uses_independent_monitor_and_records_boundary_trace()
 
 
 @pytest.mark.parametrize(
-    "lost_during_lift", [False, True], ids=["not_acquired", "lost_during_lift"]
+    "lost_during_lift, unknown_retention",
+    [(False, False), (True, False), (False, True)],
+    ids=["not_acquired", "lost_during_lift", "unknown_retention"],
 )
 def test_registered_acquisition_scheduler_stops_within_action_retry_budget(
-    monkeypatch: pytest.MonkeyPatch, lost_during_lift: bool
+    monkeypatch: pytest.MonkeyPatch, lost_during_lift: bool, unknown_retention: bool
 ) -> None:
     poses = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
     unrelated = HeldObjectState(
@@ -2237,7 +2239,9 @@ def test_registered_acquisition_scheduler_stops_within_action_retry_budget(
                     "cube",
                     "primary",
                     acquire_before_segment="lift",
-                    retain_during_segments=("lift",),
+                    retain_during_segments=(
+                        ("lift", "typo_transport") if unknown_retention else ("lift",)
+                    ),
                 ),
             ),
         )
@@ -2305,6 +2309,11 @@ def test_registered_acquisition_scheduler_stops_within_action_retry_budget(
 
     assert result.status is SemanticExecutionStatus.FAILED
     assert torch.equal(result.failure_mask, _mask(True, True))
+    if unknown_retention:
+        assert plans == 1
+        assert sent == []
+        assert "typo_transport" in result.message and "missing" in result.message
+        return
     assert plans == 2
     assert len(monitors) == 1
     gate_monitor, guard_monitor, terminal_monitor = monitors[0]
