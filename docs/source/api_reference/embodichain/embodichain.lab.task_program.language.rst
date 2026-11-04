@@ -18,6 +18,7 @@ embodichain.lab.task_program.language
       CyclicPoseTargetCfg
       HandOverCfg
       InvokeCfg
+      ObjectNearRelativeTargetValidatorCfg
       ObjectNearTargetValidatorCfg
       ParallelCfg
       PickCfg

@@ -27,6 +27,7 @@ import math
 from _thread import LockType
 from threading import Lock
 from types import MappingProxyType
+from typing import cast
 import torch
 
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
@@ -120,13 +121,17 @@ from .extensions import (
     validate_immutable_extension_declaration,
 )
 from .simulation import SimulationRobotSkillProfileBinding, SimulationSceneBinding
-from .simulation.policies import default_simulation_settle_presets
+from .simulation.policies import (
+    SimulationSettleMonitorCfg,
+    default_simulation_settle_presets,
+)
 
 _CATALOG_FINGERPRINT_SCHEMA_VERSION = 4
 _POST_POLICY_KINDS = frozenset({"wait_stable"})
 _VALIDATOR_KINDS = frozenset(
     {
         "articulation_joint_position",
+        "object_near_relative_target",
         "object_near_target",
         "object_lifted",
         "object_relative_position",
@@ -324,6 +329,36 @@ def _builtin_relation_grounders(
     return tuple(values)
 
 
+def _configured_relation_grounders(
+    scene_binding: SimulationSceneBinding,
+    values: tuple[RelationTargetGrounder, ...],
+) -> tuple[RelationTargetGrounder, ...]:
+    """Remove standard grounders already materialized on a registration.
+
+    ``SimulationTaskProgramRegistration`` exposes the complete grounder tuple,
+    including the scene-derived standard entries.  Immutable registration
+    transforms commonly use :func:`dataclasses.replace`, which feeds that
+    exposed tuple back through the constructor.  Treat one exact instance of a
+    standard grounder as already installed so those transforms remain
+    idempotent while duplicate custom declarations still fail below.
+    """
+    builtins = _builtin_relation_grounders(scene_binding)
+    builtin_by_key = {
+        _relation_grounder_key(grounder): grounder for grounder in builtins
+    }
+    consumed: set[tuple[str, type[Affordance], str]] = set()
+    configured: list[RelationTargetGrounder] = []
+    for grounder in values:
+        key = _relation_grounder_key(grounder)
+        builtin = builtin_by_key.get(key)
+        if builtin is not None and type(grounder) is type(builtin):
+            if key not in consumed:
+                consumed.add(key)
+                continue
+        configured.append(grounder)
+    return tuple(configured)
+
+
 def _snapshot_relation_grounder_keys(
     values: frozenset[tuple[str, type[Affordance], str]],
 ) -> frozenset[tuple[str, type[Affordance], str]]:
@@ -479,6 +514,14 @@ class TaskProgramIntegrationCatalog:
         repr=False,
         compare=False,
     )
+    pose_delta_settle_preset_ids: frozenset[str] = field(
+        default_factory=frozenset, kw_only=True
+    )
+    """Presets explicitly selecting consecutive rigid-pose measurements."""
+    rigid_settle_entity_ids: frozenset[str] = field(
+        default_factory=frozenset, kw_only=True
+    )
+    """Native rigid-object identities and affordances resolving to those objects."""
 
     def __post_init__(self) -> None:
         for field_name in ("scene_registry_id", "robot_profile_id"):
@@ -546,6 +589,15 @@ class TaskProgramIntegrationCatalog:
         if not preset_ids:
             raise ValueError("settle_preset_ids must not be empty.")
         object.__setattr__(self, "settle_preset_ids", preset_ids)
+        for name in ("pose_delta_settle_preset_ids", "rigid_settle_entity_ids"):
+            values = frozenset(getattr(self, name))
+            for value in values:
+                _exact_identifier(value, field_name=name)
+            object.__setattr__(self, name, values)
+        if not self.pose_delta_settle_preset_ids <= preset_ids:
+            raise ValueError(
+                "Pose-delta presets must belong to the settle-preset table."
+            )
         if (
             type(self.fingerprint) is not str
             or len(self.fingerprint) != 64
@@ -670,7 +722,6 @@ class TaskProgramIntegrationCatalog:
         path: ConfigPath,
     ) -> None:
         """Validate one registered post-policy kind and named preset."""
-        del path
         if policy.kind not in _POST_POLICY_KINDS:
             raise KeyError(
                 f"Unknown post-policy kind {policy.kind!r}; available kinds are "
@@ -681,6 +732,14 @@ class TaskProgramIntegrationCatalog:
                 f"Unknown settle preset {policy.preset!r}; available presets are "
                 f"{sorted(self.settle_preset_ids)}."
             )
+        if policy.preset in self.pose_delta_settle_preset_ids:
+            entity = self.scene.resolve(policy.entity, path=(*path, "entity"))
+            if entity.entity_id not in self.rigid_settle_entity_ids:
+                raise TaskProgramValidationError(
+                    "unsupported_pose_delta_settle_target",
+                    path,
+                    "Pose-delta settling requires an explicitly bound native rigid object.",
+                )
 
     def validate_validator(
         self,
@@ -707,6 +766,9 @@ class TaskProgramIntegrationCatalog:
             runtime_preset=program.integration.runtime_preset,
         )
         for segment in compiled.iter_segments():
+            for policy in segment.post_policies:
+                if policy.cfg.preset in self.pose_delta_settle_preset_ids:
+                    self.validate_post_policy(policy.cfg, path=policy.source_path)
             if (
                 segment.parallel_block is not None
                 and self.parallel_safety_declaration is None
@@ -1129,8 +1191,9 @@ class SimulationTaskProgramRegistration:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog.")
         settle_presets = _snapshot_settle_presets(self.settle_presets)
         object.__setattr__(self, "settle_presets", settle_presets)
-        configured_relation_grounders = _snapshot_relation_grounders(
-            self.relation_grounders
+        configured_relation_grounders = _configured_relation_grounders(
+            self.scene_binding,
+            _snapshot_relation_grounders(self.relation_grounders),
         )
         relation_grounders = _snapshot_relation_grounders(
             (
@@ -1232,6 +1295,18 @@ class SimulationTaskProgramRegistration:
                 call_catalog=self.call_catalog,
                 relation_grounder_keys=relation_grounder_keys,
                 settle_preset_ids=frozenset(settle_presets),
+                pose_delta_settle_preset_ids=frozenset(
+                    key
+                    for key, cfg in settle_presets.items()
+                    if isinstance(cfg, SimulationSettleMonitorCfg)
+                    and cfg.measurement == "pose_delta"
+                ),
+                rigid_settle_entity_ids=frozenset(
+                    binding.entity_id for binding in self.scene_binding.rigid_objects
+                )
+                | frozenset(
+                    binding.entity_id for binding in self.scene_binding.antipodal_grasps
+                ),
                 endpoint_adapter_declarations=extensions.endpoint_adapters,
                 runtime_transport_declarations=extensions.runtime_transports,
                 parallel_safety_declaration=extensions.parallel_safety,
@@ -1255,8 +1330,7 @@ class SimulationTaskProgramRegistration:
         """Return the canonical registration fingerprint."""
         return self.catalog.fingerprint
 
-    def assert_unchanged(self) -> None:
-        """Reject nested declaration drift before live component creation."""
+    def _checked_fingerprint_payload(self) -> dict[str, object]:
         scene = self.scene_binding.declare()
         profile = self.robot_profile_binding.declare()
         try:
@@ -1283,27 +1357,26 @@ class SimulationTaskProgramRegistration:
             handover_pose_providers = _snapshot_handover_pose_providers(
                 self.handover_pose_providers
             )
-            current = _digest(
-                _registration_payload(
-                    scene_binding=self.scene_binding,
-                    scene=scene,
-                    robot_profile_binding=self.robot_profile_binding,
-                    robot_profile=profile,
-                    call_catalog=self.call_catalog,
-                    settle_presets=self.settle_presets,
-                    relation_grounder_keys=relation_grounder_keys,
-                    relation_grounders=relation_grounders,
-                    handover_pose_providers=handover_pose_providers,
-                    extensions=extensions,
-                    endpoint_adapters=self.endpoint_adapters,
-                    runtime_transports=self.runtime_transports,
-                    parallel_safety_factory=self.parallel_safety_factory,
-                    control_part_evidence_factory=self.control_part_evidence_factory,
-                    registered_semantic_lowerer_factories=(
-                        self.registered_semantic_lowerer_factories
-                    ),
-                )
+            payload = _registration_payload(
+                scene_binding=self.scene_binding,
+                scene=scene,
+                robot_profile_binding=self.robot_profile_binding,
+                robot_profile=profile,
+                call_catalog=self.call_catalog,
+                settle_presets=self.settle_presets,
+                relation_grounder_keys=relation_grounder_keys,
+                relation_grounders=relation_grounders,
+                handover_pose_providers=handover_pose_providers,
+                extensions=extensions,
+                endpoint_adapters=self.endpoint_adapters,
+                runtime_transports=self.runtime_transports,
+                parallel_safety_factory=self.parallel_safety_factory,
+                control_part_evidence_factory=self.control_part_evidence_factory,
+                registered_semantic_lowerer_factories=(
+                    self.registered_semantic_lowerer_factories
+                ),
             )
+            current = _digest(payload)
         except (TypeError, ValueError) as exc:
             raise IntegrationFingerprintMismatch(
                 "Task Program integration provider declaration changed after "
@@ -1314,6 +1387,37 @@ class SimulationTaskProgramRegistration:
                 "Task Program integration declaration changed after task "
                 "registration."
             )
+        return payload
+
+    def assert_unchanged(self) -> None:
+        """Reject nested declaration drift before live component creation."""
+        self._checked_fingerprint_payload()
+
+    def fingerprint_payload(self) -> dict[str, object]:
+        """Snapshot the complete validated registration declaration as JSON data.
+
+        Returns:
+            Independently owned canonical data whose SHA-256 equals
+            :attr:`fingerprint`. Changing the returned data does not change the
+            registration or its runtime identity.
+
+        Raises:
+            IntegrationFingerprintMismatch: A registered declaration has drifted.
+        """
+        try:
+            payload = cast(
+                dict[str, object], _canonical_value(self._checked_fingerprint_payload())
+            )
+            current = _digest(payload)
+        except (TypeError, ValueError) as exc:
+            raise IntegrationFingerprintMismatch(
+                "Task Program integration declaration changed during snapshot."
+            ) from exc
+        if current != self.fingerprint:
+            raise IntegrationFingerprintMismatch(
+                "Task Program integration declaration changed during snapshot."
+            )
+        return payload
 
     @property
     def endpoint_adapter_map(

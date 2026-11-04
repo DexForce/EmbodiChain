@@ -14,8 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Warp kernels for simulation sensor data adaptation."""
+"""Private contact scatter and history reduction kernels."""
 
 from __future__ import annotations
 
-__all__ = []
+__all__: list[str] = []

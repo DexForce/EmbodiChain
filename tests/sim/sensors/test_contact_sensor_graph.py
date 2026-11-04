@@ -164,6 +164,17 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
         assert sensor._sample_graph is recaptured
         assert not history.contact.any()
         assert_air_time(0.3)
+        # The graph writes query loss even when there are no valid contacts.
+        query.buffer.device_counts.zero_()
+        query.buffer.device_counts[1] = 3
+        sensor.begin_control_step()
+        sample()
+        assert sensor.latest_sample_dropped_contacts == 3
+        assert sensor.evidence_dropped_contacts == 3
+        query.buffer.device_counts[1] = 0
+        sample()
+        assert sensor.latest_sample_dropped_contacts == 0
+        assert sensor.evidence_dropped_contacts == 3  # Earlier interval loss survives.
     caller.synchronize()
 
 
@@ -327,4 +338,13 @@ def test_outer_capture_preserves_sampling_and_eager_refresh(
                     history.contact_count, 1 if capture_mode == "lifecycle" else 2
                 ),
             )
+        # Caller-owned replay must restore latest loss after full reset too.
+        query.buffer.device_counts[0] = 0
+        for loss in (3, 0):
+            sensor.reset()
+            assert sensor.evidence_dropped_contacts == 0
+            query.buffer.device_counts[1] = loss
+            graph.replay()
+            assert sensor.latest_sample_dropped_contacts == loss
+            assert sensor.evidence_dropped_contacts == loss
     stream.synchronize()
