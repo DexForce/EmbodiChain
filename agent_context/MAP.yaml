@@ -126,10 +126,12 @@ topics:
   aliases: [robot system, robot config, robot catalog, list robot, robot preview, 机器人配置, 机器人系统, 机型解析, 列出机器人, 机器人预览]
   keywords: [UnitreeGo1Cfg, UnitreeGo2Cfg, UnitreeG1Cfg, UnitreeH12Cfg, ANYmalCCfg, MicroDuckCfg, load_locomotion_robot_profile, RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg, ARX5Cfg, ARX5, FlexivRizon4SCfg, FlexivRizon4S,
     FrankaCfg, FrankaPandaCfg, URRobotCfg, BrainCoRevo1Cfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
-    asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot]
+    asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot,
+    RobotHandGeometryCfg, RobotHandGeometryProvider, RobotCoordinatedGraspProvider, 机器人手部几何采样]
   paths: [topics/robot-system/robot-system.md]
   source_of_truth:
   - embodichain/lab/sim/objects/robot.py
+  - embodichain/lab/sim/utility/grasp_geometry.py
   - embodichain/lab/sim/robots/
   - embodichain/robot_registry.py
   - embodichain/cli/list_robot.py
@@ -140,13 +142,14 @@ topics:
   watch_paths: [embodichain/lab/sim/robots/, extensions/embodichain_robots/, embodichain/lab/sim/objects/robot.py,
     embodichain/robot_registry.py, embodichain/lab/sim/cfg/, tests/sim/robots/, tests/test_robot_registry.py,
     embodichain/cli/list_robot.py, tests/cli/test_list_robot.py, embodichain/lab/scripts/preview_robot.py,
-    tests/lab/scripts/test_preview_robot.py]
+    tests/lab/scripts/test_preview_robot.py, embodichain/lab/sim/utility/grasp_geometry.py,
+    tests/sim/utility/test_grasp_geometry.py]
   related_topics: [simulation-system, ik-solvers, motion-planning, sensor-system, sim-visualization, robot-workspace]
   status: active
 - id: sensor-system
   title: Sensor System
   aliases: [sensor system, camera attachment, 传感器, 相机挂载]
-  keywords: [CameraCfg, StereoCameraCfg, ContactSensorCfg, ContactQuery, ContactSamplingObserver, ContactEvidenceSampler, ContactTimeline, NativeSupportObservation, SupportObservationRegistry, Newton contact, SensorCfg,
+  keywords: [CameraCfg, StereoCameraCfg, ContactSensorCfg, ContactQuery, ContactSamplingObserver, ContactEvidenceSampler, ContactTimeline, Newton contact, SensorCfg,
     get_sensor_obs, resolve_parent_nodes, scatter_contact_data, tiled image, quaternion, xyzw]
   paths: [topics/sensor-system/sensor-system.md]
   source_of_truth:
@@ -154,13 +157,19 @@ topics:
   - embodichain/lab/sim/sensors/camera.py
   - embodichain/lab/sim/sensors/stereo.py
   - embodichain/lab/sim/sensors/attachment.py
-  - embodichain/lab/sim/sensors/contact_sensor.py
-  - embodichain/lab/sim/sensors/contact_sampling.py
-  - embodichain/lab/sim/sensors/contact_timeline.py
+  - embodichain/lab/sim/sensors/contact/sensor.py
+  - embodichain/lab/sim/sensors/contact/sampling.py
+  - embodichain/lab/sim/sensors/contact/timeline.py
   - embodichain/lab/sim/sensors/joint_opening.py
   - embodichain/lab/sim/sensors/support_observation.py
   - embodichain/lab/sim/evidence.py
-  - embodichain/lab/sim/sensors/_warp/contact.py
+  - embodichain/lab/sim/sensors/contact/_warp/scatter.py
+
+  - embodichain/lab/sim/sensors/contact/sensor.py
+  - embodichain/lab/sim/sensors/contact/sampling.py
+  - embodichain/lab/sim/sensors/contact/timeline.py
+  - embodichain/lab/sim/evidence.py
+  - embodichain/lab/sim/sensors/contact/_warp/scatter.py
   - embodichain/compute/image/
   watch_paths: [embodichain/lab/sim/sensors/, embodichain/compute/image/, tests/sim/sensors/]
   related_topics: [simulation-system, robot-system, env-framework, sim-visualization]
@@ -194,6 +203,7 @@ topics:
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
     轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体, kinematic trajectory refinement, 轨迹修正]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
+    CuroboPayload, CuroboQuerySnapshot, curobo_motion_generator,
     interpolation_mode, ik_seed_mode, resolve_continuous_ik_path, search_cost_scope, RejectedMotionCandidate,
     expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
     load_expansion_profile, SourceAdapter, CandidateCoordinator, CandidateTrajectoryBatch,
@@ -202,7 +212,8 @@ topics:
     via_points, nullspace_residual, perturb_approach_direction, sample_approach_cone, TIMING_PROFILES,
     trajectory variant, 轨迹变体, 固定路点,
     collision world, compute trajectory, trajectory resampling, trajectory warping, retime_to_control_grid,
-    JointTrajectoryPlaybackCfg, play_joint_trajectory, quaternion, xyzw, wxyz]
+    JointTrajectoryPlaybackCfg, play_joint_trajectory, quaternion, xyzw, wxyz,
+    CoordinatedGraspSampler, PairedGraspProvider, sample_urdf_collision_surfaces, 双手抓取采样]
   paths: [topics/motion-planning/motion-planning.md]
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
@@ -224,17 +235,21 @@ topics:
   - embodichain/compute/kinematics/_warp/trapezoidal.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_planner.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_yaml.py
+  - embodichain/lab/sim/motion/planners/curobo/payload.py
   - embodichain/lab/task_program/semantics/scene.py
   - embodichain/lab/sim/motion/expansion/
   - embodichain/compute/trajectory/
   - embodichain/lab/sim/utility/action_utils.py
+  - embodichain/toolkits/graspkit/pg_grasp/
   watch_paths: [extensions/embodichain_benchmarks/motion_generation/, tests/benchmark/motion_generation/, tests/test_benchmark_package.py, embodichain/lab/sim/motion/motion_generator.py, embodichain/lab/sim/motion/execution.py,
     embodichain/compute/kinematics/_path_derivatives.py,
     tests/sim/motion/test_motion_generator.py,
     tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
     embodichain/lab/sim/motion/ik.py, embodichain/lab/sim/motion/limits.py, embodichain/lab/sim/motion/search.py,
     tests/sim/motion/expansion/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,
-    tests/sim/motion/planners/, tests/compute/, examples/expansion/trajectory/, examples/expansion/README.md]
+    tests/sim/motion/planners/, tests/compute/, examples/expansion/trajectory/, examples/expansion/README.md,
+    embodichain/toolkits/graspkit/pg_grasp/, tests/toolkits/test_coordinated_grasp.py,
+    tests/toolkits/test_urdf_collision_surfaces.py, tests/toolkits/test_contact_fit.py]
   related_topics: [simulation-system, robot-system, ik-solvers, atomic-actions]
   status: active
 - id: scene-services
@@ -242,6 +257,8 @@ topics:
   aliases: [sim.scene, scene services, procedural scene, 场景服务, 程序化场景, 场景布局, 场景快照]
   keywords: [SceneFragment, SceneRecipe, GeneratedScene, SupportRegion, LayoutProblem,
     NativePlanarPlacement, planar_floor_region, planar_placement_metrics, select_container_landing,
+
+    SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,
     solve_layout, capture_state, restore_state, settle_scene, check_layout,
@@ -251,6 +268,7 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/scene/
   - embodichain/compute/geometry/
+  - embodichain/lab/sim/objects/backends/_collision_inputs.py
   watch_paths: [embodichain/lab/sim/scene/, embodichain/compute/geometry/,
     tests/sim/scene/, tests/compute/geometry/]
   related_topics: [simulation-system, scene-expansion, gen-sim, task-programs]
@@ -408,6 +426,7 @@ topics:
   title: Atomic Skills
   aliases: [atomic action, atomic skill, 原子动作, 原子技能]
   keywords: [AtomicActionEngine, run-atomic-action, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
+    hand_geometry_cfgs,
     RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry, control-grid retiming,
     AffordanceSamplingContext, AffordancePoseCandidates, AffordanceSample, affordance sampling]
   paths: [topics/atomic-actions/atomic-actions.md]
@@ -430,10 +449,11 @@ topics:
 - id: task-programs
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
-  keywords: [TaskProgramCfg, SimulationSettleMonitorCfg, SimulationStabilityConditionCfg, SupportSensorDeclarationCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
+  keywords: [TaskProgramCfg, SimulationSettleMonitorCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
+    hand_geometries,
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
-    joint_command_mode, ContactEvidenceSampler, ContactTimeline, NativeGripEvidenceFactory,
+    joint_command_mode, InvocationPolicyBinding, BoundInvocationPolicies, ContactEvidenceSampler, ContactTimeline, NativeGripEvidenceFactory,
     ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
@@ -442,6 +462,9 @@ topics:
   - embodichain/lab/task_program/semantics/calls.py
   - embodichain/lab/task_program/integrations/configured.py
   - embodichain/lab/task_program/integrations/simulation/grip_evidence.py
+
+
+  - embodichain/lab/task_program/integrations/invocation_policy.py
   - embodichain/lab/task_program/integrations/composition.py
   - embodichain/lab/task_program/integrations/_configured_composition.py
   - embodichain/lab/gym/envs/task_program/
