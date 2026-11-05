@@ -100,6 +100,8 @@ from embodichain.lab.sim.atomic_actions import (
     PickUpOptions,
     PlaceOptions,
     PourOptions,
+    PressOptions,
+    PressPlanningRecovery,
     PushObjectOptions,
     PushObjectToolCalibration,
     RecoveryPolicy,
@@ -991,6 +993,9 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "preserve_current_object_orientation",
                 "direction",
                 "approach_distance",
+                "press_distance",
+                "press_position",
+                "contact_roll_alternatives",
                 "translation_distance",
                 "preshape_fraction",
                 "approach_along_grasp_axis",
@@ -1432,6 +1437,61 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 )
             kwargs["tool_calibrations"] = tuple(calibrations)
         return PushObjectOptions(**kwargs)
+    if kind == "press":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset(
+                {
+                    "hand_interp_steps",
+                    "approach_distance",
+                    "press_distance",
+                    "press_position",
+                    "contact_roll_alternatives",
+                }
+            ),
+        )
+        kwargs = {}
+        if "hand_interp_steps" in config:
+            kwargs["hand_interp_steps"] = _integer(
+                config["hand_interp_steps"], path=f"{path}.hand_interp_steps", minimum=1
+            )
+        for name in ("approach_distance", "press_distance"):
+            if name in config:
+                kwargs[name] = _real(
+                    config[name],
+                    path=f"{path}.{name}",
+                    minimum=0.0,
+                    strict_minimum=name == "press_distance",
+                )
+        if "press_position" in config:
+            kwargs["press_position"] = (
+                None
+                if config["press_position"] is None
+                else _finite_tuple(
+                    config["press_position"],
+                    path=f"{path}.press_position",
+                    expected_length=3,
+                )
+            )
+        if "contact_roll_alternatives" in config:
+            kwargs["contact_roll_alternatives"] = tuple(
+                _real(
+                    item,
+                    path=f"{path}.contact_roll_alternatives[{index}]",
+                    minimum=-math.pi,
+                    maximum=math.pi,
+                )
+                for index, item in enumerate(
+                    _sequence(
+                        config["contact_roll_alternatives"],
+                        path=f"{path}.contact_roll_alternatives",
+                    )
+                )
+            )
+        return PressOptions(**kwargs)
+
     if kind == "slide":
         config = _mapping(
             value,
@@ -1789,6 +1849,7 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 "action_timeout",
                 "planning_budget",
                 "retry_all_failed_plans",
+                "planning_recovery",
             }
         ),
     )
@@ -1843,6 +1904,25 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 )
             )
         )
+    if config.get("planning_recovery") is not None:
+        declaration_path = f"{path}.planning_recovery"
+        declaration = _mapping(
+            config["planning_recovery"],
+            path=declaration_path,
+            required=frozenset({"kind", "revision"}),
+            optional=frozenset(),
+        )
+        kind = _identifier(declaration["kind"], path=f"{declaration_path}.kind")
+        if kind != "press_bounded":
+            raise ValueError(f"Unsupported {declaration_path}.kind {kind!r}.")
+        if (
+            _integer(
+                declaration["revision"], path=f"{declaration_path}.revision", minimum=1
+            )
+            != 1
+        ):
+            raise ValueError(f"Unsupported {declaration_path}.revision.")
+        kwargs["planning_recovery"] = PressPlanningRecovery()
     return RecoveryPolicy(**kwargs)
 
 
