@@ -67,6 +67,29 @@ headers are not evidence of asset licensing. In particular:
   unverified formal commercial model.
 - Missing modification records do not establish an original or unmodified asset.
 
+## Sharpa Wave 01 descriptions
+
+`SharpaWave` is an additional `eef` asset from the official
+[sharpa-robotics/sharpa-urdf-usd-xml](https://github.com/sharpa-robotics/sharpa-urdf-usd-xml) repository,
+pinned to `0d19cac602f46456b819e4b6a2c09a74982c9a3e`. Both hands have 22 active joints.
+The bundle preserves upstream licensing, MJCF and mesh dependencies, with
+source revision and original/prepared checksums in `manifest.json`.
+
+```python
+from embodichain.data import get_data_path
+from embodichain_robots.sharpa.wave.assets import SharpaWave
+
+right_urdf = get_data_path("SharpaWave/right_sharpa_wave/right_sharpa_wave.urdf")
+left_urdf = get_data_path("SharpaWave/left_sharpa_wave/left_sharpa_wave.urdf")
+```
+
+The two URDF mesh URI prefixes `package://left_sharpa_wave/` and `package://right_sharpa_wave/` become relative paths. The original URDFs remain under `source/`. Joint/link names, frames, limits, inertials, mesh bytes and MJCF files are unchanged.
+
+The versioned bundle is `eef_assets/SharpaWaveV1.zip`; it uses cache prefix
+`SharpaWaveV1`. This adds descriptions only, with no standalone RobotCfg,
+tactile simulation or RL task. Model loading does not establish contact-rich
+manipulation performance.
+
 ## Standalone hands and mounted tools
 
 `BrainCoRevo1Cfg` is the new standalone joint-controlled hand preset. It uses
