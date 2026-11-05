@@ -24,6 +24,8 @@ semantic scene graph, generation model client or task lifecycle.
 | Explicit control roles, collider inputs and source lineage | `embodichain/lab/sim/scene/control_semantics.py`, `revolute_geometry.py`, `control_source.py`, `control_mass_source.py` |
 | Shared authored source reads and link-local collider inputs | `embodichain/lab/sim/spawn/source_geometry.py`; Scene retains its `LinkMesh` import |
 | Explicit robot mounting frames and URDF collision inputs | `source_robot_geometry.py`, `utility/urdf_collision.py` |
+
+| Explicit Default/B1 gravity, native Pour inputs and immutable receiver snapshots | `embodichain/lab/sim/scene/physical_parameters.py`, `pour_inputs.py`, `pour_region.py` |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
 | CPU support, packing and constrained-layout strategies | `embodichain/lab/sim/scene/_support_cpu.py`, `_placement_cpu.py`, `_packing_cpu.py`, `_layout_cpu.py` |
 | Robot-aware object proposals and full-pose IK/FK checks | `embodichain/lab/sim/scene/workspace.py` |
@@ -46,6 +48,12 @@ axes and held/root transforms. Runtime acquisition, policy selection, ownership
 and physical acceptance remain with their consuming subsystems.
 `pose_checks.as_rigid_matrix` only validates one input transform; it neither
 repairs it nor invokes FK/IK.
+
+`physical_parameters.observed_gravity` reads actual configured Default/B1 gravity,
+without inventing missing values. `pour_inputs` captures native local mesh data
+and the selected solver root; `pour_region` owns immutable arrays and delegates
+staging arithmetic to Compute using fresh caller-supplied poses. These planning
+inputs do not create native resources or establish physical acceptance.
 
 `rigid_mesh.capture_rigid_mesh` snapshots scaled native input vertices and
 matching triangles as owned CPU data with the environment axis intact. It reads

@@ -754,3 +754,57 @@ select a staging route or certify native collision freedom.
    :members:
 
 .. autofunction:: capture_robot_distal_meshes
+
+
+Physical planning inputs
+------------------------
+
+These adapters read existing Default/B1 owners for source-qualified planning.
+Gravity comes from the actual assembled physics configuration, with no missing
+value fallback. Pour vertices retain the original native dtype/order and apply
+body scale once; faces retain original topology. The active arm origin comes
+from its explicitly selected solver root. Capture reads no object poses and
+returns owned arrays; consumers supply current observed poses separately.
+
+``PourRegionGeometry`` owns immutable source/receiver inputs and delegates the
+numeric staging rule to Compute. These inputs and targets do not establish
+collision freedom, physical contact or task acceptance. Existing simulation
+resources are borrowed and never created, stepped or destroyed.
+
+.. currentmodule:: embodichain.lab.sim.scene.physical_parameters
+
+.. autosummary::
+
+   observed_gravity
+
+.. autofunction:: observed_gravity
+
+.. currentmodule:: embodichain.lab.sim.scene.pour_inputs
+
+.. autosummary::
+
+   capture_pour_vertices
+   capture_pour_faces
+   configured_pour_gravity
+   observed_pour_arm_origin
+
+.. autofunction:: capture_pour_vertices
+
+.. autofunction:: capture_pour_faces
+
+.. autofunction:: configured_pour_gravity
+
+.. autofunction:: observed_pour_arm_origin
+
+.. currentmodule:: embodichain.lab.sim.scene.pour_region
+
+.. autosummary::
+
+   PourRegionGeometry
+   PourGeometryProvider
+
+.. autoclass:: PourRegionGeometry
+   :members: staging_pose
+
+.. autoclass:: PourGeometryProvider
+   :members:

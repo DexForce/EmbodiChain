@@ -26,6 +26,10 @@ from .evidence import (
 )
 from .condition_evidence import ConditionEvidenceBinding, evaluate_condition_evidence
 
+from .control_evidence import ControlEvidenceBinding, evaluate_control_evidence
+
+from .pour_evidence import PourEvidenceBinding, evaluate_pour_evidence
+
 if TYPE_CHECKING:
     from .spec import TaskSpec
     from .validation import EvaluationReport
@@ -40,10 +44,18 @@ def _binding(
         return SupportedPlacementEvidenceBinding.from_dict(value)
     if isinstance(value, ConditionEvidenceBinding):
         return ConditionEvidenceBinding.from_dict(value)
+    if isinstance(value, ControlEvidenceBinding):
+        return ControlEvidenceBinding.from_dict(value)
+    if isinstance(value, PourEvidenceBinding):
+        return PourEvidenceBinding.from_dict(value)
     if isinstance(value, Mapping):
         version = value.get("schema_version")
         if version == "task_spec.placement_evidence_binding/v2":
             return SupportedPlacementEvidenceBinding.from_dict(value)
+        if version == "task_spec.pour_evidence_binding/v1":
+            return PourEvidenceBinding.from_dict(value)
+        if version == "task_spec.control_evidence_binding/v1":
+            return ControlEvidenceBinding.from_dict(value)
         if version == "task_spec.condition_evidence_binding/v1":
             return ConditionEvidenceBinding.from_dict(value)
     raise ValueError(
@@ -123,11 +135,12 @@ def evaluate_physical_evidence_report(
 
     for binding in selected:
         snapshot = json_snapshot(evidence.get(binding.predicate_id, {}))
-        verifier = (
-            evaluate_supported_placement_evidence
-            if isinstance(binding, SupportedPlacementEvidenceBinding)
-            else evaluate_condition_evidence
-        )
+        verifier = {
+            SupportedPlacementEvidenceBinding: evaluate_supported_placement_evidence,
+            ConditionEvidenceBinding: evaluate_condition_evidence,
+            ControlEvidenceBinding: evaluate_control_evidence,
+            PourEvidenceBinding: evaluate_pour_evidence,
+        }[type(binding)]
         outcomes = verifier(normalized, binding, snapshot, program=program)
         predicate = goals.get(
             binding.predicate_id, milestones.get(binding.predicate_id)

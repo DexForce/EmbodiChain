@@ -109,6 +109,7 @@ costs and never establish cargo retention. The pure carrier-envelope calculation
 lives in `compute.geometry.cargo`; its upper vertical extent is intentionally
 unconstrained and is not a cavity or physical retention test.
 
+
 `ExecutionPlanLifecycle` is an optional host-owned adoption port. It receives an
 owned validated attempt before dispatch. Installation rejection latches the
 session: later ticks/revisions cannot resume commands. `ExecutionRunner` keeps
