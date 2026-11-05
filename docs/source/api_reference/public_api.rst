@@ -1706,7 +1706,8 @@ embodichain.lab.gym.recording
 -----------------------------
 
 ``EpisodeRecording`` owns raw field buffers, transition actions, row cursors and
-live recording access. ``seed`` records S0 after reset preparation;
+live recording access. The first ``seed`` binds the field and alias layout;
+later frames must retain that schema. ``seed`` records S0 after reset preparation;
 ``append`` commits At and its already captured St+1 before autoreset. Capacity T
 therefore retains T+1 states. ``step(recording_active_mask=...)`` can select raw
 recording rows independently of accepted demonstration rollouts, including a
@@ -1718,10 +1719,14 @@ Missing channels/slots never fall back to earlier frames or current simulation.
 Foreign owners, changed descriptors, reused captures and closed recordings reject.
 Frame indices are row-local recording slots, not timestamps.
 
-``snapshot_history`` archives described raw fields and validity. Trajectory
+``snapshot_history`` archives described raw fields and validity once per
+canonical channel. CPU is the default snapshot device; compatible file exports
+may retain their recording device. Trajectory
 ``.pt`` exports retain their causal ``states[t]`` / ``actions[t]`` layout and add
 ``terminal_states`` plus versioned ``raw_observations`` for all T+1 boundaries.
-Existing consumers can continue to read their original fields. Env dispatches
+The legacy state and raw-history fields share the same owned tensor storage;
+exports do not clone a second complete state history. Existing consumers can
+continue to read their original fields. Env dispatches
 capture/reset/close; recording and evidence consumers perform no second state
 acquisition through Env methods or source callbacks.
 

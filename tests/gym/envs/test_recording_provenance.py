@@ -301,6 +301,11 @@ def test_saved_recording_preserves_terminal_state_and_described_raw_history(tmp_
     assert payload["actions"].shape == (1, 3, 2)
     assert payload["terminal_states"]["robot"]["qpos"].tolist() == [[6.0, 7.0]]
     history = payload["raw_observations"]
+    # Views in the artifact share one owned state snapshot, including after load.
+    assert (
+        payload["states"]["robot"]["qpos"].untyped_storage().data_ptr()
+        == history["fields"]["robot/qpos"]["values"].untyped_storage().data_ptr()
+    )
     assert history["fields"]["robot/qpos"]["values"][0].tolist() == [
         [0.0, 1.0],
         [2.0, 3.0],

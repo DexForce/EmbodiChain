@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -59,6 +59,15 @@ class RecordedObservationFrame:
         object.__setattr__(self, "fields", MappingProxyType(dict(self.fields)))
 
 
+@dataclass(slots=True)
+class _Channel:
+    name: str
+    descriptor: ObservationDescriptor
+    values: torch.Tensor
+    valid: torch.Tensor
+    errors: dict[tuple[int, int], str] = field(default_factory=dict)
+
+
 class EpisodeRecording:
     """Own raw state frames, transition actions and row-local recording cursors.
 
@@ -88,15 +97,14 @@ class EpisodeRecording:
         if len(episode_context.episode_ids) != actions.shape[0]:
             raise ValueError("Recording rows must match the episode lifecycle owner.")
         self._context = episode_context
-        self._fields = dict(fields)
+        self._buffers = dict(fields)
+        self._channels: dict[str, _Channel] = {}
+        self._layout: tuple[_Channel, ...] | None = None
         self.actions = actions
         self.capacity = actions.shape[1]
         self.num_envs = actions.shape[0]
         self.steps = torch.zeros(self.num_envs, dtype=torch.long, device=actions.device)
-        self._descriptors: dict[str, ObservationDescriptor] = {}
-        self._valid: dict[str, torch.Tensor] = {}
-        self._errors: dict[str, dict[tuple[int, int], str]] = {}
-        self._episodes = [-1] * self.num_envs
+        self._episodes = (-1,) * self.num_envs
         self._revisions = torch.full(
             (self.num_envs, self.capacity + 1),
             -1,
@@ -110,9 +118,8 @@ class EpisodeRecording:
             device=actions.device,
         )
         self._closed = False
-        self._seeded_rows: set[int] = set()
         self._latest_revision = -1
-        for values in self._fields.values():
+        for values in self._buffers.values():
             if (
                 tuple(values.shape[:2]) != (self.num_envs, self.capacity + 1)
                 or values.device != actions.device
@@ -124,7 +131,9 @@ class EpisodeRecording:
     @property
     def descriptors(self) -> Mapping[str, ObservationDescriptor]:
         """Return bound raw field identities without exposing recording buffers."""
-        return MappingProxyType(self._descriptors)
+        return MappingProxyType(
+            {name: channel.descriptor for name, channel in self._channels.items()}
+        )
 
     def validate_episode_source(self, episode_context: EpisodeContext) -> None:
         """Require the consumer's actual lifecycle owner, not just numeric IDs.
@@ -152,75 +161,87 @@ class EpisodeRecording:
             )
         if frame.episode_ids != self._context.episode_ids:
             raise ValueError("Observation frame belongs to another episode.")
-        if set(self._fields) - set(frame.fields):
+        if self._layout is None:
+            self._bind(frame)
+        if frame.fields.keys() != self._channels.keys():
+            raise ValueError("Raw observation field schema changed after binding.")
+        for name, channel in self._channels.items():
+            sample = frame.fields[name]
+            if (
+                sample.descriptor is not channel.descriptor
+                and sample.descriptor != channel.descriptor
+            ):
+                raise ValueError(f"Raw observation identity drift for {name!r}.")
+            if (
+                sample.values.shape[0] != self.num_envs
+                or sample.values.device != self.actions.device
+            ):
+                raise ValueError(
+                    "Raw observation rows and device must match recording."
+                )
+
+    def _bind(self, frame: ObservationFrame) -> None:
+        if self._buffers.keys() - frame.fields.keys():
             raise ValueError(
                 "Observation boundary is missing required recording fields."
             )
         for name, sample in frame.fields.items():
-            if sample.values.shape[0] != self.num_envs:
-                raise ValueError(
-                    "Raw observation does not contain every environment row."
-                )
-            if sample.values.device != self.actions.device:
-                raise ValueError(
-                    "Raw observation and recording buffers must share a device."
-                )
             if (
-                name in self._descriptors
-                and self._descriptors[name] != sample.descriptor
+                sample.values.shape[0] != self.num_envs
+                or sample.values.device != self.actions.device
             ):
-                raise ValueError(f"Raw observation identity drift for {name!r}.")
-            if name in self._fields and (
-                tuple(self._fields[name].shape[2:]) != sample.descriptor.shape
-                or self._fields[name].dtype != sample.descriptor.dtype
+                raise ValueError(
+                    "Raw observation rows and device must match recording."
+                )
+            if name in self._buffers and (
+                tuple(self._buffers[name].shape[2:]) != sample.descriptor.shape
+                or self._buffers[name].dtype != sample.descriptor.dtype
             ):
                 raise ValueError(f"Recording storage differs from {name!r} descriptor.")
+        storage = {
+            sample.descriptor: self._buffers[name]
+            for name, sample in frame.fields.items()
+            if name in self._buffers
+        }
+        canonical: dict[ObservationDescriptor, _Channel] = {}
+        for name, sample in frame.fields.items():
+            descriptor = sample.descriptor
+            if descriptor not in canonical:
+                values = storage.get(descriptor)
+                if values is None:
+                    values = torch.zeros(
+                        (self.num_envs, self.capacity + 1, *descriptor.shape),
+                        dtype=descriptor.dtype,
+                        device=self.actions.device,
+                    )
+                canonical[descriptor] = _Channel(
+                    name,
+                    descriptor,
+                    values,
+                    torch.zeros(
+                        (self.num_envs, self.capacity + 1),
+                        dtype=torch.bool,
+                        device=self.actions.device,
+                    ),
+                )
+            self._channels[name] = canonical[descriptor]
+        self._layout = tuple(canonical.values())
+        self._buffers.clear()
 
     def _write(
         self, frame: ObservationFrame, ids: torch.Tensor, slots: torch.Tensor
     ) -> None:
-        # Described aliases share one field allocation and one physical sample.
-        storage_by_descriptor = {
-            sample.descriptor: self._fields[name]
-            for name, sample in frame.fields.items()
-            if name in self._fields
-        }
-        written: set[ObservationDescriptor] = set()
         rows = indices = None
-        for name, sample in frame.fields.items():
-            descriptor = sample.descriptor
-            if descriptor not in storage_by_descriptor:
-                storage_by_descriptor[descriptor] = torch.zeros(
-                    (self.num_envs, self.capacity + 1, *descriptor.shape),
-                    dtype=descriptor.dtype,
-                    device=self.actions.device,
-                )
-            self._fields[name] = storage_by_descriptor[descriptor]
-            self._descriptors[name] = descriptor
-            storage_by_descriptor.setdefault(descriptor, self._fields[name])
-            if name not in self._valid:
-                self._valid[name] = torch.zeros(
-                    (self.num_envs, self.capacity + 1),
-                    dtype=torch.bool,
-                    device=self.actions.device,
-                )
-                self._errors[name] = {}
-            if descriptor not in written:
-                self._fields[name][ids, slots] = sample.values[ids].to(
-                    self.actions.device
-                )
-                written.add(descriptor)
-            self._valid[name][ids, slots] = sample.valid[ids].to(self.actions.device)
+        for channel in self._layout:
+            sample = frame.fields[channel.name]
+            channel.values[ids, slots] = sample.values[ids]
+            channel.valid[ids, slots] = sample.valid[ids]
             if any(error is not None for error in sample.acquisition_errors):
                 if rows is None:
-                    rows, indices = (
-                        ids.detach().cpu().tolist(),
-                        slots.detach().cpu().tolist(),
-                    )
+                    rows, indices = ids.cpu().tolist(), slots.cpu().tolist()
                 for row, slot in zip(rows, indices, strict=True):
-                    error = sample.acquisition_errors[row]
-                    if error is not None:
-                        self._errors[name][row, slot] = error
+                    if sample.acquisition_errors[row] is not None:
+                        channel.errors[row, slot] = sample.acquisition_errors[row]
         self._revisions[ids, slots] = frame.revision
         self._timestamps[ids, slots] = (
             frame.timestamp if frame.timestamp is not None else float("nan")
@@ -242,19 +263,19 @@ class EpisodeRecording:
             row["initialized"] for row in self._context.snapshot(sorted(reset_rows))
         ):
             raise ValueError("Recording requires initialized episode rows.")
+        episodes = list(self._episodes)
         for row in reset_rows:
-            self._episodes[row] = frame.episode_ids[row]
+            episodes[row] = frame.episode_ids[row]
+        self._episodes = tuple(episodes)
         self.steps[ids] = 0
         self._revisions[ids] = -1
         self._timestamps[ids] = float("nan")
-        for errors in self._errors.values():
-            for key in list(errors):
+        for channel in self._layout:
+            for key in list(channel.errors):
                 if key[0] in reset_rows:
-                    del errors[key]
-        for valid in self._valid.values():
-            valid[ids] = False
+                    del channel.errors[key]
+            channel.valid[ids] = False
         self._write(frame, ids, self.steps[ids])
-        self._seeded_rows.update(reset_rows)
         self._latest_revision = max(self._latest_revision, frame.revision)
 
     def append(
@@ -282,12 +303,9 @@ class EpisodeRecording:
         ids = mask.nonzero(as_tuple=False).flatten()
         if not ids.numel():
             return
-        if (
-            len(self._seeded_rows) != self.num_envs
-            or tuple(self._episodes) != frame.episode_ids
-        ):
+        if self._episodes != frame.episode_ids:
             for row in ids.cpu().tolist():
-                if row not in self._seeded_rows:
+                if self._episodes[row] < 0:
                     raise ValueError(
                         "Recording rows require an initial observation frame."
                     )
@@ -371,13 +389,13 @@ class EpisodeRecording:
             raise ValueError("The requested boundary is not fully recorded.")
         samples = {}
         for name in names:
-            descriptor = self._descriptors[name]
-            valid = self._valid[name][ids, slots].detach().cpu().clone()
+            channel = self._channels[name]
+            valid = channel.valid[ids, slots].detach().cpu()
             errors = tuple(
                 (
                     None
                     if ok
-                    else self._errors[name].get(
+                    else channel.errors.get(
                         (row, slot),
                         "Raw observation acquisition is unavailable or nonfinite.",
                     )
@@ -385,8 +403,8 @@ class EpisodeRecording:
                 for row, slot, ok in zip(rows, frames, valid.tolist(), strict=True)
             )
             samples[name] = ObservationSample(
-                descriptor,
-                self._fields[name][ids, slots].detach().cpu().clone(),
+                channel.descriptor,
+                channel.values[ids, slots].detach().cpu(),
                 valid,
                 errors,
             )
@@ -410,16 +428,23 @@ class EpisodeRecording:
             ),
         )
 
-    def snapshot_history(self, env_ids: Sequence[int] | None = None) -> dict[str, Any]:
-        """Copy raw history for archival, retaining validity and T+1 boundaries.
+    def snapshot_history(
+        self,
+        env_ids: Sequence[int] | None = None,
+        *,
+        device: str | torch.device = "cpu",
+    ) -> dict[str, Any]:
+        """Snapshot canonical history once for archival and export projections.
 
         Args:
-            env_ids: Original environment rows to export, or all rows.
+            env_ids: Original environment rows, or all rows.
+            device: Snapshot tensor device. The default provides owned CPU
+                data; a host may retain its device for a compatible file export.
 
         Returns:
-            Versioned owned CPU tensors and serializable field descriptors.
-            Rows may have different lengths; validity excludes unwritten slots.
-            Aliases retain shared value storage in the serialized artifact.
+            Versioned owned tensors, descriptors and errors. Alias fields share
+            the same snapshot. Legacy trajectory views can reference these
+            values without cloning another complete state history.
         """
         self._check_open()
         ids = self._context._ids(env_ids).to(self.actions.device)
@@ -427,50 +452,56 @@ class EpisodeRecording:
         if not rows:
             raise ValueError("A history snapshot requires at least one row.")
         episodes = tuple(self._episodes[row] for row in rows)
-        current = self._context.snapshot(rows)
-        if (
-            tuple(row["episode"] for row in current) != episodes
-            or not all(row["initialized"] for row in current)
-            or any(row not in self._seeded_rows for row in rows)
-        ):
-            raise ValueError(
-                "Recorded observations belong to another or uninitialized episode."
-            )
-        lengths = self.steps[ids].detach().cpu().clone()
-        size = int(lengths.max()) + 1
-        revisions = self._revisions[ids, :size].detach().cpu().clone()
-        timestamps = self._timestamps[ids, :size].detach().cpu().clone()
-        written = revisions >= 0
-        fields, copied = {}, {}
-        for name, descriptor in self._descriptors.items():
-            if descriptor not in copied:
-                values = self._fields[name][ids, :size].detach().cpu().clone()
-                values.masked_fill_(
-                    ~written.reshape(*written.shape, *((1,) * len(descriptor.shape))), 0
+
+        def check_episode() -> None:
+            self._check_open()
+            current = self._context.snapshot(rows)
+            if (
+                tuple(row["episode"] for row in current) != episodes
+                or not all(row["initialized"] for row in current)
+                or min(episodes) < 0
+            ):
+                raise ValueError(
+                    "Recorded observations belong to another or uninitialized episode."
                 )
-                copied[descriptor] = values
-            metadata = asdict(descriptor)
-            metadata["dtype"] = str(descriptor.dtype)
-            valid = self._valid[name][ids, :size].detach().cpu().clone() & written
-            fields[name] = {
+
+        check_episode()
+        lengths = self.steps[ids].detach().cpu()
+        size = int(lengths.max()) + 1
+        # Advanced indexing already owns its result; to() copies only across devices.
+        revisions = self._revisions[ids, :size].detach().to(device)
+        timestamps = self._timestamps[ids, :size].detach().to(device)
+        written = revisions >= 0
+        copied = {}
+        for channel in self._layout:
+            values = channel.values[ids, :size].detach().to(device)
+            values.masked_fill_(
+                ~written.reshape(
+                    *written.shape, *((1,) * len(channel.descriptor.shape))
+                ),
+                0,
+            )
+            valid = channel.valid[ids, :size].detach().to(device) & written
+            valid_rows = valid.cpu().tolist()
+            metadata = asdict(channel.descriptor)
+            metadata["dtype"] = str(channel.descriptor.dtype)
+            copied[channel.name] = {
                 "descriptor": metadata,
-                "values": copied[descriptor],
+                "values": values,
                 "valid": valid,
                 "acquisition_errors": [
                     {
-                        slot: self._errors[name].get(
+                        slot: channel.errors.get(
                             (row, slot),
                             "Raw observation acquisition is unavailable or nonfinite.",
                         )
                         for slot in range(int(lengths[index]) + 1)
-                        if not valid[index, slot]
+                        if not valid_rows[index][slot]
                     }
                     for index, row in enumerate(rows)
                 ],
             }
-        self._check_open()
-        if tuple(row["episode"] for row in self._context.snapshot(rows)) != episodes:
-            raise ValueError("Recorded observations belong to another episode.")
+        check_episode()
         return {
             "schema_version": 1,
             "env_ids": rows,
@@ -484,7 +515,9 @@ class EpisodeRecording:
                 else "unavailable"
             ),
             "timestamp_valid": torch.isfinite(timestamps) & written,
-            "fields": fields,
+            "fields": {
+                name: copied[channel.name] for name, channel in self._channels.items()
+            },
         }
 
     def close(self) -> None:

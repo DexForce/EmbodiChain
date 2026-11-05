@@ -1078,8 +1078,7 @@ def config_to_cfg(
                 not isinstance(consumers, (list, tuple))
                 or not consumers
                 or any(
-                    not isinstance(value, str)
-                    or value not in {"policy", "recording", "evidence"}
+                    not isinstance(value, str) or value not in {"policy", "recording"}
                     for value in consumers
                 )
                 or len(set(consumers)) != len(consumers)

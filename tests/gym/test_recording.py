@@ -155,6 +155,12 @@ def test_recording_rejects_foreign_frame_owner_and_declaration_drift():
     with pytest.raises(ValueError, match="identity drift"):
         recording.append(changed, torch.zeros(2, 1))
     assert recording.steps.tolist() == [0, 0]
+    # Field layout is configured at seed, rather than grown during execution.
+    with pytest.raises(ValueError, match="field schema changed"):
+        recording.append(
+            replace(_frame(context, 2, revision=1), fields={"extra": sample}),
+            torch.zeros(2, 1),
+        )
 
 
 @pytest.mark.parametrize("mutation", ["reset", "close"])
@@ -286,3 +292,24 @@ def test_invalid_recording_selection_rejects_before_control(mask):
     env.recording = object()
     with pytest.raises(ValueError, match="one bool per environment"):
         env.step(None, recording_active_mask=mask)
+
+
+def test_alias_schema_drift_rejects_without_advancing_history():
+    context, recording = _recording()
+    frame = _frame(context, 1)
+    sample = frame.fields["measurement"]
+    recording.seed(
+        replace(frame, fields={"measurement": sample, "alias": sample}), [0, 1]
+    )
+    changed = replace(
+        _frame(context, 2, revision=1),
+        fields={
+            "measurement": sample,
+            "alias": replace(
+                sample, descriptor=replace(sample.descriptor, units=("kPa",))
+            ),
+        },
+    )
+    with pytest.raises(ValueError, match="identity drift for 'alias'"):
+        recording.append(changed, torch.zeros(2, 1))
+    assert recording.steps.tolist() == [0, 0]

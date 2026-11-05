@@ -104,7 +104,9 @@ before stepping in position-velocity mode; inactive and hold targets use zero
 qvel.
 
 `EpisodeRecording` in `gym/recording.py` owns raw field storage, actions,
-row cursors and live recording access. Standard replay fields are declared by
+row cursors and live recording access. The first seed binds a fixed field/alias
+layout; schema drift is rejected rather than registering new fields per step.
+Standard replay fields are declared by
 `trajectory_observation_cfgs`, using the same raw functors as policy observations;
 Env does not resample state in the recording hook. Raw production and consumer
 selection belong to [manager functors](../manager-functor/manager-functor.md).
@@ -125,7 +127,10 @@ actual lifecycle owner and initialized episodes before/after copying. Missing
 fields/slots never select an earlier frame or live state. Snapshots own CPU
 values, validity, missing reasons and source clock/revision metadata. Legacy
 trajectory files keep pre-action `states`/`actions`; new files add terminal state
-and versioned raw history. Private `_traj_buffer`/`_traj_steps` remain projection
+and versioned raw history. All exported state views use one owned history
+snapshot, with shared tensor storage for overlapping fields. The default bulk
+snapshot is on CPU; file export may retain the recording device for existing
+replay compatibility. Private `_traj_buffer`/`_traj_steps` remain projection
 aliases for existing persistence/replay adapters, not acquisition owners.
 
 ## Lifecycle and boundaries

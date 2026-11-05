@@ -251,12 +251,13 @@ Observation Functions
 ---------------------
 
 ``ObservationCfg.consumers`` defaults to ``("policy",)``. Add functors may
-select ``recording`` and/or ``evidence`` without expanding the policy space.
-Those consumers require an ``ObservationSample`` with an explicit descriptor
+select ``recording`` without expanding the policy space. Evidence adapters
+read qualified raw history; there is no separate evidence output route.
+Recording terms require an ``ObservationSample`` with an explicit descriptor
 and row validity; arbitrary policy tensors cannot become physical evidence by
 renaming them. Modify functors remain policy-only.
 
-For example, a single original arena pose can serve all three consumers:
+For example, a single original arena pose can serve policy and recording:
 
 .. code-block:: python
 
@@ -265,7 +266,7 @@ For example, a single original arena pose can serve all three consumers:
        mode="add",
        name="scene/cube/pose",
        params={"entity_cfg": SceneEntityCfg(uid="cube"), "quantity": "pose"},
-       consumers=("policy", "recording", "evidence"),
+       consumers=("policy", "recording"),
        extra={"shape": (7,)},
    )
 
@@ -275,6 +276,9 @@ coordinates and ``(x, y, z, qx, qy, qz, qw)``. Missing entities have a false val
 mask and acquisition reasons; a policy zero-fill is never qualified evidence.
 Original channels are retained before in-place policy transforms. Existing
 Tensor-returning policy functors keep their signature and execution order.
+The manager resolves configured and required replay sources once, including
+callable strings and defaults, and reuses matching declarations. The descriptor
+cache contains immutable schema values, never live simulation handles.
 
 .. automodule:: embodichain.lab.gym.envs.managers.observations
     :members:

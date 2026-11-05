@@ -828,39 +828,15 @@ class EmbodiedEnv(BaseEnv):
                 self.event_manager.apply(mode="startup")
 
         if self.cfg.observations or self.cfg.record_trajectory:
-            configured = self.cfg.observations
-            observations = (
-                dict(configured)
-                if isinstance(configured, Mapping)
-                else dict(vars(configured)) if configured is not None else {}
+            self.observation_manager = ObservationManager(
+                self.cfg.observations,
+                self,
+                recording=(
+                    trajectory_observation_cfgs(self, self.cfg.trajectory_uids)
+                    if self.cfg.record_trajectory
+                    else None
+                ),
             )
-            if self.cfg.record_trajectory:
-                replay = trajectory_observation_cfgs(self, self.cfg.trajectory_uids)
-                if set(replay).intersection(observations):
-                    raise ValueError(
-                        "Observation names collide with recording declarations."
-                    )
-                existing_fields = {
-                    cfg.name: cfg
-                    for cfg in observations.values()
-                    if cfg is not None and set(cfg.consumers) - {"policy"}
-                }
-                for key, declaration in replay.items():
-                    existing = existing_fields.get(declaration.name)
-                    if existing is not None:
-                        if (
-                            existing.func != declaration.func
-                            or existing.params.get("entity_cfg").uid
-                            != declaration.params["entity_cfg"].uid
-                            or existing.params.get("quantity", "pose")
-                            != declaration.params["quantity"]
-                        ):
-                            raise ValueError(
-                                f"Raw field {declaration.name!r} conflicts with the replay schema."
-                            )
-                        continue
-                    observations[key] = declaration
-            self.observation_manager = ObservationManager(observations, self)
 
         if self.cfg.rewards:
             self.reward_manager = RewardManager(self.cfg.rewards, self)
@@ -3415,9 +3391,36 @@ class EmbodiedEnv(BaseEnv):
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         lengths = self._traj_steps[env_ids_t]
         max_len = int(lengths.max().item()) if len(env_ids) > 0 else 0
-        sub = self._traj_buffer[env_ids_t]
-        states = sub["states"][:, :max_len].clone()
-        actions = sub["actions"][:, :max_len].clone()
+        recording = getattr(self, "recording", None)
+        history = (
+            recording.snapshot_history(env_ids, device=self.device)
+            if recording is not None and purpose == "recording"
+            else None
+        )
+        if history is not None:
+            all_states = TensorDict(
+                {}, batch_size=[len(env_ids), max_len + 1], device=self.device
+            )
+            for key in self._traj_buffer["states"].keys(
+                include_nested=True, leaves_only=True
+            ):
+                all_states[key] = history["fields"]["/".join(key)]["values"]
+            states = all_states[:, :max_len]
+            terminal_states = all_states[
+                torch.arange(len(env_ids), device=self.device), lengths
+            ]
+            actions = recording.actions[env_ids_t, :max_len].detach()
+        else:
+            sub = self._traj_buffer[env_ids_t]
+            states = sub["states"][:, :max_len].clone()
+            actions = sub["actions"][:, :max_len].clone()
+            terminal_states = (
+                sub["states"][
+                    torch.arange(len(env_ids), device=self.device), lengths
+                ].clone()
+                if recording is not None
+                else None
+            )
         meta = {
             "artifact_purpose": purpose,
             "lengths": lengths.tolist(),
@@ -3480,15 +3483,11 @@ class EmbodiedEnv(BaseEnv):
         try:
             with os.fdopen(descriptor, "wb") as stream:
                 payload = {"states": states, "actions": actions, "meta": meta}
-                if getattr(self, "recording", None) is not None:
-                    payload["terminal_states"] = self._traj_buffer["states"][
-                        env_ids_t, lengths
-                    ].clone()
+                if terminal_states is not None:
+                    payload["terminal_states"] = terminal_states
                     meta["state_frame_layout"] = "pre_action_plus_terminal/v1"
-                    if purpose == "recording":
-                        payload["raw_observations"] = self.recording.snapshot_history(
-                            env_ids
-                        )
+                if history is not None:
+                    payload["raw_observations"] = history
                 torch.save(payload, stream)
                 stream.flush()
                 os.fsync(stream.fileno())

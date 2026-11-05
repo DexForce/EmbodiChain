@@ -179,8 +179,9 @@ class _ObservationCapture:
         self.episode_owner = episode_owner
         self.timestamp = timestamp
         self.revision = next(_revisions)
-        self.samples: dict[ObservationDescriptor, ObservationSample] = {}
-        self.sources: dict[tuple[str, ...], ObservationSample] = {}
+        self.samples: dict[
+            ObservationDescriptor | tuple[str, ...], ObservationSample
+        ] = {}
         self.fields: dict[str, ObservationSample] = {}
         self._token: Token | None = None
 
@@ -193,28 +194,20 @@ class _ObservationCapture:
 
     def acquire(
         self,
-        descriptor: ObservationDescriptor,
+        key: ObservationDescriptor | tuple[str, ...],
         producer: Callable[[], ObservationSample],
     ) -> ObservationSample:
-        if descriptor not in self.samples:
+        if key not in self.samples:
             sample = producer()
-            if sample.descriptor != descriptor:
-                raise ValueError("A raw producer changed its declared identity.")
-            self.samples[descriptor] = ObservationSample(
-                descriptor,
-                sample.values.detach().clone(),
-                sample.valid.detach().clone(),
-                sample.acquisition_errors,
-            )
-        return self.samples[descriptor]
-
-    def acquire_source(
-        self, key: tuple[str, ...], producer: Callable[[], ObservationSample]
-    ) -> ObservationSample:
-        if key not in self.sources:
-            sample = producer()
-            self.sources[key] = self.acquire(sample.descriptor, lambda: sample)
-        return self.sources[key]
+            if sample.descriptor not in self.samples:
+                self.samples[sample.descriptor] = ObservationSample(
+                    sample.descriptor,
+                    sample.values.detach().clone(),
+                    sample.valid.detach().clone(),
+                    sample.acquisition_errors,
+                )
+            self.samples[key] = self.samples[sample.descriptor]
+        return self.samples[key]
 
     def finish(self, policy: Any) -> ObservationFrame:
         return ObservationFrame(

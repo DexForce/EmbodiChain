@@ -94,12 +94,19 @@ state orders. Physical joint IDs are not observation-column indices.
 
 `lab/gym/observations.py` owns raw descriptors, validity-bearing samples and
 explicit observation frames. `ObservationCfg.consumers` defaults to policy.
-Recording/evidence add terms must produce described `ObservationSample` values;
-plain Tensor policy outputs retain their existing contract. Recording-only
+Recording add terms must produce described `ObservationSample` values;
+plain Tensor policy outputs retain their existing contract. The two consumers
+are policy and recording; evidence adapters read qualified recording fields.
+`ObservationManager` resolves both configured and required replay terms before
+matching their source functions/parameters, including callable strings and
+omitted default arguments. Env only supplies the declarations. Recording-only
 fields never enlarge policy observations or policy rollout allocation.
 
 `observations.get_entity_state` derives native UID, quantity, arena/joint frame,
-representation, shape, dtype and joint order from its source. Explicit boundaries
+representation, shape, dtype and joint order from its source. Immutable
+schema descriptors are reused by semantic value; no simulation handles enter
+the bounded cache. Pose acquisition uses the resolved UID without constructing
+another `SceneEntityCfg` during each step. Explicit boundaries
 share its original acquisition across aliases and existing pose functors.
 Policy transformations receive separate tensors; zero-filled missing sources
 retain false validity and reasons. Preserve configured policy functor/RNG order.

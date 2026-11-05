@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import inspect
 import torch
-from collections.abc import Sequence
+from collections.abc import Sequence, Mapping
+from copy import deepcopy
 from prettytable import PrettyTable
 from typing import TYPE_CHECKING, Union
 
@@ -58,21 +59,31 @@ class ObservationManager(ManagerBase):
     _env: EmbodiedEnv
     """The environment instance."""
 
-    def __init__(self, cfg: object, env: EmbodiedEnv):
+    def __init__(
+        self,
+        cfg: object,
+        env: EmbodiedEnv,
+        *,
+        recording: Mapping[str, ObservationCfg] | None = None,
+    ) -> None:
         """Initialize the observation manager.
 
         Args:
             cfg: A configuration object or dictionary (``dict[str, ObservationCfg]``).
             env: An environment object.
+            recording: Required raw recording terms. Their callables and
+                parameters are resolved here before matching configured sources.
         """
 
+        self._recording_cfgs = deepcopy(dict(recording or {}))
         self._has_raw_channels = False
         self._mode_functor_names: dict[str, list[str]] = dict()
         self._mode_functor_cfgs: dict[str, list[ObservationCfg]] = dict()
         self._mode_class_functor_cfgs: dict[str, list[ObservationCfg]] = dict()
 
         # call the base class (this will parse the functors config)
-        super().__init__(cfg, env)
+        # ManagerBase dispatches preparation only for a truthy configuration.
+        super().__init__(cfg or self._recording_cfgs, env)
 
     def __str__(self) -> str:
         """Returns: A string representation for observation manager."""
@@ -123,7 +134,7 @@ class ObservationManager(ManagerBase):
 
     @property
     def has_raw_channels(self) -> bool:
-        """Whether this manager declares recording or evidence channels."""
+        """Whether this manager declares raw recording channels."""
         return self._has_raw_channels
 
     def compute(
@@ -160,7 +171,7 @@ class ObservationManager(ManagerBase):
                     )
                 elif mode == "add":
                     data = self._call_functor(functor_name, functor_cfg, self._env, obs)
-                    if set(functor_cfg.consumers) - {"policy"}:
+                    if "recording" in functor_cfg.consumers:
                         if not isinstance(data, ObservationSample):
                             raise TypeError(
                                 f"Raw observation {functor_name!r} must return "
@@ -212,51 +223,70 @@ class ObservationManager(ManagerBase):
     Helper functions.
     """
 
-    def _prepare_functors(self):
-        # check if config is dict already
-        if isinstance(self.cfg, dict):
-            cfg_items = self.cfg.items()
-        else:
-            cfg_items = self.cfg.__dict__.items()
-        # iterate over all the functors
-        for functor_name, functor_cfg in cfg_items:
-            # check for non config
-            if functor_cfg is None:
+    def _prepare_functors(self) -> None:
+        items = dict(self.cfg if isinstance(self.cfg, dict) else vars(self.cfg))
+        required = self._recording_cfgs
+        # Normalize through the same owner before comparing aliases. In
+        # particular a module:callable string and its resolved function agree.
+        prepared: dict[str, ObservationCfg] = {}
+        fields: dict[str, ObservationCfg] = {}
+        for name, cfg in items.items():
+            if cfg is not None:
+                self._prepare_source(name, cfg)
+                prepared[name] = cfg
+                if "recording" in cfg.consumers:
+                    if cfg.name in fields:
+                        raise ValueError(
+                            f"Duplicate raw observation field {cfg.name!r}."
+                        )
+                    fields[cfg.name] = cfg
+        for name, cfg in required.items():
+            self._prepare_source(name, cfg)
+            existing = fields.get(cfg.name)
+            if existing is not None:
+                if not self._same_source(existing, cfg):
+                    raise ValueError(
+                        f"Raw field {cfg.name!r} conflicts with the replay schema."
+                    )
                 continue
-            # check for valid config type
-            if not isinstance(functor_cfg, ObservationCfg):
-                raise TypeError(
-                    f"Configuration for the functor '{functor_name}' is not of type ObservationCfg."
-                    f" Received: '{type(functor_cfg)}'."
+            if name in prepared:
+                raise ValueError(
+                    f"Observation name {name!r} collides with recording declarations."
                 )
+            prepared[name] = cfg
+            fields[cfg.name] = cfg
+        for name, cfg in prepared.items():
+            mode = cfg.mode
+            self._mode_functor_names.setdefault(mode, []).append(name)
+            self._mode_functor_cfgs.setdefault(mode, []).append(cfg)
+            self._mode_class_functor_cfgs.setdefault(mode, [])
+            if inspect.isclass(cfg.func):
+                self._mode_class_functor_cfgs[mode].append(cfg)
+            self._has_raw_channels |= "recording" in cfg.consumers
 
-            if not isinstance(functor_cfg.consumers, (tuple, list)):
-                raise ValueError(f"Invalid observation consumers for {functor_name!r}.")
-            consumers = tuple(functor_cfg.consumers)
-            if (
-                not consumers
-                or len(set(consumers)) != len(consumers)
-                or set(consumers) - {"policy", "recording", "evidence"}
-            ):
-                raise ValueError(f"Invalid observation consumers for {functor_name!r}.")
-            if functor_cfg.mode == "modify" and consumers != ("policy",):
-                raise ValueError("Modify functors apply only to policy observations.")
-            functor_cfg.consumers = consumers
-            self._has_raw_channels |= bool(set(consumers) - {"policy"})
+    def _prepare_source(self, name: str, cfg: ObservationCfg) -> None:
+        if not isinstance(cfg, ObservationCfg):
+            raise TypeError(f"Observation {name!r} requires ObservationCfg.")
+        consumers = cfg.consumers
+        if (
+            not isinstance(consumers, (tuple, list))
+            or not consumers
+            or any(value not in ("policy", "recording") for value in consumers)
+            or len(set(consumers)) != len(consumers)
+        ):
+            raise ValueError(f"Invalid observation consumers for {name!r}.")
+        cfg.consumers = tuple(consumers)
+        if cfg.mode == "modify" and cfg.consumers != ("policy",):
+            raise ValueError("Modify functors apply only to policy observations.")
+        self._resolve_common_functor_cfg(name, cfg, min_argc=2)
 
-            # resolve common parameters
-            self._resolve_common_functor_cfg(functor_name, functor_cfg, min_argc=2)
-
-            # check if mode is a new mode
-            if functor_cfg.mode not in self._mode_functor_names:
-                # add new mode
-                self._mode_functor_names[functor_cfg.mode] = list()
-                self._mode_functor_cfgs[functor_cfg.mode] = list()
-                self._mode_class_functor_cfgs[functor_cfg.mode] = list()
-            # add functor name and parameters
-            self._mode_functor_names[functor_cfg.mode].append(functor_name)
-            self._mode_functor_cfgs[functor_cfg.mode].append(functor_cfg)
-
-            # check if the functor is a class
-            if inspect.isclass(functor_cfg.func):
-                self._mode_class_functor_cfgs[functor_cfg.mode].append(functor_cfg)
+    @staticmethod
+    def _same_source(left: ObservationCfg, right: ObservationCfg) -> bool:
+        if left.func is not right.func:
+            return False
+        defaults = {
+            name: parameter.default
+            for name, parameter in inspect.signature(left.func).parameters.items()
+            if parameter.default is not inspect.Parameter.empty
+        }
+        return {**defaults, **left.params} == {**defaults, **right.params}

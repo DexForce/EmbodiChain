@@ -2788,7 +2788,7 @@ def test_recording_only_observation_does_not_expand_policy_rollout_schema():
                 "pose": {
                     "mode": "add",
                     "name": "private_pose",
-                    "consumers": ["recording", "evidence"],
+                    "consumers": ["recording"],
                     "extra": {"shape": [7]},
                 },
             }
@@ -2802,7 +2802,7 @@ def test_recording_only_observation_does_not_expand_policy_rollout_schema():
 
 @pytest.mark.parametrize(
     "consumers",
-    [["recording", "evidence"], "recording", ["unknown"], ["policy", "policy"]],
+    [["recording"], "recording", ["evidence"], ["unknown"], ["policy", "policy"]],
 )
 def test_configured_observation_consumers_decode_and_validate(consumers):
     config = {
@@ -2822,9 +2822,9 @@ def test_configured_observation_consumers_decode_and_validate(consumers):
             }
         },
     }
-    if consumers == ["recording", "evidence"]:
+    if consumers == ["recording"]:
         cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
-        assert cfg.observations.pose.consumers == ("recording", "evidence")
+        assert cfg.observations.pose.consumers == ("recording",)
         assert cfg.observations.pose.extra == {"shape": [7]}
         assert cfg.observations.pose.params["entity_cfg"].uid == "cube"
     else:

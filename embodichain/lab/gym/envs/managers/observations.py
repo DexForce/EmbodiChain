@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import torch
 import os
+from functools import lru_cache
 
 from tensordict import TensorDict
 from typing import TYPE_CHECKING, Literal, Union, List, Dict, Sequence
@@ -61,8 +62,26 @@ if TYPE_CHECKING:
 def _entity_state_descriptor(
     uid: str, obj: object, quantity: str, values: torch.Tensor
 ) -> ObservationDescriptor:
+    names = (
+        tuple(getattr(obj, "joint_names", ()))
+        if quantity in ("qpos", "qvel") and obj is not None
+        else ()
+    )
+    return _state_descriptor(
+        uid, quantity, tuple(values.shape[1:]), values.dtype, names
+    )
+
+
+@lru_cache(maxsize=1024)
+def _state_descriptor(
+    uid: str,
+    quantity: str,
+    shape: tuple[int, ...],
+    dtype: torch.dtype,
+    names: tuple[str, ...],
+) -> ObservationDescriptor:
+    # Only immutable schema values are cached; no environment or asset handle.
     joint = quantity in ("qpos", "qvel")
-    names = tuple(getattr(obj, "joint_names", ())) if joint and obj is not None else ()
     return ObservationDescriptor(
         uid,
         quantity,
@@ -77,8 +96,8 @@ def _entity_state_descriptor(
                 else ("m/s",) if quantity == "lin_vel" else ("rad/s",)
             )
         ),
-        tuple(values.shape[1:]),
-        values.dtype,
+        shape,
+        dtype,
         names,
     )
 
@@ -94,7 +113,7 @@ def _capture_proprioception(env: EmbodiedEnv, proprioception: TensorDict) -> Non
         descriptor = _entity_state_descriptor(
             env.robot.uid, env.robot, quantity, values
         )
-        capture.acquire_source(
+        capture.acquire(
             ("entity_state", env.robot.uid, quantity),
             lambda: ObservationSample(
                 descriptor,
@@ -136,7 +155,10 @@ def get_entity_state(
         raise ValueError(
             "Raw entity state requires the complete entity, not selected bodies."
         )
-    uid = entity_cfg.uid
+    return _read_entity_state(env, entity_cfg.uid, quantity)
+
+
+def _read_entity_state(env: EmbodiedEnv, uid: str, quantity: str) -> ObservationSample:
 
     def produce() -> ObservationSample:
         obj = env.sim.get_asset(uid) if uid in env.sim.asset_uids else None
@@ -177,7 +199,7 @@ def get_entity_state(
             sample.valid.detach().clone(),
             sample.acquisition_errors,
         )
-    return capture.acquire_source(("entity_state", uid, quantity), produce)
+    return capture.acquire(("entity_state", uid, quantity), produce)
 
 
 def get_object_pose(
@@ -217,9 +239,7 @@ def get_object_pose(
     if _current_capture.get() is not None:
         from embodichain.utils.math import xyz_quat_to_4x4_matrix
 
-        sample = get_entity_state(
-            env, obs, SceneEntityCfg(uid=entity_cfg.uid), quantity="pose"
-        )
+        sample = _read_entity_state(env, entity_cfg.uid, "pose")
         return (
             xyz_quat_to_4x4_matrix(sample.values.reshape(-1, 7)).reshape(
                 *sample.values.shape[:-1], 4, 4

@@ -993,7 +993,7 @@ def test_raw_pose_is_acquired_once_before_policy_noise_and_shared_by_aliases():
                 mode="add",
                 name="cube_pose",
                 params={"entity_cfg": entity},
-                consumers=("policy", "recording", "evidence"),
+                consumers=("policy", "recording"),
             ),
             "matrix": ObservationCfg(
                 func=get_object_pose,
@@ -1073,7 +1073,7 @@ def test_raw_observation_missing_entity_has_validity_and_policy_tensor_is_not_ev
                 func=policy_value,
                 mode="add",
                 name="pretend_pose",
-                consumers=("evidence",),
+                consumers=("recording",),
             ),
         },
         env,
@@ -1197,3 +1197,59 @@ def test_pose_observations_keep_group_shape_inside_a_recording_boundary(to_matri
     else:
         torch.testing.assert_close(result, poses)
     getter.assert_called_once_with(to_matrix=False)
+
+
+@pytest.mark.parametrize("as_string", [False, True])
+def test_manager_binds_required_recording_source_once_after_callable_resolution(
+    as_string,
+):
+    from embodichain.lab.gym.envs.managers import (
+        ObservationCfg,
+        ObservationManager,
+        SceneEntityCfg,
+    )
+    from embodichain.lab.gym.envs.managers.observations import get_entity_state
+    from embodichain.lab.gym.observations import _ObservationCapture
+    from tensordict import TensorDict
+
+    env = MockEnv(num_envs=2)
+    source = (
+        "embodichain.lab.gym.envs.managers.observations:get_entity_state"
+        if as_string
+        else get_entity_state
+    )
+    cfg = ObservationCfg(
+        func=source,
+        mode="add",
+        name="scene/cube/pose",
+        params={"entity_cfg": SceneEntityCfg(uid="test_cube")},
+        consumers=("recording",),
+    )
+    required = ObservationCfg(
+        func=get_entity_state,
+        mode="add",
+        name="scene/cube/pose",
+        params={"entity_cfg": SceneEntityCfg(uid="test_cube"), "quantity": "pose"},
+        consumers=("recording",),
+    )
+    manager = ObservationManager(
+        {"cube": cfg}, env, recording={"recording:cube": required}
+    )
+    getter = Mock(wraps=env.test_object.get_local_pose)
+    env.test_object.get_local_pose = getter
+    with _ObservationCapture((0, 0)) as capture:
+        manager.compute(TensorDict({}, batch_size=[2]))
+    assert manager.active_functors["add"] == ["cube"]
+    getter.assert_called_once_with(to_matrix=False)
+    assert capture.fields["scene/cube/pose"].descriptor.entity_uid == "test_cube"
+    conflicting = ObservationCfg(
+        func=get_entity_state,
+        mode="add",
+        name="scene/cube/pose",
+        params={"entity_cfg": SceneEntityCfg(uid="target")},
+        consumers=("recording",),
+    )
+    with pytest.raises(ValueError, match="conflicts with the replay schema"):
+        ObservationManager(
+            {"cube": conflicting}, env, recording={"recording:cube": required}
+        )
