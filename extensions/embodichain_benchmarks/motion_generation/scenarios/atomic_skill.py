@@ -70,6 +70,7 @@ from .atomic_objects import (
 from .base import ScenarioEvaluation, ScenarioProvider
 from .atomic_replay import AtomicReplayRuntime
 from ._replay_diagnostics import resolve_diagnostics_config
+from ._grasp_contacts import contact_configuration
 from .atomic_grasps import (
     _AntipodalGraspSearchError,
     ActiveCaseGraspPoseGenerator,
@@ -160,22 +161,27 @@ class AtomicSkillScenario(ScenarioProvider):
         return get_parallel_jaw_gripper_model(model_id)
 
     def grasp_root_from_tcp(self) -> list[list[float]] | None:
-        """Bind mounted PGI geometry to this fixture's actual solver TCP.
+        """Bind flange-mounted hand geometry to this fixture's solver TCP.
 
-        PGI fixture roots attach at the arm flange, the solver end link. Their
-        configured tool points differ (.15/.17 m and explicit overrides).
+        PGI and Robotiq fixture roots attach at the arm flange, the solver end
+        link. Their configured tool points can differ from GraspKit defaults.
         Native Panda instead uses its actual named hand TCP from the asset;
-        no PGI offset is applied to it.
+        no flange-relative offset is applied to it.
         """
         model = self.grasp_model()
-        if model is not None and model.model_id != "dh_pgi_140_80":
+        if model is not None and model.model_id not in {
+            "dh_pgi_140_80",
+            "robotiq_arg2f_140",
+        }:
             return None
         if self.robot is None:
-            raise RuntimeError("A bound robot is required for the mounted PGI TCP.")
+            raise RuntimeError("A bound robot is required for the mounted hand TCP.")
         solver = self.robot.cfg.solver_cfg[self.control_part]
         tcp = solver.get("tcp") if isinstance(solver, Mapping) else solver.tcp
         if tcp is None:
-            raise ValueError("The mounted PGI fixture requires an explicit solver TCP.")
+            raise ValueError(
+                "The mounted hand fixture requires an explicit solver TCP."
+            )
         return [[float(value) for value in row] for row in tcp]
 
     def trial_metadata(self, case: BenchmarkCase) -> dict[str, object]:
@@ -186,6 +192,12 @@ class AtomicSkillScenario(ScenarioProvider):
             physics = dict(self.track.config.get("physics", {}))
             values["replay_clock"] = physics.get("clock", "fixed_samples")
             values["physical_replay_diagnostics"] = resolve_diagnostics_config(physics)
+            values["grasp_contact_configuration"] = {
+                part: {"finger_links": list(links), "distance_threshold_m": threshold}
+                for part, (links, threshold) in contact_configuration(
+                    self.track.config
+                ).items()
+            }
             if self.simulation is not None:
                 values["replay_control_period_s"] = float(
                     self.simulation.sim_config.physics_dt
@@ -315,6 +327,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 if part in self._gripper_states:
                     raise ValueError(f"Gripper {part!r} is configured twice.")
                 self._gripper_states[part] = (open_state, grasp_state)
+            contact_configuration(track.config)
             self.end_effector_part = next(iter(self._gripper_states))
             self._gripper_open, self._gripper_grasp = self._gripper_states[
                 self.end_effector_part
@@ -1091,6 +1104,11 @@ class AtomicSkillScenario(ScenarioProvider):
                 "timing_scope": "atomic_action_compile",
                 **benchmark_motion_attribution(case.skill_id),
                 "physics_validation": "common_joint_target_replay",
+                **(
+                    {"grasp_contacts": dict(observation.grasp_contact_metadata)}
+                    if observation is not None and observation.grasp_contact_metadata
+                    else {}
+                ),
                 **(
                     {"physical_replay_trace": dict(observation.replay_diagnostics)}
                     if observation is not None and observation.replay_diagnostics
