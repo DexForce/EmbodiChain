@@ -502,4 +502,29 @@ These interfaces install no standard post-policy producer or control factory.
    :members:
 
 .. automodule:: embodichain.lab.task_program.integrations.simulation.twist_session
+
+Declared articulation continuation and drawer services
+------------------------------------------------------
+
+Prismatic lowerers ground explicit source-qualified joint targets, withdrawal
+frames and PARK commands into the shared skills. The continuation registry owns
+actual ``ExecutionPlanAttempt`` installation history for exact declared
+program/episode occurrences. A preview is not an installation and cannot grant
+withdrawal or PARK recovery authority.
+
+Drawer and preshape adapters validate original source stamps and native owners
+around reads. They provide observed geometry and typed command provenance,
+select no alternate skill registry, and import no Task Engine state. These
+interfaces do not install the standard Press/Twist post-policy producer.
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.prismatic_lowering
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.articulation_session
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.drawer_planning
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.slide_preshape
    :members:

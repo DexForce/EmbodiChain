@@ -85,8 +85,8 @@ compiler, skill-registry replacement or simulator stepping belongs here.
 Required missing providers fail before planning. Complete release previews stay
 on the same engine and observation and authorize no physical effects. The
 single-environment source paths reject other batches. AxisAlign rejects inherited
-Pick-only options it does not implement; drawer-specific Place is unavailable
-until its separate action owner is installed.
+Pick-only options it does not implement; explicit drawer Place and held transport require the installed
+`drawer_planning` provider and complete-plan handler.
 
 Held transport and Pour retain their default paths. Explicit held-alignment and
 staging recovery consume declared geometry and owned command observations from
@@ -99,8 +99,8 @@ Released-hand cleanup and Park use exact suffix authority and the existing
 complete-plan/preview pipeline. `_released_park.py` is the unique owner of generic
 empty-hand Park qualification and bounded vias; articulation integrations reuse
 it rather than duplicating the algorithm. Articulation authorization, withdrawal
-and drawer handlers belong to their separate owner; drawer transport explicitly
-rejects until installed. New service ports are optional, typed, same-robot and
+and drawer handlers belong to `articulation_continuation`,
+`primitives/_articulation_recovery` and `primitives/_drawer_planning`. New service ports are optional, typed, same-robot and
 borrowed; construction captures no native state or commands.
 
 `ExecutionPlanLifecycle` is an optional host-owned adoption port. It receives an
@@ -326,3 +326,10 @@ measured feedback. `articulation_evidence`, `control_validation` and
 `twist_feedback` interpret explicit joint/contact facts through pure
 `compute.articulation` rules. None substitutes geometric clearance for physical
 contact or makes a missing measurement successful.
+
+Prismatic recovery keeps explicit B1/env0, 390-frame and original segment retry
+bounds. Exact installed predecessor facts authorize continuation; planning
+previews cannot advance that history. `simulation/articulation_session.py`
+implements the shared planning/lifecycle provider, while physical drawer and
+preshape reads remain in the Scene and simulation adapters. Candidate selection,
+reverse entry, release lifts, retry budgets and RNG stay with the shared skill.

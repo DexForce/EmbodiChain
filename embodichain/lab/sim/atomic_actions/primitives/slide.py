@@ -19,9 +19,15 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from numbers import Real
 from typing import ClassVar, Literal
+from collections.abc import Callable
+from functools import partial
+from embodichain.lab.sim.atomic_actions.articulation_continuation import (
+    SlidePlanningRecovery,
+)
+from embodichain.lab.sim.atomic_actions.policies import PlanningRecovery
 
 import torch
 
@@ -32,7 +38,11 @@ from embodichain.lab.sim.atomic_actions.control import (
     OPEN_COMMAND,
     JointPositionCommand,
 )
-from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
+from embodichain.lab.sim.atomic_actions.core import (
+    AtomicAction,
+    CompletePlanBuilder,
+    ObjectSemantics,
+)
 from embodichain.lab.sim.atomic_actions.effects import StateDelta
 from embodichain.lab.sim.atomic_actions.goals import (
     ObjectActionGoal,
@@ -143,6 +153,9 @@ class SlideGoal(ObjectActionGoal):
 class SlideOptions(ActionOptions):
     """Per-invocation sliding behavior for a translating articulation link."""
 
+    drawer_containment: bool = field(default=False, kw_only=True)
+    """Select explicit source drawer planning with its declared physical provider."""
+
     direction: Literal["pull", "push"] = "pull"
     """Whether to pull the part open or push it closed."""
 
@@ -155,6 +168,9 @@ class SlideOptions(ActionOptions):
     translation_distance: float = 0.15
     """Distance traveled along the pull or push direction."""
 
+    qualify_hand_clearance: bool = field(default=False, kw_only=True)
+    """Use explicit seven-state full-hand/table grasp qualification."""
+
     preshape_fraction: float = 0.0
     """Fraction from the bound open to grasp command during approach and reach."""
 
@@ -165,6 +181,10 @@ class SlideOptions(ActionOptions):
     """Distance opposite grasp Z while opening; zero holds the arm still."""
 
     def __post_init__(self) -> None:
+        if type(self.drawer_containment) is not bool:
+            raise TypeError("drawer_containment must be bool.")
+        if type(self.qualify_hand_clearance) is not bool:
+            raise TypeError("qualify_hand_clearance must be bool.")
         if self.direction not in ("pull", "push"):
             raise ValueError("direction must be either 'pull' or 'push'.")
         if self.hand_interp_steps < 1:
@@ -197,6 +217,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
     skill_id: ClassVar[str] = "slide"
     GoalType: ClassVar[type] = SlideGoal
     OptionsType: ClassVar[type] = SlideOptions
+    PlanningRecoveryType: ClassVar[type[PlanningRecovery]] = SlidePlanningRecovery
     open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -216,13 +237,104 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         self.num_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
-    def _plan(
+    def _validate_segment_motion_recovery(self, request, context) -> None:
+        if (
+            type(request.recovery_policy.planning_recovery) is not SlidePlanningRecovery
+            or context.batch_size != 1
+            or context.env_ids.tolist() != [0]
+            or request.motion_policy.dynamic_collision_mode != "off"
+            or request.motion_policy.segment_sample_count_retries != (260, 320)
+            or request.motion_policy.segment_continuous_ik_recovery
+        ):
+            raise ValueError(
+                "Source articulation segments require their typed B1 recovery and exact declared retry grid."
+            )
+
+    def plan_complete_request(
         self,
-        request: ResolvedActionRequest[
-            SlideGoal,
-            SlideOptions,
-        ],
+        request: ResolvedActionRequest[SlideGoal, SlideOptions],
         context: PlanningContext,
+        *,
+        build: CompletePlanBuilder,
+        external_nominal: bool = False,
+    ) -> ActionPlan:
+        """Retain optional aperture recovery around complete engine qualification."""
+        from embodichain.lab.sim.atomic_actions.primitives._slide_preshape import (
+            plan_complete_preshape,
+        )
+
+        if request.skill_options.drawer_containment:
+            from embodichain.lab.sim.atomic_actions.primitives._drawer_planning import (
+                validate_close,
+            )
+
+            validate_close(self, request, context, external_nominal=external_nominal)
+
+        return plan_complete_preshape(
+            self, request, context, build=build, external_nominal=external_nominal
+        )
+
+    def _plan(self, request, context):
+        if request.skill_options.qualify_hand_clearance:
+            provider = self.planning_services.slide_hand_clearance_provider
+            if provider is None:
+                raise ValueError("Slide hand clearance requires an explicit provider.")
+            return self._plan_core(
+                request,
+                context,
+                clearance=provider.nominal(request, context),
+                candidate_facts=[],
+            )
+        return self._plan_core(request, context)
+
+    def _plan_core(
+        self,
+        request: ResolvedActionRequest[SlideGoal, SlideOptions],
+        context: PlanningContext,
+        *,
+        clearance=None,
+        candidate_facts=None,
+    ) -> ActionPlan:
+        if (
+            request.recovery_policy.planning_recovery is None
+            and self.planning_services.articulation_continuation_provider is None
+        ):
+            return self._plan_nominal(
+                request, context, clearance=clearance, candidate_facts=candidate_facts
+            )
+        from embodichain.lab.sim.atomic_actions.primitives._articulation_recovery import (
+            plan_articulation,
+        )
+
+        return plan_articulation(
+            self,
+            request,
+            context,
+            lambda selected, generate: self._plan_nominal(
+                selected,
+                context,
+                generate=generate,
+                clearance=clearance,
+                candidate_facts=candidate_facts,
+            ),
+            kind="slide",
+        )
+
+    def _qualify_final_plan(self, request, context, plan):
+        from embodichain.lab.sim.atomic_actions.primitives._articulation_recovery import (
+            reject_articulation_transform,
+        )
+
+        return reject_articulation_transform(self, request, plan)
+
+    def _plan_nominal(
+        self,
+        request: ResolvedActionRequest[SlideGoal, SlideOptions],
+        context: PlanningContext,
+        *,
+        generate: Callable | None = None,
+        clearance=None,
+        candidate_facts=None,
     ) -> ActionPlan:
         """Plan the complete pull/push sequence without stepping simulation."""
         if request.motion_policy.strategy != "ik_interp":
@@ -230,6 +342,11 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
                 "Slide requires strategy='ik_interp' because its contact path "
                 "must preserve every Cartesian sample."
             )
+        plan_pose_segment = (
+            self._plan_pose_segment
+            if generate is None
+            else partial(self._plan_pose_segment, generate=generate)
+        )
         target = self.require_goal(request)
         affordance = self._require_slide_affordance(target.semantics)
         options = request.skill_options
@@ -320,11 +437,32 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         grasp_generator = self.planning_services.grasp_pose_generator(
             grasp_target.target_id
         )
-        candidates = affordance.get_grasp_candidates(
-            grasp_generator,
-            link_pose,
-            translation_axis_world,
-        )
+        if clearance is None:
+            candidates = affordance.get_grasp_candidates(
+                grasp_generator, link_pose, translation_axis_world
+            )
+        else:
+            from embodichain.toolkits.graspkit.pg_grasp.preshape import (
+                generate_handle_grasp_candidates,
+            )
+            from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+                AffordancePoseCandidates,
+            )
+
+            filtered = generate_handle_grasp_candidates(
+                grasp_generator,
+                mesh_vertices=affordance.mesh_vertices,
+                mesh_triangles=affordance.mesh_triangles,
+                obj_poses=link_pose,
+                approach_direction=translation_axis_world,
+                clearance=clearance,
+            )
+            if candidate_facts is not None:
+                candidate_facts.append((filtered.required_width, filtered.width_fit))
+            candidates = AffordancePoseCandidates.from_rows(
+                [(poses, costs) for poses, _, costs in filtered.rows],
+                device=link_pose.device,
+            )
         grasp_sample = affordance.sample_candidates(
             candidates,
             sampling=context.affordance_sampling,
@@ -384,7 +522,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             options.hand_interp_steps,
             direction=direction,
         )
-        approach_success, approach_arm = self._plan_pose_segment(
+        approach_success, approach_arm = plan_pose_segment(
             approach_xpos,
             start_arm_qpos,
             control_part,
@@ -398,7 +536,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             approach_axis,
             n_waypoints=motion_lengths[1] - 1,
         )
-        reach_success, reach_arm = self._plan_pose_segment(
+        reach_success, reach_arm = plan_pose_segment(
             reach_keyframes,
             approach_arm[:, -1],
             control_part,
@@ -413,7 +551,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             translation_axis_world,
             n_waypoints=motion_lengths[2] - 1,
         )
-        translate_success, translate_arm = self._plan_pose_segment(
+        translate_success, translate_arm = plan_pose_segment(
             translate_keyframes,
             reach_arm[:, -1],
             control_part,
@@ -437,7 +575,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
                 release_axis,
                 n_waypoints=options.hand_interp_steps - 1,
             )
-            release_success, release_arm = self._plan_pose_segment(
+            release_success, release_arm = plan_pose_segment(
                 release_keyframes,
                 translate_arm[:, -1],
                 control_part,
@@ -465,7 +603,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
                 return_axis,
                 n_waypoints=motion_lengths[3] - 1,
             )
-            return_success, return_arm = self._plan_pose_segment(
+            return_success, return_arm = plan_pose_segment(
                 return_keyframes,
                 (translate_arm if release_arm is None else release_arm)[:, -1],
                 control_part,
@@ -669,24 +807,45 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         *,
         interpolation_dt: float,
         cartesian_linear: bool = False,
+        generate: Callable | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        result = self.motion_generator.generate(
+        segment_policy = (
+            replace(
+                request.motion_policy,
+                segment_sample_count_retries=(),
+                segment_continuous_ik_recovery=False,
+            )
+            if cartesian_linear
+            else request.motion_policy
+        )
+        result = (self.motion_generator.generate if generate is None else generate)(
             build_pose_plan_states(target_pose),
-            options=request.motion_policy.to_motion_gen_options(
+            options=segment_policy.to_motion_gen_options(
                 start_qpos=start_qpos,
                 control_part=control_part,
                 sample_count=sample_count,
                 interpolation_dt=interpolation_dt,
                 cartesian_linear=cartesian_linear,
+                cartesian_keyframes=generate is not None and not cartesian_linear,
             ),
         )
         assert isinstance(result.success, torch.Tensor)
-        assert result.positions is not None
-        assert result.dt is not None
+        positions, dt = result.positions, result.dt
+        if (
+            generate is not None
+            and not result.success.all()
+            and result.rejected_candidate is not None
+        ):
+            positions, dt = (
+                result.rejected_candidate.positions,
+                result.rejected_candidate.dt,
+            )
+        assert positions is not None
+        assert dt is not None
         return result.success, resample_planned_trajectory(
-            result.positions,
+            positions,
             sample_count,
-            dt=result.dt,
+            dt=dt,
             control_dt=interpolation_dt,
             arrival_indices=result.waypoint_indices,
         )

@@ -186,8 +186,6 @@ class PlaceOptions(ActionOptions):
             raise TypeError("drawer_placement must be bool.")
         if type(self.preserve_vertical) is not bool:
             raise TypeError("preserve_vertical must be bool.")
-        if self.drawer_placement:
-            raise ValueError("Drawer Place is not installed in this Pick/Place layer.")
         if self.preserve_vertical and not self.drawer_placement:
             raise ValueError("preserve_vertical requires explicit drawer planning.")
         if any(
@@ -343,7 +341,11 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             )
         if not request.skill_options.drawer_placement:
             return build(request)
-        raise ValueError("Drawer Place is not installed in this Pick/Place layer.")
+        from ._drawer_planning import plan_place
+
+        return plan_place(
+            self, request, context, build=build, external_nominal=external_nominal
+        )
 
     def _plan(
         self,

@@ -1,0 +1,1276 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "scope": "Complete canonical Slide pipeline, cached actual Antipodal rows and actual URDF/FK hand geometry; kinematic solver oracle, not native physical success",
+  "cases": [
+    {
+      "mode": "recovered",
+      "expected": {
+        "success": [
+          true
+        ],
+        "commands": "ff19539ac6ff6e42a135d5d6050b18723356852e2ef7942a2d8b2c2a50843e04",
+        "positions": "c8e4c134c190eaa04d06b7c2bdb17b4cc0eedc1134e02d17b181915f1cfa11d0",
+        "dt": "14175f954854aeb3f30a609e5d0f4dd4a1915faca2db46041a0ce9c187a6ba15",
+        "segments": [
+          [
+            "approach",
+            0,
+            37
+          ],
+          [
+            "reach",
+            37,
+            74
+          ],
+          [
+            "close",
+            74,
+            79
+          ],
+          [
+            "pull",
+            79,
+            115
+          ],
+          [
+            "open",
+            115,
+            120
+          ]
+        ],
+        "metadata": {
+          "joint_target": {
+            "articulation_id": "drawer",
+            "joint_name": "rail",
+            "position": 0.2,
+            "already_satisfied": [
+              false
+            ]
+          },
+          "affordance_sample": {
+            "grasp": {
+              "pose_frame": "world",
+              "selected_poses": [
+                [
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.20000001788139343
+                  ],
+                  [
+                    0.5955682992935181,
+                    0.0,
+                    -0.8033046722412109,
+                    0.01416756585240364
+                  ],
+                  [
+                    -0.8033046722412109,
+                    0.0,
+                    -0.5955682992935181,
+                    0.1136336475610733
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "reference_poses": [
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.20000000298023224
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.10000000149011612
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "success": [
+                true
+              ],
+              "env_ids": [
+                0
+              ],
+              "key": "source-slide:grasp",
+              "sampling": null,
+              "candidate_ids": [
+                26
+              ],
+              "valid_candidate_counts": [
+                14
+              ],
+              "unique_candidate_counts": [
+                14
+              ],
+              "reused": [
+                false
+              ]
+            }
+          },
+          "gen_sim_e6_preshape": {
+            "nominal_fraction": 0.85,
+            "nominal_usable_aperture_m": 0.02700002557039261,
+            "required_width_m": 0.03393314406275749,
+            "selected_fraction": 0.78,
+            "measurements": [
+              {
+                "fraction": 0.84,
+                "usable_aperture_m": 0.028000012695789337
+              },
+              {
+                "fraction": 0.83,
+                "usable_aperture_m": 0.028999999821186066
+              },
+              {
+                "fraction": 0.82,
+                "usable_aperture_m": 0.029999986946582794
+              },
+              {
+                "fraction": 0.81,
+                "usable_aperture_m": 0.030999974071979523
+              },
+              {
+                "fraction": 0.8,
+                "usable_aperture_m": 0.03200002080202102
+              },
+              {
+                "fraction": 0.79,
+                "usable_aperture_m": 0.03300000792741775
+              },
+              {
+                "fraction": 0.78,
+                "usable_aperture_m": 0.03399999505281448
+              }
+            ],
+            "accepted_plan": true,
+            "physical_success": null
+          }
+        },
+        "message": [],
+        "failure": null,
+        "raw_candidates": [
+          {
+            "approach": [
+              [
+                0.0,
+                -0.7071067690849304,
+                -0.7071067690849304
+              ]
+            ],
+            "pose": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "draws": [
+              0.4312195529029976,
+              0.764516722963209,
+              0.7162814736366272
+            ]
+          },
+          {
+            "approach": [
+              [
+                0.0,
+                -0.7071067690849304,
+                -0.7071067690849304
+              ]
+            ],
+            "pose": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "draws": [
+              0.4312195529029976,
+              0.764516722963209,
+              0.7162814736366272
+            ]
+          }
+        ],
+        "measurements": [
+          0.84,
+          0.83,
+          0.82,
+          0.81,
+          0.8,
+          0.79,
+          0.78
+        ],
+        "motion_calls": [
+          {
+            "joint": false,
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0,
+                0.4000000059604645
+              ]
+            ],
+            "draws": [
+              0.2945891403757893,
+              0.1373603060290447,
+              0.9766009449958801
+            ],
+            "targets_sha256": "0f987eb8cad3dc73ed79bf595c9017e39631dc67565bd4156a7e6ef5b22ba824"
+          },
+          {
+            "joint": false,
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.20000001788139343,
+                0.09449803829193115,
+                0.17319047451019287
+              ]
+            ],
+            "draws": [
+              0.5834846657224864,
+              0.06883434180788417,
+              0.1642385721206665
+            ],
+            "targets_sha256": "150fe288500895ba7fe1a4979b8a912b258458610cad487945559f3ed38f72cc"
+          },
+          {
+            "joint": false,
+            "count": 36,
+            "preserve": true,
+            "start": [
+              [
+                0.20000001788139343,
+                0.01416756585240364,
+                0.1136336475610733
+              ]
+            ],
+            "draws": [
+              0.38579062338198966,
+              0.8776598039772437,
+              0.3063895106315613
+            ],
+            "targets_sha256": "5a0e7be3ceb7fee30d3df847ba68de564c5dc49684986a985b6984398be34f78"
+          },
+          {
+            "joint": false,
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.20000001788139343,
+                0.21416756510734558,
+                0.1136336475610733
+              ]
+            ],
+            "draws": [
+              0.759747397051814,
+              0.8521969082007004,
+              0.6215909719467163
+            ],
+            "targets_sha256": "9253a37cfb3850257f9d3c57435efad4a8096d2b6c1811cdbca49ab6919e3f38"
+          }
+        ],
+        "next_random": [
+          0.2661453632334173,
+          0.9768467305589983,
+          0.25238680839538574
+        ]
+      }
+    },
+    {
+      "mode": "nominal",
+      "expected": {
+        "success": [
+          true
+        ],
+        "commands": "6e9a8d0736781f0e79701dbb86635d78abe64779dba4cbe8cc2272a8a486c54d",
+        "positions": "994718b992481b16d78c412d409c516792b4a4caa81fb0628d86f0f7734ef7c2",
+        "dt": "14175f954854aeb3f30a609e5d0f4dd4a1915faca2db46041a0ce9c187a6ba15",
+        "segments": [
+          [
+            "approach",
+            0,
+            37
+          ],
+          [
+            "reach",
+            37,
+            74
+          ],
+          [
+            "close",
+            74,
+            79
+          ],
+          [
+            "pull",
+            79,
+            115
+          ],
+          [
+            "open",
+            115,
+            120
+          ]
+        ],
+        "metadata": {
+          "joint_target": {
+            "articulation_id": "drawer",
+            "joint_name": "rail",
+            "position": 0.2,
+            "already_satisfied": [
+              false
+            ]
+          },
+          "affordance_sample": {
+            "grasp": {
+              "pose_frame": "world",
+              "selected_poses": [
+                [
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.20000001788139343
+                  ],
+                  [
+                    0.7071068286895752,
+                    0.0,
+                    -0.7071068286895752,
+                    0.012243608944118023
+                  ],
+                  [
+                    -0.7071068286895752,
+                    0.0,
+                    -0.7071068286895752,
+                    0.11586441099643707
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "reference_poses": [
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.20000000298023224
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.10000000149011612
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "success": [
+                true
+              ],
+              "env_ids": [
+                0
+              ],
+              "key": "source-slide:grasp",
+              "sampling": null,
+              "candidate_ids": [
+                8
+              ],
+              "valid_candidate_counts": [
+                30
+              ],
+              "unique_candidate_counts": [
+                30
+              ],
+              "reused": [
+                false
+              ]
+            }
+          }
+        },
+        "message": [],
+        "failure": null,
+        "raw_candidates": [
+          {
+            "approach": [
+              [
+                0.0,
+                -0.7071067690849304,
+                -0.7071067690849304
+              ]
+            ],
+            "pose": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "draws": [
+              0.4312195529029976,
+              0.764516722963209,
+              0.7162814736366272
+            ]
+          }
+        ],
+        "measurements": [],
+        "motion_calls": [
+          {
+            "joint": false,
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0,
+                0.4000000059604645
+              ]
+            ],
+            "draws": [
+              0.2945891403757893,
+              0.1373603060290447,
+              0.9766009449958801
+            ],
+            "targets_sha256": "2d08f9437bb6be915cae843e6dff695a0ffb65d3dab38c4f3b75bd07cb89edf6"
+          },
+          {
+            "joint": false,
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.20000001788139343,
+                0.0829542875289917,
+                0.18657508492469788
+              ]
+            ],
+            "draws": [
+              0.5834846657224864,
+              0.06883434180788417,
+              0.1642385721206665
+            ],
+            "targets_sha256": "c4fd9553efcf72907e2a6e661acd2a5cf6e5d434f3a324b41b55f736301afe9a"
+          },
+          {
+            "joint": false,
+            "count": 36,
+            "preserve": true,
+            "start": [
+              [
+                0.20000001788139343,
+                0.012243608944118023,
+                0.11586441099643707
+              ]
+            ],
+            "draws": [
+              0.38579062338198966,
+              0.8776598039772437,
+              0.3063895106315613
+            ],
+            "targets_sha256": "4bf0982440863b06ff0543c17fa89eb48ea07dd54cd71db960e1569203501130"
+          },
+          {
+            "joint": false,
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.20000001788139343,
+                0.21224361658096313,
+                0.11586441099643707
+              ]
+            ],
+            "draws": [
+              0.759747397051814,
+              0.8521969082007004,
+              0.6215909719467163
+            ],
+            "targets_sha256": "3912523a81535da2dba1247cfbbc75870d287bb64a194b50fd148b6736463f8d"
+          }
+        ],
+        "next_random": [
+          0.2661453632334173,
+          0.9768467305589983,
+          0.25238680839538574
+        ]
+      }
+    },
+    {
+      "mode": "rebuild_failed",
+      "expected": {
+        "success": [
+          false
+        ],
+        "commands": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "positions": "cf1cbb66a638b4860a516671fb74850e6ccf787fe6c4c8d29e9c04efe880bd05",
+        "dt": "cf1cbb66a638b4860a516671fb74850e6ccf787fe6c4c8d29e9c04efe880bd05",
+        "segments": [],
+        "metadata": {
+          "gen_sim_e6_preshape": {
+            "nominal_fraction": 0.85,
+            "nominal_usable_aperture_m": 0.02700002557039261,
+            "required_width_m": 0.03393314406275749,
+            "selected_fraction": 0.78,
+            "measurements": [
+              {
+                "fraction": 0.84,
+                "usable_aperture_m": 0.028000012695789337
+              },
+              {
+                "fraction": 0.83,
+                "usable_aperture_m": 0.028999999821186066
+              },
+              {
+                "fraction": 0.82,
+                "usable_aperture_m": 0.029999986946582794
+              },
+              {
+                "fraction": 0.81,
+                "usable_aperture_m": 0.030999974071979523
+              },
+              {
+                "fraction": 0.8,
+                "usable_aperture_m": 0.03200002080202102
+              },
+              {
+                "fraction": 0.79,
+                "usable_aperture_m": 0.03300000792741775
+              },
+              {
+                "fraction": 0.78,
+                "usable_aperture_m": 0.03399999505281448
+              }
+            ],
+            "accepted_plan": false,
+            "physical_success": null,
+            "rebuild_failure": {
+              "code": "planning_failed",
+              "messages": [],
+              "metadata": {
+                "joint_target": {
+                  "articulation_id": "drawer",
+                  "joint_name": "rail",
+                  "position": 0.2,
+                  "already_satisfied": [
+                    false
+                  ]
+                },
+                "affordance_sample": {
+                  "grasp": {
+                    "pose_frame": "world",
+                    "selected_poses": [
+                      [
+                        [
+                          0.0,
+                          1.0,
+                          0.0,
+                          0.20000001788139343
+                        ],
+                        [
+                          0.5955682992935181,
+                          0.0,
+                          -0.8033046722412109,
+                          0.01416756585240364
+                        ],
+                        [
+                          -0.8033046722412109,
+                          0.0,
+                          -0.5955682992935181,
+                          0.1136336475610733
+                        ],
+                        [
+                          0.0,
+                          0.0,
+                          0.0,
+                          1.0
+                        ]
+                      ]
+                    ],
+                    "reference_poses": [
+                      [
+                        [
+                          1.0,
+                          0.0,
+                          0.0,
+                          0.20000000298023224
+                        ],
+                        [
+                          0.0,
+                          1.0,
+                          0.0,
+                          0.0
+                        ],
+                        [
+                          0.0,
+                          0.0,
+                          1.0,
+                          0.10000000149011612
+                        ],
+                        [
+                          0.0,
+                          0.0,
+                          0.0,
+                          1.0
+                        ]
+                      ]
+                    ],
+                    "success": [
+                      true
+                    ],
+                    "env_ids": [
+                      0
+                    ],
+                    "key": "source-slide:grasp",
+                    "sampling": null,
+                    "candidate_ids": [
+                      26
+                    ],
+                    "valid_candidate_counts": [
+                      14
+                    ],
+                    "unique_candidate_counts": [
+                      14
+                    ],
+                    "reused": [
+                      false
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "message": [
+          "Failed to resolve an articulated-part grasp pose."
+        ],
+        "failure": "planning_failed",
+        "raw_candidates": [
+          {
+            "approach": [
+              [
+                0.0,
+                -0.7071067690849304,
+                -0.7071067690849304
+              ]
+            ],
+            "pose": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "draws": [
+              0.4312195529029976,
+              0.764516722963209,
+              0.7162814736366272
+            ]
+          },
+          {
+            "approach": [
+              [
+                0.0,
+                -0.7071067690849304,
+                -0.7071067690849304
+              ]
+            ],
+            "pose": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "draws": [
+              0.4312195529029976,
+              0.764516722963209,
+              0.7162814736366272
+            ]
+          }
+        ],
+        "measurements": [
+          0.84,
+          0.83,
+          0.82,
+          0.81,
+          0.8,
+          0.79,
+          0.78
+        ],
+        "motion_calls": [
+          {
+            "joint": false,
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0,
+                0.4000000059604645
+              ]
+            ],
+            "draws": [
+              0.2945891403757893,
+              0.1373603060290447,
+              0.9766009449958801
+            ],
+            "targets_sha256": "0f987eb8cad3dc73ed79bf595c9017e39631dc67565bd4156a7e6ef5b22ba824"
+          },
+          {
+            "joint": false,
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0,
+                0.4000000059604645
+              ]
+            ],
+            "draws": [
+              0.5834846657224864,
+              0.06883434180788417,
+              0.1642385721206665
+            ],
+            "targets_sha256": "5e0bff3ac1fc1d5024978eb3885a17f359429b0a7328a25e1a3143fa37c4e33d"
+          },
+          {
+            "joint": false,
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0,
+                0.4000000059604645
+              ]
+            ],
+            "draws": [
+              0.38579062338198966,
+              0.8776598039772437,
+              0.3063895106315613
+            ],
+            "targets_sha256": "03aa0050d24423bceb224c2b0e04312db5475c7b76925cd1b6e3b5bd33f33a6e"
+          },
+          {
+            "joint": false,
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.20000001788139343,
+                0.09449803829193115,
+                0.17319047451019287
+              ]
+            ],
+            "draws": [
+              0.759747397051814,
+              0.8521969082007004,
+              0.6215909719467163
+            ],
+            "targets_sha256": "150fe288500895ba7fe1a4979b8a912b258458610cad487945559f3ed38f72cc"
+          },
+          {
+            "joint": false,
+            "count": 36,
+            "preserve": true,
+            "start": [
+              [
+                0.20000001788139343,
+                0.01416756585240364,
+                0.1136336475610733
+              ]
+            ],
+            "draws": [
+              0.2661453632334173,
+              0.9768467305589983,
+              0.25238680839538574
+            ],
+            "targets_sha256": "5a0e7be3ceb7fee30d3df847ba68de564c5dc49684986a985b6984398be34f78"
+          },
+          {
+            "joint": false,
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.20000001788139343,
+                0.21416756510734558,
+                0.1136336475610733
+              ]
+            ],
+            "draws": [
+              0.7128419480025945,
+              0.8035081863511255,
+              0.6809091567993164
+            ],
+            "targets_sha256": "9253a37cfb3850257f9d3c57435efad4a8096d2b6c1811cdbca49ab6919e3f38"
+          }
+        ],
+        "next_random": [
+          0.2945891403757893,
+          0.1373603060290447,
+          0.9766009449958801
+        ]
+      }
+    },
+    {
+      "mode": "aperture_exhausted",
+      "expected": {
+        "success": [
+          false
+        ],
+        "commands": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "positions": "cf1cbb66a638b4860a516671fb74850e6ccf787fe6c4c8d29e9c04efe880bd05",
+        "dt": "cf1cbb66a638b4860a516671fb74850e6ccf787fe6c4c8d29e9c04efe880bd05",
+        "segments": [],
+        "metadata": {},
+        "message": [
+          "Failed to resolve an articulated-part grasp pose."
+        ],
+        "failure": "planning_failed",
+        "raw_candidates": [
+          {
+            "approach": [
+              [
+                0.0,
+                -0.7071067690849304,
+                -0.7071067690849304
+              ]
+            ],
+            "pose": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "draws": [
+              0.4312195529029976,
+              0.764516722963209,
+              0.7162814736366272
+            ]
+          }
+        ],
+        "measurements": [
+          0.84,
+          0.83,
+          0.82,
+          0.81,
+          0.8,
+          0.79,
+          0.78,
+          0.77,
+          0.76,
+          0.75
+        ],
+        "motion_calls": [],
+        "next_random": [
+          0.2945891403757893,
+          0.1373603060290447,
+          0.9766009449958801
+        ]
+      }
+    },
+    {
+      "mode": "table_rejected",
+      "expected": {
+        "success": [
+          false
+        ],
+        "commands": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "positions": "cf1cbb66a638b4860a516671fb74850e6ccf787fe6c4c8d29e9c04efe880bd05",
+        "dt": "cf1cbb66a638b4860a516671fb74850e6ccf787fe6c4c8d29e9c04efe880bd05",
+        "segments": [],
+        "metadata": {
+          "gen_sim_e6_preshape": {
+            "nominal_fraction": 0.85,
+            "nominal_usable_aperture_m": 0.02700002557039261,
+            "required_width_m": 0.03393314406275749,
+            "selected_fraction": 0.78,
+            "measurements": [
+              {
+                "fraction": 0.84,
+                "usable_aperture_m": 0.028000012695789337
+              },
+              {
+                "fraction": 0.83,
+                "usable_aperture_m": 0.028999999821186066
+              },
+              {
+                "fraction": 0.82,
+                "usable_aperture_m": 0.029999986946582794
+              },
+              {
+                "fraction": 0.81,
+                "usable_aperture_m": 0.030999974071979523
+              },
+              {
+                "fraction": 0.8,
+                "usable_aperture_m": 0.03200002080202102
+              },
+              {
+                "fraction": 0.79,
+                "usable_aperture_m": 0.03300000792741775
+              },
+              {
+                "fraction": 0.78,
+                "usable_aperture_m": 0.03399999505281448
+              }
+            ],
+            "accepted_plan": false,
+            "physical_success": null,
+            "rebuild_failure": {
+              "code": "planning_failed",
+              "messages": [
+                "Failed to resolve an articulated-part grasp pose."
+              ],
+              "metadata": {}
+            }
+          }
+        },
+        "message": [
+          "Failed to resolve an articulated-part grasp pose."
+        ],
+        "failure": "planning_failed",
+        "raw_candidates": [
+          {
+            "approach": [
+              [
+                0.0,
+                -0.7071067690849304,
+                -0.7071067690849304
+              ]
+            ],
+            "pose": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "draws": [
+              0.4312195529029976,
+              0.764516722963209,
+              0.7162814736366272
+            ]
+          },
+          {
+            "approach": [
+              [
+                0.0,
+                -0.7071067690849304,
+                -0.7071067690849304
+              ]
+            ],
+            "pose": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "draws": [
+              0.4312195529029976,
+              0.764516722963209,
+              0.7162814736366272
+            ]
+          }
+        ],
+        "measurements": [
+          0.84,
+          0.83,
+          0.82,
+          0.81,
+          0.8,
+          0.79,
+          0.78
+        ],
+        "motion_calls": [],
+        "next_random": [
+          0.2945891403757893,
+          0.1373603060290447,
+          0.9766009449958801
+        ]
+      }
+    },
+    {
+      "mode": "table_only",
+      "expected": {
+        "success": [
+          false
+        ],
+        "commands": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "positions": "cf1cbb66a638b4860a516671fb74850e6ccf787fe6c4c8d29e9c04efe880bd05",
+        "dt": "cf1cbb66a638b4860a516671fb74850e6ccf787fe6c4c8d29e9c04efe880bd05",
+        "segments": [],
+        "metadata": {},
+        "message": [
+          "Failed to resolve an articulated-part grasp pose."
+        ],
+        "failure": "planning_failed",
+        "raw_candidates": [
+          {
+            "approach": [
+              [
+                0.0,
+                -0.7071067690849304,
+                -0.7071067690849304
+              ]
+            ],
+            "pose": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "draws": [
+              0.4312195529029976,
+              0.764516722963209,
+              0.7162814736366272
+            ]
+          }
+        ],
+        "measurements": [],
+        "motion_calls": [],
+        "next_random": [
+          0.2945891403757893,
+          0.1373603060290447,
+          0.9766009449958801
+        ]
+      }
+    }
+  ]
+}
