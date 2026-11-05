@@ -4337,6 +4337,8 @@ pass the selected port to AtomicActionEngine.start.
 .. autoclass:: embodichain.lab.sim.evidence.RobotCommandObservation
    :members:
 
+
+
 State observation acquisition
 -----------------------------
 
@@ -4344,8 +4346,17 @@ State observation acquisition
 collects current poses or explicit joint positions without interpreting task
 acceptance. Recorded poses read the canonical ObservationManager's raw history;
 invalid finite values remain unavailable and original temporal metadata is kept.
+Missing source timestamps remain unavailable per environment. Owner replacement
+during capture raises before a packet can be published.
 Current reads work without history. Native owners, episodes and clocks cannot be
 substituted, and recorded joint claims require the original executed policy.
+
+The explicit ``capture_held_poses`` API reads one exact boundary's raw pose and
+qpos together and applies the existing model-owned named TCP FK. It retains the
+source fixed-base/calibrated-mount scope, original joint precision and robot
+device, float64 matrix channels and final native-agreement check. Original raw
+availability and temporal metadata remain authoritative; no new sensor sample
+or inferred task outcome is produced. Unavailable history fails explicitly.
 
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
 

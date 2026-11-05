@@ -48,6 +48,10 @@ from ._configured_hand_geometry import (
 )
 from ._configured_controls import _decode_control_operation, _decode_control_lowerer
 from .simulation.control_assembly import ControlOperationDeclaration
+from .simulation.recorded_contacts import SimulationRecordedContactCfg
+from embodichain.lab.sim.atomic_actions.grip_evidence import DriverOpeningBinding
+from .simulation.cargo_observation import SimulationCargoEnvelopeCfg
+from embodichain.lab.sim.sensors.contact.timeline import ContactTimelineCfg
 from .simulation.control_policy import SimulationControlConditionCfg
 from .simulation.control_lowering import PressPrepareFactory, TwistPrepareFactory
 from .catalog import (
@@ -3262,9 +3266,107 @@ def _decode_control_part_evidence(
     )
 
 
+def _decode_driver_openings(
+    value: object, *, path: str
+) -> tuple[DriverOpeningBinding, ...]:
+    openings = []
+    for index, raw in enumerate(_sequence(value, path=f"{path}")):
+        item = _mapping(
+            raw,
+            path=f"{path}[{index}]",
+            required=frozenset(
+                {
+                    "control_part",
+                    "joint_names",
+                    "driver_indices",
+                    "open_qpos",
+                    "tolerance",
+                }
+            ),
+        )
+        openings.append(
+            DriverOpeningBinding(
+                control_part=_identifier(
+                    item["control_part"],
+                    path=f"{path}[{index}].control_part",
+                ),
+                joint_names=_identifier_tuple(
+                    item["joint_names"],
+                    path=f"{path}[{index}].joint_names",
+                ),
+                driver_indices=tuple(
+                    _sequence(
+                        item["driver_indices"],
+                        path=f"{path}[{index}].driver_indices",
+                    )
+                ),
+                open_qpos=_finite_tuple(
+                    item["open_qpos"],
+                    path=f"{path}[{index}].open_qpos",
+                ),
+                tolerance=_real(
+                    item["tolerance"],
+                    path=f"{path}[{index}].tolerance",
+                    minimum=0.0,
+                    strict_minimum=True,
+                ),
+            )
+        )
+    return tuple(openings)
+
+
+def _decode_recorded_contacts(
+    value: object, *, path: str
+) -> SimulationRecordedContactCfg:
+    config = _mapping(
+        value,
+        path=path,
+        required=frozenset({"sensor_uid", "retention", "pad_bindings"}),
+        optional=frozenset({"opening_bindings", "observer_name"}),
+    )
+    retained = _mapping(
+        config["retention"],
+        path=f"{path}.retention",
+        required=frozenset({"step_dt"}),
+        optional=frozenset(
+            {
+                "max_control_steps",
+                "max_contact_rows",
+                "max_substeps_per_control",
+                "max_errors_per_env",
+            }
+        ),
+    )
+    pads = []
+    for index, value in enumerate(
+        _sequence(config["pad_bindings"], path=f"{path}.pad_bindings")
+    ):
+        pair = _sequence(value, path=f"{path}.pad_bindings[{index}]")
+        if len(pair) != 2:
+            raise ValueError("Recorded pad bindings require part/link-list pairs.")
+        pads.append(
+            (
+                _identifier(pair[0], path=f"{path}.pad_bindings[{index}].part"),
+                _identifier_tuple(pair[1], path=f"{path}.pad_bindings[{index}].links"),
+            )
+        )
+    return SimulationRecordedContactCfg(
+        sensor_uid=_identifier(config["sensor_uid"], path=f"{path}.sensor_uid"),
+        retention=ContactTimelineCfg(**retained),
+        pad_bindings=tuple(pads),
+        opening_bindings=_decode_driver_openings(
+            config.get("opening_bindings", ()), path=f"{path}.opening_bindings"
+        ),
+        observer_name=config.get("observer_name", "task_program.recorded_contacts"),
+    ).snapshot()
+
+
 @dataclass(frozen=True, slots=True)
 class _DecodedRuntimeServices:
     """Typed configured services separated by registration ownership."""
+
+    recorded_contacts_cfg: SimulationRecordedContactCfg | None = None
+    cargo_envelope_cfg: SimulationCargoEnvelopeCfg | None = None
 
     planning_services: SimulationPlanningServicesCfg | None = None
     invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = ()
@@ -3425,6 +3527,8 @@ def _decode_runtime_services(
                 "handover_pose_providers",
                 "registered_semantic_lowerers",
                 "control_operations",
+                "cargo_envelope",
+                "recorded_contacts",
                 "control_part_evidence",
                 "nominal_motion_sources",
                 "settle_presets",
@@ -3433,6 +3537,29 @@ def _decode_runtime_services(
             }
         ),
     )
+    cargo_cfg = None
+    if "cargo_envelope" in config:
+        cargo = _mapping(
+            config["cargo_envelope"],
+            path=f"{path}.cargo_envelope",
+            required=frozenset({"carrier_uids"}),
+            optional=frozenset({"excluded_uids"}),
+        )
+        cargo_cfg = SimulationCargoEnvelopeCfg(
+            carrier_uids=tuple(
+                _identifier(uid, path=f"{path}.cargo_envelope.carrier_uids")
+                for uid in _sequence(
+                    cargo["carrier_uids"], path=f"{path}.cargo_envelope.carrier_uids"
+                )
+            ),
+            excluded_uids=tuple(
+                _identifier(uid, path=f"{path}.cargo_envelope.excluded_uids")
+                for uid in _sequence(
+                    cargo.get("excluded_uids", ()),
+                    path=f"{path}.cargo_envelope.excluded_uids",
+                )
+            ),
+        ).snapshot()
     generators_value = config.get("grasp_pose_generators", {})
     if not isinstance(generators_value, Mapping):
         raise TypeError(f"{path}.grasp_pose_generators must be a mapping.")
@@ -3667,6 +3794,14 @@ def _decode_runtime_services(
         )
         bindings.append(InvocationPolicyBinding(**item))
     return _DecodedRuntimeServices(
+        recorded_contacts_cfg=(
+            None
+            if "recorded_contacts" not in config
+            else _decode_recorded_contacts(
+                config["recorded_contacts"], path=f"{path}.recorded_contacts"
+            )
+        ),
+        cargo_envelope_cfg=cargo_cfg,
         planning_services=planning,
         invocation_policy_bindings=tuple(bindings),
         grasp_pose_generators=generators,
@@ -3754,6 +3889,8 @@ def _decode_configured_task_program_integration(
         control_part_evidence_factory=services.control_part_evidence,
         registered_semantic_lowerer_factories=(services.registered_semantic_lowerers),
         control_operations=services.control_operations,
+        cargo_envelope_cfg=services.cargo_envelope_cfg,
+        recorded_contacts_cfg=services.recorded_contacts_cfg,
         **(
             {}
             if services.settle_presets is None

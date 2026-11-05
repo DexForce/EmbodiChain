@@ -1217,3 +1217,22 @@ def test_joint_contact_retains_completed_sample_only_with_explicit_policy(retain
     observer.close()
     with pytest.raises(ValueError, match="No current completed"):
         observer.latest_source_stamp()
+
+
+def test_joint_opening_helper_delegates_to_canonical_binding_without_sampling():
+    from embodichain.lab.sim.sensors.joint_opening import create_joint_opening_reader
+
+    calls = []
+    robot = SimpleNamespace(
+        joint_names=("drive",),
+        get_joint_ids=lambda **kw: [0],
+        get_qpos=lambda **kw: calls.append(kw) or torch.tensor([[0.8]]),
+    )
+    binding = DriverOpeningBinding("hand", ("drive",), (0,), (0.8,), 0.008)
+    reader = create_joint_opening_reader(robot, (binding,))
+    assert not calls
+    observed = reader("hand", 0)
+    assert observed["open"] and observed["finite"]
+    assert calls == [{"name": "hand"}]
+    with pytest.raises(ValueError, match="unique control parts"):
+        create_joint_opening_reader(robot, (binding, binding))

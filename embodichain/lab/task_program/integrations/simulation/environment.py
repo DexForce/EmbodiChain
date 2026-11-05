@@ -119,6 +119,9 @@ from embodichain.lab.task_program.runtime.lifecycle import (
 from embodichain.lab.task_program.compiler.program import CompiledTaskProgram
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from .observation_services import SimulationObservationServices
     from ..invocation_policy import InvocationPolicyBinding
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
@@ -864,6 +867,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
                 "registration must be exactly SimulationTaskProgramRegistration."
             )
         registration.assert_unchanged()
+        if registration.recorded_contacts_cfg is not None:
+            registration.recorded_contacts_cfg.validate_num_envs(simulation.num_envs)
         declared_services = registration.planning_services
         if declared_services is not None:
             if capture_root_pose is not None or hold_qpos_source is not None:
@@ -969,6 +974,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self._sensor_suite = sensor_suite
         self._episode_identity = episode_identity
         self._control_bridge_services: list[_ControlBridgeServices] = []
+        self._observation_services: list[SimulationObservationServices] = []
         if registration.requires_scoped_control_services and not callable(
             episode_identity
         ):
@@ -1062,6 +1068,9 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         if self._owner_token.closed:
             return
         self._owner_token.closed = True
+        for services in tuple(self._observation_services):
+            services.close()
+        self._observation_services.clear()
         for services in self._control_bridge_services:
             services.close_host_resources()
         self._control_bridge_services.clear()
@@ -1576,6 +1585,51 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
                 "The task registration does not declare a parallel safety factory."
             )
         return validator
+
+    def create_observation_services(
+        self,
+        environment: EmbodiedEnv,
+        bridge: TaskProgramDemoBridge,
+        *,
+        observations: ObservationManager,
+    ) -> SimulationObservationServices:
+        """Create declared physical collectors for this exact fresh host bridge.
+
+        Args:
+            environment: Initialized host with this factory's exact robot/simulation.
+            bridge: Active actual bridge before its first execution step.
+            observations: Actual environment-owned raw ObservationManager.
+
+        Returns:
+            Real state, support and declared control/contact/Cargo services. Only
+            selected collectors acquire data or install hooks. Call ``close``
+            before replacing the episode; host teardown also releases live owners.
+
+        Raises:
+            RuntimeError: The factory has closed.
+            ValueError: The environment belongs to another factory.
+        """
+        from .observation_services import SimulationObservationServices
+
+        self._owner_token.require_open()
+        if (
+            environment.sim is not self._simulation
+            or environment.robot is not self._robot
+        ):
+            raise ValueError(
+                "Observation services belong to another environment owner."
+            )
+        services = SimulationObservationServices(
+            environment, bridge, self._registration, observations=observations
+        )
+        self._observation_services.append(services)
+
+        def release() -> None:
+            if services in self._observation_services:
+                self._observation_services.remove(services)
+
+        services._owner_release = release
+        return services
 
     def create_adapter(self) -> TaskProgramEnvironmentAdapter:
         """Create the exact Gym adapter with shared simulation policy ports."""
