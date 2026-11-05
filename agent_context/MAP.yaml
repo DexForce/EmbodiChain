@@ -529,6 +529,7 @@ topics:
   - embodichain/gen_sim/scene_engine/pipeline/generate.py
   - embodichain/gen_sim/scene_engine/pipeline/edit.py
   - embodichain/gen_sim/scene_engine/pipeline/api.py
+  - embodichain/gen_sim/scene_engine/asset_normalization.py
   - embodichain/gen_sim/scene_engine/pipeline/utils/scene_exporter.py
   - embodichain/gen_sim/scene_engine/pipeline/utils/scene_importer.py
   - embodichain/gen_sim/scene_engine/randomization/

@@ -21,6 +21,22 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.compute.geometry.shading
+------------------------------------
+
+Pure float64 triangle/corner-normal consistency for source mesh preparation.
+The check uses equally weighted unit-face accumulation and the source strict
+negative-dot decision. It does not require a mesh library, runtime object or
+simulator, and does not establish collision or manifold validity.
+
+.. currentmodule:: embodichain.compute.geometry.shading
+
+.. autosummary::
+
+   has_inconsistent_shading_normals
+
+.. autofunction:: has_inconsistent_shading_normals
+
 embodichain.compute.kinematics.ik_path
 --------------------------------------
 
@@ -563,6 +579,29 @@ embodichain.gen_sim.gradio_ui.gradio_app
 .. autosummary::
 
    main
+
+embodichain.gen_sim.scene_engine.asset_normalization
+-----------------------------------------------------
+
+Prepare independent runtime declarations and content-addressed GLB assets from
+explicit source objects. Node transforms and source scale are baked using the
+original v3 coordinate policy; safe topology is retained, while inconsistent
+corner normals trigger vertex splitting. Authored files and declarations remain
+unchanged. Invalid geometry is preserved with its original digest and diagnostic
+instead of silently substituting a different asset. This stage creates no task
+bundle or simulator and does not certify physical validity.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.asset_normalization
+
+.. autosummary::
+
+   NormalizedSceneAssets
+   normalize_source_scene_assets
+
+.. autoclass:: NormalizedSceneAssets
+   :members:
+
+.. autofunction:: normalize_source_scene_assets
 
 embodichain.gen_sim.scene_engine.cli.randomization
 --------------------------------------------------
