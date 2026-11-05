@@ -66,7 +66,7 @@ from .control import (
     OPEN_COMMAND,
     PARK_COMMAND,
 )
-from .core import AtomicAction, ObjectSemantics, SkillDescriptor
+from .core import AtomicAction, CompletePlanBuilder, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
 from .evidence import (
     PhysicalEvidenceBatch,
@@ -307,6 +307,7 @@ __all__ = [
     "AxisAlignGoal",
     "AxisAlignOptions",
     "AtomicAction",
+    "CompletePlanBuilder",
     "AtomicActionEngine",
     "PlanTransform",
     "NominalMotionSource",
