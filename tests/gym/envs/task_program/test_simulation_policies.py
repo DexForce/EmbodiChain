@@ -1619,3 +1619,24 @@ def test_joint_window_trace_capacity_never_silently_certifies_full_record():
     assert window["sample_count"] == 26 and window["retained_sample_count"] == 3
     assert window["dropped_samples"] == 23 and not window["record_complete"]
     assert window["steps"] == [23, 24, 25]
+
+
+def test_support_height_uses_highest_qualified_contact_without_averaging():
+    from embodichain.compute.geometry.contact_support import (
+        contact_support_heights as _contact_support_heights,
+    )
+
+    row = {
+        "contacts_world": [[-0.01, 0.0, 0.08], [0.01, 0.0, 0.12]],
+        "center_of_mass_world": [0.0, 0.0, 0.2],
+        "com_patch_distance_m": 0.0,
+        "com_tolerance_m": 0.003,
+        "upward_impulse": 0.1,
+    }
+    heights = _contact_support_heights(
+        torch.tensor([True, False]),
+        {"scope": "native_contact_support", "rows": [row, row]},
+        torch.zeros(2),
+    )
+    assert heights[0].item() == pytest.approx(0.12)
+    assert torch.isnan(heights[1])
