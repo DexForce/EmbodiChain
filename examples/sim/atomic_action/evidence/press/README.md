@@ -8,8 +8,8 @@ No physical state is teleported during playback.
 
 | Run | Video | Observations | Planned dwell |
 | --- | --- | --- | --- |
-| Zero dwell | [MP4](dwell-0s.mp4) | [JSON](dwell-0s.json) | absent |
-| One-second dwell | [MP4](dwell-1s.mp4) | [JSON](dwell-1s.json) | 100 × 10 ms |
+| Zero dwell | [MP4](dwell-0s.mp4) | [JSON Lines](dwell-0s.jsonl) | absent |
+| One-second dwell | [MP4](dwell-1s.mp4) | [JSON Lines](dwell-1s.jsonl) | 100 × 10 ms |
 
 The positive run has `press` ending at sample 541, `dwell` at indices
 542–641, and `retract` starting at 642. Measured EEF position drift from the
@@ -31,6 +31,6 @@ python -m examples.sim.atomic_action.press --headless --auto_play --renderer fas
 
 `--headless` disables the interactive window; FastRT still renders all recorded
 frames. Both runs report planning success and complete physical playback.
-The JSON files contain per-phase measured EEF, gripper and articulation states.
+The JSON Lines files contain one metadata record followed by per-phase measured EEF, gripper and articulation states.
 The video shows the complete approach, press, dwell (when requested), retract,
 and final settling; no phase is cut out.
