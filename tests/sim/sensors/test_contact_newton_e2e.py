@@ -103,3 +103,88 @@ def test_newton_contact_sensor_reports_each_arena() -> None:
         from dexsim.engine.newton_physics import teardown_newton_physics
 
         teardown_newton_physics()
+
+
+@pytest.mark.parametrize(
+    "mujoco_articulations", [None, ()], ids=["mujoco-rigid", "vbd-rigid"]
+)
+def test_dexuni_contact_sensor_reports_resolved_capabilities(
+    mujoco_articulations: tuple[int, ...] | None,
+) -> None:
+    """DexUni reports geometry and the force capability of its resolved path."""
+    import torch
+
+    wp.init()
+    if not wp.is_cuda_available():
+        pytest.skip("CUDA is required for DexUni contacts.")
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cuda:0",
+            num_envs=1,
+            physics_cfg=NewtonPhysicsCfg(
+                device="cuda:0",
+                physics_dt=1 / 60,
+                num_substeps=4,
+                sync_to_renderer=False,
+                use_cuda_graph=False,
+                collision_cfg=None,
+                solver_cfg={
+                    "solver_type": "dexuni",
+                    # Empty selectors force VBD free bodies. Newer SDKs can
+                    # dispatch this rigid-only scene to MuJoCo with None.
+                    "mujoco_articulations": mujoco_articulations,
+                    "vbd_options": {"iterations": 12},
+                },
+            ),
+        )
+    )
+    sensor = data = None
+    try:
+        sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="cube",
+                shape=CubeCfg(size=[0.10, 0.10, 0.10]),
+                attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=0.10)),
+                body_type="dynamic",
+                init_pos=(0, 0, 0.07),
+            )
+        )
+        sensor = sim.add_sensor(
+            ContactSensorCfg(
+                uid="contacts",
+                rigid_uid_list=["cube"],
+                filter_need_both_actor=False,
+                max_contacts_per_env=64,
+            )
+        )
+        sim.update(step=60, render_final_step=False)
+        sensor.update()
+        capabilities = sensor.contact_capabilities
+        assert capabilities.geometry
+        if mujoco_articulations == ():
+            assert not capabilities.impulse
+            assert not capabilities.friction
+        # Older cable-capable builds keep the default scene in VBD. Follow
+        # the query's published capability rather than assuming auto dispatch.
+        has_impulses = capabilities.impulse
+        if not has_impulses:
+            assert capabilities.impulse_unavailable_reason
+        if not capabilities.friction:
+            assert capabilities.friction_unavailable_reason
+        data = sensor.get_data()
+        valid = data["is_valid"]
+        assert valid.any()
+        assert torch.isfinite(data["distance"][valid]).all()
+        assert (data["distance"][valid] < 0.005).any()
+        if has_impulses:
+            assert (data["impulse"][valid] > 0).any()
+        assert sensor.dropped_contacts == 0
+    finally:
+        sensor = data = None
+        sim.destroy(exit_process=False)
+        sim = None
+        SimulationManager.flush_cleanup_queue()
+        from dexsim.engine.newton_physics import teardown_newton_physics
+
+        teardown_newton_physics()

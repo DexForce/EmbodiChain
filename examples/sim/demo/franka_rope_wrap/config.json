@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "robot_urdf": "Franka/Panda/PandaWithHand.urdf",
+  "home_qpos": [
+    0.0,
+    -0.569,
+    0.0,
+    -2.81,
+    0.0,
+    3.037,
+    0.741
+  ],
+  "floor_height_m": 0.002,
+  "post_center_xy_m": [
+    0.48,
+    0
+  ],
+  "post_radius_m": 0.045,
+  "post_height_m": 0.12,
+  "cable_waypoints_m": [
+    [
+      0.21,
+      -0.2,
+      0.006
+    ],
+    [
+      0.22607114386689492,
+      -0.18809544898748526,
+      0.006
+    ],
+    [
+      0.24214228773378982,
+      -0.1761908979749705,
+      0.006
+    ],
+    [
+      0.2582134316006847,
+      -0.16428634696245575,
+      0.006
+    ],
+    [
+      0.32,
+      -0.17,
+      0.006
+    ],
+    [
+      0.34,
+      -0.25,
+      0.006
+    ],
+    [
+      0.28,
+      -0.37626441961695295,
+      0.006
+    ],
+    [
+      0.32,
+      -0.44626441961695296,
+      0.006
+    ],
+    [
+      0.42,
+      -0.44626441961695296,
+      0.006
+    ],
+    [
+      0.45,
+      -0.37626441961695295,
+      0.006
+    ],
+    [
+      0.42,
+      -0.3,
+      0.006
+    ],
+    [
+      0.42,
+      -0.25,
+      0.006
+    ],
+    [
+      0.44,
+      -0.25,
+      0.006
+    ],
+    [
+      0.46,
+      -0.25,
+      0.006
+    ],
+    [
+      0.48,
+      -0.25,
+      0.006
+    ],
+    [
+      0.5,
+      -0.25,
+      0.006
+    ],
+    [
+      0.52,
+      -0.25,
+      0.006
+    ]
+  ],
+  "cable_segments": 96,
+  "cable_radius_m": 0.004,
+  "cable_density_kg_m3": 800.0,
+  "bend_stiffness_Nm_rad": 0.0001,
+  "twist_stiffness_Nm_rad": 0.0001,
+  "bend_damping_Nms_rad": 0.0001,
+  "linear_stiffness_N_m": 100000.0,
+  "control_hz": 60,
+  "substeps": 32,
+  "iterations": 48,
+  "pre_roll_s": 2.0,
+  "duration_s": 36.0,
+  "grasp_complete_s": 5.0,
+  "lift_complete_s": 7.0,
+  "finger_pad_width_m": 0.028,
+  "grip_half_gap_m": 0.0018,
+  "grasp_inset_m": 0.025,
+  "post_friction": 0.3,
+  "rope_friction": 0.8,
+  "floor_friction": 0.2,
+  "contact_ke_N_m": 20000.0,
+  "contact_kd_Ns_m": 1.0,
+  "contact_gap_m": 5e-05,
+  "contact_match_distance_m": 5e-05,
+  "rigid_contact_hard": false,
+  "rigid_contact_history": false,
+  "friction_epsilon": 1e-05,
+  "camera": {
+    "eye_m": [
+      1.24,
+      -1.16,
+      0.93
+    ],
+    "target_m": [
+      0.35,
+      -0.05,
+      0.3
+    ]
+  },
+  "detail_camera": {
+    "eye_m": [
+      0.55,
+      -0.24,
+      1.05
+    ],
+    "target_m": [
+      0.46,
+      -0.04,
+      0.05
+    ]
+  },
+  "render": {
+    "width": 3840,
+    "height": 2160,
+    "fps": 30,
+    "spp": 16,
+    "renderer": "rt",
+    "tone_mapping_enabled": true,
+    "exposure": 0.8,
+    "min_bounces": 4,
+    "max_bounces": 8,
+    "crf": 15,
+    "preset": "slow"
+  },
+  "validation": {
+    "tail_tcp_max_m": 0.045,
+    "winding_min_deg": 360.0,
+    "contact_arc_min_deg": 300.0,
+    "contact_band_m": 0.003,
+    "hold_winding_drift_max_deg": 3.0,
+    "hold_end_drift_max_m": 0.003,
+    "post_penetration_max_m": 0.0008,
+    "robot_post_penetration_max_m": 0.0001,
+    "joint_gap_max_m": 0.0008,
+    "floor_penetration_max_m": 0.0008,
+    "grasp_slip_max_m": 0.008,
+    "anchor_exit_bend_max_deg": 20.0
+  },
+  "grasp_offset_world_m": [
+    -0.025,
+    0,
+    0
+  ],
+  "orbit_radius_m": 0.16,
+  "orbit_degrees": 465,
+  "orbit_start_z_m": 0.065,
+  "orbit_end_z_m": 0.085,
+  "orbit_start_deg": -90.0,
+  "orbit_direction": 1,
+  "grasp_yaw_deg": 0,
+  "tighten_radial_m": 0.018,
+  "tighten_tangent_m": 0.02,
+  "open_half_gap_m": 0.0395,
+  "finger_pad_center_m": [
+    0,
+    0.002,
+    0.04175
+  ],
+  "finger_pad_size_m": [
+    0.028,
+    0.004,
+    0.0135
+  ]
+}

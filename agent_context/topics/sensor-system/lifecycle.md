@@ -37,8 +37,10 @@ Spawn handles and creates one query. Preserve these query/buffer contracts:
 `contact_capabilities` distinguishes geometry from normal/friction impulse
 support. Do not infer force support from sensor construction alone. Inspect
 `supports_contact_sensor` in `embodichain/lab/sim/physics/` for the current
-backend/solver/device matrix: Newton AutoSolver may change the answer during
-preparation, so the manager checks again afterwards.
+backend/solver/device matrix: scene preparation resolves the Newton solver
+and runtime device, so the manager checks again afterwards. DexUni's pure
+MuJoCo path can report impulses; VBD/coupled queries can be geometry-only.
+Honor the returned query capabilities for the resolved scene.
 
 The sensor retains backend-emitted rows rather than reducing an actor pair to
 one contact. Force-reporting paths apply the query's positive-impulse filtering;

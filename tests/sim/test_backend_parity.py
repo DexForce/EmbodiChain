@@ -36,6 +36,7 @@ import pytest
 import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
+from embodichain.lab.sim.cfg import CableObjectCfg
 from embodichain.lab.sim.physics import (
     DefaultPhysicsBackend,
     NewtonPhysicsBackend,
@@ -54,6 +55,7 @@ BACKEND_CAPABILITIES: dict[str, dict[str, bool]] = {
     "rigid_object_group": {"default": True, "newton": True},
     "rigid_constraints": {"default": True, "newton": False},
     "contact_sensor": {"default": True, "newton": True},
+    "cables": {"default": False, "newton": True},
 }
 
 BACKENDS: dict[str, type[PhysicsBackend]] = {
@@ -71,6 +73,7 @@ CAPABILITY_TO_ADD_METHOD: dict[str, str | None] = {
     "rigid_object_group": "add_rigid_object_group",
     "rigid_constraints": None,
     "contact_sensor": None,
+    "cables": "add_cable_object",
 }
 
 
@@ -123,7 +126,7 @@ def test_contact_sensor_guard_uses_backend_capability() -> None:
     [
         ("mujoco_warp", "cuda:0", True),
         ("mujoco_warp", "cpu", False),
-        ("dexuni", "cuda:0", False),
+        ("dexuni", "cuda:0", True),
         ("xpbd", "cpu", True),
     ],
 )
@@ -185,6 +188,7 @@ def _make_sim_with_backend(backend: PhysicsBackend) -> SimulationManager:
     sim = object.__new__(SimulationManager)
     sim.physics = backend
     sim._deformable_objects = {}
+    sim._cable_objects = {}
     sim._rigid_object_groups = {}
     sim._robots = {}
     sim._rigid_objects = {}
@@ -220,6 +224,8 @@ def test_add_method_guard_maps_to_capability(
     cfg = SimpleNamespace(uid=None)
     if feature in deformable_types:
         cfg.deformable_type = deformable_types[feature]
+    elif feature == "cables":
+        cfg = CableObjectCfg(uid="cable", points=[[0, 0, 1], [0, 0, 2]])
 
     if supported:
         # Past the guard it will hit missing-world attrs; assert the failure is
