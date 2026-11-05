@@ -151,7 +151,7 @@ topics:
 - id: sensor-system
   title: Sensor System
   aliases: [sensor system, camera attachment, 传感器, 相机挂载]
-  keywords: [CameraCfg, StereoCameraCfg, ContactSensorCfg, ContactQuery, ContactSamplingObserver, ContactEvidenceSampler, ContactTimeline, Newton contact, SensorCfg,
+  keywords: [CameraCfg, StereoCameraCfg, ContactSensorCfg, ContactQuery, ContactSamplingObserver, ContactEvidenceSampler, ContactTimeline, JointContactObserver, Newton contact, SensorCfg,
     get_sensor_obs, resolve_parent_nodes, scatter_contact_data, tiled image, quaternion, xyzw]
   paths: [topics/sensor-system/sensor-system.md]
   source_of_truth:
@@ -162,6 +162,7 @@ topics:
   - embodichain/lab/sim/sensors/contact/sensor.py
   - embodichain/lab/sim/sensors/contact/sampling.py
   - embodichain/lab/sim/sensors/contact/timeline.py
+  - embodichain/lab/sim/sensors/contact/observation.py
   - embodichain/lab/sim/sensors/support_observation.py
   - embodichain/lab/sim/evidence.py
   - embodichain/lab/sim/sensors/contact/_warp/scatter.py
@@ -477,6 +478,29 @@ topics:
     extensions/embodichain_tasks/configs/tasks/manipulation/, tests/lab/task_program/]
   related_topics: [atomic-actions, env-framework, simulation-system, motion-planning, sensor-system, data-pipeline]
   status: active
+- id: task-engine
+  title: Task Engine
+  aliases: [Task Engine, task engine, 任务引擎, 任务理解, 动作语义图, 语义图可视化]
+  keywords: [TaskAgent, TaskDraft, TaskCandidateSet, InstructionIntent, TaskSpecGenerator,
+    SemanticTaskGraph, validate_semantic_task_graph, validate_graph_coverage,
+    render_semantic_task_graph_html, write_semantic_task_graph_html]
+  paths: [topics/task-engine/task-engine.md]
+  source_of_truth:
+  - embodichain/gen_sim/task_engine/__init__.py
+  - embodichain/gen_sim/task_engine/agent.py
+  - embodichain/gen_sim/task_engine/interpretation.py
+  - embodichain/gen_sim/task_engine/contracts.py
+  - embodichain/gen_sim/task_engine/ontology.py
+  - embodichain/gen_sim/task_engine/task_spec.py
+  - embodichain/gen_sim/task_engine/semantic_graph.py
+  - embodichain/gen_sim/task_engine/semantic_graph_validation.py
+  - embodichain/gen_sim/task_engine/semantic_graph_html.py
+  - embodichain/gen_sim/task_engine/reporting.py
+  - embodichain/gen_sim/task_engine/bundle_spec.py
+  - embodichain/gen_sim/task_engine/orchestration/contracts.py
+  watch_paths: [embodichain/gen_sim/task_engine/, tests/gen_sim/task_engine/, web/task-engine/, web/graph-ui/]
+  related_topics: [task-spec, task-programs, gen-sim]
+  status: active
 - id: task-spec
   title: Task Specification
   aliases: [task specification, normative task specification, 任务规范, 任务规范校验]
@@ -490,7 +514,7 @@ topics:
   - embodichain/gen_sim/task_spec/registry.py
   - embodichain/gen_sim/task_spec/canonicalization.py
   watch_paths: [embodichain/gen_sim/task_spec/, tests/gen_sim/task_spec/]
-  related_topics: [gen-sim, task-programs]
+  related_topics: [gen-sim, task-programs, task-engine]
   status: active
 - id: gen-sim
   title: Gen Sim
@@ -505,6 +529,7 @@ topics:
   - embodichain/gen_sim/scene_engine/pipeline/generate.py
   - embodichain/gen_sim/scene_engine/pipeline/edit.py
   - embodichain/gen_sim/scene_engine/pipeline/api.py
+  - embodichain/gen_sim/scene_engine/asset_normalization.py
   - embodichain/gen_sim/scene_engine/pipeline/utils/scene_exporter.py
   - embodichain/gen_sim/scene_engine/pipeline/utils/scene_importer.py
   - embodichain/gen_sim/scene_engine/randomization/

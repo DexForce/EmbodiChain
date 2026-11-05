@@ -21,6 +21,22 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.compute.geometry.shading
+------------------------------------
+
+Pure float64 triangle/corner-normal consistency for source mesh preparation.
+The check uses equally weighted unit-face accumulation and the source strict
+negative-dot decision. It does not require a mesh library, runtime object or
+simulator, and does not establish collision or manifold validity.
+
+.. currentmodule:: embodichain.compute.geometry.shading
+
+.. autosummary::
+
+   has_inconsistent_shading_normals
+
+.. autofunction:: has_inconsistent_shading_normals
+
 embodichain.compute.kinematics.ik_path
 --------------------------------------
 
@@ -564,6 +580,29 @@ embodichain.gen_sim.gradio_ui.gradio_app
 
    main
 
+embodichain.gen_sim.scene_engine.asset_normalization
+-----------------------------------------------------
+
+Prepare independent runtime declarations and content-addressed GLB assets from
+explicit source objects. Node transforms and source scale are baked using the
+original v3 coordinate policy; safe topology is retained, while inconsistent
+corner normals trigger vertex splitting. Authored files and declarations remain
+unchanged. Invalid geometry is preserved with its original digest and diagnostic
+instead of silently substituting a different asset. This stage creates no task
+bundle or simulator and does not certify physical validity.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.asset_normalization
+
+.. autosummary::
+
+   NormalizedSceneAssets
+   normalize_source_scene_assets
+
+.. autoclass:: NormalizedSceneAssets
+   :members:
+
+.. autofunction:: normalize_source_scene_assets
+
 embodichain.gen_sim.scene_engine.cli.randomization
 --------------------------------------------------
 
@@ -908,6 +947,10 @@ Logical role requirements for downstream grounding, including cardinality,
 affordances, attributes and declared initial state. No simulator handles are
 stored in these contracts.
 
+``RoleSpec.is_single_member`` reports whether ``one`` or an explicit
+``count=1`` selects one member. It preserves authored cardinality, serialization
+and semantic hash; it does not qualify a partial binding or physical evidence.
+
 .. currentmodule:: embodichain.gen_sim.task_spec.contracts
 
 .. autosummary::
@@ -1146,6 +1189,31 @@ embodichain.lab.sim.scene.expansion.persistence
    save_scene_variants
    load_scene_variants
 
+embodichain.lab.sim.sensors.contact.observation
+-----------------------------------------------
+
+Standard sensor observers can collect a selected joint alongside native contact
+facts in explicit B=1 windows. Substeps reuse the completed contact sample;
+initial prepare acquisitions explicitly request one refresh. Joint channels use
+actual simulation time and retain independent validity and acquisition errors.
+Only valid contact slots are retained, with native loss diagnostics preserved.
+Window generations reject delayed callbacks across reset/reuse; completed copies
+remain independent. Integrations own invocation/episode binding and action-effect
+interpretation. The observer neither computes success nor advances simulation.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.observation
+
+.. autosummary::
+
+   JointContactObservation
+   JointContactObserver
+
+.. autoclass:: JointContactObservation
+   :members:
+
+.. autoclass:: JointContactObserver
+   :members:
+
 embodichain.lab.sim.sensors.contact.sampling
 ---------------------------------------------------------------------
 
@@ -1172,10 +1240,17 @@ observation was produced. The common frame has no invocation field.
    CONTACT_NORMALS
    CONTACT_IMPULSES
    CONTACT_POSITIONS
+   CONTACT_DISTANCES
+   DEFAULT_CHANNELS
    ContactEvidenceSample
    ContactEvidenceSampler
    ContactSourceStamp
    native_contact_revision
+
+Signed contact distances require explicit channel selection. Empty requests
+retain the original five ``DEFAULT_CHANNELS``; a missing or nonfinite active
+distance keeps that requested channel unavailable without invalidating unrelated
+contact channels.
 
 embodichain.lab.sim.sensors.contact.timeline
 ---------------------------------------------------------------------
@@ -1326,6 +1401,49 @@ its duration, timeout, pose/axis targets, attachment-drift bounds and optional
 native-support declaration. Registration snapshots and fingerprints the complete
 configuration; names do not select hidden behavior.
 
+``SimulationJointStabilityConditionCfg`` observes an explicitly bound native
+joint, with independently declared target tolerance and full-window drift.
+The standard port preserves the initial observed robot hold, counts only
+acknowledged ticks after the initial sample, and records the original
+``joint_position_and_stability`` receipt. This is joint retention evidence;
+it does not qualify contact safety. When an execution clock is bound, the
+receipt additionally includes the actual final joint acquisition with per-row
+validity, environment IDs and a policy-window sample sequence. ``joint_window``
+retains sampled coordinates, validity/errors, actual step/timestamp arrays,
+native joint identity and compiled policy/segment identity for independent
+reassessment. ``monitor_initial_values`` preserves the pre-sample range anchor
+as numerical initialization, separately from the clock-verified acquisitions.
+A final sample alone does not establish a complete time window.
+Without a clock, no timestamped raw evidence is fabricated.
+
+The default ``invalid_observation_policy="abort_batch"`` retains the source
+behavior. Explicit ``isolate_rows`` marks the first invalid active row unavailable
+for that execution while other rows continue. The receipt separates execution
+termination from per-row condition status; timeout, unavailable observation and
+cancellation are not interchangeable. Cancellation preserves partial diagnostic
+facts but publishes no post-policy success.
+
+``max_observation_samples`` bounds raw retention, independently of the runtime
+condition. The default 4096 comfortably holds the 126 samples from a 5-second
+wait at a 0.04-second control period. Longer waits may drop old samples, report
+``dropped_samples`` and set ``record_complete=false``; a truncated history must
+not certify complete coverage. Storage is O(batch times retained samples), and
+conversion to JSON occurs after sampling, without per-step device-to-host trace
+copies. Runtime row handling and retention settings remain registration-owned;
+``to_condition_dict()`` preserves the original normative parameter fields.
+
+Target, tolerance and range drift use native runtime joint units. Translation
+and rotation require their own explicitly selected policy values; the default
+0.001 is not a universal physical distance or velocity threshold. Robot holds
+retain the source observed posture, and neither this monitor nor the policy
+advances environment time itself.
+
+Every environment-adapter bridge obtains fresh policy/validator session state,
+including execution without nominal sources. A later bridge supersedes the
+earlier session's observation ownership instead of replacing its clock. Captured
+position holds use the configured Gym action encoder, supplying zero velocity
+targets in ``position_velocity`` mode while retaining the original positions.
+
 Supported conditions declare a standard contact sensor through
 ``SupportSensorDeclarationCfg``. The scene binding supplies its exact two native
 rigid UIDs; the runtime factory creates or reuses the sensor and the environment
@@ -1350,11 +1468,15 @@ established. This distinguishes unavailable outcomes from measured negatives.
 
    SupportSensorDeclarationCfg
    SimulationStabilityConditionCfg
+   SimulationJointStabilityConditionCfg
 
 .. autoclass:: SupportSensorDeclarationCfg
    :members:
 
 .. autoclass:: SimulationStabilityConditionCfg
+   :members:
+
+.. autoclass:: SimulationJointStabilityConditionCfg
    :members:
 
 embodichain.lab.gym.envs.episode_context
