@@ -54,3 +54,10 @@ cutout. These images identify the asset; they are not observations after a call.
 Firefox and WebKit; `tests/gen_sim/task_engine/browser_fixture.py` creates
 synthetic inputs through the public renderer without starting simulation.
 See [`web/README.md`](../../../web/README.md) for both frontend build paths.
+
+
+Model declaration binding uses `embodiment_declarations.py` and `robot_profiles.py`.
+These consume public `embodichain_robots.task_program` descriptions and component
+services; they emit declarations and provenance hashes rather than skills,
+physical facts or acceptance. This standalone descriptor surface does not yet
+connect Source physical-input preparation, bundle publication or CLI routing.

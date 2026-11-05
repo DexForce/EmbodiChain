@@ -693,3 +693,129 @@ embodichain_robots.wuji.hand
 .. automethod:: embodichain_robots.wuji.hand.cfg.WujiHandCfg.from_dict
 
 .. automethod:: embodichain_robots.wuji.hand.cfg.WujiHandCfg.build_pk_serial_chain
+
+
+embodichain_robots.tianji.marvin.deployment
+-------------------------------------------
+
+Native Marvin source placement reads the authored base collider against an
+explicit table. Its contact overlay is opt-in and binds the actual native finger
+links. Standard asset preflight loads only the existing gripper-equipped Marvin
+asset; no alternate wrist assembly, simulator, motion plan or certificate is
+created.
+
+.. currentmodule:: embodichain_robots.tianji.marvin.deployment
+
+.. autosummary::
+
+   source_tianji_mount_declaration
+   source_tianji_contact_pad_declaration
+   source_tianji_lateral_positions
+   require_tianji_task_assets
+
+.. autofunction:: source_tianji_mount_declaration
+
+.. autofunction:: source_tianji_contact_pad_declaration
+
+.. autofunction:: source_tianji_lateral_positions
+
+.. autofunction:: require_tianji_task_assets
+
+embodichain_robots.tianji.marvin.task_program
+---------------------------------------------
+
+The source declaration reuses ``TianjiMarvinCfg`` and ``tianji_marvin.yaml``.
+It preserves the native two-joint hands and mimic drivers, calibrated component
+TCPs, SSIK configuration, ready pose and sensor suite. Explicit sampled-hand
+services and named arm Park commands are added only to a source integration
+copy. Nominal reserves come from authored colliders and do not replace measured
+native geometry or task acceptance. The ordinary component is unchanged.
+
+.. currentmodule:: embodichain_robots.tianji.marvin.task_program
+
+.. autosummary::
+
+   TianjiMarvinTaskHandCalibration
+   declare_tianji_task_program_embodiment
+   tianji_marvin_task_hand_calibrations
+
+.. autoclass:: TianjiMarvinTaskHandCalibration
+   :members:
+
+.. autofunction:: declare_tianji_task_program_embodiment
+
+.. autofunction:: tianji_marvin_task_hand_calibrations
+
+
+Explicit Robotiq task-hand contact roles
+----------------------------------------
+
+The Franka and UR10 dual-arm Robotiq embodiments already own their public
+``hand_geometries`` mappings. This model helper reuses those exact declarations,
+including caller-selected commands and custom semantic resource IDs. Frozen
+historical snapshots predating the service supply the canonical embodiment's
+geometry mapping explicitly. No parallel root/pad/sampling default is invented.
+The helper adds the complete source finger roster and explicit nominal task
+reserve dimensions; neither is substituted for measured native geometry.
+
+.. currentmodule:: embodichain_robots.robotiq.task_program
+
+.. autoclass:: Robotiq140TaskHandCalibration
+   :members:
+
+.. autofunction:: robotiq140_task_hand_calibrations
+
+Explicit source deployment calibration
+--------------------------------------
+
+These helpers return owned declarations for the Franka and UR10 Robotiq
+embodiments. They retain the source 0.128 m opening cap and bench mounting,
+explicit contact-pad overlay and UR10 idle-shoulder/Park choices. Effort and
+stiffness inputs are selected by the deployment owner; the helpers do not inspect
+task IDs, instantiate robots, solve IK, or change shared component files. Mounting
+is a geometric declaration and does not certify physical clearance.
+
+.. automodule:: embodichain_robots.robotiq.deployment
+   :members:
+
+The model owner also exposes ``source_robot_lateral_positions`` and
+``require_source_robot_assets`` for provider-free frontend use. Lateral hints
+retain the original qualification: Franka returns None; UR10 without a selected
+physical component returns None; selected UR10 uses its declared world pose
+and arm-base frames. Asset preflight checks registered source files and model configuration,
+without constructing a Robot, solver or simulator.
+
+
+
+embodichain_robots.task_program
+-------------------------------
+
+These public model-owner entry points select the explicit component's native
+hand/deployment description. They preserve the existing Robotiq declarations for
+Franka and UR10 and use the existing native Marvin component for Tianji. Shared
+components stay unchanged; source integration additions are separate owned
+values, with original model/command units and physical endpoint identities.
+
+.. currentmodule:: embodichain_robots.task_program
+
+.. autosummary::
+
+   declare_source_task_embodiment
+   resolve_task_hand_calibrations
+   declare_task_robot_mount
+   declare_task_contact_pads
+   task_robot_lateral_positions
+   require_task_robot_assets
+
+.. autofunction:: declare_source_task_embodiment
+
+.. autofunction:: resolve_task_hand_calibrations
+
+.. autofunction:: declare_task_robot_mount
+
+.. autofunction:: declare_task_contact_pads
+
+.. autofunction:: task_robot_lateral_positions
+
+.. autofunction:: require_task_robot_assets
+

@@ -7,6 +7,11 @@
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
 | Explicit hand geometry capture and lazy paired grasp ownership | `embodichain/lab/sim/utility/grasp_geometry.py` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
+| Native Marvin Task Program hand/deployment descriptions | `extensions/embodichain_robots/tianji/marvin/task_program.py`, `deployment.py`; uses the existing native component and constructs no runtime |
+
+
+| Explicit Franka/UR10 Robotiq task-hand roles and source declaration calibration | `extensions/embodichain_robots/robotiq/task_program.py`, `deployment.py`; keeps components as the authority and constructs no runtime |
+| Public configured model-description dispatch | `extensions/embodichain_robots/task_program.py`; selects the explicitly declared owner, independent of Task Engine or native runtime assembly |
 | Available robot configs and variants | `extensions/embodichain_robots/_catalog.py`; `extensions/embodichain_robots/__init__.py` owns lazy exports |
 | Locomotion assets, standing poses, drives and reference frames | `extensions/embodichain_robots/locomotion_profiles.py` reads each vendor/model's `profile.json`; model packages own `cfg.py` and `assets.py` |
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
