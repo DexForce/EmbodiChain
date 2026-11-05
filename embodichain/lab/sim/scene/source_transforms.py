@@ -71,7 +71,12 @@ def apply_source_body_scale(
         raise ValueError(
             "Source body scale policy must be preserve, multiply, or absolute."
         )
+    requested = _vector3(requested)
     source = _vector3(config.get("body_scale", [1.0, 1.0, 1.0]))
+    if any(value <= 0 for value in (*source, *requested)):
+        raise ValueError(
+            "Source and requested body scales must be positive three-vectors."
+        )
     if policy == "preserve":
         result = source
     elif policy == "multiply":

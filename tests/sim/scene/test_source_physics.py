@@ -89,3 +89,8 @@ assert result["body_type"] == "dynamic"
         capture_output=True,
         text=True,
     )
+
+
+def test_standalone_ingress_rejects_unknown_roles_before_emitting_dynamic_physics():
+    with pytest.raises(ValueError, match="Source role"):
+        source_scene_object_declaration({"uid": "source"}, role="unregistered")

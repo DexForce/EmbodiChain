@@ -70,3 +70,12 @@ def test_unknown_scale_policy_keeps_existing_public_source_preflight_rejection()
         apply_source_body_scale(
             {"body_scale": [1, 2, 3]}, policy="unsupported", requested=[1, 1, 1]
         )
+
+
+@pytest.mark.parametrize("requested", [[1, 2], [1, -1, 2]])
+def test_standalone_scale_ingress_rejects_malformed_vectors_before_mutation(requested):
+    source = {"body_scale": [1, 2, 3]}
+    before = deepcopy(source)
+    with pytest.raises(ValueError, match="vector"):
+        apply_source_body_scale(source, policy="multiply", requested=requested)
+    assert source == before

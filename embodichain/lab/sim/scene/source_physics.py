@@ -230,6 +230,10 @@ def source_scene_object_declaration(
         ValueError: For unsupported source physics fields, malformed property
             groups, or conflicting legacy/canonical collider declarations.
     """
+    if role not in {"background", "rigid_object", "articulation"}:
+        raise ValueError(
+            "Source role must be background, rigid_object, or articulation."
+        )
     if role == "articulation":
         # Articulation schemas vary by asset; preserve their source fields after
         # path and pose normalization instead of guessing a reduced schema.
