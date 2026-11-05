@@ -88,6 +88,18 @@ Named geometric/held/support stability conditions execute through the standard
 `SimulationSegmentPolicyPort`; they do not install another constraints registry.
 The initial sample does not count toward duration. Ordinary drift resets the
 object/reference anchors, while a held-state failure stays latched for the row.
+Joint stability uses the actual joint coordinate and full-window range, holding
+the original observed robot position. Its receipt does not claim contact safety.
+The pure ``compute.trajectory.PositionRangeMonitor`` owns candidate-window
+statistics; the port owns observation and hold scheduling. An execution clock
+adds the final raw sample and a bounded ``joint_window`` record with actual
+steps/times, per-sample validity/errors and policy/segment/native identity.
+The pre-sample range anchor is retained separately as numerical initialization.
+Incomplete retention is explicit and cannot prove full coverage. Unclocked
+default execution retains its legacy receipt without fabricated timestamps.
+Execution termination and per-row condition status remain separate. The default
+invalid-row mode aborts the batch; explicit isolation lets other rows continue.
+Cancelled/interrupted waits keep partial diagnostics and no success result.
 Native support and qualified planar-region inputs remain distinct measurements;
 missing acquisition cannot become geometric success. Pure task/report matching
 stays outside Lab and can consume owned condition data without a runtime.
@@ -248,3 +260,14 @@ The result records missing-observation counts and the last reasons. A row that
 never reestablishes a successful window after missing evidence reports
 `support_result_available=false`; consumers must not interpret that false result
 as a measured task failure. Source-global errors still invalidate every witness.
+
+`SimulationSegmentPolicyPort.observation_clock` exposes only the requesting
+session's current observation binding; an unbound port returns None and a
+superseded session rejects new reads. Same-clock binding is idempotent and the
+generation belongs to the existing owner lifetime, not a global active-run
+registry. Default execution, cancellation and cleanup retain their own protocols.
+The environment adapter requests a fresh policy/validator session for every
+bridge, including ordinary execution without nominal sources. Creating a later
+bridge cannot replace the clock stored by an earlier session. Position-only
+post-policy holds pass through the configured Gym action encoder, preserving the
+captured positions and supplying zero velocity targets in position-velocity mode.
