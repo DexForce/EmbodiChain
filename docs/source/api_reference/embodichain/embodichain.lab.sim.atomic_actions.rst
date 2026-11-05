@@ -517,5 +517,31 @@ calibration fails before capture. Diagnostic metadata never selects policy.
 
 .. autoclass:: GraspOpeningTarget
    :members:
+   :no-index:
 
 .. automethod:: ActionPlanningServices.prepare_grasp_query
+
+Explicit source contact-policy composition
+------------------------------------------
+
+The shared ``GraspOpeningTarget`` definition lives in ``grasp_geometry``;
+``atomic_actions`` and ``runtime`` retain the same public class identity. Its
+poses and metadata stay owned and bound to one preparation scope.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.grasp_geometry
+   :members:
+
+``source_native_contact`` maps the explicitly selected preserved source revision
+to GraspKit's existing typed ``ClosingContactPolicy`` and the requested FCL
+service. Closing, opening and rigid-clearance algorithms remain solely in
+GraspKit. Source builders consume the existing Default/B1 native capture API,
+retain the explicit hand sampling grid and original distances, and never step
+physics or infer a Task Program policy. Missing FCL fails explicitly; this is
+geometric qualification, not physical acquisition/release evidence.
+
+Close each query with its context manager or a ``finally`` block. It releases
+only owned query resources, never borrowed simulation entities. Ordinary
+``prepare_grasp_query`` keeps its existing Newton backend and defaults.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.source_native_contact
+   :members:

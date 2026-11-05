@@ -24,6 +24,8 @@ Atomic skills own which segment enables recovery; Task Engine declares policy.
 | Joint-path timing | `embodichain/lab/sim/motion/planners/toppra_planner.py`, `trapezoidal_planner.py` in that directory |
 | Cartesian geometry and scalar timing | `embodichain/lab/sim/motion/planners/se3.py`, `bezier.py`, `_scalar_time_law.py`, `_blend_constraints.py` in that directory |
 | Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
+| Discrete full-robot collision queries and owned query scopes | `embodichain/lab/sim/motion/mesh_collision.py` |
+| Bounded empty-arm joint clearance | `embodichain/lab/sim/motion/joint_clearance.py` |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
@@ -212,7 +214,14 @@ hands provide their own geometry. Sampling/collision stays in the canonical
 contact frame, and public poses map once to the declared runtime TCP. Do not
 add a second hand-specific conversion. GraspKit owns collision-qualified end-region
 selection through `pg_grasp.regions`; callers select a policy without supplying
-a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
+a Task Engine implementation. Explicit `pg_grasp.constraints` and `opening`
+views filter complete object geometry after ordinary ranking and preserve source
+order and infinite-cost failure padding. `preshape` consumes captured numeric
+hand sweeps; `proposals` defers final-TCP qualification without bypassing required
+ground filtering. These APIs import without a Robot, simulation or target
+decomposition backend; `pg_grasp` resolves concrete implementations lazily. Nominal dimensions
+in `hand_envelope` remain separate from physical collision geometry.
+The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
 sampled closing geometry and contact fitting with explicit thresholds; robot/FK
 sampling and physical contact evidence remain Lab responsibilities.
 `pg_grasp.native_contact` owns discrete convex closing/opening and rigid-clearance

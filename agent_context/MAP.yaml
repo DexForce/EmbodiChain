@@ -201,7 +201,7 @@ topics:
     trajectory expansion, trajectory augmentation, expansion profile, configured trajectory expansion,
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
     轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体, kinematic trajectory refinement, 轨迹修正]
-  keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
+  keywords: [SimulationFreeMotionQuery, ObservedCuroboQueryFactory, select_clearance_joint_offset, BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
     CuroboPayload, CuroboQuerySnapshot, curobo_motion_generator,
     interpolation_mode, ik_seed_mode, resolve_continuous_ik_path, search_cost_scope, RejectedMotionCandidate, MotionRecoveryTrace,
     expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
