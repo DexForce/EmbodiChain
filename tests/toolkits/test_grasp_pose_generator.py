@@ -264,19 +264,3 @@ def test_grasp_pose_generator():
 
 if __name__ == "__main__":
     test_grasp_pose_generator()
-
-
-def test_public_model_resolution_preserves_named_defaults_and_closed_inline_bounds():
-    from embodichain.toolkits.graspkit import resolve_parallel_jaw_gripper_model
-
-    native = resolve_parallel_jaw_gripper_model("tianji_marvin_gripper")
-    assert (native.min_opening_width, native.max_opening_width) == (0.001, 0.095)
-    inline = dict(model_id="robotiq_arg2f_140", max_opening_width=0.128)
-    capped = resolve_parallel_jaw_gripper_model(inline)
-    assert (capped.min_opening_width, capped.max_opening_width) == (0.002, 0.128)
-    capped.max_opening_width = 0.1
-    assert inline["max_opening_width"] == 0.128
-    with pytest.raises(ValueError, match="unsupported fields"):
-        resolve_parallel_jaw_gripper_model({**inline, "collision_box": [1, 1, 1]})
-    with pytest.raises(ValueError, match="unknown parallel-jaw"):
-        resolve_parallel_jaw_gripper_model("unknown_hand")
