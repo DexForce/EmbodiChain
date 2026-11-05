@@ -19,6 +19,10 @@ semantic scene graph, generation model client or task lifecycle.
 | Exact native hand/rigid shape and physical-offset capture | `embodichain/lab/sim/scene/native_hand.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
+| Static USD root/link geometry and explicit proxy fitting | `embodichain/lab/sim/scene/articulation_geometry.py` |
+| Source-declared prismatic, press and revolute physical bindings | `embodichain/lab/sim/scene/articulation_inputs.py`, `press_inputs.py`, `revolute_inputs.py` |
+| Explicit control roles, collider inputs and source lineage | `embodichain/lab/sim/scene/control_semantics.py`, `revolute_geometry.py`, `control_source.py`, `control_mass_source.py` |
+| Shared authored source reads and link-local collider inputs | `embodichain/lab/sim/spawn/source_geometry.py`; Scene retains its `LinkMesh` import |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
 | CPU support, packing and constrained-layout strategies | `embodichain/lab/sim/scene/_support_cpu.py`, `_placement_cpu.py`, `_packing_cpu.py`, `_layout_cpu.py` |
 | Robot-aware object proposals and full-pose IK/FK checks | `embodichain/lab/sim/scene/workspace.py` |
@@ -50,6 +54,19 @@ It creates no collision query and selects no grasp policy. Geometric qualificati
 belongs to [GraspKit](../motion-planning/motion-planning.md); query composition and
 cleanup belong to `ActionPlanningServices` in [Atomic Actions](../atomic-actions/atomic-actions.md).
 Captured shapes and nominal queries do not establish physical acquisition/release.
+
+Static control readers consume explicit authored roles, keep source mesh frames
+and identity, and never build semantic graphs or select execution/recovery
+budgets. Acceptance thresholds and semantic link IDs belong to their callers.
+They consume the shared [Object/Spawn source reader](../simulation-system/simulation-system.md)
+and may explicitly share one `UsdSourceSnapshot` within an assembly. Source
+freshness checks reuse captured identities without repeating role parsing at
+the end of each inspection. Scene retains control-specific qualification,
+source-label targets and geometry derivation; live state uses Object APIs.
+`control_mass_source` retains the Default-only two-attribute mass compensation
+in a content-addressed derived source; it never edits the original asset.
+`control_source` rejects source/sidecar drift, including newly present optional
+sidecars. Source mesh proofs do not certify native cooked shapes or paths.
 
 `NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
 recreate it after replacing either object or changing its model/scale. Queries

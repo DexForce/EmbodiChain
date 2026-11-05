@@ -12,6 +12,7 @@ topics:
   keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, VisualMaterial, VisualMaterialCfg, VisualMaterialInst, preview-material, 材质预览, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
+    UsdSourceSnapshot, read_usd_source, LinkMesh,
     PhysicalCollisionGeometry, capture_physical_collision_geometry,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
     fixed-cadence playback, quaternion, xyzw]

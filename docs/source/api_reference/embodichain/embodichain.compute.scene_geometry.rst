@@ -182,6 +182,18 @@ rotation angles without selecting elapsed time or stability thresholds.
 .. automodule:: embodichain.compute.geometry.rigid
    :members:
 
+Circular-prism qualification
+----------------------------
+
+The CPU source-mesh proof checks two complete radial rings, convex closed
+triangle topology and strict containment of additional rotor colliders. It
+preserves the existing qualification tolerances and returns a radius, without
+simulation state or task-specific success evaluation.
+
+.. currentmodule:: embodichain.compute.geometry.cylinder
+
+.. autofunction:: circular_prism_radius
+
 Native support patch measurements
 ---------------------------------
 
