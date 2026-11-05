@@ -1174,6 +1174,7 @@ class TaskProgramDemoBridge:
         parallel_safety_validator: ParallelCommandSafetyValidator | None = None,
         expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None,
         isolate_policy_sessions: bool = False,
+        runtime_resource_cleanup: Callable[[], None] | None = None,
         invocation_policies: BoundInvocationPolicies | None = None,
     ) -> None:
         if not isinstance(program, CompiledTaskProgramPort):
@@ -1268,6 +1269,12 @@ class TaskProgramDemoBridge:
             validator_port, SegmentValidatorPort
         ):
             raise TypeError("validator session must implement SegmentValidatorPort")
+        if runtime_resource_cleanup is not None and not callable(
+            runtime_resource_cleanup
+        ):
+            raise TypeError("runtime_resource_cleanup must be callable or None.")
+        self._runtime_resource_cleanup = runtime_resource_cleanup
+        self._runtime_resources_closed = False
         self._program = program
         self._runtime = runtime
         self._sink = command_sink
@@ -1306,7 +1313,7 @@ class TaskProgramDemoBridge:
             or (lifecycle.complete and lifecycle.validation is not None)
         )
         return (
-            self._segment_iterator_closed
+            (self._segment_iterator_closed or self._runtime_resources_closed)
             and self._active_segment_id is None
             and settled
         )
@@ -1406,6 +1413,22 @@ class TaskProgramDemoBridge:
             )
         return self._eligible_mask.clone()
 
+    @property
+    def validator_port(self) -> SegmentValidatorPort | None:
+        """Return this bridge's actual validator owner without creating a new session."""
+        return self._validator_port
+
+    def close_runtime_resources(self) -> None:
+        """Release bridge-owned observation/query resources without issuing commands.
+
+        Hosts must complete the existing abort handshake before abandoning a
+        pending action. This cleanup does not acknowledge or execute that action.
+        """
+        if not self._runtime_resources_closed:
+            self._runtime_resources_closed = True
+            if self._runtime_resource_cleanup is not None:
+                self._runtime_resource_cleanup()
+
     def iter_segments(self) -> Iterator[DemoSegment]:
         """Lazily adapt compiled program segments to ``DemoSegment`` values.
 
@@ -1414,6 +1437,8 @@ class TaskProgramDemoBridge:
         raises :class:`TaskProgramBridgeError` instead of silently carrying stale row
         eligibility into downstream execution.
         """
+        if self._runtime_resources_closed:
+            raise TaskProgramBridgeError("Bridge runtime resources are closed.")
         if self._segment_iterator_started:
             raise TaskProgramBridgeError(
                 "This bridge's segment iterator is already started or closed."
@@ -1423,6 +1448,7 @@ class TaskProgramDemoBridge:
             yield from self._iter_segments()
         finally:
             self._segment_iterator_closed = True
+            self.close_runtime_resources()
 
     def _iter_segments(self) -> Iterator[DemoSegment]:
         for segment in self._program.iter_segments():

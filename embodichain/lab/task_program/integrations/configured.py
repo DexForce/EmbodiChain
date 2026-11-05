@@ -46,6 +46,10 @@ from ._configured_hand_geometry import (
     _RobotHandGeometryCfgFactory,
     _decode_hand_geometry,
 )
+from ._configured_controls import _decode_control_operation, _decode_control_lowerer
+from .simulation.control_assembly import ControlOperationDeclaration
+from .simulation.control_policy import SimulationControlConditionCfg
+from .simulation.control_lowering import PressPrepareFactory, TwistPrepareFactory
 from .catalog import (
     SimulationTaskProgramRegistration,
 )
@@ -2576,6 +2580,7 @@ def _decode_registered_lowerer(
     value: object,
     *,
     path: str,
+    control_operations: tuple[ControlOperationDeclaration, ...] = (),
 ) -> (
     _ArticulationLinkSlideLowererFactory
     | _AxisAlignLowererFactory
@@ -2586,8 +2591,17 @@ def _decode_registered_lowerer(
     | _PourLowererFactory
     | _PushObjectLowererFactory
     | _RelativePlaceLowererFactory
+    | PressPrepareFactory
+    | TwistPrepareFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
+    if isinstance(value, Mapping) and value.get("kind") in {
+        "press_prepare",
+        "press",
+        "twist_prepare",
+        "twist",
+    }:
+        return _decode_control_lowerer(value, operations=control_operations, path=path)
     common = _mapping(
         value,
         path=path,
@@ -2998,18 +3012,22 @@ class _DecodedRuntimeServices:
         | RoutedMoveHeldObjectLowererFactory
         | _PourLowererFactory
         | _PushObjectLowererFactory
-        | _RelativePlaceLowererFactory,
+        | _RelativePlaceLowererFactory
+        | PressPrepareFactory
+        | TwistPrepareFactory,
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
+    control_operations: tuple[ControlOperationDeclaration, ...] = ()
     settle_presets: (
         tuple[
             tuple[
                 str,
                 DynamicSettleMonitorCfg
                 | SimulationStabilityConditionCfg
-                | SimulationJointStabilityConditionCfg,
+                | SimulationJointStabilityConditionCfg
+                | SimulationControlConditionCfg,
             ],
             ...,
         ]
@@ -3022,7 +3040,8 @@ def _decode_settle_presets(value: object, *, path: str) -> tuple[
         str,
         DynamicSettleMonitorCfg
         | SimulationStabilityConditionCfg
-        | SimulationJointStabilityConditionCfg,
+        | SimulationJointStabilityConditionCfg
+        | SimulationControlConditionCfg,
     ],
     ...,
 ]:
@@ -3035,6 +3054,22 @@ def _decode_settle_presets(value: object, *, path: str) -> tuple[
         item_path = f"{path}.{name}"
         if not isinstance(item, Mapping):
             raise TypeError(f"{item_path} must be a mapping.")
+        if item.get("kind") in {"press_control", "twist_control"}:
+            config = _mapping(
+                item,
+                path=item_path,
+                required=frozenset({"kind", "entity", "operation_id", "phase"}),
+                optional=frozenset({"terminal"}),
+            )
+            preset = SimulationControlConditionCfg(
+                entity=config["entity"],
+                operation_id=config["operation_id"],
+                family="press" if config["kind"] == "press_control" else "twist",
+                phase=config["phase"],
+                terminal=config.get("terminal", False),
+            ).snapshot()
+            result.append((name, preset))
+            continue
         if item.get("kind") == "joint_position_and_stability":
             config = _mapping(
                 item,
@@ -3117,6 +3152,7 @@ def _decode_runtime_services(
                 "hand_geometries",
                 "handover_pose_providers",
                 "registered_semantic_lowerers",
+                "control_operations",
                 "control_part_evidence",
                 "nominal_motion_sources",
                 "settle_presets",
@@ -3171,10 +3207,27 @@ def _decode_runtime_services(
             )
         )
     )
+    operations = tuple(
+        _decode_control_operation(item, path=f"{path}.control_operations[{index}]")
+        for index, item in enumerate(
+            _sequence(
+                config.get("control_operations", ()), path=f"{path}.control_operations"
+            )
+        )
+    )
+    if len({item.call.operation_id for item in operations}) != len(operations):
+        raise ValueError("Control operation IDs must be unique.")
+    if not {item.grasp_target_id for item in operations} <= {
+        key for key, _ in hand_geometries
+    }:
+        raise ValueError(
+            "Control operations require explicitly configured hand geometry."
+        )
     lowerers = tuple(
         _decode_registered_lowerer(
             item,
             path=f"{path}.registered_semantic_lowerers[{index}]",
+            control_operations=operations,
         )
         for index, item in enumerate(
             _sequence(
@@ -3348,6 +3401,7 @@ def _decode_runtime_services(
         hand_geometries=hand_geometries,
         handover_pose_providers=handover,
         registered_semantic_lowerers=lowerers,
+        control_operations=operations,
         control_part_evidence=evidence,
         nominal_motion_sources=tuple(nominal),
         settle_presets=(
@@ -3427,6 +3481,7 @@ def _decode_configured_task_program_integration(
         handover_pose_providers=services.handover_pose_providers,
         control_part_evidence_factory=services.control_part_evidence,
         registered_semantic_lowerer_factories=(services.registered_semantic_lowerers),
+        control_operations=services.control_operations,
         **(
             {}
             if services.settle_presets is None

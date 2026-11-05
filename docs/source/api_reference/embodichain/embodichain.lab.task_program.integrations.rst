@@ -598,3 +598,44 @@ The default ``None`` keeps legacy custom factory calls unchanged: no new keyword
 is passed to them. Explicit scope requests require a factory supporting the
 optional keyword. The validator must not acquire observations or mutate physical
 state. Control-service construction and evidence collection remain separate.
+
+
+Scoped control producers and runtime-bound lowerers
+---------------------------------------------------
+
+The standard factory creates a fresh operation for every compiled bridge, using
+its real program fingerprint, initialized episode, contact sensor and acknowledged
+clock. The same operation is supplied to the registered lowerer and physical
+post-policy. Ordinary factories continue using ``create``; the optional runtime
+factory protocol explicitly requests the bridge's actual service context.
+
+Press preserves observed preparation holds, source tip geometry, bounded physical
+release windows and terminal receipts. Twist shares one cursor between Atomic
+planning, installed-plan lifecycle and measured chunk feedback. Prismatic
+continuation registries reuse the published Atomic recovery owners. This assembly
+keeps B1 source qualification and rejects external nominal plans or expansion for
+control bridges. Software assembly checks do not establish physical qualification.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.extensions
+
+.. autoclass:: RuntimeBoundSemanticLowererFactory
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.runtime_services
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_assembly
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_lowering
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_policy
+   :members:
+
+Control observers opt into retaining the actual before-fetch source stamp. Their
+``capture(refresh=False)`` reuses the completed buffer; this does not add a sensor
+refresh or repeat the post-policy's physical acquisition. Bridge cleanup detaches
+owned hooks and closes cursors/queries without acknowledging pending commands.
+The borrowed observation owner remains available for final collectors until host
+teardown, while a changed episode invalidates that bridge's live observations.

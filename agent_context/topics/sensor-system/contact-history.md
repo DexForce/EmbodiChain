@@ -105,6 +105,12 @@ sequence. Initial captures explicitly request a refresh; substeps reuse the
 completed sensor sample. The observer never declares action success or task
 acceptance; integrations own occurrence and episode binding.
 
+Controls can explicitly select ``retain_source_stamp=True`` to keep the last
+completed before-fetch stamp even between windows. ``capture(refresh=False)``
+reuses that completed buffer; the default observer path and sensor refresh count
+remain unchanged. ``pause_window`` stops retaining window rows without inventing a
+new physical sample. Reset and close invalidate retained stamps.
+
 Window generations reject delayed callbacks after reset, replacement or close.
 Records are append-only within a generation; `snapshot(start)` returns an owned
 suffix, with `snapshot()` selecting the full window. Limits mark

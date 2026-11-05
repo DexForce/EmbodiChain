@@ -1129,3 +1129,53 @@ def test_joint_contact_duration_limit_preserves_owned_prefix_and_stops_acquisiti
     observer.begin_window("new")
     assert observer.generation != generation and observer.snapshot() == ()
     assert len(retained) == 1 and retained[0].frame.timestamp == 0.0
+
+
+@pytest.mark.parametrize("retain", [False, True])
+def test_joint_contact_retains_completed_sample_only_with_explicit_policy(retain):
+    from embodichain.lab.sim.sensors.contact import JointContactObserver
+
+    source, clock, joint_reads = ContactSource(), [0.0], []
+
+    def position():
+        joint_reads.append(clock[0])
+        return torch.zeros(1)
+
+    observer = JointContactObserver(
+        ContactEvidenceSampler(source),
+        position,
+        lambda: clock[0],
+        retain_source_stamp=retain,
+    )
+    generation = observer.begin_window("prepare")
+    assert observer.capture(refresh=True) is None
+    assert source.update_count == 1 and joint_reads == [0.0]
+    observer.pause_window()
+    token = observer.before_sample()
+    assert (token is not None) is retain
+    clock[0] = 0.004
+    # Model the ContactSensor's one completed substep acquisition. The observer
+    # keeps its real before-fetch stamp without another sensor or joint query.
+    source.update()
+    observer.after_sample(0.004, token)
+    assert source.update_count == 2 and joint_reads == [0.0]
+    assert observer.record_count == 1 and observer.generation == generation
+    if not retain:
+        with pytest.raises(ValueError, match="No current completed"):
+            observer.latest_source_stamp()
+        return
+    stamp = observer.latest_source_stamp()
+    observer.begin_window("next")
+    assert observer.capture(refresh=False, source_stamp=stamp) is None
+    assert source.update_count == 2 and joint_reads == [0.0, 0.004]
+    assert observer.record_count == 1
+    assert observer.snapshot()[0].frame.timestamp == 0.004
+    clock[0] += 0.004
+    with pytest.raises(ValueError, match="No current completed"):
+        observer.latest_source_stamp()
+    observer.reset()
+    with pytest.raises(ValueError, match="No current completed"):
+        observer.latest_source_stamp()
+    observer.close()
+    with pytest.raises(ValueError, match="No current completed"):
+        observer.latest_source_stamp()

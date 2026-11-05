@@ -535,7 +535,11 @@ def test_operation_session_binds_occurrences_and_separates_preview_feedback(tmp_
     preview.close()
 
 
-def test_operation_session_prepares_the_real_motion_query_factory(tmp_path):
+def test_operation_session_prepares_the_real_motion_query_factory(
+    tmp_path, monkeypatch
+):
+    # The shared fixture lives with the public Motion owner, outside this test package.
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "motion"))
     from _revolute_query_fixture import revolute_query_inputs
     from embodichain.lab.sim.motion.revolute_query import (
         RevolutePathQuery,

@@ -310,3 +310,90 @@ def test_prismatic_and_object_inputs_share_link_frames_and_source_topology(butto
     np.testing.assert_allclose(object_mesh.bounds, [vertices.min(0), vertices.max(0)])
     with pytest.raises(ValueError, match="does not belong"):
         source.link_mesh(path, "/Button/base", scale=2.0)
+
+
+def test_control_mass_readback_preserves_fixed_mass_scaling_and_rejects_double_conversion(
+    tmp_path,
+):
+    import torch
+    from types import SimpleNamespace
+    from embodichain.lab.sim.scene.control_mass_observation import (
+        verify_scaled_control_mass,
+    )
+
+    config = knob_source(tmp_path)
+    config["body_scale"] = (2.0, 2.0, 2.0)
+    binding = inspect_revolute_control(config, 90)
+    art = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=config["fpath"], body_scale_mass_policy="fixed_mass"),
+        num_instances=1,
+        get_mass=lambda name: torch.tensor([[0.02]]),
+        get_inertia=lambda name: torch.tensor([[[0.04, 0.08, 0.12]]]),
+        get_com_pose=lambda name: torch.tensor([[[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]]),
+    )
+    result = verify_scaled_control_mass(art, binding)
+    assert result["verified"] and len(result["links"]) == 2
+    art.get_inertia = lambda name: torch.tensor([[[0.16, 0.32, 0.48]]])
+    with pytest.raises(ValueError, match="readback mismatch"):
+        verify_scaled_control_mass(art, binding)
+
+
+def test_native_control_geometry_keeps_axial_and_park_metrics_distinct():
+    import torch
+    from types import SimpleNamespace
+    from embodichain.lab.sim.scene.press_inputs import PressBinding
+    from embodichain.lab.sim.scene.control_measurement import NativeControlGeometry
+
+    pose = torch.eye(4)[None]
+    faces = torch.empty(0, 3, dtype=torch.long)
+    finger = torch.tensor([[0.05, -0.01, -0.01], [0.06, 0.01, 0.01]])
+    target = torch.tensor([[-0.01, -0.01, -0.01], [0.01, 0.01, 0.01]])
+    calls = []
+    robot = SimpleNamespace(
+        num_instances=1,
+        link_names=("finger",),
+        get_link_pose=lambda name, **kwargs: pose.clone(),
+        get_link_vert_face=lambda name: (finger, faces),
+        get_qpos=lambda **kwargs: torch.zeros(1, 1),
+        compute_fk=lambda **kwargs: pose.clone(),
+    )
+
+    def mesh(name):
+        calls.append(name)
+        return (target if name == "button" else torch.empty(0, 3)), faces
+
+    art = SimpleNamespace(
+        num_instances=1,
+        link_names=("button", "base"),
+        get_link_vert_face=mesh,
+        get_link_pose=lambda name, **kwargs: pose.clone(),
+    )
+    binding = PressBinding(
+        "control",
+        "joint",
+        "button",
+        "base",
+        "source.usda",
+        "a" * 64,
+        "/mesh",
+        1.0,
+        (1.0, 0.0, 0.0),
+        (0.0, 0.01),
+        (0.1, 0.0, 0.0),
+        0.0,
+        0.01,
+    )
+    geometry = NativeControlGeometry(
+        robot,
+        art,
+        finger_link_names=("finger",),
+        motion_part="arm",
+        press_binding=binding,
+    )
+    retreat = geometry.press_clearances(terminal=False)
+    assert retreat["retreat_clearance"] == pytest.approx(0.04)
+    assert retreat["tcp_clearance"] == pytest.approx(0.1)
+    assert retreat["terminal_clearance"] is None and not calls
+    terminal = geometry.press_clearances(terminal=True)
+    assert terminal["terminal_clearance"] == pytest.approx(0.04)
+    assert calls == ["button", "base"]

@@ -866,6 +866,7 @@ success; event rules retain incomplete evidence and release failures explicitly.
    :members:
 
 .. automodule:: embodichain.lab.sim.atomic_actions.twist_feedback
+   :members:
 
 Prismatic articulation and drawer planning
 ------------------------------------------

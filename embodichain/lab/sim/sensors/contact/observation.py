@@ -71,6 +71,10 @@ class JointContactObserver:
         joint_position: Read the explicitly selected joint as a floating (1,) tensor.
         clock: Actual nonnegative simulation time, not a synthetic sample clock.
         joint_velocity: Optional independent (1,) joint-velocity reader.
+        retain_source_stamp: Explicitly retain the actual before-fetch stamp of
+            completed callbacks, including while a window is paused. This enables
+            a new window to reuse that same sample without another sensor fetch.
+            The default keeps ordinary inactive callbacks unchanged.
     """
 
     def __init__(
@@ -80,9 +84,12 @@ class JointContactObserver:
         clock: Callable[[], float],
         *,
         joint_velocity: Callable[[], torch.Tensor] | None = None,
+        retain_source_stamp: bool = False,
     ) -> None:
         if sampler.num_envs != 1:
             raise ValueError("Joint contact observation supports B=1 only.")
+        if type(retain_source_stamp) is not bool:
+            raise TypeError("retain_source_stamp must be a bool.")
         self._sampler, self._clock = sampler, clock
         self._joints = {"articulation.joint_position": joint_position}
         if joint_velocity is not None:
@@ -97,16 +104,14 @@ class JointContactObserver:
         self._max_samples: int | None = None
         self._max_duration: float | None = None
         self._overflow = False
+        self._retain_source_stamp = retain_source_stamp
+        self._latest_stamp: ContactSourceStamp | None = None
+        self._latest_time: float | None = None
 
     @property
     def generation(self) -> int:
         """Observer-local window generation, advanced on begin/reset/close."""
         return self._generation
-
-    @property
-    def record_count(self) -> int:
-        """Return the current window's retained count without copying or sampling."""
-        return len(self._records)
 
     @property
     def overflow(self) -> bool:
@@ -140,7 +145,10 @@ class JointContactObserver:
             raise ValueError("max_duration must be finite and positive.")
         self.set_phase(phase)
         started = self._time()
+        latest_stamp, latest_time = self._latest_stamp, self._latest_time
         self.reset()
+        if self._retain_source_stamp:
+            self._latest_stamp, self._latest_time = latest_stamp, latest_time
         self._max_samples, self._max_duration = max_samples, max_duration
         self._started_at, self._active = started, True
         return self._generation
@@ -213,6 +221,8 @@ class JointContactObserver:
         Read stored data with :meth:`snapshot`. A reached limit marks overflow
         without acquiring another sample. Missing channels remain unavailable.
         """
+        if self._retain_source_stamp and type(refresh) is not bool:
+            raise TypeError("refresh must be a bool.")
         if self._closed or not self._active:
             raise RuntimeError("Joint contact observation has no active window.")
         generation, phase = self._generation, self._phase
@@ -240,9 +250,17 @@ class JointContactObserver:
             torch.tensor([0]),
             (*DEFAULT_CHANNELS, CONTACT_DISTANCES),
         )
-        sample = self._sampler.sample(
-            request, refresh=refresh, source_stamp=source_stamp
-        )
+        if self._retain_source_stamp:
+            if refresh:
+                source_stamp = self._sampler.source_stamp()
+                self._sampler.sensor.update()
+            sample = self._sampler.sample(
+                request, refresh=False, source_stamp=source_stamp
+            )
+        else:
+            sample = self._sampler.sample(
+                request, refresh=refresh, source_stamp=source_stamp
+            )
         # Retain valid contacts rather than fixed-capacity padding per substep.
         mask = sample.frame.batches[CONTACT_VALID_MASK].values[0]
         batches = {
@@ -259,6 +277,8 @@ class JointContactObserver:
             raise ValueError(
                 "Simulation time changed during joint/contact acquisition."
             )
+        if self._retain_source_stamp:
+            self._latest_stamp, self._latest_time = source_stamp, timestamp
         record = JointContactObservation(
             PhysicalEvidenceFrame._from_owned_batches(
                 timestamp, self._revision, request.env_ids, batches
@@ -269,6 +289,31 @@ class JointContactObserver:
             sample.dropped_contacts,
         )
         self._records.append(record)
+
+    @property
+    def record_count(self) -> int:
+        """Return the current window's retained count without copying or sampling."""
+        return len(self._records)
+
+    def latest_source_stamp(self) -> ContactSourceStamp:
+        """Return an explicitly retained current sample's before-fetch identity.
+
+        No native data is fetched. A reset, close, time change or disabled
+        retention leaves this evidence unavailable; the current world revision
+        cannot substitute for the original before-fetch stamp.
+
+        Raises:
+            ValueError: No completed sample is retained at the current time.
+        """
+        if (
+            self._closed
+            or self._latest_stamp is None
+            or self._latest_time != self._time()
+        ):
+            raise ValueError(
+                "No current completed contact sample source stamp is available."
+            )
+        return self._latest_stamp
 
     def snapshot(self, start: int = 0) -> tuple[JointContactObservation, ...]:
         """Copy all records or only the suffix beginning at an earlier offset.
@@ -294,13 +339,20 @@ class JointContactObserver:
 
     def before_sample(self) -> object:
         """Capture source identity and current window before sensor fetch."""
-        if self._closed or not self._active or self._overflow:
+        if self._closed or (
+            not self._retain_source_stamp and (not self._active or self._overflow)
+        ):
             return None
         return (self, self._generation, self._sampler.source_stamp())
 
     def after_sample(self, dt: float, token: object) -> None:
         """Reuse one completed sensor sample; stale-window callbacks are ignored."""
-        if self._closed or not self._active or token is None:
+        if (
+            self._closed
+            or token is None
+            or not self._retain_source_stamp
+            and not self._active
+        ):
             return
         if (
             not isinstance(token, tuple)
@@ -311,6 +363,10 @@ class JointContactObserver:
             return
         if isinstance(dt, bool) or not math.isfinite(dt) or dt <= 0:
             raise ValueError("Joint contact substep duration must be positive.")
+        if self._retain_source_stamp:
+            self._latest_stamp, self._latest_time = token[2], self._time()
+            if not self._active or self._overflow:
+                return
         if self._records and not math.isclose(
             self._time() - self._records[-1].frame.timestamp,
             dt,
@@ -320,6 +376,10 @@ class JointContactObserver:
             raise ValueError("Joint contact samples do not cover consecutive substeps.")
         self.capture(refresh=False, source_stamp=token[2])
 
+    def pause_window(self) -> None:
+        """Stop appending while retaining the owned prefix and its generation."""
+        self._active = False
+
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         """End the owned window when its single native row resets."""
         if env_ids is not None and 0 not in env_ids:
@@ -328,6 +388,7 @@ class JointContactObserver:
         self._active = False
         self._records.clear()
         self._overflow = False
+        self._latest_stamp = self._latest_time = None
 
     def close(self) -> None:
         """Invalidate late callbacks without sampling, stepping or issuing commands."""

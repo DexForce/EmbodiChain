@@ -593,6 +593,26 @@ class RegisteredSemanticLowererSceneValidator(Protocol):
         """
 
 
+@runtime_checkable
+class RuntimeBoundSemanticLowererFactory(Protocol):
+    """Optional factory port requiring the actual bridge-owned runtime context."""
+
+    call_id: ClassVar[str]
+    revision: ClassVar[str]
+
+    def create_with_runtime_services(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+        runtime_services: TaskProgramRuntimeServiceContext,
+    ) -> RegisteredSemanticLowerer:
+        """Bind a fresh lowerer to explicit services without global active-run state."""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
 class StandardExtensionDeclarations:
     """Cross-checked provider-free declarations for the standard factory."""
@@ -1178,6 +1198,9 @@ def build_standard_extension_declarations(
     )
 
 
+if TYPE_CHECKING:
+    from .runtime_services import TaskProgramRuntimeServiceContext
+
 __all__ = [
     "ControlPartEvidenceProviderDeclaration",
     "ControlPartEvidenceProviderFactory",
@@ -1187,6 +1210,7 @@ __all__ = [
     "RegisteredSemanticLowererDeclaration",
     "RegisteredSemanticLowererFactory",
     "RegisteredSemanticLowererSceneValidator",
+    "RuntimeBoundSemanticLowererFactory",
     "RuntimeTransportDeclaration",
     "StandardExtensionDeclarations",
     "VersionedKey",
