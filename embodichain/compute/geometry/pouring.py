@@ -577,9 +577,6 @@ def source_pour_staging_frame(
         Receiver-relative translation pose, world orientation and local pivot.
         The original 15 mm reserve and axis-alignment order remain unchanged.
     """
-    from scipy.spatial.transform import Rotation
-    import math
-
     vertices = np.asarray(vertices)
     upright = np.asarray(upright_axis)
     rotation = np.asarray(initial_rotation)

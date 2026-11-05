@@ -14,16 +14,47 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Original source orientation arithmetic stays independent of task/runtime owners."""
+"""Frozen source classifications, target poses and numeric placement declarations."""
 
 from __future__ import annotations
-from pathlib import Path
+
 import json
+from pathlib import Path
+
+import numpy as np
 import pytest
+
+from embodichain.compute.geometry.source_relations import (
+    source_orientation_label,
+    source_support_proposal,
+)
 from embodichain.compute.geometry.source_targets import (
     upright_source_quaternion,
     upright_origin_height,
 )
+
+CASES = json.loads(
+    (Path(__file__).parent / "data/source_relations_b0.json").read_text()
+)
+
+
+@pytest.mark.parametrize("case", CASES["orientation"])
+def test_source_orientation_classification(case):
+    assert source_orientation_label(case["input"]) == case["expected"]
+
+
+@pytest.mark.parametrize("case", CASES["support"])
+def test_source_support_candidate_and_tie_order(case):
+    assert (
+        source_support_proposal(
+            case["uid"],
+            np.asarray(case["child"]),
+            case["objects"],
+            tolerance=case["tolerance"],
+        )
+        == case["expected"]
+    )
+
 
 REFERENCE = json.loads(
     (Path(__file__).parent / "data/source_targets_b0.json").read_text()
@@ -74,7 +105,7 @@ PICK_REFERENCE = json.loads(
 
 @pytest.mark.parametrize(
     "row",
-    [v for v in PICK_REFERENCE["cases"] if v["name"].startswith("e1_")],
+    PICK_REFERENCE["cases"],
     ids=lambda row: row["name"],
 )
 def test_numeric_pick_approach_matches_original_complete_source_factory(row):

@@ -53,6 +53,7 @@ from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from .simulation.policies import SimulationSettleMonitorCfg
 from .simulation.stability import (
     SimulationStabilityConditionCfg,
+    SimulationJointStabilityConditionCfg,
     SupportSensorDeclarationCfg,
 )
 from .composition import (
@@ -1749,6 +1750,8 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 "goal_translation_threshold",
                 "goal_rotation_threshold",
                 "action_timeout",
+                "planning_budget",
+                "retry_all_failed_plans",
             }
         ),
     )
@@ -1764,6 +1767,10 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
             minimum=0,
         ),
     }
+    if "retry_all_failed_plans" in config:
+        kwargs["retry_all_failed_plans"] = _boolean(
+            config["retry_all_failed_plans"], path=f"{path}.retry_all_failed_plans"
+        )
     for field_name in (
         "goal_translation_threshold",
         "goal_rotation_threshold",
@@ -1776,6 +1783,29 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 minimum=0.0,
                 strict_minimum=True,
             )
+    if config.get("planning_budget") is not None:
+        from embodichain.lab.sim.atomic_actions.policies import PlanningBudget
+
+        budget_path = f"{path}.planning_budget"
+        budget = _mapping(
+            config["planning_budget"],
+            path=budget_path,
+            required=frozenset(),
+            optional=frozenset({"wall_seconds"}),
+        )
+        wall_seconds = budget.get("wall_seconds")
+        kwargs["planning_budget"] = PlanningBudget(
+            wall_seconds=(
+                None
+                if wall_seconds is None
+                else _real(
+                    wall_seconds,
+                    path=f"{budget_path}.wall_seconds",
+                    minimum=0.0,
+                    strict_minimum=True,
+                )
+            )
+        )
     return RecoveryPolicy(**kwargs)
 
 
@@ -2700,15 +2730,27 @@ class _DecodedRuntimeServices:
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
     settle_presets: (
         tuple[
-            tuple[str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg], ...
+            tuple[
+                str,
+                DynamicSettleMonitorCfg
+                | SimulationStabilityConditionCfg
+                | SimulationJointStabilityConditionCfg,
+            ],
+            ...,
         ]
         | None
     ) = None
 
 
-def _decode_settle_presets(
-    value: object, *, path: str
-) -> tuple[tuple[str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg], ...]:
+def _decode_settle_presets(value: object, *, path: str) -> tuple[
+    tuple[
+        str,
+        DynamicSettleMonitorCfg
+        | SimulationStabilityConditionCfg
+        | SimulationJointStabilityConditionCfg,
+    ],
+    ...,
+]:
     """Decode a complete closed named table for the existing registration owner."""
     if not isinstance(value, Mapping) or not value:
         raise ValueError(f"{path} must be a nonempty mapping.")
@@ -2718,7 +2760,29 @@ def _decode_settle_presets(
         item_path = f"{path}.{name}"
         if not isinstance(item, Mapping):
             raise TypeError(f"{item_path} must be a mapping.")
-        if "kind" in item:
+        if item.get("kind") == "joint_position_and_stability":
+            config = _mapping(
+                item,
+                path=item_path,
+                required=frozenset({"kind", "entity", "joint", "target", "tolerance"}),
+                optional=frozenset(
+                    {
+                        "duration",
+                        "timeout",
+                        "position_drift",
+                        "invalid_observation_policy",
+                        "max_observation_samples",
+                    }
+                ),
+            )
+            preset = SimulationJointStabilityConditionCfg(
+                **{
+                    name: deepcopy(value)
+                    for name, value in config.items()
+                    if name != "kind"
+                }
+            ).snapshot()
+        elif "kind" in item:
             config = _mapping(
                 item,
                 path=item_path,

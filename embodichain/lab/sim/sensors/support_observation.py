@@ -673,6 +673,45 @@ class NativeSupportObservation:
                 "Native support acquisition/environment clock mapping changed."
             )
 
+    def observe_current(
+        self,
+        *,
+        support_contract_revision: int | None = None,
+        com_tolerance: float | None = None,
+        clock: SupportControlClock | None = None,
+    ) -> NativeSupportResult:
+        """Read current pair poses and acquire support through this existing owner.
+
+        Args:
+            support_contract_revision: Existing explicit support qualification mode.
+            com_tolerance: Optional declared policy tolerance, as for ``observe``.
+            clock: Expected host control clock when this owner participates in a
+                runtime. A bound strong clock must be that exact object.
+
+        Returns:
+            Owned current physical values and source metadata. Historical poses
+            must use their recorded evidence rather than this acquisition path.
+
+        Raises:
+            RuntimeError: This observer is closed.
+            ValueError: A clock or native owner changed before live pose reads.
+        """
+        if self._closed:
+            raise RuntimeError("Native support observer is closed.")
+        if self._clock is not None and clock is not self._clock:
+            raise ValueError("Native support belongs to another bound runtime clock.")
+        try:
+            self._refresh_identity()
+        except _ERRORS as error:
+            self._unavailable(error)
+            raise ValueError(self._error) from error
+        return self.observe(
+            self.object.get_local_pose(to_matrix=True),
+            self.reference.get_local_pose(to_matrix=True),
+            support_contract_revision=support_contract_revision,
+            com_tolerance=com_tolerance,
+        )
+
     def observe(
         self,
         object_pose: torch.Tensor,
@@ -1064,52 +1103,6 @@ def qualified_support_heights(
     Keep the highest qualified point so penetration is not hidden by averaging.
     Unavailable rows cannot replace the existing conservative mesh envelope.
     """
-    heights = torch.full_like(like, torch.nan)
-    rows = observation.get("rows")
-    if (
-        supported.dtype != torch.bool
-        or supported.shape != like.shape
-        or observation.get("scope") != "native_contact_support"
-        or not isinstance(rows, list)
-        or len(rows) != like.shape[0]
-    ):
-        return heights
-    for index, row in enumerate(rows):
-        if not supported[index] or not isinstance(row, Mapping):
-            continue
-        values = tuple(
-            row.get(name)
-            for name in ("com_patch_distance_m", "com_tolerance_m", "upward_impulse")
-        )
-        if any(
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-            for value in values
-        ):
-            continue
-        distance, tolerance, impulse = values
-        if tolerance <= 0 or not 0 <= distance <= tolerance or impulse <= 0:
-            continue
-        if row.get("contacts_world") is None or row.get("center_of_mass_world") is None:
-            continue
-        try:
-            points = torch.as_tensor(
-                row["contacts_world"], device=like.device, dtype=like.dtype
-            )
-            center = torch.as_tensor(
-                row["center_of_mass_world"], device=like.device, dtype=like.dtype
-            )
-        except (TypeError, ValueError):
-            continue
-        if (
-            points.ndim != 2
-            or points.shape[1] != 3
-            or not points.shape[0]
-            or center.shape != (3,)
-            or not torch.isfinite(points).all()
-            or not torch.isfinite(center).all()
-        ):
-            continue
-        heights[index] = points[:, 2].amax()
-    return heights
+    from embodichain.compute.geometry.contact_support import contact_support_heights
+
+    return contact_support_heights(supported, observation, like)

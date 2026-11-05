@@ -36,7 +36,9 @@ REFERENCE = json.loads(
 @pytest.mark.parametrize("case", REFERENCE["preshape"], ids=lambda c: c["name"])
 def test_last_native_pad_fit_matches_source_projection(case):
     points = np.asarray(case["target"])
-    pads = tuple(np.asarray(value) for value in case["pads"])
+    xs = np.asarray(REFERENCE["pad_strokes"][case["stroke"]])
+    pads = np.empty((*xs.shape, 3))
+    pads[..., 0], pads[..., 1:] = xs, REFERENCE["pad_yz"]
     expected = case["expected"]
 
     def selected():
@@ -62,6 +64,7 @@ def test_last_native_pad_fit_matches_source_projection(case):
 
 @pytest.mark.parametrize("case", REFERENCE["landing"], ids=lambda c: c["name"])
 def test_occupied_floor_proposal_matches_source_reservations(case):
+    case = REFERENCE["landing_defaults"] | case
     expected = case["expected"]
 
     def selected():

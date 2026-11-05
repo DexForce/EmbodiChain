@@ -22,16 +22,17 @@ import numpy as np
 import pytest
 from embodichain.compute.geometry.pour_region import region_staging_pose
 
-_CASES = json.loads((Path(__file__).parent / "data/pour_region_b0.json").read_text())[
-    "cases"
-]
+_REFERENCE = json.loads(
+    (Path(__file__).parent / "data/pour_region_b0.json").read_text()
+)
 
 
-@pytest.mark.parametrize("case", _CASES, ids=lambda case: case["name"])
+@pytest.mark.parametrize("case", _REFERENCE["cases"], ids=lambda case: case["name"])
 def test_inset_staging_matches_frozen_source(case):
+    inputs = _REFERENCE["inputs"] | _REFERENCE["poses"][case["pose"]] | case["inputs"]
     values = {
         name: np.asarray(value) if isinstance(value, list) else value
-        for name, value in case["inputs"].items()
+        for name, value in inputs.items()
     }
     if values["proxy_position_tolerance_m"] == "infinity":
         values["proxy_position_tolerance_m"] = float("inf")

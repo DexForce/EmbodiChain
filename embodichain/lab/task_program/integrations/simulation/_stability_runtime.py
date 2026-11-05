@@ -36,6 +36,7 @@ from embodichain.utils.math import pose_inv
 from .stability import SimulationStabilityConditionCfg
 from embodichain.lab.sim.sensors.support_observation import (
     SupportControlClock,
+    NativeSupportResult,
     SupportObservationRegistry,
     qualified_support_heights,
 )
@@ -46,6 +47,7 @@ __all__: list[str] = []
 @dataclass
 class _Lifetime:
     closed: bool = False
+    clock_generation: int = 0
 
 
 class _ConditionStabilityRuntime:
@@ -192,6 +194,7 @@ class _ConditionStabilityRuntime:
             self._support_observers[key] = observer
         self._metadata: dict[int, dict[str, Any]] = {}
         self._clock: SupportControlClock | None = None
+        self._clock_generation = 0
 
     def bind_clock(self, clock: SupportControlClock) -> None:
         """Bind strong support readers to the already-owned execution clock."""
@@ -203,10 +206,36 @@ class _ConditionStabilityRuntime:
             or not math.isclose(clock.step_dt, self._dt, rel_tol=0, abs_tol=1e-9)
         ):
             raise ValueError("Strong support clock differs from the control cadence.")
+        if clock is not self._clock:
+            self._lifetime.clock_generation += 1
+            self._clock_generation = self._lifetime.clock_generation
         self._clock = clock
         for cfg in self._presets.values():
             if cfg.support_contract_revision == 1:
                 self._support_observers[(cfg.entity, cfg.reference)].bind_clock(clock)
+
+    def capture_current_support(
+        self, preset_id: str, *, clock: SupportControlClock
+    ) -> NativeSupportResult:
+        """Use this session's declared pair only while it still owns the binding."""
+        self._require_open()
+        if (
+            clock is None
+            or self._clock is not clock
+            or self._clock_generation != self._lifetime.clock_generation
+        ):
+            raise ValueError(
+                "Support capture belongs to another runtime/session clock."
+            )
+        cfg = self._presets[preset_id]
+        if cfg.support_sensor is None:
+            raise ValueError(
+                "The selected stability preset declares no support sensor."
+            )
+        return self._support_observers[(cfg.entity, cfg.reference)].observe_current(
+            support_contract_revision=cfg.support_contract_revision,
+            clock=clock,
+        )
 
     def _support(
         self,
@@ -567,3 +596,59 @@ class _ConditionStabilityRuntime:
         result._results = {}
         result._metadata = {}
         return result
+
+    def measure_support_geometry(
+        self,
+        preset_id: str,
+        *,
+        native_support: Mapping[str, Any],
+        object_pose: Any,
+        reference_pose: Any,
+    ) -> dict[str, Any]:
+        """Project captured poses against this owner's existing input geometry.
+
+        No sensor or live pose is sampled. The caller supplies either a current
+        owned observation or its historical policy snapshot and seeded poses.
+        """
+        self._require_open()
+        cfg = self._presets[preset_id]
+        if cfg.kind != "supported_region":
+            raise ValueError(
+                "Full-footprint measurements require a declared region condition."
+            )
+        # The frozen collector computed final/historical mesh projection on CPU.
+        # Preserve that arithmetic/device boundary even when simulation is CUDA.
+        vertices = self._support_vertices[cfg.entity].detach().cpu()
+        pose = torch.as_tensor(
+            object_pose, dtype=vertices.dtype, device=vertices.device
+        )
+        reference = torch.as_tensor(
+            reference_pose, dtype=vertices.dtype, device=vertices.device
+        )
+        if (
+            native_support.get("entity") != cfg.entity
+            or native_support.get("reference") != cfg.reference
+            or native_support.get("env_ids") != list(range(vertices.shape[0]))
+        ):
+            raise ValueError("Captured support has another declared pair or row scope.")
+        landing = self._region_geometry[(cfg.entity, cfg.reference)].measure(
+            pose.detach().cpu(), reference.detach().cpu()
+        )
+        landing.update(support_tolerance_m=0.05, penetration_tolerance_m=0.01)
+        bottom = (vertices.to(pose) @ pose[:, 2, :3, None]).squeeze(-1).amin(-1) + pose[
+            :, 2, 3
+        ]
+        heights = qualified_support_heights(
+            torch.tensor(
+                native_support["supported"], dtype=torch.bool, device=pose.device
+            ),
+            native_support,
+            bottom,
+        )
+        return {
+            "landing_region": landing,
+            "support_gap_m": [
+                float(value) if torch.isfinite(value) else None
+                for value in bottom - heights
+            ],
+        }
