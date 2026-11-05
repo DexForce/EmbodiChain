@@ -89,7 +89,9 @@ retain `DynamicSettleMonitorCfg`; explicit `measurement` selects
 The explicit `joint_position_and_stability` kind selects
 `SimulationJointStabilityConditionCfg` and requires a canonical articulation,
 exact native joint, target and tolerance. These are policy parameters, not
-static articulation geometry or names inferred by an engine.
+static articulation geometry or names inferred by an engine. Its optional invalid
+row policy and bounded raw retention belong to execution, and participate in the
+registration fingerprint; ``to_condition_dict()`` keeps only normative values.
 Support conditions include an explicit sensor UID/capacity declaration. The
 scene binding supplies native pair UIDs, and the full definition is fingerprinted.
 

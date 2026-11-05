@@ -83,6 +83,8 @@ It retains validity masks, native actor IDs, Arena frames and impulses, with
 explicit unsupported, nonfinite, saturated or source-drift errors. Native and
 runtime observation revisions remain different identities. The output device
 follows the request.
+Signed contact distance is opt-in; an empty request retains the five default
+channels. A missing distance invalidates only that requested channel.
 
 `lab/sim/sensors/contact/timeline.py` owns bounded per-environment packed history,
 driven by an explicit host control clock. Keep it in the environment's sensor
@@ -95,6 +97,19 @@ and aliases, deduplicating rows before advancing generations. Frontends own
 report schema wrappers and semantic actor labels. The CPU test
 `tests/gym/envs/task_program/test_contact_evidence.py` exercises the actual public
 step boundary, frame ownership, native stamps and selective reset behavior.
+
+`contact/observation.py` collects explicit B=1 joint position/velocity
+and packed valid contacts through the same sensor hooks. It uses actual
+simulation time and separates native contact revision from its acquisition
+sequence. Initial captures explicitly request a refresh; substeps reuse the
+completed sensor sample. The observer never declares action success or task
+acceptance; integrations own occurrence and episode binding.
+
+Window generations reject delayed callbacks after reset, replacement or close.
+Records are append-only within a generation; `snapshot(start)` returns an owned
+suffix, with `snapshot()` selecting the full window. Limits mark
+overflow explicitly, and missing/nonfinite channels preserve unavailability
+independently.
 
 `lab/sim/sensors/support_observation.py` owns native load-patch acquisition. Its explicit
 `SupportObservationRegistry` reuses an exact native pair across bridge consumers;

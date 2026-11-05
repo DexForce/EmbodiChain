@@ -23,8 +23,8 @@ All seven-element root and rigid-object poses use EmbodiChain's
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any, Protocol, TypeAlias, TYPE_CHECKING
+from dataclasses import asdict, dataclass
 
 import torch
 from tensordict import TensorDictBase
@@ -33,17 +33,17 @@ from embodichain.utils import logger
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
 
 __all__ = [
+    "RecordedRobotJointSnapshot",
+    "RecordedTrajectoryReader",
+    "read_recorded_robot_joint_snapshot",
     "capture_trajectory_state",
     "restore_trajectory_state",
-    "RecordedRigidPoseSnapshot",
-    "RecordedTrajectoryReader",
-    "read_recorded_rigid_pose_snapshot",
-    "RecordedRigidPoseWindow",
-    "read_recorded_rigid_pose_window",
-    "RecordedRobotJointSnapshot",
-    "read_recorded_robot_joint_snapshot",
+    "trajectory_observation_cfgs",
+    "export_observation_history",
 ]
 
 
@@ -204,463 +204,78 @@ def restore_trajectory_state(
             )
 
 
-@dataclass(frozen=True, slots=True, eq=False)
-class RecordedRigidPoseSnapshot:
-    """Owned rigid poses from exact completed trajectory boundary slots.
-
-    Frame indices are row-local trajectory slots, not simulation timestamps.
-    They must not be mixed with another clock domain without a proven mapping.
-    The snapshot carries the host episode IDs; it decides no task outcome.
-    """
-
-    object_uid: str
-    env_ids: tuple[int, ...]
-    episode_ids: tuple[int, ...]
-    frame_indices: tuple[int, ...]
-    poses: torch.Tensor
-
-    def __post_init__(self) -> None:
-        from embodichain.compute.geometry.rigid import validate_rigid_pose_batch
-
-        if (
-            type(self.object_uid) is not str
-            or not self.object_uid
-            or self.object_uid != self.object_uid.strip()
-        ):
-            raise ValueError(
-                "Recorded object UID must be an exact nonempty identifier."
-            )
-        size = len(self.env_ids)
-        if not size or len(set(self.env_ids)) != size:
-            raise ValueError("Recorded environment IDs must be nonempty and unique.")
-        for name, lower in (("env_ids", 0), ("episode_ids", 0), ("frame_indices", 1)):
-            values = tuple(getattr(self, name))
-            if len(values) != size or any(
-                type(value) is not int or value < lower for value in values
-            ):
-                raise ValueError(f"{name} must contain one qualified integer per row.")
-            object.__setattr__(self, name, values)
-        validate_rigid_pose_batch(self.poses, size)
-        object.__setattr__(self, "poses", self.poses.detach().clone())
-
-
-class RecordedTrajectoryReader:
-    """Read live recording buffers through an episode-qualified, read-only port.
+def trajectory_observation_cfgs(
+    env: _TrajectoryEnv, uids: list[str] | None = None
+) -> dict[str, ObservationCfg]:
+    """Declare replay fields through the same raw observation functors as policy.
 
     Args:
-        source: Owner callback returning recorded states and completed-step
-            counts, or None when recording is unavailable. Buffers stay with
-            the recorder and are never exposed through this reader.
-        episode_context: Recording owner's row-local episode lifecycle. Its
-            identity prevents borrowing a reader from another environment.
-        is_closed: Owner callback indicating whether recording access has ended.
-        robot_identity: Optional actual robot UID and opaque owner callback.
-            Robot qpos reads require this explicit identity dependency.
-
-    The recording host supplies these dependencies during assembly. This reader
-    imports no environment or simulator and performs no physical acquisition.
-    Each result is an independently owned snapshot of exact recorded slots.
-    """
-
-    def __init__(
-        self,
-        *,
-        source: Callable[[], tuple[_TrajectoryState, torch.Tensor] | None],
-        episode_context: EpisodeContext,
-        is_closed: Callable[[], bool],
-        robot_identity: Callable[[], tuple[str, object]] | None = None,
-    ) -> None:
-        if not all(callable(value) for value in (source, is_closed)):
-            raise TypeError("Recording sources and lifetime checks must be callable.")
-        self._source = source
-        self._episode_context = episode_context
-        if robot_identity is not None and not callable(robot_identity):
-            raise TypeError("Recorded robot identity source must be callable.")
-        self._is_closed = is_closed
-        self._robot_identity = robot_identity
-
-    def _check_episode(self, expected: tuple[int, ...]) -> None:
-        current = self._episode_context.snapshot()
-        if (
-            not current
-            or len(expected) != len(current)
-            or any(type(value) is not int or value < 0 for value in expected)
-            or tuple(row["episode"] for row in current) != expected
-            or not all(row["initialized"] for row in current)
-        ):
-            raise ValueError(
-                "Recorded poses belong to another or uninitialized episode."
-            )
-
-    def _check_open(self) -> None:
-        if self._is_closed():
-            raise RuntimeError("Recorded observations are unavailable after close.")
-
-    def validate_episode_source(self, episode_context: EpisodeContext) -> None:
-        """Require this recording's actual episode owner before binding a consumer.
-
-        Args:
-            episode_context: Consumer's expected recording lifecycle owner.
-
-        Raises:
-            ValueError: The reader belongs to another recording episode owner.
-        """
-        if self._episode_context is not episode_context:
-            raise ValueError("Recording reader belongs to another episode owner.")
-
-    def read_rigid_poses(
-        self,
-        object_uid: str,
-        frame_indices: Sequence[int],
-        *,
-        episode_ids: Sequence[int],
-    ) -> RecordedRigidPoseSnapshot:
-        """Copy one rigid object's exact recorded poses for the expected episode.
-
-        Args:
-            object_uid: Native UID selected for recording.
-            frame_indices: Positive completed boundary slot for each row.
-            episode_ids: Expected episode IDs captured before execution.
-
-        Returns:
-            Owned CPU matrices with environment, episode and frame identities.
-            Missing slots never fall back to earlier frames or live state.
-
-        Raises:
-            RuntimeError: Recording is unavailable or its owner is closed.
-            ValueError: An episode changed, a row is uninitialized, or the
-                requested recording boundary is incomplete or invalid.
-            KeyError: The selected native object was not recorded.
-        """
-        self._check_open()
-        recording = self._source()
-        if recording is None:
-            raise RuntimeError("Rigid trajectory recording is unavailable.")
-        expected = tuple(episode_ids)
-        self._check_episode(expected)
-        states, written_steps = recording
-        result = read_recorded_rigid_pose_snapshot(
-            states,
-            written_steps,
-            object_uid=object_uid,
-            frame_indices=frame_indices,
-            episode_ids=expected,
-        )
-        self._check_open()
-        self._check_episode(expected)
-        return result
-
-    def read_rigid_pose_window(
-        self,
-        object_uid: str,
-        start_frames: Sequence[int],
-        end_frames: Sequence[int],
-        *,
-        episode_ids: Sequence[int],
-    ) -> RecordedRigidPoseWindow:
-        """Copy exact inclusive pose windows from this recording episode.
-
-        Args:
-            object_uid: Exact native rigid-object UID selected for recording.
-            start_frames: First seeded slot for every environment row.
-            end_frames: Last exact written slot for every row.
-            episode_ids: Expected episode identities captured before execution.
-
-        Returns:
-            Owned CPU windows with each row's original length, dtype, and grid.
-
-        Raises:
-            RuntimeError: Recording is unavailable or its owner is closed.
-            ValueError: An episode changed or a requested interval is invalid.
-            KeyError: The selected native object was not recorded.
-        """
-        self._check_open()
-        recording = self._source()
-        if recording is None:
-            raise RuntimeError("Rigid trajectory recording is unavailable.")
-        expected = tuple(episode_ids)
-        self._check_episode(expected)
-        states, written_steps = recording
-        result = read_recorded_rigid_pose_window(
-            states,
-            written_steps,
-            object_uid=object_uid,
-            start_frames=start_frames,
-            end_frames=end_frames,
-            episode_ids=expected,
-        )
-        self._check_open()
-        self._check_episode(expected)
-        return result
-
-    def read_step_counts(self, *, episode_ids: Sequence[int]) -> tuple[int, ...]:
-        """Copy the exact completed boundary for each bound recording row.
-
-        Args:
-            episode_ids: Expected initialized recording episode identities.
-
-        Returns:
-            Completed step counts without reading a simulator or current robot.
-
-        Raises:
-            ValueError: Recording, initialized rows, or boundaries are unavailable.
-        """
-        if self._is_closed():
-            raise ValueError("No active recorded environment boundary is available.")
-        recording = self._source()
-        if recording is None:
-            raise ValueError("No active recorded environment boundary is available.")
-        expected = tuple(episode_ids)
-        self._check_episode(expected)
-        _, written_steps = recording
-        if (
-            not isinstance(written_steps, torch.Tensor)
-            or written_steps.ndim != 1
-            or written_steps.dtype != torch.long
-        ):
-            raise ValueError("Recorded boundary rows are invalid.")
-        values = written_steps.detach().cpu().tolist()
-        if len(values) != len(expected) or any(
-            type(value) is not int or value < 0 for value in values
-        ):
-            raise ValueError("Recorded boundary rows are invalid.")
-        if self._is_closed():
-            raise ValueError("No active recorded environment boundary is available.")
-        self._check_episode(expected)
-        return tuple(values)
-
-    def read_robot_qpos(
-        self, frame_indices: Sequence[int], *, episode_ids: Sequence[int]
-    ) -> RecordedRobotJointSnapshot:
-        """Copy exact recorded joint positions under the actual robot identity.
-
-        Args:
-            frame_indices: Positive completed slots for every native row.
-            episode_ids: Expected initialized recording episode identities.
-
-        Returns:
-            Owned positions with original dtype/device and row/robot identity.
-
-        Raises:
-            RuntimeError: Recording, robot identity, or its lifetime is unavailable.
-            ValueError: The robot, episode, or requested recorded slots changed.
-        """
-        self._check_open()
-        recording = self._source()
-        if recording is None:
-            raise RuntimeError("Robot trajectory recording is unavailable.")
-        if self._robot_identity is None:
-            raise RuntimeError("Recorded robot identity is unavailable.")
-        expected = tuple(episode_ids)
-        self._check_episode(expected)
-        uid, owner = self._robot_identity()
-        states, written_steps = recording
-        result = read_recorded_robot_joint_snapshot(
-            states,
-            written_steps,
-            robot_uid=uid,
-            frame_indices=frame_indices,
-            episode_ids=expected,
-        )
-        self._check_open()
-        next_uid, next_owner = self._robot_identity()
-        if next_owner is not owner or next_uid != uid:
-            raise ValueError(
-                "The robot or episode changed during recorded qpos capture."
-            )
-        self._check_episode(expected)
-        return result
-
-
-def read_recorded_rigid_pose_snapshot(
-    states: _TrajectoryState,
-    written_steps: torch.Tensor,
-    *,
-    object_uid: str,
-    frame_indices: Sequence[int],
-    episode_ids: Sequence[int],
-) -> RecordedRigidPoseSnapshot:
-    """Read seeded post-transition poses without live-state fallback.
-
-    Args:
-        states: Existing trajectory state buffers, including ``rigid_objects``.
-        written_steps: Completed transition count for each recorded row.
-        object_uid: Explicit native rigid-object UID.
-        frame_indices: Positive exact boundary slot for each environment row.
-        episode_ids: Host-validated episode identity for those buffers.
+        env: Host exposing robot and scene registries for schema assembly.
+        uids: Optional allow-list for non-robot entities.
 
     Returns:
-        Independently owned CPU poses at the requested end-step slots. The
-        source dtype and xyzw-to-matrix conversion are preserved.
-
-    Raises:
-        ValueError: Recording is incomplete, a row/slot is missing, or poses
-            are not qualified. This never substitutes ``end_step - 1`` or a
-            current simulation pose.
-        KeyError: The selected rigid object was not recorded.
+        Recording-only add functors. No physical state is acquired here; legacy
+        trajectory field paths are export names, not another acquisition path.
     """
-    from embodichain.utils.math import xyz_quat_to_4x4_matrix
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg, SceneEntityCfg
+    from embodichain.lab.gym.envs.managers.observations import get_entity_state
 
-    if (
-        not isinstance(written_steps, torch.Tensor)
-        or written_steps.ndim != 1
-        or written_steps.dtype != torch.long
-    ):
-        raise ValueError("Recording requires an integer completed-step vector.")
-    frames, episodes = tuple(frame_indices), tuple(episode_ids)
-    size = written_steps.numel()
-    if (
-        len(frames) != size
-        or len(episodes) != size
-        or any(type(frame) is not int or frame <= 0 for frame in frames)
-    ):
-        raise ValueError("Recorded boundaries require one positive frame per row.")
-    values = states["rigid_objects"][object_uid]["pose"]
-    if (
-        not isinstance(values, torch.Tensor)
-        or values.ndim != 3
-        or values.shape[0] != size
-        or values.shape[-1] != 7
-    ):
-        raise ValueError("Recorded rigid poses must contain every requested row.")
-    completed = written_steps.detach().cpu().tolist()
-    if any(frame > completed[row] for row, frame in enumerate(frames)):
-        raise ValueError("The requested boundary is not fully recorded.")
-    if any(frame >= values.shape[1] for frame in frames):
-        raise ValueError("The seeded terminal state slot is unavailable.")
-    pose = xyz_quat_to_4x4_matrix(
-        torch.stack([values[row, frame] for row, frame in enumerate(frames)])
-        .detach()
-        .cpu()
-    )
-    return RecordedRigidPoseSnapshot(
-        object_uid,
-        tuple(range(size)),
-        episodes,
-        frames,
-        pose,
-    )
+    result = {}
 
-
-@dataclass(frozen=True, slots=True, eq=False)
-class RecordedRigidPoseWindow:
-    """Owned inclusive recorded pose windows, retaining each native row's length.
-
-    No row is padded or resampled. Initial slot zero is available only when it
-    was seeded, and the exact end slot must already have been written.
-    """
-
-    object_uid: str
-    env_ids: tuple[int, ...]
-    episode_ids: tuple[int, ...]
-    start_frames: tuple[int, ...]
-    end_frames: tuple[int, ...]
-    poses: tuple[torch.Tensor, ...]
-
-    def __post_init__(self) -> None:
-        from embodichain.compute.geometry.rigid import validate_rigid_pose_batch
-
-        if (
-            type(self.object_uid) is not str
-            or not self.object_uid
-            or self.object_uid != self.object_uid.strip()
-        ):
-            raise ValueError(
-                "Recorded object UID must be an exact nonempty identifier."
+    def add(prefix: str, uid: str, quantities: tuple[str, ...]) -> None:
+        for quantity in quantities:
+            field = (
+                "root_pose"
+                if quantity == "pose" and prefix != "rigid_objects"
+                else quantity
             )
-        size = len(self.env_ids)
-        if not size or len(set(self.env_ids)) != size:
-            raise ValueError("Recorded environment IDs must be nonempty and unique.")
-        for name in ("env_ids", "episode_ids", "start_frames", "end_frames"):
-            values = tuple(getattr(self, name))
-            if len(values) != size or any(
-                type(value) is not int or value < 0 for value in values
-            ):
-                raise ValueError(
-                    f"{name} must contain one qualified nonnegative integer per row."
-                )
-            object.__setattr__(self, name, values)
-        rows = tuple(self.poses)
-        if len(rows) != size:
-            raise ValueError("Recorded windows require every declared environment row.")
-        owned = []
-        for start, end, poses in zip(
-            self.start_frames, self.end_frames, rows, strict=True
-        ):
-            if end < start:
-                raise ValueError("Recorded window end cannot precede its start.")
-            validate_rigid_pose_batch(poses, end - start + 1)
-            owned.append(poses.detach().to(device="cpu", copy=True))
-        object.__setattr__(self, "poses", tuple(owned))
+            name = f"{prefix}/{uid}/{field}" if prefix != "robot" else f"robot/{field}"
+            result[f"recording:{name}"] = ObservationCfg(
+                func=get_entity_state,
+                mode="add",
+                name=name,
+                params={"entity_cfg": SceneEntityCfg(uid=uid), "quantity": quantity},
+                consumers=("recording",),
+            )
+
+    add("robot", env.robot.uid, ("pose", "qpos", "qvel"))
+    for uid in env.sim._articulations:
+        if uids is None or uid in uids:
+            add("articulations", uid, ("pose", "qpos", "qvel"))
+    for uid in env.sim._rigid_objects:
+        if uids is None or uid in uids:
+            add("rigid_objects", uid, ("pose", "lin_vel", "ang_vel"))
+    return result
 
 
-def read_recorded_rigid_pose_window(
-    states: _TrajectoryState,
-    written_steps: torch.Tensor,
+def export_observation_history(
+    observations: ObservationManager,
+    env_ids: list[int] | None = None,
     *,
-    object_uid: str,
-    start_frames: Sequence[int],
-    end_frames: Sequence[int],
-    episode_ids: Sequence[int],
-) -> RecordedRigidPoseWindow:
-    """Read exact inclusive recorded pose windows without live-state fallback.
+    device: str | torch.device = "cpu",
+) -> dict[str, Any]:
+    """Project numeric history through its single observation schema for export.
 
     Args:
-        states: Existing trajectory state buffers including rigid_objects.
-        written_steps: Completed transition count in every native row.
-        object_uid: Exact native rigid-object UID in the recording selection.
-        start_frames: First requested seeded slot in each row, including zero.
-        end_frames: Last exact slot in each row, already written by execution.
-        episode_ids: Host-validated episode identities for the stored buffers.
+        observations: Manager owning the field meanings and canonical IDs.
+        env_ids: Selected original environment rows, or all rows.
+        device: Snapshot destination device.
 
     Returns:
-        Owned CPU matrices for each row's own inclusive interval. One bulk
-        conversion per row preserves source dtype, time grid and xyzw ordering.
-
-    Raises:
-        ValueError: A row/window/seeded slot is absent, incomplete or invalid.
-        KeyError: The selected rigid object was not recorded.
+        Owned history with source descriptors and alias views. Existing
+        trajectory state projections can share the same snapshot tensors.
     """
-    from embodichain.utils.math import xyz_quat_to_4x4_matrix
-
-    if (
-        not isinstance(written_steps, torch.Tensor)
-        or written_steps.ndim != 1
-        or written_steps.dtype != torch.long
-    ):
-        raise ValueError("Recording requires an integer completed-step vector.")
-    starts, ends, episodes = tuple(start_frames), tuple(end_frames), tuple(episode_ids)
-    size = written_steps.numel()
-    if any(len(values) != size for values in (starts, ends, episodes)) or any(
-        type(value) is not int or value < 0
-        for values in (starts, ends, episodes)
-        for value in values
-    ):
-        raise ValueError(
-            "Recorded windows require one nonnegative boundary and episode per row."
-        )
-    if any(start > end for start, end in zip(starts, ends, strict=True)):
-        raise ValueError("Recorded window end cannot precede its start.")
-    values = states["rigid_objects"][object_uid]["pose"]
-    if (
-        not isinstance(values, torch.Tensor)
-        or values.ndim != 3
-        or values.shape[0] != size
-        or values.shape[-1] != 7
-    ):
-        raise ValueError("Recorded rigid poses must contain every requested row.")
-    completed = written_steps.detach().cpu().tolist()
-    if any(end > completed[row] for row, end in enumerate(ends)):
-        raise ValueError("The requested window is not fully recorded.")
-    if any(end >= values.shape[1] for end in ends):
-        raise ValueError("The seeded terminal state slot is unavailable.")
-    poses = tuple(
-        xyz_quat_to_4x4_matrix(values[row, start : end + 1].detach().cpu())
-        for row, (start, end) in enumerate(zip(starts, ends, strict=True))
-    )
-    return RecordedRigidPoseWindow(
-        object_uid, tuple(range(size)), episodes, starts, ends, poses
-    )
+    snapshot = observations.snapshot_history(env_ids, device=device)
+    fields = snapshot["fields"]
+    for name, values in fields.items():
+        metadata = asdict(observations.schema[name])
+        metadata["dtype"] = str(observations.schema[name].dtype)
+        values["descriptor"] = metadata
+    snapshot["fields"] = {
+        name: fields[field_id] for name, field_id in observations.field_ids.items()
+    }
+    return snapshot
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -761,3 +376,156 @@ def read_recorded_robot_joint_snapshot(
         frames,
         torch.stack([values[row, frame] for row, frame in enumerate(frames)]),
     )
+
+
+class RecordedTrajectoryReader:
+    """Project canonical raw history into owned robot-joint snapshots.
+
+    The reader owns no buffers, cursors or physical acquisition. The observation
+    manager remains the only history schema and data source; a missing or invalid
+    field never falls back to live state or an earlier recording slot.
+
+    Args:
+        observations: Host observation manager, or None when history is disabled.
+        episode_context: Exact host episode lifecycle owner.
+        is_closed: Read-only host lifetime callback.
+        robot_identity: Optional native robot UID and opaque owner callback.
+        step_counts: Optional host callback returning its canonical raw cursor.
+    """
+
+    def __init__(
+        self,
+        *,
+        observations: ObservationManager | None,
+        episode_context: EpisodeContext,
+        is_closed: Callable[[], bool],
+        robot_identity: Callable[[], tuple[str, object]] | None = None,
+        step_counts: Callable[[], torch.Tensor | None] | None = None,
+    ) -> None:
+        if not callable(is_closed) or any(
+            value is not None and not callable(value)
+            for value in (robot_identity, step_counts)
+        ):
+            raise TypeError(
+                "Recording identity, cursor and lifetime sources must be callable."
+            )
+        self._observations = observations
+        self._episode_context = episode_context
+        self._is_closed = is_closed
+        self._robot_identity = robot_identity
+        self._step_counts = step_counts
+
+    def validate_episode_source(self, episode_context: EpisodeContext) -> None:
+        """Require the consumer's actual recording lifecycle owner.
+
+        Args:
+            episode_context: Expected host lifecycle, compared by identity.
+        """
+        if episode_context is not self._episode_context:
+            raise ValueError("Recording reader belongs to another episode owner.")
+
+    def _guard(self, expected: tuple[int, ...]) -> None:
+        if self._is_closed():
+            raise RuntimeError("Recorded observations are unavailable after close.")
+        current = self._episode_context.snapshot()
+        if (
+            not current
+            or len(expected) != len(current)
+            or any(type(value) is not int or value < 0 for value in expected)
+            or tuple(row["episode"] for row in current) != expected
+            or not all(row["initialized"] for row in current)
+        ):
+            raise ValueError(
+                "Recorded positions belong to another or uninitialized episode."
+            )
+        if self._observations is None or not self._observations.has_history:
+            raise RuntimeError("Observation history is unavailable.")
+        self._observations.validate_history_owner(self._episode_context)
+
+    def read_robot_qpos(
+        self, frame_indices: Sequence[int], *, episode_ids: Sequence[int]
+    ) -> RecordedRobotJointSnapshot:
+        """Read exact positive slots without changing their dtype or device.
+
+        Args:
+            frame_indices: Completed seeded state slot for each native row.
+            episode_ids: Expected initialized host episode identities.
+
+        Returns:
+            Owned positions and native row/robot identity. Unavailable raw
+            acquisition raises with its original reasons, never a valid snapshot.
+        """
+        expected = tuple(episode_ids)
+        self._guard(expected)
+        if self._robot_identity is None:
+            raise RuntimeError("Recorded robot identity is unavailable.")
+        uid, owner = self._robot_identity()
+        frames = tuple(frame_indices)
+        if len(frames) != len(expected) or any(
+            type(frame) is not int or frame <= 0 for frame in frames
+        ):
+            raise ValueError(
+                "Recorded robot positions require one positive slot per row."
+            )
+        fields = [
+            name
+            for name, descriptor in self._observations.schema.items()
+            if descriptor.entity_uid == uid
+            and descriptor.quantity == "qpos"
+            and descriptor.coordinate_frame == "joint"
+            and descriptor.representation == "joint_order"
+            and descriptor.units == ("joint_units",)
+            and len(descriptor.shape) == 1
+            and descriptor.shape[0] > 0
+        ]
+        if not fields:
+            raise RuntimeError(
+                f"Recorded raw joint positions for {uid!r} are unavailable."
+            )
+        field = fields[0]
+        snapshot = self._observations.read_history(
+            frames, fields=(field,), episode_ids=expected
+        )
+        if not bool(snapshot.valid[field].all()):
+            raise RuntimeError(
+                "Recorded robot acquisition is unavailable: "
+                f"{snapshot.acquisition_errors[field]}."
+            )
+        result = RecordedRobotJointSnapshot(
+            uid,
+            snapshot.env_ids,
+            snapshot.episode_ids,
+            snapshot.frame_indices,
+            snapshot.values[field],
+        )
+        self._guard(expected)
+        next_uid, next_owner = self._robot_identity()
+        if next_uid != uid or next_owner is not owner:
+            raise ValueError(
+                "The robot or episode changed during recorded qpos capture."
+            )
+        return result
+
+    def read_step_counts(self, *, episode_ids: Sequence[int]) -> tuple[int, ...]:
+        """Copy the host's completed raw boundaries without another history scan.
+
+        Args:
+            episode_ids: Expected initialized recording episode identities.
+
+        Returns:
+            Independently owned completed counts in original environment order.
+        """
+        expected = tuple(episode_ids)
+        self._guard(expected)
+        values = None if self._step_counts is None else self._step_counts()
+        if (
+            not isinstance(values, torch.Tensor)
+            or values.dtype != torch.long
+            or values.ndim != 1
+            or values.numel() != len(expected)
+            or bool((values < 0).any())
+        ):
+            raise ValueError("No valid recorded environment boundaries are available.")
+        result = tuple(values.detach().cpu().tolist())
+        self._guard(expected)
+        return result

@@ -20,7 +20,8 @@ Lightweight RL environments have a separate owner in
 | Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
 | Scene, managers, RL outcomes and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
-| Historical recording reads and episode/lifetime checks | `gym/utils/trajectory_state.py`: `RecordedTrajectoryReader`; Env assembles the read-only component |
+| Raw schema, optional history and exact historical queries | `managers/observation_manager.py`; Env dispatches capture/reset/close boundaries |
+| Owned robot-joint snapshots from exact recorded slots | `gym/utils/trajectory_state.py`: `RecordedTrajectoryReader`, `RecordedRobotJointSnapshot` |
 | Optional measured physical objectives | `embodichain/lab/gym/envs/objectives/`; Gym owns observation/reset hooks independently of expert acceptance |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
 | Demo segment execution / outcomes | `embodichain/lab/gym/envs/demo.py` |
@@ -103,20 +104,56 @@ schema version, and `step_dt` in trajectory/demo metadata. Missing qvel fails
 before stepping in position-velocity mode; inactive and hold targets use zero
 qvel.
 
-`RecordedTrajectoryReader` in `gym/utils/trajectory_state.py` owns historical
-recording queries and validates expected `EpisodeContext` IDs, initialized rows
-and recording lifetime before and after copying. Injected readers must share the
-consumer's actual episode owner; numeric episode IDs alone cannot establish that
-ownership. Env assembles `trajectory_reader` from recording sources and lifecycle
-callbacks; it does not define rigid-pose query methods. Consumers inject the reader into their acquisition adapter.
-Rigid-pose reads require exact seeded `end_step` slots and return owned CPU matrices;
-`read_robot_qpos` instead preserves the recorded joint dtype/device, requiring an
-explicit host robot UID/opaque-owner callback checked around the copy. The Env
-supplies this optional dependency without new robot reads; existing pose readers
-retain their old call shape. `read_step_counts` validates completed row boundaries
-under the same initialized episode/lifetime. Missing capacity/rows never select
-`end_step - 1` or current live state. Frame
-indices describe row-local recording, not simulation timestamps.
+`ObservationManager` owns raw acquisition, the single field schema, alias
+resolution and read-only access to raw rollout observations. Standard replay fields are declared by
+`trajectory_observation_cfgs`; Env supplies those declarations and the owned
+buffers, without interpreting source functions or maintaining another schema.
+See [manager functors](../manager-functor/manager-functor.md#raw-observations-and-consumer-views).
+
+`RecordedTrajectoryReader` projects robot qpos from that manager's schema and
+exact raw slots. Env supplies its existing raw cursor and optional robot-owner
+callback; the reader owns neither history nor a cursor. It verifies the actual
+episode owner and recording lifetime around the copy, retaining the original
+joint order, floating dtype and device. Invalid raw acquisition remains
+unavailable; a later live state or earlier slot cannot replace it. Standalone
+`read_recorded_robot_joint_snapshot` copies caller-owned replay buffers under
+explicit row/slot identities without acquiring simulation state.
+
+The host's `_rollout_storage` is the common TensorDict owner. Its leading batch
+axis is environment-only so policy state slots, trajectory state slots and
+learner windows can retain their own time axes and devices without implicit
+copies. Internal expert policy storage keeps T+1 observations; the public
+`rollout_buffer` remains its T-transition view. With trajectory recording, that
+view also exposes raw observation/validity/time views from the same storage.
+`_traj_buffer` and indexed observation reads reference the shared raw tensors.
+Raw writes are part of the host rollout callbacks, using the existing buffer
+utilities. Episode IDs, availability, acquisition clocks and closed state are
+rollout metadata; no history class owns another lifecycle or cursor.
+
+An explicit observation boundary follows physics and interval events, before
+reward/action-postprocessing hooks and autoreset. Reset seeds S0 after
+`episode_prepare`; T transitions retain T+1 raw states, including terminal ST.
+Ordinary `get_obs()` queries do not advance history; explicit captures in the
+same tick have distinct revisions. Policy rollouts retain the actual transformed
+and noisy values. `step(..., recording_active_mask=...)` independently selects
+history rows for a diagnostic settling tail.
+
+Historical consumers bind fields using `observation_manager.schema`, then use
+`read_history` with exact row-local frame indices and episode IDs. The indexed
+rollout read checks actual episode ownership, initialized rows and lifecycle
+metadata before/after copying. It never queries
+live state or substitutes a previous frame. Results own values, validity,
+reasons and temporal identities, without another descriptor model.
+
+`export_observation_history` projects the manager's schema onto one owned numeric
+snapshot. Legacy trajectory state views and raw history share that snapshot's
+storage. The default snapshot is CPU; file export can retain its device for
+existing replay compatibility. `_traj_buffer`/`_traj_steps` remain projection
+aliases for existing persistence/replay adapters. Attaching/reusing an external
+RL rollout never truncates or clears episode history. Policy acceptance and raw
+diagnostic recording retain separate named cursors/masks in the same owner;
+normalization, noise, projection and different lifetimes prevent arbitrary
+aliasing of raw values with transformed policy values.
 
 ## Lifecycle and boundaries
 
@@ -143,9 +180,11 @@ flat action validation/slicing → term processing → term application
 
 Raw policy input is one ordered flat floating tensor. `ActionManager` validates
 it before state changes, processes every slice, and applies each term's owned
-resources. `ControllerAction` stays wrapped through preprocessing, bypasses the
-manager entirely, and validates qpos/qvel/qf keys, batch, joint width, floating
-dtype, and device at the direct controller boundary. Both paths retain the
+resources. `ControllerAction` stays wrapped through preprocessing and normally validates
+qpos/qvel/qf keys, batch, joint width, floating dtype and device at the direct
+controller boundary. The position-only `expert_trajectory.use_action_manager`
+opt-in instead processes joint targets through the configured policy terms,
+retaining exact FK targets and expert recording schema. Both paths retain the
 ordinary observation, reward, termination, and rollout lifecycle.
 
 Read final task success before resetting scene/bridge state. A Task Program
@@ -216,14 +255,14 @@ the traceback can retain native resources not yet registered with the manager.
 
 ### Stateful sensor and action lifecycle
 
-BaseEnv starts one simulation-manager update per control interval and samples
-participating sensors through its `after_substep` observer. See the sensor-owned [contact history contract](../sensor-system/contact-history.md)
+`BaseEnv._advance_physics()` starts one simulation-manager update per control
+interval and samples participating sensors through its `after_substep` observer.
+`EmbodiedEnv._advance_physics()` connects an ActionManager control-interval callback
+to the batched simulation update after sensor sampling, and delegates ordinary
+actions to the base implementation. ActionManager owns the substep count, term
+refresh and inactive-row holds. Intermediate
+recording and visualization frames retain the simulation manager's publication cadence.
+Direct controller-ready commands bypass
+this refresh path; the explicit expert ActionManager route participates. See the sensor-owned [contact history contract](../sensor-system/contact-history.md)
 for interval accumulation, counterpart filtering and selective reset.
 EmbodiedEnv resets action and event managers before applying reset-mode events.
-
-Exact historical pose windows use
-`RecordedTrajectoryReader.read_rigid_pose_window`, which validates the initialized
-episode before and after reading. `RecordedRigidPoseWindow` retains each row's
-inclusive start/end slots and own length; it never pads, resamples, substitutes a
-live pose or shifts an absent end slot backward. Slot zero must contain the
-seeded initial state. Task/effect acceptance remains outside this recording API.

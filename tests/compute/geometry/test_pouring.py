@@ -121,3 +121,24 @@ def test_jaw_tilt_projection_preserves_order_and_invalid_parallel_case():
     torch.testing.assert_close(axis, torch.tensor([[1.0, 0, 0], [0.0, 0, 0]]))
     torch.testing.assert_close(direction, torch.tensor([[0.0, -1, 0], [0.0, 0, 0]]))
     assert valid.tolist() == [True, False]
+
+
+def test_source_static_staging_preserves_b0_rotations_and_offset_order():
+    from scipy.spatial.transform import Rotation
+    from embodichain.compute.geometry.pouring import source_pour_staging_frame
+
+    reference = json.loads(
+        (Path(__file__).parent / "data/static_pour_staging_b0.json").read_text()
+    )
+    for case in reference["cases"]:
+        relative, rotation, pivot = source_pour_staging_frame(
+            np.asarray(reference["vertices"]),
+            np.asarray(case["axis"]),
+            Rotation.from_euler("XYZ", case["angles"], degrees=True).as_matrix(),
+            reference["reference_top"],
+            reference["finger_radius"],
+        )
+        np.testing.assert_array_equal(relative.reshape(-1), case["relative_pose"])
+        np.testing.assert_array_equal(rotation.reshape(-1), case["world_orientation"])
+        np.testing.assert_allclose(rotation @ case["axis"], [0, 0, 1], atol=1e-15)
+        np.testing.assert_array_equal(pivot, [0.01, 0.015, 0.05])

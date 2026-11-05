@@ -3314,6 +3314,27 @@ def test_condition_snapshot_is_idempotent_and_plain_matching_data_has_no_sensor_
         owned.snapshot()
 
 
+def test_generic_planning_budget_decodes_without_source_recovery_factories():
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_recovery_policy,
+    )
+    from embodichain.lab.sim.atomic_actions import PlanningBudget
+
+    config = dict(
+        max_replans=0,
+        max_action_retries=0,
+        planning_budget={"wall_seconds": 0.25},
+        retry_all_failed_plans=False,
+    )
+    policy = _decode_recovery_policy(config, path="recovery")
+    assert policy.planning_budget == PlanningBudget(0.25)
+    assert policy.retry_all_failed_plans is False
+    with pytest.raises(ValueError, match="planning_recovery"):
+        _decode_recovery_policy(
+            {**config, "planning_recovery": {"kind": "not_installed"}}, path="recovery"
+        )
+
+
 def test_configured_joint_stability_owns_target_and_requires_articulation():
     from embodichain.lab.task_program.integrations.simulation.stability import (
         SimulationJointStabilityConditionCfg,
@@ -3372,3 +3393,52 @@ def test_configured_joint_stability_rejects_incomplete_policy(change):
     }
     with pytest.raises((TypeError, ValueError)):
         _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"invalid_observation_policy": "ignore"},
+        {"max_observation_samples": 1},
+        {"max_observation_samples": True},
+    ],
+)
+def test_joint_window_configuration_rejects_unknown_runtime_modes(changes):
+    payload = _integration_payload("open_drawer")
+    declaration = dict(
+        kind="joint_position_and_stability",
+        entity="drawer",
+        joint="cabinet_to_drawer",
+        target=0.1,
+        tolerance=0.03,
+        **changes,
+    )
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "retained": declaration
+    }
+    with pytest.raises((ValueError, TypeError)):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_joint_window_runtime_settings_do_not_redefine_normative_condition_data():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationJointStabilityConditionCfg,
+    )
+
+    baseline = SimulationJointStabilityConditionCfg(
+        entity="drawer", joint="cabinet_to_drawer", target=0.1, tolerance=0.03
+    )
+    changed = baseline.snapshot()
+    changed.invalid_observation_policy = "isolate_rows"
+    changed.max_observation_samples = 128
+    assert baseline.to_condition_dict() == changed.to_condition_dict()
+    payload = _integration_payload("open_drawer")
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "retained": dict(kind="joint_position_and_stability", **baseline.to_dict())
+    }
+    first = _decode_configured_task_program_integration(payload).registration
+    payload["runtime_services"]["settle_presets"]["retained"] = dict(
+        kind="joint_position_and_stability", **changed.to_dict()
+    )
+    second = _decode_configured_task_program_integration(payload).registration
+    assert first.fingerprint != second.fingerprint

@@ -617,11 +617,13 @@ def test_nominal_sources_are_bound_to_compiled_program_identity() -> None:
     )
     config = _program()
     compiled = adapter.compile(config)
-    assert adapter.create_bridge(compiled)._validator_port is validator
+    ordinary = adapter.create_bridge(compiled)
+    assert ordinary._validator_port is validator.sessions[0]
     bindings = BoundTaskProgramNominalSources(compiled, {0: Source()})
     bridge = adapter.create_bridge(compiled, nominal_source_factory=bindings)
     assert isinstance(bridge, TaskProgramDemoBridge)
-    assert bridge._validator_port is validator.sessions[0]
+    assert bridge._validator_port is validator.sessions[1]
+    assert ordinary._validator_port is not bridge._validator_port
     config.instruction = "A different instruction for the same program."
     changed = adapter.compile(config)
     with pytest.raises(ValueError, match="do not match"):

@@ -1026,7 +1026,7 @@ class TaskProgramEnvironmentAdapter:
             runner_cfg=assembly.runner_cfg,
             parallel_safety_validator=assembly.parallel_safety_validator,
             expansion_trace_provider=assembly.expansion_trace_provider,
-            isolate_policy_sessions=nominal_source_factory is not None,
+            isolate_policy_sessions=True,
             **({"invocation_policies": policies} if policies is not None else {}),
         )
 

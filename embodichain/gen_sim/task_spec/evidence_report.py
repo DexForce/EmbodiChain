@@ -25,7 +25,9 @@ from .evidence import (
     evaluate_supported_placement_evidence,
 )
 from .condition_evidence import ConditionEvidenceBinding, evaluate_condition_evidence
+
 from .control_evidence import ControlEvidenceBinding, evaluate_control_evidence
+
 from .pour_evidence import PourEvidenceBinding, evaluate_pour_evidence
 
 if TYPE_CHECKING:
@@ -37,12 +39,7 @@ __all__ = ["evaluate_physical_evidence_report"]
 
 def _binding(
     value: Any,
-) -> (
-    SupportedPlacementEvidenceBinding
-    | ConditionEvidenceBinding
-    | ControlEvidenceBinding
-    | PourEvidenceBinding
-):
+) -> SupportedPlacementEvidenceBinding | ConditionEvidenceBinding:
     if isinstance(value, SupportedPlacementEvidenceBinding):
         return SupportedPlacementEvidenceBinding.from_dict(value)
     if isinstance(value, ConditionEvidenceBinding):
@@ -55,12 +52,12 @@ def _binding(
         version = value.get("schema_version")
         if version == "task_spec.placement_evidence_binding/v2":
             return SupportedPlacementEvidenceBinding.from_dict(value)
-        if version == "task_spec.condition_evidence_binding/v1":
-            return ConditionEvidenceBinding.from_dict(value)
-        if version == "task_spec.control_evidence_binding/v1":
-            return ControlEvidenceBinding.from_dict(value)
         if version == "task_spec.pour_evidence_binding/v1":
             return PourEvidenceBinding.from_dict(value)
+        if version == "task_spec.control_evidence_binding/v1":
+            return ControlEvidenceBinding.from_dict(value)
+        if version == "task_spec.condition_evidence_binding/v1":
+            return ConditionEvidenceBinding.from_dict(value)
     raise ValueError(
         "Unsupported physical evidence binding schema; rebuild the deployment declaration."
     )
@@ -69,11 +66,7 @@ def _binding(
 def evaluate_physical_evidence_report(
     spec: TaskSpec | Mapping[str, Any],
     bindings: Sequence[
-        SupportedPlacementEvidenceBinding
-        | ConditionEvidenceBinding
-        | ControlEvidenceBinding
-        | PourEvidenceBinding
-        | Mapping[str, Any]
+        SupportedPlacementEvidenceBinding | ConditionEvidenceBinding | Mapping[str, Any]
     ],
     evidence: Mapping[str, Mapping[str, Any]],
     *,
@@ -84,7 +77,7 @@ def evaluate_physical_evidence_report(
 
     Args:
         spec: Frozen normative specification.
-        bindings: Unique placement/state/control declarations, sharing one
+        bindings: Unique placement/orientation/joint declarations, sharing one
             row, episode and raw-or-historical input contract.
         evidence: Physical/execution snapshots keyed by predicate identity.
         program: Exact serialized program identified by every binding.

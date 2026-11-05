@@ -15,10 +15,8 @@ of those owners.
 | Normative identity and ordered milestones | `spec.py`: `TaskSpec`, `MilestoneSpec` |
 | Predicate vocabulary and temporal windows | `expressions.py` |
 | Structure validation and evidence evaluation | `validation.py` |
-| Placement bindings and physical proof checks | `evidence.py` |
+| Placement binding, physical proof checks and certificate assembly | `evidence.py` |
 | Orientation/joint state and milestone qualification | `condition_evidence.py` |
-| Operation-bound historical Press/Twist qualification | `control_evidence.py` |
-| Rigid Pour motion qualification and exact occurrence selection | `pour_evidence.py` |
 | Common per-environment physical reports | `evidence_report.py` |
 | Frozen graph/role/lineage projection | `embodichain/gen_sim/task_engine/evidence.py` |
 | Cache reads, identity checks and atomic writes | `registry.py`: `TaskSpecCache` |
@@ -33,6 +31,11 @@ owned nested values. Frozen dataclasses still contain JSON containers: changing
 one in place invalidates its original identity. Construct a new TaskSpec for an
 intentional semantic change. Instructions, task identifiers and provenance
 metadata do not participate in normative identity.
+
+`RoleSpec.is_single_member` is a read-only query for `one` or explicit
+`count=1`. It does not rewrite the authored selector, serialized fields or
+semantic identity. Larger counts and `all` require complete separate binding
+and evidence; they cannot be reduced to an available subset.
 
 Milestone dependencies must be acyclic. All predicates for one milestone must
 hold at the same snapshot strictly after its predecessors. Missing evidence and
@@ -56,8 +59,11 @@ New placement bundles project the configured owner condition directly through
 `project_configured_placement_evidence_binding`, without a legacy constraint
 file or digest. The B0 fixture adapter separately checks its frozen source identity.
 TaskSpec verifies receipts, acquisition masks, episode IDs, sampled support windows
-and recorded execution prefixes. Lab owns the physical collector; the injected recording reader owns historical
-pose access and episode/lifetime checks. Env only assembles recording components;
+and recorded execution prefixes. Lab owns the physical collector;
+[episode recording](../env-framework/env-framework.md#expert-trajectory-contract)
+supplies historical values with validity and episode/lifetime checks; the
+observation manager owns their semantic schema.
+Env dispatches capture/reset boundaries;
 no Lab module imports TaskSpec or Task Engine.
 
 Current goals cannot borrow recorded milestone success. The legacy instantaneous
@@ -67,49 +73,14 @@ therefore does not erase an available final physical negative. Recorded mileston
 still require their complete group prefix and original support receipt. Boundary snapshots do
 not establish a complete control-step trajectory. The explicit legacy contact
 scope and version-2 sampled-support scope retain their original meanings.
-The explicit revision-1 scope additionally verifies release-phase windows,
-actor/episode identity, stable policy clocks and raw contact patches. Declared
-full-footprint regions preserve the original planar `on`/`inside` checks; they
-are not general volume containment. Task families requiring handover or
-coordinated transport cannot use a single placement proof. Raw Lab snapshots
-carry no accepted/released claim; historical claims are checked when present.
-Recorded region geometry is recomputed from seeded poses and the original
-native load, then compared with the original policy snapshot, without sampling
-current contacts or substituting live poses.
-
-The Task Engine `project_condition_evidence_binding` adapter only projects
-frozen role/lineage and explicit compiled occurrence descriptors. It receives
-already resolved owner criteria and native IDs; it does not select thresholds
-or acquire physical state.
-
-Orientation and articulation endpoint bindings seal their native entity,
-criteria, episode and input-format identities. Current state is evaluated
-independently of program success. Recorded milestones require the complete
-successful occurrence prefix and original policy/validator receipts. E6 retains
-the exact semantic slide target, joint-coordinate tolerance and one-second
-stability contract; missing or failed milestone evidence remains unavailable.
-Raw joint receipts additionally bind their actual environment-step acquisition
-clock and boundary. A common report owner combines supported physical families
-without filling absent predicates or historical boundaries.
-
-Control qualification consumes a plain sealed source route and exact execution
-occurrences, not a live Press/Twist factory. It retains source sampling-window,
-cleanup and clearance requirements and the explicitly declared coarse/calibrated
-criterion. Only explicit historical receipt replay is currently supported; raw
-control acquisition is rejected before observation until the complete window
-contract is implemented. A final control goal remains an operation-event proof,
-not a replacement for a current joint-position measurement. Failed or missing
-operation receipts remain unavailable.
-
-Rigid Pour proof preserves the explicit 30-degree tilt/15-degree restore proxy,
-receiver projection and measured release. Its source/receiver and compiled
-occurrence descriptors are plain declarations; it does not consume Task Engine
-graph objects or live Lab factories. New raw observations require their geometry
-channels, episode, cadence, compiled program fingerprint and exact
-window/boundary identities. The event proof
-cannot establish ``poured`` fluid transfer. Recorded milestones additionally
-require the successful operation prefix; valid measured negatives remain failed
-and missing channels remain unavailable per environment.
+Explicit revision-1 support also checks release-phase windows, actor/episode
+identity, stable policy clocks and raw contact patches. Declared full-footprint
+regions retain the original planar `on`/`inside` checks; they do not establish
+general volume containment. Transfer/coordinated-transport tasks still require
+their separate operation proofs. Raw Lab snapshots carry no accepted/released
+claim; historical claims are checked when present. For a recorded region, Lab
+reprojects the exact raw history poses against owned geometry and the original
+support snapshot, retaining availability/errors and making no live acquisition.
 
 ## Focused validation
 
@@ -118,3 +89,28 @@ serialization, cache, missing-evidence, temporal-window and milestone contracts.
 The [API supplement](../../../docs/source/api_reference/public_api.rst) documents
 the public imports. Provider calls and simulation runs are unnecessary for this
 protocol and snapshot-validation package.
+
+Orientation and articulation state bindings seal criteria, native identities,
+episode, format and exact execution occurrences. Current state is independent
+of program success. Recorded milestones retain their complete successful prefix
+and original policy/validator receipts. E6 rechecks the authored joint target,
+tolerance and one-second stable window; invalid or missing evidence remains
+unavailable per environment. Lab state collectors use the same canonical
+ObservationManager history as support collection, preserving raw validity,
+acquisition errors and temporal identities without a second acquisition path.
+The Task Engine projection supplies declarations only and selects no thresholds.
+
+`pour_evidence.py` qualifies a recorded rigid tilt/restore occurrence using sealed
+source/receiver, episode, program, release and cadence identities. The original
+30-degree tilt, 15-degree restore and receiver-projection bounds are unchanged;
+this does not qualify fluid transfer. Missing acquisition remains unavailable.
+Lab reads recorded values through the canonical ObservationManager schema/raw
+history, never live poses or a second trajectory buffer. Historical control
+receipts remain qualified by the separate `control_evidence.py` owner.
+
+Historical Press/Twist control proof lives in `control_evidence.py`. Bindings
+seal explicit predicate/joint/direction/resource and compiled occurrence identity.
+TaskSpec replays the original acceptance receipt and complete execution prefix;
+program success alone cannot certify a physical control effect. Missing acquisition
+remains unavailable, and an original measured rejection remains rejected. This
+verifier collects no state and changes no physics or acceptance thresholds.

@@ -11,7 +11,8 @@
     "esModuleInterop": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "types": ["vite/client", "node"]
+    "types": ["vite/client", "node"],
+    "preserveSymlinks": true
   },
   "include": ["src", "tests", "vite.config.ts", "playwright.config.ts"]
 }
