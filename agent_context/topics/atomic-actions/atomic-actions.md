@@ -143,6 +143,15 @@ are rejected. Omitting the target preserves fixed-distance `SlideOptions` and th
 original Slide tutorial. Slide remains open-loop; this extension does not certify
 contact or physical goal satisfaction.
 
+`ActionPlanningServices` also accepts explicit free-motion, observed joint-prefix,
+placement-scene and exact-occurrence continuation ports. Borrowed robot-bound
+ports must own the same Robot instance. Construction performs no acquisition;
+`curobo_queries` returns only a capability implemented by the configured prefix
+adapter. The shared B1 `inspect_manipulation_plan` checks actual emitted commands,
+timing, passive joints, velocity/joint limits and robot collision proxies. It is
+available to direct Atomic callers without enabling migrated Pick/Place options.
+Full-scene clearance requires the separate explicit free-motion query.
+
 ## Package map
 
 | Concern | Source of truth |

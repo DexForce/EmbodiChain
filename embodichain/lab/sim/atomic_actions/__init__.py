@@ -74,6 +74,23 @@ from .evidence import (
     PhysicalEvidenceProvider,
     PhysicalEvidenceRequest,
 )
+from .planning_probes import (
+    JointPrefixPlanner,
+    CuroboWorldObservationProvider,
+    ObservedCuroboQueryService,
+    PlaceSceneInputs,
+    PlaceInsideLanding,
+    PlaceSceneProvider,
+)
+from .place_continuation import (
+    PlaceContinuationRoute,
+    PlaceContinuationSession,
+    PlaceContinuationProvider,
+)
+from .primitives._manipulation_checks import (
+    inspect_manipulation_plan,
+    inspect_robot_motion,
+)
 from .engine import AtomicActionEngine, PlanTransform
 from .nominal import NominalMotionSource, InstantiatedSkillMotion
 from .prototype_source import PrototypeMotionProvider
@@ -283,6 +300,17 @@ from .state import (
 )
 
 __all__ = [
+    "JointPrefixPlanner",
+    "CuroboWorldObservationProvider",
+    "ObservedCuroboQueryService",
+    "PlaceSceneInputs",
+    "PlaceInsideLanding",
+    "PlaceSceneProvider",
+    "PlaceContinuationRoute",
+    "PlaceContinuationSession",
+    "PlaceContinuationProvider",
+    "inspect_manipulation_plan",
+    "inspect_robot_motion",
     "ActionBinding",
     "ActionControlOverrides",
     "ActionInvocation",

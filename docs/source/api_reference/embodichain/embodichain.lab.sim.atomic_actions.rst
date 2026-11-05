@@ -519,3 +519,34 @@ calibration fails before capture. Diagnostic metadata never selects policy.
    :members:
 
 .. automethod:: ActionPlanningServices.prepare_grasp_query
+
+
+Shared planning inputs and validation
+-------------------------------------
+
+Planning services can borrow same-robot collision and joint-prefix queries and
+explicit placement inputs without replacing PickUp or Place. Construction
+retains dependencies but captures no geometry and initializes no planner.
+Missing observed-query capability stays unavailable; no other world source is
+selected. A continuation names exact occurrences and predicts a complete plan
+without committing physical effects.
+
+The B1 command validator checks emitted payloads against their trajectory,
+zero-time boundary, passive joints, declared limits and robot collision proxies.
+It does not establish full-scene clearance or physical success. The original
+PickUp/Place options and algorithms remain unchanged in this layer.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
+.. autofunction:: inspect_manipulation_plan
+
+.. autofunction:: inspect_robot_motion
+
+.. automodule:: embodichain.lab.sim.atomic_actions.planning_probes
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.place_continuation
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.curobo_queries
+   :members:
