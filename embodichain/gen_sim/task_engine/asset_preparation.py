@@ -53,6 +53,7 @@ def fit_prepared_scene_assets(
         only collects semantic identities/provenance and updates their shared
         physical/planner declarations; it implements no geometric fitting rules.
     """
+    scene.assert_source_assets()
     selected = {}
     for node in graph["nodes"]:
         call = node["call"]
@@ -172,6 +173,7 @@ def normalize_prepared_scene_assets(
         Updated scene with source-compatible geometry/hash/provenance metadata.
         Frozen physical snapshots must bypass this explicit source preparation.
     """
+    scene.assert_source_assets()
     assets = normalize_source_scene_assets(
         background=scene.background,
         rigid_objects=scene.rigid_objects,

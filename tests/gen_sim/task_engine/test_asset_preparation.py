@@ -99,3 +99,51 @@ def test_optional_fit_precedes_normalization_and_keeps_both_views(tmp_path):
     )
     with pytest.raises(ValueError, match="stricter"):
         fit_prepared_scene_assets(scene, later, openings={"left": 0.05, "right": 0.04})
+
+
+@pytest.mark.parametrize("operation", ["fit", "normalize"])
+def test_asset_preparation_rejects_source_drift_before_backend_or_cache_write(
+    tmp_path, monkeypatch, operation
+):
+    import embodichain.gen_sim.task_engine.asset_preparation as owner
+
+    scene, graph = fixture(tmp_path)
+    source = Path(scene.rigid_objects[0]["shape"]["fpath"])
+    source.write_bytes(source.read_bytes() + b"\n")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("changed source reached an adaptation backend")
+
+    if operation == "fit":
+        monkeypatch.setattr(owner, "fit_source_grasp_declarations", forbidden)
+        with pytest.raises(ValueError, match="changed since scene preparation"):
+            fit_prepared_scene_assets(scene, graph, openings={"left": 0.05})
+    else:
+        monkeypatch.setattr(owner, "normalize_source_scene_assets", forbidden)
+        with pytest.raises(ValueError, match="changed since scene preparation"):
+            normalize_prepared_scene_assets(scene, str(tmp_path / "derived"))
+        assert not (tmp_path / "derived").exists()
+
+
+def test_fit_then_public_normalization_keeps_both_views_and_original_assets(tmp_path):
+    scene, graph = fixture(tmp_path)
+    asset = Path(scene.rigid_objects[0]["shape"]["fpath"])
+    original = asset.read_bytes()
+    fitted, report = fit_prepared_scene_assets(
+        scene, graph, openings={"left": 0.05}, contact_clearances={"object": 0.003}
+    )
+    normalized = normalize_prepared_scene_assets(fitted, str(tmp_path / "derived"))
+    physical = normalized.rigid_objects[0]
+    planner = normalized.planner_objects[1]
+    assert report["status"] == "scaled"
+    assert physical["shape"] == planner["shape"]
+    assert physical["body_scale"] == planner["body_scale"] == [1.0, 1.0, 1.0]
+    derived = Path(physical["shape"]["fpath"])
+    assert derived != asset and derived.is_file()
+    assert (
+        normalized.asset_hashes["object"]
+        == hashlib.sha256(derived.read_bytes()).hexdigest()
+    )
+    assert normalized.asset_provenance and asset.read_bytes() == original
+    assert physical["attrs"]["mass_props"]["mass"] == 0.005
+    normalized.assert_source_assets()
