@@ -1134,3 +1134,24 @@ def test_uninstalled_recovery_is_static_preflight_error_without_acquisition():
         integration.link_call(Pick(object=SceneObjectRef("cube")))
     assert failure.value.diagnostic.code == "incompatible_planning_recovery"
     assert provider.calls == 0
+
+
+def test_segment_recovery_without_handler_is_rejected_by_static_preflight():
+    registry, provider = _scene_registry(with_default=True)
+    integration = _semantic_integration(
+        registry,
+        preset=_preset(
+            "default",
+            motion_policy=MotionPolicy(
+                strategy="ik_interp",
+                interpolation_mode="fixed_grid",
+                ik_seed_mode="sequential",
+                acceleration_limit=None,
+                segment_sample_count_retries=(4, 6),
+            ),
+        ),
+    )
+    with pytest.raises(SemanticValidationError) as failure:
+        integration.link_call(Pick(object=SceneObjectRef("cube")))
+    assert failure.value.diagnostic.code == "incompatible_motion_policy"
+    assert provider.calls == 0
