@@ -23,6 +23,8 @@ from typing import Any, TYPE_CHECKING
 import torch
 import trimesh
 
+from .rigid_mesh import capture_rigid_mesh
+
 from embodichain.compute.geometry.landing import (
     planar_floor_region,
     planar_placement_metrics,
@@ -35,29 +37,10 @@ __all__ = ["NativePlanarPlacement"]
 
 
 def _native_mesh(
-    simulation: Any, uid: str, batch_size: int
+    simulation: SimulationManager, uid: str, batch_size: int
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    native = simulation.get_rigid_object(uid)
-    if native is None:
-        raise ValueError("Placement requires its exact bound native rigid object.")
-    vertices = native.get_vertices(scale=True).detach().cpu()
-    faces = native.get_triangles().detach().cpu()
-    if (
-        vertices.ndim != 3
-        or vertices.shape[0] != batch_size
-        or vertices.shape[-1] != 3
-        or not vertices.shape[1]
-        or not torch.isfinite(vertices).all()
-        or faces.ndim != 3
-        or faces.shape[0] != batch_size
-        or faces.shape[-1] != 3
-        or not faces.shape[1]
-        or faces.dtype not in (torch.int32, torch.int64)
-        or (faces < 0).any()
-        or (faces >= vertices.shape[1]).any()
-    ):
-        raise ValueError("Placement requires finite scaled native mesh geometry.")
-    return vertices, faces
+    mesh = capture_rigid_mesh(simulation, uid, batch_size=batch_size)
+    return mesh.vertices, mesh.triangles
 
 
 class NativePlanarPlacement:
