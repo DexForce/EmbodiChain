@@ -298,3 +298,10 @@ Historical pose reads require an explicitly supplied ObservationManager and
 reuse its semantic schema/raw store, including unavailable rows and original
 boundary/revision/timestamp metadata. It does not evaluate TaskSpec conditions,
 resample past state or alter execution targets.
+
+`SimulationStateObservationCollector.capture_recorded_pour_geometry` reads one
+owned snapshot from the explicitly supplied ObservationManager, then selects
+exact inclusive source slots and receiver slots at the first maximum tilt.
+Raw validity/errors, episode and written-boundary identity remain authoritative.
+Geometry functions live in Compute and choose no Pour thresholds or release
+verdicts. The collector does not read live poses or acquire new sensor samples.
