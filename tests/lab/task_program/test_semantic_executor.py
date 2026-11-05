@@ -3184,3 +3184,52 @@ def test_executor_lifecycle_rejection_does_not_dispatch_or_run_effects(
     assert expected in result.message
     assert len(aborts) == 1 and system.sink.sent == 0
     assert not system.collector.calls
+
+
+def test_grounding_and_first_session_observation_preserve_original_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native source metadata survives both handoffs without a second sample."""
+    from dataclasses import replace
+    from embodichain.lab.sim.evidence import PhysicalObservationStamp
+    from embodichain.lab.task_program.runtime.executor import _PrimedObservationProvider
+
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    task = TaskState.empty(BATCH_SIZE, "cpu")
+    context = system.observation.observe(task)
+    original = replace(context.robot, root_pose=torch.eye(4).repeat(BATCH_SIZE, 1, 1))
+    stamp = PhysicalObservationStamp(
+        "native-owner", "default.contacts", 7, context.robot.timestamp
+    )
+    context = replace(
+        context,
+        robot=original,
+        world_source_stamp=stamp,
+        is_preview=True,
+        observed_robot=original,
+    )
+    calls = []
+
+    def observed(current):
+        calls.append(current)
+        return context
+
+    monkeypatch.setattr(system.observation, "observe", observed)
+    normalized = system.runtime._observe_for_grounding()
+    assert len(calls) == 1
+    assert normalized.world_source_stamp is stamp
+    assert normalized.is_preview is True and normalized.observed_robot is original
+    assert normalized.robot.root_pose is original.root_pose
+    assert normalized.scene is context.scene
+    first = _PrimedObservationProvider(normalized, system.observation)
+    different_task = TaskState.empty(BATCH_SIZE, "cpu")
+    handed = first.observe(different_task)
+    assert len(calls) == 1
+    assert handed.task is different_task and handed.world_source_stamp is stamp
+    assert handed.is_preview is True and handed.observed_robot is original
+    assert (
+        handed.robot.root_pose is original.root_pose
+        and handed.scene is normalized.scene
+    )
+    subsequent = first.observe(different_task)
+    assert len(calls) == 2 and subsequent is context

@@ -245,14 +245,7 @@ class _PrimedObservationProvider:
                 affordance_sampling=self._affordance_sampling,
             )
         self._context = None
-        return PlanningContext(
-            robot=context.robot,
-            task=task_state,
-            scene=context.scene,
-            env_ids=context.env_ids,
-            control_dt=context.control_dt,
-            affordance_sampling=context.affordance_sampling,
-        )
+        return replace(context, task=task_state)
 
 
 class SemanticCallExecutor:
@@ -1001,14 +994,7 @@ class SemanticCallExecutor:
             raise TypeError(
                 "ObservationProvider.observe() must return PlanningContext."
             )
-        normalized = PlanningContext(
-            robot=context.robot,
-            task=self._task_state,
-            scene=context.scene,
-            env_ids=context.env_ids,
-            control_dt=context.control_dt,
-            affordance_sampling=context.affordance_sampling,
-        )
+        normalized = replace(context, task=self._task_state)
         if normalized.batch_size != self._task_state.batch_size:
             raise ValueError(
                 "Observation batch size changed during semantic execution."
