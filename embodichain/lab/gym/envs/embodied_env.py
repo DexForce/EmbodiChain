@@ -595,7 +595,7 @@ class EmbodiedEnv(BaseEnv):
                 )
                 self.observation_manager.bind_rollout_storage(self._rollout_storage)
                 # Private aliases preserve existing replay/persistence adapters;
-                # acquisition, cursors and lifetime belong to the recorder.
+                # acquisition, cursors and lifetime belong to the host rollout.
                 self._traj_steps = self._rollout_storage["raw_steps"]
 
             self.rollout_steps = torch.zeros(

@@ -2457,11 +2457,17 @@ def _write_raw_rollout(
         "unavailable",
     ):
         raise ValueError("Raw rollout requires an explicit observation boundary.")
-    count, capacity = storage["raw_actions"].shape[:2]
-    device = storage["raw_actions"].device
-    values, valid = storage["raw_obs"], storage["raw_valid"]
-    errors = storage.get_non_tensor("raw_acquisition_errors")
+    actions = storage["raw_actions"]
+    steps, revisions, timestamps = (
+        storage["raw_steps"],
+        storage["raw_revision"],
+        storage["raw_timestamp"],
+    )
+    count, capacity = actions.shape[:2]
+    device = actions.device
     if action is None:
+        values, valid = storage["raw_obs"], storage["raw_valid"]
+        errors = storage.get_non_tensor("raw_acquisition_errors")
         if state["layout"] is None:
             if values.keys() - set(field_ids):
                 raise ValueError(
@@ -2480,16 +2486,25 @@ def _write_raw_rollout(
                     (count, capacity + 1), dtype=torch.bool, device=device
                 )
                 errors[name] = {}
-                layout.append((name, values[name], valid[name], errors[name]))
+                layout.append(
+                    (
+                        name,
+                        values[name],
+                        valid[name],
+                        errors[name],
+                        (count, *values[name].shape[2:]),
+                        values[name].dtype,
+                    )
+                )
             state["layout"] = tuple(layout)
         ids = context._ids(env_ids).to(device)
         rows = set(ids.cpu().tolist())
         if not all(row["initialized"] for row in context.snapshot(sorted(rows))):
             raise ValueError("Raw rollout requires initialized episode rows.")
     else:
-        if tuple(action.shape) != (count, *storage["raw_actions"].shape[2:]):
+        if tuple(action.shape) != (count, *actions.shape[2:]):
             raise ValueError("Action does not match the raw rollout layout.")
-        mask = storage["raw_steps"] < capacity
+        mask = steps < capacity
         if active is not None:
             if active.shape != (count,) or active.dtype != torch.bool:
                 raise ValueError("Raw recording selection requires one bool per row.")
@@ -2505,37 +2520,32 @@ def _write_raw_rollout(
                     raise ValueError("Raw rollout belongs to another episode.")
     if state["layout"] is None:
         raise RuntimeError("Raw rollout fields have not been initialized.")
-    for name, target, _, _ in state["layout"]:
+    for name, target, _, _, shape, dtype in state["layout"]:
         sample = frame.fields[name].values
-        if (
-            sample.shape[0] != count
-            or sample.device != device
-            or tuple(sample.shape[1:]) != tuple(target.shape[2:])
-            or sample.dtype != target.dtype
-        ):
+        if sample.shape != shape or sample.device != device or sample.dtype != dtype:
             raise ValueError(f"Raw rollout values differ from storage for {name!r}.")
     if action is None:
         epochs = list(state["episodes"])
         for row in rows:
             epochs[row] = frame.episode_ids[row]
         state["episodes"] = tuple(epochs)
-        storage["raw_steps"][ids] = 0
-        storage["raw_revision"][ids] = -1
-        storage["raw_timestamp"][ids] = float("nan")
-        for _, _, availability, reasons in state["layout"]:
+        steps[ids] = 0
+        revisions[ids] = -1
+        timestamps[ids] = float("nan")
+        for _, _, availability, reasons, _, _ in state["layout"]:
             availability[ids] = False
             for key in list(reasons):
                 if key[0] in rows:
                     del reasons[key]
-        slots = storage["raw_steps"][ids]
+        slots = steps[ids]
     else:
-        slots = storage["raw_steps"][ids] + 1
+        slots = steps[ids] + 1
         if frame.revision <= state["latest_revision"] and bool(
-            (storage["raw_revision"][ids, slots - 1] >= frame.revision).any()
+            (revisions[ids, slots - 1] >= frame.revision).any()
         ):
             raise ValueError("Each transition requires a new observation acquisition.")
     selected_rows = selected_slots = None
-    for name, target, availability, reasons in state["layout"]:
+    for name, target, availability, reasons, _, _ in state["layout"]:
         sample = frame.fields[name]
         target[ids, slots] = sample.values[ids]
         availability[ids, slots] = sample.valid[ids]
@@ -2545,13 +2555,13 @@ def _write_raw_rollout(
             for row, slot in zip(selected_rows, selected_slots, strict=True):
                 if sample.acquisition_errors[row] is not None:
                     reasons[row, slot] = sample.acquisition_errors[row]
-    storage["raw_revision"][ids, slots] = frame.revision
-    storage["raw_timestamp"][ids, slots] = (
+    revisions[ids, slots] = frame.revision
+    timestamps[ids, slots] = (
         frame.timestamp if frame.timestamp is not None else float("nan")
     )
     if action is not None:
-        storage["raw_actions"][ids, slots - 1] = action[ids].to(device)
-        storage["raw_steps"][ids] += 1
+        actions[ids, slots - 1] = action[ids].to(device)
+        steps[ids] += 1
     state["latest_revision"] = max(state["latest_revision"], frame.revision)
 
 
@@ -2605,7 +2615,7 @@ def _read_raw_rollout(
         timestamps = storage["raw_timestamp"][ids, :size].detach().to(device)
         written = revisions >= 0
         exported = {}
-        for name, values, valid, reasons in state["layout"] or ():
+        for name, values, valid, reasons, _, _ in state["layout"] or ():
             data = values[ids, :size].detach().to(device)
             data.masked_fill_(
                 ~written.reshape(*written.shape, *((1,) * (data.ndim - 2))), 0
