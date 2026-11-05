@@ -480,6 +480,19 @@ class ContactSensor(BaseSensor):
         )
 
     @property
+    def dropped_contacts_mask(self) -> torch.Tensor:
+        """Return environments whose contact evidence may have been truncated.
+
+        Per-environment scatter overflow invalidates only that environment.
+        Native query overflow has no environment attribution, so it invalidates
+        every environment. The device-local result requires no host read.
+
+        Returns:
+            A new boolean tensor with one entry per environment.
+        """
+        return (self._scatter_dropped_count > 0) | (self._query_dropped_count > 0)
+
+    @property
     def dropped_contacts(self) -> int:
         """Rows lost across the current control interval, or latest standalone update.
 
