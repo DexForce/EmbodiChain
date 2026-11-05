@@ -138,3 +138,100 @@ def test_restore_trajectory_state_writes_complete_robot_state() -> None:
 
     robot.set_qpos.assert_called_once_with(recorded_qpos, target=False)
     robot.set_qvel.assert_called_once_with(recorded_qvel, target=False)
+
+
+def test_recorded_pose_snapshot_uses_seeded_end_slot_and_owns_buffers():
+    from embodichain.lab.gym.utils.trajectory_state import (
+        read_recorded_rigid_pose_snapshot,
+    )
+
+    states = _make_state_buffer()
+    values = states["rigid_objects"]["cube"]["pose"]
+    values[..., 6] = 1.0
+    values[:, 0, 0] = -10.0
+    values[:, 1, 0] = 1.0
+    values[:, 2, 0] = 2.0
+    snapshot = read_recorded_rigid_pose_snapshot(
+        states,
+        torch.tensor([2, 2]),
+        object_uid="cube",
+        frame_indices=[1, 2],
+        episode_ids=[4, 9],
+    )
+    assert snapshot.poses[:, 0, 3].tolist() == [1.0, 2.0]
+    assert snapshot.episode_ids == (4, 9)
+    assert snapshot.frame_indices == (1, 2)
+    values.zero_()
+    assert snapshot.poses[:, 0, 3].tolist() == [1.0, 2.0]
+
+
+def test_recorded_pose_snapshot_rejects_missing_terminal_slot_and_episode_reuse():
+    import pytest
+    from types import MethodType
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.utils.trajectory_state import (
+        read_recorded_rigid_pose_snapshot,
+    )
+
+    states = _make_state_buffer()
+    states["rigid_objects"]["cube"]["pose"][..., 6] = 1.0
+    with pytest.raises(ValueError, match="not fully recorded"):
+        read_recorded_rigid_pose_snapshot(
+            states,
+            torch.tensor([1, 2]),
+            object_uid="cube",
+            frame_indices=[2, 2],
+            episode_ids=[0, 0],
+        )
+    with pytest.raises(ValueError, match="terminal state slot"):
+        read_recorded_rigid_pose_snapshot(
+            states,
+            torch.tensor([3, 3]),
+            object_uid="cube",
+            frame_indices=[3, 3],
+            episode_ids=[0, 0],
+        )
+    context = EpisodeContext(2)
+    context._begin_episode(torch.tensor([0, 1]))
+    context._finish_initialization(torch.tensor([0, 1]))
+    env = SimpleNamespace(
+        num_envs=2,
+        episode_context=context,
+        _traj_buffer={"states": states},
+        _traj_steps=torch.tensor([2, 2]),
+        _closed=False,
+    )
+    env.capture_recorded_rigid_poses = MethodType(
+        EmbodiedEnv.capture_recorded_rigid_poses, env
+    )
+    assert env.capture_recorded_rigid_poses(
+        "cube", [2, 2], episode_ids=[0, 0]
+    ).episode_ids == (0, 0)
+    context._begin_episode(torch.tensor([0]))
+    with pytest.raises(ValueError, match="another.*episode"):
+        env.capture_recorded_rigid_poses("cube", [2, 2], episode_ids=[0, 0])
+    env._traj_buffer = None
+    with pytest.raises(RuntimeError, match="recording is unavailable"):
+        env.capture_recorded_rigid_poses("cube", [2, 2], episode_ids=[1, 0])
+
+
+def test_recorded_pose_snapshot_rejects_missing_rows_and_unseeded_pose_slots():
+    import pytest
+    from embodichain.lab.gym.utils.trajectory_state import (
+        read_recorded_rigid_pose_snapshot,
+    )
+
+    for poses, message in (
+        (torch.zeros(1, 3, 7), "every requested row"),
+        (torch.zeros(2, 3, 7), "pose does not match"),
+    ):
+        states = {"rigid_objects": {"cube": {"pose": poses}}}
+        with pytest.raises(ValueError, match=message):
+            read_recorded_rigid_pose_snapshot(
+                states,
+                torch.tensor([2, 2]),
+                object_uid="cube",
+                frame_indices=[2, 2],
+                episode_ids=[0, 0],
+            )

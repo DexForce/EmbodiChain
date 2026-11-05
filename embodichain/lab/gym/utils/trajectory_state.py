@@ -22,7 +22,8 @@ All seven-element root and rigid-object poses use EmbodiChain's
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Protocol, TypeAlias
 
 import torch
@@ -30,7 +31,12 @@ from tensordict import TensorDictBase
 
 from embodichain.utils import logger
 
-__all__ = ["capture_trajectory_state", "restore_trajectory_state"]
+__all__ = [
+    "capture_trajectory_state",
+    "restore_trajectory_state",
+    "RecordedRigidPoseSnapshot",
+    "read_recorded_rigid_pose_snapshot",
+]
 
 
 class _TrajectoryEnv(Protocol):
@@ -188,3 +194,113 @@ def restore_trajectory_state(
             logger.log_warning(
                 f"Scene rigid object '{uid}' is not in the trajectory; leaving initial state."
             )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class RecordedRigidPoseSnapshot:
+    """Owned rigid poses from exact completed trajectory boundary slots.
+
+    Frame indices are row-local trajectory slots, not simulation timestamps.
+    They must not be mixed with another clock domain without a proven mapping.
+    The snapshot carries the host episode IDs; it decides no task outcome.
+    """
+
+    object_uid: str
+    env_ids: tuple[int, ...]
+    episode_ids: tuple[int, ...]
+    frame_indices: tuple[int, ...]
+    poses: torch.Tensor
+
+    def __post_init__(self) -> None:
+        from embodichain.compute.geometry.rigid import validate_rigid_pose_batch
+
+        if (
+            type(self.object_uid) is not str
+            or not self.object_uid
+            or self.object_uid != self.object_uid.strip()
+        ):
+            raise ValueError(
+                "Recorded object UID must be an exact nonempty identifier."
+            )
+        size = len(self.env_ids)
+        if not size or len(set(self.env_ids)) != size:
+            raise ValueError("Recorded environment IDs must be nonempty and unique.")
+        for name, lower in (("env_ids", 0), ("episode_ids", 0), ("frame_indices", 1)):
+            values = tuple(getattr(self, name))
+            if len(values) != size or any(
+                type(value) is not int or value < lower for value in values
+            ):
+                raise ValueError(f"{name} must contain one qualified integer per row.")
+            object.__setattr__(self, name, values)
+        validate_rigid_pose_batch(self.poses, size)
+        object.__setattr__(self, "poses", self.poses.detach().clone())
+
+
+def read_recorded_rigid_pose_snapshot(
+    states: _TrajectoryState,
+    written_steps: torch.Tensor,
+    *,
+    object_uid: str,
+    frame_indices: Sequence[int],
+    episode_ids: Sequence[int],
+) -> RecordedRigidPoseSnapshot:
+    """Read seeded post-transition poses without live-state fallback.
+
+    Args:
+        states: Existing trajectory state buffers, including ``rigid_objects``.
+        written_steps: Completed transition count for each recorded row.
+        object_uid: Explicit native rigid-object UID.
+        frame_indices: Positive exact boundary slot for each environment row.
+        episode_ids: Host-validated episode identity for those buffers.
+
+    Returns:
+        Independently owned CPU poses at the requested end-step slots. The
+        source dtype and xyzw-to-matrix conversion are preserved.
+
+    Raises:
+        ValueError: Recording is incomplete, a row/slot is missing, or poses
+            are not qualified. This never substitutes ``end_step - 1`` or a
+            current simulation pose.
+        KeyError: The selected rigid object was not recorded.
+    """
+    from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+    if (
+        not isinstance(written_steps, torch.Tensor)
+        or written_steps.ndim != 1
+        or written_steps.dtype != torch.long
+    ):
+        raise ValueError("Recording requires an integer completed-step vector.")
+    frames, episodes = tuple(frame_indices), tuple(episode_ids)
+    size = written_steps.numel()
+    if (
+        len(frames) != size
+        or len(episodes) != size
+        or any(type(frame) is not int or frame <= 0 for frame in frames)
+    ):
+        raise ValueError("Recorded boundaries require one positive frame per row.")
+    values = states["rigid_objects"][object_uid]["pose"]
+    if (
+        not isinstance(values, torch.Tensor)
+        or values.ndim != 3
+        or values.shape[0] != size
+        or values.shape[-1] != 7
+    ):
+        raise ValueError("Recorded rigid poses must contain every requested row.")
+    completed = written_steps.detach().cpu().tolist()
+    if any(frame > completed[row] for row, frame in enumerate(frames)):
+        raise ValueError("The requested boundary is not fully recorded.")
+    if any(frame >= values.shape[1] for frame in frames):
+        raise ValueError("The seeded terminal state slot is unavailable.")
+    pose = xyz_quat_to_4x4_matrix(
+        torch.stack([values[row, frame] for row, frame in enumerate(frames)])
+        .detach()
+        .cpu()
+    )
+    return RecordedRigidPoseSnapshot(
+        object_uid,
+        tuple(range(size)),
+        episodes,
+        frames,
+        pose,
+    )

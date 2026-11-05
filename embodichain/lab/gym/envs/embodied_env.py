@@ -95,7 +95,11 @@ from embodichain.lab.gym.utils.gym_utils import (
     build_trajectory_buffer,
     init_rollout_buffer_from_gym_space,
 )
-from embodichain.lab.gym.utils.trajectory_state import capture_trajectory_state
+from embodichain.lab.gym.utils.trajectory_state import (
+    capture_trajectory_state,
+    RecordedRigidPoseSnapshot,
+    read_recorded_rigid_pose_snapshot,
+)
 from embodichain.data_pipeline.recording import build_recording_provenance
 from embodichain.utils import configclass, logger
 from embodichain.utils.string import string_to_callable
@@ -751,6 +755,54 @@ class EmbodiedEnv(BaseEnv):
             return
         step_ids = self._traj_steps[env_ids]
         capture_trajectory_state(self, self._traj_buffer["states"], env_ids, step_ids)
+
+    def capture_recorded_rigid_poses(
+        self,
+        object_uid: str,
+        frame_indices: Sequence[int],
+        *,
+        episode_ids: Sequence[int],
+    ) -> RecordedRigidPoseSnapshot:
+        """Own one rigid object's exact recorded boundary poses for this episode.
+
+        Args:
+            object_uid: Explicit native UID present in the recording selection.
+            frame_indices: Positive completed boundary slot for each row.
+            episode_ids: Episode IDs captured by this run before execution.
+
+        Returns:
+            Owned CPU matrices with row, episode and slot identity.
+
+        Raises:
+            RuntimeError: The environment is closed or recording is unavailable.
+            ValueError: The episode changed, or a row/boundary is not complete.
+            KeyError: The selected native object was not recorded.
+        """
+        if getattr(self, "_closed", False):
+            raise RuntimeError("Recorded observations are unavailable after close.")
+        if self._traj_buffer is None or self._traj_steps is None:
+            raise RuntimeError("Rigid trajectory recording is unavailable.")
+        expected = tuple(episode_ids)
+        current = self.episode_context.snapshot()
+        if (
+            len(expected) != self.num_envs
+            or any(type(value) is not int or value < 0 for value in expected)
+            or tuple(row["episode"] for row in current) != expected
+            or not all(row["initialized"] for row in current)
+        ):
+            raise ValueError(
+                "Recorded poses belong to another or uninitialized episode."
+            )
+        result = read_recorded_rigid_pose_snapshot(
+            self._traj_buffer["states"],
+            self._traj_steps,
+            object_uid=object_uid,
+            frame_indices=frame_indices,
+            episode_ids=expected,
+        )
+        if tuple(row["episode"] for row in self.episode_context.snapshot()) != expected:
+            raise ValueError("The episode changed during recorded pose capture.")
+        return result
 
     def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
         """Set the rollout buffer for episode data collection.

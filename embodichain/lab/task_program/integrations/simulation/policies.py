@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.sensors.base_sensor import BaseSensor
     from embodichain.lab.sim.sensors.support_observation import (
         SupportControlClock,
+        NativeSupportResult,
         SupportObservationRegistry,
     )
 
@@ -299,6 +300,32 @@ class SimulationSegmentPolicyPort:
         self._require_open()
         if self._condition_runtime is not None:
             self._condition_runtime.bind_clock(clock)
+
+    def capture_support_observation(
+        self, preset_id: str, *, clock: SupportControlClock
+    ) -> NativeSupportResult:
+        """Capture current support from this exact declared runtime session.
+
+        Args:
+            preset_id: Existing named condition in the sealed settle table.
+            clock: The requesting bridge's canonical clock object.
+
+        Returns:
+            Owned native support with explicit validity/error masks, using the
+            native rest-envelope COM tolerance. A policy-specific tolerance is
+            confined to that policy's historical measurement. No task predicate
+            or historical support is reconstructed here.
+
+        Raises:
+            RuntimeError: Runtime resources are closed.
+            ValueError: The preset has no support declaration or this session
+                no longer owns the observer's runtime clock binding.
+            KeyError: The preset is not registered.
+        """
+        self._require_open()
+        if self._condition_runtime is None:
+            raise ValueError("No native support condition is registered.")
+        return self._condition_runtime.capture_current_support(preset_id, clock=clock)
 
     def close_runtime_resources(self) -> None:
         """Mark condition sessions closed without destroying borrowed resources."""

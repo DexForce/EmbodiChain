@@ -179,6 +179,7 @@ rotation angles without selecting elapsed time or stability thresholds.
    rotate_rigid_grasp
    rigid_pose_displacement
    pose_axis_alignment
+   validate_rigid_pose_batch
 
 
 .. automodule:: embodichain.compute.geometry.rigid
@@ -210,5 +211,12 @@ hull; no silhouette containment, stability window or task verdict is inferred.
    :nosignatures:
 
    support_from_contacts
+   contact_load_path
 
 .. autofunction:: support_from_contacts
+
+``contact_load_path`` checks one sampled contact graph using positive upward
+loads and explicit dynamic cargo IDs. It does not join paths across substeps or
+choose a stable-window duration. That qualification belongs to the consumer.
+
+.. autofunction:: contact_load_path
