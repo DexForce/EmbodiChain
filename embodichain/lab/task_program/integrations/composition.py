@@ -26,7 +26,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from embodichain.lab.task_program.language.schema import TaskProgramIntegrationCfg
 
@@ -64,12 +64,13 @@ class ConfiguredTaskProgramIntegration:
 class ConfiguredTaskProgramDeployment:
     """Resolved component metadata for one configured deployment.
 
+    An inline program is retained as an owned declaration; file selections keep
+    their resolved path. ``program_source`` returns the selected representation.
+
     Attributes:
         integration_id: Task integration identifier from the selected component.
         program_id: Program identifier declared by that integration.
         program_path: Resolved file path, or None for an inline program.
-        program_declaration (dict | None): Owned inline program, or None for a file selection.
-            Use program_source to obtain the selected source representation.
         selection: Trusted scene, robot-profile and execution-preset selection.
         integration: Validated registration and lazy live adapter factory.
         scene_binding (dict): Independently owned semantic scene declaration.
@@ -84,10 +85,10 @@ class ConfiguredTaskProgramDeployment:
     integration: ConfiguredTaskProgramIntegration
     scene_binding: dict[str, object]
     planner_config: dict[str, object] | None
-    program_declaration: dict[str, object] | None = None
+    program_declaration: dict[str, Any] | None = None
 
     @property
-    def program_source(self) -> Path | dict[str, object]:
+    def program_source(self) -> Path | dict[str, Any]:
         """Return a file path or owned inline program for strict decoding.
 
         Returns:
