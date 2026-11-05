@@ -123,7 +123,7 @@ or reclassify a recorded outcome.
    :members:
 
 Optional TaskSpec companion
---------------------------
+---------------------------
 
 Preserve valid TaskSpec identities and the explicit closed absence marker.
 Absence carries no normative success or certificate.
