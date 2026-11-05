@@ -18,14 +18,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import math
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from .source_geometry import LinkMesh
+from embodichain.lab.sim.spawn.source_geometry import (
+    LinkMesh,
+    UsdSourceSnapshot,
+    read_usd_source,
+)
 from .revolute_inputs import RevoluteControlBinding
 from .control_semantics import resolve_twist_semantics
 
@@ -68,21 +71,7 @@ def _owner(prim: Any) -> Any:
 def _triangles(
     vertices: np.ndarray, counts: np.ndarray, indices: np.ndarray
 ) -> np.ndarray:
-    if (
-        vertices.ndim != 2
-        or vertices.shape[1:] != (3,)
-        or not len(vertices)
-        or not np.isfinite(vertices).all()
-        or counts.ndim != 1
-        or not len(counts)
-        or (counts < 3).any()
-        or indices.ndim != 1
-        or not len(indices)
-        or counts.sum() != len(indices)
-        or indices.min() < 0
-        or indices.max() >= len(vertices)
-    ):
-        raise ValueError("E8 collision mesh has invalid topology.")
+    # Basic polygon arrays were validated by the shared source reader.
     faces: list[tuple[int, int, int]] = []
     offset = 0
     for count in counts:
@@ -146,15 +135,15 @@ def _uniform_transform(transform: np.ndarray, *, rigid: bool) -> None:
         )
 
 
-def _mesh(prim: Any, body: Any, cache: Any, scale: float) -> LinkMesh:
+def _mesh(
+    source: UsdSourceSnapshot, prim: Any, body: Any, cache: Any, scale: float
+) -> LinkMesh:
     from pxr import UsdGeom, UsdPhysics
 
     mesh = UsdGeom.Mesh(prim)
     if mesh.GetHoleIndicesAttr().Get():
         raise ValueError("E8 collision mesh holes require explicit qualified topology.")
-    vertices = np.asarray(mesh.GetPointsAttr().Get(), dtype=np.float64)
-    counts = np.asarray(mesh.GetFaceVertexCountsAttr().Get(), dtype=np.int64)
-    indices = np.asarray(mesh.GetFaceVertexIndicesAttr().Get(), dtype=np.int64)
+    vertices, counts, indices = source.mesh_arrays(str(prim.GetPath()))
     faces = _triangles(vertices, counts, indices)
     body_pose = np.asarray(cache.GetLocalToWorldTransform(body), dtype=float).T
     _uniform_transform(body_pose, rigid=True)
@@ -167,9 +156,6 @@ def _mesh(prim: Any, body: Any, cache: Any, scale: float) -> LinkMesh:
     vertices = (vertices @ transform[:3, :3].T + transform[:3, 3]) * scale
     if not np.isfinite(vertices).all():
         raise ValueError("E8 scaled collision vertices must remain finite.")
-    # Bytes-backed arrays cannot be made writable through setflags().
-    vertices = np.frombuffer(vertices.tobytes(), dtype=np.float64).reshape(-1, 3)
-    faces = np.frombuffer(faces.tobytes(), dtype=np.int64).reshape(-1, 3)
     approximation = str(UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr().Get())
     return LinkMesh(
         str(prim.GetPath()), str(body.GetPath()), vertices, faces, approximation
@@ -177,7 +163,7 @@ def _mesh(prim: Any, body: Any, cache: Any, scale: float) -> LinkMesh:
 
 
 def load_twist_geometry(
-    path: str | Path, binding: RevoluteControlBinding
+    path: str | Path | UsdSourceSnapshot, binding: RevoluteControlBinding
 ) -> TwistGeometry:
     """Read qualified collider inputs in separate native rigid-link frames.
 
@@ -194,10 +180,10 @@ def load_twist_geometry(
     Returns:
         Separate scaled collider inputs for grip, target, parent and articulation.
     """
-    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+    from pxr import UsdGeom, UsdPhysics
 
-    path = Path(path)
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    source = read_usd_source(path)
+    digest = source.source_sha256
     if digest != binding.source_sha256:
         raise ValueError("E8 collision source does not match its audited binding.")
     if (
@@ -206,21 +192,13 @@ def load_twist_geometry(
         or binding.scale <= 0.0
     ):
         raise ValueError("E8 collision deployment scale must be finite and positive.")
-    semantics = resolve_twist_semantics(path)
+    semantics = resolve_twist_semantics(source)
     if (
         semantics.source_sha256 != digest
         or semantics.semantics_sha256 != binding.calibration_sha256
     ):
         raise ValueError("E8 collision semantics do not match its audited binding.")
-    layer = Sdf.Layer.OpenAsAnonymous(str(path))
-    stage = Usd.Stage.Open(layer) if layer is not None else None
-    if stage is None or UsdGeom.GetStageMetersPerUnit(stage) != 1.0:
-        raise ValueError("E8 collision source must be metre-authored USD.")
-    if any(
-        layer not in (stage.GetRootLayer(), stage.GetSessionLayer())
-        for layer in stage.GetUsedLayers()
-    ):
-        raise ValueError("E8 collision source must be self-contained and hash-bound.")
+    stage = source.stage
     joint_prim = stage.GetPrimAtPath(semantics.joint_path)
     joints = [
         prim
@@ -294,7 +272,7 @@ def load_twist_geometry(
             continue
         if not prim.IsA(UsdGeom.Mesh):
             raise ValueError("E8 collision source has an unsupported collider type.")
-        value = _mesh(prim, owner, cache, float(binding.scale))
+        value = _mesh(source, prim, owner, cache, float(binding.scale))
         articulation_meshes.append(value)
         if owner in (parent, target):
             groups[str(owner.GetPath())].append(value)
@@ -306,13 +284,7 @@ def load_twist_geometry(
     parent_meshes = tuple(groups[str(parent.GetPath())])
     if grip is None or not target_meshes or not parent_meshes:
         raise ValueError("E8 requires grip, target and parent collision meshes.")
-    refreshed = resolve_twist_semantics(path)
-    if (
-        refreshed.source_sha256 != digest
-        or refreshed.semantics_sha256 != semantics.semantics_sha256
-        or hashlib.sha256(path.read_bytes()).hexdigest() != digest
-    ):
-        raise ValueError("E8 collision source changed while loading.")
+    semantics.assert_current(source)
     return TwistGeometry(
         grip,
         target_meshes,

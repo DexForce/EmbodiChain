@@ -25,6 +25,8 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from embodichain.lab.sim.spawn.source_geometry import UsdSourceSnapshot, read_usd_source
+
 from embodichain.compute.geometry.cylinder import circular_prism_radius
 from .control_mass_source import qualify_mass_source_copy
 from .control_semantics import resolve_twist_semantics
@@ -136,7 +138,7 @@ class RevoluteSourceSeal:
 
 
 def capture_revolute_source_seal(
-    source_path: str | Path,
+    source_path: str | Path | UsdSourceSnapshot,
     binding: RevoluteControlBinding,
     *,
     body_scale_mass_policy: str = "native",
@@ -152,8 +154,9 @@ def capture_revolute_source_seal(
         Immutable identities for later freshness checks. Robot/native provenance
         and dynamic collision qualification remain with their owning adapters.
     """
-    path = Path(source_path).resolve()
-    semantics = resolve_twist_semantics(path)
+    source = read_usd_source(source_path)
+    path = source.path
+    semantics = resolve_twist_semantics(source)
     if (
         semantics.source_sha256 != binding.source_sha256
         or semantics.semantics_sha256 != binding.calibration_sha256

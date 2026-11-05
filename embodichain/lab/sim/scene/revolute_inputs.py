@@ -18,12 +18,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-import hashlib
 import math
-from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from embodichain.lab.sim.spawn.source_geometry import UsdSourceSnapshot, read_usd_source
 
 from .articulation_inputs import _fixed_base
 from .control_semantics import resolve_twist_semantics
@@ -118,18 +118,19 @@ def _validate_binding(data: dict[str, Any]) -> None:
 
 
 def inspect_revolute_control(
-    config: dict[str, Any], setting: int
+    config: dict[str, Any], setting: int, *, source: UsdSourceSnapshot | None = None
 ) -> RevoluteControlBinding:
     """Resolve source-declared roles and measure the printed-label target.
 
     Args:
         config: Fixed-base asset declaration with positive uniform scale.
         setting: An explicitly annotated printed setting label.
+        source: Optional shared static read matching the declared asset.
 
     Returns:
         Source-qualified geometry and absolute joint target; execution budgets remain separate.
     """
-    from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
+    from pxr import Gf, UsdGeom, UsdPhysics
 
     if not _fixed_base(config):
         raise ValueError("E8 requires a fixed base.")
@@ -141,8 +142,10 @@ def inspect_revolute_control(
         or not np.allclose(scale, scale[0])
     ):
         raise ValueError("E8 requires a positive uniform scale.")
-    path = Path(config["fpath"])
-    semantics = resolve_twist_semantics(path)
+    source = read_usd_source(config["fpath"] if source is None else source)
+    source.assert_current(config["fpath"])
+    path = source.path
+    semantics = resolve_twist_semantics(source)
     digest = semantics.source_sha256
     from .control_mass_source import adjacent_manifest_path, qualify_mass_source_copy
 
@@ -158,10 +161,7 @@ def inspect_revolute_control(
         raise ValueError(
             f"E8 setting {setting!r} is not calibrated; available: {sorted(labels)}."
         )
-    layer = Sdf.Layer.OpenAsAnonymous(str(path))
-    stage = None if layer is None else Usd.Stage.Open(layer)
-    if stage is None or UsdGeom.GetStageMetersPerUnit(stage) != 1.0:
-        raise ValueError("E8 requires metre-authored USD.")
+    stage = source.stage
     selected_joint = stage.GetPrimAtPath(semantics.joint_path)
     if not selected_joint or not selected_joint.IsA(UsdPhysics.RevoluteJoint):
         raise ValueError("E8 semantic joint changed while binding.")
@@ -260,9 +260,5 @@ def inspect_revolute_control(
         semantics.semantics_sha256,
         "" if mass_copy is None else mass_copy.manifest_sha256,
     )
-    if (
-        hashlib.sha256(path.read_bytes()).hexdigest() != digest
-        or resolve_twist_semantics(path) != semantics
-    ):
-        raise ValueError("E8 source or semantics changed while binding.")
+    semantics.assert_current(source)
     return binding

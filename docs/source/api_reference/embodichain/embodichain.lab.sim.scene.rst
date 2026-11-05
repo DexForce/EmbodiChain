@@ -430,6 +430,8 @@ Authored collider inputs
 -----------------------
 
 ``LinkMesh`` carries owned link-local source vertices and triangle indices.
+Its implementation belongs to ``spawn.source_geometry``; the Scene import
+remains available as the same class.
 It preserves authored order and dtype, and explicitly permits vertex-only
 inputs with an empty triangle array. Native cooked collision geometry and
 runtime poses remain separate observations; this value proves neither contact
@@ -446,9 +448,25 @@ Static articulation and control inputs
 These readers inspect self-contained USD sources without creating a simulator.
 ``ArticulationGeometry`` measures collider vertices relative to the imported
 root body; ``fit_articulation_to_proxy`` explicitly returns a revised physical
-declaration. Prismatic discovery preserves traversal order and requires explicit
-part selection when several mechanisms exist. Press inspection measures a
+declaration. Prismatic discovery preserves stable part-identity order and
+requires explicit part selection when several mechanisms exist. Press inspection measures a
 selected joint, endpoint and collider; it does not evaluate a press event.
+
+Static readers share the Object/Spawn source reader. Config-based inspections
+accept an optional ``source=UsdSourceSnapshot``; path-based inspections also
+accept that snapshot directly. This reuses the selected source parse within an assembly while retaining
+source-byte and annotation checks at the reader boundaries. Mass lineage
+qualification keeps its own original/derived source checks::
+
+    from embodichain.lab.sim.spawn.source_geometry import read_usd_source
+    from embodichain.lab.sim.scene.revolute_inputs import inspect_revolute_control
+    from embodichain.lab.sim.scene.revolute_geometry import load_twist_geometry
+    from embodichain.lab.sim.scene.control_source import capture_revolute_source_seal
+
+    source = read_usd_source(config["fpath"])
+    binding = inspect_revolute_control(config, 90, source=source)
+    geometry = load_twist_geometry(source, binding)
+    seal = capture_revolute_source_seal(source, binding)
 
 Revolute inspection consumes authored joint, grip, pointer and printed-setting
 roles. The existing ``gen_sim.twist-control/v1`` annotation format is retained

@@ -28,6 +28,8 @@ from typing import Any
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from embodichain.lab.sim.spawn.source_geometry import UsdSourceSnapshot, read_usd_source
+
 __all__ = [
     "ArticulationGeometry",
     "read_articulation_geometry",
@@ -138,7 +140,9 @@ def _fixed_base(config: Mapping[str, Any]) -> bool:
     return isinstance(root_props, Mapping) and root_props.get("fixed_base") is True
 
 
-def read_articulation_geometry(path: str | Path) -> ArticulationGeometry:
+def read_articulation_geometry(
+    path: str | Path | UsdSourceSnapshot,
+) -> ArticulationGeometry:
     """Measure collision meshes relative to the unique native root rigid body.
 
     Runtime reset replaces the imported base pose. Measuring the USD default
@@ -153,22 +157,14 @@ def read_articulation_geometry(path: str | Path) -> ArticulationGeometry:
     """
     from pxr import Usd, UsdGeom, UsdPhysics
 
-    stage = Usd.Stage.Open(str(path))
-    if stage is None:
-        raise ValueError(f"Cannot open articulation geometry: {path}")
-    if (
-        UsdGeom.GetStageUpAxis(stage) != "Z"
-        or UsdGeom.GetStageMetersPerUnit(stage) != 1.0
-    ):
+    source = read_usd_source(path)
+    source.require_geometry()
+    stage = source.stage
+    if UsdGeom.GetStageUpAxis(stage) != "Z":
         raise ValueError("Articulation geometry requires Z-up, metre-authored USD.")
     root = stage.GetDefaultPrim()
     if not root or not root.HasAPI(UsdPhysics.ArticulationRootAPI):
         raise ValueError("Articulation geometry requires an explicit default root.")
-    if any(
-        not layer.anonymous and layer != stage.GetRootLayer()
-        for layer in stage.GetUsedLayers()
-    ):
-        raise ValueError("Articulation geometry requires a self-contained USD layer.")
     prims = list(Usd.PrimRange(root))
     bodies = {p.GetPath(): p for p in prims if p.HasAPI(UsdPhysics.RigidBodyAPI)}
     parents = {}
@@ -260,6 +256,7 @@ def read_articulation_geometry(path: str | Path) -> ArticulationGeometry:
     by_link = {name: np.concatenate(items) for name, items in link_vertices.items()}
     for points in by_link.values():
         points.setflags(write=False)
+    source.assert_current()
     return ArticulationGeometry(
         bodies[base_path].GetName(), combined, link_poses, by_link
     )

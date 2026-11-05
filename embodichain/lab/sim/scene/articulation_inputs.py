@@ -27,6 +27,8 @@ from typing import Any
 
 import numpy as np
 
+from embodichain.lab.sim.spawn.source_geometry import UsdSourceSnapshot, read_usd_source
+
 __all__ = [
     "PrismaticBinding",
     "ArticulationPartCandidate",
@@ -237,26 +239,10 @@ class ArticulationPartCandidate:
         }
 
 
-def _stage(path: str | Path) -> Any:
-    from pxr import Usd, UsdGeom
-
-    if Path(path).suffix.lower() not in {".usd", ".usda", ".usdc"}:
-        raise ValueError(
-            "GenSim E6 currently requires a self-contained USD articulation."
-        )
-    stage = Usd.Stage.Open(str(path))
-    if stage is None or UsdGeom.GetStageMetersPerUnit(stage) != 1.0:
-        raise ValueError("GenSim E6 requires metre-authored USD geometry.")
-    if any(
-        not layer.anonymous and layer != stage.GetRootLayer()
-        for layer in stage.GetUsedLayers()
-    ):
-        raise ValueError("GenSim E6 requires a self-contained USD layer.")
-    return stage
-
-
 def discover_prismatic_parts(
     config: dict[str, Any],
+    *,
+    source: UsdSourceSnapshot | None = None,
 ) -> tuple[ArticulationPartCandidate, ...]:
     """Discover pullable prismatic parts without selecting one for execution.
 
@@ -267,9 +253,10 @@ def discover_prismatic_parts(
 
     Args:
         config: Fixed-base asset declaration with positive uniform scale.
+        source: Optional shared static read matching the declared asset.
 
     Returns:
-        Candidates in deterministic source traversal order.
+        Candidates in deterministic part-identity order.
     """
     from pxr import Gf, UsdGeom, UsdPhysics
 
@@ -283,9 +270,12 @@ def discover_prismatic_parts(
         or not np.allclose(scale, scale[0], atol=1e-6, rtol=1e-6)
     ):
         raise ValueError("GenSim E6 requires positive uniform body_scale.")
-    stage = _stage(config["fpath"])
-    source_path = Path(config["fpath"])
-    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    source = read_usd_source(config["fpath"] if source is None else source)
+    source.assert_current(config["fpath"])
+    source.require_geometry()
+    stage = source.stage
+    source_path = source.path
+    source_hash = source.source_sha256
     if source_path.with_suffix(".mass.json").is_file():
         from .control_mass_source import qualify_mass_source_copy
 
@@ -411,6 +401,7 @@ def discover_prismatic_parts(
         )
     if not candidates:
         raise ValueError("GenSim E6 requires at least one enabled prismatic joint.")
+    source.assert_current()
     return tuple(sorted(candidates, key=lambda item: item.part_id))
 
 
@@ -419,21 +410,20 @@ def _binding_from_candidate(
     candidate: ArticulationPartCandidate,
     *,
     include_part_id: bool = True,
+    source: UsdSourceSnapshot | None = None,
 ) -> PrismaticBinding:
     if len(candidate.handle_paths) != 1:
         raise ValueError(
             f"GenSim E6 part {candidate.part_id!r} requires one unambiguous handle."
         )
     scale = float(np.asarray(config.get("body_scale", (1.0, 1.0, 1.0)))[0])
-    source_sha256 = hashlib.sha256(Path(config["fpath"]).read_bytes()).hexdigest()
-    from pxr import UsdGeom, UsdPhysics
+    from pxr import UsdGeom
 
-    stage = _stage(config["fpath"])
-    handle_body = stage.GetPrimAtPath(candidate.handle_paths[0])
-    while handle_body and not handle_body.HasAPI(UsdPhysics.RigidBodyAPI):
-        handle_body = handle_body.GetParent()
-    if not handle_body:
-        raise ValueError("The handle mesh must belong to a rigid body.")
+    source = read_usd_source(config["fpath"] if source is None else source)
+    source.assert_current(config["fpath"])
+    source.require_geometry()
+    stage = source.stage
+    handle_body = stage.GetPrimAtPath(source.rigid_owner(candidate.handle_paths[0]))
     handle_axis = np.asarray(candidate.axis)
     if str(handle_body.GetPath()) != candidate.link_path:
         cache = UsdGeom.XformCache()
@@ -459,52 +449,64 @@ def _binding_from_candidate(
         link=handle_body.GetName(),
         parent=candidate.parent,
         handle_path=candidate.handle_paths[0],
-        source_sha256=source_sha256,
+        source_sha256=source.source_sha256,
         scale=scale,
         axis=tuple(handle_axis),
         limits=candidate.limits,
         part_id=candidate.part_id if include_part_id else "",
         closed_position=None if closed is None else float(closed) * scale,
     )
-    handle_mesh(binding, config["fpath"])
+    handle_mesh(binding, source)
     return binding
 
 
-def inspect_prismatic(config: dict[str, Any]) -> PrismaticBinding:
+def inspect_prismatic(
+    config: dict[str, Any], *, source: UsdSourceSnapshot | None = None
+) -> PrismaticBinding:
     """Require one explicit mechanism; never select an arbitrary joint or mesh.
 
     Args:
         config: Asset declaration with exactly one supported mechanism.
+        source: Optional shared static read matching the declared asset.
 
     Returns:
         A qualified binding to its explicit collision handle.
     """
-    parts = discover_prismatic_parts(config)
+    source = read_usd_source(config["fpath"] if source is None else source)
+    parts = discover_prismatic_parts(config, source=source)
     if len(parts) != 1:
         raise ValueError("GenSim E6 requires exactly one enabled prismatic joint.")
-    return _binding_from_candidate(config, parts[0], include_part_id=False)
+    return _binding_from_candidate(
+        config, parts[0], include_part_id=False, source=source
+    )
 
 
-def inspect_prismatic_part(config: dict[str, Any], part_id: str) -> PrismaticBinding:
+def inspect_prismatic_part(
+    config: dict[str, Any], part_id: str, *, source: UsdSourceSnapshot | None = None
+) -> PrismaticBinding:
     """Resolve one catalog part into an executable binding.
 
     Args:
         config: Existing physical asset declaration.
         part_id: Stable catalog part identity.
+        source: Optional shared static read matching the declared asset.
 
     Returns:
         The selected physical binding.
     """
+    source = read_usd_source(config["fpath"] if source is None else source)
     matches = [
-        part for part in discover_prismatic_parts(config) if part.part_id == part_id
+        part
+        for part in discover_prismatic_parts(config, source=source)
+        if part.part_id == part_id
     ]
     if len(matches) != 1:
         raise ValueError(f"Unknown GenSim E6 part {part_id!r}.")
-    return _binding_from_candidate(config, matches[0])
+    return _binding_from_candidate(config, matches[0], source=source)
 
 
 def handle_mesh(
-    binding: PrismaticBinding, path: str | Path
+    binding: PrismaticBinding, path: str | Path | UsdSourceSnapshot
 ) -> tuple[np.ndarray, np.ndarray]:
     """Bake one collision mesh into its owning link frame, without scene edits.
 
@@ -515,39 +517,17 @@ def handle_mesh(
     Returns:
         Scaled link-local vertices and fan-triangulated face indices.
     """
-    from pxr import UsdGeom
-
-    stage = _stage(path)
-    prim = stage.GetPrimAtPath(binding.handle_path)
-    body = next(p for p in stage.Traverse() if p.GetName() == binding.link)
-    mesh = UsdGeom.Mesh(prim)
-    vertices = np.asarray(mesh.GetPointsAttr().Get(), dtype=float)
-    counts = np.asarray(mesh.GetFaceVertexCountsAttr().Get(), dtype=int)
-    indices = np.asarray(mesh.GetFaceVertexIndicesAttr().Get(), dtype=int)
-    if (
-        vertices.ndim != 2
-        or vertices.shape[1] != 3
-        or not np.isfinite(vertices).all()
-        or not len(indices)
-        or (counts < 3).any()
-        or counts.sum() != len(indices)
-        or indices.min() < 0
-        or indices.max() >= len(vertices)
-    ):
-        raise ValueError("GenSim E6 handle has invalid mesh topology.")
-    cache = UsdGeom.XformCache()
-    body_pose = np.asarray(cache.GetLocalToWorldTransform(body)).T
-    if not np.allclose(body_pose[:3, :3].T @ body_pose[:3, :3], np.eye(3), atol=1e-5):
-        raise ValueError("GenSim E6 requires unscaled USD rigid-body frames.")
-    transform = (
-        np.linalg.inv(body_pose) @ np.asarray(cache.GetLocalToWorldTransform(prim)).T
+    source = read_usd_source(path)
+    if source.source_sha256 != binding.source_sha256:
+        raise ValueError("Prismatic source differs from its inspected binding.")
+    body = source.stage.GetPrimAtPath(source.rigid_owner(binding.handle_path))
+    if body.GetName() != binding.link:
+        raise ValueError("Prismatic handle owner differs from its inspected binding.")
+    vertices, faces = source.link_mesh_arrays(
+        binding.handle_path,
+        str(body.GetPath()),
+        scale=binding.scale,
+        rigid_tolerance=1e-5,
     )
-    vertices = (vertices @ transform[:3, :3].T + transform[:3, 3]) * binding.scale
-    faces, offset = [], 0
-    for count in counts:
-        polygon = indices[offset : offset + count]
-        faces.extend(
-            (polygon[0], polygon[i], polygon[i + 1]) for i in range(1, count - 1)
-        )
-        offset += count
-    return vertices, np.asarray(faces)
+    source.assert_current()
+    return vertices, faces

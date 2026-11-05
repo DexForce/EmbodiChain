@@ -19,12 +19,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import math
-from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from embodichain.lab.sim.spawn.source_geometry import UsdSourceSnapshot, read_usd_source
 
 __all__ = ["PressBinding", "inspect_press"]
 
@@ -60,6 +60,7 @@ def inspect_press(
     link: str,
     released_position: float = 0.0,
     collision_mesh: str | None = None,
+    source: UsdSourceSnapshot | None = None,
 ) -> PressBinding:
     """Inspect an explicit button without guessing identities or changing physics.
 
@@ -73,6 +74,7 @@ def inspect_press(
         link: Exact authored child link name.
         released_position: Authored endpoint in runtime metres.
         collision_mesh: Optional absolute collider path; omission requires one unambiguous mesh.
+        source: Optional shared static read matching the declared asset.
 
     Returns:
         Stroke, direction and outer contact point without evidence of execution.
@@ -94,18 +96,12 @@ def inspect_press(
     for value in (config.get("uid"), joint, link):
         if type(value) is not str or not value or value.strip() != value:
             raise ValueError("E9 requires exact object, joint and link identities.")
-    path = Path(config["fpath"]).resolve()
-    if path.suffix.lower() not in {".usd", ".usda", ".usdc"}:
-        raise ValueError("E9 requires a self-contained USD asset.")
-    source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
-    stage = Usd.Stage.Open(str(path))
-    if stage is None or UsdGeom.GetStageMetersPerUnit(stage) != 1.0:
-        raise ValueError("E9 requires metre-authored USD geometry.")
-    if any(
-        not layer.anonymous and layer != stage.GetRootLayer()
-        for layer in stage.GetUsedLayers()
-    ):
-        raise ValueError("E9 requires a self-contained USD layer.")
+    source = read_usd_source(config["fpath"] if source is None else source)
+    source.assert_current(config["fpath"])
+    source.require_geometry()
+    path = source.path
+    source_hash = source.source_sha256
+    stage = source.stage
     selected = [p for p in stage.Traverse() if p.GetName() == joint]
     bodies = [p for p in stage.Traverse() if p.GetName() == link]
     if len(selected) != 1 or len(bodies) != 1:
@@ -181,22 +177,7 @@ def inspect_press(
     ]
     if len(meshes) != 1:
         raise ValueError("E9 requires one explicit, unambiguous collision mesh.")
-    mesh = UsdGeom.Mesh(meshes[0])
-    points = np.asarray(mesh.GetPointsAttr().Get(), dtype=float)
-    counts = np.asarray(mesh.GetFaceVertexCountsAttr().Get(), dtype=int)
-    indices = np.asarray(mesh.GetFaceVertexIndicesAttr().Get(), dtype=int)
-    if (
-        points.ndim != 2
-        or points.shape[1] != 3
-        or not len(points)
-        or not np.isfinite(points).all()
-        or not len(indices)
-        or (counts < 3).any()
-        or counts.sum() != len(indices)
-        or indices.min() < 0
-        or indices.max() >= len(points)
-    ):
-        raise ValueError("E9 collision mesh topology is invalid.")
+    points, _, _ = source.mesh_arrays(str(meshes[0].GetPath()))
     cache = UsdGeom.XformCache()
     body_pose = np.asarray(cache.GetLocalToWorldTransform(body)).T
     parent_pose = np.asarray(cache.GetLocalToWorldTransform(parent)).T
@@ -214,8 +195,7 @@ def inspect_press(
     surface = points[np.isclose(projections, projections.min(), atol=1e-6, rtol=0)]
     if not np.isfinite(surface).all() or not len(surface):
         raise ValueError("E9 needs a finite outer contact point.")
-    if hashlib.sha256(path.read_bytes()).hexdigest() != source_hash:
-        raise ValueError("E9 source changed during inspection.")
+    source.assert_current()
     return PressBinding(
         config["uid"],
         joint,

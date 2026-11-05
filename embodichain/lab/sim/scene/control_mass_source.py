@@ -26,6 +26,8 @@ from typing import Any
 
 import numpy as np
 
+from embodichain.lab.sim.spawn.source_geometry import read_usd_source
+
 from .control_semantics import TwistSemantics, resolve_twist_semantics
 
 __all__ = [
@@ -275,17 +277,15 @@ def _validate_stage(stage: Any) -> None:
 
 
 def _snapshot(path: Path) -> _Snapshot:
-    from pxr import Sdf, Usd
-
     sidecar_path = path.with_suffix(".twist.json")
     try:
         if path.is_symlink() or sidecar_path.is_symlink():
             raise ValueError("E8 mass-source files cannot be symbolic links.")
-        raw = path.read_bytes()
+        source = read_usd_source(path)
+        raw = source.raw
         sidecar = sidecar_path.read_bytes() if sidecar_path.exists() else None
-        semantics = resolve_twist_semantics(path)
-        layer = Sdf.Layer.OpenAsAnonymous(str(path))
-        stage = Usd.Stage.Open(layer) if layer is not None else None
+        semantics = resolve_twist_semantics(source)
+        stage = source.stage
         if stage is None:
             raise ValueError("E8 mass source USD cannot be read.")
         _validate_stage(stage)

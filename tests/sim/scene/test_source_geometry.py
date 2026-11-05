@@ -43,6 +43,10 @@ def test_input_mesh_preserves_order_and_detaches_mutable_buffers():
         assert owned.faces.dtype == np.int32
         assert not owned.vertices.flags.writeable
         assert not owned.faces.flags.writeable
+        with pytest.raises(ValueError):
+            owned.vertices.setflags(write=True)
+        with pytest.raises(ValueError):
+            owned.faces.setflags(write=True)
     assert not np.shares_memory(mesh.vertices, copied.vertices)
     cloud = LinkMesh(
         "cloud", "body", mesh.vertices, np.empty((0, 3), dtype=np.int64), "none"

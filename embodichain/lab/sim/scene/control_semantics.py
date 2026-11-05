@@ -24,6 +24,8 @@ import math
 from pathlib import Path
 from typing import Any
 
+from embodichain.lab.sim.spawn.source_geometry import UsdSourceSnapshot, read_usd_source
+
 __all__ = [
     "TwistSemantics",
     "MissingTwistSemanticsError",
@@ -55,6 +57,29 @@ class TwistSemantics:
     pointer_path: str
     settings: tuple[tuple[int, tuple[str, ...]], ...]
     sidecar_sha256: str | None = None
+
+    def assert_current(self, path: str | Path | UsdSourceSnapshot) -> None:
+        """Recheck captured bytes and sidecar presence without parsing roles.
+
+        Args:
+            path: Current source selection, or a checked read of that source.
+        """
+        if isinstance(path, UsdSourceSnapshot):
+            path.assert_current()
+            digest, path = path.source_sha256, path.path
+        else:
+            path = Path(path)
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        sidecar = path.with_suffix(".twist.json")
+        sidecar_digest = (
+            hashlib.sha256(sidecar.read_bytes()).hexdigest()
+            if sidecar.exists()
+            else None
+        )
+        if digest != self.source_sha256 or sidecar_digest != self.sidecar_sha256:
+            raise InvalidTwistSemanticsError(
+                "E8 source or annotation changed during qualification."
+            )
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -292,7 +317,7 @@ def _validate_roles(stage: Any, roles: dict[str, Any]) -> None:
             _validate_mesh(stage, path, parent, cache, "label")
 
 
-def resolve_twist_semantics(path: str | Path) -> TwistSemantics:
+def resolve_twist_semantics(path: str | Path | UsdSourceSnapshot) -> TwistSemantics:
     """Qualify explicit source roles without choosing from names or a registry.
 
     A source-side ``.twist.json`` declares schema, source SHA256, exact joint,
@@ -310,9 +335,8 @@ def resolve_twist_semantics(path: str | Path) -> TwistSemantics:
     Returns:
         Validated source roles and byte identities.
     """
-    from pxr import Sdf, Usd, UsdGeom
-
-    path = Path(path)
+    snapshot = path if isinstance(path, UsdSourceSnapshot) else None
+    path = snapshot.path if snapshot is not None else Path(path)
     sidecar_path = path.with_suffix(".twist.json")
     if path.suffix.lower() not in {".usd", ".usda", ".usdc"}:
         if not sidecar_path.exists():
@@ -323,12 +347,10 @@ def resolve_twist_semantics(path: str | Path) -> TwistSemantics:
             "E8 semantics require a self-contained USD source."
         )
     try:
-        source_bytes = path.read_bytes()
-        source_digest = hashlib.sha256(source_bytes).hexdigest()
-        # Fresh anonymous layers prevent a cached identifier from serving old
-        # geometry after source bytes and their integrity digest have changed.
-        layer = Sdf.Layer.OpenAsAnonymous(str(path))
-        stage = Usd.Stage.Open(layer) if layer is not None else None
+        snapshot = read_usd_source(path if snapshot is None else snapshot)
+        source_bytes = snapshot.raw
+        source_digest = snapshot.source_sha256
+        stage = snapshot.stage
     except Exception as error:
         raise InvalidTwistSemanticsError("E8 source USD cannot be read.") from error
     if stage is None:
@@ -358,19 +380,10 @@ def resolve_twist_semantics(path: str | Path) -> TwistSemantics:
         raise MissingTwistSemanticsError(
             "E8 source has no explicit twist-control semantics."
         )
-    if UsdGeom.GetStageMetersPerUnit(stage) != 1.0:
-        raise InvalidTwistSemanticsError("E8 source must be metre-authored USD.")
-    if (
-        layer.subLayerPaths
-        or layer.GetExternalReferences()
-        or any(
-            item not in (layer, stage.GetSessionLayer())
-            for item in stage.GetUsedLayers()
-        )
-    ):
-        raise InvalidTwistSemanticsError(
-            "E8 source must be self-contained and hash-bound."
-        )
+    try:
+        snapshot.require_geometry()
+    except ValueError as error:
+        raise InvalidTwistSemanticsError(str(error)) from error
     if not default:
         raise InvalidTwistSemanticsError("E8 source requires an explicit default prim.")
     if any(item != annotations[0] for item in annotations[1:]):
