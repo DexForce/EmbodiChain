@@ -49,19 +49,10 @@ def test_source_proposal_records_and_input_ownership(case):
         occupied_footprints=[Polygon(x) for x in case["occupied"]],
         separation_m=0.02,
     )
-    plain = [
-        {
-            key: value.tolist() if isinstance(value, np.ndarray) else value
-            for key, value in result.items()
-        }
-        for result in results
-    ]
-    assert json.dumps(plain, sort_keys=True) == json.dumps(
-        case["expected"], sort_keys=True
-    )
+    actual = json.loads(json.dumps(results, default=np.ndarray.tolist))
+    assert actual == [_REFERENCE["proposals"][index] for index in case["expected"]]
     np.testing.assert_array_equal(subject.vertices, vertices[0])
     np.testing.assert_array_equal(support.vertices, vertices[1])
-    assert all(result["native_bearing_verified"] is False for result in results)
 
 
 def test_numeric_placement_extents_keep_alignment_and_articulation_root_edges():
@@ -75,24 +66,20 @@ def test_numeric_placement_extents_keep_alignment_and_articulation_root_edges():
     vertices = trimesh.creation.box(extents=(0.1, 0.2, 0.6)).vertices
     rotation = np.array([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]])
     assert dominant_local_axis(vertices) == [0.0, 0.0, 1.0]
-    assert vertical_placement_bounds(vertices, rotation, axis_aligned=False) == (
-        -0.05,
-        0.05,
-    )
-    assert vertical_placement_bounds(vertices, rotation, axis_aligned=True) == (
-        -0.3,
-        0.3,
-    )
-    assert (
-        horizontal_placement_extent(
-            vertices, rotation, world_axis=0, axis_aligned=False
+    for aligned, vertical, horizontal in (
+        (False, (-0.05, 0.05), 0.3),
+        (True, (-0.3, 0.3), 0.1),
+    ):
+        assert (
+            vertical_placement_bounds(vertices, rotation, axis_aligned=aligned)
+            == vertical
         )
-        == 0.3
-    )
-    assert (
-        horizontal_placement_extent(vertices, rotation, world_axis=0, axis_aligned=True)
-        == 0.1
-    )
+        assert (
+            horizontal_placement_extent(
+                vertices, rotation, world_axis=0, axis_aligned=aligned
+            )
+            == horizontal
+        )
     kwargs = dict(
         world_axis=1,
         object_axis_aligned=False,

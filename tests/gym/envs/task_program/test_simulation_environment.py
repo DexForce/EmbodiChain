@@ -1440,6 +1440,8 @@ def test_fresh_bridges_observe_new_scene_at_the_same_initial_clock() -> None:
         )
     )
     first_bridge = adapter.create_bridge(compiled)
+    first_policy = first_bridge._post_policy_port
+    assert first_policy.observation_clock is first_bridge.clock
     first_runtime = first_bridge._runtime
     first_provider = first_runtime.observation_provider
     initial = first_provider.observe(TaskState.empty(_BATCH_SIZE, robot.device))
@@ -1447,6 +1449,11 @@ def test_fresh_bridges_observe_new_scene_at_the_same_initial_clock() -> None:
 
     cube.pose[:, 0, 3] = 0.35  # Layout changes between episodes, before stepping.
     second_bridge = adapter.create_bridge(compiled)
+    second_policy = second_bridge._post_policy_port
+    assert first_policy is not second_policy
+    assert second_policy.observation_clock is second_bridge.clock
+    with pytest.raises(ValueError, match="another runtime/session clock"):
+        first_policy.observation_clock
     second_runtime = second_bridge._runtime
     second_provider = second_runtime.observation_provider
     refreshed = second_provider.observe(TaskState.empty(_BATCH_SIZE, robot.device))

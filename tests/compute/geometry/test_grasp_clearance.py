@@ -46,9 +46,11 @@ def _dtype(case):
 
 @pytest.mark.parametrize("case", _REFERENCE["approaches"])
 def test_grasp_candidate_direction_region_and_order_match_b0(case):
-    dtype = _dtype(case)
+    inputs = _REFERENCE["approach_inputs"][case["input"]]
+    expected = _REFERENCE["approach_results"][case["expected"]]
+    dtype = _dtype(inputs)
     axis, pose, tcp = [
-        torch.tensor(case[key], dtype=dtype) for key in ("axis", "pose", "tcp")
+        torch.tensor(inputs[key], dtype=dtype) for key in ("axis", "pose", "tcp")
     ]
     positive = None if case["positive"] is None else torch.tensor(case["positive"])
     random_before = torch.get_rng_state().clone()
@@ -56,24 +58,24 @@ def test_grasp_candidate_direction_region_and_order_match_b0(case):
         axis, pose, tcp, ends=case["ends"], positive=positive, purpose=case["purpose"]
     )
     assert torch.equal(random_before, torch.get_rng_state())
-    assert len(actual) == len(case["expected"])
-    for value, expected in zip(actual, case["expected"], strict=True):
+    for value, original in zip(actual, expected, strict=True):
         assert value.direction.dtype == dtype
-        assert value.direction.tolist() == expected["direction"]
-        assert (None if value.axis is None else value.axis.tolist()) == expected["axis"]
-        assert value.positive.tolist() == expected["positive"]
+        assert value.direction.tolist() == original["direction"]
+        assert (None if value.axis is None else value.axis.tolist()) == original["axis"]
+        assert value.positive.tolist() == original["positive"]
     axis.zero_()
     if actual[0].axis is not None:
-        assert actual[0].axis.tolist() == case["expected"][0]["axis"]
+        assert actual[0].axis.tolist() == expected[0]["axis"]
 
 
 @pytest.mark.parametrize("case", _REFERENCE["opening"])
 def test_opening_mask_keeps_complete_mesh_and_64_candidate_chunk_edges(case):
     dtype = _dtype(case)
-    vertices, poses, object_pose = [
-        torch.tensor(case[key], dtype=dtype)
-        for key in ("vertices", "poses", "object_pose")
+    vertices, object_pose = [
+        torch.tensor(case[key], dtype=dtype) for key in ("vertices", "object_pose")
     ]
+    poses = torch.eye(4, dtype=dtype).repeat(len(case["translations_x"]), 1, 1)
+    poses[:, 0, 3] = torch.tensor(case["translations_x"], dtype=dtype)
     poses[tuple(case["nonfinite"])] = float("nan")
     before = vertices.clone()
     assert (
@@ -132,7 +134,6 @@ def test_distal_staging_candidate_order_and_bound_failures_match_b0(case):
         np.asarray(case["attachment"]),
         **snapshot,
     )
-    assert len(actual) == len(case["expected"])
     for (label, target, report), expected in zip(actual, case["expected"], strict=True):
         assert label == expected["label"] and report == expected["report"]
         assert (None if target is None else target.tolist()) == expected["targets"]

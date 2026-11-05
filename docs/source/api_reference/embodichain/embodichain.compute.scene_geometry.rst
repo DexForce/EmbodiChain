@@ -241,8 +241,15 @@ hull; no silhouette containment, stability window or task verdict is inferred.
    :nosignatures:
 
    support_from_contacts
+   contact_load_path
 
 .. autofunction:: support_from_contacts
+
+``contact_load_path`` checks one sampled contact graph using positive upward
+loads and explicit dynamic cargo IDs. It does not join paths across substeps or
+choose a stable-window duration. That qualification belongs to the consumer.
+
+.. autofunction:: contact_load_path
 
 Pour arcs and grasp projections
 -------------------------------
@@ -387,3 +394,14 @@ limits and observed Robot state are supplied by the Motion owner.
 
 .. automodule:: embodichain.compute.geometry.staging
    :members:
+
+Qualified contact heights
+-------------------------
+
+``contact_support_heights`` selects the highest qualified patch point without
+averaging penetration away. Missing load, COM support or finite coordinates
+produce NaN and preserve the caller's conservative envelope. The sensor-facing
+``qualified_support_heights`` API delegates to this shared calculation; TaskSpec
+uses it without importing Lab or acquiring physical state.
+
+.. autofunction:: embodichain.compute.geometry.contact_support.contact_support_heights

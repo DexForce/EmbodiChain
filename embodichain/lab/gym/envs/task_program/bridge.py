@@ -997,6 +997,26 @@ class BufferedGymCommandSink:
             metadata={"bridge_action_kind": "runtime_wait_hold"},
         )
 
+    def encode_post_policy_hold(self, qpos: torch.Tensor) -> EnvAction:
+        """Encode a policy's captured full-position hold in the controller mode.
+
+        Args:
+            qpos: Finite floating positions shaped ``(batch_size, robot_dof)``.
+
+        Returns:
+            An owned position action, including zero velocity targets when the
+            configured encoder uses ``position_velocity`` commands.
+        """
+        if (
+            not isinstance(qpos, torch.Tensor)
+            or qpos.ndim != 2
+            or not all(qpos.shape)
+            or not qpos.is_floating_point()
+            or not torch.isfinite(qpos).all().item()
+        ):
+            raise ValueError("Post-policy holds require finite full-position rows.")
+        return self._encoder._action_from_qpos(qpos)
+
 
 @dataclass(slots=True)
 class _SegmentLifecycle:
@@ -1290,6 +1310,20 @@ class TaskProgramDemoBridge:
             and self._active_segment_id is None
             and settled
         )
+
+    @property
+    def program(self) -> CompiledTaskProgramPort:
+        """Return the program selected for this execution."""
+        return self._program
+
+    @property
+    def post_policy_port(self) -> SegmentPostPolicyPort | None:
+        """Return this bridge's actual policy session, including isolated sessions.
+
+        This is the instance used during this execution, not its factory's
+        template port. Consumers still own checking the supported provider API.
+        """
+        return self._post_policy_port
 
     @property
     def program_completed(self) -> bool:
@@ -1983,6 +2017,11 @@ class TaskProgramDemoBridge:
                         result=result,
                         action_kind="program_post_policy",
                     )
+                    if isinstance(processed.value, torch.Tensor):
+                        processed = ControllerAction(
+                            value=self._sink.encode_post_policy_hold(processed.value),
+                            metadata=processed.metadata,
+                        )
                     yield from self._yield_and_advance(processed, lifecycle)
             except BaseException as exc:
                 iteration_error = exc
