@@ -189,6 +189,14 @@ selection through `pg_grasp.regions`; callers select a policy without supplying
 a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
 sampled closing geometry and contact fitting with explicit thresholds; robot/FK
 sampling and physical contact evidence remain Lab responsibilities.
+`pg_grasp.native_contact` owns discrete convex closing/opening and rigid-clearance
+qualification through an injected `ConvexMeshQuery` factory; it imports no Lab
+runtime. `ClosingContactPolicy` declares geometric rules without experiment
+revision dispatch. This exact-shape route retains native pair offsets and contact
+ordering; it does not replace the surface-based checker. Scene captures physical
+geometry, and `ActionPlanningServices` bind an explicitly supplied geometric
+policy to the existing Newton backend. Queries own only isolated collision resources and preserve unavailable
+threshold results; hosts retain simulation ownership and physical-effect evidence.
 `SampledHandGeometry.at_width()` interpolates the supplied hand samples.
 The public `get_dual_arm_grasp_proposals()` path retains candidate generation
 and ranking while leaving geometric qualification to the caller; normal
@@ -377,8 +385,17 @@ rotation axis. Failed chains do not truncate other rows or change their choices.
 Built-in Atomic suites
 compile and replay on their declared command clock; compiled replay consumes
 arrival intervals on physics ticks and preserves observation segment indices.
+Mounted-hand selection must agree with command joint order and contact links.
+PGI and Robotiq collision samplers bind the actual flange-relative solver TCP;
+the benchmark README owns the hand-specific fixture and suite selections.
 Legacy fixed-sample replay remains explicit in trial metadata. The benchmark
 README and design contract own population and protocol details.
+Physical grasp/retention scoring consumes synchronized, target-filtered finger
+contacts rather than gripper joint-position proxies. Explicit `finger_links`
+belong to benchmark gripper settings; missing bindings or truncated queries are
+unavailable evidence. The collector and target/role binding live in
+`scenarios/_grasp_contacts.py`; contact geometry, distance conventions and current
+scoring version are specified in the benchmark README and `evaluation.py`.
 Run host calls serially within a process. `run_benchmark(workers>1)` isolates
 quality shards with spawned processes after freezing the full input corpus;
 `prepare_case_manifest()` can prepare that corpus without running planners.

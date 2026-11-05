@@ -33,6 +33,7 @@ from ..contracts import (
 )
 from .atomic_evaluation import signed_rotation_about_axis
 from ._replay_diagnostics import ReplayDiagnostics, resolve_diagnostics_config
+from ._grasp_contacts import GraspContacts
 
 if TYPE_CHECKING:
     from embodichain.lab.sim import SimulationManager
@@ -60,6 +61,8 @@ class _ReplayMetrics:
     object_rotation_peak_signed_rad: torch.Tensor | None = None
     replay_traces: Mapping[str, ReplayObservationTrace] = field(default_factory=dict)
     replay_diagnostics: Mapping[str, object] = field(default_factory=dict)
+    gripper_contact_thresholds_m: Mapping[str, float] = field(default_factory=dict)
+    grasp_contact_metadata: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -72,6 +75,10 @@ class _ReplayTraceAccumulator:
     articulation_joint: list[torch.Tensor] = field(default_factory=list)
     gripper_qpos: dict[str, list[torch.Tensor]] = field(default_factory=dict)
     scene_object_poses: dict[str, list[torch.Tensor]] = field(default_factory=dict)
+    gripper_contact_distances: dict[str, list[torch.Tensor]] = field(
+        default_factory=dict
+    )
+    gripper_contact_targets: dict[str, str] = field(default_factory=dict)
 
     def finish(self) -> ReplayObservationTrace:
         """Stack synchronized samples into the public immutable trace."""
@@ -90,6 +97,11 @@ class _ReplayTraceAccumulator:
                 object_id: torch.stack(values)
                 for object_id, values in self.scene_object_poses.items()
             },
+            gripper_contact_distances={
+                part: torch.stack(values)
+                for part, values in self.gripper_contact_distances.items()
+            },
+            gripper_contact_targets=self.gripper_contact_targets,
         )
 
 
@@ -139,6 +151,7 @@ class AtomicReplayRuntime:
         self._objects = objects
         self._articulations = articulations
         self._gripper_states = gripper_states
+        self._grasp_contacts: GraspContacts | None = None
 
     def execute(
         self,
@@ -251,6 +264,8 @@ class AtomicReplayRuntime:
             },
             replay_traces=replay_metrics.replay_traces,
             replay_diagnostics=replay_metrics.replay_diagnostics,
+            gripper_contact_thresholds_m=replay_metrics.gripper_contact_thresholds_m,
+            grasp_contact_metadata=replay_metrics.grasp_contact_metadata,
         )
 
     def _physics_settings(self) -> _PhysicsReplaySettings:
@@ -332,6 +347,11 @@ class AtomicReplayRuntime:
         articulation_joint = None
         grippers: dict[str, torch.Tensor] = {}
         scene_object_poses: dict[str, torch.Tensor] = {}
+        contacts = (
+            self._grasp_contacts.sample()
+            if "gripper_contact" in channels and self._grasp_contacts is not None
+            else {}
+        )
         if "tcp_pose" in channels:
             tcp_pose = self.robot.compute_fk(
                 self.robot.get_qpos(name=self.control_part),
@@ -374,6 +394,15 @@ class AtomicReplayRuntime:
             if "gripper_qpos" in requested:
                 for part, qpos in grippers.items():
                     accumulator.gripper_qpos.setdefault(part, []).append(qpos)
+            if "gripper_contact" in requested:
+                for part, distances in contacts.items():
+                    accumulator.gripper_contact_distances.setdefault(part, []).append(
+                        distances
+                    )
+                if self._grasp_contacts is not None:
+                    accumulator.gripper_contact_targets.update(
+                        self._grasp_contacts.targets
+                    )
             if "scene_object_pose" in requested:
                 for object_id in accumulator.window.scene_object_ids:
                     accumulator.scene_object_poses.setdefault(object_id, []).append(
@@ -552,6 +581,21 @@ class AtomicReplayRuntime:
             window.observation_id: _ReplayTraceAccumulator(window)
             for window in observation_windows
         }
+        self._grasp_contacts = (
+            GraspContacts(
+                self.simulation,
+                self.robot,
+                self._track_config,
+                case,
+                self._objects,
+                tuple(self._gripper_states),
+                self._articulations,
+            )
+            if any(
+                "gripper_contact" in window.channels for window in observation_windows
+            )
+            else None
+        )
         requested_scene_object_ids = {
             object_id
             for window in observation_windows
@@ -735,6 +779,16 @@ class AtomicReplayRuntime:
                     None if rotation_peak is None else rotation_peak * rotation_sign
                 ),
                 replay_diagnostics={} if diagnostics is None else diagnostics.finish(),
+                gripper_contact_thresholds_m=(
+                    {}
+                    if self._grasp_contacts is None
+                    else self._grasp_contacts.thresholds
+                ),
+                grasp_contact_metadata=(
+                    {}
+                    if self._grasp_contacts is None
+                    else self._grasp_contacts.metadata()
+                ),
                 replay_traces={
                     observation_id: accumulator.finish()
                     for observation_id, accumulator in trace_accumulators.items()
@@ -744,6 +798,7 @@ class AtomicReplayRuntime:
                         or accumulator.articulation_joint
                         or accumulator.gripper_qpos
                         or accumulator.scene_object_poses
+                        or accumulator.gripper_contact_distances
                     )
                 },
             )

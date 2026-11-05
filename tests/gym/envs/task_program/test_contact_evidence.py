@@ -38,10 +38,7 @@ from embodichain.lab.sim.sensors.contact.timeline import (
     ContactTimeline,
     ContactTimelineCfg,
 )
-from embodichain.lab.sim.sensors.joint_opening import (
-    DriverOpeningBinding,
-    create_joint_opening_reader,
-)
+from embodichain.lab.sim.atomic_actions.grip_evidence import DriverOpeningBinding
 from embodichain.lab.task_program.integrations.simulation.grip_evidence import (
     NativeGripEvidenceCfg,
     NativeGripEvidenceFactory,
@@ -213,15 +210,24 @@ def test_opening_does_not_resolve_invalid_or_nonopposing_contacts(damage):
 def test_declared_driver_opening_keeps_strict_boundary_and_finite_full_row(
     driver, mimic, opened
 ):
+    reads = []
+
+    def measured_qpos(name):
+        reads.append(name)
+        return torch.tensor([[driver, mimic]])
+
     robot = SimpleNamespace(
         joint_names=["drive", "compliant"],
         get_joint_ids=lambda name: [0, 1],
-        get_qpos=lambda name: torch.tensor([[driver, mimic]]),
+        get_qpos=measured_qpos,
     )
     binding = DriverOpeningBinding(
         "hand", ("drive", "compliant"), (0,), (0.0, 0.0), 0.05
     )
-    value = create_joint_opening_reader(robot, (binding,))("hand", 0)
+    reader = binding.bind(robot)
+    assert reads == []
+    value = reader(0)
+    assert reads == ["hand"]
     assert value["open"] is opened
     assert value["driving_joint_names"] == ["drive"]
     assert "not_contact_free_separation" in value["scope"]
@@ -328,7 +334,10 @@ def test_grip_trace_keeps_explicit_loss_and_nonfinite_accounting():
     assert reader.snapshot_trace()["unrecorded_query_count"] == 1
 
 
-def test_shared_factory_uses_explicit_bindings_and_keeps_provider_identity_and_instance_state():
+@pytest.mark.parametrize("revision", [1, 2])
+def test_shared_factory_uses_explicit_bindings_and_keeps_provider_identity_and_instance_state(
+    revision,
+):
     source = ContactSource(count=3)
     source.data["is_valid"][0] = False
     sensors = {}
@@ -345,6 +354,8 @@ def test_shared_factory_uses_explicit_bindings_and_keeps_provider_identity_and_i
     )
     robot = SimpleNamespace(
         uid="robot",
+        joint_names=["drive", "compliant"],
+        get_joint_ids=lambda name: [0, 1],
         get_qpos=lambda **kwargs: torch.zeros(3, 2),
         get_qvel=lambda **kwargs: torch.zeros(3, 2),
         compute_fk=lambda **kwargs: torch.eye(4).repeat(3, 1, 1),
@@ -361,6 +372,16 @@ def test_shared_factory_uses_explicit_bindings_and_keeps_provider_identity_and_i
         sensor_uid="custom_sensor",
         object_bindings=(("subject", "native_body"),),
         pad_bindings=(("precision_clamp", ("first_pad", "second_pad")),),
+        algorithm_revision=revision,
+        opening_bindings=(
+            (
+                DriverOpeningBinding(
+                    "precision_clamp", ("drive", "compliant"), (0,), (0.0, 0.0), 0.05
+                ),
+            )
+            if revision == 2
+            else ()
+        ),
     )
     factory = NativeGripEvidenceFactory(cfg)
     from embodichain.lab.task_program.integrations.extensions import (
@@ -375,6 +396,18 @@ def test_shared_factory_uses_explicit_bindings_and_keeps_provider_identity_and_i
         engine=SimpleNamespace(robot=robot),
         scene_provider=None,
     )
+    if revision == 2:
+        wrong_robot = SimpleNamespace(**vars(robot))
+        wrong_robot.joint_names = ["compliant", "drive"]
+        with pytest.raises(ValueError, match="joint order"):
+            factory.create(
+                **{
+                    **arguments,
+                    "robot": wrong_robot,
+                    "engine": SimpleNamespace(robot=wrong_robot),
+                }
+            )
+        assert sensors == {}
     first, second = factory.create(**arguments), factory.create(**arguments)
     observation = first.collect(
         (query(part="precision_clamp", evidence_id="left-lane:grip"),),
@@ -393,6 +426,22 @@ def test_shared_factory_uses_explicit_bindings_and_keeps_provider_identity_and_i
         "first_pad",
         "second_pad",
     ]
+    # Keep only one loaded pad in row 2. Only the explicitly configured second
+    # revision may use the measured open driver to resolve release availability.
+    source.data["is_valid"][2, 1] = False
+    released = first.collect(
+        (
+            query(
+                part="precision_clamp",
+                evidence_id="release",
+                expected=False,
+                relation=HeldObjectRelation.DETACHED,
+            ),
+        ),
+        context(ids=(2,)),
+    )["release"]
+    assert released.values.tolist() == [False]
+    assert released.valid.tolist() == [revision == 2]
     source.cfg.filter_need_both_actor = False
     with pytest.raises(ValueError, match="contact scope"):
         factory.create(**arguments)
@@ -850,6 +899,45 @@ def test_timeline_reset_propagates_sensor_index_errors_before_mutating_history(i
     assert timeline.snapshot() == before
 
 
+@pytest.mark.parametrize("loss", [0, 3, -1])
+def test_sampler_combined_loss_diagnostic_does_not_read_legacy_counters(loss):
+    source = ContactSource()
+
+    class CombinedSource:
+        def __getattr__(self, name):
+            return getattr(source, name)
+
+        @property
+        def evidence_dropped_contacts(self):
+            return loss
+
+        @property
+        def dropped_contacts(self):
+            raise AssertionError("Combined acquisition must not synchronize twice.")
+
+        @property
+        def latest_sample_dropped_contacts(self):
+            raise AssertionError("Combined acquisition must not synchronize twice.")
+
+    sample = ContactEvidenceSampler(CombinedSource()).sample(
+        PhysicalEvidenceRequest(1.0, 0, torch.tensor([0]))
+    )
+    assert sample.frame.get(CONTACT_NORMALS).valid.tolist() == [loss == 0]
+    if loss:
+        assert sample.frame.get(CONTACT_NORMALS).acquisition_errors[0]
+
+
+@pytest.mark.parametrize("loss", [3, -1])
+def test_custom_source_latest_loss_fallback_retains_unavailable_evidence(loss):
+    source = ContactSource()
+    source.latest_sample_dropped_contacts = loss
+    sample = ContactEvidenceSampler(source).sample(
+        PhysicalEvidenceRequest(1.0, 0, torch.tensor([0]))
+    )
+    assert sample.frame.get(CONTACT_NORMALS).valid.tolist() == [False]
+    assert sample.frame.get(CONTACT_NORMALS).acquisition_errors[0]
+
+
 def test_optional_contact_distances_preserve_default_channels_and_row_validity():
     from embodichain.lab.sim.sensors.contact.sampling import (
         CONTACT_DISTANCES,
@@ -1006,42 +1094,3 @@ def test_joint_contact_observer_rejects_replaced_window_during_acquisition():
     with pytest.raises(ValueError, match="window changed"):
         observer.capture(refresh=True)
     assert observer.snapshot() == ()
-
-
-@pytest.mark.parametrize("loss", [0, 3, -1])
-def test_sampler_combined_loss_diagnostic_does_not_read_legacy_counters(loss):
-    source = ContactSource()
-
-    class CombinedSource:
-        def __getattr__(self, name):
-            return getattr(source, name)
-
-        @property
-        def evidence_dropped_contacts(self):
-            return loss
-
-        @property
-        def dropped_contacts(self):
-            raise AssertionError("Combined acquisition must not synchronize twice.")
-
-        @property
-        def latest_sample_dropped_contacts(self):
-            raise AssertionError("Combined acquisition must not synchronize twice.")
-
-    sample = ContactEvidenceSampler(CombinedSource()).sample(
-        PhysicalEvidenceRequest(1.0, 0, torch.tensor([0]))
-    )
-    assert sample.frame.get(CONTACT_NORMALS).valid.tolist() == [loss == 0]
-    if loss:
-        assert sample.frame.get(CONTACT_NORMALS).acquisition_errors[0]
-
-
-@pytest.mark.parametrize("loss", [3, -1])
-def test_custom_source_latest_loss_fallback_retains_unavailable_evidence(loss):
-    source = ContactSource()
-    source.latest_sample_dropped_contacts = loss
-    sample = ContactEvidenceSampler(source).sample(
-        PhysicalEvidenceRequest(1.0, 0, torch.tensor([0]))
-    )
-    assert sample.frame.get(CONTACT_NORMALS).valid.tolist() == [False]
-    assert sample.frame.get(CONTACT_NORMALS).acquisition_errors[0]

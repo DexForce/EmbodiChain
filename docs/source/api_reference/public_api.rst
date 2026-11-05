@@ -1040,6 +1040,8 @@ state and world-to-base transforms belong to the query snapshot. Payload queries
 remain B=1; the carried body owns its identity, control part, local spheres and
 observed world pose. These values are separate from serialized configuration.
 Subsets, reordered environments, and per-environment worlds are unsupported.
+An omitted start uses the captured selected joint rows; the motion facade reports
+the world as immutable.
 
 The owned motion factory closes backend-local attachments on exit and makes no
 skill-phase decisions. Queries require CUDA graphs off, a static snapshot world
@@ -1144,8 +1146,6 @@ embodichain.lab.sim.scene.expansion.persistence
    save_scene_variants
    load_scene_variants
 
-embodichain.lab.sim.sensors.contact_sampling
-
 embodichain.lab.sim.sensors.contact.sampling
 ---------------------------------------------------------------------
 
@@ -1156,18 +1156,12 @@ normals, and native impulses. Per-channel validity distinguishes unsupported
 capabilities, nonfinite active data, saturation and source drift from measured
 negative observations. Native contact revision remains separate from runtime
 observation revision. The Default-only revision reader fails explicitly when its
-SDK contract is unavailable. Signed ``CONTACT_DISTANCES`` are opt-in;
-``DEFAULT_CHANNELS`` retains the original five-channel request. Missing distance
-invalidates its explicit channel without invalidating other available channels.
-
 SDK contract is unavailable.
 
 ``sample`` keeps frame tensors on its request's environment-ID device. The
 ``collect`` provider port retains that same device contract. Host observers may
 request CPU frames; ``source_device`` records where the original numerical
 observation was produced. The common frame has no invocation field.
-
-.. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
 
@@ -1180,38 +1174,15 @@ observation was produced. The common frame has no invocation field.
    CONTACT_POSITIONS
    CONTACT_DISTANCES
    DEFAULT_CHANNELS
-
    ContactEvidenceSample
    ContactEvidenceSampler
    ContactSourceStamp
    native_contact_revision
 
-embodichain.lab.sim.sensors.joint_contact_observation
----------------------------------------------------
-
-Standard sensor observers can collect a selected joint alongside native contact
-facts in explicit B=1 windows. Substeps reuse the completed contact sample;
-initial prepare acquisitions explicitly request one refresh. Joint channels use
-actual simulation time and retain independent validity and acquisition errors.
-Only valid contact slots are retained, with native loss diagnostics preserved.
-Window generations reject delayed callbacks across reset/reuse; completed copies
-remain independent. Integrations own invocation/episode binding and action-effect
-interpretation. The observer neither computes success nor advances simulation.
-
-.. currentmodule:: embodichain.lab.sim.sensors.joint_contact_observation
-
-.. autosummary::
-
-   JointContactObservation
-   JointContactObserver
-
-.. autoclass:: JointContactObservation
-   :members:
-
-.. autoclass:: JointContactObserver
-   :members:
-
-embodichain.lab.sim.sensors.contact_timeline
+Signed contact distances require explicit channel selection. Empty requests
+retain the original five ``DEFAULT_CHANNELS``; a missing or nonfinite active
+distance keeps that requested channel unavailable without invalidating unrelated
+contact channels.
 
 embodichain.lab.sim.sensors.contact.timeline
 ---------------------------------------------------------------------
@@ -1236,12 +1207,35 @@ any task-success evaluation.
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
-
 .. autosummary::
 
    ContactTimeline
    ContactTimelineCfg
+
+embodichain.lab.sim.sensors.joint_contact_observation
+-----------------------------------------------------
+
+Standard sensor observers can collect a selected joint alongside native contact
+facts in explicit B=1 windows. Substeps reuse the completed contact sample;
+initial prepare acquisitions explicitly request one refresh. Joint channels use
+actual simulation time and retain independent validity and acquisition errors.
+Only valid contact slots are retained, with native loss diagnostics preserved.
+Window generations reject delayed callbacks across reset/reuse; completed copies
+remain independent. Integrations own invocation/episode binding and action-effect
+interpretation. The observer neither computes success nor advances simulation.
+
+.. currentmodule:: embodichain.lab.sim.sensors.joint_contact_observation
+
+.. autosummary::
+
+   JointContactObservation
+   JointContactObserver
+
+.. autoclass:: JointContactObservation
+   :members:
+
+.. autoclass:: JointContactObserver
+   :members:
 
 embodichain.lab.sim.sensors.support_observation
 -----------------------------------------------
@@ -1280,6 +1274,7 @@ stability window. Normative task acceptance remains outside this module.
    NativeSupportResult
    NativeSupportObservation
    SupportObservationRegistry
+   qualified_support_heights
 
 .. autoclass:: NativeSupportResult
    :members:
@@ -1290,6 +1285,13 @@ stability window. Normative task acceptance remains outside this module.
 .. autoclass:: SupportObservationRegistry
    :members:
 
+
+Qualified contact-height adaptation remains sensor-owned. It uses only a
+positive-load COM-qualified patch and returns the highest point; invalid rows
+remain NaN. Pure transformed mesh envelopes live in
+``compute.geometry.rigid.support_mesh_envelope`` and establish no contact.
+
+.. autofunction:: qualified_support_heights
 
 embodichain.lab.task_program.integrations.simulation.grip_evidence
 ------------------------------------------------------------------
@@ -1356,6 +1358,49 @@ its duration, timeout, pose/axis targets, attachment-drift bounds and optional
 native-support declaration. Registration snapshots and fingerprints the complete
 configuration; names do not select hidden behavior.
 
+``SimulationJointStabilityConditionCfg`` observes an explicitly bound native
+joint, with independently declared target tolerance and full-window drift.
+The standard port preserves the initial observed robot hold, counts only
+acknowledged ticks after the initial sample, and records the original
+``joint_position_and_stability`` receipt. This is joint retention evidence;
+it does not qualify contact safety. When an execution clock is bound, the
+receipt additionally includes the actual final joint acquisition with per-row
+validity, environment IDs and a policy-window sample sequence. ``joint_window``
+retains sampled coordinates, validity/errors, actual step/timestamp arrays,
+native joint identity and compiled policy/segment identity for independent
+reassessment. ``monitor_initial_values`` preserves the pre-sample range anchor
+as numerical initialization, separately from the clock-verified acquisitions.
+A final sample alone does not establish a complete time window.
+Without a clock, no timestamped raw evidence is fabricated.
+
+The default ``invalid_observation_policy="abort_batch"`` retains the source
+behavior. Explicit ``isolate_rows`` marks the first invalid active row unavailable
+for that execution while other rows continue. The receipt separates execution
+termination from per-row condition status; timeout, unavailable observation and
+cancellation are not interchangeable. Cancellation preserves partial diagnostic
+facts but publishes no post-policy success.
+
+``max_observation_samples`` bounds raw retention, independently of the runtime
+condition. The default 4096 comfortably holds the 126 samples from a 5-second
+wait at a 0.04-second control period. Longer waits may drop old samples, report
+``dropped_samples`` and set ``record_complete=false``; a truncated history must
+not certify complete coverage. Storage is O(batch times retained samples), and
+conversion to JSON occurs after sampling, without per-step device-to-host trace
+copies. Runtime row handling and retention settings remain registration-owned;
+``to_condition_dict()`` preserves the original normative parameter fields.
+
+Target, tolerance and range drift use native runtime joint units. Translation
+and rotation require their own explicitly selected policy values; the default
+0.001 is not a universal physical distance or velocity threshold. Robot holds
+retain the source observed posture, and neither this monitor nor the policy
+advances environment time itself.
+
+Every environment-adapter bridge obtains fresh policy/validator session state,
+including execution without nominal sources. A later bridge supersedes the
+earlier session's observation ownership instead of replacing its clock. Captured
+position holds use the configured Gym action encoder, supplying zero velocity
+targets in ``position_velocity`` mode while retaining the original positions.
+
 Supported conditions declare a standard contact sensor through
 ``SupportSensorDeclarationCfg``. The scene binding supplies its exact two native
 rigid UIDs; the runtime factory creates or reuses the sensor and the environment
@@ -1380,11 +1425,15 @@ established. This distinguishes unavailable outcomes from measured negatives.
 
    SupportSensorDeclarationCfg
    SimulationStabilityConditionCfg
+   SimulationJointStabilityConditionCfg
 
 .. autoclass:: SupportSensorDeclarationCfg
    :members:
 
 .. autoclass:: SimulationStabilityConditionCfg
+   :members:
+
+.. autoclass:: SimulationJointStabilityConditionCfg
    :members:
 
 embodichain.lab.gym.envs.episode_context
@@ -3650,20 +3699,6 @@ classes; sensor acquisition never imports Task Program or Atomic implementation.
    PhysicalEvidenceBatch
    PhysicalEvidenceFrame
 
-embodichain.lab.sim.sensors.joint_opening
------------------------------------------
-
-Robot-owned driver calibration and read-only joint-opening observations.
-No model-name or task-name inference is performed.
-
-.. currentmodule:: embodichain.lab.sim.sensors.joint_opening
-
-.. autosummary::
-
-   DriverOpeningBinding
-   create_joint_opening_reader
-
-
 embodichain.compute.geometry.grip_contacts
 ------------------------------------------
 
@@ -3688,7 +3723,6 @@ are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrat
 .. autosummary::
 
    GripContactObserver
-
    DriverOpeningBinding
 
 ``DriverOpeningBinding.bind(robot)`` validates the explicit joint order before
@@ -3704,3 +3738,24 @@ qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
 
 .. autoclass:: DriverOpeningBinding
    :members:
+
+Stability execution ownership
+----------------------------
+
+A simulation factory with native support owns one unfinished bridge at a time.
+``validate_runtime_bridge_creation`` rejects overlap before rebinding clocks;
+``bind_runtime_bridge`` records the bridge created by the standard adapter.
+``TaskProgramDemoBridge.execution_finished`` requires closed segment iteration
+and a consumed/validated or explicitly aborted final segment, with no active
+action generator. It is distinct from ``program_completed`` and does not certify
+success or acknowledge commands. Non-support factories retain existing assembly.
+
+Factory-returned effect providers retain their public IDs/revisions and guard
+all collection through the shared lifetime. The same guard protects live scene
+snapshots and drive-target holds. Independently owned past reports remain readable.
+
+The source control grid, stability counters and held-failure latch are unchanged.
+CPU policy profiling can run with
+``python -m scripts.benchmark.task_program.stability --output /tmp/stability``.
+This measures constant-pose policy overhead and serialization separately from
+native contact acquisition, physical tasks and GPU execution.

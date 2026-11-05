@@ -55,7 +55,11 @@ that commits or invalidates observed effects.
 
 `MoveHeldObject` accepts ordered object-pose waypoints without rebasing the
 verified grasp. Its goal optionally frees only the final world yaw; default
-goals remain exact. Heading alternatives are checked as complete motion paths,
+goals remain exact. An explicit `HeldObjectPoseGoal.object_id` requires that exact
+input object before native or nominal planning and reports retained attachment
+through the existing terminal effect-verification boundary. Omission keeps the
+original effectless transport behavior and numerical path. Heading alternatives
+are checked as complete motion paths,
 with accepted rows retained independently and selected offsets in diagnostics.
 Held-object transport and Pour keep the binding's configured grasp command; a
 contact-blocked measured aperture does not retain closing effort.
@@ -67,6 +71,15 @@ captures geometry. Consumers retain declared pad-link order and replace closing
 commands with the current resolved endpoint commands, including invocation
 overrides. [Robot geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
 defines the capture boundary. Task Program declarations do not enter Atomic APIs.
+
+`ActionPlanningServices.prepare_grasp_query()` resolves the declared hand
+calibration by target ID and binds Scene capture to GraspKit's typed geometric
+policy and the existing isolated Newton backend. The opt-in context manager
+closes all query resources on normal exit, failure or cancellation. Opening
+grounding and optional rigid-scene queries share the explicit observation scope;
+undeclared calibration fails before capture. It selects no experiment revisions,
+installs no alternate skill registry and leaves ordinary PickUp defaults unchanged.
+Historical revision mapping belongs only to the frozen regression fixture.
 
 `PickUpOptions.approach_direction` accepts one world vector or one vector per
 planning row. PickUp and AxisAlign normalize each row independently and use the

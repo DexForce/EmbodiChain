@@ -61,9 +61,9 @@ from embodichain.lab.task_program.integrations._configured_composition import (
     _load_configured_task_program_deployment,
     _resolve_task_program_components,
 )
-from embodichain.lab.gym.utils._component_composition import (
-    _ResolvedGymComponents,
-    _resolve_gym_components,
+from embodichain.lab.gym.utils.composition import (
+    ResolvedGymComponents,
+    resolve_gym_components,
 )
 from embodichain.lab.gym.envs.task_program.registration import (
     _register_configured_task_program_integration,
@@ -209,9 +209,9 @@ def _gym_config(task_name: str) -> dict[str, object]:
 def _physical_components(
     path: Path,
     config: dict[str, object],
-) -> _ResolvedGymComponents:
+) -> ResolvedGymComponents:
     """Resolve one deployment's reusable physical components."""
-    return _resolve_gym_components(config, base_dir=path.parent)
+    return resolve_gym_components(config, base_dir=path.parent)
 
 
 def _integration_payload(task_name: str) -> dict[str, object]:
@@ -310,7 +310,14 @@ def test_public_composition_owns_declarations_and_defers_live_state(
     gym_before = dict(gym_registry)
     path = _config_path("hand_over")
     config = _gym_config("hand_over")
+    input_snapshot = deepcopy(config)
     physical = _physical_components(path, config)
+    other = _physical_components(path, config)
+    assert isinstance(physical, ResolvedGymComponents)
+    assert physical.config == other.config
+    other.config["robot"]["uid"] = "changed_physical_copy"
+    assert physical.config["robot"]["uid"] != "changed_physical_copy"
+    assert config == input_snapshot
     assert physical.embodiment_skill_profile is not None
     selectors = physical.config["task_program"]
     profile = physical.embodiment_skill_profile
@@ -1204,6 +1211,7 @@ def test_relative_place_uses_fresh_reference_pose_and_verified_grasp() -> None:
     assert lowering.registered_effect.held_objects[0].relation is (
         HeldObjectRelation.DETACHED
     )
+
     assert (
         lowering.registered_effect.held_objects[0].release_before_segment == "retract"
     )
@@ -1686,8 +1694,12 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
     import embodichain.toolkits.graspkit.pg_grasp.model_geometry as geometry
 
     marker = object()
+    geometry_values = {}
+    contact = [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.21], [0, 0, 0, 1]]
     monkeypatch.setattr(
-        geometry, "get_parallel_jaw_collision_geometry", lambda *a, **kw: marker
+        geometry,
+        "get_parallel_jaw_collision_geometry",
+        lambda *a, **kw: (geometry_values.update(kw), marker)[1],
     )
     monkeypatch.setattr(
         grasp,
@@ -1701,6 +1713,7 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
             "approach_deviation_angle": 0.3490658503988659,
             "max_candidates": 500,
             "center_mode": "centroid",
+            "root_from_contact_frame": contact,
         },
         path="generator",
     )()
@@ -1708,6 +1721,8 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
     assert generator.algorithm_cfg.approach_deviation_angle == 0.3490658503988659
     assert generator.algorithm_cfg.max_candidates == 500
     assert generator.algorithm_cfg.center_mode == "centroid"
+
+    assert geometry_values["root_from_contact_frame"].tolist() == contact
 
 
 @pytest.mark.parametrize(
@@ -1718,6 +1733,7 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
         {"max_candidates": 0},
         {"max_candidates": True},
         {"center_mode": "guessed"},
+        {"root_from_contact_frame": [[0.0] * 4 for _ in range(4)]},
     ],
 )
 def test_grasp_search_declarations_reject_invalid_values_before_construction(value):
@@ -3006,6 +3022,184 @@ def test_real2sim_collection_profile_rejects_ambiguous_limits_and_recipes(
         load_real2sim_tabletop_profile(path)
 
 
+@pytest.mark.parametrize("relative", [False, True])
+def test_routed_transport_is_declared_owned_and_lowered_without_live_reads(relative):
+    from types import SimpleNamespace
+    from embodichain.lab.task_program.semantics import (
+        SceneEntityRegistration,
+        SceneRegistry,
+        SemanticEffectKind,
+    )
+    from embodichain.lab.task_program.integrations.simulation.transport import (
+        RoutedMoveHeldObjectLowererFactory,
+    )
+
+    pose = (
+        {
+            "kind": "scene_entity",
+            "entity_id": "cup",
+            "relative_pose": torch.eye(4).reshape(-1).tolist(),
+            "world_orientation": torch.eye(3).reshape(-1).tolist(),
+        }
+        if relative
+        else {
+            "kind": "pose",
+            "position": [0.1, 0.2, 0.3],
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 2.0],
+        }
+    )
+    raw = {
+        "kind": "move_held_object",
+        "routes": [{"object_id": "bottle", "target_id": "destination", "pose": pose}],
+    }
+    payload = _tableware_integration_payload("pour_water")
+    lowerers = payload["runtime_services"]["registered_semantic_lowerers"]
+    index = next(
+        i for i, item in enumerate(lowerers) if item["kind"] == "move_held_object"
+    )
+    lowerers[index] = raw
+    configured = _decode_configured_task_program_integration(payload)
+    factory = next(
+        f
+        for f in configured.registration.registered_semantic_lowerer_factories
+        if f.call_id == "simulation.move_held_object"
+    )
+    assert type(factory) is RoutedMoveHeldObjectLowererFactory
+    fingerprint = configured.registration.fingerprint_payload()
+    raw["routes"][0]["object_id"] = "mutated"
+    if relative:
+        pose["relative_pose"][3] = 99.0
+    else:
+        pose["position"][0] = 99.0
+    assert configured.registration.fingerprint_payload() == fingerprint
+    robot = object()
+    registry = SceneRegistry(
+        [
+            SceneEntityRegistration(
+                SceneObjectRef(name),
+                state_provider=SimpleNamespace(
+                    observe=lambda **kwargs: pytest.fail("lowering read live state")
+                ),
+            )
+            for name in ("bottle", "cup")
+        ]
+    )
+    lowerer = factory.create(
+        simulation=None,
+        robot=robot,
+        scene_registry=registry,
+        engine=SimpleNamespace(robot=robot),
+    )
+    other = factory.create(
+        simulation=None,
+        robot=robot,
+        scene_registry=registry,
+        engine=SimpleNamespace(robot=robot),
+    )
+    assert other is not lowerer
+    arguments = {"target": "destination", "object": "bottle"}
+    if relative:
+        arguments["reference"] = "cup"
+    call = RegisteredSemanticCall(call_id=factory.call_id, arguments=arguments)
+    lowered = lowerer.lower(
+        call, context=None, bound=None, option_template=MoveHeldObjectOptions()
+    )
+    assert lowered.registered_effect.effect_kind is SemanticEffectKind.ATTACH
+    assert lowered.registered_effect.held_objects[0].object_id == "bottle"
+    target = lowered.goal.object_target_pose
+    if relative:
+        assert target.entity_id == "cup"
+        torch.testing.assert_close(target.relative_pose, torch.eye(4))
+        torch.testing.assert_close(target.world_orientation, torch.eye(3))
+    else:
+        torch.testing.assert_close(target[:3, 3], torch.tensor([0.1, 0.2, 0.3]))
+        torch.testing.assert_close(target[:3, :3], torch.eye(3))
+    lookahead = lowerer.pick_lookahead_targets(
+        call, picked_object=SceneObjectRef("bottle"), bound=None, previous_target=None
+    )
+    assert len(lookahead) == 1
+    assert (
+        lowerer.pick_lookahead_targets(
+            call, picked_object=SceneObjectRef("cup"), bound=None, previous_target=None
+        )
+        is None
+    )
+    target_matrix = target.relative_pose if relative else target
+    target_matrix.fill_(99)
+    again = lowerer.lower(
+        call, context=None, bound=None, option_template=MoveHeldObjectOptions()
+    ).goal.object_target_pose
+    assert not torch.equal(again.relative_pose if relative else again, target_matrix)
+    with pytest.raises(ValueError, match="object-target route"):
+        lowerer.lower(
+            RegisteredSemanticCall(
+                call_id=factory.call_id,
+                arguments={"target": "destination", "object": "cup"},
+            ),
+            context=None,
+            bound=None,
+            option_template=MoveHeldObjectOptions(),
+        )
+
+
+@pytest.mark.parametrize(
+    "damage", ["mixed", "duplicate", "unknown_pose_field", "nonrigid"]
+)
+def test_routed_transport_rejects_ambiguous_or_invalid_declarations(damage):
+    route = {
+        "object_id": "bottle",
+        "target_id": "destination",
+        "pose": {
+            "kind": "scene_entity",
+            "entity_id": "cup",
+            "relative_pose": torch.eye(4).reshape(-1).tolist(),
+        },
+    }
+    raw = {"kind": "move_held_object", "routes": [route]}
+    if damage == "mixed":
+        raw["target_id"] = "legacy"
+    elif damage == "duplicate":
+        raw["routes"].append(deepcopy(route))
+    elif damage == "unknown_pose_field":
+        route["pose"]["planner"] = "arbitrary"
+    else:
+        route["pose"]["relative_pose"][0] = 2.0
+    with pytest.raises((TypeError, ValueError)):
+        _decode_registered_lowerer(raw, path="lowerer")
+
+
+@pytest.mark.parametrize("missing", ["object", "reference"])
+def test_routed_transport_missing_entities_reject_before_runtime_assembly(missing):
+    payload = _tableware_integration_payload("pour_water")
+    routes = [
+        {
+            "object_id": "missing" if missing == "object" else "bottle",
+            "target_id": "destination",
+            "pose": {
+                "kind": "scene_entity",
+                "entity_id": "missing" if missing == "reference" else "cup",
+            },
+        }
+    ]
+    lowerers = payload["runtime_services"]["registered_semantic_lowerers"]
+    index = next(
+        i for i, item in enumerate(lowerers) if item["kind"] == "move_held_object"
+    )
+    lowerers[index] = {"kind": "move_held_object", "routes": routes}
+    with pytest.raises(ValueError, match="missing"):
+        _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize("value", [(True,) * 16, ("invalid",) * 16])
+def test_public_scene_target_rejects_non_numeric_matrix_with_type_error(value):
+    from embodichain.lab.task_program.integrations.simulation.targets import (
+        SceneEntityTarget,
+    )
+
+    with pytest.raises(TypeError, match="relative_pose.*sixteen|relative_pose.*16"):
+        SceneEntityTarget("cup", relative_pose=value)
+
+
 def test_configured_settle_table_is_closed_owned_and_uses_the_standard_registration():
     from embodichain.lab.task_program.integrations.simulation.stability import (
         SimulationStabilityConditionCfg,
@@ -3118,3 +3312,112 @@ def test_condition_snapshot_is_idempotent_and_plain_matching_data_has_no_sensor_
     owned.local_axis = (0.0, 0.0, 0.0)
     with pytest.raises(ValueError, match="zero"):
         owned.snapshot()
+
+
+def test_configured_joint_stability_owns_target_and_requires_articulation():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationJointStabilityConditionCfg,
+    )
+    from embodichain.lab.task_program.integrations.catalog import (
+        IntegrationFingerprintMismatch,
+    )
+    from embodichain.lab.task_program import WaitStablePostCfg
+
+    payload = _integration_payload("open_drawer")
+    declaration = {
+        "kind": "joint_position_and_stability",
+        "entity": "drawer",
+        "joint": "cabinet_to_drawer",
+        "target": 0.1,
+        "tolerance": 0.03,
+    }
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "retained": declaration,
+    }
+    value = _decode_configured_task_program_integration(payload)
+    cfg = value.registration.settle_presets["retained"]
+    assert type(cfg) is SimulationJointStabilityConditionCfg
+    assert (cfg.duration, cfg.timeout, cfg.position_drift) == (1.0, 5.0, 0.001)
+    value.registration.catalog.validate_post_policy(
+        WaitStablePostCfg(entity="drawer", preset="retained"), path=("post",)
+    )
+    declaration["target"] = 0.2
+    assert cfg.target == 0.1
+    cfg.target = 0.3
+    with pytest.raises(IntegrationFingerprintMismatch):
+        value.registration.assert_unchanged()
+    declaration["entity"] = "drawer_handle"
+    with pytest.raises(ValueError, match="explicit articulation binding"):
+        _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize("change", ["missing_tolerance", "unknown_field", "bad_window"])
+def test_configured_joint_stability_rejects_incomplete_policy(change):
+    payload = _integration_payload("open_drawer")
+    declaration = {
+        "kind": "joint_position_and_stability",
+        "entity": "drawer",
+        "joint": "cabinet_to_drawer",
+        "target": 0.1,
+        "tolerance": 0.03,
+    }
+    if change == "missing_tolerance":
+        del declaration["tolerance"]
+    elif change == "unknown_field":
+        declaration["infer_target"] = True
+    else:
+        declaration["timeout"] = 0.5
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "retained": declaration,
+    }
+    with pytest.raises((TypeError, ValueError)):
+        _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"invalid_observation_policy": "ignore"},
+        {"max_observation_samples": 1},
+        {"max_observation_samples": True},
+    ],
+)
+def test_joint_window_configuration_rejects_unknown_runtime_modes(changes):
+    payload = _integration_payload("open_drawer")
+    declaration = dict(
+        kind="joint_position_and_stability",
+        entity="drawer",
+        joint="cabinet_to_drawer",
+        target=0.1,
+        tolerance=0.03,
+        **changes,
+    )
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "retained": declaration
+    }
+    with pytest.raises((ValueError, TypeError)):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_joint_window_runtime_settings_do_not_redefine_normative_condition_data():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationJointStabilityConditionCfg,
+    )
+
+    baseline = SimulationJointStabilityConditionCfg(
+        entity="drawer", joint="cabinet_to_drawer", target=0.1, tolerance=0.03
+    )
+    changed = baseline.snapshot()
+    changed.invalid_observation_policy = "isolate_rows"
+    changed.max_observation_samples = 128
+    assert baseline.to_condition_dict() == changed.to_condition_dict()
+    payload = _integration_payload("open_drawer")
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "retained": dict(kind="joint_position_and_stability", **baseline.to_dict())
+    }
+    first = _decode_configured_task_program_integration(payload).registration
+    payload["runtime_services"]["settle_presets"]["retained"] = dict(
+        kind="joint_position_and_stability", **changed.to_dict()
+    )
+    second = _decode_configured_task_program_integration(payload).registration
+    assert first.fingerprint != second.fingerprint

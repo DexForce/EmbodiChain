@@ -45,91 +45,71 @@ Selective reset clears only the selected rows.
 
 `dropped_contacts` reports query loss plus separately counted scatter overflow
 across the control interval. Query counts stay on the device until this diagnostic
-is read. A standalone sensor without histories or observers reports the latest
-update. `latest_sample_dropped_contacts` separately reports the latest fetch's
-query and scatter loss, including a standalone refresh before an observer's
-first control interval. Query output buffers belong to each sensor's own query.
-Evidence consumers must reject loss from either diagnostic; use the maximum
-rather than adding overlapping counts.
-
-is read. A standalone sensor without histories or sampling observers reports the latest update.
-`latest_sample_dropped_contacts` separately reports the latest query and scatter
-loss even when interval counters are retained. Its device counters are updated
-by the existing CUDA scatter kernel, including graph replay, without another
-copy launch. CPU uses a scalar copy to avoid a per-row scatter branch. Full reset clears both; selective
-reset retains query-wide loss. Evidence rejects loss from either diagnostic and
-uses their maximum, since the counts overlap. `evidence_dropped_contacts` reads
-the packed interval/latest counters once and reduces them with host int64 sums.
-The standard sampler uses this combined diagnostic; custom sources without it
-retain the separate-counter fallback.
+is read. A standalone sensor without histories or sampling observers reports the
+latest update. `latest_sample_dropped_contacts` separately reports the latest
+query and scatter loss, including a refresh before the observer's first control
+interval. Its device counters are updated by the existing CUDA scatter kernel,
+including graph replay and empty-contact samples; CPU uses a scalar copy.
+Full reset clears both diagnostics; selective reset retains query-wide loss.
+`evidence_dropped_contacts` reads their packed counters once and reduces them
+with host int64 sums. The standard sampler rejects loss from either diagnostic
+and uses their maximum because the counts overlap; custom sources retain the
+separate-counter fallback. Query output buffers belong to each sensor's query.
 See `tests/sim/sensors/test_contact_history.py`, `test_contact_query_sensor.py`
 and `tests/gym/envs/test_substep_sensors.py`.
 
 ## Sampling observers
 
 `ContactSensor.add_sampling_observer` attaches a named, instance-owned read-only
-observer to this same lifecycle. It receives begin, before-fetch, after-sample and
-selected-row reset notifications. The empty default performs no observer copies
-or callbacks. Hooks run outside the sensor's internal CUDA capture; observers
-inside an external capture fail before their callbacks run. Existing history
-sampling and device kernels keep their ownership and ordering.
-Removal can supply `expected=observer` to retain a replacement registered under
-the same name. Owners that close during an in-flight token snapshot must make
-their delayed callbacks no-ops.
+observer to the same lifecycle. It receives begin, before-sample, after-sample and
+selected-row reset notifications. With no observers, the update path does not
+enumerate subscriptions, construct token generators or enter callback loops.
+Hooks run outside the sensor's internal CUDA capture; external capture with
+observers fails before callbacks run. Observer tokens and after-sample callbacks
+run once per physics step alongside history reduction. A raw sample fetched
+earlier in the same step is reused; repeated reads do not advance history or
+repeat callbacks. Removal can supply `expected=observer` to retain a replacement
+registered under the same name. Closed owners make delayed callbacks no-ops.
 
 `lab/sim/sensors/contact/sampling.py` snapshots and revalidates each request
 before acquisition. It validates channel shape/dtype and finite-row masks once,
-then privately transfers the fresh channel tensors into evidence batches. Each
-batch still owns its environment IDs and all frame alignment checks remain.
-Public batch/frame construction and snapshots always revalidate and copy mutable
-inputs; this path does not cache validation by tensor/object identity.
-The sampler adapts sampled buffers
+then privately transfers fresh channel tensors into evidence batches. Every
+batch owns its environment IDs and frame alignment checks remain complete.
+Public batch/frame constructors and snapshots still validate and copy mutable
+inputs; validation is never cached by tensor or object identity.
 
-observer to this same lifecycle. It receives begin, before-sample, after-sample and
-selected-row reset notifications. With no observers, the update path does not
-enumerate subscriptions, construct token generators or enter callback loops. Hooks run outside the sensor's internal CUDA capture; observers
-inside an external capture fail before their callbacks run. Existing history
-sampling and device kernels keep their ownership and ordering.
+The sampler adapts buffers to the shared `lab/sim/evidence.py` frame/batch types.
+It retains validity masks, native actor IDs, Arena frames and impulses, with
+explicit unsupported, nonfinite, saturated or source-drift errors. Native and
+runtime observation revisions remain different identities. The output device
+follows the request.
+Signed contact distance is opt-in; an empty request retains the five default
+channels. A missing distance invalidates only that requested channel.
 
-Observer tokens and after-sample callbacks run once per physical step, alongside
-history reduction. A raw sample fetched earlier in the same step is reused;
-repeated reads do not advance history or repeat callbacks.
-
-`lab/sim/sensors/contact/sampling.py` adapts sampled buffers
-to the shared `lab/sim/evidence.py` frame/batch types. It retains the validity mask,
-native actor IDs, Arena frames and impulses, with explicit unsupported, nonfinite,
-saturated or source-drift errors. Native and runtime observation revisions remain
-different identities. The provider's output device follows its request.
-Signed distance is an explicitly requested channel; an empty request retains
-the original five channels. Missing distance invalidates only that requested
-channel, while nonfinite active distances retain per-row unavailability.
-
-`joint_contact_observation.py` collects explicit B=1 joint position/velocity
-and contact facts through the same sensor hooks. It stores packed valid contacts,
-uses actual simulation time and keeps native source revision separate from its
-acquisition sequence. The integration binds window generations to its existing
-invocation/episode scope; no sensor declares skill success or task acceptance.
-Within that generation records are append-only. `snapshot_since` returns owned
-new records for incremental projection; resets advance the generation before
-clearing history, and full `snapshot` retains its original ownership contract.
-Substep storage transfers only fresh batches from ordinary validated batch
-constructors into its private frame. It avoids an unused publication copy;
-public capture/snapshot still revalidate and detach all returned tensors.
-
-`lab/sim/sensors/contact/timeline.py` owns bounded per-environment packed
-
-
-`lab/sim/sensors/contact/timeline.py` owns bounded per-environment packed
-history, driven by an explicit host control clock. Keep it in the environment's
-sensor suite so `BaseEnv.step` drives the public observer port. It records no task
-verdict and reads no private active-bridge field. Selected resets clear only those
-rows; missing/partial intervals and loss remain visible. The contact-row limit is
-a source-compatible soft threshold: at most one complete native batch can cross
-it; the following sample is unavailable. Reset uses the sensor's index conversion
-and aliases, deduplicating rows before advancing generations. Frontends own report
-schema wrappers and semantic actor labels. The CPU test
+`lab/sim/sensors/contact/timeline.py` owns bounded per-environment packed history,
+driven by an explicit host control clock. Keep it in the environment's sensor
+suite so `BaseEnv.step` drives the public observer port. It records no task verdict
+and reads no private active-bridge field. Selected resets clear only those rows;
+missing/partial intervals and loss remain visible. The contact-row limit is a
+source-compatible soft threshold: at most one complete native batch can cross it;
+the following sample is unavailable. Reset uses the sensor's index conversion
+and aliases, deduplicating rows before advancing generations. Frontends own
+report schema wrappers and semantic actor labels. The CPU test
 `tests/gym/envs/task_program/test_contact_evidence.py` exercises the actual public
 step boundary, frame ownership, native stamps and selective reset behavior.
+
+`joint_contact_observation.py` collects explicit B=1 joint position/velocity
+and packed valid contacts through the same sensor hooks. It uses actual
+simulation time and separates native contact revision from its acquisition
+sequence. Initial captures explicitly request a refresh; substeps reuse the
+completed sensor sample. The observer never declares action success or task
+acceptance; integrations own occurrence and episode binding.
+
+Window generations reject delayed callbacks after reset, replacement or close.
+Records are append-only within a generation; `snapshot_since` returns owned
+new records, while full `snapshot` retains its ownership contract. Limits mark
+overflow explicitly, and missing/nonfinite channels preserve unavailability
+independently.
 
 `lab/sim/sensors/support_observation.py` owns native load-patch acquisition. Its explicit
 `SupportObservationRegistry` reuses an exact native pair across bridge consumers;
@@ -140,7 +120,9 @@ calculation lives in `compute/geometry/contact_support.py`.
 Support results separate a physical boolean from availability/error masks.
 Global acquisition failures clear every row's witness, while selected resets
 advance only those row generations. A positive witness survives sleeping contacts
-only while both poses and native identities remain qualified. Complete empty
+only while both poses and native identities remain qualified. Callback captures
+and direct reads share the actual physics-step identity: a cached contact cannot
+re-establish a witness after a same-step pose change. Complete empty
 samples do not prove an absence of support over a stability window. Every frame
 uses a real acquisition clock; `bind_clock` separately enables revision-1 window
 qualification. A legacy observation does not acquire strong metadata merely by
@@ -153,3 +135,8 @@ warmup may create a nonzero offset; unobserved advancement that changes the
 mapping invalidates the window. Legacy acquisition keeps the simulation clock
 and does not gain strong qualification. These domains must not be mixed in one
 evidence window.
+
+`qualified_support_heights` adapts an already qualified native COM/load patch;
+it returns the highest accepted contact or NaN for an unavailable row. It does
+not create a physical window or choose a Task Program verdict. Geometric world
+mesh envelopes are numerical Compute inputs, independent of this contact proof.

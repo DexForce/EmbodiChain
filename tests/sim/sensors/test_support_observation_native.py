@@ -128,6 +128,113 @@ def test_default_boxes_preserve_native_support_witness_and_clock_domains():
         moved[:, 2, 3] += 0.3
         obj.set_local_pose(moved)
         assert not window().support.values.any()
+
+        # Exercise the typed standard policy against the same actual native
+        # bodies, including a cold acquisition window and normal substep holds.
+        from types import SimpleNamespace
+        import torch
+        from embodichain.lab.task_program import (
+            TaskProgramCompiler,
+            decode_task_program,
+        )
+        from embodichain.lab.task_program.integrations.simulation.bindings import (
+            SimulationSceneBinding,
+            SimulationRigidObjectBinding,
+        )
+        from embodichain.lab.task_program.integrations.simulation.policies import (
+            SimulationSegmentPolicyPort,
+        )
+        from embodichain.lab.task_program.integrations.simulation.stability import (
+            SimulationStabilityConditionCfg,
+            SupportSensorDeclarationCfg,
+        )
+
+        registry.release("payload", "support")
+        restored = obj.get_local_pose(to_matrix=True)
+        restored[:, 0, 3] = 0.0
+        restored[:, 2, 3] = 0.14
+        obj.set_local_pose(restored)
+        binding = SimulationSceneBinding(
+            "native_support_policy",
+            rigid_objects=(
+                SimulationRigidObjectBinding("item", "payload"),
+                SimulationRigidObjectBinding("surface", "support"),
+            ),
+        )
+        qpos = torch.zeros(1, 1)
+        sensors = {}
+        port = SimulationSegmentPolicyPort(
+            sim,
+            SimpleNamespace(get_qpos=lambda **kw: qpos.clone()),
+            binding,
+            settle_presets={
+                "stable": SimulationStabilityConditionCfg(
+                    entity="item",
+                    kind="stack",
+                    reference="surface",
+                    local_axis=(0, 0, 1),
+                    reference_axis=(0, 0, 1),
+                    reference_half_extents=(0.25, 0.25),
+                    object_bottom=-0.03,
+                    reference_top=0.05,
+                    duration=0.08,
+                    timeout=2.0,
+                    support_contract_revision=1,
+                    support_sensor=SupportSensorDeclarationCfg(
+                        uid="native_support_test"
+                    ),
+                )
+            },
+            step_dt=0.04,
+            support_registry=registry,
+            sensor_suite=sensors,
+        )
+        compiled = TaskProgramCompiler(binding.declare()).compile(
+            decode_task_program(
+                dict(
+                    program_id="native_support_policy",
+                    targets={},
+                    integration=dict(
+                        scene_registry="native_support_policy",
+                        robot_profile="robot",
+                        runtime_preset="default",
+                    ),
+                    program=dict(
+                        kind="segment",
+                        name="support",
+                        steps=dict(
+                            kind="invoke", call=dict(kind="pick", object="item")
+                        ),
+                        post=[dict(kind="wait_stable", entity="item", preset="stable")],
+                    ),
+                )
+            )
+        )
+        segment = next(compiled.iter_segments())
+        policy = segment.post_policies[0]
+        clock = EnvironmentStepClock(0.04)
+        port.bind_clock(clock)
+        sensor = sensors["native_support_test"]
+        commands = 0
+        for command in port.actions(
+            policy, segment=segment, active_mask=torch.ones(1, dtype=torch.bool)
+        ):
+            assert torch.equal(command, qpos)
+            before = len(calls)
+            sensor.begin_control_step()
+            sim.update(
+                physics_dt=0.01, step=4, after_substep=sensor.update_physics_step
+            )
+            clock.advance_after_env_step()
+            assert len(calls) - before == 4
+            commands += 1
+        assert commands >= 2
+        assert port.post_policy_result(policy, segment=segment).tolist() == [True]
+        metadata = port.post_policy_metadata(policy, segment=segment)
+        assert metadata["support_unavailable_observations"][0] >= 1
+        assert metadata["support_result_available"] == [True]
+        assert metadata["clock_ended_at"] == clock.now()
+
     finally:
         if registry is not None:
             registry.close()
