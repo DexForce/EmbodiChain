@@ -117,6 +117,7 @@ from .extensions import (
     RegisteredSemanticLowererFactory,
     RegisteredSemanticLowererSceneValidator,
     RuntimeTransportDeclaration,
+    RuntimeBoundSemanticLowererFactory,
     StandardExtensionDeclarations,
     build_standard_extension_declarations,
     validate_immutable_extension_declaration,
@@ -128,6 +129,14 @@ from .simulation.policies import (
 )
 from .simulation.planning_services import SimulationPlanningServicesCfg
 from .simulation.idle_clearance import IdleClearanceFactory
+
+from .runtime_services import TaskProgramRuntimeServiceContext
+from .simulation.control_policy import SimulationControlConditionCfg
+from .simulation.control_lowering import TwistCallDeclaration
+from .simulation.control_assembly import (
+    ControlOperationDeclaration,
+    _validate_control_registration,
+)
 
 if TYPE_CHECKING:
     from .invocation_policy import InvocationPolicyBinding
@@ -269,13 +278,15 @@ def _snapshot_settle_presets(
         str,
         DynamicSettleMonitorCfg
         | SimulationStabilityConditionCfg
-        | SimulationJointStabilityConditionCfg,
+        | SimulationJointStabilityConditionCfg
+        | SimulationControlConditionCfg,
     ],
 ) -> Mapping[
     str,
     DynamicSettleMonitorCfg
     | SimulationStabilityConditionCfg
-    | SimulationJointStabilityConditionCfg,
+    | SimulationJointStabilityConditionCfg
+    | SimulationControlConditionCfg,
 ]:
     """Own one strict named settle-preset table."""
     if not isinstance(values, Mapping) or not values:
@@ -284,7 +295,8 @@ def _snapshot_settle_presets(
         str,
         DynamicSettleMonitorCfg
         | SimulationStabilityConditionCfg
-        | SimulationJointStabilityConditionCfg,
+        | SimulationJointStabilityConditionCfg
+        | SimulationControlConditionCfg,
     ] = {}
     for preset_id, preset in values.items():
         if (
@@ -299,6 +311,7 @@ def _snapshot_settle_presets(
         if not isinstance(preset, DynamicSettleMonitorCfg) and type(preset) not in (
             SimulationStabilityConditionCfg,
             SimulationJointStabilityConditionCfg,
+            SimulationControlConditionCfg,
         ):
             raise TypeError(
                 "settle_presets require dynamic monitors or typed stability conditions."
@@ -587,6 +600,13 @@ class TaskProgramIntegrationCatalog:
     """Exact program-bound named presets for sequential execution occurrences."""
 
     idle_factories: tuple[IdleClearanceFactory, ...] = field(default=(), kw_only=True)
+
+    control_calls: tuple[tuple[str, ControlOperationDeclaration, bool], ...] = field(
+        default=(), kw_only=True
+    )
+    control_presets: Mapping[str, tuple[str, str]] = field(
+        default_factory=dict, kw_only=True
+    )
 
     def __post_init__(self) -> None:
         for field_name in ("scene_registry_id", "robot_profile_id"):
@@ -943,7 +963,74 @@ class TaskProgramIntegrationCatalog:
             _validate_idle_program(
                 compiled, manifest, self.invocation_policy_bindings, self.idle_factories
             )
+
+        self.validate_control_program(compiled)
         return compiled
+
+    def validate_control_program(self, program: CompiledTaskProgram) -> None:
+        """Reject foreign targets, budgets or policy phases in a compiled control program."""
+        if type(program) is not CompiledTaskProgram:
+            raise TypeError("Control validation requires a compiled Task Program.")
+        control_calls = {
+            call_id: (declaration, prepare)
+            for call_id, declaration, prepare in self.control_calls
+        }
+        counts = {call_id: 0 for call_id in control_calls}
+        for segment in program.iter_segments():
+            for call in segment.calls:
+                call_id = getattr(call.call, "call_id", None)
+                if call_id not in control_calls:
+                    continue
+                declaration, prepare = control_calls[call_id]
+                expected = {"object": declaration.binding.object_id}
+                if type(declaration.call) is TwistCallDeclaration:
+                    expected["setting"] = declaration.binding.target_setting
+                if (
+                    segment.parallel_block is not None
+                    or dict(call.call.arguments) != expected
+                ):
+                    raise ValueError(
+                        "Control occurrences require exact sequential declared targets."
+                    )
+                required_phase = (
+                    "ready"
+                    if prepare
+                    else "chunk" if declaration.chunk_count is not None else "released"
+                )
+                allowed_phases = {required_phase}
+                if (
+                    not prepare
+                    and declaration.chunk_count is not None
+                    and counts[call_id] == declaration.chunk_count - 1
+                ):
+                    # The original final Twist owns one release window instead
+                    # of a chunk-feedback window. It must not acquire an extra
+                    # hold merely to satisfy declaration validation.
+                    allowed_phases.add("released")
+                matching = [
+                    self.control_presets.get(policy.cfg.preset)
+                    for policy in segment.post_policies
+                ]
+                if not any(
+                    cfg is not None
+                    and cfg[0] == declaration.call.operation_id
+                    and cfg[1] in allowed_phases
+                    for cfg in matching
+                ):
+                    raise ValueError(
+                        "Control call occurrence lacks its matching physical post-policy."
+                    )
+                counts[call_id] += 1
+        for call_id, (declaration, prepare) in control_calls.items():
+            expected_count = (
+                1
+                if prepare or declaration.chunk_count is None
+                else declaration.chunk_count
+            )
+            if counts[call_id] != expected_count:
+                raise ValueError(
+                    "Program control occurrences differ from the declared operation budget."
+                )
 
     def validate_engine(self, engine: AtomicActionEngine) -> None:
         """Require the live engine to expose every statically selected skill."""
@@ -1158,7 +1245,8 @@ def _registration_payload(
         str,
         DynamicSettleMonitorCfg
         | SimulationStabilityConditionCfg
-        | SimulationJointStabilityConditionCfg,
+        | SimulationJointStabilityConditionCfg
+        | SimulationControlConditionCfg,
     ],
     relation_grounder_keys: frozenset[tuple[str, type[Affordance], str]],
     relation_grounders: tuple[RelationTargetGrounder, ...],
@@ -1171,9 +1259,11 @@ def _registration_payload(
     registered_semantic_lowerer_factories: tuple[RegisteredSemanticLowererFactory, ...],
     planning_services: SimulationPlanningServicesCfg | None = None,
     invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
+    control_operations: tuple[ControlOperationDeclaration, ...] = (),
 ) -> dict[str, object]:
     """Build the versioned canonical fingerprint payload."""
     payload = {
+        **({"control_operations": control_operations} if control_operations else {}),
         "schema_version": _CATALOG_FINGERPRINT_SCHEMA_VERSION,
         "scene_binding": scene_binding,
         "scene_manifest": scene.entries,
@@ -1304,7 +1394,8 @@ class SimulationTaskProgramRegistration:
         str,
         DynamicSettleMonitorCfg
         | SimulationStabilityConditionCfg
-        | SimulationJointStabilityConditionCfg,
+        | SimulationJointStabilityConditionCfg
+        | SimulationControlConditionCfg,
     ] = field(default_factory=default_simulation_settle_presets)
     relation_grounders: tuple[RelationTargetGrounder, ...] = ()
     handover_pose_providers: tuple[HandOverPoseProvider, ...] = ()
@@ -1321,6 +1412,7 @@ class SimulationTaskProgramRegistration:
     invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = field(
         default=(), kw_only=True
     )
+    control_operations: tuple[ControlOperationDeclaration, ...] = ()
     catalog: TaskProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -1392,6 +1484,12 @@ class SimulationTaskProgramRegistration:
         if type(self.call_catalog) is not SemanticCallCatalog:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog.")
         settle_presets = _snapshot_settle_presets(self.settle_presets)
+        control_calls = _validate_control_registration(
+            self.control_operations,
+            self.scene_binding,
+            settle_presets,
+            self.registered_semantic_lowerer_factories,
+        )
         rigid_ids = {binding.entity_id for binding in self.scene_binding.rigid_objects}
         reference_ids = (
             rigid_ids
@@ -1449,6 +1547,11 @@ class SimulationTaskProgramRegistration:
             handover_pose_providers,
         )
 
+        from .simulation.prismatic_lowering import _validate_prismatic_source_bindings
+
+        _validate_prismatic_source_bindings(
+            self.scene_binding, self.registered_semantic_lowerer_factories
+        )
         scene = self.scene_binding.declare()
         profile = self.robot_profile_binding.declare()
         if (
@@ -1586,6 +1689,7 @@ class SimulationTaskProgramRegistration:
                 ),
                 planning_services=self.planning_services,
                 invocation_policy_bindings=self.invocation_policy_bindings,
+                control_operations=self.control_operations,
             )
         )
         object.__setattr__(
@@ -1608,6 +1712,7 @@ class SimulationTaskProgramRegistration:
                     in (
                         SimulationStabilityConditionCfg,
                         SimulationJointStabilityConditionCfg,
+                        SimulationControlConditionCfg,
                     )
                 },
                 pose_delta_settle_preset_ids=frozenset(
@@ -1630,6 +1735,12 @@ class SimulationTaskProgramRegistration:
                     extensions.registered_semantic_lowerers
                 ),
                 fingerprint=fingerprint,
+                control_calls=control_calls,
+                control_presets={
+                    key: (cfg.operation_id, cfg.phase)
+                    for key, cfg in settle_presets.items()
+                    if type(cfg) is SimulationControlConditionCfg
+                },
                 _required_skills=required_skills,
             ),
         )
@@ -1686,6 +1797,19 @@ class SimulationTaskProgramRegistration:
             self.planning_services.validate_physics(physics)
 
     @property
+    def requires_scoped_control_services(self) -> bool:
+        """Whether declared source controls require a real compiled bridge scope."""
+        from .simulation.prismatic_lowering import (
+            ArticulationSlideFactory,
+            ArticulationParkFactory,
+        )
+
+        return bool(self.control_operations) or any(
+            isinstance(value, (ArticulationSlideFactory, ArticulationParkFactory))
+            for value in self.registered_semantic_lowerer_factories
+        )
+
+    @property
     def fingerprint(self) -> str:
         """Return the canonical registration fingerprint."""
         return self.catalog.fingerprint
@@ -1694,6 +1818,19 @@ class SimulationTaskProgramRegistration:
         scene = self.scene_binding.declare()
         profile = self.robot_profile_binding.declare()
         try:
+            from .simulation.prismatic_lowering import (
+                _validate_prismatic_source_bindings,
+            )
+
+            _validate_prismatic_source_bindings(
+                self.scene_binding, self.registered_semantic_lowerer_factories
+            )
+            _validate_control_registration(
+                self.control_operations,
+                self.scene_binding,
+                self.settle_presets,
+                self.registered_semantic_lowerer_factories,
+            )
             _validate_standard_effect_monitors(profile)
             _validate_standard_tracking_metrics(profile)
             extensions = build_standard_extension_declarations(
@@ -1740,6 +1877,7 @@ class SimulationTaskProgramRegistration:
                 ),
                 planning_services=self.planning_services,
                 invocation_policy_bindings=self.invocation_policy_bindings,
+                control_operations=self.control_operations,
             )
             current = _digest(payload)
         except (TypeError, ValueError) as exc:
@@ -1803,6 +1941,7 @@ class SimulationTaskProgramRegistration:
         robot: object,
         scene_registry: SceneRegistry,
         engine: AtomicActionEngine,
+        runtime_services: TaskProgramRuntimeServiceContext | None = None,
     ) -> tuple[RegisteredSemanticLowerer, ...]:
         """Create fresh live lowerers declared by this registration."""
         self.assert_unchanged()
@@ -1813,6 +1952,13 @@ class SimulationTaskProgramRegistration:
         if engine.robot is not robot:
             raise ValueError("engine and factory must reference the exact same robot.")
 
+        if (
+            runtime_services is not None
+            and type(runtime_services) is not TaskProgramRuntimeServiceContext
+        ):
+            raise TypeError(
+                "runtime_services must be exactly TaskProgramRuntimeServiceContext."
+            )
         created: list[RegisteredSemanticLowerer] = []
         with self._registered_semantic_lowerer_lock:
             for factory in self.registered_semantic_lowerer_factories:
@@ -1820,12 +1966,25 @@ class SimulationTaskProgramRegistration:
                     getattr(type(factory), "call_id", None),
                     field_name="RegisteredSemanticLowererFactory.call_id",
                 )
-                lowerer = factory.create(
-                    simulation=simulation,
-                    robot=robot,
-                    scene_registry=scene_registry,
-                    engine=engine,
-                )
+                if isinstance(factory, RuntimeBoundSemanticLowererFactory):
+                    if runtime_services is None:
+                        raise ValueError(
+                            "This lowerer requires the actual bridge-owned runtime service context."
+                        )
+                    lowerer = factory.create_with_runtime_services(
+                        simulation=simulation,
+                        robot=robot,
+                        scene_registry=scene_registry,
+                        engine=engine,
+                        runtime_services=runtime_services,
+                    )
+                else:
+                    lowerer = factory.create(
+                        simulation=simulation,
+                        robot=robot,
+                        scene_registry=scene_registry,
+                        engine=engine,
+                    )
                 if not isinstance(lowerer, RegisteredSemanticLowerer):
                     raise TypeError(
                         "RegisteredSemanticLowererFactory.create() must return a "

@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from numbers import Real
 from typing import ClassVar
 
 import torch
@@ -49,6 +50,7 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
     PlannerDiagnostics,
+    PlanQualification,
     TimedTrajectory,
 )
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
@@ -66,6 +68,9 @@ from embodichain.lab.sim.atomic_actions.requirements import (
     SkillBindingContract,
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.primitives.twist_recovery import (
+    TwistPlanningRecovery,
+)
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     axis_translation_keyframes,
     build_pose_plan_states,
@@ -75,6 +80,41 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class TwistJointTarget:
+    """Absolute revolute coordinate with an explicit affordance-axis calibration.
+
+    Args:
+        articulation_id: Exact articulation identity in the observed scene.
+        joint_name: Exact revolute joint name, matching the affordance.
+        position: Requested absolute joint coordinate in radians.
+        axis_sign: Maps increasing joint coordinate to the affordance axis.
+
+    Reaching this coordinate does not establish contact, released stability or
+    task success. Physical acceptance remains an observed execution contract.
+    """
+
+    articulation_id: str
+    joint_name: str
+    position: float
+    axis_sign: int = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        for name in ("articulation_id", "joint_name"):
+            value = getattr(self, name)
+            if type(value) is not str or not value or value != value.strip():
+                raise ValueError(f"{name} must be an exact non-empty identifier.")
+        if (
+            isinstance(self.position, bool)
+            or not isinstance(self.position, Real)
+            or not math.isfinite(self.position)
+        ):
+            raise ValueError("Twist joint position must be finite radians.")
+        if type(self.axis_sign) is not int or self.axis_sign not in (-1, 1):
+            raise ValueError("Twist joint target axis_sign must be +1 or -1.")
+        object.__setattr__(self, "position", float(self.position))
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class TwistGoal(ObjectActionGoal):
     """Target object described by a twist affordance."""
@@ -82,14 +122,64 @@ class TwistGoal(ObjectActionGoal):
     target_pose: PoseGoalValue
     """Target pose snapshot or late-bound stable scene-entity reference."""
 
+    contact_reference: tuple[float, float, float] | None = field(
+        default=None, kw_only=True
+    )
+    """Original local contact point before affordance float32 normalization.
+
+    Bounded axial candidates apply their declared offsets before rounding this
+    point, preserving calibrated source precision. Ordinary Twist omits it.
+    """
+
+    joint_target: TwistJointTarget | None = field(default=None, kw_only=True)
+    """Optional B1 absolute intent resolved from the current observed joint state.
+
+    Without it, the original fixed-angle behavior remains. A zero remaining
+    angle does not skip grasp/release or mark a physical effect complete.
+    """
+
     def __post_init__(self) -> None:
         ObjectActionGoal.__post_init__(self)
+        if self.contact_reference is not None:
+            if (
+                type(self.contact_reference) not in (list, tuple)
+                or len(self.contact_reference) != 3
+                or any(
+                    isinstance(v, bool)
+                    or not isinstance(v, Real)
+                    or not math.isfinite(v)
+                    for v in self.contact_reference
+                )
+            ):
+                raise ValueError(
+                    "Twist contact_reference requires three finite local coordinates."
+                )
+            object.__setattr__(
+                self,
+                "contact_reference",
+                tuple(float(v) for v in self.contact_reference),
+            )
         validate_pose_goal(self.target_pose, "target_pose", allow_waypoints=False)
+        if (
+            self.joint_target is not None
+            and type(self.joint_target) is not TwistJointTarget
+        ):
+            raise TypeError("joint_target must be exactly TwistJointTarget or None.")
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class TwistOptions(ActionOptions):
     """Per-invocation twisting behavior."""
+
+    rotation_enabled: bool = field(default=True, kw_only=True)
+    """Explicit bounded negative control: false keeps grasp/release but emits zero arc."""
+
+    contact_bite_depth: float | None = field(default=None, kw_only=True)
+    """Explicit source contact depth for bounded candidate qualification."""
+    contact_roll: float | None = field(default=None, kw_only=True)
+    """Optional fixed source roll; omission permits the declared four-axis table."""
+    contact_settle_steps: int = field(default=0, kw_only=True)
+    """Hold samples appended after close and twist, without changing their motion."""
 
     hand_interp_steps: int = 5
     """Number of waypoints used for each close/open hand segment."""
@@ -103,7 +193,29 @@ class TwistOptions(ActionOptions):
     twist_angle: float = math.pi / 4
     """Requested twist rotation in radians."""
 
+    max_twist_angle: float = math.pi
+    """Maximum absolute arc per plan in joint-target mode, in ``(0, pi]``.
+
+    This geometric cap does not alter the original fixed-angle mode.
+    """
+
     def __post_init__(self) -> None:
+        if self.contact_bite_depth is not None and (
+            type(self.contact_bite_depth) not in (int, float)
+            or not math.isfinite(self.contact_bite_depth)
+            or self.contact_bite_depth <= 0
+        ):
+            raise ValueError("contact_bite_depth must be finite and positive.")
+        if self.contact_roll is not None and (
+            type(self.contact_roll) not in (int, float)
+            or not math.isfinite(self.contact_roll)
+            or abs(self.contact_roll) > math.pi
+        ):
+            raise ValueError("contact_roll must be finite and within [-pi, pi].")
+        if type(self.rotation_enabled) is not bool:
+            raise TypeError("rotation_enabled must be a bool.")
+        if type(self.contact_settle_steps) is not int or self.contact_settle_steps < 0:
+            raise ValueError("contact_settle_steps must be a non-negative integer.")
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
         if self.twist_waypoint_count < 1:
@@ -114,6 +226,13 @@ class TwistOptions(ActionOptions):
             raise ValueError("pre_grasp_distance must be non-negative.")
         if not math.isfinite(self.twist_angle):
             raise ValueError("twist_angle must be finite.")
+        if (
+            isinstance(self.max_twist_angle, bool)
+            or not isinstance(self.max_twist_angle, Real)
+            or not math.isfinite(self.max_twist_angle)
+            or not 0 < self.max_twist_angle <= math.pi
+        ):
+            raise ValueError("max_twist_angle must be finite radians in (0, pi].")
 
 
 class Twist(AtomicAction[TwistGoal, TwistOptions]):
@@ -122,6 +241,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
     skill_id: ClassVar[str] = "twist"
     GoalType: ClassVar[type] = TwistGoal
     OptionsType: ClassVar[type] = TwistOptions
+    PlanningRecoveryType: ClassVar[type] = TwistPlanningRecovery
     open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -151,6 +271,47 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         request: ResolvedActionRequest[TwistGoal, TwistOptions],
         context: PlanningContext,
     ) -> ActionPlan:
+        """Select explicit bounded recovery without changing ordinary Twist."""
+        self.descriptor().validate_planning_recovery(request.recovery_policy)
+        if request.recovery_policy.planning_recovery is None:
+            options = request.skill_options
+            if (
+                request.goal.contact_reference is not None
+                or options.contact_bite_depth is not None
+                or options.contact_roll is not None
+                or options.contact_settle_steps
+                or not options.rotation_enabled
+            ):
+                raise ValueError(
+                    "Twist contact search options require TwistPlanningRecovery."
+                )
+            return self._plan_nominal(request, context)
+        from embodichain.lab.sim.atomic_actions.primitives._twist_bounded import (
+            plan_bounded_twist,
+        )
+
+        return plan_bounded_twist(self, request, context)
+
+    def _qualify_final_plan(
+        self,
+        request: ResolvedActionRequest[TwistGoal, TwistOptions],
+        context: PlanningContext,
+        plan: ActionPlan,
+    ) -> PlanQualification | None:
+        """Qualify transformed samples without another candidate search."""
+        if request.recovery_policy.planning_recovery is None:
+            return None
+        from embodichain.lab.sim.atomic_actions.primitives._twist_bounded import (
+            qualify_transformed_twist,
+        )
+
+        return qualify_transformed_twist(self, request, context, plan)
+
+    def _plan_nominal(
+        self,
+        request: ResolvedActionRequest[TwistGoal, TwistOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
         """Plan all six twisting segments without stepping simulation."""
         if request.motion_policy.strategy != "ik_interp":
             raise ValueError(
@@ -158,8 +319,31 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
                 "twist path must preserve every Cartesian sample."
             )
         target = self.require_goal(request)
+        if target.joint_target is not None and context.batch_size != 1:
+            raise ValueError(
+                "Twist joint-target planning supports exactly one environment."
+            )
         affordance = self._require_twist_affordance(target.semantics)
         options = request.skill_options
+        angle: float | torch.Tensor = options.twist_angle
+        joint_valid = torch.ones(
+            context.batch_size, dtype=torch.bool, device=self.device
+        )
+        joint_metadata: dict[str, object] = {}
+        if target.joint_target is not None:
+            angle, joint_valid = self._joint_displacement(
+                target.joint_target, affordance, context, options.max_twist_angle
+            )
+            joint_metadata = {
+                "joint_target": {
+                    "articulation_id": target.joint_target.articulation_id,
+                    "joint_name": target.joint_target.joint_name,
+                    "position": target.joint_target.position,
+                    "axis_sign": target.joint_target.axis_sign,
+                    "commanded_angles": angle.detach().cpu().tolist(),
+                    "scope": "observed_remaining_arc_not_physical_acceptance",
+                }
+            }
         interpolation_dt = context.require_control_dt()
         binding = request.binding
         motion_target = binding.endpoint("primary", "motion").require_target(
@@ -216,7 +400,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             grasp_xpos,
             affordance.twist_axis,
             affordance.require_axis_origin(),
-            options.twist_angle,
+            angle,
             n_twist - 1,
         )
 
@@ -272,7 +456,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
                 grasp_xpos,
                 affordance.twist_axis,
                 affordance.require_axis_origin(),
-                options.twist_angle,
+                angle,
                 progress,
             )
             return hold_inactive_cartesian_rows(
@@ -300,7 +484,8 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             interpolation_dt=interpolation_dt,
         )
         success = (
-            grasp_sample.success
+            joint_valid
+            & grasp_sample.success
             & approach_success
             & reach_success
             & twist_success
@@ -380,7 +565,10 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             expected_effects=StateDelta(),
             diagnostics=PlannerDiagnostics(
                 backend=self.planning_services.planner_name,
-                metadata={"affordance_sample": grasp_sample.metadata},
+                metadata={
+                    **joint_metadata,
+                    "affordance_sample": grasp_sample.metadata,
+                },
             ),
             segment_lengths={
                 "approach": lengths[0],
@@ -390,6 +578,75 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
                 "open": lengths[4],
                 "retract": lengths[5],
             },
+            scene_dependency_end_segment=(
+                "reach"
+                if target.joint_target is not None and self._scene_dependencies(request)
+                else None
+            ),
+        )
+
+    @staticmethod
+    def _joint_displacement(
+        target: TwistJointTarget,
+        affordance: TwistAffordance,
+        context: PlanningContext,
+        max_angle: float,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not math.isclose(
+            context.scene.timestamp, context.robot.timestamp, abs_tol=1e-9, rel_tol=0
+        ):
+            raise ValueError(
+                "Twist joint and robot observations must share a timestamp."
+            )
+        limits = affordance.joint_limits
+        if affordance.joint_name != target.joint_name or limits is None:
+            raise ValueError(
+                "Twist joint target requires matching named affordance limits."
+            )
+        if not limits[0] <= target.position <= limits[1]:
+            raise ValueError("Twist joint target is outside its declared limits.")
+        state = context.scene.articulation_joints.get(
+            (target.articulation_id, target.joint_name)
+        )
+        if state is None:
+            raise ValueError(
+                "The exact Twist articulation joint observation is absent."
+            )
+        position = state.position
+        if position.shape == (1,):
+            position = position.reshape(1, 1).expand(context.batch_size, 1)
+        if (
+            position.shape != (context.batch_size, 1)
+            or position.device != context.robot.qpos.device
+        ):
+            raise ValueError(
+                "Twist joint observations must have shape (B, 1) on the planning device."
+            )
+        epsilon = (
+            4
+            * torch.finfo(position.dtype).eps
+            * max(1.0, *(abs(value) for value in limits))
+        )
+        valid = (
+            torch.isfinite(position[:, 0])
+            & (position[:, 0] >= limits[0] - epsilon)
+            & (position[:, 0] <= limits[1] + epsilon)
+        )
+        if state.valid_mask is not None:
+            valid &= state.valid_mask
+        if not valid.all():
+            raise ValueError(
+                "Twist joint observation must be valid and within declared limits "
+                "up to native-dtype boundary roundoff."
+            )
+        # Source bindings subtract an observed scalar in Python double precision
+        # before the float32 Cartesian arc samples are formed.
+        delta = (target.position - position[:, 0].to(torch.float64)) / target.axis_sign
+        return (
+            torch.where(
+                valid, delta.clamp(-max_angle, max_angle), torch.zeros_like(delta)
+            ),
+            valid,
         )
 
     @staticmethod
@@ -463,7 +720,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         grasp_xpos: torch.Tensor,
         twist_axis: torch.Tensor,
         axis_origin: tuple[float, float, float],
-        twist_angle: float,
+        twist_angle: float | torch.Tensor,
         waypoint_count: int,
     ) -> torch.Tensor:
         """Build Cartesian EEF keyframes that follow the target's twist arc."""
@@ -489,18 +746,24 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         grasp_xpos: torch.Tensor,
         twist_axis: torch.Tensor,
         axis_origin: tuple[float, float, float],
-        twist_angle: float,
+        twist_angle: float | torch.Tensor,
         fractions: torch.Tensor,
     ) -> torch.Tensor:
         """Sample the rigid grasp path at normalized twist-angle fractions."""
+        fractions = fractions.to(device=self.device, dtype=torch.float32)
+        angles = (
+            twist_angle.to(fractions)[:, None] * fractions
+            if isinstance(twist_angle, torch.Tensor)
+            else twist_angle * fractions
+        )
         _, eef_poses = rotate_rigid_grasp(
             link_pose,
             grasp_xpos,
             twist_axis,
             axis_origin,
-            twist_angle * fractions.to(device=self.device, dtype=torch.float32),
+            angles,
         )
         return eef_poses
 
 
-__all__ = ["Twist", "TwistGoal", "TwistOptions"]
+__all__ = ["Twist", "TwistGoal", "TwistJointTarget", "TwistOptions"]

@@ -1,0 +1,12 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "source_sha256": "b12189f0982187bfcf16f8b42cf6b2c62ab9843cdf6827e6f08e0c7b09fb3680",
+  "scope": "Frozen candidate wrapper over common qualified nominal Twist and numeric query doubles; not native physical qualification",
+  "ik_calls": 1776,
+  "trace_sha256": "36fb142727f2369cca7b67c41884c12d710fa26a7ca12308817f87519e8b0e0a",
+  "positions_sha256": "f4c40c3a09a3dca62fdf45372d31387225b2dff97bbe9aa5e9ebf0b2d67de15f",
+  "dt_sha256": "2b194eb0fe28e9edef5a8f5d5c1c3eb1dded9d35395ea859bd9ef334055da77b",
+  "torch_rng": "58d20f7cc52966525cc37f0e2a21fa0b03340f576e84364600e464b101bfbf18",
+  "numpy_rng": "2fb4b099632c8244cbc746705cc685479efd531f568d87b6bb247e9a328d06dc",
+  "python_rng": "eb4407825845ed03a32d5baf4a81a4a4f8bfbbeda42709a19f832e0a4ec2edba"
+}

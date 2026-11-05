@@ -3990,3 +3990,219 @@ def test_configured_alignment_options_preflight_exact_policy_and_batch_scope() -
             ),
             path="recovery",
         )
+
+
+@pytest.mark.parametrize("kind", ["press_control", "twist_control"])
+def test_control_conditions_require_configured_operation_declarations_before_runtime(
+    kind,
+):
+    payload = _integration_payload("open_drawer")
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "control": {
+            "kind": kind,
+            "entity": "drawer",
+            "operation_id": "operation",
+            "phase": "ready",
+        }
+    }
+    with pytest.raises(ValueError, match="control-operation declarations"):
+        _decode_configured_task_program_integration(payload)
+
+
+def _press_service_payload():
+    from dataclasses import asdict
+    from embodichain.lab.sim.scene.press_inputs import PressBinding
+
+    payload = _integration_payload("open_drawer")
+    payload["scene"]["articulations"].append(
+        {"entity_id": "button", "simulation_uid": "button"}
+    )
+    payload["scene"]["links"].append(
+        {
+            "entity_id": "button_cap",
+            "articulation_id": "button",
+            "native_link_name": "cap",
+        }
+    )
+    binding = asdict(
+        PressBinding(
+            "button",
+            "joint",
+            "cap",
+            "base",
+            "",
+            "a" * 64,
+            "/mesh",
+            1.0,
+            (0.0, 0.0, -1.0),
+            (0.0, 0.01),
+            (0.0, 0.0, 0.0),
+            0.0,
+            0.01,
+        )
+    )
+    binding.pop("source_path")
+    services = payload.setdefault("runtime_services", {})
+    services["hand_geometries"] = {
+        "eef": {
+            "kind": "sampled_parallel_jaw",
+            "motion_part": "arm",
+            "hand_part": "eef",
+            "command_preset": "parallel_jaw_commands",
+            "hand_root_link": "hand",
+            "pad_link_names": ["finger_a", "finger_b"],
+            "sample_count": 65,
+            "body_max_edge": 0.01,
+            "pad_max_edge": 0.004,
+            "max_subdivisions": 10,
+        }
+    }
+    services["control_operations"] = [
+        {
+            "kind": "press",
+            "operation_id": "press0",
+            "entity_id": "button_cap",
+            "binding": binding,
+            "sensor_uid": "contact",
+            "grasp_target_id": "eef",
+            "finger_link_names": ["finger_a", "finger_b"],
+            "arm_label": "right",
+            "moving_mass": 0.1,
+        }
+    ]
+    services["registered_semantic_lowerers"].extend(
+        [
+            {
+                "kind": "press_prepare",
+                "operation_id": "press0",
+                "operation_suffix": "press0",
+            },
+            {"kind": "press", "operation_id": "press0", "operation_suffix": "press0"},
+        ]
+    )
+    services["settle_presets"] = {
+        phase: {
+            "kind": "press_control",
+            "entity": "button_cap",
+            "operation_id": "press0",
+            "phase": phase,
+        }
+        for phase in ("ready", "released")
+    }
+    return payload
+
+
+def test_configured_control_services_are_typed_closed_and_fingerprinted():
+    payload = _press_service_payload()
+    integration = _decode_configured_task_program_integration(payload)
+    registration = integration.registration
+    declaration = registration.control_operations[0]
+    assert declaration.call.operation_id == "press0"
+    assert declaration.source_route_payload()["binding"]["source_sha256"] == "a" * 64
+    assert "control_operations" in registration.fingerprint_payload()
+    assert "gen_sim.press.press0" in registration.call_catalog.descriptors
+    changed = deepcopy(payload)
+    changed["runtime_services"]["control_operations"][0]["moving_mass"] = 0.2
+    assert (
+        _decode_configured_task_program_integration(changed).registration.fingerprint
+        != registration.fingerprint
+    )
+    assert (
+        "control_operations"
+        not in _decode_configured_task_program_integration(
+            _integration_payload("open_drawer")
+        ).registration.fingerprint_payload()
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "missing_operation",
+        "wrong_entity",
+        "wrong_family",
+        "unknown_field",
+        "missing_phase",
+    ],
+)
+def test_configured_controls_reject_incomplete_or_crosswired_services(change):
+    payload = _press_service_payload()
+    services = payload["runtime_services"]
+    if change == "missing_operation":
+        services["control_operations"] = []
+    elif change == "wrong_entity":
+        services["settle_presets"]["ready"]["entity"] = "drawer"
+    elif change == "wrong_family":
+        services["registered_semantic_lowerers"][-1]["kind"] = "twist"
+    elif change == "unknown_field":
+        services["control_operations"][0]["planner_override"] = {}
+    else:
+        del services["settle_presets"]["released"]
+    with pytest.raises((TypeError, ValueError)):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_control_preflight_requires_exact_occurrences_and_policies():
+    from embodichain.lab.task_program.language.decoder import decode_task_program
+
+    payload = _press_service_payload()
+    from embodichain.lab.sim.atomic_actions.requirements import (
+        JOINT_POSITION_CAPABILITY,
+    )
+
+    payload["robot_profile"]["resources"][0]["endpoints"][0]["capabilities"].append(
+        JOINT_POSITION_CAPABILITY
+    )
+    payload["robot_profile"]["defaults"].update(
+        move_joints={"primary": "primary_manipulator"},
+        press={"primary": "primary_manipulator"},
+    )
+    payload["robot_profile"]["presets"][0]["action_options"].update(
+        {
+            "gen_sim.press_prepare.press0": {"kind": "move_joints"},
+            "gen_sim.press.press0": {"kind": "press", "press_distance": 0.02},
+        }
+    )
+    registration = _decode_configured_task_program_integration(payload).registration
+    program = {
+        "program_id": "press_program",
+        "targets": {},
+        "integration": {
+            "robot_profile": registration.robot_profile_binding.profile_id,
+            "scene_registry": registration.scene_binding.registry_id,
+            "runtime_preset": "trajectory",
+        },
+        "program": {
+            "kind": "sequence",
+            "items": [
+                {
+                    "kind": "segment",
+                    "name": phase,
+                    "steps": {
+                        "kind": "invoke",
+                        "call": {
+                            "kind": "registered",
+                            "call_id": call_id,
+                            "arguments": {"object": "button"},
+                        },
+                    },
+                    "post": [
+                        {"kind": "wait_stable", "entity": "button_cap", "preset": phase}
+                    ],
+                }
+                for phase, call_id in (
+                    ("ready", "gen_sim.press_prepare.press0"),
+                    ("released", "gen_sim.press.press0"),
+                )
+            ],
+        },
+    }
+    registration.catalog.preflight(decode_task_program(program))
+    missing = deepcopy(program)
+    missing["program"]["items"].pop()
+    with pytest.raises(ValueError, match="operation budget"):
+        registration.catalog.preflight(decode_task_program(missing))
+    wrong_policy = deepcopy(program)
+    wrong_policy["program"]["items"][0]["post"][0]["preset"] = "released"
+    with pytest.raises(ValueError, match="matching physical post-policy"):
+        registration.catalog.preflight(decode_task_program(wrong_policy))

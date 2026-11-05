@@ -37,6 +37,8 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Semantic Calls, scene, profile, effects, evidence | `embodichain/lab/task_program/semantics/` |
 | Immutable catalog and extension declarations | `embodichain/lab/task_program/integrations/catalog.py`, `extensions.py` |
 | Program-bound occurrence policy selection | `embodichain/lab/task_program/integrations/invocation_policy.py` |
+| Bridge-owned runtime service identity | `embodichain/lab/task_program/integrations/runtime_services.py` |
+| Declared control operations, physical policy and grounding | `embodichain/lab/task_program/integrations/simulation/control_assembly.py`, `control_policy.py`, `control_lowering.py` |
 | Environment adapter and runtime assembly | `embodichain/lab/task_program/integrations/environment.py` |
 | Expansion source adapter, candidate transform and records | `embodichain/lab/task_program/integrations/expansion.py` |
 | Physical Gym component composition | `embodichain/lab/gym/utils/_component_composition.py` |
@@ -91,6 +93,14 @@ Source-bound bridges request independent session state from the simulation
 post-policy/validator port while retaining its registered scene bindings. This
 isolates lift baselines and policy results across episodes. Native bridges and
 ports without the optional session factory retain their existing ownership.
+
+Declared Press/Twist controls assemble real per-bridge operations before runtime-bound
+lowerers. The factory uses the public initialized EpisodeContext, the ordinary
+sensor suite and one acknowledged bridge clock. Catalog preflight validates exact
+sequential targets, occurrence budgets and physical post-policy phases. Twist and
+prismatic registries connect the existing Atomic lifecycle port; bridge cleanup
+closes owned hooks/cursors without issuing or acknowledging commands. Source control
+bridges keep their explicit B1 scope and reject external nominal plans and expansion.
 
 Simulation settling defaults to reported native velocities. An explicit
 `simulation.policies.SimulationSettleMonitorCfg(measurement="pose_delta")`

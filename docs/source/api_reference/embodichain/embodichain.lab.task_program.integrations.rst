@@ -488,6 +488,55 @@ must not construct resources or read live state during this preflight.
 
 
 
+Scoped Twist observation and execution sessions
+-----------------------------------------------
+
+``TwistOperationSession`` binds exact declared occurrences, robot, program and
+physical episode to one shared Atomic cursor and the real Motion query factory.
+Planning, installation, adoption and feedback remain separate guarded boundaries.
+The registry selects only exact declared occurrence IDs and implements the
+existing plan-lifecycle factory; preview forks change cursor identity without
+changing the borrowed physical owners.
+
+``ControlObservationWindow`` projects only newly appended records from an exact
+canonical ``JointContactObserver`` generation. Raw frames retain simulation time;
+source-relative scalar time is explicitly declared. It preserves missing channel,
+loss, capacity and cadence errors and never performs another sensor fetch.
+``record_count`` reads the retained prefix length without copying that prefix.
+These interfaces install no standard post-policy producer or control factory.
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_observation
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.twist_session
+   :members:
+
+Declared articulation continuation and drawer services
+------------------------------------------------------
+
+Prismatic lowerers ground explicit source-qualified joint targets, withdrawal
+frames and PARK commands into the shared skills. The continuation registry owns
+actual ``ExecutionPlanAttempt`` installation history for exact declared
+program/episode occurrences. A preview is not an installation and cannot grant
+withdrawal or PARK recovery authority.
+
+Drawer and preshape adapters validate original source stamps and native owners
+around reads. They provide observed geometry and typed command provenance,
+select no alternate skill registry, and import no Task Engine state. These
+interfaces do not install the standard Press/Twist post-policy producer.
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.prismatic_lowering
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.articulation_session
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.drawer_planning
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.slide_preshape
+   :members:
+
 Configured geometry planning
 ----------------------------
 
@@ -601,25 +650,74 @@ retain their policies and fingerprints.
 Declared articulation continuation and drawer services
 ------------------------------------------------------
 
-Prismatic lowerers ground explicit source-qualified joint targets, withdrawal
-frames and PARK commands into the shared skills. The continuation registry owns
-actual ``ExecutionPlanAttempt`` installation history for exact declared
-program/episode occurrences. A preview is not an installation and cannot grant
-withdrawal or PARK recovery authority.
+Explicit runtime observation scope
+----------------------------------
 
-Drawer and preshape adapters validate original source stamps and native owners
-around reads. They provide observed geometry and typed command provenance,
-select no alternate skill registry, and import no Task Engine state. These
-interfaces do not install the standard Press/Twist post-policy producer.
+``TaskProgramEnvironmentAdapter.assemble_runtime`` and ``create_bridge`` accept
+an optional ``runtime_scope_guard`` for a host-owned session, episode or physical
+owner epoch. The standard factory forwards it to the planning observation port
+and shared scene cache. ``validate_runtime_scope()`` checks factory lifetime and
+this explicit authority without acquiring robot/sensor state or stepping physics.
+A scope change during acquisition rejects the result. Cached qpos also rejects
+closed factory resources; a live factory does not imply that a previous bridge
+still has authority.
 
-.. automodule:: embodichain.lab.task_program.integrations.simulation.prismatic_lowering
+The default ``None`` keeps legacy custom factory calls unchanged: no new keyword
+is passed to them. Explicit scope requests require a factory supporting the
+optional keyword. The validator must not acquire observations or mutate physical
+state. Control-service construction and evidence collection remain separate.
+
+
+Scoped control producers and runtime-bound lowerers
+---------------------------------------------------
+
+The standard factory creates a fresh operation for every compiled bridge, using
+its real program fingerprint, initialized episode, contact sensor and acknowledged
+clock. The same operation is supplied to the registered lowerer and physical
+post-policy. Ordinary factories continue using ``create``; the optional runtime
+factory protocol explicitly requests the bridge's actual service context.
+
+Press preserves observed preparation holds, source tip geometry, bounded physical
+release windows and terminal receipts. Twist shares one cursor between Atomic
+planning, installed-plan lifecycle and measured chunk feedback. Prismatic
+continuation registries reuse the published Atomic recovery owners. This assembly
+keeps B1 source qualification and rejects external nominal plans or expansion for
+control bridges. Software assembly checks do not establish physical qualification.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.extensions
+
+.. autoclass:: RuntimeBoundSemanticLowererFactory
    :members:
 
-.. automodule:: embodichain.lab.task_program.integrations.simulation.articulation_session
+.. automodule:: embodichain.lab.task_program.integrations.runtime_services
    :members:
 
-.. automodule:: embodichain.lab.task_program.integrations.simulation.drawer_planning
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_assembly
    :members:
 
-.. automodule:: embodichain.lab.task_program.integrations.simulation.slide_preshape
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_lowering
    :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_policy
+   :members:
+   :exclude-members: ControlOperationRuntime
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.control_policy
+
+.. autoclass:: ControlOperationRuntime
+   :members:
+   :exclude-members: observation_scope
+
+.. py:attribute:: ControlOperationRuntime.observation_scope
+   :type: dict[str, builtins.object]
+
+   Owned JSON provenance for the declared program, episode, operation, native
+   actors, observer and clock. Reading this metadata performs no acquisition;
+   the declarations do not establish current physical evidence availability.
+
+Control observers opt into retaining the actual before-fetch source stamp. Their
+``capture(refresh=False)`` reuses the completed buffer; this does not add a sensor
+refresh or repeat the post-policy's physical acquisition. Bridge cleanup detaches
+owned hooks and closes cursors/queries without acknowledging pending commands.
+The borrowed observation owner remains available for final collectors until host
+teardown, while a changed episode invalidates that bridge's live observations.

@@ -51,6 +51,15 @@ values contain only immutable finite data and name their skill/revision.
 tuple; unsupported declarations fail before skill preparation. These contracts
 add no alternate built-in skill implementation or source-specific decoder.
 
+Press keeps its default open-loop path. Explicit `PressPlanningRecovery` permits
+at most two complete B1 plans, including nominal, and consumes the declared
+contact-roll alternative only after failure. Failed phases use Motion's existing
+continuous IK on the same targets and time grid. Final emitted full-robot velocity
+qualification remains rejection-only; no transformed plan triggers another search.
+The configured decoder accepts only the fixed `press_bounded` revision-one
+declaration. `validate_press_extra_distance` validates declaration-owned extra
+travel without changing skill defaults or deciding measured Press success.
+
 `SkillDescriptor.supports_segment_motion_recovery` is read-only and derived
 from the actual Atomic validation override. A copied class marker does not
 advertise a handler. Semantic preflight rejects unsupported segment policy
@@ -323,6 +332,16 @@ For public API changes also run the docs checker tests and Sphinx dummy build.
 For simulator adapters add an environment-level test that exercises normal
 `env.step()` consumption and safe cancellation.
 
+
+Bounded Twist uses `twist_planning` for exact same-observation query sessions and
+`primitives/twist_recovery.py` for immutable planning outcomes and measured
+recovery state. The B1/env0 float32 source route retains candidate ordering,
+fixed-grid sequential IK, time samples and budgets. Planning never commits a
+cursor; the host separately commits outcomes, adopts installed plans and submits
+measured feedback. `articulation_evidence`, `control_validation` and
+`twist_feedback` interpret explicit joint/contact facts through pure
+`compute.articulation` rules. None substitutes geometric clearance for physical
+contact or makes a missing measurement successful.
 
 Prismatic recovery keeps explicit B1/env0, 390-frame and original segment retry
 bounds. Exact installed predecessor facts authorize continuation; planning

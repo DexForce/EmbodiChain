@@ -983,6 +983,7 @@ def _system(
     effectless_action: bool = False,
     plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
     nominal_source_factory=None,
+    plan_lifecycle_factory=None,
 ) -> _System:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -1024,6 +1025,7 @@ def _system(
         runner_cfg=runtime_runner_cfg,
         plan_transform_factory=plan_transform_factory,
         nominal_source_factory=nominal_source_factory,
+        plan_lifecycle_factory=plan_lifecycle_factory,
     )
     return _System(
         runtime,
@@ -3107,3 +3109,76 @@ def test_composite_lifecycle_requires_one_explicit_owner():
         CompositeTaskProgramPlanLifecycleFactory(
             (Factory(object()),)
         ).create_plan_lifecycle(request, engine=engine)
+
+
+def test_executor_installs_lifecycle_per_repeated_occurrence():
+    requests, attempts, aborts = [], [], []
+
+    class Lifecycle:
+        def on_plan_installed(self, attempt):
+            attempts.append(attempt)
+
+        def on_execution_aborted(self, reason):
+            aborts.append(reason)
+
+    class Factory:
+        def create_plan_lifecycle(self, request, *, engine):
+            requests.append(request)
+            return Lifecycle()
+
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),) * 2,
+        plan_lifecycle_factory=Factory(),
+    )
+    call = _call("repeated")
+    result = system.runtime.run((call, call), workflow_id="scoped")
+    assert result.status is SemanticExecutionStatus.COMPLETED
+    assert [request.analysis_call_index for request in requests] == [0, 1]
+    assert [request.workflow_call_index for request in requests] == [0, 1]
+    assert [attempt.plan.invocation_id for attempt in attempts] == [
+        "scoped:0",
+        "scoped:1",
+    ]
+    assert not aborts
+    with pytest.raises(ValueError, match="parallel"):
+        system.runtime.fork(system.sink)
+
+
+@pytest.mark.parametrize("boundary", ["plan", "runner"])
+def test_executor_lifecycle_rejection_does_not_dispatch_or_run_effects(
+    boundary, monkeypatch
+):
+    aborts = []
+
+    class Lifecycle:
+        def on_plan_installed(self, attempt):
+            if boundary == "plan":
+                raise ValueError("cursor does not own occurrence")
+
+        def on_execution_aborted(self, reason):
+            aborts.append(reason)
+
+    class Factory:
+        def create_plan_lifecycle(self, request, *, engine):
+            return Lifecycle()
+
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        plan_lifecycle_factory=Factory(),
+    )
+    if boundary == "runner":
+
+        def reject_runner(*args, **kwargs):
+            raise ValueError("runner clock unavailable")
+
+        monkeypatch.setattr(runtime_module, "ExecutionRunner", reject_runner)
+    result = system.runtime.start(_call("rejected"))
+    assert result.status is SemanticExecutionStatus.FAILED
+    expected = (
+        "cursor does not own occurrence"
+        if boundary == "plan"
+        else "runner clock unavailable"
+    )
+    assert expected in result.message
+    assert len(aborts) == 1 and system.sink.sent == 0
+    assert not system.collector.calls

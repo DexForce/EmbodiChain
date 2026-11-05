@@ -147,6 +147,9 @@ from .requirements import (
     SkillResourceSlot,
 )
 from .runtime import ActionPlanningServices, GraspOpeningTarget
+from .twist_planning import TwistPlanningProvider, TwistPlanningSession
+from .primitives.twist_recovery import TwistPlanningRecovery
+
 from .drawer_planning import DrawerPlanningInputs, DrawerPlanningProvider
 from .articulation_continuation import (
     SlidePlanningRecovery,
@@ -252,6 +255,8 @@ from .primitives import (
     Press,
     PressGoal,
     PressOptions,
+    PressPlanningRecovery,
+    validate_press_extra_distance,
     PushObject,
     PushObjectGoal,
     PushObjectOptions,
@@ -262,6 +267,7 @@ from .primitives import (
     SlideOptions,
     Twist,
     TwistGoal,
+    TwistJointTarget,
     TwistOptions,
 )
 from .runner import (
@@ -506,6 +512,8 @@ __all__ = [
     "PressAffordance",
     "PressGoal",
     "PressOptions",
+    "PressPlanningRecovery",
+    "validate_press_extra_distance",
     "PushObject",
     "PushObjectGoal",
     "PushObjectOptions",
@@ -530,7 +538,11 @@ __all__ = [
     "SlideOptions",
     "Twist",
     "TwistGoal",
+    "TwistJointTarget",
     "TwistOptions",
+    "TwistPlanningProvider",
+    "TwistPlanningSession",
+    "TwistPlanningRecovery",
     "RecoveryPolicy",
     "PlanningRecovery",
     "RigidObjectSceneProvider",

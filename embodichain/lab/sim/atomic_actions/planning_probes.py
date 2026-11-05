@@ -555,6 +555,28 @@ class RetainedCommandProvider(Protocol):
 
 
 @runtime_checkable
+class SlideHandClearanceProvider(Protocol):
+    """Supply explicit nominal and fraction-specific hand sweep geometry."""
+
+    @property
+    def robot(self) -> Robot:
+        """Return the exact engine robot owning the hand geometry."""
+        ...
+
+    def nominal(
+        self, request: ResolvedActionRequest, context: PlanningContext
+    ) -> PreshapeHandClearance:
+        """Return declaration-time cached nominal geometry for this occurrence."""
+        ...
+
+    def measure(
+        self, request: ResolvedActionRequest, context: PlanningContext, fraction: float
+    ) -> PreshapeHandClearance:
+        """Capture one fractional sweep under the original native observation."""
+        ...
+
+
+@runtime_checkable
 class HandOverSceneProvider(Protocol):
     """Prepare one owned native hand/scene query for an observed transfer."""
 
@@ -575,26 +597,4 @@ class HandOverSceneProvider(Protocol):
         program or Task Engine objects. Missing source stamps or geometry reject
         instead of silently disabling receiver qualification.
         """
-        ...
-
-
-@runtime_checkable
-class SlideHandClearanceProvider(Protocol):
-    """Supply explicit nominal and fraction-specific hand sweep geometry."""
-
-    @property
-    def robot(self) -> Robot:
-        """Return the exact engine robot owning the hand geometry."""
-        ...
-
-    def nominal(
-        self, request: ResolvedActionRequest, context: PlanningContext
-    ) -> PreshapeHandClearance:
-        """Return declaration-time cached nominal geometry for this occurrence."""
-        ...
-
-    def measure(
-        self, request: ResolvedActionRequest, context: PlanningContext, fraction: float
-    ) -> PreshapeHandClearance:
-        """Capture one fractional sweep under the original native observation."""
         ...

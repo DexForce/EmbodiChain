@@ -43,11 +43,13 @@ from .plans import (
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .released_continuation import ReleasedHandContinuationProvider
+from .twist_planning import TwistPlanningProvider
+
 from .drawer_planning import DrawerPlanningProvider
 from .articulation_continuation import ArticulationContinuationProvider
 from .planning_probes import (
-    HandOverSceneProvider,
     SlideHandClearanceProvider,
+    HandOverSceneProvider,
     HeldStagingProvider,
     RetainedCommandProvider,
     JointPrefixPlanner,
@@ -101,13 +103,14 @@ class AtomicActionEngine:
         held_staging_provider: HeldStagingProvider | None = None,
         retained_command_provider: RetainedCommandProvider | None = None,
         released_hand_provider: ReleasedHandContinuationProvider | None = None,
-        handover_scene_provider: HandOverSceneProvider | None = None,
-        coordinated_cargo_geometry: SceneMeshSnapshot | None = None,
+        twist_planning_provider: TwistPlanningProvider | None = None,
         slide_hand_clearance_provider: SlideHandClearanceProvider | None = None,
         drawer_planning_provider: DrawerPlanningProvider | None = None,
         articulation_continuation_provider: (
             ArticulationContinuationProvider | None
         ) = None,
+        handover_scene_provider: HandOverSceneProvider | None = None,
+        coordinated_cargo_geometry: SceneMeshSnapshot | None = None,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
@@ -137,6 +140,8 @@ class AtomicActionEngine:
                 distal geometry for explicitly selected held-path recovery.
             retained_command_provider: Same-robot verified command provenance and
                 same-observation command snapshots; no physical success is implied.
+            twist_planning_provider: Explicit same-robot bounded Twist query service.
+
             slide_hand_clearance_provider: Explicit same-robot slide hand clearance service.
             drawer_planning_provider: Explicit same-robot drawer planning service.
             articulation_continuation_provider: Explicit same-robot articulation continuation service.
@@ -173,11 +178,12 @@ class AtomicActionEngine:
             held_staging_provider=held_staging_provider,
             retained_command_provider=retained_command_provider,
             released_hand_provider=released_hand_provider,
-            handover_scene_provider=handover_scene_provider,
-            coordinated_cargo_geometry=coordinated_cargo_geometry,
+            twist_planning_provider=twist_planning_provider,
             slide_hand_clearance_provider=slide_hand_clearance_provider,
             drawer_planning_provider=drawer_planning_provider,
             articulation_continuation_provider=articulation_continuation_provider,
+            handover_scene_provider=handover_scene_provider,
+            coordinated_cargo_geometry=coordinated_cargo_geometry,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}

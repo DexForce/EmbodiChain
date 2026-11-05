@@ -585,6 +585,34 @@ available; explicit measured source policies reject incompatible nominal input.
    PlaceInsideLanding
    PlaceSceneProvider
 
+Explicit Press planning recovery
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``PressPlanningRecovery`` selects the existing Press skill's failure-only B1
+recovery. Nominal planning and at most one declared contact-roll alternative share
+the original two-complete-plan budget and RNG progression. Failed Cartesian
+phases may retry through the shared unchanged-target, unchanged-time IK resolver.
+The final emitted full-robot trajectory retains velocity qualification after
+resampling and transforms. Missing motion or excessive velocity remains failure.
+Default ``PressOptions`` enables no contact-roll alternatives or recovery.
+
+``validate_press_extra_distance`` accepts only an optional finite addition in
+``[0, 0.010]`` metres. It does not alter the authored stroke or determine physical
+contact, release or task success. Configured recovery accepts only
+``{kind: press_bounded, revision: 1}``; budgets and callbacks cannot be supplied
+through that declaration.
+
+.. autosummary::
+   :nosignatures:
+
+   PressPlanningRecovery
+   validate_press_extra_distance
+
+.. autoclass:: PressPlanningRecovery
+   :members:
+
+.. autofunction:: validate_press_extra_distance
+
 Curobo queries
 ^^^^^^^^^^^^^^
 
@@ -809,6 +837,63 @@ Released continuation authority
 .. autoclass:: ReleasedHandContinuationProvider
    :members:
 
+
+Bounded Twist planning and measured feedback
+--------------------------------------------
+
+``TwistPlanningRecovery`` retains the fixed B1/env0, float32, fixed-grid sequential
+IK route. The skill reads an explicit ``TwistPlanningProvider`` session for the
+same robot, observation, invocation and revision, selects the original ordered
+contact candidates and closes the borrowed query on every exit. Final command
+qualification and parent dependency proofs reject without changing the source
+budget or issuing a physical command. Missing providers do not select a fallback.
+
+The recovery cursor separates planning outcome commit, installed-plan adoption
+and measured feedback. Preview forks own separate cursor identities. Geometric
+qualification and successful planning do not establish measured contact or task
+success; event rules retain incomplete evidence and release failures explicitly.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.twist_planning
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.twist_recovery
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.articulation_evidence
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.control_validation
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.twist_feedback
+   :members:
+
+Prismatic articulation and drawer planning
+------------------------------------------
+
+``SlidePlanningRecovery`` preserves explicit B1/env0 fixed-grid sequential IK,
+the original segment retry grid, 390-frame bound, endpoint order, push/withdrawal
+repair and RNG scopes. ``ArticulationWithdrawalPlanningRecovery`` and
+``ArticulationParkPlanningRecovery`` consume actual installed predecessor facts.
+Preview plans do not authorize later withdrawal or PARK. Generic PARK screening
+and bounded vias remain implemented once in ``primitives/_released_park.py``.
+
+Explicit drawer Place and held transport use declared ``DrawerPlanningProvider``
+inputs. The complete-plan builder retains bounded entry ranking, upright release
+lift choices, reverse entry, selected-transform rejection and containment checks
+before motion. Missing geometry or native ownership remains unavailable.
+``SlideHandClearanceProvider`` supplies measured preshape aperture facts; the
+optional 85%-to-75% retry retains original candidate and RNG boundaries.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.articulation_continuation
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.drawer_planning
+   :members:
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
+
+.. autoclass:: SlideHandClearanceProvider
 
 Bounded handover and coordinated hold continuation
 --------------------------------------------------

@@ -43,11 +43,13 @@ from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
 
 from embodichain.lab.sim.motion.mesh_collision import FreeMotionQuery
 from .released_continuation import ReleasedHandContinuationProvider
+from .twist_planning import TwistPlanningProvider
+
 from .drawer_planning import DrawerPlanningProvider
 from .articulation_continuation import ArticulationContinuationProvider
 from .planning_probes import (
-    HandOverSceneProvider,
     SlideHandClearanceProvider,
+    HandOverSceneProvider,
     HeldStagingProvider,
     RetainedCommandProvider,
     JointPrefixPlanner,
@@ -121,13 +123,14 @@ class ActionPlanningServices:
         held_staging_provider: HeldStagingProvider | None = None,
         retained_command_provider: RetainedCommandProvider | None = None,
         released_hand_provider: ReleasedHandContinuationProvider | None = None,
-        handover_scene_provider: HandOverSceneProvider | None = None,
-        coordinated_cargo_geometry: SceneMeshSnapshot | None = None,
+        twist_planning_provider: TwistPlanningProvider | None = None,
         slide_hand_clearance_provider: SlideHandClearanceProvider | None = None,
         drawer_planning_provider: DrawerPlanningProvider | None = None,
         articulation_continuation_provider: (
             ArticulationContinuationProvider | None
         ) = None,
+        handover_scene_provider: HandOverSceneProvider | None = None,
+        coordinated_cargo_geometry: SceneMeshSnapshot | None = None,
     ) -> None:
         """Retain shared services and snapshot caller-owned calibration data.
 
@@ -151,6 +154,8 @@ class ActionPlanningServices:
             drawer_planning_provider: Explicit same-robot drawer planning service.
             articulation_continuation_provider: Explicit same-robot articulation continuation service.
             released_hand_provider: Same-robot released suffix authority.
+            twist_planning_provider: Explicit same-robot bounded Twist query service.
+
             handover_scene_provider: Same-robot native receiver query lifetimes.
             coordinated_cargo_geometry: Static owned envelopes for the explicit
                 observed cargo preference; no poses are captured or certified.
@@ -271,6 +276,36 @@ class ActionPlanningServices:
                 "released_hand_provider must own this engine's exact robot."
             )
         self._released_hand_provider = released_hand_provider
+        if twist_planning_provider is not None and (
+            not isinstance(twist_planning_provider, TwistPlanningProvider)
+            or twist_planning_provider.robot is not self._robot
+        ):
+            raise TypeError("twist_planning_provider must own this engine's robot.")
+        self._twist_planning_provider = twist_planning_provider
+
+        if slide_hand_clearance_provider is not None and (
+            not isinstance(slide_hand_clearance_provider, SlideHandClearanceProvider)
+            or slide_hand_clearance_provider.robot is not motion_generator.robot
+        ):
+            raise TypeError("Slide hand clearance requires this engine's exact robot.")
+        self._slide_hand_clearance_provider = slide_hand_clearance_provider
+        if drawer_planning_provider is not None and (
+            not isinstance(drawer_planning_provider, DrawerPlanningProvider)
+            or drawer_planning_provider.robot is not motion_generator.robot
+        ):
+            raise TypeError("Drawer provider must own the exact engine robot.")
+        self._drawer_planning_provider = drawer_planning_provider
+        if articulation_continuation_provider is not None and (
+            not isinstance(
+                articulation_continuation_provider, ArticulationContinuationProvider
+            )
+            or articulation_continuation_provider.robot is not self._robot
+        ):
+            raise TypeError(
+                "articulation_continuation_provider must own this engine's robot."
+            )
+        self._articulation_continuation_provider = articulation_continuation_provider
+
         if handover_scene_provider is not None and not isinstance(
             handover_scene_provider, HandOverSceneProvider
         ):
@@ -299,29 +334,6 @@ class ActionPlanningServices:
                 unavailable=coordinated_cargo_geometry.unavailable,
             )
         )
-
-        if slide_hand_clearance_provider is not None and (
-            not isinstance(slide_hand_clearance_provider, SlideHandClearanceProvider)
-            or slide_hand_clearance_provider.robot is not motion_generator.robot
-        ):
-            raise TypeError("Slide hand clearance requires this engine's exact robot.")
-        self._slide_hand_clearance_provider = slide_hand_clearance_provider
-        if drawer_planning_provider is not None and (
-            not isinstance(drawer_planning_provider, DrawerPlanningProvider)
-            or drawer_planning_provider.robot is not motion_generator.robot
-        ):
-            raise TypeError("Drawer provider must own the exact engine robot.")
-        self._drawer_planning_provider = drawer_planning_provider
-        if articulation_continuation_provider is not None and (
-            not isinstance(
-                articulation_continuation_provider, ArticulationContinuationProvider
-            )
-            or articulation_continuation_provider.robot is not self._robot
-        ):
-            raise TypeError(
-                "articulation_continuation_provider must own this engine's robot."
-            )
-        self._articulation_continuation_provider = articulation_continuation_provider
         if tracking_runtime is not None and not isinstance(
             tracking_runtime,
             TrackingRuntime,
@@ -405,14 +417,9 @@ class ActionPlanningServices:
         return self._released_hand_provider
 
     @property
-    def handover_scene_provider(self) -> HandOverSceneProvider | None:
-        """Return the optional provider of owned native receiver scene queries."""
-        return self._handover_scene_provider
-
-    @property
-    def coordinated_cargo_geometry(self) -> SceneMeshSnapshot | None:
-        """Return borrowed static cargo envelopes; planning consumers read only."""
-        return self._coordinated_cargo_geometry
+    def twist_planning_provider(self) -> TwistPlanningProvider | None:
+        """Return the explicit occurrence-bound Twist planning service."""
+        return self._twist_planning_provider
 
     @property
     def articulation_continuation_provider(
@@ -430,6 +437,16 @@ class ActionPlanningServices:
     def slide_hand_clearance_provider(self) -> SlideHandClearanceProvider | None:
         """Return the explicitly installed prismatic hand geometry service."""
         return self._slide_hand_clearance_provider
+
+    @property
+    def handover_scene_provider(self) -> HandOverSceneProvider | None:
+        """Return the optional provider of owned native receiver scene queries."""
+        return self._handover_scene_provider
+
+    @property
+    def coordinated_cargo_geometry(self) -> SceneMeshSnapshot | None:
+        """Return borrowed static cargo envelopes; planning consumers read only."""
+        return self._coordinated_cargo_geometry
 
     @property
     def robot(self) -> Robot:

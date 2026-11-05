@@ -1462,6 +1462,38 @@ and restores them without a new seed or draw. It is transient runtime state.
 
    PlanningRandomState
 
+embodichain.lab.sim.scene.control_mass_observation
+--------------------------------------------------
+
+Read back source-declared fixed mass, scaled COM and body inertia without native
+writes. Source lineage and tensor-scale tolerances remain explicit. An unrequested
+native mass policy reports unverified; it does not acquire a fixed-mass certificate.
+
+.. currentmodule:: embodichain.lab.sim.scene.control_mass_observation
+
+.. autosummary::
+
+   verify_scaled_control_mass
+
+.. autofunction:: verify_scaled_control_mass
+
+embodichain.lab.sim.scene.control_measurement
+---------------------------------------------
+
+Control release geometry keeps native Press link meshes separate from authored
+Twist collision inputs. Axial finger/TCP clearance and terminal world-mesh AABB
+separation remain different measurements. Explicit complete finger rosters select
+the sampled hand geometry; these inputs do not qualify native collision cooking.
+
+.. currentmodule:: embodichain.lab.sim.scene.control_measurement
+
+.. autosummary::
+
+   NativeControlGeometry
+
+.. autoclass:: NativeControlGeometry
+   :members:
+
 embodichain.lab.sim.scene.expansion.layout
 ------------------------------------------
 

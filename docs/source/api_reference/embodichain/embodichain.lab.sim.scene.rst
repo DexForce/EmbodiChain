@@ -755,6 +755,21 @@ select a staging route or certify native collision freedom.
 
 .. autofunction:: capture_robot_distal_meshes
 
+Authored revolute setting attributes
+------------------------------------
+
+This adapter exposes only qualified authored setting labels and their exact joint
+and source identities. A source without fixed-base setting annotations advertises
+none. It selects no task program, motion goal or execution/recovery budget.
+
+.. currentmodule:: embodichain.lab.sim.scene.revolute_inputs
+
+.. autosummary::
+   :nosignatures:
+
+   revolute_setting_attributes
+
+.. autofunction:: revolute_setting_attributes
 
 Physical planning inputs
 ------------------------
