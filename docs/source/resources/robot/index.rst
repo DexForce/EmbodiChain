@@ -43,6 +43,10 @@ Manufacturers
      - :doc:`Wuji Hand <wuji/hand>`
      - ``WujiHandCfg``
      - Standalone left/right hand with 20 independent source joints.
+   * - :doc:`Sharpa Robotics <sharpa/index>`
+     - :doc:`Sharpa Wave 01 <sharpa/wave>`
+     - ``SharpaWaveCfg``
+     - Standalone left/right hand with 22 independent source joints.
    * - :doc:`DexForce <dexforce/index>`
      - :doc:`Dexforce W1 <dexforce/w1>`
      - ``DexforceW1Cfg``
@@ -101,6 +105,7 @@ Manufacturers
    anybotics/index
    arx/index
    brainco/index
+   sharpa/index
    wuji/index
    changingtek/index
    dh_robotics/index
@@ -120,7 +125,8 @@ End-effector Assets
 -------------------
 
 Hands and grippers share the manufacturer/model organization above.
-BrainCo Revo 1 and Wuji Hand provide standalone hand presets; asset-only
+BrainCo Revo 1, Sharpa Wave 01 and Wuji Hand provide standalone hand presets;
+asset-only
 entries provide source assets for caller-owned assembly. ``eef`` is a control-group
 convention and does not identify grasping capabilities.
 
@@ -143,6 +149,9 @@ instructions, provenance boundaries and rendered source-model illustrations.
      - Left/right assets and standalone preset.
    * - :doc:`Wuji Technology <wuji/index>`
      - :doc:`Wuji Hand <wuji/hand>`
+     - Left/right assets and standalone preset.
+   * - :doc:`Sharpa Robotics <sharpa/index>`
+     - :doc:`Sharpa Wave 01 <sharpa/wave>`
      - Left/right assets and standalone preset.
    * - :doc:`ChangingTek <changingtek/index>`
      - :doc:`CTM2F110 <changingtek/ctm2f110>`

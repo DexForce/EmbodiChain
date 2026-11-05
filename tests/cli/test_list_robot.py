@@ -109,6 +109,7 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     assert "Control" in output and "DOF" in output and "Parts" in output
     expected_ids = {
         "BrainCoRevo1",
+        "SharpaWave",
         "WujiHand",
         "ARX5",
         "AlohaMini",
@@ -230,6 +231,7 @@ main(["list-robot"])
         check=True,
     )
 
+    assert "SharpaWave" in result.stdout
     assert "WujiHand" in result.stdout
     assert result.stderr == ""
 

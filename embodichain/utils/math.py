@@ -2227,44 +2227,79 @@ def interpolate_rotations(
     """Interpolates between two rotation matrices.
 
     Args:
-        R1: First rotation matrix. (4x4).
-        R2: Second rotation matrix. (4x4).
-        num_steps: Number of desired interpolated rotations (excluding start and end).
+        R1: Start rotation matrix, shaped ``(3, 3)``.
+        R2: End rotation matrix, shaped ``(3, 3)``.
+        num_steps: Positive number of equal interpolation intervals.
         axis_angle: If True, interpolate in axis-angle representation;
                    otherwise use slerp. Defaults to True.
 
     Returns:
-        Stack of interpolated rotation matrices of shape (num_steps + 1, 4, 4),
+        Stack of interpolated rotation matrices of shape (num_steps + 1, 3, 3),
         including the start and end rotations.
+
+    Raises:
+        ValueError: If ``num_steps`` is not positive.
     """
     assert isinstance(R1, torch.Tensor), "Input must be a torch tensor"
     assert isinstance(R2, torch.Tensor), "Input must be a torch tensor"
+    num_steps = len(range(num_steps))
+    if num_steps < 1:
+        raise ValueError("num_steps must be positive")
     if axis_angle:
-        # Delta rotation expressed as axis-angle
-        delta_rot_mat = torch.matmul(R2, R1.transpose(-1, -2))
-        delta_quat = quat_from_matrix(delta_rot_mat)
-        delta_axis_angle = axis_angle_from_quat(delta_quat)
-
-        # Grab angle
-        delta_angle = torch.linalg.norm(delta_axis_angle)
-
-        # Fix the axis, and chunk the angle up into steps
-        rot_step_size = delta_angle / num_steps
-
-        # Convert into delta rotation matrices, and then convert to absolute rotations
-        if delta_angle < 0.05:
-            # Small angle - don't bother with interpolation
-            rot_steps = torch.stack([R2 for _ in range(num_steps)])
+        dtype = (
+            torch.float32 if R1.dtype in (torch.float16, torch.bfloat16) else R1.dtype
+        )
+        start, end = R1.to(dtype=dtype), R2.to(dtype=dtype)
+        delta_rot_mat = torch.matmul(end, start.transpose(-1, -2))
+        cosine = (torch.trace(delta_rot_mat) - 1) / 2
+        if cosine > 0:
+            # Near identity the antisymmetric part is well-conditioned. Avoid
+            # zero square-root quaternion candidates and division by a zero
+            # angle, including in inactive autograd branches.
+            sine_axis = (
+                torch.stack(
+                    [
+                        delta_rot_mat[2, 1] - delta_rot_mat[1, 2],
+                        delta_rot_mat[0, 2] - delta_rot_mat[2, 0],
+                        delta_rot_mat[1, 0] - delta_rot_mat[0, 1],
+                    ]
+                )
+                / 2
+            )
+            angle = torch.atan2(torch.linalg.vector_norm(sine_axis), cosine)
+            rotation_vector = sine_axis / torch.sinc(angle / torch.pi)
+            x, y, z = rotation_vector.unbind()
+            zero = torch.zeros_like(x)
+            skew = torch.stack([zero, -z, y, z, zero, -x, -y, x, zero]).reshape(3, 3)
+            fractions = (
+                torch.arange(num_steps, dtype=dtype, device=R1.device) / num_steps
+            )
+            scaled_skew = fractions[:, None, None] * skew
+            scaled_angle = fractions * angle
+            # (1 - cos(a)) / a**2 = sinc(a / (2*pi))**2 / 2.
+            relative = (
+                torch.eye(3, dtype=dtype, device=R1.device)
+                + torch.sinc(scaled_angle / torch.pi)[:, None, None] * scaled_skew
+                + 0.5
+                * torch.sinc(scaled_angle / (2 * torch.pi))[:, None, None] ** 2
+                * (scaled_skew @ scaled_skew)
+            )
+            rot_steps = relative @ start
         else:
-            # Make sure that axis is a unit vector
+            # Retain the established conversion near pi, where the
+            # antisymmetric part alone cannot determine the rotation axis.
+            delta_axis_angle = axis_angle_from_quat(quat_from_matrix(delta_rot_mat))
+            delta_angle = torch.linalg.vector_norm(delta_axis_angle)
+            rot_step_size = delta_angle / num_steps
             delta_axis = delta_axis_angle / delta_angle
             delta_rot_steps = [
                 matrix_from_quat(quat_from_angle_axis(i * rot_step_size, delta_axis))
                 for i in range(num_steps)
             ]
             rot_steps = torch.stack(
-                [torch.matmul(delta_rot_steps[i], R1) for i in range(num_steps)]
+                [torch.matmul(delta_rot_steps[i], start) for i in range(num_steps)]
             )
+        rot_steps = rot_steps.to(dtype=R1.dtype)
     else:
         q1 = quat_from_matrix(R1)
         q2 = quat_from_matrix(R2)
