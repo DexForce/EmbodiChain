@@ -432,12 +432,13 @@ topics:
 - id: atomic-actions
   title: Atomic Skills
   aliases: [atomic action, atomic skill, 原子动作, 原子技能]
-  keywords: [PlanningBudget, PlanningRecovery, ExecutionPlanLifecycle, AtomicActionEngine, run-atomic-action, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
+  keywords: [TwistPlanningRecovery, compute.articulation, PlanningBudget, PlanningRecovery, ExecutionPlanLifecycle, AtomicActionEngine, run-atomic-action, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
     hand_geometry_cfgs, GraspOpeningTarget, prepare_grasp_query, scoped grasp preparation,
     RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry, control-grid retiming,
     AffordanceSamplingContext, AffordancePoseCandidates, AffordanceSample, affordance sampling]
   paths: [topics/atomic-actions/atomic-actions.md]
   source_of_truth:
+  - embodichain/compute/articulation/
   - embodichain/lab/sim/atomic_actions/engine.py
   - embodichain/lab/sim/atomic_actions/core.py
   - embodichain/lab/sim/atomic_actions/goals.py
@@ -457,7 +458,7 @@ topics:
 - id: task-programs
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
-  keywords: [TaskProgramCfg, SimulationSettleMonitorCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
+  keywords: [TwistOperationSession, ControlObservationWindow, TaskProgramCfg, SimulationSettleMonitorCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
     hand_geometries,
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,

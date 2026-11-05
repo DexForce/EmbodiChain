@@ -41,6 +41,7 @@ from .plans import (
 )
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
+from .twist_planning import TwistPlanningProvider
 from .scene import SceneProvider
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 from .tracking import TrackingPolicy, TrackingRuntime
@@ -74,6 +75,7 @@ class AtomicActionEngine:
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
         hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
+        twist_planning_provider: TwistPlanningProvider | None = None,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
@@ -88,6 +90,7 @@ class AtomicActionEngine:
                 control-part name.
             hand_geometry_cfgs: Explicit hand calibrations keyed by grasp endpoint
                 target ID. Settings are copied; construction performs no hand FK.
+            twist_planning_provider: Explicit same-robot bounded Twist query service.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
             tracking_runtime: Optional exact-version feedback, projector, and
@@ -105,6 +108,7 @@ class AtomicActionEngine:
             tracking_runtime=tracking_runtime,
             grasp_pose_generators=grasp_pose_generators,
             hand_geometry_cfgs=hand_geometry_cfgs,
+            twist_planning_provider=twist_planning_provider,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}

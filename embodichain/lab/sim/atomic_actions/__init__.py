@@ -138,6 +138,8 @@ from .requirements import (
     SkillResourceSlot,
 )
 from .runtime import ActionPlanningServices, GraspOpeningTarget
+from .twist_planning import TwistPlanningProvider, TwistPlanningSession
+from .primitives.twist_recovery import TwistPlanningRecovery
 from .runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
@@ -237,6 +239,7 @@ from .primitives import (
     SlideOptions,
     Twist,
     TwistGoal,
+    TwistJointTarget,
     TwistOptions,
 )
 from .runner import (
@@ -447,7 +450,11 @@ __all__ = [
     "SlideOptions",
     "Twist",
     "TwistGoal",
+    "TwistJointTarget",
     "TwistOptions",
+    "TwistPlanningProvider",
+    "TwistPlanningSession",
+    "TwistPlanningRecovery",
     "RecoveryPolicy",
     "PlanningRecovery",
     "RigidObjectSceneProvider",

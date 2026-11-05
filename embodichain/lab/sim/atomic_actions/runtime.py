@@ -41,6 +41,8 @@ from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
     _rigid_pose,
 )
 
+from .twist_planning import TwistPlanningProvider
+
 from .bindings import ActionBinding, EndpointBinding, JointPositionTarget
 from .control import ActionControlOverrides, ControlPartCommandProfile
 from .core import resolve_runtime_device
@@ -127,6 +129,7 @@ class ActionPlanningServices:
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
         hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
+        twist_planning_provider: TwistPlanningProvider | None = None,
     ) -> None:
         """Retain shared services and snapshot caller-owned calibration data.
 
@@ -137,11 +140,18 @@ class ActionPlanningServices:
             grasp_pose_generators: Existing grasp services by endpoint target ID.
             hand_geometry_cfgs: Explicit Lab hand settings by grasp target ID;
                 copied independently without capturing geometry or reading state.
+            twist_planning_provider: Explicit same-robot bounded Twist query service.
         """
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
         self._device = resolve_runtime_device(motion_generator.device)
         self._binding_owner_id = uuid4().hex
+        if twist_planning_provider is not None and (
+            not isinstance(twist_planning_provider, TwistPlanningProvider)
+            or twist_planning_provider.robot is not self._robot
+        ):
+            raise TypeError("twist_planning_provider must own this engine's robot.")
+        self._twist_planning_provider = twist_planning_provider
         if tracking_runtime is not None and not isinstance(
             tracking_runtime,
             TrackingRuntime,
@@ -162,6 +172,11 @@ class ActionPlanningServices:
     def motion_generator(self) -> MotionGenerator:
         """Return the single motion generator owned by the engine."""
         return self._motion_generator
+
+    @property
+    def twist_planning_provider(self) -> TwistPlanningProvider | None:
+        """Return the explicit occurrence-bound Twist planning service."""
+        return self._twist_planning_provider
 
     @property
     def robot(self) -> Robot:

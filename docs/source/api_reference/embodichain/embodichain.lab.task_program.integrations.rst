@@ -479,3 +479,27 @@ must not construct resources or read live state during this preflight.
 .. autoclass:: RegisteredSemanticLowererSceneValidator
    :members:
 
+
+
+Scoped Twist observation and execution sessions
+-----------------------------------------------
+
+``TwistOperationSession`` binds exact declared occurrences, robot, program and
+physical episode to one shared Atomic cursor and the real Motion query factory.
+Planning, installation, adoption and feedback remain separate guarded boundaries.
+The registry selects only exact declared occurrence IDs and implements the
+existing plan-lifecycle factory; preview forks change cursor identity without
+changing the borrowed physical owners.
+
+``ControlObservationWindow`` projects only newly appended records from an exact
+canonical ``JointContactObserver`` generation. Raw frames retain simulation time;
+source-relative scalar time is explicitly declared. It preserves missing channel,
+loss, capacity and cadence errors and never performs another sensor fetch.
+``record_count`` reads the retained prefix length without copying that prefix.
+These interfaces install no standard post-policy producer or control factory.
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_observation
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.twist_session
+   :members:

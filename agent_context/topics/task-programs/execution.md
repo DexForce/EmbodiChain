@@ -305,3 +305,11 @@ exact inclusive source slots and receiver slots at the first maximum tilt.
 Raw validity/errors, episode and written-boundary identity remain authoritative.
 Geometry functions live in Compute and choose no Pour thresholds or release
 verdicts. The collector does not read live poses or acquire new sensor samples.
+
+`simulation/twist_session.py` binds declared program/operation/episode occurrences
+to the Atomic Twist cursor and real Motion query factory. Its registry implements
+the existing lifecycle factory; queries close on failed construction, stale
+scope or completion. `control_observation.py` projects the canonical contact
+observer's exact generation with `record_count` and `snapshot(start)`, preserving
+raw clock identities and missing/capacity errors without fetching contacts.
+Standard post-policy producer assembly remains a separate integration owner.

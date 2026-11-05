@@ -59,7 +59,7 @@ from .slide import (
     SlideJointTarget,
     SlideOptions,
 )
-from .twist import Twist, TwistGoal, TwistOptions
+from .twist import Twist, TwistGoal, TwistJointTarget, TwistOptions
 
 BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     MoveEndEffector,
@@ -130,5 +130,6 @@ __all__ = [
     "SlideOptions",
     "Twist",
     "TwistGoal",
+    "TwistJointTarget",
     "TwistOptions",
 ]
