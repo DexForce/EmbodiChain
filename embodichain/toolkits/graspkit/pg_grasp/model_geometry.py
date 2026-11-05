@@ -27,19 +27,124 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from embodichain.data import get_data_path
+from embodichain.data.asset_dependencies import asset_dependency_files
+from types import MappingProxyType
 from .fixed_geometry import FixedGripperCollisionGeometry, _rigid_transform
 
-__all__ = ["get_parallel_jaw_collision_geometry"]
+__all__ = ["get_parallel_jaw_collision_geometry", "get_parallel_jaw_model_asset_files"]
 
-_MODELS = (
-    "dh_pgi_140_80",
-    "franka_panda_hand",
-    "cobotmagic_v100_gripper",
-    "tianji_marvin_gripper",
-    "pika_gripper",
-    "robotiq_2f85",
-    "robotiq_arg2f_140",
+_MODEL_ASSETS = MappingProxyType(
+    {
+        "dh_pgi_140_80": "DH_PGI_140_80/DH_PGI_140_80.urdf",
+        "franka_panda_hand": "Franka/Panda/PandaWithHand.urdf",
+        "cobotmagic_v100_gripper": "CobotMagicArm/CobotMagicWithGripperV100.urdf",
+        "tianji_marvin_gripper": "TianjiMarvin/robot_with_ee_acd.urdf",
+        "pika_gripper": "PikaGripper/PikaGripper.urdf",
+        "robotiq_2f85": "Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf",
+        "robotiq_arg2f_140": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf",
+    }
 )
+_MODELS = tuple(_MODEL_ASSETS)
+
+_MODEL_COLLISION_LINKS = MappingProxyType(
+    {
+        "dh_pgi_140_80": (
+            "gripper_base_link_1",
+            "gripper_finger1_link_1",
+            "gripper_finger2_link_1",
+        ),
+        "franka_panda_hand": ("fr3_hand", "fr3_leftfinger", "fr3_rightfinger"),
+        "cobotmagic_v100_gripper": ("gripper_base", "link7", "link8"),
+        "tianji_marvin_gripper": (
+            "{side}_hand_base_link",
+            "{side}_hand_finger_1_link",
+            "{side}_hand_finger_2_link",
+        ),
+        "pika_gripper": ("GRIPPER_BASE", "FINGER1", "FINGER2"),
+        "robotiq_2f85": (
+            "robotiq_arg2f_base_link",
+            "left_outer_knuckle",
+            "left_outer_finger",
+            "left_inner_knuckle",
+            "left_inner_finger",
+            "left_inner_finger_pad",
+            "right_outer_knuckle",
+            "right_outer_finger",
+            "right_inner_knuckle",
+            "right_inner_finger",
+            "right_inner_finger_pad",
+        ),
+        "robotiq_arg2f_140": (
+            "robotiq_arg2f_base_link",
+            "left_outer_knuckle",
+            "left_outer_finger",
+            "left_inner_knuckle",
+            "left_inner_finger",
+            "left_inner_finger_pad",
+            "right_outer_knuckle",
+            "right_outer_finger",
+            "right_inner_knuckle",
+            "right_inner_finger",
+            "right_inner_finger_pad",
+        ),
+    }
+)
+
+
+def _model_collision_links(model_id: str, side: str | None) -> tuple[str, ...]:
+    return tuple(name.format(side=side) for name in _MODEL_COLLISION_LINKS[model_id])
+
+
+def _model_mesh_paths(model_id: str) -> dict[str, str] | None:
+    # This archive relocates its URDF while retaining these exact source names.
+    return (
+        {
+            f"../Collision/{name}": get_data_path(f"CobotMagicArm/Collision/{name}")
+            for name in ("gripper_base_v100_acd.obj", "link7_acd.obj", "link8_acd.obj")
+        }
+        if model_id == "cobotmagic_v100_gripper"
+        else None
+    )
+
+
+def _validate_model_source(model_id: str, side: str | None) -> None:
+    if model_id not in _MODELS:
+        raise ValueError(
+            f"No collision geometry for {model_id!r}; available models: {_MODELS}. Custom hands require explicit URDF collision geometry."
+        )
+    if model_id == "tianji_marvin_gripper":
+        if side not in ("left", "right"):
+            raise ValueError(
+                "Marvin collision geometry requires explicit left/right side."
+            )
+    elif side is not None:
+        raise ValueError(f"{model_id!r} has no side-specific geometry.")
+
+
+def get_parallel_jaw_model_asset_files(
+    model_id: str, *, side: str | None = None
+) -> tuple[Path, ...]:
+    """Enumerate declared files for the same registered collision model.
+
+    Args:
+        model_id: Registered physical hand model used by the geometry factory.
+        side: Required left/right selection for standard Marvin, otherwise None.
+
+    Returns:
+        Sorted resolved source and transitive local dependencies, with the same
+        explicit archive reference overrides as collision geometry. No sampler,
+        geometry, robot, simulator or solver is instantiated.
+
+    Raises:
+        ValueError: Model/side is unsupported or dependencies cannot be inventoried.
+        FileNotFoundError: A declared source or dependency is unavailable.
+    """
+    _validate_model_source(model_id, side)
+    return asset_dependency_files(
+        Path(get_data_path(_MODEL_ASSETS[model_id])),
+        reference_overrides=_model_mesh_paths(model_id),
+        urdf_collision_links=_model_collision_links(model_id, side),
+    )
 
 
 def _pose(rotation: np.ndarray | None = None, xyz=(0.0, 0.0, 0.0)) -> np.ndarray:
@@ -82,45 +187,20 @@ def get_parallel_jaw_collision_geometry(
         ValueError: Unknown models, missing/unsupported sides or invalid frames.
         FileNotFoundError: A registered asset cannot be resolved.
     """
-    if model_id not in _MODELS:
-        raise ValueError(
-            f"No collision geometry for {model_id!r}; available models: {_MODELS}. "
-            "Custom hands require explicit URDF collision geometry."
-        )
-    if model_id == "tianji_marvin_gripper":
-        if side not in ("left", "right"):
-            raise ValueError(
-                "Marvin collision geometry requires explicit left/right side."
-            )
-    elif side is not None:
-        raise ValueError(f"{model_id!r} has no side-specific geometry.")
+    _validate_model_source(model_id, side)
+    asset = _MODEL_ASSETS[model_id]
+    links = _model_collision_links(model_id, side)
 
     rz90 = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
     if model_id == "franka_panda_hand":
-        asset = "Franka/Panda/PandaWithHand.urdf"
         root = "fr3_hand"
-        links = (root, "fr3_leftfinger", "fr3_rightfinger")
         joints = {"fr3_finger_joint1": 0.04, "fr3_finger_joint2": 0.04}
         default_tcp = _pose(xyz=(0, 0, 0.1034))
         canonical = default_tcp @ _pose(rz90)
         calibration = "PandaWithHand fr3_hand_tcp joint; native +Y closes"
     elif model_id in {"robotiq_2f85", "robotiq_arg2f_140"}:
         variant = "140" if model_id == "robotiq_arg2f_140" else "85"
-        asset = f"Robotiq/robotiq_arg2f_{variant}/robotiq_arg2f_{variant}.urdf"
         root = "robotiq_arg2f_base_link"
-        links = (
-            root,
-            "left_outer_knuckle",
-            "left_outer_finger",
-            "left_inner_knuckle",
-            "left_inner_finger",
-            "left_inner_finger_pad",
-            "right_outer_knuckle",
-            "right_outer_finger",
-            "right_inner_knuckle",
-            "right_inner_finger",
-            "right_inner_finger_pad",
-        )
         joints = {
             name: 0.0
             for name in (
@@ -145,26 +225,20 @@ def get_parallel_jaw_collision_geometry(
             canonical = default_tcp @ _pose(rz90)
             calibration = "Robotiq 2F-85 fully open collision meshes; native Y opens, tool TCP Z=.15"
     elif model_id == "dh_pgi_140_80":
-        asset = "DH_PGI_140_80/DH_PGI_140_80.urdf"
         root = "gripper_base_link_1"
-        links = (root, "gripper_finger1_link_1", "gripper_finger2_link_1")
         joints = {"gripper_finger1_joint_1": 0.0, "gripper_finger2_joint_1": 0.0}
         # The shipped UR5/PGI embodiment and tutorial grasp TCP name this
         # contact centre explicitly. General/tool-point overrides are distinct.
         canonical = default_tcp = _pose(xyz=(0, 0, 0.15))
         calibration = "ur5_dh_pgi_140_80 embodiment; PGI grasp TCP at base Z=.15"
     elif model_id == "cobotmagic_v100_gripper":
-        asset = "CobotMagicArm/CobotMagicWithGripperV100.urdf"
         root = "gripper_base"
-        links = (root, "link7", "link8")
         joints = {"joint7": 0.05, "joint8": 0.05}
         default_tcp = _pose(np.diag([-1.0, -1.0, 1.0]), (0, 0, 0.143))
         canonical = default_tcp @ _pose(rz90)
         calibration = "CobotMagicCfg link6 TCP; identity link6-to-gripper_base"
     elif model_id == "pika_gripper":
-        asset = "PikaGripper/PikaGripper.urdf"
         root = "GRIPPER_ROOT_LINK"
-        links = ("GRIPPER_BASE", "FINGER1", "FINGER2")
         joints = {"FINGER1_JOINT": 0.05, "FINGER2_JOINT": 0.05}
         # The asset includes its root adapter: base X approaches, base Y
         # closes. The shipped W1/Pika TCP already aligns canonical X/Z.
@@ -173,9 +247,7 @@ def get_parallel_jaw_collision_geometry(
             "dexforce_w1_030_pika embodiment; standalone root adapter included"
         )
     else:
-        asset = "TianjiMarvin/robot_with_ee_acd.urdf"
         root = f"{side}_hand_base_link"
-        links = (root, f"{side}_hand_finger_1_link", f"{side}_hand_finger_2_link")
         joints = {
             f"{side.upper()}_HAND_FINGER_1": 0.0,
             f"{side.upper()}_HAND_FINGER_2": 0.0,
@@ -209,14 +281,7 @@ def get_parallel_jaw_collision_geometry(
     # This registered archive relocates its URDF to the asset root while
     # retaining ../Collision in three filenames. Bind those exact known paths;
     # the generic loader continues to reject unresolved paths without guessing.
-    mesh_paths = (
-        {
-            f"../Collision/{name}": get_data_path(f"CobotMagicArm/Collision/{name}")
-            for name in ("gripper_base_v100_acd.obj", "link7_acd.obj", "link8_acd.obj")
-        }
-        if model_id == "cobotmagic_v100_gripper"
-        else None
-    )
+    mesh_paths = _model_mesh_paths(model_id)
     geometry = FixedGripperCollisionGeometry.from_urdf(
         get_data_path(asset),
         root_link=root,

@@ -109,6 +109,12 @@ share an outer caller-owned deadline across nested previews and isolate separate
 contexts. They do not replace `_budget.py`'s existing automatic planning hooks,
 preempt native work, or certify physical task success.
 
+Atomic policy propagation keeps whole-request sample alternatives separate from
+MotionGenerator's segment alternatives. Required final speed
+qualification checks emitted full-robot samples after transforms/recovery; it
+never treats zero-speed rejected holds as original candidate evidence. The
+ordinary automatic planning/cancellation hooks remain on AtomicAction.plan.
+
 Normalization must preserve the meaning of timing, derivatives, failure rows
 and backend diagnostics together. Read the
 [result contract](planner-details.md#normalization-and-capabilities) before
@@ -467,3 +473,11 @@ For stale obstacles, inspect collision capability/identity before planner tuning
 For altered trajectory duration or acceleration, inspect normalization and the
 destination clock before changing backend limits. Tutorials remain examples;
 validate these production boundaries directly.
+
+Registered parallel-jaw model input inventory is owned by
+`toolkits.graspkit.pg_grasp.model_geometry.get_parallel_jaw_model_asset_files()`.
+It shares the geometry factory's model asset registry and exact archive mesh
+bindings, then delegates local transitive enumeration to Data. Callers can seal
+model inputs without constructing geometry, samplers, robots or planners. Scalar
+opening ModelCfg values alone do not identify these external files; runtime
+assembly still owns TCP/contact transforms and native lifetime checks.
