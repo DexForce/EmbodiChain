@@ -18,43 +18,26 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import TYPE_CHECKING
 import torch
 
 from .ik import sample_cartesian_targets, resolve_continuous_ik_path
-from .planners.utils import MoveType, PlanResult, PlanState
+from .planners.utils import MotionRecoveryTrace, MoveType, PlanResult, PlanState
 
 if TYPE_CHECKING:
     from .motion_generator import MotionGenerator, MotionGenOptions
 
-__all__ = ["CartesianMotionResult", "generate_cartesian_motion"]
+__all__: list[str] = []
 
 
-@dataclass(frozen=True, slots=True)
-class CartesianMotionResult:
-    """One request's result and local recovery receipt, separate from action retries.
-
-    Args:
-        result: Owned motion output under the ordinary hold-on-failure contract.
-        attempted_counts: Nominal and actually attempted dense grids, in order.
-        used_continuity: Whether the unchanged-time continuous solver supplied
-            the accepted result. Failed dense attempts are not substituted for
-            the original failed result or its original candidate evidence.
-    """
-
-    result: PlanResult
-    attempted_counts: tuple[int, ...]
-    used_continuity: bool = False
-
-
-def generate_cartesian_motion(
+def _generate_cartesian_motion(
     generator: MotionGenerator,
     targets: list[PlanState],
     options: MotionGenOptions,
     *,
     defer_recovery: bool = False,
-) -> CartesianMotionResult:
+) -> PlanResult:
     """Sample declared keyframes, then execute the explicit segment recovery budget.
 
     Args:
@@ -66,12 +49,11 @@ def generate_cartesian_motion(
             nominal failure before spending this request's motion alternatives.
 
     Returns:
-        Result and independent local counts. Dense retries advance the caller's
-        random stream in source order. On exhaustion, continuous IK queries the
+        Standard plan result and its independent local attempt receipt. Dense
+        retries advance the caller's random stream in source order. On exhaustion, continuous IK queries the
         original sampled path and time grid, not the last rejected alternative.
         Its own Torch fork remains in the shared continuous resolver.
     """
-    options.__post_init__()
     if (
         type(defer_recovery) is not bool
         or options.strategy != "ik_interp"
@@ -84,6 +66,7 @@ def generate_cartesian_motion(
         or options.interpolation_dt is None
         or not targets
         or any(t.move_type is not MoveType.EEF_MOVE or t.xpos is None for t in targets)
+        or not options.is_linear
         or options.preserve_cartesian_samples
         or options.cartesian_path_sampler is not None
     ):
@@ -106,34 +89,40 @@ def generate_cartesian_motion(
         is_linear=True,
     )
 
-    def build(count: int):
+    def build(count: int) -> tuple[list[PlanState], MotionGenOptions]:
         return sample_cartesian_targets(start, targets, count), replace(
             base, sample_count=count
         )
 
     sampled, original = build(options.sample_count)
-    first = generator.generate(sampled, options=original)
+    first = generator._generate_once(sampled, options=original)
     counts = [options.sample_count]
     retries = options.segment_sample_count_retries
+
+    def finish(result: PlanResult, *, used_continuity: bool = False) -> PlanResult:
+        result.recovery = MotionRecoveryTrace(tuple(counts), used_continuity)
+        return result
+
     # Preserve the source eligibility boundary even under outer action retries.
     if (
         first.success.any()
         or defer_recovery
         or (retries and options.sample_count > retries[0])
     ):
-        return CartesianMotionResult(first, tuple(counts))
+        return finish(first)
     for count in retries:
         if count <= options.sample_count:
             continue
         dense, dense_options = build(count)
         counts.append(count)
-        candidate = generator.generate(dense, options=dense_options)
+        candidate = generator._generate_once(dense, options=dense_options)
         if candidate.success.any():
-            return CartesianMotionResult(candidate, tuple(counts))
+            return finish(candidate)
     if options.segment_continuous_ik_recovery:
         recovered = resolve_continuous_ik_path(
             generator, sampled, original, operation="Cartesian segment"
         )
         if recovered is not None:
-            return CartesianMotionResult(recovered, tuple(counts), True)
-    return CartesianMotionResult(first, tuple(counts))
+            recovered = generator._normalize_plan_result(recovered, sampled, original)
+            return finish(recovered, used_continuity=True)
+    return finish(first)

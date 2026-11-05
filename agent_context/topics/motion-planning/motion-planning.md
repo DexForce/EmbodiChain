@@ -1,15 +1,16 @@
 # Motion Planning
 
-`motion.cartesian.generate_cartesian_motion` owns sampled Cartesian segment
-recovery. `segment_sample_count_retries` and
-`segment_continuous_ik_recovery` are explicit options, empty/false by default.
-Their attempt counts are local to one motion request; dense alternatives do not
-reset RNG, and exhausted alternatives keep the original failed result/grid.
-The continuous resolver receives the original samples. Ordinary `generate`
-rejects these flags, and Atomic skills reject them unless explicitly supported.
-Complete-action retries remain a distinct `MotionPolicy.sample_count_retries`
-loop with its original Torch-only fork. Policy traces report both effective
-budgets; signed registrations containing the added fields need regeneration.
+`MotionGenerator.generate()` owns sampled Cartesian segment recovery through its
+private `_cartesian.py` helper. Explicit linear keyframes use fixed-grid sequential
+IK; `preserve_cartesian_samples=True` retains the separate pre-sampled contract.
+Segment alternatives are opt-in and B1-only. Their local counts and continuity
+receipt live in `PlanResult.recovery`, separate from complete-action retries.
+Dense attempts advance the original RNG stream; continuous IK uses the original
+grid and its existing Torch fork. Exhaustion retains the first failed result and
+candidate evidence. `defer_recovery=True` lets a caller inspect the nominal result.
+Each actual generation attempt charges the existing host budget once; the public
+entry checks cancellation before FK and adds no planning charge of its own.
+Atomic skills own which segment enables recovery; Task Engine declares policy.
 
 ## Find the owner
 

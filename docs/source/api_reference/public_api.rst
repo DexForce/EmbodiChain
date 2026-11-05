@@ -1073,24 +1073,6 @@ connected-component order and its conservative input-envelope policy.
    read_articulation_link_boxes
    snapshot_collision_sources
 
-embodichain.lab.sim.motion.cartesian
-------------------------------------
-
-Sample selected Cartesian keyframes on an explicit fixed grid. Segment-local
-sample-count alternatives and continuous IK are separate from complete-action
-retries; their receipts retain actual counts and whether continuity supplied the
-result. Exhausted alternatives retain the original request and candidate grid.
-The helper does not reset the dense retry random stream; continuous IK keeps
-its own Torch-only fork. Ordinary ``MotionGenerator.generate`` rejects these
-non-default fields instead of ignoring them.
-
-.. currentmodule:: embodichain.lab.sim.motion.cartesian
-
-.. autosummary::
-
-   CartesianMotionResult
-   generate_cartesian_motion
-
 embodichain.lab.sim.motion.ik
 -----------------------------
 
@@ -2365,6 +2347,7 @@ embodichain.lab.sim.motion.planners.utils
    PlanState
    PlanResult
    RejectedMotionCandidate
+   MotionRecoveryTrace
    normalize_success_mask
    calculate_point_allocations
    interpolate_xpos

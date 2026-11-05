@@ -22,6 +22,7 @@ from types import SimpleNamespace as NS
 import numpy as np
 import torch
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult, PlanState
+from embodichain.lab.sim.motion.motion_generator import MotionGenerator
 
 
 def segment_fixture(case):
@@ -76,12 +77,36 @@ def segment_fixture(case):
         dt[:, 0] = 0
         return PlanResult(success=torch.tensor([True]), positions=positions, dt=dt)
 
+    generator = object.__new__(MotionGenerator)
+    generator.robot = robot
+    generator.planner = NS()
+    generator.device = torch.device("cpu")
+    generator._generate_once = generate
     target = torch.eye(4)[None]
     target[:, 0, 3] = 0.2
     return (
-        NS(robot=robot, generate=generate, _generate_checked=generate),
+        generator,
         [PlanState(MoveType.EEF_MOVE, xpos=target)],
         calls,
         continuous,
         recover,
     )
+
+
+def real_segment_fixture(directory, case):
+    """Keep the real generation/normalization/budget path around a deterministic IK callback."""
+    generator, targets, calls, continuous, recover = segment_fixture(case)
+    callback = generator._generate_once
+    del generator._generate_once
+    generator._generate_ik_interpolation = lambda targets, options: callback(
+        targets, options=options
+    )
+    path = directory / "robot.urdf"
+    path.write_text(
+        '<robot name="test"><joint name="joint" type="prismatic"><limit velocity="10"/></joint></robot>'
+    )
+    generator.robot.cfg = NS(fpath=str(path))
+    generator.robot.joint_names = ("joint",)
+    generator.robot.get_joint_ids = lambda **kwargs: [0]
+    generator.robot.get_qvel_limits = lambda **kwargs: torch.tensor([[10.0]])
+    return generator, targets, calls, continuous, recover
