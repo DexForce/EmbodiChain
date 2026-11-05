@@ -25,6 +25,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Explicit source control resize/support/press calibration | `control_preparation.py`, `control_support.py`, `source_measurement.py`, `press_calibration.py`; static source data, never live acquisition |
 | Source-declared prismatic, press and revolute physical bindings | `embodichain/lab/sim/scene/articulation_inputs.py`, `press_inputs.py`, `revolute_inputs.py` |
 | Explicit control roles, collider inputs and source lineage | `embodichain/lab/sim/scene/control_semantics.py`, `revolute_geometry.py`, `control_source.py`, `control_mass_source.py` |
+| Declared world source meshes and conservative slider envelopes | `source_geometry.py`, `source_envelopes.py`; static source/scale/pose only, no native collision claim |
 | Declared local source vertices | `source_geometry.read_source_vertices`; authored mesh/articulation data or an explicitly scaled local override, with no native observation |
 | Read-only source glTF basis/top inputs | `source_geometry.py`; original scene transforms, scale and topology, with no native acquisition |
 | Shared authored source reads and link-local collider inputs | `embodichain/lab/sim/spawn/source_geometry.py`; Scene retains its `LinkMesh` import |
