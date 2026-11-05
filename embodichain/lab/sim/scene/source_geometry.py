@@ -27,7 +27,12 @@ if TYPE_CHECKING:
 
 from embodichain.lab.sim.spawn.source_geometry import LinkMesh
 
-__all__ = ["LinkMesh", "read_gltf_z_up_mesh", "estimate_source_mesh_top_z"]
+__all__ = [
+    "LinkMesh",
+    "read_gltf_z_up_mesh",
+    "estimate_source_mesh_top_z",
+    "read_source_vertices",
+]
 
 
 def read_gltf_z_up_mesh(
@@ -90,3 +95,44 @@ def estimate_source_mesh_top_z(config: Mapping[str, Any]) -> float | None:
         # Mesh bounds improve robot placement but are not needed to preserve the
         # exported scene. The robot builder has a conservative tabletop fallback.
         return None
+
+
+def read_source_vertices(
+    source: Mapping[str, Any],
+    *,
+    articulation: bool = False,
+    local_vertices: np.ndarray | None = None,
+) -> np.ndarray:
+    """Read scaled source vertices; an explicit local override already owns scale.
+
+    Args:
+        source: Authored physical pose, scale and source shape/asset declaration.
+        articulation: Select the fixed articulation source reader.
+        local_vertices: Already-scaled selected-link source vertices, when supplied.
+
+    Returns:
+        Local Z-up source vertices without reading native state.
+    """
+    if local_vertices is not None:
+        return np.asarray(local_vertices)
+    if articulation:
+        from .articulation_geometry import read_articulation_geometry
+
+        path = source.get("fpath")
+        if not path:
+            raise ValueError("Articulated reference has no native USD asset.")
+        scale = np.asarray(source.get("body_scale", [1.0, 1.0, 1.0]), dtype=np.float64)
+        if scale.shape != (3,) or not np.isfinite(scale).all() or (scale <= 0).any():
+            raise ValueError(
+                "Articulated reference requires a finite positive body_scale."
+            )
+        return read_articulation_geometry(path).vertices * scale
+    shape = source.get("shape")
+    if not isinstance(shape, Mapping) or not shape.get("fpath"):
+        raise ValueError("Source object has no mesh geometry.")
+    return np.asarray(
+        read_gltf_z_up_mesh(
+            shape["fpath"], body_scale=source.get("body_scale", [1.0] * 3)
+        ).vertices,
+        dtype=np.float64,
+    )
