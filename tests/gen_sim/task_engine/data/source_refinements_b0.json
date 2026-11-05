@@ -1,0 +1,90 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "cases": [
+    {
+      "case": "upright",
+      "expected": {
+        "sha256": "d38687ff39b211384d42768445117a1affa0253c208eff91da29d1de519ac3bc"
+      }
+    },
+    {
+      "case": "upright_support",
+      "expected": {
+        "sha256": "5afb8e8b439d00ad87831429eea0e71a3ce82590f400be7820580d9e80f03961"
+      }
+    },
+    {
+      "case": "upright_preserve",
+      "expected": {
+        "sha256": "b4898c49f3b4bb046d112e302bb4ed88684c3448f9ed9f51465e5e308a8d7ede"
+      }
+    },
+    {
+      "case": "upright_reused",
+      "expected": {
+        "sha256": "e19bf6b1f4716407bd9593705eb97c2ccce7f8dd8c7fe5ed092550a4086b7da6"
+      }
+    },
+    {
+      "case": "fresh_handover_vertical",
+      "expected": {
+        "sha256": "680d85b5a18ced878522f59bdccaf97d95fe7437059aec1b2dcc9c67e6ad61b0"
+      }
+    },
+    {
+      "case": "fresh_handover_horizontal",
+      "expected": {
+        "sha256": "5516a7cc7fed95acd45bf291feab9101df3a4127473067fff92dd83c9396d063"
+      }
+    },
+    {
+      "case": "used_handover",
+      "expected": {
+        "sha256": "ba95c2caa26a87ce31717e40f7ef8676e7199d9119c132072dad28ed032d6a49"
+      }
+    },
+    {
+      "case": "handover_identity_collision",
+      "expected": {
+        "error_type": "ValueError",
+        "error": "Generated handover staging identity collides with existing content."
+      }
+    },
+    {
+      "case": "pour_return",
+      "expected": {
+        "sha256": "525e0cd91d5104190d7acf4d20c542a63f343474b6f0594473406574182f5345"
+      }
+    },
+    {
+      "case": "pour_without_table",
+      "expected": {
+        "sha256": "886bcad22746e61cd4489a21dd0ad8e1667293b81168c398d87880d7ae1ad37e"
+      }
+    },
+    {
+      "case": "carry_maximum",
+      "expected": {
+        "sha256": "5ccddf7b02f78a581fc026cd1e41db4a6849bef5a0aef3c4061edc37f34c635d"
+      }
+    },
+    {
+      "case": "carry_minimum",
+      "expected": {
+        "sha256": "e56357a4b80f97f301354de8496f06a357937dee05300acbc7453e26a39e3aac"
+      }
+    },
+    {
+      "case": "carry_middle",
+      "expected": {
+        "sha256": "9e7f5e58441dc66281840ac96ff86913a28df25fe68f60ebcd83f01148c47f2f"
+      }
+    },
+    {
+      "case": "carry_explicit",
+      "expected": {
+        "sha256": "39b391af2de60983617632da8c063b7169598074fdc2c2f4a339df49573aade9"
+      }
+    }
+  ]
+}

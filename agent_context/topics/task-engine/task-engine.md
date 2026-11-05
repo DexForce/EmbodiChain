@@ -11,6 +11,8 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Candidates, drafts, scene requests and success declarations | `contracts.py`, `agent.py` |
 | Candidate-to-normative-spec conversion | `task_spec.py` |
 | Semantic graph schema, ordering and canonical call validation | `semantic_graph.py` |
+| Source upright/carrier/handover/return graph declarations | `source_graph_declarations.py`; geometry comes from public Scene/Compute |
+| Declared alignment/Pick aliases and held-resource transitions | `alignment_declarations.py`; nominal envelopes use the public hand protocol |
 | Roles, binding reports and scene manifest contracts | `orchestration/contracts.py` |
 | Graph/TaskSpec/grounding coverage and source lineage | `semantic_graph_validation.py` |
 
@@ -54,3 +56,12 @@ cutout. These images identify the asset; they are not observations after a call.
 Firefox and WebKit; `tests/gen_sim/task_engine/browser_fixture.py` creates
 synthetic inputs through the public renderer without starting simulation.
 See [`web/README.md`](../../../web/README.md) for both frontend build paths.
+
+Source graph refinements operate on fixed input graphs and explicit authored
+source views. They preserve graph target/call identity, insertion order and
+semantic first-use/held-resource relationships while Scene supplies target
+geometry and Compute constructs poses. Constrained aliases require explicit
+geometry; ordinary E2 retains its existing downward-entry declaration. Closed
+option/lowerer fragments remain declarations for later configured preflight,
+not a runtime factory or a skill registration patch. This surface does not
+connect bundle/CLI publication or claim physical success.
