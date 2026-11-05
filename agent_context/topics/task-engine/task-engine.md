@@ -13,6 +13,9 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Semantic graph schema, ordering and canonical call validation | `semantic_graph.py` |
 | Roles, binding reports and scene manifest contracts | `orchestration/contracts.py` |
 | Graph/TaskSpec/grounding coverage and source lineage | `semantic_graph_validation.py` |
+| Ordered relation targets and occupied support reservations | `placement_declarations.py` |
+| Static scene affordance/source bindings | `scene_binding_declarations.py` |
+| Named Task Program stability and sensor declarations | `stability_declarations.py` |
 
 TaskSpec identity and predicate evaluation belong to
 [Task specification](../task-spec/task-spec.md). Both mappings and instances must
@@ -54,3 +57,14 @@ cutout. These images identify the asset; they are not observations after a call.
 Firefox and WebKit; `tests/gen_sim/task_engine/browser_fixture.py` creates
 synthetic inputs through the public renderer without starting simulation.
 See [`web/README.md`](../../../web/README.md) for both frontend build paths.
+
+## Static source declarations
+
+Placement and scene-binding resolvers consume frozen source scenes and explicit
+resource mappings. Shared Scene owns mesh, articulation, collision and robot
+mount adaptation; Compute owns numeric placement and reservation geometry.
+Task Engine chooses semantic targets and produces existing declarative formats.
+`resolve_stability_conditions` takes exact support sensor declarations (or a pure
+factory), then returns detached typed conditions for the integration preset table.
+It neither constructs sensors nor acquires evidence. Runtime policy evaluation
+and physical observation remain Task Program and Lab responsibilities.

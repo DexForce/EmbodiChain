@@ -137,3 +137,25 @@ the architecture explorer. Shared viewport controls and theme tokens live in
 API embeds committed build outputs, so installed offline rendering has no Node
 runtime requirement. Vector SVG export serializes the current task layout and
 retains the original evidence status rather than generating a new verdict.
+
+Static deployment declarations
+------------------------------
+
+Resolve graph relations into ordered placement routes and declared scene
+bindings using shared Scene and Compute source geometry. These functions read
+frozen source assets without constructing a simulator, robot or motion solver.
+Targets remain proposals; runtime effects and TaskSpec acceptance are separate.
+
+.. automodule:: embodichain.gen_sim.task_engine.placement_declarations
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.scene_binding_declarations
+   :members:
+
+Stability declarations select existing typed Task Program conditions and exact
+sensor declarations. They preserve task/resource identities and require callers
+to provide the sensors needed by the selected support conditions. They do not
+collect contact facts or decide whether a physical objective succeeded.
+
+.. automodule:: embodichain.gen_sim.task_engine.stability_declarations
+   :members:
