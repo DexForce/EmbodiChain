@@ -88,6 +88,12 @@ class EpisodeContext:
             raise ValueError("Environment IDs must be unique valid rows.")
         return ids
 
+    @property
+    def episode_ids(self) -> tuple[int, ...]:
+        """Return row identities without copying device eligibility masks."""
+        self._assert_thread()
+        return tuple(self._episodes)
+
     def filter_recordable(
         self, env_ids: Sequence[int] | torch.Tensor | None = None
     ) -> torch.Tensor:

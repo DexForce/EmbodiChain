@@ -276,20 +276,21 @@ not orchestrate multiple experiments or qualify kinematic playback.
 
 `EmbodiedEnv` can record per-object kinematic trajectories and replay them later.
 
-- **Recording**: set `cfg.record_trajectory = True`. A dedicated per-env
-  `self._traj_buffer` (TensorDict: `states` = robot root_pose+qpos, articulations,
-  rigid objects; `actions` = the flat raw policy action when ActionManager is
-  configured, active qpos for position-mode experts, or effective flat
-  `[qpos, qvel]` targets in position-velocity expert mode) is written each step via
-  `_write_trajectory_step` (called from `_hook_after_sim_step`). A per-env
-  `self._traj_steps` counter means **async parallel envs** (different reset times)
-  don't corrupt each other. `cfg.trajectory_uids` restricts which non-robot objects
-  are recorded.
-- **Persistence**: `env.save_trajectory(path, env_ids=None)` writes a `.pt` with
-  `states`, `actions`, and `meta` (incl. per-env `lengths`). With
-  `cfg.trajectory_auto_save = True` (default), trajectories auto-save to
-  `<EMBODICHAIN_DEFAULT_DATA_ROOT>/trajectories/<run_id>/` at episode end and on
-  `close()` (best-effort: IO errors warn + skip, never crash the episode).
+- **Recording**: set `cfg.record_trajectory = True`. the existing host rollout writer
+  fills the shared store's raw observation group and metadata. Policy and raw
+  cursors keep their accepted-versus-diagnostic semantics; there is no independent
+  history instance or write lifecycle. Standard state fields use observation functors; the host
+  does not perform a separate physics read in its write hook. Full robot state,
+  articulations and selected rigid objects retain their existing action schema.
+  `cfg.trajectory_uids` restricts non-robot replay fields. Raw channels, T+1
+  timing and lifetime queries are owned by the
+  [recording contract](env-framework.md#expert-trajectory-contract).
+- **Persistence**: `env.save_trajectory(path, env_ids=None)` retains legacy
+  `states`, `actions` and `meta` (`lengths`), adding `terminal_states` and versioned
+  `raw_observations`. Auto-save participates in an explicitly committed reset;
+  `close()` discards uncommitted data and finalizes writes rather than implicitly
+  accepting an episode. Persistence failures propagate through the durability
+  barrier. Defaults and paths live in `EmbodiedEnvCfg`/`save_trajectory`.
 - **Replay**: `ReplayWrapper(env, trajectory, mode)` wraps any `EmbodiedEnv`.
   `kinematic` disables physics and writes recorded states (obs only, exact
   reproduction); `dynamic` feeds raw-policy actions through `env.step` so the
@@ -299,9 +300,13 @@ not orchestrate multiple experiments or qualify kinematic playback.
   accepted. Objective-enabled dynamic replay requires one row and a full reset.
   `control` exposes `go_to_step(step)` for O(1) scrubbing. The replay env must
   use the same robot/objects/`actions` config as the recording env.
-- **Decoupled from `rollout_buffer`**: the trajectory buffer is separate from the
-  shared `rollout_buffer` (obs/actions/rewards) used by LeRobot/RL.
-  `current_rollout_step`, LeRobot recorder, and RL mode are untouched.
+- **Policy projection**: `rollout_buffer` retains actual policy observations,
+  including sampled noise, and its existing obs/action/reward alignment for
+  LeRobot/RL. It shares the acquisition boundary with raw history, rather than
+  being used as a substitute for physical state. Learner-owned rollout storage
+  keeps its own cursor and layout. Internally allocated expert policy observations
+  include the terminal T+1 slot in the backing store; the public T-transition
+  view and existing dataset action/annotation alignment stay compatible.
 - **Fixed action layout**: an ActionManager-backed trajectory uses the batched
   policy action space; a controller/expert trajectory uses the private
   `ExpertActionSpec` layout. One trajectory cannot mix these schemas.

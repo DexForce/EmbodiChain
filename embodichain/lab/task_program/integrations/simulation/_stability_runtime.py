@@ -36,6 +36,7 @@ from embodichain.utils.math import pose_inv
 from .stability import SimulationStabilityConditionCfg
 from embodichain.lab.sim.sensors.support_observation import (
     SupportControlClock,
+    NativeSupportResult,
     SupportObservationRegistry,
     qualified_support_heights,
 )
@@ -46,6 +47,7 @@ __all__: list[str] = []
 @dataclass
 class _Lifetime:
     closed: bool = False
+    clock_generation: int = 0
 
 
 class _ConditionStabilityRuntime:
@@ -192,6 +194,7 @@ class _ConditionStabilityRuntime:
             self._support_observers[key] = observer
         self._metadata: dict[int, dict[str, Any]] = {}
         self._clock: SupportControlClock | None = None
+        self._clock_generation = 0
 
     def bind_clock(self, clock: SupportControlClock) -> None:
         """Bind strong support readers to the already-owned execution clock."""
@@ -203,10 +206,36 @@ class _ConditionStabilityRuntime:
             or not math.isclose(clock.step_dt, self._dt, rel_tol=0, abs_tol=1e-9)
         ):
             raise ValueError("Strong support clock differs from the control cadence.")
+        if clock is not self._clock:
+            self._lifetime.clock_generation += 1
+            self._clock_generation = self._lifetime.clock_generation
         self._clock = clock
         for cfg in self._presets.values():
             if cfg.support_contract_revision == 1:
                 self._support_observers[(cfg.entity, cfg.reference)].bind_clock(clock)
+
+    def capture_current_support(
+        self, preset_id: str, *, clock: SupportControlClock
+    ) -> NativeSupportResult:
+        """Use this session's declared pair only while it still owns the binding."""
+        self._require_open()
+        if (
+            clock is None
+            or self._clock is not clock
+            or self._clock_generation != self._lifetime.clock_generation
+        ):
+            raise ValueError(
+                "Support capture belongs to another runtime/session clock."
+            )
+        cfg = self._presets[preset_id]
+        if cfg.support_sensor is None:
+            raise ValueError(
+                "The selected stability preset declares no support sensor."
+            )
+        return self._support_observers[(cfg.entity, cfg.reference)].observe_current(
+            support_contract_revision=cfg.support_contract_revision,
+            clock=clock,
+        )
 
     def _support(
         self,

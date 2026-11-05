@@ -271,3 +271,16 @@ bridge, including ordinary execution without nominal sources. Creating a later
 bridge cannot replace the clock stored by an earlier session. Position-only
 post-policy holds pass through the configured Gym action encoder, preserving the
 captured positions and supplying zero velocity targets in position-velocity mode.
+
+`SimulationSupportObservationCollector` binds before the first action to an
+explicit environment and the bridge's actual policy session. Current capture
+uses that session's clock ownership and the native rest-envelope COM tolerance;
+recorded snapshots retain the policy's original override. Recorded reads combine
+the original policy metadata with exact described raw pose fields from an
+explicitly injected `ObservationManager`. The collector binds semantic fields
+from its schema; optional numeric history validates buffer lifetime, actual
+episode owner and temporal identities. The collector retains bridge/policy
+checks. Without observation history, current capture remains available and
+historical capture rejects. Raw history and T+1 timing belong to
+[environment recording](../env-framework/env-framework.md#expert-trajectory-contract).
+It never combines current contacts with old poses or accesses Env's private buffers.

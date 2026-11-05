@@ -269,8 +269,60 @@ Action Descriptors
 .. autoclass:: ActionTrace
     :members:
 
+Observation Manager
+-------------------
+
+.. automodule:: embodichain.lab.gym.envs.managers.observation_manager
+    :members:
+    :no-index:
+
+The manager owns the raw field schema, source aliases and acquisition context.
+``capture`` returns the raw boundary and its actual policy view. The existing
+host rollout writer fills raw fields and temporal metadata directly;
+``bind_rollout_storage`` grants the manager read access to those tensors.
+``read_history`` returns owned indexed snapshots and ``snapshot_history`` serves
+the export adapter. There is no history instance, allocation engine or separate
+bind/seed/append API. Evidence adapters bind roles through ``schema``; numeric
+buffer operations perform no entity/quantity lookup.
+
+Expert policy state slots retain T+1 observations; existing rollout consumers
+keep their T-transition view. External learner windows preserve their own device
+and horizon. ``utils.trajectory_state.export_observation_history`` combines the
+single observation schema with a numeric snapshot for compatible output,
+without copying another complete state history.
+
 Observation Functions
 ---------------------
+
+``ObservationCfg.consumers`` defaults to ``("policy",)``. Add functors may
+select ``recording`` without expanding the policy space. Evidence adapters
+read qualified raw history; there is no separate evidence output route.
+Recording terms require an ``ObservationSample`` with an explicit descriptor
+and row validity; arbitrary policy tensors cannot become physical evidence by
+renaming them. Modify functors remain policy-only.
+
+For example, a single original arena pose can serve policy and recording:
+
+.. code-block:: python
+
+   ObservationCfg(
+       func=observations.get_entity_state,
+       mode="add",
+       name="scene/cube/pose",
+       params={"entity_cfg": SceneEntityCfg(uid="cube"), "quantity": "pose"},
+       consumers=("policy", "recording"),
+       extra={"shape": (7,)},
+   )
+
+The descriptor derives the resolved UID, shape, dtype, coordinate frame,
+representation and joint identities from the source. Pose values use arena
+coordinates and ``(x, y, z, qx, qy, qz, qw)``. Missing entities have a false validity
+mask and acquisition reasons; a policy zero-fill is never qualified evidence.
+Original channels are retained before in-place policy transforms. Existing
+Tensor-returning policy functors keep their signature and execution order.
+The manager resolves configured and required replay sources once, including
+callable strings and defaults, and reuses matching declarations. The descriptor
+cache contains immutable schema values, never live simulation handles.
 
 .. automodule:: embodichain.lab.gym.envs.managers.observations
     :members:
