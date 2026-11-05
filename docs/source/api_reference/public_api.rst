@@ -899,6 +899,21 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 
    save_layouts
 
+embodichain.gen_sim.task_engine.asset_preparation
+-------------------------------------------------
+
+The semantic frontend selects explicit acquisition identities/openings and keeps
+planner/runtime views consistent while delegating geometric fitting and asset
+materialization to Scene Engine. These adapters implement no fit algorithm and
+construct no simulation or skill.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.asset_preparation
+
+.. autofunction:: fit_prepared_scene_assets
+
+.. autofunction:: normalize_prepared_scene_assets
+
+
 embodichain.gen_sim.task_engine.evidence
 ----------------------------------------
 

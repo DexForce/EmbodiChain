@@ -13,6 +13,7 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Semantic graph schema, ordering and canonical call validation | `semantic_graph.py` |
 | Roles, binding reports and scene manifest contracts | `orchestration/contracts.py` |
 | Graph/TaskSpec/grounding coverage and source lineage | `semantic_graph_validation.py` |
+| Semantic acquisition requests and normalized-asset view projection | `asset_preparation.py`; consumes public Scene Engine APIs |
 | Source export discovery and pure scene declarations | `orchestration/source_scene.py` |
 
 TaskSpec identity and predicate evaluation belong to
