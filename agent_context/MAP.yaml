@@ -479,7 +479,8 @@ topics:
   title: Task Engine
   aliases: [Task Engine, task engine, 任务引擎, 任务理解]
   keywords: [TaskAgent, TaskDraft, TaskCandidateSet, InstructionIntent, TaskSpecGenerator,
-    SemanticTaskGraph, validate_semantic_task_graph, validate_graph_coverage]
+    SemanticTaskGraph, validate_semantic_task_graph, validate_graph_coverage,
+    render_semantic_task_graph_html, write_semantic_task_graph_html]
   paths: [topics/task-engine/task-engine.md]
   source_of_truth:
   - embodichain/gen_sim/task_engine/__init__.py
@@ -490,6 +491,9 @@ topics:
   - embodichain/gen_sim/task_engine/task_spec.py
   - embodichain/gen_sim/task_engine/semantic_graph.py
   - embodichain/gen_sim/task_engine/semantic_graph_validation.py
+  - embodichain/gen_sim/task_engine/semantic_graph_html.py
+  - embodichain/gen_sim/task_engine/reporting.py
+  - embodichain/gen_sim/task_engine/bundle_spec.py
   - embodichain/gen_sim/task_engine/orchestration/contracts.py
   watch_paths: [embodichain/gen_sim/task_engine/, tests/gen_sim/task_engine/]
   related_topics: [task-spec, task-programs, gen-sim]

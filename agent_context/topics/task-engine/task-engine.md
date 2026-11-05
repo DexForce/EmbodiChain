@@ -28,3 +28,21 @@ Fixed candidate/graph inputs can be checked without invoking a model. Run
 `tests/gen_sim/task_engine/` for candidate/spec, coverage and import/ownership
 boundaries. Public API descriptions are in the
 [Task Engine reference](../../../docs/source/api_reference/embodichain/embodichain.gen_sim.task_engine.rst).
+
+## Read-only graph display
+
+`semantic_graph_html.py` renders an existing graph and optional TaskSpec,
+recomputed coverage and recorded execution report. `reporting.py` owns the
+read-only report validator; `bundle_spec.py` recognizes explicit TaskSpec absence.
+Rendering does not call a model, start a simulator or change physical verdicts.
+The writer produces a standalone HTML file outside sealed bundle directories.
+JSON/YAML inputs and historical certificates remain unchanged. Template, scripts,
+styles and licensed fonts are packaged with the module, so installed rendering
+can embed its resources without network access.
+
+`_semantic_graph_presentation.py` reads optional local thumbnails and run display
+metadata. `_graph_localization.py` keeps display-only language labels separate
+from canonical graph identity. Translation runs only through an explicit caller;
+ordinary offline rendering never invokes it. Use
+`tests/gen_sim/task_engine/test_semantic_graph_html.py` for HTML escaping,
+identity/coverage checks, read-only input behavior and source-thumbnail selection.
