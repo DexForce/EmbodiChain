@@ -99,13 +99,14 @@ The config attribute name is the stable functor identity.
 For a flat policy tensor, the environment calls manager processing, manager
 application, physics, event `interval`, observation, and reward in that order.
 A term can opt into physics-substep refresh, scheduled by `EmbodiedEnv`.
-Its first command is processed and
-applied normally; subsequent substeps call `update_substep` and apply only the
+Its first command is processed and applied normally; subsequent substeps
+call `update_substep` and apply only the
 opted-in terms. Inactive demo rows retain measured holds on every refresh.
 `expert_trajectory.use_action_manager` routes position-only expert commands
 through `ActionManager.process_joint_targets`. Relative substep DLS and binary
 gripper terms support that route, retaining exact FK targets and the expert
-storage schema while using the policy controller.
+storage schema while using the policy controller. Completed rows are masked
+after target conversion so binary grippers also retain measured joint holds.
 `ControllerAction` otherwise bypasses the manager for direct controller writes;
 the full loop and reset ordering are owned by
 [environment execution](../env-framework/execution.md).

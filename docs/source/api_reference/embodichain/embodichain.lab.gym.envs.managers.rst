@@ -198,15 +198,18 @@ the applied increment and both forms of limiting; resets clear selected rows.
 ``RelativeEefDlsAction`` keeps an unbounded xyz/rotation-vector request as one
 fixed arena-frame target for the control interval. It recomputes the damped
 Jacobian solve from measured joints before each physics substep and clips only
-joint-position limits. Its ``eef_pose.relative_substep_dls@1`` contract selects
+joint-position limits. It shares solver-order mapping and arena/TCP Jacobian
+adaptation with the single-step relative controller. Its ``eef_pose.relative_substep_dls@1`` contract selects
 this behavior separately from the bounded, single-step relative-pose contract.
-The unchanged physics loop remains batched for terms without substep updates.
+``EmbodiedEnv`` refreshes action terms through the batched simulation callback,
+preserving intermediate recording and visualization frames.
 
 Configure the same arm and binary gripper terms for expert and policy execution.
 Set ``env.expert_trajectory.use_action_manager: true`` to route position-only
 ``ControllerAction`` commands through ``ActionManager.process_joint_targets``.
 The DLS term retains the expert's exact FK target while recording the
 corresponding relative request, and keeps the existing expert storage schema.
+Completed demo rows retain measured joint holds after conversion and refresh.
 The default controller-ready route stays direct. Every configured term must
 support joint-target processing.
 For binary grippers, ``open_on_zero=False`` makes zero a closing request;

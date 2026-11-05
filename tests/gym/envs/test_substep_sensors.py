@@ -112,4 +112,4 @@ def test_substep_action_updates_interleave_with_physics_and_sensor_observation(
         ]
     )
     assert calls == expected
-    assert updates == ([1, 1, 1] if refreshes else [3])
+    assert updates == [3]

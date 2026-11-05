@@ -2500,12 +2500,22 @@ class EmbodiedEnv(BaseEnv):
         ]
         for sensor in sensors:
             sensor.begin_control_step()
-        for substep in range(self.cfg.sim_steps_per_control):
-            if substep:
-                manager.apply_substep_actions()
-            self.sim.update(self.physics_dt, 1, render_final_step=False)
+        substep = 0
+
+        def observe_substep(dt: float) -> None:
+            nonlocal substep
             for sensor in sensors:
-                sensor.update_physics_step(self.physics_dt)
+                sensor.update_physics_step(dt)
+            substep += 1
+            if substep < self.cfg.sim_steps_per_control:
+                manager.apply_substep_actions()
+
+        self.sim.update(
+            self.physics_dt,
+            self.cfg.sim_steps_per_control,
+            after_substep=observe_substep,
+            render_final_step=False,
+        )
 
     @property
     def last_action_trace(self) -> ActionTrace | None:
@@ -2713,7 +2723,7 @@ class EmbodiedEnv(BaseEnv):
                 self.action_manager.process_joint_targets(full_targets)
             else:
                 self.action_manager.process_action(action)
-            if getattr(self, "_demo_no_auto_reset", False) and not managed_expert:
+            if getattr(self, "_demo_no_auto_reset", False):
                 self.action_manager.mask_inactive(self._demo_active_mask)
             if self.dataset_manager is not None and not policy_recording:
                 processed_qpos = getattr(self.action_manager, "_processed_qpos", None)

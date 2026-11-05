@@ -33,6 +33,7 @@ from embodichain.lab.gym.envs.managers.actions import (
     JointPositionToLimitsAction,
     JointVelocityAction,
     ParallelGripperAction,
+    RelativeEefDlsAction,
     RelativeEefPoseAction,
     RelativeJointPositionAction,
     resolve_action_contract,
@@ -696,33 +697,66 @@ def dls_eef_env(relative_eef_env: SimpleNamespace) -> SimpleNamespace:
     env.solver = SimpleNamespace(
         joint_names=names,
         root_link_name="solver_root",
+        end_link_name="solver_tool",
         pk_serial_chain=SimpleNamespace(get_joint_parameter_names=lambda: names),
         tcp_xpos=np.eye(4),
         get_jacobian=MagicMock(return_value=jacobian),
     )
     env.robot.get_solver = MagicMock(return_value=env.solver)
     env.robot.get_link_pose = MagicMock(return_value=torch.eye(4).repeat(2, 1, 1))
+    env.robot.get_qpos_limits = lambda: env.robot.body_data.qpos_limits
+
+    def full_state_jacobian(qpos, **kwargs):
+        solver_ids = [
+            env.robot.joint_names.index(name) for name in env.solver.joint_names
+        ]
+        return env.solver.get_jacobian(qpos[:, solver_ids])
+
+    env.robot.compute_jacobian = full_state_jacobian
     env.robot.get_control_part_base_pose = MagicMock(
         return_value=torch.eye(4).repeat(2, 1, 1)
     )
     return env
 
 
+@pytest.mark.parametrize(
+    "action_type,damping",
+    [(RelativeEefPoseAction, 0.05), (RelativeEefDlsAction, 0.01)],
+)
 def test_dls_rotates_linear_and_angular_jacobian_into_arena(
     dls_eef_env: SimpleNamespace,
+    action_type: type,
+    damping: float,
 ) -> None:
     """A root rotated by pi about Z reverses both arena-X Jacobian blocks."""
     env = dls_eef_env
     env.robot.get_link_pose.return_value[:, :3, :3] = torch.diag(
         torch.tensor([-1.0, -1.0, 1.0])
     )
-    term = RelativeEefPoseAction(
-        make_cfg(RelativeEefPoseAction, part_name="arm", ik_method="dls"), env
+    env.robot.compute_fk.return_value[:, :3, :3] = torch.diag(
+        torch.tensor([-1.0, -1.0, 1.0])
+    )
+    params = (
+        {"damping": damping}
+        if action_type is RelativeEefDlsAction
+        else {"ik_method": "dls", "dls_damping": damping}
+    )
+    term = action_type(
+        make_cfg(
+            action_type,
+            part_name="arm",
+            translation_scale=0.02,
+            rotation_scale=0.10,
+            **params,
+        ),
+        env,
     )
     term.process_actions(torch.tensor([[1.0, 0, 0, 1.0, 0, 0]]).repeat(2, 1))
 
-    expected = torch.tensor([[-0.02, -0.10]]).repeat(2, 1) / (1 + 0.05**2)
-    torch.testing.assert_close(term.joint_delta, expected)
+    expected = torch.tensor([[-0.02, -0.10]]).repeat(2, 1) / (1 + damping**2)
+    torch.testing.assert_close(
+        (term.processed_actions - env.robot.get_qpos()[:, [2, 0]]), expected
+    )
     env.robot.compute_ik.assert_not_called()
     torch.testing.assert_close(
         env.solver.get_jacobian.call_args.args[0],
@@ -736,8 +770,14 @@ def test_dls_rotates_linear_and_angular_jacobian_into_arena(
     assert term.ik_success.all()
 
 
+@pytest.mark.parametrize(
+    "action_type,damping",
+    [(RelativeEefPoseAction, 0.05), (RelativeEefDlsAction, 0.01)],
+)
 def test_dls_shifts_nonzero_tcp_jacobian_without_pk_locations(
     dls_eef_env: SimpleNamespace,
+    action_type: type,
+    damping: float,
 ) -> None:
     """TCP rotation is removed before shifting the arena Jacobian to its offset."""
     env = dls_eef_env
@@ -750,16 +790,31 @@ def test_dls_shifts_nonzero_tcp_jacobian_without_pk_locations(
     env.robot.compute_fk.return_value[:, :3, :3] = torch.diag(
         torch.tensor([-1.0, -1.0, 1.0])
     )
-    term = RelativeEefPoseAction(
-        make_cfg(RelativeEefPoseAction, part_name="arm", ik_method="dls"), env
+    params = (
+        {"damping": damping}
+        if action_type is RelativeEefDlsAction
+        else {"ik_method": "dls", "dls_damping": damping}
+    )
+    term = action_type(
+        make_cfg(
+            action_type,
+            part_name="arm",
+            translation_scale=0.02,
+            rotation_scale=0.10,
+            **params,
+        ),
+        env,
     )
 
     term.process_actions(torch.tensor([[1.0, 0, 0, 0, 0, 0]]).repeat(2, 1))
 
     # End-link Rz(pi/2) puts its +X offset along arena +Y, so angular +Z
     # induces linear -X. The scalar DLS denominator includes both Jacobian rows.
-    expected = torch.tensor([[-0.2 * 0.02 / (1 + 0.2**2 + 0.05**2), 0.0]])
-    torch.testing.assert_close(term.joint_delta, expected.repeat(2, 1))
+    expected = torch.tensor([[-0.2 * 0.02 / (1 + 0.2**2 + damping**2), 0.0]])
+    torch.testing.assert_close(
+        (term.processed_actions - env.robot.get_qpos()[:, [2, 0]]),
+        expected.repeat(2, 1),
+    )
     assert env.solver.get_jacobian.call_args.kwargs == {}
     assert term.ik_success.all()
 
@@ -859,22 +914,42 @@ def test_dls_nonfinite_jacobian_holds_row_and_partial_reset_preserves_others(
         torch.testing.assert_close(getattr(term, name)[1], untouched[name])
 
 
+@pytest.mark.parametrize(
+    "action_type,damping",
+    [(RelativeEefPoseAction, 0.05), (RelativeEefDlsAction, 0.01)],
+)
 def test_dls_maps_joint_order_between_selected_joints_and_solver_chain(
     dls_eef_env: SimpleNamespace,
+    action_type: type,
+    damping: float,
 ) -> None:
     """A permuted configured selection cannot change Jacobian column semantics."""
     env = dls_eef_env
     names = ("joint_0", "joint_2")
     env.solver.joint_names = names
     env.solver.pk_serial_chain.get_joint_parameter_names = lambda: names
-    term = RelativeEefPoseAction(
-        make_cfg(RelativeEefPoseAction, part_name="arm", ik_method="dls"), env
+    params = (
+        {"damping": damping}
+        if action_type is RelativeEefDlsAction
+        else {"ik_method": "dls", "dls_damping": damping}
+    )
+    term = action_type(
+        make_cfg(
+            action_type,
+            part_name="arm",
+            translation_scale=0.02,
+            rotation_scale=0.10,
+            **params,
+        ),
+        env,
     )
     term.process_actions(torch.tensor([[1.0, 0, 0, 0, 0, 0]]).repeat(2, 1))
     term.apply_actions()
 
-    expected = torch.tensor([[0.0, 0.02]]).repeat(2, 1) / (1 + 0.05**2)
-    torch.testing.assert_close(term.joint_delta, expected)
+    expected = torch.tensor([[0.0, 0.02]]).repeat(2, 1) / (1 + damping**2)
+    torch.testing.assert_close(
+        (term.processed_actions - env.robot.get_qpos()[:, [2, 0]]), expected
+    )
     torch.testing.assert_close(
         env.robot.compute_fk.call_args.kwargs["qpos"],
         torch.tensor([[0.1, 0.3], [0.4, 0.6]]),
@@ -889,32 +964,56 @@ def test_dls_maps_joint_order_between_selected_joints_and_solver_chain(
 @pytest.mark.parametrize(
     "names", [None, ("joint_0", "unknown"), ("joint_0", "joint_0")]
 )
-@pytest.mark.parametrize("ik_method", ["solver", "dls"])
+@pytest.mark.parametrize(
+    "action_type,ik_method",
+    [
+        (RelativeEefPoseAction, "solver"),
+        (RelativeEefPoseAction, "dls"),
+        (RelativeEefDlsAction, None),
+    ],
+)
 def test_dls_rejects_unknown_or_ambiguous_solver_joint_order(
     dls_eef_env: SimpleNamespace,
     names: tuple[str, ...] | None,
-    ik_method: str,
+    action_type: type,
+    ik_method: str | None,
 ) -> None:
     dls_eef_env.solver.joint_names = names
     with pytest.raises(ValueError, match="joint_names"):
-        RelativeEefPoseAction(
-            make_cfg(RelativeEefPoseAction, part_name="arm", ik_method=ik_method),
+        action_type(
+            make_cfg(
+                action_type,
+                part_name="arm",
+                **({"ik_method": ik_method} if ik_method else {}),
+            ),
             dls_eef_env,
         )
 
 
-@pytest.mark.parametrize("ik_method", ["solver", "dls"])
+@pytest.mark.parametrize(
+    "action_type,ik_method",
+    [
+        (RelativeEefPoseAction, "solver"),
+        (RelativeEefPoseAction, "dls"),
+        (RelativeEefDlsAction, None),
+    ],
+)
 def test_dls_rejects_configured_names_that_disagree_with_chain_order(
     dls_eef_env: SimpleNamespace,
-    ik_method: str,
+    action_type: type,
+    ik_method: str | None,
 ) -> None:
     dls_eef_env.solver.pk_serial_chain.get_joint_parameter_names = lambda: (
         "joint_0",
         "joint_2",
     )
     with pytest.raises(ValueError, match="kinematic chain order"):
-        RelativeEefPoseAction(
-            make_cfg(RelativeEefPoseAction, part_name="arm", ik_method=ik_method),
+        action_type(
+            make_cfg(
+                action_type,
+                part_name="arm",
+                **({"ik_method": ik_method} if ik_method else {}),
+            ),
             dls_eef_env,
         )
 
@@ -989,20 +1088,19 @@ def test_relative_eef_solver_maps_fk_seed_and_returned_joint_order(
 
 @pytest.mark.parametrize("batch", [1, 8, 32])
 def test_substep_dls_preserves_unbounded_targets_and_expert_conversion(batch):
-    """Expert and policy requests follow the same held-pose DLS trajectory."""
+    """An identity Jacobian gives a closed-form held-target controller step."""
     from scipy.spatial.transform import Rotation
-    from embodichain.lab.gym.envs.managers.actions import RelativeEefDlsAction
 
     qpos = torch.zeros(batch, 7)
     qpos[:, :3] = torch.tensor([0.2, -0.1, 0.3])
     limits = torch.tensor([-3.0, 3.0]).expand(batch, 7, 2).clone()
     jacobian = torch.eye(6, 7).expand(batch, 6, 7).clone()
 
-    def fk(values, *, name, to_matrix):
+    def fk(qpos, *, name, to_matrix):
         pose = torch.eye(4).repeat(batch, 1, 1)
-        pose[:, :3, 3] = values[:, :3]
+        pose[:, :3, 3] = qpos[:, :3]
         pose[:, :3, :3] = torch.tensor(
-            Rotation.from_rotvec(values[:, 3:6].numpy()).as_matrix(), dtype=values.dtype
+            Rotation.from_rotvec(qpos[:, 3:6].numpy()).as_matrix(), dtype=qpos.dtype
         )
         return pose
 
@@ -1013,62 +1111,68 @@ def test_substep_dls_preserves_unbounded_targets_and_expert_conversion(batch):
         get_qpos_limits=lambda: limits,
         compute_fk=fk,
         compute_jacobian=lambda values, **kwargs: jacobian,
+        get_link_pose=lambda **kwargs: torch.eye(4).repeat(batch, 1, 1),
         get_solver=lambda part: SimpleNamespace(
-            end_link_name="tool", root_link_name="base"
+            joint_names=tuple(f"joint{i}" for i in range(7)),
+            end_link_name="tool",
+            root_link_name="base",
+            tcp_xpos=np.eye(4),
+            get_jacobian=lambda values: jacobian,
         ),
         set_qpos=lambda **kwargs: None,
     )
     env = SimpleNamespace(num_envs=batch, device="cpu", robot=robot)
     term = RelativeEefDlsAction(make_cfg(RelativeEefDlsAction, part_name="arm"), env)
-    action = torch.tensor([1.5, -1.2, 0.1, 0.2, -0.1, 0.3]).expand(batch, 6).clone()
-    current = fk(qpos, name="arm", to_matrix=True)
-    target = current.clone()
-    target[:, :3, 3] += action[:, :3] * 0.5
-    target[:, :3, :3] = (
-        torch.tensor(
-            Rotation.from_rotvec((action[:, 3:] * 0.5).numpy()).as_matrix(),
-            dtype=qpos.dtype,
-        )
-        @ current[:, :3, :3]
-    )
+    action = torch.tensor([1.5, -1.2, 0.1, 0.2, 0.0, 0.0]).expand(batch, 6).clone()
     planned = qpos.clone()
-    planned[:, :3] = target[:, :3, 3]
-    planned[:, 3:6] = torch.tensor(
-        Rotation.from_matrix(target[:, :3, :3].numpy()).as_rotvec(), dtype=qpos.dtype
-    )
+    planned[:, :6] += action * 0.5
     term.process_joint_targets(planned)
     torch.testing.assert_close(term.raw_actions, action)
-    target = fk(planned, name="arm", to_matrix=True)
+    expert_commands = term.processed_actions.clone()
+    term.process_actions(action)
+    torch.testing.assert_close(term.processed_actions, expert_commands)
     assert np.isinf(term.action_space.high).all()
     for _ in range(5):
-        pose = fk(qpos, name="arm", to_matrix=True)
-        error = torch.cat(
-            (
-                target[:, :3, 3] - pose[:, :3, 3],
-                torch.tensor(
-                    Rotation.from_matrix(
-                        (target[:, :3, :3] @ pose[:, :3, :3].mT).numpy()
-                    ).as_rotvec(),
-                    dtype=qpos.dtype,
-                ),
-            ),
-            -1,
-        )
-        expected = (
-            qpos
-            + (
-                jacobian.mT
-                @ torch.linalg.solve(
-                    jacobian @ jacobian.mT + 0.01**2 * torch.eye(6), error.unsqueeze(-1)
-                )
-            ).squeeze(-1)
-        ).clamp(limits[..., 0], limits[..., 1])
+        expected = qpos.clone()
+        expected[:, :6] += (planned[:, :6] - qpos[:, :6]) / (1 + 0.01**2)
         term.update_substep()
-        torch.testing.assert_close(term.processed_actions, expected, rtol=0, atol=0)
+        torch.testing.assert_close(term.processed_actions, expected, rtol=0, atol=1e-6)
         qpos.copy_(qpos + 0.2 * (expected - qpos))
     preserved = term.raw_actions[1:].clone()
     term.reset([0])
     torch.testing.assert_close(term.raw_actions[1:], preserved)
+
+
+def test_substep_dls_expert_targets_preserve_solver_and_selected_joint_order(
+    dls_eef_env: SimpleNamespace,
+) -> None:
+    """Named FK consumes solver order and joint commands retain configured order."""
+    env = dls_eef_env
+    names = ("joint_0", "joint_2")
+    env.solver.joint_names = names
+    env.solver.pk_serial_chain.get_joint_parameter_names = lambda: names
+
+    def fk(qpos, *, name, to_matrix):
+        pose = torch.eye(4).repeat(2, 1, 1)
+        pose[:, 0, 3] = qpos[:, 0]
+        pose[:, 2, 3] = qpos[:, 1]
+        return pose
+
+    env.robot.compute_fk.side_effect = fk
+    term = RelativeEefDlsAction(make_cfg(RelativeEefDlsAction, part_name="arm"), env)
+    planned = env.robot.get_qpos().clone()
+    planned[:, 0] += 0.05
+    planned[:, 2] += 0.02
+    term.process_joint_targets(planned)
+
+    torch.testing.assert_close(
+        term.raw_actions, torch.tensor([[0.1, 0.0, 0.04, 0.0, 0.0, 0.0]]).repeat(2, 1)
+    )
+    expected = env.robot.get_qpos()[:, [2, 0]].clone()
+    expected[:, 1] += 0.05 / (1 + 0.01**2)
+    torch.testing.assert_close(term.processed_actions, expected)
+    term.apply_actions()
+    assert env.robot.set_qpos.call_args.kwargs["joint_ids"] == [2, 0]
 
 
 def test_binary_gripper_conversion_preserves_closed_zero_boundary():

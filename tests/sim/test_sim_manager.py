@@ -1593,6 +1593,43 @@ def test_final_substep_consumers_share_publication(camera, record, viser):
     assert len(runtime.capture_calls) == (3 if viser else 0)
 
 
+def test_embodied_substep_actions_preserve_intermediate_window_frames():
+    """Action refresh keeps physics-rate recording without extra camera captures."""
+    from embodichain.lab.gym.envs import EmbodiedEnv
+
+    sim, _, state, publications, rendered = _make_render_frame_sim()
+    sim._window_record_state = _WindowRecordState(
+        time_step=0.01,
+        max_memory_bytes=1024,
+        output_dir="unused",
+        video_name="unused",
+        save_kwargs={},
+        capture_from_sim_update=True,
+    )
+    recorded = []
+    refreshed = []
+    sim._capture_window_record_frame = lambda _: recorded.append(state["published"])
+    env = EmbodiedEnv.__new__(EmbodiedEnv)
+    env.cfg = SimpleNamespace(sim_steps_per_control=3)
+    env.sim_cfg = SimpleNamespace(physics_dt=0.01)
+    env.sim = sim
+    env.sensors = {}
+    env._step_uses_action_manager = True
+    env.action_manager = SimpleNamespace(
+        requires_substep_update=True,
+        apply_substep_actions=lambda: refreshed.append(state["value"]),
+    )
+
+    env._advance_physics()
+    with sim.render_frame():
+        sim.render_camera_group([3])
+
+    assert recorded == [1, 2, 3]
+    assert publications == [1, 2, 3]
+    assert rendered == [3]
+    assert refreshed == [1, 2]
+
+
 def test_render_frames_and_independent_reads_refresh_direct_state_writes():
     sim, _, state, publications, rendered = _make_render_frame_sim()
     for value in (4, 7):

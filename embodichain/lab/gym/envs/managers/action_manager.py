@@ -220,7 +220,12 @@ class ActionManager(ManagerBase):
         """Whether any term refreshes its command between physics substeps."""
         return bool(self._substep_terms)
 
-    def _validate_joint_targets(self, qpos: torch.Tensor) -> None:
+    def process_joint_targets(self, qpos: torch.Tensor) -> None:
+        """Process expert targets while preserving exact FK target poses.
+
+        Args:
+            qpos: Finite full-joint position targets on the environment device.
+        """
         expected = self._env.robot.get_qpos().shape
         if (
             not isinstance(qpos, torch.Tensor)
@@ -233,13 +238,6 @@ class ActionManager(ManagerBase):
                 f"Expected finite joint targets with shape {expected} on {self._env.device}."
             )
 
-    def process_joint_targets(self, qpos: torch.Tensor) -> None:
-        """Process expert targets while preserving exact FK target poses.
-
-        Args:
-            qpos: Finite full-joint position targets on the environment device.
-        """
-        self._validate_joint_targets(qpos)
         self._previous_action.copy_(self._action)
         self._substep_active_mask = None
         for term in self._terms.values():

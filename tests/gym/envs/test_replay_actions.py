@@ -422,37 +422,53 @@ def test_kinematic_task_replay_does_not_claim_measured_goal_acceptance():
 def test_expert_opt_in_uses_policy_controller_with_full_joint_target(
     completed: bool,
 ) -> None:
-    from unittest.mock import MagicMock
-    from embodichain.lab.gym.envs.expert_trajectory import ExpertTrajectoryCfg
-
-    env = _ReplayEnv(num_envs=1)
-    env._demo_no_auto_reset = completed
-    env._demo_active_mask = torch.tensor([not completed])
+    """Converted expert targets keep measured holds on completed demo rows."""
     from types import MethodType
+    from unittest.mock import MagicMock
 
+    from embodichain.lab.gym.envs.expert_trajectory import ExpertTrajectoryCfg
+    from embodichain.lab.gym.envs.managers import (
+        ActionManager,
+        ActionTermCfg,
+        ParallelGripperAction,
+    )
+
+    env = _ReplayEnv(num_envs=2)
+    env._demo_no_auto_reset = True
+    env._demo_active_mask = torch.tensor([not completed, True])
     env._mask_controller_demo_action = MethodType(
         EmbodiedEnv._mask_controller_demo_action, env
     )
     env.cfg = SimpleNamespace(
         expert_trajectory=ExpertTrajectoryCfg(use_action_manager=True)
     )
-    manager = SimpleNamespace(
-        process_joint_targets=MagicMock(),
-        apply_action=MagicMock(),
-        action_trace=lambda: None,
-        action=torch.zeros(1, 7),
+    measured = torch.tensor([[0.0, 0.015, 0.025], [0.0, 0.01, 0.02]])
+    env.robot.get_qpos = lambda: measured
+    env.robot.get_joint_ids = lambda part, **kwargs: [1, 2]
+    env.robot.body_data = SimpleNamespace(
+        qpos_limits=torch.tensor([[[-1.0, 1.0], [0.0, 0.04], [0.0, 0.04]]])
     )
-    env.action_manager = manager
-    prepared = env._preprocess_action(ControllerAction(torch.tensor([[0.2, 0.3]])))
-    manager.process_joint_targets.assert_called_once()
-    torch.testing.assert_close(
-        manager.process_joint_targets.call_args.args[0],
-        (
-            torch.tensor([[0.0, 0.0, 0.0]])
-            if completed
-            else torch.tensor([[0.0, 0.2, 0.3]])
-        ),
+    env.robot.set_qpos = MagicMock()
+    env.action_manager = ActionManager(
+        {
+            "gripper": ActionTermCfg(
+                func=ParallelGripperAction,
+                params={
+                    "part_name": "hand",
+                    "command_mode": "binary",
+                    "open_command": {"elbow": 0.04, "wrist": 0.04},
+                    "close_command": {"elbow": 0.0, "wrist": 0.0},
+                },
+            )
+        },
+        env,
     )
+    requested = torch.full((2, 2), 0.04)
+    prepared = env._preprocess_action(ControllerAction(requested))
     env._step_action(prepared)
-    manager.apply_action.assert_called_once()
+    expected = requested.clone()
+    if completed:
+        expected[0] = measured[0, 1:]
+    torch.testing.assert_close(env.robot.set_qpos.call_args.kwargs["qpos"], expected)
+    torch.testing.assert_close(prepared.value, expected)
     assert env._step_uses_action_manager
