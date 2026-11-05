@@ -40,12 +40,16 @@ embodichain.compute.trajectory.limits
 Per-environment sampled joint-speed checks with explicit arrival intervals.
 The result checks finite positions and declared speeds; it does not establish
 continuous collision freedom or acceleration compliance.
+``joint_velocity_diagnostics`` retains the worst row, interval, joint and
+original operands, representing nonfinite ratios as None. These diagnostics
+do not make an invalid trajectory valid.
 
 .. currentmodule:: embodichain.compute.trajectory.limits
 
 .. autosummary::
 
    joint_velocity_validity
+   joint_velocity_diagnostics
 
 embodichain.data
 ----------------

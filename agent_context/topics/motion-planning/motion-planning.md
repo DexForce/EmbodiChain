@@ -80,6 +80,14 @@ Failed execution rows hold their start. `PlanResult.rejected_candidate` retains
 owned original positions, intervals and rejected-row identities for retries and
 audit; checking the zero-speed hold is not evidence that the candidate passed.
 
+`compute.trajectory.interpolation.interpolate_velocity_grid` allocates fixed
+B=1 joint-edge intervals from explicit speed caps. It preserves ordered mandatory
+endpoints and requested sample count, rejecting insufficient duration instead of
+retiming. The `limits.joint_velocity_diagnostics` companion reports the worst
+frame/joint operands with nonfinite values represented as None; it does not
+replace or weaken the existing validity mask. Ordinary interpolation remains
+unchanged unless callers explicitly choose the fixed-count helper.
+
 The bounded `resolve_continuous_ik_path()` adapter preserves a single path's
 time grid and restores the caller's random stream. Its numerical seed search
 accepts only B=1 and performs no simulation or state mutation.
