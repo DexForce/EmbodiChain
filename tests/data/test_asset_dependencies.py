@@ -362,3 +362,20 @@ def test_usdz_inventory_hashes_the_outer_package_for_contained_assets(tmp_path):
     package = tmp_path / "model.usdz"
     assert UsdUtils.CreateNewUsdzPackage(Sdf.AssetPath(str(root)), str(package))
     assert asset_dependency_files(package) == (package,)
+
+
+def test_explicit_urdf_collision_consumer_does_not_read_visual_or_other_links(tmp_path):
+    mesh = tmp_path / "selected.obj"
+    mesh.write_text("v 0 0 0\n")
+    source = tmp_path / "model.urdf"
+    source.write_text(
+        '<robot><link name="selected"><visual><geometry><mesh filename="missing_visual.dae"/></geometry></visual><collision><geometry><mesh filename="selected.obj"/></geometry></collision></link><link name="unused"><collision><geometry><mesh filename="missing_other.stl"/></geometry></collision></link></robot>'
+    )
+    assert set(asset_dependency_files(source, urdf_collision_links=["selected"])) == {
+        source,
+        mesh,
+    }
+    with pytest.raises(FileNotFoundError):
+        asset_dependency_files(source)
+    with pytest.raises(ValueError, match="exact existing links"):
+        asset_dependency_files(source, urdf_collision_links=["missing"])
