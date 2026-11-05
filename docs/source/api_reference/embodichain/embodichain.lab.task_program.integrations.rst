@@ -24,6 +24,7 @@ embodichain.lab.task_program.integrations
       CuroboParallelCommandSafetyValidator, CuroboParallelSafetyValidatorFactory,
       SimulationSegmentPolicyPort, create_simulation_task_program_adapter,
       InvocationPolicyBinding, BoundInvocationPolicies, task_program_fingerprint,
+      PostPolicyPresetBinding, BoundPostPolicyPresets,
 
       ConfiguredTaskProgramDeployment, ConfiguredTaskProgramIntegration,
       load_configured_task_program_deployment
@@ -33,6 +34,8 @@ embodichain.lab.task_program.integrations
       AntipodalGraspAffordanceBinding
       InvocationPolicyBinding
       BoundInvocationPolicies
+      PostPolicyPresetBinding
+      BoundPostPolicyPresets
       task_program_fingerprint
       ConfiguredHandOverPoseProvider
       ConfiguredTaskProgramDeployment
