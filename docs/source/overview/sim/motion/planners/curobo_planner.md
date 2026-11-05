@@ -169,11 +169,18 @@ second CUDA context.
 
 ## Collision world
 
-:::{warning}
-cuRobo self-collision checking is temporarily disabled in this backend.
-Robot-to-world collision checking remains enabled, but planned trajectories
-are not currently rejected when two robot links collide with each other.
-:::
+Native cuRobo self-collision checking is enabled by default in both planning
+and exact joint-trajectory validation. Generated robot models include padding
+and mechanical adjacency exemptions. `CuroboAutoGenCfg.self_collision_ignore`
+can supply a complete authored exemption table, and `self_collision_buffer`
+sets nonnegative shared or per-link padding. Runtime loading preserves authored
+maps, and failed sphere fitting rejects an incomplete model.
+
+`CuroboPlannerCfg.self_collision_check=False` explicitly disables the native
+self-collision cost while keeping robot-to-world collision checks enabled.
+This setting also applies to exact trajectory validation. Existing generated
+model caches are rebuilt for the updated collision contract. Attached payloads
+can declare `CuroboPayload.touch_links`; other robot links remain checked.
 
 The adapter automatically rebases simulator-world Cartesian goals and dynamic
 obstacle poses through the live simulator control-part base, so parallel arena
