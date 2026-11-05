@@ -160,3 +160,23 @@ def test_measurements_equal_frozen_b0_rows_and_transformed_frames():
                 strict=True,
             )
         ] == case["accepted"]
+
+
+def test_planar_source_snapshot_and_content_capture_keep_original_owners():
+    from embodichain.lab.sim.scene.planar_observation import capture_planar_contents
+
+    natives = {
+        "floor": _native(trimesh.creation.box((0.6, 0.4, 0.02))),
+        "object": _native(trimesh.creation.box((0.03, 0.03, 0.06))),
+    }
+    simulation = SimpleNamespace(num_envs=1, get_rigid_object=natives.get)
+    observer = NativePlanarPlacement(simulation, "object", "floor", batch_size=1)
+    vertices, floors = observer.source_geometry()
+    vertices.fill_(100.0)
+    second, again = observer.source_geometry()
+    assert float(second.abs().max()) < 1.0 and floors[0][0].equals(again[0][0])
+    content = capture_planar_contents(simulation, (("logical", "object"),))
+    assert content[0][0] == "logical" and content[0][1].shape == (8, 3)
+    natives["object"] = _native(trimesh.creation.box())
+    with pytest.raises(ValueError, match="native bindings"):
+        observer.source_geometry()

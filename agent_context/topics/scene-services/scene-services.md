@@ -90,9 +90,12 @@ sidecars. Source mesh proofs do not certify native cooked shapes or paths.
 recreate it after replacing either object or changing its model/scale. Queries
 take explicit observed poses and return footprint containment, area and vertical
 gap, without accepting a task or inferring contact support. Exact silhouette mode
-retains concavities and holes; convex-hull mode remains explicit. Acquisition
-errors remain unavailable evidence. Callers own thresholds, invocation/episode
-association, observation timing and evidence publication.
+retains concavities and holes; convex-hull mode remains explicit. `source_geometry()` returns independent subject vertices and floor copies after
+checking the original bindings. `capture_planar_contents` reads explicitly ordered
+logical/native rigid contents at B=1; both supply geometry without reading poses
+or certifying retention. Acquisition errors remain unavailable evidence. Callers
+own thresholds, invocation/episode association, observation timing and evidence
+publication.
 
 `mesh_snapshot.py` captures scaled rigid visual vertices and ordered articulation
 collision-input components from explicit UID/link mappings. It reads no live

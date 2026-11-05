@@ -705,3 +705,17 @@ allowance are explicit; missing FCL or unavailable geometry raises.
 .. currentmodule:: embodichain.lab.sim.scene.convex_clearance
 
 .. autofunction:: convex_input_clearance
+
+Owned planar proposal inputs
+---------------------------
+
+``NativePlanarPlacement.source_geometry()`` returns independent scaled subject
+vertices and per-row planar floor copies for numeric proposal generation. It
+checks the original physical object bindings without reading live poses.
+``capture_planar_contents`` reads explicit source-ordered rigid-object vertices
+for B=1 consumers. These snapshots do not establish containment, retention or
+physical task success; projection uses the caller's current observed poses.
+
+.. currentmodule:: embodichain.lab.sim.scene.planar_observation
+
+.. autofunction:: capture_planar_contents
