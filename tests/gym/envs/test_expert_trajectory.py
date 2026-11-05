@@ -218,3 +218,11 @@ def test_expert_action_encoding_rejects_nonfinite_targets() -> None:
 
     with pytest.raises(ValueError, match="finite"):
         encode_expert_action(action, spec=spec, active_joint_ids=[0])
+
+
+def test_expert_action_manager_route_requires_position_targets() -> None:
+    assert ExpertTrajectoryCfg(use_action_manager=True).use_action_manager
+    with pytest.raises(ValueError, match="position-only"):
+        ExpertTrajectoryCfg(
+            joint_command_mode="position_velocity", use_action_manager=True
+        )

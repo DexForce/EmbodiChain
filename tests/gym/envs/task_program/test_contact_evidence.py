@@ -252,10 +252,31 @@ def test_sampler_owns_masked_frames_in_requested_environment_order():
         == [[True, True, False, False]] * 2
     )
     assert all(batch.valid.all() for batch in sample.frame.batches.values())
+    sample.frame.batches[CONTACT_NORMALS].env_ids[0] = 1
+    assert sample.frame.get(CONTACT_IMPULSES).env_ids.tolist() == [2, 0]
+    assert sample.frame.env_ids.tolist() == [2, 0]
+    sample.frame.batches[CONTACT_NORMALS].env_ids[0] = 2
     old = sample.frame.get(CONTACT_NORMALS).values.clone()
     source.data["normal"].zero_()
     assert torch.equal(sample.frame.get(CONTACT_NORMALS).values, old)
+    request.env_ids[0] = 1
+    assert sample.frame.env_ids.tolist() == [2, 0]
+    sample.frame.env_ids[0] = 99
+    assert sample.frame.batches[CONTACT_NORMALS].env_ids.tolist() == [2, 0]
+    sample.frame.env_ids[0] = 2
+    sample.frame.batches[CONTACT_NORMALS].values[0, 0, 0] = float("nan")
+    with pytest.raises(ValueError, match="finite"):
+        sample.frame.snapshot()
     assert source.update_count == 1
+
+
+def test_sampler_revalidates_request_scope_before_touching_the_source():
+    source = ContactSource(count=3)
+    request = PhysicalEvidenceRequest(2.0, 7, torch.tensor([2, 0]))
+    request.env_ids[1] = 2
+    with pytest.raises(ValueError, match="unique"):
+        ContactEvidenceSampler(source).sample(request)
+    assert source.update_count == 0
 
 
 @pytest.mark.parametrize(
@@ -509,27 +530,25 @@ def test_empty_contact_timeline_does_not_retain_sensor_padding():
 
 
 def test_public_base_env_step_drives_actual_sensor_observer_port():
-    source = ContactSource()
-    clock = SimpleNamespace(step_index=0)
-    sensor = ContactSensor.__new__(ContactSensor)
-    sensor._sample_ready_stream = None
-    sensor._last_update_key = None
-    sensor._last_history_key = None
-    sensor._last_contact_buffer = None
-    sensor.device = torch.device("cpu")
-    sensor._entities = [None]
-    sensor._num_instances = 1
-    sensor._query = SimpleNamespace(
-        capabilities=source.contact_capabilities, actors=(), selected_actor_ids=()
+    from importlib.util import module_from_spec, spec_from_file_location
+    from pathlib import Path
+
+    # Reuse the complete real-sensor fixture rather than mirror its private buffers.
+    fixture_path = (
+        Path(__file__).parents[3] / "sim/sensors/test_contact_query_sensor.py"
     )
-    sensor._data_buffer = source.data
-    sensor._histories = {}
-    sensor._sampling_observers = {}
-    sensor._query_dropped_count = torch.zeros(1, dtype=torch.int32)
-    sensor._scatter_dropped_count = torch.zeros(1, dtype=torch.int32)
+    spec = spec_from_file_location("contact_query_fixture", fixture_path)
+    fixture = module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    _FakeQuery, _sensor_for_query = fixture._FakeQuery, fixture._sensor_for_query
+    import warp as wp
+
+    wp.init()
+    source = ContactSource()
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    clock = SimpleNamespace(step_index=0)
     sampled = []
-    sensor._read_contacts = lambda: object()
-    sensor._sample_physics_contacts = lambda buffer, dt: sampled.append(dt)
     sampler = ContactEvidenceSampler(
         sensor,
         native_revision_reader=lambda: source.revision,
@@ -546,7 +565,10 @@ def test_public_base_env_step_drives_actual_sensor_observer_port():
 
     sensor.update = forbid_refresh
     sensor.add_sampling_observer("physical_contacts", timeline)
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
     env = BaseEnv.__new__(BaseEnv)
+    env.episode_context = EpisodeContext(1)
     env.cfg = SimpleNamespace(sim_steps_per_control=4)
     env.sim_cfg = SimpleNamespace(physics_dt=0.01)
     env.sensors = {"contacts": sensor}
@@ -554,14 +576,12 @@ def test_public_base_env_step_drives_actual_sensor_observer_port():
     def update(dt, steps, **kwargs):
         for step in range(steps):
             source.revision += 1
-            env.sim.physics_step_index += 1
-            source.data["impulse"].fill_((step + 1) * 0.01)
+            query.buffer.data[:2, 9].fill_((step + 1) * 0.01)
+            sensor._sim.physics_step_index += 1
+            sampled.append(dt)
             kwargs["after_substep"](dt)
 
-    env.sim = SimpleNamespace(
-        update=update, render_frame=lambda: nullcontext(), physics_step_index=0
-    )
-    sensor._sim = env.sim
+    env.sim = SimpleNamespace(update=update, render_frame=lambda: nullcontext())
     env._profiler = SimpleNamespace(section=lambda *args, **kwargs: nullcontext())
     env._elapsed_steps = torch.zeros(1, dtype=torch.long)
     for name in ("_preprocess_action", "_step_action", "_postprocess_action"):
@@ -848,15 +868,13 @@ def test_timeline_reset_matches_sensor_indices_without_double_generation(
     before = timeline.snapshot()
     sensor = ContactSensor.__new__(ContactSensor)
     sensor._sample_ready_stream = None
-    sensor._last_update_key = None
-    sensor._last_history_key = None
-    sensor._last_contact_buffer = None
     sensor.device = torch.device("cpu")
     sensor._data_buffer = source.data
     sensor._num_contacts_per_env = source.data["is_valid"].sum(1).to(torch.int32)
     sensor._query_dropped_count = torch.zeros(1, dtype=torch.int32)
     sensor._scatter_dropped_count = torch.zeros(3, dtype=torch.int32)
     sensor._sample_scatter_dropped_count = torch.zeros(3, dtype=torch.int32)
+    sensor._latest_contact_buffer = None
     sensor._histories = {}
     sensor._sampling_observers = {}
     sensor.add_sampling_observer("timeline", timeline)
@@ -921,3 +939,193 @@ def test_custom_source_latest_loss_fallback_retains_unavailable_evidence(loss):
     )
     assert sample.frame.get(CONTACT_NORMALS).valid.tolist() == [False]
     assert sample.frame.get(CONTACT_NORMALS).acquisition_errors[0]
+
+
+def test_optional_contact_distances_preserve_default_channels_and_row_validity():
+    from embodichain.lab.sim.sensors.contact.sampling import (
+        CONTACT_DISTANCES,
+        CONTACT_POSITIONS,
+        DEFAULT_CHANNELS,
+    )
+
+    source = ContactSource(count=2, capacity=3)
+    sampler = ContactEvidenceSampler(source)
+    default = sampler.sample(PhysicalEvidenceRequest(1.0, 1, torch.tensor([1, 0])))
+    assert tuple(default.frame.batches) == DEFAULT_CHANNELS
+    assert len(DEFAULT_CHANNELS) == 5
+    assert all(batch.valid.all() for batch in default.frame.batches.values())
+    missing = sampler.sample(
+        PhysicalEvidenceRequest(
+            1.0,
+            2,
+            torch.tensor([1, 0]),
+            (CONTACT_POSITIONS, CONTACT_DISTANCES),
+        )
+    )
+    assert missing.frame.get(CONTACT_POSITIONS).valid.all()
+    assert missing.frame.get(CONTACT_DISTANCES).valid.tolist() == [False, False]
+    assert all(missing.frame.get(CONTACT_DISTANCES).acquisition_errors)
+    source.data["distance"] = torch.tensor(
+        [
+            [-0.001, 0.002, float("nan")],
+            [float("nan"), 0.004, float("nan")],
+        ]
+    )
+    sampled = sampler.sample(
+        PhysicalEvidenceRequest(
+            2.0,
+            3,
+            torch.tensor([1, 0]),
+            (CONTACT_DISTANCES,),
+        )
+    )
+    distance = sampled.frame.get(CONTACT_DISTANCES)
+    assert distance.valid.tolist() == [False, True]
+    assert distance.values[1].tolist() == pytest.approx([-0.001, 0.002, 0.0])
+    assert distance.values.device == sampled.frame.env_ids.device
+    source.data["distance"].zero_()
+    assert distance.values[1, 0] == pytest.approx(-0.001)
+    assert source.update_count == 3
+
+
+def test_joint_contact_observer_reuses_substep_sample_and_owns_window_records():
+    from embodichain.lab.sim.sensors.contact import (
+        JointContactObserver,
+    )
+    from embodichain.lab.sim.sensors.contact.sampling import CONTACT_DISTANCES
+
+    source = ContactSource(capacity=5)
+    source.data["distance"] = torch.tensor([[-0.001, 0.002, float("nan"), 0.0, 0.0]])
+    qpos, qvel = torch.tensor([0.12]), torch.tensor([0.01])
+    clock = [0.0]
+    observer = JointContactObserver(
+        ContactEvidenceSampler(source),
+        lambda: qpos,
+        lambda: clock[0],
+        joint_velocity=lambda: qvel,
+    )
+    generation = observer.begin_window("prepare")
+    observer.capture(refresh=True)
+    initial = observer.snapshot()[0]
+    assert source.update_count == 1
+    observer.set_phase("twist")
+    token = observer.before_sample()
+    clock[0] = 0.004
+    qpos[0] = 0.13
+    observer.after_sample(0.004, token)
+    records = observer.snapshot()
+    assert len(records) == 2
+    assert len(observer.snapshot(1)) == 1
+    assert observer.snapshot(2) == ()
+    with pytest.raises(ValueError, match="window prefix"):
+        observer.snapshot(-1)
+    assert [record.phase for record in records] == ["prepare", "twist"]
+    assert records[-1].frame.timestamp == 0.004
+    assert records[-1].frame.observation_revision == 2
+    assert records[-1].frame.get(
+        "articulation.joint_position"
+    ).values.tolist() == pytest.approx([0.13])
+    assert initial.frame.get(
+        "articulation.joint_position"
+    ).values.tolist() == pytest.approx([0.12])
+    assert records[-1].frame.get(CONTACT_DISTANCES).values.tolist()[0] == pytest.approx(
+        [-0.001, 0.002]
+    )
+    assert source.update_count == 1
+    records[-1].frame.batches["articulation.joint_position"].values.fill_(100)
+    assert observer.snapshot()[-1].frame.get("articulation.joint_position").values[
+        0
+    ] == pytest.approx(0.13)
+    with pytest.raises(ValueError, match="consecutive substeps"):
+        observer.after_sample(0.004, observer.before_sample())
+    observer.reset([])
+    assert observer.generation == generation
+    observer.begin_window("next", max_samples=1)
+    observer.after_sample(0.004, token)
+    assert observer.snapshot() == ()
+    observer.capture(refresh=True)
+    observer.capture(refresh=True)
+    assert len(observer.snapshot()) == 1
+    assert observer.overflow
+    assert source.update_count == 2
+    late = observer.before_sample()
+    observer.close()
+    observer.after_sample(0.004, late)
+    assert source.update_count == 2
+
+
+def test_joint_contact_channels_keep_missing_and_nonfinite_observations_unavailable():
+    from embodichain.lab.sim.sensors.contact import (
+        JointContactObserver,
+    )
+    from embodichain.lab.sim.sensors.contact.sampling import CONTACT_DISTANCES
+
+    source = ContactSource()
+    observer = JointContactObserver(
+        ContactEvidenceSampler(source),
+        lambda: torch.tensor([float("nan")]),
+        lambda: 1.0,
+    )
+    observer.begin_window("press")
+    observer.capture(refresh=True)
+    record = observer.snapshot()[0]
+    assert not record.frame.get("articulation.joint_position").valid.any()
+    assert not record.frame.get(CONTACT_DISTANCES).valid.any()
+    assert record.frame.get(CONTACT_NORMALS).valid.all()
+    with pytest.raises(ValueError, match="B=1"):
+        JointContactObserver(
+            ContactEvidenceSampler(ContactSource(count=2)),
+            lambda: torch.zeros(2),
+            lambda: 1.0,
+        )
+
+
+@pytest.mark.parametrize("change", ["window", "clock"])
+def test_joint_contact_observer_rejects_changed_window_or_clock_during_acquisition(
+    change,
+):
+    from embodichain.lab.sim.sensors.contact import (
+        JointContactObserver,
+    )
+
+    source = ContactSource()
+    holder, clock = [], [1.0]
+
+    def read_joint():
+        if change == "window":
+            holder[0].begin_window("replacement")
+        else:
+            clock[0] += 0.004
+        return torch.zeros(1)
+
+    observer = JointContactObserver(
+        ContactEvidenceSampler(source), read_joint, lambda: clock[0]
+    )
+    holder.append(observer)
+    observer.begin_window("original")
+    message = "window changed" if change == "window" else "Simulation time changed"
+    with pytest.raises(ValueError, match=message):
+        observer.capture(refresh=True)
+    assert observer.snapshot() == ()
+
+
+def test_joint_contact_duration_limit_preserves_owned_prefix_and_stops_acquisition():
+    from embodichain.lab.sim.sensors.contact import JointContactObserver
+
+    source, clock = ContactSource(), [0.0]
+    observer = JointContactObserver(
+        ContactEvidenceSampler(source), lambda: torch.zeros(1), lambda: clock[0]
+    )
+    generation = observer.begin_window("bounded", max_duration=0.01)
+    observer.capture(refresh=True)
+    retained = observer.snapshot()
+    clock[0] = 0.01
+    observer.capture(refresh=True)
+    assert len(observer.snapshot()) == 2
+    clock[0] = 0.02
+    observer.capture(refresh=True)
+    assert observer.overflow and source.update_count == 2
+    assert len(observer.snapshot()) == 2
+    observer.begin_window("new")
+    assert observer.generation != generation and observer.snapshot() == ()
+    assert len(retained) == 1 and retained[0].frame.timestamp == 0.0

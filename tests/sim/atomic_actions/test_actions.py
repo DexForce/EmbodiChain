@@ -1318,6 +1318,31 @@ def test_external_pick_transport_place_assemble_without_native_planning(
     )
     assert move_plan.plan_success.item()
     assert not move_plan.replannable
+    assert not move_plan.requires_effect_verification
+    named_invocation = replace(
+        _invocation(move, HeldObjectPoseGoal(torch.eye(4), object_id="target")),
+        recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
+    )
+    named_plan = _ACTION_ENGINES[id(move)].plan(
+        named_invocation,
+        held_context,
+        nominal_source=Source({"transport": 4}, [1, 1, 1, 1]),
+    )
+    assert named_plan.requires_effect_verification
+    torch.testing.assert_close(
+        named_plan.joint_trajectory.positions, move_plan.joint_trajectory.positions
+    )
+    unavailable_source = Mock()
+    with pytest.raises(ValueError, match="requires object 'other'"):
+        _ACTION_ENGINES[id(move)].plan(
+            replace(
+                named_invocation,
+                goal=HeldObjectPoseGoal(torch.eye(4), object_id="other"),
+            ),
+            held_context,
+            nominal_source=unavailable_source,
+        )
+    unavailable_source.instantiate.assert_not_called()
     waypoints = torch.eye(4).repeat(1, 2, 1, 1)
     waypoints[:, 0, 0, 3] = 0.1  # Required via pose; final pose alone is insufficient.
     with pytest.raises(ValueError, match="ordered waypoints are unsupported"):
@@ -2426,6 +2451,53 @@ def test_move_held_object_uses_exact_projected_attachment_target() -> None:
         trajectory.positions[:, :, ARM_DOF:],
         torch.ones(NUM_ENVS, trajectory.waypoint_count, HAND_DOF),
     )
+
+
+def test_named_transport_retains_attachment_without_changing_motion() -> None:
+    generator = _motion_generator()
+    generator.generate = Mock(wraps=generator.generate)
+    action = _bind_action(generator, MoveHeldObject())
+    held = _held()
+    task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": held})
+    context = _context(task)
+    original = _plan_action(
+        action, _invocation(action, HeldObjectPoseGoal(torch.eye(4))), context
+    )
+    named = _plan_action(
+        action,
+        _invocation(
+            action, HeldObjectPoseGoal(torch.eye(4), object_id=held.semantics.entity_id)
+        ),
+        context,
+    )
+    assert (
+        original.expected_effects.is_empty and not original.requires_effect_verification
+    )
+    assert named.requires_effect_verification
+    assert generator.generate.call_count == 2
+    torch.testing.assert_close(
+        named.joint_trajectory.positions,
+        original.joint_trajectory.positions,
+        atol=0,
+        rtol=0,
+    )
+    torch.testing.assert_close(
+        named.joint_trajectory.dt, original.joint_trajectory.dt, atol=0, rtol=0
+    )
+    retained = named.expected_effects.held_object_updates["arm"]
+    assert retained.semantics.entity_id == held.semantics.entity_id
+    torch.testing.assert_close(retained.object_to_eef, held.object_to_eef)
+    wrong = _invocation(action, HeldObjectPoseGoal(torch.eye(4), object_id="other"))
+    generator.generate.reset_mock()
+    with pytest.raises(ValueError, match="requires object 'other'"):
+        _plan_action(action, wrong, context)
+    generator.generate.assert_not_called()
+
+
+@pytest.mark.parametrize("value", ["", " padded ", 1, False])
+def test_named_transport_requires_an_exact_object_identity(value) -> None:
+    with pytest.raises(ValueError, match="object_id"):
+        HeldObjectPoseGoal(torch.eye(4), object_id=value)
 
 
 def test_move_held_object_preserves_ordered_object_waypoints() -> None:

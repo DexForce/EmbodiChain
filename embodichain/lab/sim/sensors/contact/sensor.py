@@ -480,6 +480,19 @@ class ContactSensor(BaseSensor):
         )
 
     @property
+    def dropped_contacts_mask(self) -> torch.Tensor:
+        """Return environments whose contact evidence may have been truncated.
+
+        Per-environment scatter overflow invalidates only that environment.
+        Native query overflow has no environment attribution, so it invalidates
+        every environment. The device-local result requires no host read.
+
+        Returns:
+            A new boolean tensor with one entry per environment.
+        """
+        return (self._scatter_dropped_count > 0) | (self._query_dropped_count > 0)
+
+    @property
     def dropped_contacts(self) -> int:
         """Rows lost across the current control interval, or latest standalone update.
 
@@ -666,15 +679,28 @@ class ContactSensor(BaseSensor):
             raise TypeError("observer must implement ContactSamplingObserver.")
         self._sampling_observers[name] = observer
 
-    def remove_sampling_observer(self, name: str) -> ContactSamplingObserver:
+    def remove_sampling_observer(
+        self,
+        name: str,
+        *,
+        expected: ContactSamplingObserver | None = None,
+    ) -> ContactSamplingObserver:
         """Detach a registered observer without changing contact histories.
 
         Args:
             name: Previously registered observer name.
+            expected: Optional exact owner. A different current owner is retained.
 
         Returns:
             The detached observer; the caller retains its recorded data.
+
+        Raises:
+            ValueError: The current observer differs from ``expected``.
+            KeyError: No observer is registered under this name.
         """
+        current = self._sampling_observers[name]
+        if expected is not None and current is not expected:
+            raise ValueError("Sampling observer belongs to a different owner.")
         return self._sampling_observers.pop(name)
 
     @property

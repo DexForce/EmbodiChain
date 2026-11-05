@@ -21,6 +21,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from functools import wraps
 
+from dataclasses import replace
 from types import MappingProxyType
 from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 
@@ -49,7 +50,7 @@ if TYPE_CHECKING:
         TrajectoryTemplate,
     )
 
-    from .execution import ExecutionSession
+    from .execution import ExecutionSession, ExecutionPlanLifecycle
 
 
 PlanTransform = Callable[
@@ -419,6 +420,71 @@ class AtomicActionEngine:
         plan_transform: PlanTransform | None = None,
         nominal_source: NominalMotionSource | None = None,
     ) -> ActionPlan:
+        """Own an explicitly selected planning ledger around the complete request."""
+        if not isinstance(request, ResolvedActionRequest):
+            raise TypeError("request must be a ResolvedActionRequest.")
+        from embodichain.lab.sim.motion.search import (
+            PlanningBudgetExceeded,
+            current_search_cost,
+            measure_search,
+            search_cost_scope,
+        )
+
+        budget = request.recovery_policy.planning_budget
+        parent = current_search_cost()
+        if budget is None and parent is None:
+            return self._plan_request_impl(
+                request,
+                context,
+                plan_transform=plan_transform,
+                nominal_source=nominal_source,
+            )
+        action = self._actions.get(request.skill_id)
+        if action is None:
+            raise KeyError(
+                f"No atomic action registered for skill {request.skill_id!r}."
+            )
+        current = self.initial_context() if context is None else context
+        with search_cost_scope(
+            wall_seconds=None if budget is None else budget.wall_seconds
+        ) as cost:
+            try:
+                with measure_search("complete_plan_request"):
+                    plan = self._plan_request_impl(
+                        request,
+                        current,
+                        plan_transform=plan_transform,
+                        nominal_source=nominal_source,
+                    )
+            except PlanningBudgetExceeded as error:
+                if parent is not None:
+                    raise
+                plan = action.failed_plan(
+                    request,
+                    current,
+                    message=str(error),
+                    failure_code="planning_wall_budget_exhausted",
+                    retryable=False,
+                )
+            return replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "search_cost": cost.snapshot(),
+                    },
+                ),
+            )
+
+    def _plan_request_impl(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext | None = None,
+        *,
+        plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
+    ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
         This is the planning entry point used by execution recovery. Callers
@@ -477,6 +543,19 @@ class AtomicActionEngine:
                     {"name": s.name, "start": s.start, "stop": s.stop}
                     for s in plan.segments
                 ],
+            )
+        failure = plan.diagnostics.failure
+        if (
+            not request.recovery_policy.retry_all_failed_plans
+            and not plan.plan_success.any()
+            and failure is not None
+            and failure.retryable
+        ):
+            plan = replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics, failure=replace(failure, retryable=False)
+                ),
             )
         return plan
 
@@ -671,6 +750,7 @@ class AtomicActionEngine:
         eligible_mask: torch.Tensor | None = None,
         plan_transform: PlanTransform | None = None,
         nominal_source: NominalMotionSource | None = None,
+        plan_lifecycle: ExecutionPlanLifecycle | None = None,
     ) -> ExecutionSession:
         """Start incremental execution for a grounded invocation sequence.
 
@@ -683,6 +763,8 @@ class AtomicActionEngine:
                 are eligible when omitted.
             plan_transform: Optional transform scoped to every planning call in
                 the returned execution session.
+            plan_lifecycle: Optional host-owned plan/adoption lifecycle, called
+                after complete validation and before dispatch.
 
         Returns:
             Stateful execution session advanced by ``session.tick(...)``.
@@ -697,6 +779,7 @@ class AtomicActionEngine:
             eligible_mask=eligible_mask,
             plan_transform=plan_transform,
             nominal_source=nominal_source,
+            plan_lifecycle=plan_lifecycle,
         )
 
     def _validate_context(self, context: PlanningContext) -> None:

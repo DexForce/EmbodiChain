@@ -81,6 +81,7 @@ from .execution import (
     ExecutionEvent,
     ExecutionEventKind,
     ExecutionPlanAttempt,
+    ExecutionPlanLifecycle,
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
@@ -110,11 +111,19 @@ from .plans import (
     CompiledTrajectory,
     EffectVerificationRequirement,
     PlannerDiagnostics,
+    PlanQualification,
+    PlanningRecoveryOutcome,
     PlanningFailure,
     TimedTrajectory,
     TrajectorySegment,
 )
-from .policies import DynamicCollisionMode, MotionPolicy, RecoveryPolicy
+from .policies import (
+    DynamicCollisionMode,
+    MotionPolicy,
+    PlanningBudget,
+    PlanningRecovery,
+    RecoveryPolicy,
+)
 from .requirements import (
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
@@ -128,7 +137,7 @@ from .requirements import (
     SkillEndpointRequirement,
     SkillResourceSlot,
 )
-from .runtime import ActionPlanningServices
+from .runtime import ActionPlanningServices, GraspOpeningTarget
 from .runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
@@ -280,6 +289,7 @@ __all__ = [
     "ActionOptions",
     "ActionPlan",
     "ActionPlanningServices",
+    "GraspOpeningTarget",
     "Affordance",
     "AffordancePoseCandidates",
     "AffordanceSample",
@@ -347,6 +357,7 @@ __all__ = [
     "ExecutionEvent",
     "ExecutionEventKind",
     "ExecutionPlanAttempt",
+    "ExecutionPlanLifecycle",
     "ExecutionRunner",
     "ExecutionRunnerCfg",
     "ExecutionSession",
@@ -385,6 +396,7 @@ __all__ = [
     "JointPositionTrackingMetric",
     "JointPositionTrackingState",
     "MotionPolicy",
+    "PlanningBudget",
     "MonotonicExecutionClock",
     "MoveEndEffector",
     "MoveEndEffectorOptions",
@@ -412,7 +424,9 @@ __all__ = [
     "PourOptions",
     "PourTarget",
     "PlannerDiagnostics",
+    "PlanQualification",
     "PlanningFailure",
+    "PlanningRecoveryOutcome",
     "PlanningContext",
     "PoseGoalValue",
     "PoseTrackingMetric",
@@ -434,6 +448,7 @@ __all__ = [
     "TwistGoal",
     "TwistOptions",
     "RecoveryPolicy",
+    "PlanningRecovery",
     "RigidObjectSceneProvider",
     "RigidObjectSceneProviderCfg",
     "ResolvedActionRequest",

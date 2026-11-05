@@ -1,5 +1,17 @@
 # Motion Planning
 
+`MotionGenerator.generate()` owns sampled Cartesian segment recovery through its
+private `_cartesian.py` helper. Explicit linear keyframes use fixed-grid sequential
+IK; `preserve_cartesian_samples=True` retains the separate pre-sampled contract.
+Segment alternatives are opt-in and B1-only. Their local counts and continuity
+receipt live in `PlanResult.recovery`, separate from complete-action retries.
+Dense attempts advance the original RNG stream; continuous IK uses the original
+grid and its existing Torch fork. Exhaustion retains the first failed result and
+candidate evidence. `defer_recovery=True` lets a caller inspect the nominal result.
+Each actual generation attempt charges the existing host budget once; the public
+entry checks cancellation before FK and adds no planning charge of its own.
+Atomic skills own which segment enables recovery; Task Engine declares policy.
+
 ## Find the owner
 
 | Change or question | Start here |
@@ -79,6 +91,14 @@ adaptive timing remain defaults. Non-default modes require `ik_interp`.
 Failed execution rows hold their start. `PlanResult.rejected_candidate` retains
 owned original positions, intervals and rejected-row identities for retries and
 audit; checking the zero-speed hold is not evidence that the candidate passed.
+
+`compute.trajectory.interpolation.interpolate_velocity_grid` allocates fixed
+B=1 joint-edge intervals from explicit speed caps. It preserves ordered mandatory
+endpoints and requested sample count, rejecting insufficient duration instead of
+retiming. The `limits.joint_velocity_diagnostics` companion reports the worst
+frame/joint operands with nonfinite values represented as None; it does not
+replace or weaken the existing validity mask. Ordinary interpolation remains
+unchanged unless callers explicitly choose the fixed-count helper.
 
 The bounded `resolve_continuous_ik_path()` adapter preserves a single path's
 time grid and restores the caller's random stream. Its numerical seed search
@@ -199,6 +219,14 @@ selection through `pg_grasp.regions`; callers select a policy without supplying
 a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
 sampled closing geometry and contact fitting with explicit thresholds; robot/FK
 sampling and physical contact evidence remain Lab responsibilities.
+`pg_grasp.native_contact` owns discrete convex closing/opening and rigid-clearance
+qualification through an injected `ConvexMeshQuery` factory; it imports no Lab
+runtime. `ClosingContactPolicy` declares geometric rules without experiment
+revision dispatch. This exact-shape route retains native pair offsets and contact
+ordering; it does not replace the surface-based checker. Scene captures physical
+geometry, and `ActionPlanningServices` bind an explicitly supplied geometric
+policy to the existing Newton backend. Queries own only isolated collision resources and preserve unavailable
+threshold results; hosts retain simulation ownership and physical-effect evidence.
 `SampledHandGeometry.at_width()` interpolates the supplied hand samples.
 The public `get_dual_arm_grasp_proposals()` path retains candidate generation
 and ranking while leaving geometric qualification to the caller; normal
@@ -387,8 +415,17 @@ rotation axis. Failed chains do not truncate other rows or change their choices.
 Built-in Atomic suites
 compile and replay on their declared command clock; compiled replay consumes
 arrival intervals on physics ticks and preserves observation segment indices.
+Mounted-hand selection must agree with command joint order and contact links.
+PGI and Robotiq collision samplers bind the actual flange-relative solver TCP;
+the benchmark README owns the hand-specific fixture and suite selections.
 Legacy fixed-sample replay remains explicit in trial metadata. The benchmark
 README and design contract own population and protocol details.
+Physical grasp/retention scoring consumes synchronized, target-filtered finger
+contacts rather than gripper joint-position proxies. Explicit `finger_links`
+belong to benchmark gripper settings; missing bindings or truncated queries are
+unavailable evidence. The collector and target/role binding live in
+`scenarios/_grasp_contacts.py`; contact geometry, distance conventions and current
+scoring version are specified in the benchmark README and `evaluation.py`.
 Run host calls serially within a process. `run_benchmark(workers>1)` isolates
 quality shards with spawned processes after freezing the full input corpus;
 `prepare_case_manifest()` can prepare that corpus without running planners.

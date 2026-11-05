@@ -478,3 +478,44 @@ verifier.
    HeldObjectGuardResult
    PhaseEffectGateRequest
    PhaseEffectGateResult
+
+Named held-object transport
+---------------------------
+
+``HeldObjectPoseGoal.object_id`` optionally identifies the exact object already
+held by the bound resource. A named goal validates that identity before native
+or external nominal planning and declares the unchanged attachment as its
+terminal effect. The execution owner verifies this effect before committing it;
+planning does not establish physical attachment. Motion and timing use the same
+path as an unnamed goal. Omitting the field preserves the existing effectless
+``MoveHeldObject`` behavior. Task Program's routed transport uses named goals
+and additionally selects a verified input-hold guard for its transport segment.
+
+
+Scoped grasp preparation
+------------------------
+
+``ActionPlanningServices.prepare_grasp_query()`` resolves the declared hand
+calibration by endpoint target ID and binds Scene capture to GraspKit's explicit
+``ClosingContactPolicy`` and the existing isolated Newton backend. It accepts no
+experiment revision selector and installs no alternate skill registration.
+Ordinary PickUp defaults remain unchanged. Source-compatible capture uses the
+caller's explicit 65-sample hand declaration.
+
+Use this service as a context manager. Closing, optional release-opening and
+rigid-scene query resources close together on normal exit, failure or cancellation;
+borrowed simulation entities are never destroyed. ``GraspOpeningTarget`` carries
+already-grounded poses from the same observation scope. An undeclared hand
+calibration fails before capture. Diagnostic metadata never selects policy.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.runtime
+
+.. autosummary::
+   :nosignatures:
+
+   GraspOpeningTarget
+
+.. autoclass:: GraspOpeningTarget
+   :members:
+
+.. automethod:: ActionPlanningServices.prepare_grasp_query
