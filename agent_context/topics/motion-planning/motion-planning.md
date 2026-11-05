@@ -24,8 +24,6 @@ Atomic skills own which segment enables recovery; Task Engine declares policy.
 | Joint-path timing | `embodichain/lab/sim/motion/planners/toppra_planner.py`, `trapezoidal_planner.py` in that directory |
 | Cartesian geometry and scalar timing | `embodichain/lab/sim/motion/planners/se3.py`, `bezier.py`, `_scalar_time_law.py`, `_blend_constraints.py` in that directory |
 | Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
-| Discrete full-robot collision queries and owned query scopes | `embodichain/lab/sim/motion/mesh_collision.py` |
-| Bounded empty-arm joint clearance | `embodichain/lab/sim/motion/joint_clearance.py` |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |

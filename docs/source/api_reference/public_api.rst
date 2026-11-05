@@ -1298,33 +1298,6 @@ separate checker does not own those attachments.
    CuroboQuerySnapshot
    curobo_motion_generator
 
-embodichain.lab.sim.motion.planners.curobo.observed
----------------------------------------------------
-
-``ObservedCuroboQueryFactory`` combines the existing owned query, collision
-snapshot and motion facade. It takes an explicit root pose/name, full locked
-joint input and a ``CuroboWorldObservation`` carrying matching time plus semantic
-and native revisions. The host validates native capture coherence. Missing
-collision-only link poses reject; the factory never fills them from live state.
-The root identity is checked against both the robot and materialized cuRobo
-profile. Nonidentity additional base conventions use the lower-level explicit
-``world_to_base`` snapshot API instead.
-
-The shape reader's order survives projection; only an explicitly selected payload
-is excluded. No phase, RNG boundary, goal or backend velocity/acceleration choice
-is introduced here. Fresh backend resources close on success or exception.
-Planning envelopes and projected held poses do not establish physical evidence.
-
-.. currentmodule:: embodichain.lab.sim.motion.planners.curobo.observed
-
-.. autoclass:: CollisionShapeReader
-   :members:
-
-.. autoclass:: CuroboWorldObservation
-
-.. autoclass:: ObservedCuroboQueryFactory
-   :members:
-
 embodichain.lab.sim.scene.collision_sources
 -------------------------------------------
 
@@ -1340,15 +1313,6 @@ connected-component order and its conservative input-envelope policy.
    CollisionObjectSnapshot
    read_articulation_link_boxes
    snapshot_collision_sources
-   SimulationCollisionShapeReader
-
-``SimulationCollisionShapeReader`` preserves an explicit logical/native roster
-and collision-only articulation links without reading live poses. It verifies
-borrowed native owners at capture; exclusions name exact declared IDs.
-
-.. autoclass:: SimulationCollisionShapeReader
-   :members:
-
 
 embodichain.lab.sim.motion.ik
 -----------------------------
@@ -4215,69 +4179,6 @@ pass the selected port to AtomicActionEngine.start.
 .. autoclass:: CompositeTaskProgramPlanLifecycleFactory
    :members:
 
-embodichain.lab.sim.motion.joint_clearance
-------------------------------------------
-
-Select an explicitly requested B1 empty-arm joint offset from the original
-six proposals, stable FK-separation order and 101-sample full-scene screen.
-This operation draws no new random stream, runs no IK and executes no commands.
-
-.. currentmodule:: embodichain.lab.sim.motion.joint_clearance
-
-.. autosummary::
-
-   select_clearance_joint_offset
-
-.. autofunction:: select_clearance_joint_offset
-
-
-embodichain.lab.sim.motion.mesh_collision
------------------------------------------
-
-Discrete B1 collision queries consume commanded full-robot samples and owned
-input-mesh worlds. Complete scene, robot-only, robot/articulation and explicit
-source-excluding precontact scopes remain distinct in MotionCollisionReport.
-Snapshot scopes retain the exact robot/model input identity and reject drift.
-Nested robot_collision_query_scope restores the previous call-local scope.
-
-These queries require the explicit ``planning-geometry`` optional dependency.
-Missing FCL rejects before capture; existing Newton queries keep their backend.
-Input proxies and sampled checks establish neither CCD nor physical contact.
-
-.. currentmodule:: embodichain.lab.sim.motion.mesh_collision
-
-.. autosummary::
-
-   MotionCollisionReport
-   FreeMotionQuery
-   PrecontactMotionQuery
-   SimulationFreeMotionQuery
-   RobotMeshCollisionSnapshot
-   robot_collision_query_scope
-   inspect_robot_collision
-   RobotArticulationCollisionSnapshot
-
-.. autoclass:: MotionCollisionReport
-   :members:
-
-.. autoclass:: FreeMotionQuery
-   :members:
-
-.. autoclass:: PrecontactMotionQuery
-   :members:
-
-.. autoclass:: SimulationFreeMotionQuery
-   :members:
-
-.. autoclass:: RobotMeshCollisionSnapshot
-   :members:
-
-.. autofunction:: robot_collision_query_scope
-
-.. autofunction:: inspect_robot_collision
-
-.. autoclass:: RobotArticulationCollisionSnapshot
-   :members:
 State observation acquisition
 -----------------------------
 

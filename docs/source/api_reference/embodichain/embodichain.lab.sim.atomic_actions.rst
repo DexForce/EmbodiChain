@@ -532,11 +532,11 @@ poses and metadata stay owned and bound to one preparation scope.
    :members:
 
 ``source_native_contact`` maps the explicitly selected preserved source revision
-to GraspKit's existing typed ``ClosingContactPolicy`` and the requested FCL
-service. Closing, opening and rigid-clearance algorithms remain solely in
+to GraspKit's existing typed ``ClosingContactPolicy`` and the shared Newton collision
+pipeline. Closing, opening and rigid-clearance algorithms remain solely in
 GraspKit. Source builders consume the existing Default/B1 native capture API,
-retain the explicit hand sampling grid and original distances, and never step
-physics or infer a Task Program policy. Missing FCL fails explicitly; this is
+retain the explicit hand sampling grid and original contact thresholds, and never step
+physics or infer a Task Program policy. Missing Newton fails explicitly; this is
 geometric qualification, not physical acquisition/release evidence.
 
 Close each query with its context manager or a ``finally`` block. It releases

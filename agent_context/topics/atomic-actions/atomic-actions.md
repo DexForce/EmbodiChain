@@ -144,7 +144,9 @@ original Slide tutorial. Slide remains open-loop; this extension does not certif
 contact or physical goal satisfaction.
 
 `source_native_contact` composes preserved explicit source policies with the
-FCL backend over the same GraspKit closing/opening/rest algorithms. Scene keeps
+shared Newton collision pipeline over the same GraspKit closing/opening/rest
+algorithms. Contact decisions retain the query owner's conservative interval
+semantics; threshold ambiguity remains unavailable. Scene keeps
 native geometry capture, including the caller-selected sampling grid. The source
 adapter owns only policy mapping, provenance and query cleanup; ordinary
 `ActionPlanningServices.prepare_grasp_query` retains Newton and shared defaults.
