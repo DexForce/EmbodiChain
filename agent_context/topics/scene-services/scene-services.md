@@ -62,6 +62,17 @@ belongs to [GraspKit](../motion-planning/motion-planning.md); query composition 
 cleanup belong to `ActionPlanningServices` in [Atomic Actions](../atomic-actions/atomic-actions.md).
 Captured shapes and nominal queries do not establish physical acquisition/release.
 
+`native_hand_scene.py` and `native_motion_scene.py` expose opt-in FCL queries
+on the same physical observation. Hand capture retains collision-only links,
+planes and native contact/rest offsets; motion capture retains ordered rigid and
+articulation obstacles, arm parts and named-joint FK. Both preserve the original
+Default/B1/env0 coverage and reject stale or replaced owners rather than refresh.
+Callers supply the observation guard and close each owned query. These are
+discrete geometric checks, not continuous-path or physical-effect evidence.
+`convex_clearance.py` checks conservative input-mesh solids at explicit frame
+indices, preserving order and first rejection; it also catches full containment.
+It takes explicit margins and never substitutes for a native contact witness.
+
 Static control readers consume explicit authored roles, keep source mesh frames
 and identity, and never build semantic graphs or select execution/recovery
 budgets. Acceptance thresholds and semantic link IDs belong to their callers.
