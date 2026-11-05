@@ -30,6 +30,7 @@ import math
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -141,12 +142,12 @@ def test_missing_curobo_is_actionable(monkeypatch):
     "failure_module",
     [
         None,
+        "curobo.trajectory_timeopt",
         "curobo.motion_planner",
         "curobo.batch_motion_planner",
         "curobo.collision_checking",
         "curobo.types",
         "curobo.scene",
-        "curobo._src.cost.tool_pose_criteria",
     ],
 )
 def test_curobo_import_preserves_caller_precision(
@@ -641,15 +642,31 @@ def test_curobo_planner_class_is_lazy_import_safe():
     assert "curobo" not in sys.modules
 
 
-def test_backend_disables_curobo_self_collision(monkeypatch):
+@pytest.mark.parametrize(
+    ("batch_size", "algorithm", "enable_timeopt", "expected_lanes"),
+    [(1, "rrt", True, 8), (2, "prm", False, None), (17, "rrt", False, 256)],
+)
+def test_backend_forwards_fast_settings_and_disables_self_collision(
+    monkeypatch, batch_size, algorithm, enable_timeopt, expected_lanes
+):
     create_kwargs = {}
+    cost_manager = SimpleNamespace(disable_self_collision=Mock())
+    graph_rollout = SimpleNamespace(get_cost_manager_configs=lambda: [cost_manager])
 
     class FakeMotionPlannerCfg:
         @staticmethod
         def create(**kwargs):
             create_kwargs.update(kwargs)
             return SimpleNamespace(
-                trajopt_solver_config=SimpleNamespace(interpolation_dt=None)
+                trajopt_solver_config=SimpleNamespace(
+                    interpolation_dt=None, num_seeds=8
+                ),
+                **{
+                    f"{algorithm}_graph_planner_config": SimpleNamespace(
+                        resources_config=SimpleNamespace(rollout_config=graph_rollout),
+                        planner_config=SimpleNamespace(max_batched_lanes=128),
+                    )
+                },
             )
 
     class FakeMotionPlanner:
@@ -659,10 +676,11 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
             self.cfg = cfg
 
     planner = CuroboPlanner.__new__(CuroboPlanner)
-    planner.cfg = SimpleNamespace(
-        world=SimpleNamespace(multi_env=False),
-        collision_activation_distance=0.01,
-        interpolation_dt=0.025,
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot",
+        graph_planner_algorithm=algorithm,
+        enable_timeopt=enable_timeopt,
+        interpolation_dt=0.01,
     )
     planner._curobo_device = torch.device("cuda:0")
     planner._bindings = SimpleNamespace(
@@ -685,9 +703,9 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
     }
     monkeypatch.setattr(torch.cuda, "device", lambda device: nullcontext())
 
-    planner._build_backend(
+    backend = planner._build_backend(
         control_part="arm",
-        batch_size=1,
+        batch_size=batch_size,
         profile=_CuroboProfile(
             robot_config_path="robot.yml",
             sim_to_curobo_joint_names={"joint": "joint"},
@@ -699,6 +717,16 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
     )
 
     assert create_kwargs["self_collision_check"] is False
+    assert create_kwargs["max_batch_size"] == batch_size
+    assert create_kwargs["graph_planner_algorithm"] == algorithm
+    assert create_kwargs["enable_timeopt"] is enable_timeopt
+    assert create_kwargs["interpolation_dt"] == 0.01
+    cost_manager.disable_self_collision.assert_called_once()
+    if expected_lanes is not None:
+        assert (
+            backend.planner.cfg.rrt_graph_planner_config.planner_config.max_batched_lanes
+            == expected_lanes
+        )
     assert create_kwargs["robot"]["robot_cfg"]["kinematics"] == {
         "source": "robot.yml",
         "self_collision_buffer": {},
@@ -752,7 +780,8 @@ def test_runtime_robot_config_adds_only_curobo_compatibility_placeholders(tmp_pa
     assert "self_collision_ignore" not in persisted["robot_cfg"]["kinematics"]
 
 
-def test_disable_self_collision_reaches_all_curobo_rollouts():
+@pytest.mark.parametrize("algorithm", ["prm", "rrt"])
+def test_disable_self_collision_reaches_all_curobo_rollouts(algorithm):
     class FakeCostCfg:
         def __init__(self):
             self.disable_calls = 0
@@ -785,7 +814,11 @@ def test_disable_self_collision_reaches_all_curobo_rollouts():
                 optimizer_rollout_configs=[trajopt_optimizer],
             )
         ),
-        graph_planner_config=SimpleNamespace(rollout_config=graph_rollout),
+        **{
+            f"{algorithm}_graph_planner_config": SimpleNamespace(
+                resources_config=SimpleNamespace(rollout_config=graph_rollout)
+            )
+        },
     )
 
     CuroboPlanner._disable_curobo_self_collision_rollouts(planner_cfg)

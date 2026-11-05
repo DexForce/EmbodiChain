@@ -54,6 +54,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (  # noqa:
     CuroboPlanner,
     CuroboPlannerCfg,
     CuroboWorldCfg,
+    _torch_cuda_graph_capture_mode,
 )
 
 ROBOT_UID = "curobo_franka"
@@ -218,7 +219,7 @@ def test_curobo_v2_plans_a_joint_space_move():
 
 @pytest.mark.slow
 def test_curobo_v2_plans_batched_joint_space_moves_direct_first():
-    """Keep easy shared-world joint plans from receiving partial PRM seeds."""
+    """Preserve direct-first planning and exercise the configured RRT fallback."""
     sim, robot, _ = _make_sim_robot(num_envs=8)
     try:
         cfg = CuroboPlannerCfg(
@@ -268,6 +269,22 @@ def test_curobo_v2_plans_batched_joint_space_moves_direct_first():
         assert torch.isfinite(result.positions).all()
         assert torch.allclose(result.positions[:, 0], start_qpos, atol=1e-3)
         assert torch.allclose(result.positions[:, -1], target_qpos, atol=1e-3)
+
+        # Force the fallback once: easy direct-first queries otherwise need not
+        # touch RRT's lane buffers or its separate collision rollout at all.
+        planner = mg.planner
+        backend = next(iter(planner._backend_cache.values()))
+        with _torch_cuda_graph_capture_mode(cfg.cuda_graph_capture_error_mode):
+            native = backend.planner.plan_cspace(
+                planner._to_curobo_joint_goal(target_qpos, backend),
+                planner._to_curobo_joint_state(start_qpos, backend),
+                max_attempts=1,
+                enable_graph_attempt=0,
+            )
+        assert native is not None
+        assert native.success.reshape(-1).tolist() == [True] * 8
+        _, positions, _, _, _ = planner._extract_segment(native, backend)
+        assert torch.allclose(positions[:, -1], target_qpos, atol=1e-3)
     finally:
         sim.destroy()
         SimulationManager.flush_cleanup_queue()

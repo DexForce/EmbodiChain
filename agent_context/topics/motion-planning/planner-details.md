@@ -258,7 +258,7 @@ samples through the capability described above. Validate export metadata and
 batched behavior in `test_neural_planner.py` and `test_neural_batched.py` under
 `tests/sim/motion/planners/`.
 
-### cuRobo import isolation
+### cuRobo backend and import isolation
 
 `curobo_planner.py::_require_curobo()` lazily imports the optional backend and
 restores the caller's Torch matmul precision and CUDA/cuDNN TF32 flags on success
@@ -284,6 +284,18 @@ Cartesian reference joint solutions never seed the solve. Historical homogeneous
 Joint/FullPose routes retain their existing behavior. Validate component masking,
 mixed order and real Franka adapter calls in
 `tests/benchmark/motion_generation/test_constraint_sequences.py`.
+
+The supported backend is cuRobo V2-Fast (0.9+). `CuroboPlannerCfg` selects
+RRT or PRM initialization and enables/disables fixed-path TimeOpt; direct seeds
+are attempted first. Pass the interpolation timestep into the native factory
+before constructing solvers so TimeOpt and interpolation share the same settings.
+Cached solvers retain these construction-time settings.
+RRT lane capacity is rounded to a power of two covering batch × trajectory seeds,
+so small backends avoid unused tree buffers and larger batches are not limited
+to the native factory's default lane count.
+TimeOpt uses source-model inertial data and effort limits; world collision
+geometry alone does not model carried payload dynamics. Preserve native timing
+and derivatives through result normalization and control-grid playback.
 
 ## Retiming and playback
 
