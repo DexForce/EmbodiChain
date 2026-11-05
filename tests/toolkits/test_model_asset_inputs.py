@@ -40,7 +40,12 @@ def test_model_inventory_resolves_actual_registered_source_without_geometry(
     mesh = tmp_path / "mesh.stl"
     mesh.write_bytes(b"original")
     source.write_text(
-        '<robot><link name="root"><collision><geometry><mesh filename="mesh.stl"/></geometry></collision></link></robot>'
+        "<robot>"
+        + "".join(
+            f'<link name="{name}"><visual><geometry><mesh filename="missing_visual.dae"/></geometry></visual><collision><geometry><mesh filename="mesh.stl"/></geometry></collision></link>'
+            for name in owner._model_collision_links(model, side)
+        )
+        + "</robot>"
     )
     requests = []
 
@@ -69,7 +74,10 @@ def test_cobot_inventory_uses_same_explicit_archive_overrides(tmp_path, monkeypa
         path.write_text("v 0 0 0\n")
     source.write_text(
         "<robot>"
-        + "".join(f'<mesh filename="../Collision/{name}"/>' for name in names)
+        + "".join(
+            f'<link name="{link}"><visual><geometry><mesh filename="../Visual/missing.dae"/></geometry></visual><collision><geometry><mesh filename="../Collision/{name}"/></geometry></collision></link>'
+            for link, name in zip(("gripper_base", "link7", "link8"), names)
+        )
         + "</robot>"
     )
 
@@ -99,3 +107,21 @@ def test_inventory_rejects_unknown_model_or_wrong_side_before_data_lookup(
     )
     with pytest.raises(ValueError):
         owner.get_parallel_jaw_model_asset_files(model, side=side)
+
+
+def test_real_registered_cobot_inventory_matches_geometry_collision_consumption(
+    monkeypatch,
+):
+    from embodichain.data import get_data_path
+
+    asset = Path(get_data_path("CobotMagicArm/CobotMagicWithGripperV100.urdf"))
+    if not asset.is_file():
+        pytest.skip("existing model archive unavailable")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("inventory constructed geometry")
+
+    monkeypatch.setattr(owner.FixedGripperCollisionGeometry, "from_urdf", forbidden)
+    files = owner.get_parallel_jaw_model_asset_files("cobotmagic_v100_gripper")
+    assert asset.resolve() in files and all(path.is_file() for path in files)
+    assert all(path.suffix.lower() != ".dae" for path in files)
