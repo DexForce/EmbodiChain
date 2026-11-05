@@ -20,7 +20,7 @@ Lightweight RL environments have a separate owner in
 | Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
 | Scene, managers, RL outcomes and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
-| Exact recorded boundary poses and episode checks | `embodichain/lab/gym/envs/embodied_env.py` → `capture_recorded_rigid_poses`, `gym/utils/trajectory_state.py` |
+| Historical recording reads and episode/lifetime checks | `gym/utils/trajectory_state.py`: `RecordedTrajectoryReader`; Env assembles the read-only component |
 | Optional measured physical objectives | `embodichain/lab/gym/envs/objectives/`; Gym owns observation/reset hooks independently of expert acceptance |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
 | Demo segment execution / outcomes | `embodichain/lab/gym/envs/demo.py` |
@@ -103,11 +103,15 @@ schema version, and `step_dt` in trajectory/demo metadata. Missing qvel fails
 before stepping in position-velocity mode; inactive and hold targets use zero
 qvel.
 
-`capture_recorded_rigid_poses` returns owned CPU poses from exact completed
-trajectory slots and checks the expected `EpisodeContext` IDs. It requires the
-seeded `end_step` slot; missing capacity/rows never select `end_step - 1` or current
-live state. Returned frame indices describe row-local recording, not simulation
-time. The shared reader/value owner is `gym/utils/trajectory_state.py`.
+`RecordedTrajectoryReader` in `gym/utils/trajectory_state.py` owns historical
+recording queries and validates expected `EpisodeContext` IDs, initialized rows
+and recording lifetime before and after copying. Injected readers must share the
+consumer's actual episode owner; numeric episode IDs alone cannot establish that
+ownership. Env assembles `trajectory_reader` from recording sources and lifecycle
+callbacks; it does not define rigid-pose query methods. Consumers inject the reader into their acquisition adapter.
+The reader requires exact seeded `end_step` slots and returns owned CPU matrices;
+missing capacity/rows never select `end_step - 1` or current live state. Frame
+indices describe row-local recording, not simulation timestamps.
 
 ## Lifecycle and boundaries
 

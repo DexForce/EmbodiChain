@@ -167,11 +167,10 @@ def test_recorded_pose_snapshot_uses_seeded_end_slot_and_owns_buffers():
 
 def test_recorded_pose_snapshot_rejects_missing_terminal_slot_and_episode_reuse():
     import pytest
-    from types import MethodType
-    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
     from embodichain.lab.gym.utils.trajectory_state import (
         read_recorded_rigid_pose_snapshot,
+        RecordedTrajectoryReader,
     )
 
     states = _make_state_buffer()
@@ -195,25 +194,27 @@ def test_recorded_pose_snapshot_rejects_missing_terminal_slot_and_episode_reuse(
     context = EpisodeContext(2)
     context._begin_episode(torch.tensor([0, 1]))
     context._finish_initialization(torch.tensor([0, 1]))
-    env = SimpleNamespace(
-        num_envs=2,
+    recording = {"data": (states, torch.tensor([2, 2])), "closed": False}
+    reader = RecordedTrajectoryReader(
+        source=lambda: recording["data"],
         episode_context=context,
-        _traj_buffer={"states": states},
-        _traj_steps=torch.tensor([2, 2]),
-        _closed=False,
+        is_closed=lambda: recording["closed"],
     )
-    env.capture_recorded_rigid_poses = MethodType(
-        EmbodiedEnv.capture_recorded_rigid_poses, env
+    assert reader.read_rigid_poses("cube", [2, 2], episode_ids=[0, 0]).episode_ids == (
+        0,
+        0,
     )
-    assert env.capture_recorded_rigid_poses(
-        "cube", [2, 2], episode_ids=[0, 0]
-    ).episode_ids == (0, 0)
     context._begin_episode(torch.tensor([0]))
     with pytest.raises(ValueError, match="another.*episode"):
-        env.capture_recorded_rigid_poses("cube", [2, 2], episode_ids=[0, 0])
-    env._traj_buffer = None
+        reader.read_rigid_poses("cube", [2, 2], episode_ids=[0, 0])
+    recording["data"] = None
     with pytest.raises(RuntimeError, match="recording is unavailable"):
-        env.capture_recorded_rigid_poses("cube", [2, 2], episode_ids=[1, 0])
+        reader.read_rigid_poses("cube", [2, 2], episode_ids=[1, 0])
+
+    recording["data"] = (states, torch.tensor([2, 2]))
+    recording["closed"] = True
+    with pytest.raises(RuntimeError, match="after close"):
+        reader.read_rigid_poses("cube", [2, 2], episode_ids=[1, 0])
 
 
 def test_recorded_pose_snapshot_rejects_missing_rows_and_unseeded_pose_slots():
@@ -235,3 +236,46 @@ def test_recorded_pose_snapshot_rejects_missing_rows_and_unseeded_pose_slots():
                 frame_indices=[2, 2],
                 episode_ids=[0, 0],
             )
+
+
+def test_recorded_reader_rejects_lifetime_changes_during_snapshot(monkeypatch):
+    import pytest
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.utils import trajectory_state
+
+    states = _make_state_buffer()
+    states["rigid_objects"]["cube"]["pose"][..., 6] = 1.0
+    context = EpisodeContext(2)
+    ids = torch.tensor([0, 1])
+    context._begin_episode(ids)
+    context._finish_initialization(ids)
+    lifetime = {"closed": False}
+    reader = trajectory_state.RecordedTrajectoryReader(
+        source=lambda: (states, torch.tensor([2, 2])),
+        episode_context=context,
+        is_closed=lambda: lifetime["closed"],
+    )
+    read = trajectory_state.read_recorded_rigid_pose_snapshot
+
+    def reset_after_copy(*args, **kwargs):
+        result = read(*args, **kwargs)
+        context._begin_episode(torch.tensor([0]))
+        return result
+
+    monkeypatch.setattr(
+        trajectory_state, "read_recorded_rigid_pose_snapshot", reset_after_copy
+    )
+    with pytest.raises(ValueError, match="another or uninitialized episode"):
+        reader.read_rigid_poses("cube", [2, 2], episode_ids=[0, 0])
+    context._finish_initialization(torch.tensor([0]))
+
+    def close_after_copy(*args, **kwargs):
+        result = read(*args, **kwargs)
+        lifetime["closed"] = True
+        return result
+
+    monkeypatch.setattr(
+        trajectory_state, "read_recorded_rigid_pose_snapshot", close_after_copy
+    )
+    with pytest.raises(RuntimeError, match="after close"):
+        reader.read_rigid_poses("cube", [2, 2], episode_ids=[1, 0])
