@@ -245,6 +245,7 @@ Observation Manager
 
 .. automodule:: embodichain.lab.gym.envs.managers.observation_manager
     :members:
+    :no-index:
 
 Observation Functions
 ---------------------
