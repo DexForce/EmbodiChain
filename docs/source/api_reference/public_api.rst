@@ -902,6 +902,43 @@ Neither entry point derives numerical policy values from task or object names.
 
 .. autofunction:: project_configured_placement_evidence_binding
 
+embodichain.gen_sim.task_engine.orchestration.source_scene
+----------------------------------------------------------
+
+The source importer keeps semantic UID/path/provenance correspondence while
+consuming public shared Scene physics, pose/scale and authored-mesh input APIs.
+It emits planner and physical declaration views without running simulation,
+solving IK, creating skills or invoking a generation model. Source files and
+asset hashes remain authoritative; later drift is rejected, never re-signed.
+This surface does not yet connect physical-input snapshots, bundle publication
+or CLI execution.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.source_scene
+
+.. autosummary::
+
+   PreparedScene
+   ResolvedSceneSource
+   is_prompt2scene_export
+   prepare_scene
+   resolve_gym_config_path
+   resolve_source_scene
+
+.. autoclass:: PreparedScene
+   :members:
+
+.. autoclass:: ResolvedSceneSource
+   :members:
+
+.. autofunction:: is_prompt2scene_export
+
+.. autofunction:: prepare_scene
+
+.. autofunction:: resolve_gym_config_path
+
+.. autofunction:: resolve_source_scene
+
+
 embodichain.gen_sim.task_spec
 -----------------------------
 
