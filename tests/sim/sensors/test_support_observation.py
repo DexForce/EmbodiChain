@@ -17,6 +17,9 @@
 """CPU native-support contracts on the real ContactSensor observer lifecycle."""
 
 from __future__ import annotations
+from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.gym.utils.gym_utils import _init_raw_rollout
+from tensordict import TensorDict
 
 from copy import deepcopy
 from contextlib import nullcontext
@@ -372,7 +375,10 @@ def test_missing_acquisition_time_never_becomes_a_fabricated_zero_timestamp():
 
 def test_public_base_env_step_samples_support_once_per_physics_substep():
     sim, _, observer, clock, _ = _setup(strong=True, count=1)
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
     env = BaseEnv.__new__(BaseEnv)
+    env.episode_context = EpisodeContext(1)
     env.cfg = SimpleNamespace(sim_steps_per_control=4)
     env.sim_cfg = SimpleNamespace(physics_dt=0.01)
     env.sensors = {observer.sensor.cfg.uid: observer.sensor}
@@ -875,19 +881,17 @@ def test_support_height_uses_highest_qualified_contact_without_averaging():
 
 
 def _support_policy_fixture(
-    *, com_tolerance=None, com_x=0.0, extra_preset=False, with_joint=False
+    *, com_tolerance=None, com_x=0.0, extra_preset=False, region=False
 ):
     from embodichain.lab.task_program.integrations.simulation.bindings import (
         SimulationSceneBinding,
         SimulationRigidObjectBinding,
-        SimulationArticulationBinding,
     )
     from embodichain.lab.task_program.integrations.simulation.policies import (
         SimulationSegmentPolicyPort,
     )
     from embodichain.lab.task_program.integrations.simulation.stability import (
         SimulationStabilityConditionCfg,
-        SimulationJointStabilityConditionCfg,
         SupportSensorDeclarationCfg,
     )
 
@@ -903,30 +907,11 @@ def _support_policy_fixture(
             SimulationRigidObjectBinding(entity_id="surface", simulation_uid="support"),
         ),
     )
-    if with_joint:
-        from dataclasses import replace
-
-        joint_values = torch.tensor([[0.12], [float("nan")]])
-        sim.test_articulation = SimpleNamespace(
-            uid="native_drawer",
-            joint_names=("slide_joint",),
-            get_qpos=lambda: joint_values.clone(),
-        )
-        sim.get_articulation = lambda uid: (
-            sim.test_articulation if uid == "native_drawer" else None
-        )
-        binding = replace(
-            binding,
-            articulations=(
-                SimulationArticulationBinding(
-                    entity_id="drawer", simulation_uid="native_drawer"
-                ),
-            ),
-        )
     cfg = SimulationStabilityConditionCfg(
         entity="item",
         reference="surface",
-        kind="supported_placement",
+        kind="supported_region" if region else "supported_placement",
+        support_contract_revision=1 if region else None,
         displacement=(0.0, 0.0, 0.2),
         com_tolerance=com_tolerance,
         duration=0.04,
@@ -941,22 +926,7 @@ def _support_policy_fixture(
         sim,
         robot,
         binding,
-        settle_presets={
-            "support": cfg,
-            **({"unused": cfg} if extra_preset else {}),
-            **(
-                {
-                    "joint": SimulationJointStabilityConditionCfg(
-                        entity="drawer",
-                        joint="slide_joint",
-                        target=0.12,
-                        tolerance=0.01,
-                    )
-                }
-                if with_joint
-                else {}
-            ),
-        },
+        settle_presets={"support": cfg, **({"unused": cfg} if extra_preset else {})},
         step_dt=0.04,
         support_registry=registry,
         sensor_suite=sim.sensors,
@@ -991,10 +961,12 @@ def test_current_capture_rejects_superseded_session_but_same_clock_bind_is_idemp
     "declaration_case",
     [
         "normal",
+        "recorded_region",
+        "invalid_region_history",
         "foreign_scene",
         "missing_preset",
         "equivalent_snapshot",
-        "missing_reader",
+        "missing_recording",
         "foreign_recording",
     ],
 )
@@ -1002,7 +974,12 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     declaration_case,
 ):
     from dataclasses import replace
-    from embodichain.lab.gym.utils.trajectory_state import RecordedTrajectoryReader
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+    from embodichain.lab.gym.envs.managers.observation_types import (
+        ObservationDescriptor,
+        ObservationSample,
+        ObservationFrame,
+    )
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
     from embodichain.lab.gym.envs.task_program.bridge import (
         TaskProgramDemoBridge,
@@ -1023,11 +1000,13 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     from embodichain.lab.sim.atomic_actions import CARTESIAN_POSE_CAPABILITY
     from embodichain.lab.task_program.integrations.simulation.observations import (
         SimulationSupportObservationCollector,
-        SimulationStateObservationCollector,
     )
 
     sim, robot, registry, template, binding, cfg = _support_policy_fixture(
-        com_tolerance=0.1, com_x=0.04, extra_preset=True, with_joint=True
+        com_tolerance=0.1,
+        com_x=0.04,
+        extra_preset=True,
+        region=declaration_case in {"recorded_region", "invalid_region_history"},
     )
     profile = SimulationRobotSkillProfileBinding(
         "robot",
@@ -1053,7 +1032,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         default_preset="default",
     )
     registration = SimulationTaskProgramRegistration(
-        binding, profile, settle_presets=template._settle_presets
+        binding, profile, settle_presets={"support": cfg, "unused": cfg}
     )
     compiled = TaskProgramCompiler(binding.declare()).compile(
         decode_task_program(
@@ -1073,8 +1052,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
                         "call": {"kind": "pick", "object": "item"},
                     },
                     "post": [
-                        {"kind": "wait_stable", "entity": "item", "preset": "support"},
-                        {"kind": "wait_stable", "entity": "drawer", "preset": "joint"},
+                        {"kind": "wait_stable", "entity": "item", "preset": "support"}
                     ],
                 },
             }
@@ -1119,11 +1097,47 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         episode_context=context,
         _closed=False,
     )
-    recording = RecordedTrajectoryReader(
-        source=lambda: ({"rigid_objects": values}, torch.ones(2, dtype=torch.long)),
-        episode_context=context,
-        is_closed=lambda: env._closed,
+    fields = {f"poses/{uid}": value["pose"] for uid, value in values.items()}
+    recording = ObservationManager({}, env)
+    recording._env._rollout_storage = getattr(recording._env, "_rollout_storage", None)
+    if recording._env._rollout_storage is None:
+        recording._env._rollout_storage = TensorDict(
+            {}, batch_size=[len(recording._env.episode_context.episode_ids)]
+        )
+    _init_raw_rollout(
+        recording._env._rollout_storage,
+        recording._env.episode_context,
+        **dict(fields=fields, actions=torch.zeros(2, 2, 1)),
     )
+    recording.bind_rollout_storage(recording._env._rollout_storage)
+    env.observation_manager = recording
+
+    def observation_frame(index):
+        samples = {
+            name: ObservationSample(
+                ObservationDescriptor(
+                    name.split("/", 1)[1],
+                    "pose",
+                    "arena",
+                    "xyz_xyzw",
+                    ("m", "unitless"),
+                    (7,),
+                    torch.float32,
+                ),
+                value[:, index],
+                torch.ones(2, dtype=torch.bool),
+                (None, None),
+            )
+            for name, value in fields.items()
+        }
+        return ObservationFrame(
+            None, samples, context.episode_ids, index, episode_owner=context
+        )
+
+    EmbodiedEnv._record_initial_observation(
+        recording._env, observation_frame(0), [0, 1]
+    )
+    _append_fixture(recording._env, observation_frame(1), torch.zeros(2, 1))
     if declaration_case == "foreign_scene":
         foreign = replace(
             binding,
@@ -1135,7 +1149,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         registration = replace(registration, scene_binding=foreign)
         with pytest.raises(ValueError, match="scene binding differs"):
             SimulationSupportObservationCollector(
-                env, bridge, registration, recording=recording
+                env, bridge, registration, observations=recording
             )
         registry.close()
         return
@@ -1143,7 +1157,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         registration = replace(registration, settle_presets={"support": cfg})
         with pytest.raises(ValueError, match="complete preset selection"):
             SimulationSupportObservationCollector(
-                env, bridge, registration, recording=recording
+                env, bridge, registration, observations=recording
             )
         registry.close()
         return
@@ -1151,14 +1165,25 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         other_context = EpisodeContext(2)
         other_context._begin_episode(torch.tensor([0, 1]))
         other_context._finish_initialization(torch.tensor([0, 1]))
-        foreign_reader = RecordedTrajectoryReader(
-            source=lambda: pytest.fail("A foreign recording must not be read"),
-            episode_context=other_context,
-            is_closed=lambda: False,
+        foreign_recording = ObservationManager(
+            {}, SimpleNamespace(episode_context=other_context)
         )
+        foreign_recording._env._rollout_storage = getattr(
+            foreign_recording._env, "_rollout_storage", None
+        )
+        if foreign_recording._env._rollout_storage is None:
+            foreign_recording._env._rollout_storage = TensorDict(
+                {}, batch_size=[len(foreign_recording._env.episode_context.episode_ids)]
+            )
+        _init_raw_rollout(
+            foreign_recording._env._rollout_storage,
+            foreign_recording._env.episode_context,
+            **dict(fields={}, actions=torch.zeros(2, 2, 1)),
+        )
+        foreign_recording.bind_rollout_storage(foreign_recording._env._rollout_storage)
         with pytest.raises(ValueError, match="another episode owner"):
             SimulationSupportObservationCollector(
-                env, bridge, registration, recording=foreign_reader
+                env, bridge, registration, observations=foreign_recording
             )
         registry.close()
         return
@@ -1169,13 +1194,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         env,
         bridge,
         registration,
-        recording=None if declaration_case == "missing_reader" else recording,
-    )
-    states = SimulationStateObservationCollector(
-        env,
-        bridge,
-        registration,
-        recording=None if declaration_case == "missing_reader" else recording,
+        observations=None if declaration_case == "missing_recording" else recording,
     )
     assert bridge.post_policy_port is not template
     segment = next(compiled.iter_segments())
@@ -1193,10 +1212,8 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     with pytest.raises((KeyError, RuntimeError)):
         template.post_policy_metadata(policy, segment=segment)
     before = sim.query.fetches
-    if declaration_case == "missing_reader":
-        with pytest.raises(RuntimeError, match="trajectory reader is unavailable"):
-            states.capture_recorded_rigid_pose("item", [1, 1])
-        with pytest.raises(RuntimeError, match="trajectory reader is unavailable"):
+    if declaration_case == "missing_recording":
+        with pytest.raises(RuntimeError, match="Observation history is unavailable"):
             collector.capture_recorded(
                 "support",
                 segment_id=segment.name,
@@ -1210,31 +1227,25 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         assert sim.query.fetches == before
         registry.close()
         return
-    sim.simulation_time = sim.time
-    current_pose = states.capture_current_rigid_pose("item")
-    assert current_pose["state_acquisition"]["evidence_id"] == "rigid.pose"
-    assert current_pose["state_acquisition"]["valid"] == [True, True]
-    assert current_pose["state_acquisition"]["timestamp"] == sim.time
-    assert current_pose["state_acquisition"]["revision_kind"] == "collector_acquisition"
-    assert current_pose["native_uid"] == "payload"
-    saved_pose = deepcopy(current_pose["state_acquisition"]["values"])
-    current_pose["state_acquisition"]["values"][0][0][3] = 99.0
-    assert (
-        states.capture_current_rigid_pose("item")["state_acquisition"]["values"]
-        == saved_pose
-    )
-    joint = states.capture_current_joint_position("drawer", "slide_joint")
-    assert joint["state_acquisition"]["evidence_id"] == "articulation.joint_position"
-    assert joint["state_acquisition"]["valid"] == [True, False]
-    assert joint["state_acquisition"]["values"] == [pytest.approx(0.12), None]
-    assert joint["state_acquisition"]["acquisition_errors"][1]
-    with pytest.raises(ValueError, match="exact declared native joint"):
-        states.capture_current_joint_position("drawer", "guessed_joint")
-    historical_pose = states.capture_recorded_rigid_pose("item", [1, 1])
-    assert historical_pose["state_acquisition"]["values"] == saved_pose
-    assert historical_pose["boundary_frames"] == [1, 1]
-    assert historical_pose["observation_kind"] == "recorded"
-    assert sim.query.fetches == before
+    if declaration_case == "invalid_region_history":
+        env._rollout_storage["raw_valid"]["poses/payload"][0, 1] = False
+        with pytest.raises(RuntimeError, match="unavailable"):
+            collector.capture_recorded(
+                "support",
+                segment_id=segment.name,
+                source_path=segment.source_path,
+                frame_indices=[1, 1],
+            )
+        assert sim.query.fetches == before
+        registry.close()
+        return
+    if declaration_case == "recorded_region":
+
+        def no_live_pose(**kwargs):
+            raise AssertionError("Recorded region must not query current poses")
+
+        for body in sim.objects.values():
+            body.get_local_pose = no_live_pose
     recorded = collector.capture_recorded(
         "support",
         segment_id=segment.name,
@@ -1246,6 +1257,26 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     assert recorded["boundary_frames"] == [1, 1]
     assert recorded["native_support"]["supported"] == [True, True]
     assert recorded["native_support"]["rows"][0]["com_tolerance_m"] == 0.1
+    if declaration_case == "recorded_region":
+        expected = bridge.post_policy_port.post_policy_metadata(
+            policy, segment=segment
+        )["measurements"]
+        assert recorded["landing_region"] == expected["landing_region"]
+        assert recorded["support_gap_m"] == expected["support_gap"]
+        env._rollout_storage["raw_obs"]["poses/payload"][0, 1, 0] += 0.001
+        changed = collector.capture_recorded(
+            "support",
+            segment_id=segment.name,
+            source_path=segment.source_path,
+            frame_indices=[1, 1],
+        )
+        assert (
+            changed["landing_region"]["object_pose"]
+            != recorded["landing_region"]["object_pose"]
+        )
+        assert sim.query.fetches == before
+        registry.close()
+        return
     recorded["native_support"]["rows"][0]["contacts_world"][0][0] = 100.0
     again = collector.capture_recorded(
         "support",
@@ -1266,54 +1297,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     assert "support_contract_revision" not in current["native_support"]
     with pytest.raises(ValueError, match="before the first"):
         SimulationSupportObservationCollector(
-            env, bridge, registration, recording=recording
-        )
-    joint_policy = segment.post_policies[1]
-    with pytest.raises((KeyError, RuntimeError)):
-        states.capture_recorded_joint_policy(
-            "drawer",
-            preset_id="joint",
-            segment_id=segment.name,
-            source_path=segment.source_path,
-            frame_indices=[clock.step_index] * 2,
-        )
-    sim.test_articulation.get_qpos = lambda: torch.full((2, 1), 0.12)
-    for _ in bridge.post_policy_port.actions(
-        joint_policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
-    ):
-        clock.advance_after_env_step()
-    captured_joint = states.capture_recorded_joint_policy(
-        "drawer",
-        preset_id="joint",
-        segment_id=segment.name,
-        source_path=segment.source_path,
-        frame_indices=[clock.step_index] * 2,
-    )
-    assert captured_joint["policy_result"]["accepted"] == [True, True]
-    assert (
-        captured_joint["policy_result"]["joint_observation"]["end_step"]
-        == clock.step_index
-    )
-    sim.test_articulation.get_qpos = lambda: (_ for _ in ()).throw(
-        AssertionError("historical collection must not read qpos")
-    )
-    assert (
-        states.capture_recorded_joint_policy(
-            "drawer",
-            preset_id="joint",
-            segment_id=segment.name,
-            source_path=segment.source_path,
-            frame_indices=[clock.step_index] * 2,
-        )
-        == captured_joint
-    )
-    with pytest.raises(ValueError, match="exact boundary"):
-        states.capture_recorded_joint_policy(
-            "drawer",
-            preset_id="joint",
-            segment_id=segment.name,
-            source_path=segment.source_path,
-            frame_indices=[clock.step_index - 1] * 2,
+            env, bridge, registration, observations=recording
         )
     context._begin_episode(torch.tensor([0]))
     with pytest.raises(ValueError, match="another episode"):
@@ -1339,3 +1323,10 @@ def test_current_observation_rejects_replaced_native_body_before_reading_old_pos
         observer.observe_current()
     assert original.pose_reads == 0
     registry.close()
+
+
+def _append_fixture(env, frame, action):
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    env._traj_raw_action = action
+    EmbodiedEnv._write_trajectory_step(env, frame)

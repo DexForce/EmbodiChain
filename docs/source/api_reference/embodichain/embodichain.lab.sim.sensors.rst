@@ -158,7 +158,7 @@ Contact package
 
 ``embodichain.lab.sim.sensors.contact`` is the canonical entry point for contact
 sensor configuration, acquisition and history. Its ``sensor``, ``sampling``,
-``history`` and ``timeline`` modules share one package; sensor-specific Warp
+``history``, ``timeline`` and ``observation`` modules share one package; sensor-specific Warp
 adaptation kernels live under its private ``_warp`` directory. Generic physical
 evidence remains in ``lab.sim.evidence``; grasp interpretation and Task Program
 bindings remain in their owning layers. Calibrated hand opening used for release
@@ -178,6 +178,8 @@ interpretation belongs to ``atomic_actions.grip_evidence``, not the sensor layer
    CONTACT_NORMALS
    CONTACT_IMPULSES
    CONTACT_POSITIONS
+   CONTACT_DISTANCES
+   DEFAULT_CHANNELS
    ContactEvidenceSample
    ContactEvidenceSampler
    ContactSourceStamp
@@ -185,6 +187,13 @@ interpretation belongs to ``atomic_actions.grip_evidence``, not the sensor layer
    ContactTimeline
    ContactTimelineCfg
    ContactHistory
+   JointContactObservation
+   JointContactObserver
+Use the public ``sensors.contact`` entry point for joint/contact windows.
+``capture`` appends without publishing internal storage; ``snapshot(start=0)``
+returns owned full or incremental history. Callers retain the window generation
+when reusing an incremental offset.
+
 
 Import migration
 ----------------

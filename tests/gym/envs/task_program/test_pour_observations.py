@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for shared trajectory state capture and restore helpers."""
+"""Tests for recorded Pour geometry from canonical observation history."""
 
 from __future__ import annotations
 
@@ -26,7 +26,14 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from embodichain.lab.gym.utils.trajectory_state import RecordedTrajectoryReader
+from tensordict import TensorDict
+from embodichain.lab.gym.envs.managers import ObservationManager
+from embodichain.lab.gym.envs.managers.observation_types import (
+    ObservationDescriptor,
+    ObservationFrame,
+    ObservationSample,
+)
+from embodichain.lab.gym.utils.gym_utils import _init_raw_rollout, _write_raw_rollout
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
 from embodichain.lab.gym.envs.task_program.bridge import (
     TaskProgramDemoBridge,
@@ -179,19 +186,59 @@ def _collector_case(name="nominal", *, count=1):
         robot=robot,
         num_envs=count,
         episode_context=episodes,
-        _traj_buffer={"states": {"rigid_objects": states}},
-        _traj_steps=torch.zeros(count, dtype=torch.long),
         _closed=False,
     )
-    recording = RecordedTrajectoryReader(
-        source=lambda: (env._traj_buffer["states"], env._traj_steps),
-        episode_context=episodes,
-        is_closed=lambda: env._closed,
-    )
+    recording = ObservationManager({}, env)
+    storage = TensorDict({}, batch_size=[count])
+    horizon = max(value["pose"].shape[1] for value in states.values()) - 1
+    _init_raw_rollout(storage, episodes, {}, torch.zeros(count, horizon, 1))
+    recording.bind_rollout_storage(storage)
+    for slot in range(common["written_steps"][0] + 1):
+        fields = {
+            uid: ObservationSample(
+                ObservationDescriptor(
+                    uid,
+                    "pose",
+                    "arena",
+                    "xyz_xyzw",
+                    ("m", "unitless"),
+                    (7,),
+                    torch.float32,
+                ),
+                value["pose"][:, slot],
+                torch.ones(count, dtype=torch.bool),
+                (None,) * count,
+            )
+            for uid, value in states.items()
+        }
+        frame = ObservationFrame(
+            None,
+            fields,
+            episodes.episode_ids,
+            slot,
+            timestamp=slot * clock.step_dt,
+            clock_domain="simulation_time",
+            episode_owner=episodes,
+        )
+        recording._bind_schema(frame)
+        _write_raw_rollout(
+            storage,
+            episodes,
+            frame,
+            **(
+                {
+                    "field_ids": tuple(recording.field_ids.values()),
+                    "env_ids": list(range(count)),
+                }
+                if slot == 0
+                else {"action": torch.zeros(count, 1)}
+            ),
+        )
+    env.observation_manager = recording
+    env._test_raw_storage = storage
     collector = SimulationStateObservationCollector(
-        env, bridge, registration, recording=recording
+        env, bridge, registration, observations=recording
     )
-    env._traj_steps[:] = common["written_steps"][0]
     for _ in range(common["written_steps"][0]):
         clock.advance_after_env_step()
     sim.simulation_time = 0.1 + clock.now()
@@ -248,12 +295,12 @@ def test_pour_capture_keeps_native_rows_and_rejects_missing_windows_or_rebound_o
         observed["geometry_frame"]["batches"]["pour.motion_geometry"]["values"][0]
         == observed["geometry_frame"]["batches"]["pour.motion_geometry"]["values"][1]
     )
-    env._traj_steps[1] = ends[1] - 1
+    env._test_raw_storage["raw_steps"][1] = ends[1] - 1
     with pytest.raises(ValueError, match="not fully recorded"):
         collector.capture_recorded_pour_geometry(
             "cube", "region", start_frames=starts, end_frames=ends
         )
-    env._traj_steps[1] = ends[1]
+    env._test_raw_storage["raw_steps"][1] = ends[1]
     bodies["cube"] = deepcopy(bodies["cube"])
     with pytest.raises(ValueError, match="another native object"):
         collector.capture_recorded_pour_geometry(
@@ -328,3 +375,31 @@ def test_lab_geometry_and_declared_occurrences_feed_independent_taskspec_reports
     expected = "satisfied" if case["record"]["accepted"][0] else "failed"
     assert report.goal[0].status.value == expected
     assert report.milestones[0].status.value == expected
+
+
+@pytest.mark.parametrize("missing", ["pose", "timestamp", "interior_slot"])
+def test_pour_capture_rejects_unavailable_raw_acquisition(missing):
+    collector, env, case, _, _ = _collector_case()
+    measured = case["record"]["measurements"]
+    slot = measured["start_frames"][0] + 1
+    storage = env._test_raw_storage
+    if missing == "pose":
+        field = env.observation_manager.field_ids["cube"]
+        storage["raw_valid"][field][0, slot] = False
+        storage.get_non_tensor("raw_acquisition_errors")[field][
+            0, slot
+        ] = "source unavailable"
+        error, message = RuntimeError, "source unavailable"
+    elif missing == "timestamp":
+        storage["raw_timestamp"][0, slot] = float("nan")
+        error, message = RuntimeError, "acquisition time is unavailable"
+    else:
+        storage["raw_revision"][0, slot] = -1
+        error, message = ValueError, "not fully recorded"
+    with pytest.raises(error, match=message):
+        collector.capture_recorded_pour_geometry(
+            "cube",
+            "region",
+            start_frames=measured["start_frames"],
+            end_frames=measured["end_frames"],
+        )
