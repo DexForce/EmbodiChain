@@ -1010,6 +1010,35 @@ callables, byte strings and unordered sets are rejected before serialization.
    canonicalize
    json_snapshot
 
+embodichain.gen_sim.task_spec.condition_evidence
+------------------------------------------------
+
+Sealed state bindings select explicit orientation or articulation endpoint
+criteria, native and episode identities, and separate current or recorded input
+contracts. Current orientation uses the shared rigid-pose axis computation;
+current joints use the declared target tolerance. Neither implies task execution
+success. Historical milestones require their full successful occurrence prefix
+and the original policy receipts; E6 also verifies the exact semantic operation,
+joint validator, target bounds and one-second stability contract.
+
+New raw observations require their complete acquisition channels and cannot
+switch to the historical verifier by adding a record. Missing channels, failed
+milestone receipts and unbound episodes remain unavailable per environment.
+Cold import and binding normalization do not load a simulation or numeric backend.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.condition_evidence
+
+.. autosummary::
+
+   ConditionEvidenceBinding
+   evaluate_condition_evidence
+
+.. autoclass:: ConditionEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_condition_evidence
+
+
 embodichain.gen_sim.task_spec.contracts
 ---------------------------------------
 
@@ -1088,6 +1117,23 @@ invariants. The ordinary TaskSpec evaluator remains the certificate authority.
 .. autofunction:: evaluate_supported_placement_evidence
 
 .. autofunction:: evaluate_placement_evidence_report
+
+embodichain.gen_sim.task_spec.evidence_report
+---------------------------------------------
+
+Combine verified placement, orientation and joint evidence using the existing
+TaskSpec evaluator. Bindings must share the native row, episode and input-format
+contract. Final observations cannot fill past milestones; sparse boundary
+observations cannot establish continuous invariants or complete temporal windows.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.evidence_report
+
+.. autosummary::
+
+   evaluate_physical_evidence_report
+
+.. autofunction:: evaluate_physical_evidence_report
+
 
 embodichain.gen_sim.task_spec.expressions
 -----------------------------------------
@@ -4479,3 +4525,20 @@ pass the selected port to AtomicActionEngine.start.
 
 .. autoclass:: CompositeTaskProgramPlanLifecycleFactory
    :members:
+
+State observation acquisition
+-----------------------------
+
+``SimulationStateObservationCollector`` binds the actual bridge/session and
+collects current poses or explicit joint positions without interpreting task
+acceptance. Recorded poses read the canonical ObservationManager's raw history;
+invalid finite values remain unavailable and original temporal metadata is kept.
+Current reads work without history. Native owners, episodes and clocks cannot be
+substituted, and recorded joint claims require the original executed policy.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
+
+.. autoclass:: SimulationStateObservationCollector
+   :members:
+
+.. autofunction:: embodichain.gen_sim.task_engine.evidence.project_condition_evidence_binding

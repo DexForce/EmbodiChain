@@ -183,3 +183,8 @@ resolved condition and compiled occurrence descriptors. The final builder must
 not load or emit `constraints.json`. The original `project_placement_evidence_binding`
 only validates the frozen B0 constraints payload for source-comparison fixtures;
 it delegates the semantic projection and is not a second runtime policy owner.
+
+Task Engine's `project_condition_evidence_binding` projects frozen role/lineage,
+explicit compiled occurrences and already-resolved physical criteria into the
+TaskSpec state-evidence contract. It reads no physical state and chooses no
+acceptance thresholds; the Lab observation owner supplies facts.
