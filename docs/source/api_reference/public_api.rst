@@ -1676,7 +1676,7 @@ embodichain.lab.gym.utils.profiler
    EnvProfiler
 
 embodichain.lab.gym.envs.managers.observation_types
--------------------------------------------------
+---------------------------------------------------
 
 The observation manager owns source acquisition and the single raw-field schema.
 Policy views receive separate tensors before in-place normalization/noise;
