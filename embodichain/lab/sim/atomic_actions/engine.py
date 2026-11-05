@@ -41,6 +41,15 @@ from .plans import (
 )
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
+from .planning_probes import (
+    JointPrefixPlanner,
+    PourGraspProjectionProvider,
+    PickClosingQueryProvider,
+    PlaceSceneProvider,
+)
+from .place_continuation import PlaceContinuationProvider
+from .measured_rigid import MeasuredRigidPlanningProvider
+from embodichain.lab.sim.motion.mesh_collision import FreeMotionQuery
 from .scene import SceneProvider
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 from .tracking import TrackingPolicy, TrackingRuntime
@@ -74,6 +83,13 @@ class AtomicActionEngine:
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
         hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
+        free_motion_query: FreeMotionQuery | None = None,
+        pour_grasp_projection_provider: PourGraspProjectionProvider | None = None,
+        joint_prefix_planner: JointPrefixPlanner | None = None,
+        pick_closing_query_provider: PickClosingQueryProvider | None = None,
+        place_scene_provider: PlaceSceneProvider | None = None,
+        place_continuation_provider: PlaceContinuationProvider | None = None,
+        measured_rigid_provider: MeasuredRigidPlanningProvider | None = None,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
@@ -88,6 +104,17 @@ class AtomicActionEngine:
                 control-part name.
             hand_geometry_cfgs: Explicit hand calibrations keyed by grasp endpoint
                 target ID. Settings are copied; construction performs no hand FK.
+            free_motion_query: Optional borrowed same-robot collision queries.
+            pour_grasp_projection_provider: Read-only numeric grasp constraints
+                for explicitly selected pouring grasps.
+            joint_prefix_planner: Optional same-robot observed motion adapter.
+            pick_closing_query_provider: Fresh owned closing queries for the
+                explicitly selected native Pick screen.
+            place_scene_provider: Owned geometry and declared support identities.
+            place_continuation_provider: Same-robot occurrence-bound release
+                predictions; predictions authorize no physical effects.
+            measured_rigid_provider: Same-robot measured preshape and inside
+                geometry, acquired only by explicitly selected action options.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
             tracking_runtime: Optional exact-version feedback, projector, and
@@ -105,6 +132,13 @@ class AtomicActionEngine:
             tracking_runtime=tracking_runtime,
             grasp_pose_generators=grasp_pose_generators,
             hand_geometry_cfgs=hand_geometry_cfgs,
+            free_motion_query=free_motion_query,
+            pour_grasp_projection_provider=pour_grasp_projection_provider,
+            joint_prefix_planner=joint_prefix_planner,
+            pick_closing_query_provider=pick_closing_query_provider,
+            place_scene_provider=place_scene_provider,
+            place_continuation_provider=place_continuation_provider,
+            measured_rigid_provider=measured_rigid_provider,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}

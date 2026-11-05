@@ -2356,6 +2356,25 @@ def test_integration_config_rejects_unknown_fields_before_live_construction() ->
         _decode_configured_task_program_integration(payload)
 
 
+@pytest.mark.parametrize(
+    "kind,field,value",
+    [
+        ("pick_up", "native_closing_revision", 4),
+        ("place", "measured_inside", True),
+    ],
+)
+def test_source_manipulation_config_requires_its_published_service_decoder(
+    kind: str, field: str, value: object
+) -> None:
+    """Direct Atomic support does not advertise an uninstalled runtime factory."""
+    payload = _integration_payload("repeated_pick_place")
+    payload["robot_profile"]["presets"][0]["action_options"] = {
+        "pick": {"kind": kind, field: value}
+    }
+    with pytest.raises(ValueError, match=field):
+        _decode_configured_task_program_integration(payload)
+
+
 def test_integration_config_rejects_removed_schema_version() -> None:
     """The integration declaration has no development-history version field."""
     payload = _integration_payload("repeated_pick_place")

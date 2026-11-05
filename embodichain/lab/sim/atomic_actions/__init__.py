@@ -75,6 +75,15 @@ from .evidence import (
     PhysicalEvidenceRequest,
 )
 from .engine import AtomicActionEngine, PlanTransform
+from .pour_projection import PourGraspProjectionInputs
+from .planning_probes import (
+    PourGraspProjectionProvider,
+    PickClosingQueryProvider,
+    PickRigidSceneProvider,
+    PlaceSceneInputs,
+    PlaceInsideLanding,
+    PlaceSceneProvider,
+)
 from .nominal import NominalMotionSource, InstantiatedSkillMotion
 from .prototype_source import PrototypeMotionProvider
 from .execution import (
@@ -217,9 +226,11 @@ from .primitives import (
     OpenDoorOptions,
     PickUp,
     PickUpOptions,
+    PickPlanningRecovery,
     Place,
     PlaceGoal,
     PlaceOptions,
+    PlacePlanningRecovery,
     Pour,
     PourGoal,
     PourOptions,
@@ -283,6 +294,13 @@ from .state import (
 )
 
 __all__ = [
+    "PourGraspProjectionProvider",
+    "PickClosingQueryProvider",
+    "PickRigidSceneProvider",
+    "PlaceSceneInputs",
+    "PlaceInsideLanding",
+    "PlaceSceneProvider",
+    "PourGraspProjectionInputs",
     "ActionBinding",
     "ActionControlOverrides",
     "ActionInvocation",
@@ -417,9 +435,11 @@ __all__ = [
     "PARK_COMMAND",
     "PickUp",
     "PickUpOptions",
+    "PickPlanningRecovery",
     "Place",
     "PlaceGoal",
     "PlaceOptions",
+    "PlacePlanningRecovery",
     "Pour",
     "PourGoal",
     "PourOptions",

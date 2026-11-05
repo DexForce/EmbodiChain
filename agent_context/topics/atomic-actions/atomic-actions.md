@@ -66,6 +66,19 @@ callbacks never become global engine configuration. Unsupported segment recovery
 rejects before provider preparation, and external nominal motion is not replaced
 by native sampling retries. No new Source skill implementation is registered.
 
+Pick and Place keep their shared default path. Explicit typed options select
+source geometry and native screens; `PickPlanningRecovery` and
+`PlacePlanningRecovery` own bounded searches. Their descriptors advertise the
+actual recovery type and segment handler. `ActionPlanningServices` borrows
+same-robot Motion/collision services and typed Pick/Place fact providers from
+`planning_probes`, `measured_rigid` and `place_continuation`; no semantic graph,
+compiler, skill-registry replacement or simulator stepping belongs here.
+Required missing providers fail before planning. Complete release previews stay
+on the same engine and observation and authorize no physical effects. The
+single-environment source paths reject other batches. AxisAlign rejects inherited
+Pick-only options it does not implement; drawer-specific Place is unavailable
+until its separate action owner is installed.
+
 `ExecutionPlanLifecycle` is an optional host-owned adoption port. It receives an
 owned validated attempt before dispatch. Installation rejection latches the
 session: later ticks/revisions cannot resume commands. `ExecutionRunner` keeps

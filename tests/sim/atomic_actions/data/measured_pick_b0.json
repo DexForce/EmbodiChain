@@ -1,0 +1,369 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "scope": "Complete source MeasuredRigidPolicy._pick over canonical generic base pipeline; robot mesh qualification port controlled, native closure/rest-FCL real",
+  "cases": [
+    {
+      "mode": "accepted",
+      "success": [
+        true
+      ],
+      "positions": "ad45f735004a518c02d20fb730db01093bb3f6608307f1d3158c85a970383e11",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "velocities": "48c16b40336fb30df2897bcc5a0f7d150f2891b181b1adf8936d35b2ddad2367",
+      "segments": [
+        [
+          "approach",
+          0,
+          88
+        ],
+        [
+          "close",
+          88,
+          100
+        ],
+        [
+          "lift",
+          100,
+          151
+        ]
+      ],
+      "metadata": {
+        "affordance_sample": {
+          "grasp": {
+            "key": "pick:grasp",
+            "candidate_ids": [
+              0
+            ],
+            "selected_poses": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  -1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "adaptive_grasp": {
+              "strategy_indices": [
+                0
+              ],
+              "approach_directions": [
+                [
+                  0.0,
+                  0.0,
+                  -1.0
+                ]
+              ],
+              "attempts": [
+                {
+                  "strategy": 0,
+                  "grasp_feasible": [
+                    true
+                  ],
+                  "path_feasible": [
+                    true
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "pick_path": {
+          "provider": "joint_interp",
+          "approach_samples": 88,
+          "contact_samples": 46,
+          "selected_grasp_unchanged": true,
+          "close_lift_unchanged": true,
+          "attempts": [
+            {
+              "contact_samples": 46,
+              "contact_ik_valid": true,
+              "joint_interp": {
+                "valid": true,
+                "frames": 151,
+                "scope": "discrete_robot_meshes",
+                "approach_scene": {
+                  "valid": true,
+                  "frames": 88,
+                  "scope": "discrete_free_motion_meshes"
+                }
+              }
+            }
+          ],
+          "accepted": true,
+          "qualification_scope": "full_robot_and_approach_scene_discrete_meshes"
+        },
+        "measured_rigid": {
+          "accepted": true,
+          "preshape_fraction": 0.734375,
+          "target_width_m": 0.03,
+          "extra_side_reserve_m": 0.002,
+          "unchanged_arm_and_timing": true,
+          "closure": {
+            "valid": true,
+            "emitted_close_samples": 12,
+            "revision": 4,
+            "identity": {},
+            "scope": "discrete_nominal_rest_order_with_contact_halo_diagnostics_not_physical_acquisition",
+            "native_pair_rest_offsets_used": true,
+            "native_pair_contact_offsets_used": true,
+            "closing_grid_samples": 65,
+            "unique_tcp_queries": 1,
+            "accepted_queries": 1,
+            "reasons": [
+              {
+                "valid": true,
+                "reason": "nominal_bilateral_pad_rest_first",
+                "potential_nonpad_halo_at_pad_rest_endpoint": false,
+                "checked_samples": 15,
+                "nominal_closing_fraction": 0.21875
+              }
+            ],
+            "nonpad_contact_halo_is_veto": false,
+            "opening": null
+          },
+          "command_qualification": {
+            "valid": true,
+            "frames": 151,
+            "scope": "discrete_robot_meshes"
+          },
+          "approach": {
+            "valid": true,
+            "frames": 88,
+            "scope": "discrete_free_motion_meshes"
+          },
+          "native": {
+            "valid": true,
+            "frames": 151,
+            "queries": 0,
+            "scope": "discrete_native_pair_rest_not_continuous_contact_or_task_success"
+          }
+        }
+      },
+      "failure": null,
+      "events": [
+        "closing",
+        "scene",
+        "closing"
+      ],
+      "after_rng": [
+        "903697359879995d02f3fcb75c18c2d9c06946fd9bd08607a2db33a4c0eadb43",
+        0.36669556939777637,
+        0.6052398804018957
+      ],
+      "calls_sha256": "65ed41fb04dd38205f01f8e02711c78fa5c55ca8470479981352168ab05a3da8",
+      "ik_sha256": "d7e72ed69bb59a1889369fd70632db8338941dae6a0188a27cd013d738ae28fc"
+    },
+    {
+      "mode": "base_failure",
+      "success": [
+        false
+      ],
+      "positions": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "dt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "velocities": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "segments": [],
+      "metadata": {
+        "pick_candidate_retry": {
+          "budget": 4,
+          "attempts": [],
+          "accepted": false
+        },
+        "pick_raw_candidate_retry": {
+          "budget": 4,
+          "attempts": [
+            {
+              "strategy": 0,
+              "candidate_id": 0,
+              "roll_variant": 0,
+              "selected_pose": [
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.20000000298023224
+                  ],
+                  [
+                    0.0,
+                    -1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    -1.0,
+                    0.10000000149011612
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "trajectory": {
+                "valid": false,
+                "reason": "approach_continuity_rejected"
+              }
+            },
+            {
+              "strategy": 0,
+              "candidate_id": 0,
+              "roll_variant": 1,
+              "selected_pose": [
+                [
+                  [
+                    -1.0,
+                    0.0,
+                    0.0,
+                    0.20000000298023224
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    -1.0,
+                    0.10000000149011612
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "trajectory": {
+                "valid": false,
+                "reason": "approach_continuity_rejected"
+              }
+            }
+          ],
+          "accepted": false,
+          "source": "geometry_before_endpoint_ik",
+          "qualification_scope": "continuous_pick_full_robot_limits_and_approach_scene_discrete_meshes"
+        }
+      },
+      "failure": {
+        "code": "planning_failed",
+        "retryable": true
+      },
+      "events": [],
+      "after_rng": [
+        "4864f28273e93404ed441b03147427354613c478f472ad92e558002bac6b7a9a",
+        0.36669556939777637,
+        0.6052398804018957
+      ],
+      "calls_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "mode": "blocked",
+      "success": [
+        false
+      ],
+      "positions": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "dt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "velocities": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "segments": [],
+      "metadata": {},
+      "failure": {
+        "code": "measured_rigid_unqualified",
+        "retryable": false
+      },
+      "events": [
+        "closing",
+        "scene",
+        "closing"
+      ],
+      "after_rng": [
+        "903697359879995d02f3fcb75c18c2d9c06946fd9bd08607a2db33a4c0eadb43",
+        0.36669556939777637,
+        0.6052398804018957
+      ],
+      "calls_sha256": "65ed41fb04dd38205f01f8e02711c78fa5c55ca8470479981352168ab05a3da8",
+      "ik_sha256": "d7e72ed69bb59a1889369fd70632db8338941dae6a0188a27cd013d738ae28fc"
+    },
+    {
+      "mode": "closure_rejected",
+      "success": [
+        false
+      ],
+      "positions": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "dt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "velocities": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "segments": [],
+      "metadata": {},
+      "failure": {
+        "code": "measured_rigid_unqualified",
+        "retryable": false
+      },
+      "events": [
+        "closing",
+        "scene",
+        "closing"
+      ],
+      "after_rng": [
+        "903697359879995d02f3fcb75c18c2d9c06946fd9bd08607a2db33a4c0eadb43",
+        0.36669556939777637,
+        0.6052398804018957
+      ],
+      "calls_sha256": "65ed41fb04dd38205f01f8e02711c78fa5c55ca8470479981352168ab05a3da8",
+      "ik_sha256": "d7e72ed69bb59a1889369fd70632db8338941dae6a0188a27cd013d738ae28fc"
+    },
+    {
+      "mode": "unavailable",
+      "success": [
+        false
+      ],
+      "positions": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "dt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "velocities": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "segments": [],
+      "metadata": {},
+      "failure": {
+        "code": "measured_rigid_unqualified",
+        "retryable": false
+      },
+      "events": [
+        "closing",
+        "scene"
+      ],
+      "after_rng": [
+        "903697359879995d02f3fcb75c18c2d9c06946fd9bd08607a2db33a4c0eadb43",
+        0.36669556939777637,
+        0.6052398804018957
+      ],
+      "calls_sha256": "65ed41fb04dd38205f01f8e02711c78fa5c55ca8470479981352168ab05a3da8",
+      "ik_sha256": "d7e72ed69bb59a1889369fd70632db8338941dae6a0188a27cd013d738ae28fc"
+    }
+  ],
+  "full_records_sha256": "919a954e5a0c87038657da6f264975168fc6be90e6ac53ca45e19e180eb5e70a"
+}

@@ -261,6 +261,46 @@ def test_engine_can_disable_builtin_loading() -> None:
     assert _engine(load_builtins=False).actions == {}
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "free_motion_query",
+        "pour_grasp_projection_provider",
+        "joint_prefix_planner",
+        "pick_closing_query_provider",
+        "place_scene_provider",
+        "place_continuation_provider",
+        "measured_rigid_provider",
+    ],
+)
+def test_pick_place_services_reject_untyped_ports_before_binding(name: str) -> None:
+    with pytest.raises(TypeError, match=name):
+        AtomicActionEngine(_motion_generator(), **{name: object()})
+
+
+@pytest.mark.parametrize(
+    "name, method",
+    [
+        ("free_motion_query", "inspect"),
+        ("joint_prefix_planner", "plan"),
+        ("place_continuation_provider", "prepare"),
+        ("measured_rigid_provider", "prepare"),
+    ],
+)
+def test_pick_place_services_reject_another_robot_before_binding(
+    name: str, method: str
+) -> None:
+    from types import SimpleNamespace
+
+    calls: list[object] = []
+    provider = SimpleNamespace(
+        robot=object(), **{method: lambda *args, **kwargs: calls.append(args)}
+    )
+    with pytest.raises(ValueError, match="exact robot"):
+        AtomicActionEngine(_motion_generator(), **{name: provider})
+    assert calls == []
+
+
 def test_initial_context_uses_configured_scene_provider() -> None:
     scene = SceneSnapshot(
         timestamp=1.5,

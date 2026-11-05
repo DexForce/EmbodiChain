@@ -479,6 +479,14 @@ deprecated entity-only fallback. For canonical snapshot grounding and moving
 target recovery, see
 `examples/sim/atomic_action/moving_target_recovery.py`.
 
+Explicit `PickUpOptions` can select qualified fixed, constrained, adaptive or
+native closing geometry. These options require their declared planning ports;
+missing inputs fail rather than disabling a required check. Candidate/path
+recovery is independently enabled with
+`RecoveryPolicy(planning_recovery=PickPlanningRecovery(...))`. The shared default
+uses the original sampling path. `AxisAlignOptions` rejects Pick-only options
+that its planner does not implement.
+
 ### Picking articulated targets
 
 `PickUp` accepts an {class}`~embodichain.lab.sim.objects.Articulation` wherever
@@ -728,6 +736,13 @@ The bound `primary.grasp` endpoint must provide `open` and `grasp`. Important
 | `preserve_current_object_orientation` | Keep the observed object orientation while using the target translation |
 
 **Example:** `examples/sim/atomic_action/place.py`
+
+Explicit Place recovery uses `PlacePlanningRecovery` and a typed scene provider
+with declared floor/support identities. The bounded waypoint, lateral,
+retained-grip and inside-yaw variants preserve required release poses. Measured
+inside geometry and complete Pick-to-Place previews are separate explicit
+services; a preview never establishes a physical release. Drawer-specific Place
+is unavailable in this layer and rejects before planning.
 
 (builtin-assemble)=
 

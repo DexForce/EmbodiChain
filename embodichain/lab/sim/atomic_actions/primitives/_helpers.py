@@ -287,17 +287,19 @@ def plan_named_arm_trajectory(
     n_waypoints: int,
     motion_policy: MotionPolicy,
     interpolation_dt: float | None,
+    *,
+    linear_segments: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Plan a fixed-size pose trajectory for one named manipulator."""
-    result = motion_generator.generate(
-        build_pose_plan_states(target_poses),
-        options=motion_policy.to_motion_gen_options(
-            start_qpos=start_qpos,
-            control_part=control_part,
-            sample_count=n_waypoints,
-            interpolation_dt=interpolation_dt,
-        ),
+    targets = build_pose_plan_states(target_poses)
+    options = motion_policy.to_motion_gen_options(
+        start_qpos=start_qpos,
+        control_part=control_part,
+        sample_count=n_waypoints,
+        interpolation_dt=interpolation_dt,
+        cartesian_keyframes=linear_segments,
     )
+    result = motion_generator.generate(targets, options=options)
     return _named_arm_result(result, n_waypoints, interpolation_dt, control_part)
 
 

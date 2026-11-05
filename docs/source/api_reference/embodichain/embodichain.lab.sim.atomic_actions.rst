@@ -545,3 +545,168 @@ only owned query resources, never borrowed simulation entities. Ordinary
 
 .. automodule:: embodichain.lab.sim.atomic_actions.source_native_contact
    :members:
+
+
+Explicit Pick and Place planning
+--------------------------------
+
+``PickUpOptions`` and ``PlaceOptions`` select action geometry. Motion sampling,
+segment recovery and timing remain in ``MotionPolicy``; bounded candidate and
+release-path recovery use the exact ``PickPlanningRecovery`` or
+``PlacePlanningRecovery`` value in ``RecoveryPolicy.planning_recovery``. Ordinary
+defaults do not enable these capabilities. The descriptor advertises only each
+installed skill's actual recovery type and segment handler.
+
+The engine borrows typed planning ports. Their owned snapshots contain geometric
+facts and exact occurrence identities, never Task Engine or semantic compiler
+objects. Missing required geometry or a different robot rejects before the
+corresponding query. A continuation preview predicts a complete release using
+the same engine and observation; it authorizes no task-state effect or physical
+success. Native measured paths retain their explicit single-environment scope.
+
+``AxisAlignOptions`` rejects inherited Pick-only requirements that its planner
+does not implement. Drawer-specific Place remains unavailable in this layer and
+fails during options validation. Existing external nominal capabilities remain
+available; explicit measured source policies reject incompatible nominal input.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
+.. autosummary::
+   :nosignatures:
+
+   PickPlanningRecovery
+   PlacePlanningRecovery
+   PourGraspProjectionInputs
+   PourGraspProjectionProvider
+   PickClosingQueryProvider
+   PickRigidSceneProvider
+   PlaceSceneInputs
+   PlaceInsideLanding
+   PlaceSceneProvider
+
+Curobo queries
+^^^^^^^^^^^^^^
+
+The joint-prefix adapter preserves the exact observed full robot state and backend options while borrowing Motion's owned query lifetime.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.curobo_queries
+
+.. autosummary::
+   :nosignatures:
+
+   CuroboJointPrefixPlanner
+
+.. autoclass:: CuroboJointPrefixPlanner
+   :members:
+
+Measured rigid
+^^^^^^^^^^^^^^
+
+Physical hosts supply same-observation rigid geometry and query sessions. Atomic skills own candidate selection, plan transformation and bounded recovery.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.measured_rigid
+
+.. autosummary::
+   :nosignatures:
+
+   MeasuredInsidePlanningInputs
+   MeasuredRigidPlanningSession
+   MeasuredRigidPlanningProvider
+
+.. autoclass:: MeasuredInsidePlanningInputs
+   :members:
+
+.. autoclass:: MeasuredRigidPlanningSession
+   :members:
+
+.. autoclass:: MeasuredRigidPlanningProvider
+   :members:
+
+Place continuation
+^^^^^^^^^^^^^^^^^^
+
+Release prediction binds distinct source, optional transport and release occurrences. Predictions cannot collect future physical facts or commit effects.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.place_continuation
+
+.. autosummary::
+   :nosignatures:
+
+   PlaceContinuationRoute
+   PlaceContinuationSession
+   PlaceContinuationProvider
+
+.. autoclass:: PlaceContinuationRoute
+   :members:
+
+.. autoclass:: PlaceContinuationSession
+   :members:
+
+.. autoclass:: PlaceContinuationProvider
+   :members:
+
+Planning probes
+^^^^^^^^^^^^^^^
+
+These ports separate read-only geometry and observed backend queries from Pick and Place phase construction. Missing declared inputs fail explicitly.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
+
+.. autosummary::
+   :nosignatures:
+
+   JointPrefixPlanner
+   CuroboWorldObservationProvider
+   ObservedCuroboQueryService
+   PourGraspProjectionProvider
+   PickClosingQueryProvider
+   PickRigidSceneProvider
+   PlaceInsideLanding
+   PlaceInsideLandingProvider
+   PlaceSceneInputs
+   PlaceSceneProvider
+
+.. autoclass:: JointPrefixPlanner
+   :members:
+
+.. autoclass:: CuroboWorldObservationProvider
+   :members:
+
+.. autoclass:: ObservedCuroboQueryService
+   :members:
+
+.. autoclass:: PourGraspProjectionProvider
+   :members:
+
+.. autoclass:: PickClosingQueryProvider
+   :members:
+
+.. autoclass:: PickRigidSceneProvider
+   :members:
+
+.. autoclass:: PlaceInsideLanding
+   :members:
+
+.. autoclass:: PlaceInsideLandingProvider
+   :members:
+
+.. autoclass:: PlaceSceneInputs
+   :members:
+
+.. autoclass:: PlaceSceneProvider
+   :members:
+
+Pour projection
+^^^^^^^^^^^^^^^
+
+Numeric downstream-pour operands constrain Pick grasp sampling without exposing a task graph or changing Pour execution.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.pour_projection
+
+.. autosummary::
+   :nosignatures:
+
+   PourGraspProjectionInputs
+
+.. autoclass:: PourGraspProjectionInputs
+   :members:
