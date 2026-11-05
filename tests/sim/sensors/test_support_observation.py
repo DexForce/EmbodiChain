@@ -778,6 +778,39 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
     assert sim.query.fetches == (
         8 if startup == "cold" else 16 if startup == "row_reset" else 12
     )
+    if kind == "supported_region":
+        native = metadata["measurements"]["native_support"]
+        # Historical projection consumes the captured poses and original load,
+        # not a new contact read or a live pose after the boundary.
+        before_fetches = sim.query.fetches
+
+        def no_live_pose(**kwargs):
+            raise AssertionError("historical geometry reread a live pose")
+
+        for body in sim.objects.values():
+            body.get_local_pose = no_live_pose
+        measured = port.measure_support_geometry(
+            "held_surface",
+            native_support=native,
+            object_pose=native["object_pose"],
+            reference_pose=native["reference_pose"],
+        )
+        assert measured["landing_region"] == metadata["measurements"]["landing_region"]
+        assert measured["support_gap_m"] == metadata["measurements"]["support_gap"]
+        assert sim.query.fetches == before_fetches
+        changed = deepcopy(native["object_pose"])
+        changed[0][0][3] += 0.02
+        other = port.measure_support_geometry(
+            "held_surface",
+            native_support=native,
+            object_pose=changed,
+            reference_pose=native["reference_pose"],
+        )
+        assert (
+            other["landing_region"]["object_pose"]
+            != measured["landing_region"]["object_pose"]
+        )
+        assert sim.query.fetches == before_fetches
     registry.close()
 
 

@@ -212,6 +212,7 @@ hull; no silhouette containment, stability window or task verdict is inferred.
 
    support_from_contacts
    contact_load_path
+   contact_support_heights
 
 .. autofunction:: support_from_contacts
 
@@ -220,3 +221,10 @@ loads and explicit dynamic cargo IDs. It does not join paths across substeps or
 choose a stable-window duration. That qualification belongs to the consumer.
 
 .. autofunction:: contact_load_path
+
+``contact_support_heights`` selects the highest point of a finite, positively
+loaded COM-qualified contact patch. Missing rows return NaN; this value does not
+establish a task outcome. Runtime measurement and snapshot re-evaluation share
+this same calculation.
+
+.. autofunction:: contact_support_heights

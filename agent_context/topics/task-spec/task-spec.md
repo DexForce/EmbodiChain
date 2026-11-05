@@ -61,10 +61,16 @@ boundary, but not an unexecuted later wait/park policy. Failed post-policy execu
 therefore does not erase an available final physical negative. Recorded milestones
 still require their complete group prefix and original support receipt. Boundary snapshots do
 not establish a complete control-step trajectory. The explicit legacy contact
-scope and version-2 sampled-support scope retain their original meanings;
-revision-1/full-footprint region declarations require their own verifier and are
-rejected by this initial rigid-on slice. Raw Lab snapshots carry no accepted or
-released claim. Historical claims are checked when present.
+scope and version-2 sampled-support scope retain their original meanings.
+The explicit revision-1 scope additionally verifies release-phase windows,
+actor/episode identity, stable policy clocks and raw contact patches. Declared
+full-footprint regions preserve the original planar `on`/`inside` checks; they
+are not general volume containment. Task families requiring handover or
+coordinated transport cannot use a single placement proof. Raw Lab snapshots
+carry no accepted/released claim; historical claims are checked when present.
+Recorded region geometry is recomputed from seeded poses and the original
+native load, then compared with the original policy snapshot, without sampling
+current contacts or substituting live poses.
 
 ## Focused validation
 

@@ -18,12 +18,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
+from collections.abc import Mapping
+import math
+
+if TYPE_CHECKING:
+    import torch
 
 import numpy as np
 from shapely.geometry import MultiPoint, Point
 
-__all__ = ["support_from_contacts", "contact_load_path"]
+__all__ = ["support_from_contacts", "contact_load_path", "contact_support_heights"]
 
 
 def support_from_contacts(
@@ -166,3 +171,76 @@ def contact_load_path(
         for a, b in contacts
     )
     return object_actor in rooted, external
+
+
+def contact_support_heights(
+    supported: torch.Tensor,
+    observation: Mapping[str, Any],
+    like: torch.Tensor,
+) -> torch.Tensor:
+    """Refine heights only from NativeSupportObservation's qualified patch.
+
+    Its contact points already require positive upward load and COM support.
+    Keep the highest qualified point so penetration is not hidden by averaging.
+    Unavailable rows cannot replace the existing conservative mesh envelope.
+
+    Args:
+        supported: Measured support flags, one boolean per environment.
+        observation: Original contact-patch measurements and COM distances.
+        like: Per-environment numeric reference for output shape, dtype and device.
+
+    Returns:
+        Highest qualified contact height for each row, or NaN when the row lacks
+        finite positive upward load and a qualified COM patch. No pose is sampled.
+    """
+    import torch
+
+    heights = torch.full_like(like, torch.nan)
+    rows = observation.get("rows")
+    if (
+        supported.dtype != torch.bool
+        or supported.shape != like.shape
+        or observation.get("scope") != "native_contact_support"
+        or not isinstance(rows, list)
+        or len(rows) != like.shape[0]
+    ):
+        return heights
+    for index, row in enumerate(rows):
+        if not supported[index] or not isinstance(row, Mapping):
+            continue
+        values = tuple(
+            row.get(name)
+            for name in ("com_patch_distance_m", "com_tolerance_m", "upward_impulse")
+        )
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in values
+        ):
+            continue
+        distance, tolerance, impulse = values
+        if tolerance <= 0 or not 0 <= distance <= tolerance or impulse <= 0:
+            continue
+        if row.get("contacts_world") is None or row.get("center_of_mass_world") is None:
+            continue
+        try:
+            points = torch.as_tensor(
+                row["contacts_world"], device=like.device, dtype=like.dtype
+            )
+            center = torch.as_tensor(
+                row["center_of_mass_world"], device=like.device, dtype=like.dtype
+            )
+        except (TypeError, ValueError):
+            continue
+        if (
+            points.ndim != 2
+            or points.shape[1] != 3
+            or not points.shape[0]
+            or center.shape != (3,)
+            or not torch.isfinite(points).all()
+            or not torch.isfinite(center).all()
+        ):
+            continue
+        heights[index] = points[:, 2].amax()
+    return heights
