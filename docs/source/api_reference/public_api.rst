@@ -1040,6 +1040,8 @@ state and world-to-base transforms belong to the query snapshot. Payload queries
 remain B=1; the carried body owns its identity, control part, local spheres and
 observed world pose. These values are separate from serialized configuration.
 Subsets, reordered environments, and per-environment worlds are unsupported.
+An omitted start uses the captured selected joint rows; the motion facade reports
+the world as immutable.
 
 The owned motion factory closes backend-local attachments on exit and makes no
 skill-phase decisions. Queries require CUDA graphs off, a static snapshot world
@@ -1203,6 +1205,51 @@ any task-success evaluation.
    ContactTimeline
    ContactTimelineCfg
 
+embodichain.lab.sim.sensors.support_observation
+-----------------------------------------------
+
+Native support acquisition uses a standard borrowed ``ContactSensor`` and the
+public sampling observer lifecycle. Each explicit runtime registry owns one
+observer per exact native pair. Replacing native instances under the same UID
+requires release and rebind; closing an old observer cannot detach a new owner
+registered under the same hook name. Borrowed sensors and bodies are never
+destroyed by this registry.
+
+Every physical batch has a real host acquisition timestamp and a collector-owned
+revision. An independently bound control clock qualifies support contract
+revision 1, including native source identity, topology, episode generation and
+the complete substep interval. Legacy metadata stays legacy even when sharing
+an observer whose strong clock is bound. Its strong-only sample serial and the
+all-acquisition frame revision are separate identities.
+
+``NativeSupportResult.support.valid`` must be checked before using its values.
+Acquisition errors invalidate the whole pair's witness batch; selected resets
+leave the other rows intact. Positive contact patches may persist through
+sleep while both body poses remain within the original tolerance. Missing,
+overflowed or changed observations invalidate those witnesses. A complete empty
+sample is an instantaneous negative, not proof of absent support throughout a
+stability window. Normative task acceptance remains outside this module.
+
+.. currentmodule:: embodichain.lab.sim.sensors.support_observation
+
+.. autosummary::
+
+   NATIVE_SUPPORT_CHANNEL
+   SupportControlClock
+   NativeSupportResult
+   NativeSupportObservation
+   SupportObservationRegistry
+
+.. autoclass:: NativeSupportResult
+   :members:
+
+.. autoclass:: NativeSupportObservation
+   :members:
+
+.. autoclass:: SupportObservationRegistry
+   :members:
+
+
 embodichain.lab.task_program.integrations.simulation.grip_evidence
 ------------------------------------------------------------------
 
@@ -1230,6 +1277,7 @@ serializers and TaskSpec evaluation belong outside this module.
    NativeGripEvidenceFactory
    NativeGripEvidenceProvider
    NativeGripObserver
+
 
 embodichain.lab.sim.scene.mesh_snapshot
 ---------------------------------------

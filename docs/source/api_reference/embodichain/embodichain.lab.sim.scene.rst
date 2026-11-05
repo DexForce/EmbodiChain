@@ -397,6 +397,34 @@ A report passes only when its nonempty required checks all pass. Fixed-step sett
    :members:
    :imported-members:
 
+embodichain.lab.sim.scene.native_hand
+--------------------------------------
+
+These read-only services capture Default cooked convex/box shapes, native
+rest/contact offsets and the configured hand stroke through named FK. They reuse
+object-backend physical geometry/offset capture and the existing hand-stroke sampler. Capture
+requires the exact simulation-owned Robot, registered native UIDs and B1/env0;
+subsequent rigid reads reject replaced owners. No query, grasp policy or
+experiment revision is selected here.
+
+GraspKit owns discrete geometric qualification through an injected collision
+backend. ``ActionPlanningServices`` binds an explicitly supplied geometric policy
+and owns query lifetimes. Captured geometry does not establish physical acquisition or release.
+
+.. currentmodule:: embodichain.lab.sim.scene.native_hand
+
+.. autosummary::
+   :nosignatures:
+
+   NativeHandGeometry
+   capture_native_hand_geometry
+   capture_native_rigid_geometry
+   capture_native_rigid_obstacles
+
+.. automodule:: embodichain.lab.sim.scene.native_hand
+   :members:
+
+
 Related integrations
 --------------------
 
@@ -578,3 +606,26 @@ is not evidence of contact support, release, stability or task completion.
 
 .. autoclass:: NativePlanarPlacement
    :members:
+
+Exact batched rigid mesh inputs
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.rigid_mesh
+
+Capture scaled vertices and their original triangle indices without reading a
+pose, changing winding, processing a mesh or merging environment rows. The owned
+CPU data supports exact silhouette and staged Pour geometry. Input meshes are
+not cooked collision shapes or physical contact evidence; consumers retain the
+observation pose and native-object lifetime separately. The lightweight scene
+mesh-envelope path does not acquire triangles unless explicitly requested by
+this separate API.
+
+.. autosummary::
+
+   RigidMeshSnapshot
+   capture_rigid_mesh
+
+.. autoclass:: RigidMeshSnapshot
+   :members:
+
+.. autofunction:: capture_rigid_mesh

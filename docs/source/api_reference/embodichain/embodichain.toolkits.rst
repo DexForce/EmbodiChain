@@ -401,3 +401,34 @@ URDF Assembly
    :members:
    :undoc-members:
    :show-inheritance:
+
+
+Captured convex hand qualification
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``pg_grasp.native_contact`` qualifies discrete closing, release-opening and
+rigid-clearance samples using caller-supplied convex collision groups. It imports
+no Robot, simulator or Lab backend. ``ClosingContactPolicy`` declares geometric
+rules directly; source experiment revisions are selected by Atomic Actions.
+The existing sampled-surface ``HandContactChecker`` remains independently usable.
+Native offset/order semantics are preserved on this convex route. An ambiguous
+clearance interval remains unavailable, and geometric acceptance does not certify
+physical acquisition, release or continuous collision freedom. Close owned
+queries explicitly or through the closing query's context manager.
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.native_contact
+
+.. autosummary::
+   :nosignatures:
+
+   ClosingContactPolicy
+   ConvexMeshQuery
+   NativeQueryScope
+   NativeContactPart
+   NativeClosingQuery
+   NativeOpeningQuery
+   NativeRigidRestScene
+   NativeRigidObstacle
+
+.. automodule:: embodichain.toolkits.graspkit.pg_grasp.native_contact
+   :members:

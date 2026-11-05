@@ -69,3 +69,27 @@ Profiling
 ~~~~~~~~~
 
 .. automodule:: embodichain.lab.gym.utils.profiler
+
+Execution-free component composition
+------------------------------------
+
+``resolve_gym_components`` expands environment, embodiment and scene component
+selectors through the existing strict decoders. Calls own their nested output
+mappings and preserve field ownership and relative paths. They neither register
+Gym environments nor construct runtime configurations or simulation resources.
+Task Program selectors remain declarations: compose them separately through
+``load_configured_task_program_deployment`` using the returned skill profile.
+Complete runtime validation remains with the normal environment loader.
+
+.. currentmodule:: embodichain.lab.gym.utils
+
+.. autosummary::
+
+   ResolvedGymComponents
+   resolve_gym_components
+
+.. currentmodule:: embodichain.lab.gym.utils.composition
+
+.. autoclass:: ResolvedGymComponents
+
+.. autofunction:: resolve_gym_components

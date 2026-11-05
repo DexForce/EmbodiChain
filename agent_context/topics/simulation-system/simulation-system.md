@@ -49,6 +49,13 @@ tensor batches through the private Scene visual adapter. That boundary converts
 world matrices to arena-local poses and refreshes parent transforms and native
 IDs after topology changes.
 
+`objects/backends/collision.py` owns physical collision descriptors and strict
+cooked convex/box snapshots through `capture_physical_collision_geometry`.
+Strict snapshots preserve float64 geometry and requested native body offsets;
+ordinary descriptor getters keep their existing precision and shape support.
+[Scene services](../scene-services/scene-services.md) assemble observed frames and
+native ownership around those values without duplicating SDK geometry reads.
+
 `spawn/_usd_assets.py` materializes package textures into `SpawnScene`-owned
 files. They survive topology rebuilds and are deleted after native Scene closure;
 facade source configs retain the original package address.

@@ -16,6 +16,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Existing binding selection and cloned poses | `embodichain/lab/sim/scene/query.py` |
 | Exact native planar footprint observations | `embodichain/lab/sim/scene/planar_observation.py` |
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
+| Exact native hand/rigid shape and physical-offset capture | `embodichain/lab/sim/scene/native_hand.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
 | Static USD root/link geometry and explicit proxy fitting | `embodichain/lab/sim/scene/articulation_geometry.py` |
@@ -28,11 +29,31 @@ semantic scene graph, generation model client or task lifecycle.
 | Existing-entity expansion proposals and host integration | [Scene expansion](../scene-expansion/scene-expansion.md) |
 
 The package facade resolves services lazily. Expansion has its own
-`scene.expansion` namespace. `compute.geometry` takes numerical geometry, never entity UIDs,
-simulation or GenSim models. Its `landing.py` CPU routines additionally consume
-Trimesh meshes and Shapely polygons for triangle-union floor and silhouette measurements.
-Scene CPU strategies own support
-selection, polygon search, greedy packing and SciPy SLSQP optimization.
+`scene.expansion` namespace. `compute.geometry` takes numerical geometry, never
+simulation or GenSim models. Its `contact_support.py` computes a contact patch
+and COM distance from arrays; native acquisition and witness lifetimes belong
+to the [sensor integration](../sensor-system/contact-history.md). Its `landing.py`
+CPU routines additionally consume Trimesh meshes and Shapely polygons for
+triangle-union floor and silhouette measurements. Scene CPU strategies own
+support selection, polygon search, greedy packing and SciPy SLSQP optimization.
+
+`rigid_mesh.capture_rigid_mesh` snapshots scaled native input vertices and
+matching triangles as owned CPU data with the environment axis intact. It reads
+no poses, preserves duplicates/winding/order and never substitutes a hull or box
+for missing topology. Callers recapture after model/scale changes. This separate
+API leaves the lightweight mesh-envelope path unchanged and supplies
+`NativePlanarPlacement` and exact silhouette/Pour consumers.
+
+`native_hand.py` captures cooked convex/box geometry and explicitly requested
+rest/contact offsets for the exact simulation-owned Robot and native rigid UIDs.
+It requires Default/B1/env0, checks named FK against native frames, and validates
+original owners before subsequent rigid reads. Strict shape conversion and offset
+reads belong to `objects/backends/collision.py`; closing FK reuses
+[hand geometry](../robot-system/robot-system.md#sampled-hand-geometry).
+It creates no collision query and selects no grasp policy. Geometric qualification
+belongs to [GraspKit](../motion-planning/motion-planning.md); query composition and
+cleanup belong to `ActionPlanningServices` in [Atomic Actions](../atomic-actions/atomic-actions.md).
+Captured shapes and nominal queries do not establish physical acquisition/release.
 
 Static control readers consume explicit authored roles, keep source mesh frames
 and identity, and never build semantic graphs or select execution/recovery

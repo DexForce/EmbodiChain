@@ -1,14 +1,17 @@
-Geometry tensor kernels
-=======================
+Geometry arrays and tensor kernels
+==================================
 
 ``embodichain.compute.geometry`` provides reusable Torch operations on dense
 float32/float64 tensors. Inputs share dtype and device; outputs stay on that
 CPU or CUDA device. The kernels do not accept entity UIDs, asset paths, mesh
 library objects or simulator handles, and do not import scene services.
 
-Shape, dtype, device and scalar-argument checks use host metadata. Numeric
+For the tensor APIs, shape, dtype, device and scalar-argument checks use host
+metadata. Numeric
 validity is computed on the tensor device and returned through masks or NaN
 outputs; no tensor value is copied to the host to decide validity.
+The CPU contact-patch API below instead consumes NumPy arrays and reports
+finite-qualification errors explicitly.
 
 Independent batches and object axes
 -----------------------------------
@@ -190,3 +193,20 @@ simulation state or task-specific success evaluation.
 .. currentmodule:: embodichain.compute.geometry.cylinder
 
 .. autofunction:: circular_prism_radius
+
+Native support patch measurements
+---------------------------------
+
+This CPU NumPy/Shapely calculation consumes numeric contact arrays and explicit
+actor IDs. Positive impulses with normalized upward normals at least 0.9 form
+the measured XY patch. The reported COM distance is measured against its convex
+hull; no silhouette containment, stability window or task verdict is inferred.
+
+.. currentmodule:: embodichain.compute.geometry.contact_support
+
+.. autosummary::
+   :nosignatures:
+
+   support_from_contacts
+
+.. autofunction:: support_from_contacts

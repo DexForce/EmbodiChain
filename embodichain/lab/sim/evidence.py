@@ -194,6 +194,34 @@ class PhysicalEvidenceFrame:
     batches: Mapping[str, PhysicalEvidenceBatch] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        self._initialize(snapshot_batches=True)
+
+    @classmethod
+    def _from_owned_batches(
+        cls,
+        timestamp: float,
+        observation_revision: int,
+        env_ids: torch.Tensor,
+        batches: Mapping[str, PhysicalEvidenceBatch],
+    ) -> PhysicalEvidenceFrame:
+        """Take exclusive ownership of newly constructed, unexposed batches.
+
+        Only internal producers may use this immediately after the public batch
+        constructor has validated and copied all channel inputs. The producer
+        must not retain or expose the transferred batch objects. External or
+        reused mutable inputs must use the ordinary frame constructor instead.
+        Frame metadata/alignment checks and its independent env-ID copy remain.
+        """
+        frame = object.__new__(cls)
+        object.__setattr__(frame, "timestamp", timestamp)
+        object.__setattr__(frame, "observation_revision", observation_revision)
+        object.__setattr__(frame, "env_ids", env_ids)
+        object.__setattr__(frame, "batches", batches)
+        frame._initialize(snapshot_batches=False)
+        return frame
+
+    def _initialize(self, *, snapshot_batches: bool) -> None:
+        """Validate alignment and install owned frame metadata."""
         timestamp = _validate_timestamp(self.timestamp, name="timestamp")
         if type(self.observation_revision) is not int or self.observation_revision < 0:
             raise ValueError("observation_revision must be a non-negative integer.")
@@ -228,7 +256,7 @@ class PhysicalEvidenceFrame:
                 batch.env_ids, env_ids
             ):
                 raise ValueError("All evidence batches must share frame env_ids.")
-            normalized[evidence_id] = batch.snapshot()
+            normalized[evidence_id] = batch.snapshot() if snapshot_batches else batch
         object.__setattr__(self, "timestamp", timestamp)
         object.__setattr__(self, "env_ids", env_ids)
         object.__setattr__(self, "batches", MappingProxyType(normalized))
