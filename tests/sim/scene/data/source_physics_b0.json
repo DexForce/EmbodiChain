@@ -1,0 +1,971 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "source_path": "embodichain/gen_sim/task_engine/orchestration/source_scene.py",
+  "source_sha256": "99a8f25629b0e0c8639d2eaccea89192c0976837bd11ee33161eba002e685b35",
+  "selected_ast_sha256": "cd49d1742b1672e25789060a38dfee60ddab6b15bfe159c4236b5926705dca2f",
+  "cases": [
+    {
+      "id": "rigid-defaults",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description"
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":16},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":16,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "background-defaults",
+      "role": "background",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description"
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\"},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":10.0},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.01}},\"body_type\":\"kinematic\",\"max_convex_hull_num\":1}"
+      }
+    },
+    {
+      "id": "articulation-preserves-authored-fields",
+      "role": "articulation",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "fpath": "fixture.usda",
+        "joint_drive_props": {
+          "stiffness": 1.0
+        },
+        "attrs": {
+          "unknown_authored": 3
+        },
+        "custom": {
+          "values": [
+            1,
+            2
+          ]
+        }
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\"},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"name\":\"semantic name\",\"fpath\":\"fixture.usda\",\"joint_drive_props\":{\"stiffness\":1.0},\"attrs\":{\"unknown_authored\":3},\"custom\":{\"values\":[1,2]}}"
+      }
+    },
+    {
+      "id": "authored-group-precedence",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "mass": 0.8,
+          "dynamic_friction": 0.2,
+          "newton_props": {
+            "backend": "newton",
+            "mu": 0.4,
+            "mass": 0.6
+          },
+          "default_props": {
+            "mass": 0.7
+          },
+          "mass_props": {
+            "mass": 0.3,
+            "inertia": [
+              1,
+              2,
+              3
+            ]
+          },
+          "material_props": {
+            "dynamic_friction": 0.9
+          }
+        }
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":16},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.3,\"inertia\":[1,2,3]},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":16,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "native-source-fields",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "newton_props": {
+            "backend": "newton",
+            "mu": 0.4,
+            "condim": 4,
+            "gap": 0.001,
+            "ke": 1.0,
+            "kd": 2.0,
+            "rolling_friction": 0.1
+          },
+          "default_props": {
+            "torsional_patch_radius": 0.01,
+            "min_torsional_patch_radius": 0.002,
+            "disable_strong_friction": true
+          }
+        }
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":16},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001,\"condim\":4,\"gap\":0.001,\"torsional_patch_radius\":0.01,\"min_torsional_patch_radius\":0.002,\"disable_strong_friction\":true},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.4,\"restitution\":0.05,\"ke\":1.0,\"kd\":2.0,\"rolling_friction\":0.1}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":16,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "portable-source-fields",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "density": 1000.0,
+          "recompute_inertia": false,
+          "com_position": [
+            1,
+            2,
+            3
+          ],
+          "com_quaternion": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "has_gravity": false,
+          "retain_acceleration": true,
+          "enable_ccd": true,
+          "enable_collision": false,
+          "sleep_threshold": 0.3
+        }
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":16},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1,\"density\":1000.0,\"recompute_inertia\":false,\"com_position\":[1,2,3],\"com_quaternion\":[0,0,0,1]},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8,\"has_gravity\":false,\"retain_acceleration\":true,\"enable_ccd\":true,\"sleep_threshold\":0.3},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001,\"collision_enabled\":false},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":16,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "background-authored-overrides",
+      "role": "background",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "mass": 1.2,
+          "static_friction": 0.1,
+          "dynamic_friction": 0.2,
+          "rest_offset": 0.005
+        },
+        "max_convex_hull_num": 9
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\"},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":1.2},\"collision_props\":{\"rest_offset\":0.005},\"material_props\":{\"static_friction\":0.1,\"dynamic_friction\":0.2,\"restitution\":0.01}},\"body_type\":\"kinematic\",\"max_convex_hull_num\":1}"
+      }
+    },
+    {
+      "id": "flat-alias-conflict-order",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "enable_collision": false,
+          "collision_enabled": true,
+          "mu": 0.7,
+          "dynamic_friction": 0.9
+        }
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":16},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001,\"collision_enabled\":true},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":16,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "canonical-null-groups",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "mass_props": null,
+          "newton_props": null
+        }
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":16},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":16,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "canonical-native-passthrough",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "mass_props": {
+            "custom_authored": [
+              1,
+              2
+            ]
+          }
+        }
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":16},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1,\"custom_authored\":[1,2]},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":16,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "hull-bound-0",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "max_convex_hull_num": 0
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":1},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":1,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "hull-bound--8",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "max_convex_hull_num": -8
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":1},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":1,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "hull-bound-1",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "max_convex_hull_num": 1
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":1},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":1,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "hull-bound-3",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "max_convex_hull_num": 3
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":3},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":3,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "hull-bound-16",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "max_convex_hull_num": 16
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":16},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":16,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "hull-bound-100",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "max_convex_hull_num": 100
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":16},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":16,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "hull-bound-4",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "max_convex_hull_num": "4"
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":4},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":4,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "hull-bound-True",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "max_convex_hull_num": true
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":1},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":1,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "hull-bound-invalid",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "max_convex_hull_num": "invalid"
+      },
+      "expected": {
+        "error_type": "ValueError",
+        "error": "invalid literal for int() with base 10: 'invalid'"
+      }
+    },
+    {
+      "id": "default-shape-cooking",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb",
+          "acd_method": "other",
+          "max_convex_hull_num": 99
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "max_convex_hull_num": 3
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":3},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":3,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "canonical-shape-cooking",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb",
+          "collision": {
+            "approximation": "triangle_mesh"
+          },
+          "acd_method": "deprecated",
+          "max_convex_hull_num": 99
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "max_convex_hull_num": 3
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"collision\":{\"approximation\":\"triangle_mesh\"}},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":3,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "legacy-cooking",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "mesh_collision_props": {
+            "approximation": "convex_decomposition",
+            "max_hulls": 4
+          }
+        },
+        "max_convex_hull_num": 6
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"collision\":{\"approximation\":\"convex_decomposition\",\"max_hulls\":4}},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":6,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "legacy-collider-conflict-before-hull-error",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "collision": {}
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "mesh_collision_props": {}
+        },
+        "max_convex_hull_num": "invalid"
+      },
+      "expected": {
+        "error_type": "ValueError",
+        "error": "Legacy attrs.mesh_collision_props cannot be combined with shape.collision."
+      }
+    },
+    {
+      "id": "legacy-collider-without-shape",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": null,
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "mesh_collision_props": {}
+        }
+      },
+      "expected": {
+        "error_type": "ValueError",
+        "error": "Legacy attrs.mesh_collision_props requires a mesh shape."
+      }
+    },
+    {
+      "id": "legacy-collider-null",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "mesh_collision_props": null
+        }
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":16},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":16,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "unknown-flat",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "bad_field": 1
+        }
+      },
+      "expected": {
+        "error_type": "ValueError",
+        "error": "Unsupported source rigid-body attrs field 'bad_field'; use grouped mass_props, rigid_props, collision_props, or material_props."
+      }
+    },
+    {
+      "id": "malformed-canonical-before-unknown-flat",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "bad_field": 1,
+          "material_props": []
+        }
+      },
+      "expected": {
+        "error_type": "ValueError",
+        "error": "Source attrs.material_props must be a mapping."
+      }
+    },
+    {
+      "id": "malformed-legacy-before-unknown-flat",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "bad_field": 1,
+          "newton_props": []
+        }
+      },
+      "expected": {
+        "error_type": "ValueError",
+        "error": "Source attrs.newton_props must be a mapping."
+      }
+    },
+    {
+      "id": "unknown-native",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "newton_props": {
+            "bad_field": 1
+          }
+        }
+      },
+      "expected": {
+        "error_type": "ValueError",
+        "error": "Unsupported source rigid-body attrs field 'bad_field'; use grouped mass_props, rigid_props, collision_props, or material_props."
+      }
+    },
+    {
+      "id": "nonmapping-attrs",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": null
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":16},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":16,\"acd_method\":\"visacd\"}"
+      }
+    },
+    {
+      "id": "null-legacy-groups",
+      "role": "rigid_object",
+      "config": {
+        "uid": "item",
+        "shape": {
+          "shape_type": "Mesh",
+          "fpath": "fixture.glb"
+        },
+        "init_pos": [
+          1.0,
+          2.0,
+          3.0
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "name": "semantic name",
+        "description": "semantic description",
+        "attrs": {
+          "default_props": null,
+          "newton_props": null
+        }
+      },
+      "expected": {
+        "serialized": "{\"uid\":\"item\",\"shape\":{\"shape_type\":\"Mesh\",\"fpath\":\"fixture.glb\",\"acd_method\":\"visacd\",\"max_convex_hull_num\":16},\"init_pos\":[1.0,2.0,3.0],\"init_rot\":[0.0,0.0,0.0],\"body_scale\":[1.0,1.0,1.0],\"attrs\":{\"mass_props\":{\"mass\":0.1},\"rigid_props\":{\"linear_damping\":0.9,\"angular_damping\":0.9,\"max_depenetration_velocity\":0.8,\"max_linear_velocity\":5.0,\"max_angular_velocity\":5.0,\"min_position_iters\":32,\"min_velocity_iters\":8},\"collision_props\":{\"contact_offset\":0.003,\"rest_offset\":0.001},\"material_props\":{\"static_friction\":0.95,\"dynamic_friction\":0.9,\"restitution\":0.05}},\"body_type\":\"dynamic\",\"max_convex_hull_num\":16,\"acd_method\":\"visacd\"}"
+      }
+    }
+  ]
+}

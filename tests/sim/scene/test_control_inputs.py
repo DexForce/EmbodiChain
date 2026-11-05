@@ -50,6 +50,15 @@ def test_declared_control_targets_and_geometry_remain_separate_from_scene_pose(
     source = read_usd_source(config["fpath"])
     binding = inspect_revolute_control(config, 90, source=source)
     assert binding.target_qpos == pytest.approx(-math.pi / 2)
+    from embodichain.lab.sim.scene.revolute_inputs import revolute_setting_attributes
+
+    attributes = revolute_setting_attributes(config)
+    assert attributes["twist_setting_labels"] == pytest.approx(
+        {"0": 0.0, "90": -math.pi / 2}
+    )
+    assert attributes["twist_control_joint"] == binding.joint
+    assert attributes["twist_source_sha256"] == binding.source_sha256
+    assert revolute_setting_attributes({"fix_base": False}) == {}
     assert binding.axis_sign == -1
     assert binding.axis == (0.0, 0.0, -1.0)
     assert binding.origin == (0.0, 0.0, 0.0)

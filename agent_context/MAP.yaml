@@ -201,7 +201,7 @@ topics:
     trajectory expansion, trajectory augmentation, expansion profile, configured trajectory expansion,
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
     轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体, kinematic trajectory refinement, 轨迹修正]
-  keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
+  keywords: [RevolutePathQueryFactory, RevolutePathReport, RevoluteDependencyReport, BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
     CuroboPayload, CuroboQuerySnapshot, curobo_motion_generator,
     interpolation_mode, ik_seed_mode, resolve_continuous_ik_path, search_cost_scope, RejectedMotionCandidate, MotionRecoveryTrace,
     expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
@@ -218,6 +218,7 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
   - embodichain/lab/sim/motion/motion_generator.py
+  - embodichain/lab/sim/motion/revolute_query.py
   - embodichain/lab/sim/motion/ik.py
   - embodichain/lab/sim/motion/_cartesian.py
   - embodichain/lab/sim/motion/limits.py

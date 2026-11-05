@@ -630,6 +630,58 @@ this separate API.
 
 .. autofunction:: capture_rigid_mesh
 
+
+Authored source mesh inputs
+---------------------------
+
+These readers retain authored scene-node transforms and face order, convert the
+source glTF Y-up basis to object-local Z-up and apply body scale once. They read
+files without native simulation. The top estimator preserves unavailable input
+as None; it is not a cooked-collider observation or physical clearance proof.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+
+.. autosummary::
+
+   read_gltf_z_up_mesh
+   estimate_source_mesh_top_z
+
+.. autofunction:: read_gltf_z_up_mesh
+
+.. autofunction:: estimate_source_mesh_top_z
+
+
+Source scene ingress declarations
+--------------------------------
+
+These explicit adapters normalize owned source mappings without constructing a
+simulation or changing shared physical defaults. The source physics adapter
+retains authored/grouped property precedence and legacy collider declarations.
+Pose/scale adapters preserve matrix authority, intrinsic XYZ degree rotations
+and original world-Z rounding; callers supply owned declarations.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_physics
+
+.. autosummary::
+
+   source_scene_object_declaration
+
+.. autofunction:: source_scene_object_declaration
+
+.. currentmodule:: embodichain.lab.sim.scene.source_transforms
+
+.. autosummary::
+
+   normalize_source_pose
+   apply_source_body_scale
+   rotate_source_world_z
+
+.. autofunction:: normalize_source_pose
+
+.. autofunction:: apply_source_body_scale
+
+.. autofunction:: rotate_source_world_z
+
 Authored robot mounting frames
 ------------------------------
 
@@ -643,3 +695,20 @@ precedence over a single-file shoulder lookup. No model or hand is selected.
 .. autofunction:: source_fixed_frame_pose
 
 .. autofunction:: source_arm_base_position
+
+
+Authored revolute setting attributes
+------------------------------------
+
+This adapter exposes only qualified authored setting labels and their exact joint
+and source identities. A source without fixed-base setting annotations advertises
+none. It selects no task program, motion goal or execution/recovery budget.
+
+.. currentmodule:: embodichain.lab.sim.scene.revolute_inputs
+
+.. autosummary::
+   :nosignatures:
+
+   revolute_setting_attributes
+
+.. autofunction:: revolute_setting_attributes

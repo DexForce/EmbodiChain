@@ -13,6 +13,7 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Semantic graph schema, ordering and canonical call validation | `semantic_graph.py` |
 | Roles, binding reports and scene manifest contracts | `orchestration/contracts.py` |
 | Graph/TaskSpec/grounding coverage and source lineage | `semantic_graph_validation.py` |
+| Source export discovery and pure scene declarations | `orchestration/source_scene.py` |
 
 TaskSpec identity and predicate evaluation belong to
 [Task specification](../task-spec/task-spec.md). Both mappings and instances must
@@ -28,6 +29,17 @@ Fixed candidate/graph inputs can be checked without invoking a model. Run
 `tests/gen_sim/task_engine/` for candidate/spec, coverage and import/ownership
 boundaries. Public API descriptions are in the
 [Task Engine reference](../../../docs/source/api_reference/embodichain/embodichain.gen_sim.task_engine.rst).
+
+`orchestration/source_scene.py` owns supported source-export discovery, semantic
+UID correspondence and immutable preparation provenance. It delegates physical
+properties and pose/scale normalization to shared Scene ingress, and reads
+mesh-top inputs through the public Scene geometry owner. Use `PreparedScene`'s
+asset identity check before later preparation; missing or changed original input
+cannot be replaced or given a new digest under its old identity. Articulation
+assets use their resolved top-level source path; shape-owned asset digests stay
+unchanged. Asset baking
+remains Scene Engine's existing owner; this importer does not publish bundles
+or connect a runtime/CLI.
 
 ## Read-only graph display
 
