@@ -472,6 +472,25 @@ topics:
     extensions/embodichain_tasks/configs/tasks/manipulation/, tests/lab/task_program/]
   related_topics: [atomic-actions, env-framework, simulation-system, motion-planning, sensor-system, data-pipeline]
   status: active
+- id: task-engine
+  title: Task Engine
+  aliases: [Task Engine, task engine, 任务引擎, 任务理解]
+  keywords: [TaskAgent, TaskDraft, TaskCandidateSet, InstructionIntent, TaskSpecGenerator,
+    SemanticTaskGraph, validate_semantic_task_graph, validate_graph_coverage]
+  paths: [topics/task-engine/task-engine.md]
+  source_of_truth:
+  - embodichain/gen_sim/task_engine/__init__.py
+  - embodichain/gen_sim/task_engine/agent.py
+  - embodichain/gen_sim/task_engine/interpretation.py
+  - embodichain/gen_sim/task_engine/contracts.py
+  - embodichain/gen_sim/task_engine/ontology.py
+  - embodichain/gen_sim/task_engine/task_spec.py
+  - embodichain/gen_sim/task_engine/semantic_graph.py
+  - embodichain/gen_sim/task_engine/semantic_graph_validation.py
+  - embodichain/gen_sim/task_engine/orchestration/contracts.py
+  watch_paths: [embodichain/gen_sim/task_engine/, tests/gen_sim/task_engine/]
+  related_topics: [task-spec, task-programs, gen-sim]
+  status: active
 - id: task-spec
   title: Task Specification
   aliases: [task specification, normative task specification, 任务规范, 任务规范校验]
@@ -485,7 +504,7 @@ topics:
   - embodichain/gen_sim/task_spec/registry.py
   - embodichain/gen_sim/task_spec/canonicalization.py
   watch_paths: [embodichain/gen_sim/task_spec/, tests/gen_sim/task_spec/]
-  related_topics: [gen-sim, task-programs]
+  related_topics: [gen-sim, task-programs, task-engine]
   status: active
 - id: gen-sim
   title: Gen Sim
