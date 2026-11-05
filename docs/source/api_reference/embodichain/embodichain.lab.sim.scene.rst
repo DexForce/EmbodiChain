@@ -629,3 +629,34 @@ this separate API.
    :members:
 
 .. autofunction:: capture_rigid_mesh
+
+Authored robot mounting frames
+------------------------------
+
+These readers consume exact source identities and declared control parts without
+constructing a robot or solving IK. Fixed attachment chains retain URDF transform
+order; moving/cyclic mounts reject. Explicit assembly component transforms take
+precedence over a single-file shoulder lookup. No model or hand is selected.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_robot_geometry
+
+.. autofunction:: source_fixed_frame_pose
+
+.. autofunction:: source_arm_base_position
+
+
+Authored revolute setting attributes
+------------------------------------
+
+This adapter exposes only qualified authored setting labels and their exact joint
+and source identities. A source without fixed-base setting annotations advertises
+none. It selects no task program, motion goal or execution/recovery budget.
+
+.. currentmodule:: embodichain.lab.sim.scene.revolute_inputs
+
+.. autosummary::
+   :nosignatures:
+
+   revolute_setting_attributes
+
+.. autofunction:: revolute_setting_attributes
