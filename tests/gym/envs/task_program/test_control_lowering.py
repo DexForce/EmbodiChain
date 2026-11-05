@@ -787,6 +787,21 @@ def test_control_bridge_uses_one_clock_actual_services_and_episode_guard(
     first = adapter.create_bridge(compiled, runtime_scope_guard=validate_scope)
     second = adapter.create_bridge(compiled)
     assert len(hooks) == 2
+    if via_environment:
+        from embodichain.lab.gym.envs.managers import ObservationManager
+
+        manager = ObservationManager({}, environment)
+        environment.observation_manager = manager
+        environment.active_task_program_bridge = first
+        services = adapter.create_observation_services(
+            environment, first, observations=manager
+        )
+        assert set(services.controls) == {"operation"}
+        assert services.recorded_contacts is services.cargo is None
+        services.close()
+        # Observation cleanup borrows the still-running control runtime.
+        captures[0][1].runtime_context.control_operation("operation").validate_scope()
+        assert len(hooks) == 2
     assert first.clock is captures[0][0] and second.clock is captures[1][0]
     assert first.post_policy_port is first.validator_port is captures[0][1].policy_port
     assert (

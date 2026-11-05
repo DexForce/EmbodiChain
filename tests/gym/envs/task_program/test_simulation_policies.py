@@ -1621,27 +1621,6 @@ def test_joint_window_trace_capacity_never_silently_certifies_full_record():
     assert window["steps"] == [23, 24, 25]
 
 
-def test_support_height_uses_highest_qualified_contact_without_averaging():
-    from embodichain.compute.geometry.contact_support import (
-        contact_support_heights as _contact_support_heights,
-    )
-
-    row = {
-        "contacts_world": [[-0.01, 0.0, 0.08], [0.01, 0.0, 0.12]],
-        "center_of_mass_world": [0.0, 0.0, 0.2],
-        "com_patch_distance_m": 0.0,
-        "com_tolerance_m": 0.003,
-        "upward_impulse": 0.1,
-    }
-    heights = _contact_support_heights(
-        torch.tensor([True, False]),
-        {"scope": "native_contact_support", "rows": [row, row]},
-        torch.zeros(2),
-    )
-    assert heights[0].item() == pytest.approx(0.12)
-    assert torch.isnan(heights[1])
-
-
 def _press_control_port(*, program_fingerprint="program", episode_id="episode"):
     from dataclasses import asdict
     from embodichain.lab.sim.scene.press_inputs import PressBinding
@@ -2168,3 +2147,171 @@ def _twist_control_case(
 
 def test_standard_control_port_runs_twist_startup_chunk_and_park_through_shared_cursor():
     _twist_control_case()
+
+
+def test_support_height_uses_highest_qualified_contact_without_averaging():
+    from embodichain.compute.geometry.contact_support import (
+        contact_support_heights as _contact_support_heights,
+    )
+
+    row = {
+        "contacts_world": [[-0.01, 0.0, 0.08], [0.01, 0.0, 0.12]],
+        "center_of_mass_world": [0.0, 0.0, 0.2],
+        "com_patch_distance_m": 0.0,
+        "com_tolerance_m": 0.003,
+        "upward_impulse": 0.1,
+    }
+    heights = _contact_support_heights(
+        torch.tensor([True, False]),
+        {"scope": "native_contact_support", "rows": [row, row]},
+        torch.zeros(2),
+    )
+    assert heights[0].item() == pytest.approx(0.12)
+    assert torch.isnan(heights[1])
+
+
+def _full_control_program(names=("ready", "released", "park")):
+    payload = dict(
+        program_id="raw_control_test",
+        integration=dict(
+            robot_profile="test_robot",
+            scene_registry="test_scene",
+            runtime_preset="safe",
+        ),
+        targets={},
+        program=dict(
+            kind="sequence",
+            items=[
+                dict(
+                    kind="segment",
+                    name=name,
+                    steps=dict(
+                        kind="invoke",
+                        call=dict(
+                            kind="registered", call_id="example.control", arguments={}
+                        ),
+                    ),
+                    post=[dict(kind="wait_stable", entity="drawer", preset=name)],
+                )
+                for name in names
+            ],
+        ),
+    )
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=SceneArticulationRef("drawer"),
+                state_provider=_StaticStateProvider(),
+            ),
+        )
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(
+        decode_task_program(payload)
+    )
+    return payload, compiled
+
+
+def _raw_press_observation(*, empty_initial=False):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.task_program.bridge import (
+        TaskProgramDemoBridge,
+        BufferedGymCommandSink,
+        RuntimeCommandFrameEncoder,
+    )
+    from embodichain.lab.task_program.integrations.invocation_policy import (
+        task_program_fingerprint,
+    )
+    from embodichain.lab.task_program.integrations.simulation.control_observations import (
+        SimulationControlObservationCollector,
+    )
+
+    payload, compiled = _full_control_program()
+    system = _press_control_port(
+        program_fingerprint=task_program_fingerprint(compiled), episode_id="0"
+    )
+    system.compiled = compiled
+    runtime = SimpleNamespace(
+        result=None,
+        status=None,
+        start=lambda *a, **k: None,
+        step=lambda: None,
+        cancel=lambda reason: None,
+        adopt_verified_task_state=lambda state: None,
+    )
+    sink = BufferedGymCommandSink(
+        RuntimeCommandFrameEncoder(
+            SimpleNamespace(current_qpos=lambda ids: system.robot.get_qpos())
+        ),
+        system.clock,
+    )
+    bridge = TaskProgramDemoBridge(
+        compiled,
+        runtime,
+        sink,
+        system.clock,
+        post_policy_port=system.port,
+        isolate_policy_sessions=False,
+    )
+    epochs = EpisodeContext(1)
+    epochs._begin_episode(torch.tensor([0]))
+    epochs._finish_initialization(torch.tensor([0]))
+    env = SimpleNamespace(
+        sim=system.port._simulation, robot=system.robot, episode_context=epochs
+    )
+    collector = SimulationControlObservationCollector(env, bridge, "press0")
+    segments = []
+    selectors = []
+    for name in ("ready", "released", "park"):
+        if name == "released":
+            if empty_initial:
+                system.data["is_valid"].zero_()
+                system.advance()
+                system.data["is_valid"].fill_(True)
+            system.data["impulse"].fill_(0.1)
+            system.advance()
+            system.art._qpos.fill_(0.00006)
+            system.advance()
+            system.data["impulse"].zero_()
+        _, result = _run_control_policy(system, name)
+        segment, policy = system.segments[name]
+        scope = system.port.control_policy_scope(policy, segment=segment)
+        selector = dict(
+            segment_id=segment.segment_id,
+            segment_name=segment.name,
+            source_path=list(segment.source_path),
+            policy_index=0,
+            preset=name,
+            phase=scope["phase"],
+            terminal=scope["terminal"],
+        )
+        selectors.append(selector)
+        segments.append(
+            dict(
+                name=segment.name,
+                active=[True],
+                successes=[True],
+                end_steps=[system.clock.step_index],
+                metadata=dict(
+                    task_program_id=compiled.program_id,
+                    program_segment_id=segment.segment_id,
+                    program_segment_source_path=list(segment.source_path),
+                    runtime=dict(env_ids=[0]),
+                    post_policies=[
+                        dict(
+                            kind="wait_stable",
+                            policy_index=0,
+                            source_path=list(policy.source_path),
+                            result_mask=[True],
+                            result=result,
+                        )
+                    ],
+                ),
+            )
+        )
+    system.operation.close()
+    system.art.get_qpos = lambda: (_ for _ in ()).throw(
+        AssertionError("Control evidence capture cannot read live-later state")
+    )
+    raw = collector.capture(selectors, terminal_policy=selectors[-1])
+    return system, collector, payload, segments, selectors, raw

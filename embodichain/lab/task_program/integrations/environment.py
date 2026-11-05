@@ -84,6 +84,9 @@ from embodichain.lab.task_program.runtime.expansion import (
 from embodichain.lab.task_program.semantics.scene import SceneRegistry
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from .simulation.observation_services import SimulationObservationServices
     from .simulation.environment import _ControlBridgeServices
     from .invocation_policy import BoundInvocationPolicies, InvocationPolicyBinding
     from .nominal import TracingTaskProgramNominalSources
@@ -971,6 +974,36 @@ class TaskProgramEnvironmentAdapter:
             host_collision_guard=collision_guard,
         )
         return TracingTaskProgramNominalSources(program, delegate)
+
+    def create_observation_services(
+        self,
+        environment: EmbodiedEnv,
+        bridge: TaskProgramDemoBridge,
+        *,
+        observations: ObservationManager,
+    ) -> SimulationObservationServices:
+        """Assemble the standard factory's real per-episode physical collectors.
+
+        Args:
+            environment: Initialized host whose actual bridge is already active.
+            bridge: Actual bridge returned by this adapter, before execution.
+            observations: Explicit canonical observation manager owned by the host.
+
+        Returns:
+            Owned declared collectors borrowing this runtime and raw history.
+
+        Raises:
+            TypeError: This integration has no observation-service factory.
+            RuntimeError: This adapter or its factory has closed.
+        """
+        self._require_open()
+        self._validate_registration_ownership()
+        create = getattr(self._factory, "create_observation_services", None)
+        if not callable(create):
+            raise TypeError(
+                "This integration has no standard observation service factory."
+            )
+        return create(environment, bridge, observations=observations)
 
     def create_bridge(
         self,

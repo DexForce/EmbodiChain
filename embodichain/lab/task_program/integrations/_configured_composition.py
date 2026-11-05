@@ -52,6 +52,7 @@ _RUNTIME_SERVICE_FIELDS = frozenset(
         "hand_geometries",
         "handover_pose_providers",
         "registered_semantic_lowerers",
+        "control_operations",
         "control_part_evidence",
         "settle_presets",
         "planning_services",
@@ -59,7 +60,12 @@ _RUNTIME_SERVICE_FIELDS = frozenset(
     }
 )
 _TASK_RUNTIME_SERVICE_FIELDS = _RUNTIME_SERVICE_FIELDS | frozenset(
-    {"grasp_pose_generator_overrides", "nominal_motion_sources"}
+    {
+        "grasp_pose_generator_overrides",
+        "nominal_motion_sources",
+        "cargo_envelope",
+        "recorded_contacts",
+    }
 )
 _GRASP_GENERATOR_OVERRIDE_FIELDS = frozenset(
     {
@@ -239,6 +245,7 @@ def _merge_runtime_services(
     for field_name in (
         "handover_pose_providers",
         "registered_semantic_lowerers",
+        "control_operations",
     ):
         skill_profile_values = _owned_sequence(
             skill_profile.get(field_name, ()),
@@ -263,6 +270,10 @@ def _merge_runtime_services(
     evidence = task_evidence if task_evidence is not None else skill_profile_evidence
     if evidence is not None:
         result["control_part_evidence"] = deepcopy(evidence)
+    if "recorded_contacts" in task:
+        result["recorded_contacts"] = deepcopy(task["recorded_contacts"])
+    if "cargo_envelope" in task:
+        result["cargo_envelope"] = deepcopy(task["cargo_envelope"])
     if "nominal_motion_sources" in task:
         result["nominal_motion_sources"] = _owned_sequence(
             task["nominal_motion_sources"],

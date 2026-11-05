@@ -7558,3 +7558,125 @@ def test_declared_nominal_planning_rejects_only_selected_source_modes(field) -> 
                 compiled, registration, declaration
             )
         _validate_configured_nominal_planning_modes(compiled, registration, ())
+
+
+def test_cargo_service_declaration_is_closed_owned_and_fingerprinted():
+    from embodichain.lab.task_program.integrations import IntegrationFingerprintMismatch
+
+    payload = _integration_payload("repeated_pick_place")
+    baseline = _decode_configured_task_program_integration(payload).registration
+    actor = payload["scene"]["rigid_objects"][0]
+    uid = actor.get("simulation_uid", actor["entity_id"])
+    payload["runtime_services"]["cargo_envelope"] = {
+        "carrier_uids": [uid],
+        "excluded_uids": [],
+    }
+    registered = _decode_configured_task_program_integration(payload).registration
+    assert registered.cargo_envelope_cfg.carrier_uids == (uid,)
+    assert registered.fingerprint != baseline.fingerprint
+    for declaration in (
+        {"carrier_uids": ["missing"]},
+        {"carrier_uids": [uid, uid]},
+        {"carrier_uids": [uid], "scale": 2.0},
+    ):
+        invalid = deepcopy(payload)
+        invalid["runtime_services"]["cargo_envelope"] = declaration
+        with pytest.raises((ValueError, TypeError)):
+            _decode_configured_task_program_integration(invalid)
+    registered.cargo_envelope_cfg.carrier_uids = ("changed",)
+    with pytest.raises(IntegrationFingerprintMismatch):
+        registered.assert_unchanged()
+
+
+def test_public_component_composition_preserves_task_owned_cargo_selection():
+    path = _config_path("repeated_pick_place")
+    config = _gym_config("repeated_pick_place")
+    physical = _physical_components(path, config)
+    _, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    actor = task["scene_binding"]["rigid_objects"][0]
+    uid = actor.get("simulation_uid", actor["entity_id"])
+    task.setdefault("runtime_services", {})["cargo_envelope"] = {"carrier_uids": [uid]}
+    payload = _compose_integration_payload(
+        task=task,
+        policy=policy,
+        skill_profile=physical.embodiment_skill_profile,
+        scene=task["scene_binding"],
+    )
+    registration = _decode_configured_task_program_integration(payload).registration
+    assert registration.cargo_envelope_cfg.carrier_uids == (uid,)
+
+
+def test_recorded_contacts_are_closed_fingerprinted_and_load_without_simulator(
+    monkeypatch,
+):
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.task_program.integrations import IntegrationFingerprintMismatch
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("configuration constructed simulation")
+
+    monkeypatch.setattr(SimulationManager, "__init__", forbidden)
+    payload = _integration_payload("repeated_pick_place")
+    baseline = _decode_configured_task_program_integration(payload).registration
+    declaration = dict(
+        sensor_uid="gen_sim_task_spec_contacts",
+        retention=dict(step_dt=0.04),
+        pad_bindings=[["eef", ["pad_a", "pad_b"]]],
+        opening_bindings=[
+            dict(
+                control_part="eef",
+                joint_names=["drive"],
+                driver_indices=[0],
+                open_qpos=[0.8],
+                tolerance=0.008,
+            )
+        ],
+    )
+    payload["runtime_services"]["recorded_contacts"] = declaration
+    registration = _decode_configured_task_program_integration(payload).registration
+    cfg = registration.recorded_contacts_cfg
+    assert cfg.pad_bindings == (("eef", ("pad_a", "pad_b")),)
+    assert cfg.opening_bindings[0].driver_indices == (0,)
+    assert (
+        cfg.retention.max_control_steps == 30000
+        and registration.fingerprint != baseline.fingerprint
+    )
+    declaration["retention"]["step_dt"] = 0.2
+    assert cfg.retention.step_dt == 0.04
+    for error in (
+        dict(retention=dict(step_dt=0.0)),
+        dict(pad_bindings=[["unknown", ["a", "b"]]]),
+        dict(extra="unregistered"),
+    ):
+        invalid = deepcopy(payload)
+        invalid["runtime_services"]["recorded_contacts"].update(error)
+        with pytest.raises((ValueError, TypeError)):
+            _decode_configured_task_program_integration(invalid)
+    with pytest.raises(ValueError, match="Default"):
+        registration.validate_physics("newton")
+    cfg.retention.max_contact_rows = 1
+    with pytest.raises(IntegrationFingerprintMismatch):
+        registration.assert_unchanged()
+
+
+def test_recorded_contact_selection_composes_only_from_task_component():
+    path = _config_path("repeated_pick_place")
+    physical = _physical_components(path, _gym_config("repeated_pick_place"))
+    _, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    task.setdefault("runtime_services", {})["recorded_contacts"] = dict(
+        sensor_uid="history",
+        retention=dict(step_dt=0.04),
+        pad_bindings=[["eef", ["a", "b"]]],
+    )
+    payload = _compose_integration_payload(
+        task=task,
+        policy=policy,
+        skill_profile=physical.embodiment_skill_profile,
+        scene=task["scene_binding"],
+    )
+    registration = _decode_configured_task_program_integration(payload).registration
+    assert registration.recorded_contacts_cfg.sensor_uid == "history"
