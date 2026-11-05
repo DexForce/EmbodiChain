@@ -440,3 +440,7 @@ and do not acquire assets, robots, scenes or physical acceptance evidence.
 .. currentmodule:: embodichain.compute.geometry.press_calibration
 
 .. autofunction:: source_press_release_bias
+
+.. currentmodule:: embodichain.compute.geometry.revolute_support
+
+.. autofunction:: revolute_swept_min_z

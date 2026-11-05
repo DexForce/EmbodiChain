@@ -19,6 +19,8 @@
 from __future__ import annotations
 from pathlib import Path
 import json
+import math
+from embodichain.compute.geometry.revolute_support import revolute_swept_min_z
 import numpy as np
 import pytest
 from embodichain.compute.geometry.control_grasp_scale import select_control_grasp_scale
@@ -82,3 +84,18 @@ def test_press_release_bias_retains_original_clamps_and_rejects_invalid_input():
         source_press_release_bias(0.0, 0.001)
     with pytest.raises(ValueError, match="positive mass and stroke"):
         source_press_release_bias(0.1, float("nan"))
+
+
+def test_revolute_support_considers_interior_angle_minimum_and_exact_limits():
+    # Rotating a point around Y crosses z=-1 between the two equal z=0 endpoints.
+    point = np.array([[1.0, 0.0, 0.0]])
+    minimum = revolute_swept_min_z(
+        point, np.eye(3), np.zeros(3), np.array([0.0, 1.0, 0.0]), (0.0, math.pi), 2.0
+    )
+    assert minimum == -2.0
+    assert (
+        revolute_swept_min_z(
+            point, np.eye(3), np.zeros(3), np.array([0.0, 1.0, 0.0]), (0.0, 0.0), 2.0
+        )
+        == 0.0
+    )
