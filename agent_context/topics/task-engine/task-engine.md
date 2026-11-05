@@ -11,6 +11,7 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Candidates, drafts, scene requests and success declarations | `contracts.py`, `agent.py` |
 | Candidate-to-normative-spec conversion | `task_spec.py` |
 | Semantic graph schema, ordering and canonical call validation | `semantic_graph.py` |
+| Pure program projection and explicit segment acceptance bindings | `program_declarations.py` |
 | Roles, binding reports and scene manifest contracts | `orchestration/contracts.py` |
 | Graph/TaskSpec/grounding coverage and source lineage | `semantic_graph_validation.py` |
 | Semantic acquisition requests and normalized-asset view projection | `asset_preparation.py`; consumes public Scene Engine APIs |
@@ -110,3 +111,10 @@ relationships into neutral robot-owner candidates. The robot facade selects
 model effort thresholds, prismatic gains and initial clearance posture from
 explicit requirements. Task Engine does not hold those machine calibration
 values or rewrite runtime action policies.
+
+build_program_declaration preserves each graph call and segment identity while
+applying explicit owned post-policy and validator bindings. Deferred acceptance
+must retain every original check at the group terminal. The same pure projection
+validator is owned here for later bundle loading; it depends on no bundle reader,
+simulator, robot or motion service. Complete deployment preflight remains with
+the configured Task Program owner.

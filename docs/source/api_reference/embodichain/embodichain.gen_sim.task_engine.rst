@@ -162,3 +162,16 @@ This surface neither publishes a runtime bundle nor constructs a simulator.
    :members:
 
 .. autofunction:: prepare_source_physical_input
+
+Pure program declarations
+-------------------------
+
+Project a validated Semantic Call graph into the existing program format using
+explicit per-segment acceptance bindings. Calls, targets, stage identities and
+ordering remain tied to the graph. Optional acceptance deferral must retain every
+original post-policy and validator at the terminal boundary. This builder does
+not read a bundle, compose runtime services, plan motion or create a simulator;
+callers still perform complete configured deployment preflight.
+
+.. automodule:: embodichain.gen_sim.task_engine.program_declarations
+   :members:
