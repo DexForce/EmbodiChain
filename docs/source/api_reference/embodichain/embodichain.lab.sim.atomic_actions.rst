@@ -949,13 +949,4 @@ before motion. Missing geometry or native ownership remains unavailable.
 ``SlideHandClearanceProvider`` supplies measured preshape aperture facts; the
 optional 85%-to-75% retry retains original candidate and RNG boundaries.
 
-.. automodule:: embodichain.lab.sim.atomic_actions.articulation_continuation
-   :members:
-
-.. automodule:: embodichain.lab.sim.atomic_actions.drawer_planning
-   :members:
-
 .. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
-
-.. autoclass:: SlideHandClearanceProvider
-   :members:

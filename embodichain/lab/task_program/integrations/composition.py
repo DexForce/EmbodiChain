@@ -68,7 +68,7 @@ class ConfiguredTaskProgramDeployment:
         integration_id: Task integration identifier from the selected component.
         program_id: Program identifier declared by that integration.
         program_path: Resolved file path, or None for an inline program.
-        program_declaration: Owned inline program, or None for a file selection.
+        program_declaration (dict | None): Owned inline program, or None for a file selection.
             Use program_source to obtain the selected source representation.
         selection: Trusted scene, robot-profile and execution-preset selection.
         integration: Validated registration and lazy live adapter factory.
@@ -88,7 +88,12 @@ class ConfiguredTaskProgramDeployment:
 
     @property
     def program_source(self) -> Path | dict[str, object]:
-        """Return a file path or owned inline program for strict decoding."""
+        """Return a file path or owned inline program for strict decoding.
+
+        Returns:
+            pathlib.Path | dict: The selected immutable-file reference or a fresh
+            declaration dictionary whose values remain under the strict decoder.
+        """
         if self.program_path is not None:
             return self.program_path
         if self.program_declaration is None:
