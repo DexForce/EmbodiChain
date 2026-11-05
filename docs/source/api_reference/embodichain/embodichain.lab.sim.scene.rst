@@ -629,3 +629,93 @@ this separate API.
    :members:
 
 .. autofunction:: capture_rigid_mesh
+
+Same-observation native hand and motion queries
+-----------------------------------------------
+
+The explicit native query modules retain the Default backend's B=1/env0 shape
+coverage and observation ownership. Capture does not step simulation. Replacing
+physical owners or advancing the supplied native revision invalidates an open
+query; context-manager exit releases only its owned collision resources.
+
+``native_hand_scene`` keeps complete collision-only hand links, rigid bodies,
+articulation links and planes in their captured order. Its discrete checks use
+native contact/rest offsets. ``native_motion_scene`` keeps the original ordered
+moving-part/rest-offset checks and full named-joint FK adaptation. Neither query
+establishes continuous collision freedom, measured grasp acquisition or task
+success. FCL is an explicit optional backend; install
+``embodichain[planning-geometry]`` to request these paths.
+
+.. currentmodule:: embodichain.lab.sim.scene.native_hand_scene
+
+.. autosummary::
+
+   NativeScenePlane
+   NativeSceneBody
+   NativeHandSceneQuery
+   capture_native_hand_scene
+
+.. autoclass:: NativeScenePlane
+   :members:
+
+.. autoclass:: NativeSceneBody
+   :members:
+
+.. autoclass:: NativeHandSceneQuery
+   :members:
+
+.. autofunction:: capture_native_hand_scene
+
+.. currentmodule:: embodichain.lab.sim.scene.native_motion_scene
+
+.. autosummary::
+
+   NativeRestCollisionPart
+   NativeRestSceneBody
+   NativeRestSceneQuery
+   capture_native_rest_scene
+   capture_native_arm_parts
+   native_path_link_poses
+
+.. autoclass:: NativeRestCollisionPart
+   :members:
+
+.. autoclass:: NativeRestSceneBody
+   :members:
+
+.. autoclass:: NativeRestSceneQuery
+   :members:
+
+.. autofunction:: capture_native_rest_scene
+
+.. autofunction:: capture_native_arm_parts
+
+.. autofunction:: native_path_link_poses
+
+Conservative input-solid clearance
+----------------------------------
+
+``convex_input_clearance`` consumes already-scaled input vertices and explicit
+observed poses. It tests selected discrete frames in their supplied order,
+including repeats, and stops at the first rejection. Convex solids also reject
+complete containment. This is a conservative input-envelope query, separate from
+native cooked-shape and physical contact evidence. Margins and numerical
+allowance are explicit; missing FCL or unavailable geometry raises.
+
+.. currentmodule:: embodichain.lab.sim.scene.convex_clearance
+
+.. autofunction:: convex_input_clearance
+
+Owned planar proposal inputs
+----------------------------
+
+``NativePlanarPlacement.source_geometry()`` returns independent scaled subject
+vertices and per-row planar floor copies for numeric proposal generation. It
+checks the original physical object bindings without reading live poses.
+``capture_planar_contents`` reads explicit source-ordered rigid-object vertices
+for B=1 consumers. These snapshots do not establish containment, retention or
+physical task success; projection uses the caller's current observed poses.
+
+.. currentmodule:: embodichain.lab.sim.scene.planar_observation
+
+.. autofunction:: capture_planar_contents
