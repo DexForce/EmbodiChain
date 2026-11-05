@@ -1047,10 +1047,10 @@ both hands -> lift -> move object -> hold**.
 | Verification | coordinated attachment must be externally verified |
 
 The left/right grasp poses are not supplied by the caller. At planning time the
-action calls `AntipodalAffordance.get_dual_arm_valid_grasp_poses` with the
+action calls its engine-owned parallel-jaw grasp-pose service with the
 `approach_direction`, `left_to_right_arm_direction`, and `middle_empty_ratio`
-options to partition the object into left/right grasp regions and select the
-lowest-cost grasp on each side. Each derived `object_to_eef` transform is stored
+options. The existing paired-grasp service retains its qualification, candidate
+order and selected left/right grasp pair. Each derived `object_to_eef` transform is stored
 in the corresponding projected `HeldObjectState`. Later object-centric skills
 can inspect those per-manipulator entries directly; sharing the same
 `ObjectSemantics` instance identifies the common object. Single-arm transport
@@ -1080,6 +1080,12 @@ corresponding participant slots. Coordinated dual-arm planning with
 `strategy="motion_gen"` is not
 supported by the cuRobo backend; use the supported IK/interpolation path for
 this primitive.
+
+Explicit `continue_verified_holds=True` consumes the two incoming verified
+attachments and keeps their grasp transforms instead of sampling another pickup.
+`prefer_cargo_clearance=True` uses declared static cargo envelopes and current
+observations as a paired-candidate preference. Missing observations retain the
+base costs; the envelope test never certifies physical cargo retention.
 
 **Example:** `examples/sim/atomic_action/coordinated_pickment.py`
 
@@ -1177,6 +1183,15 @@ interval between them as a likely path- or collision-planning failure.
 
 As with the other coordinated primitive, cuRobo does not currently support its
 dual-arm `strategy="motion_gen"` path.
+
+The explicit adaptive receiver mode pairs `HandOverPlanningRecovery` with
+`HandOverOptions(adaptive_receive=True, release_at_target=False,
+arm_selection="bound", existing_hold_hand_source="grasp_command")`. Optional
+native receiver screening borrows the same-robot `HandOverSceneProvider`.
+Direction/exchange budgets, closing commands and source retreat remain bounded
+by their declared policy. Queries close after planning; actual grip transfer
+still requires runtime effect evidence. Default nearest-arm and paired planning
+keep their existing behavior.
 
 **Example:** `examples/sim/atomic_action/handover.py`
 

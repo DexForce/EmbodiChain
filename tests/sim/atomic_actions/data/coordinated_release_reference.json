@@ -1,0 +1,43 @@
+{
+  "success": [
+    true
+  ],
+  "positions_sha256": "73cc917e35ed0302b619b173e0e673325e15dd997373e7b88a1a5533d0d158fd",
+  "dt_sha256": "92aca8f2631b3c354db29e9f724b7b411a75a7938bdf8900ce749debeff8b12b",
+  "segments": [
+    [
+      "move",
+      0,
+      114
+    ],
+    [
+      "hold",
+      114,
+      118
+    ],
+    [
+      "release",
+      118,
+      128
+    ],
+    [
+      "retreat",
+      128,
+      140
+    ]
+  ],
+  "grasps": [],
+  "effects": {
+    "source_arm": null,
+    "destination_arm": null
+  },
+  "monitor": {
+    "object": 0
+  },
+  "after_rng": [
+    "1e17cff717c75660867352fa067aaa4769fba8c671598e412aa2dcec2e9626d3",
+    0.5517513686348753,
+    0.4015909369106695
+  ],
+  "ik_sha256": "1e81943f80c27525713cec05c5a57fd155f17192bb9857b7003515c83af49c45"
+}

@@ -24,6 +24,7 @@ from types import MappingProxyType
 from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 
 import torch
+from embodichain.lab.sim.scene.mesh_snapshot import SceneMeshSnapshot
 
 from .affordance_sampling import AffordanceSamplingContext
 from .bindings import ActionBinding
@@ -43,6 +44,7 @@ from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .released_continuation import ReleasedHandContinuationProvider
 from .planning_probes import (
+    HandOverSceneProvider,
     HeldStagingProvider,
     RetainedCommandProvider,
     JointPrefixPlanner,
@@ -96,6 +98,8 @@ class AtomicActionEngine:
         held_staging_provider: HeldStagingProvider | None = None,
         retained_command_provider: RetainedCommandProvider | None = None,
         released_hand_provider: ReleasedHandContinuationProvider | None = None,
+        handover_scene_provider: HandOverSceneProvider | None = None,
+        coordinated_cargo_geometry: SceneMeshSnapshot | None = None,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
@@ -127,6 +131,10 @@ class AtomicActionEngine:
                 same-observation command snapshots; no physical success is implied.
             released_hand_provider: Same-robot authority for the exact cleanup
                 and following Park occurrences.
+            handover_scene_provider: Same-robot native hand/scene query port for
+                explicitly selected bounded receiving.
+            coordinated_cargo_geometry: Static owned cargo envelopes for explicit
+                coordinated-grasp preference; no success certificate is implied.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
             tracking_runtime: Optional exact-version feedback, projector, and
@@ -154,6 +162,8 @@ class AtomicActionEngine:
             held_staging_provider=held_staging_provider,
             retained_command_provider=retained_command_provider,
             released_hand_provider=released_hand_provider,
+            handover_scene_provider=handover_scene_provider,
+            coordinated_cargo_geometry=coordinated_cargo_geometry,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}

@@ -94,6 +94,21 @@ and drawer handlers belong to their separate owner; drawer transport explicitly
 rejects until installed. New service ports are optional, typed, same-robot and
 borrowed; construction captures no native state or commands.
 
+HandOver keeps the existing default/paired planning route. Explicit
+`HandOverPlanningRecovery` enables bounded receiver and exchange alternatives,
+consuming same-observation native hand queries from `HandOverSceneProvider`.
+The engine borrows that provider and checks its exact robot; the action owns
+query cleanup, resource transfer, release and retreat, with effects uncommitted
+until runtime verification. Geometry screening does not establish grip evidence.
+
+Coordinated pickup can explicitly continue two already verified grasps and retain
+their transforms instead of sampling another pickup. Optional static
+`coordinated_cargo_geometry` is copied at installation and used only to prefer
+clearance from observed contents. Missing observations retain the original base
+costs and never establish cargo retention. The pure carrier-envelope calculation
+lives in `compute.geometry.cargo`; its upper vertical extent is intentionally
+unconstrained and is not a cavity or physical retention test.
+
 `ExecutionPlanLifecycle` is an optional host-owned adoption port. It receives an
 owned validated attempt before dispatch. Installation rejection latches the
 session: later ticks/revisions cannot resume commands. `ExecutionRunner` keeps

@@ -28,6 +28,7 @@ from uuid import uuid4
 
 import numpy as np
 import torch
+from embodichain.lab.sim.scene.mesh_snapshot import SceneMeshSnapshot
 
 from embodichain.toolkits.graspkit import GraspPoseGenerator
 from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
@@ -43,6 +44,7 @@ from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
 from embodichain.lab.sim.motion.mesh_collision import FreeMotionQuery
 from .released_continuation import ReleasedHandContinuationProvider
 from .planning_probes import (
+    HandOverSceneProvider,
     HeldStagingProvider,
     RetainedCommandProvider,
     JointPrefixPlanner,
@@ -116,6 +118,8 @@ class ActionPlanningServices:
         held_staging_provider: HeldStagingProvider | None = None,
         retained_command_provider: RetainedCommandProvider | None = None,
         released_hand_provider: ReleasedHandContinuationProvider | None = None,
+        handover_scene_provider: HandOverSceneProvider | None = None,
+        coordinated_cargo_geometry: SceneMeshSnapshot | None = None,
     ) -> None:
         """Retain shared services and snapshot caller-owned calibration data.
 
@@ -136,6 +140,9 @@ class ActionPlanningServices:
             held_staging_provider: Same-robot staging declarations and geometry.
             retained_command_provider: Same-robot retained-command provenance.
             released_hand_provider: Same-robot released suffix authority.
+            handover_scene_provider: Same-robot native receiver query lifetimes.
+            coordinated_cargo_geometry: Static owned envelopes for the explicit
+                observed cargo preference; no poses are captured or certified.
         """
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
@@ -253,6 +260,34 @@ class ActionPlanningServices:
                 "released_hand_provider must own this engine's exact robot."
             )
         self._released_hand_provider = released_hand_provider
+        if handover_scene_provider is not None and not isinstance(
+            handover_scene_provider, HandOverSceneProvider
+        ):
+            raise TypeError(
+                "handover_scene_provider must implement its declared planning port."
+            )
+        if (
+            handover_scene_provider is not None
+            and handover_scene_provider.robot is not self._robot
+        ):
+            raise ValueError(
+                "handover_scene_provider must own this engine's exact robot."
+            )
+        self._handover_scene_provider = handover_scene_provider
+        if coordinated_cargo_geometry is not None and not isinstance(
+            coordinated_cargo_geometry, SceneMeshSnapshot
+        ):
+            raise TypeError("coordinated_cargo_geometry must be a SceneMeshSnapshot.")
+        self._coordinated_cargo_geometry = (
+            None
+            if coordinated_cargo_geometry is None
+            else SceneMeshSnapshot(
+                coordinated_cargo_geometry,
+                components=coordinated_cargo_geometry.components,
+                collision_roles=coordinated_cargo_geometry.collision_roles,
+                unavailable=coordinated_cargo_geometry.unavailable,
+            )
+        )
         if tracking_runtime is not None and not isinstance(
             tracking_runtime,
             TrackingRuntime,
@@ -334,6 +369,16 @@ class ActionPlanningServices:
     def released_hand_provider(self) -> ReleasedHandContinuationProvider | None:
         """Return the exact engine-owned cleanup/Park continuation service."""
         return self._released_hand_provider
+
+    @property
+    def handover_scene_provider(self) -> HandOverSceneProvider | None:
+        """Return the optional provider of owned native receiver scene queries."""
+        return self._handover_scene_provider
+
+    @property
+    def coordinated_cargo_geometry(self) -> SceneMeshSnapshot | None:
+        """Return borrowed static cargo envelopes; planning consumers read only."""
+        return self._coordinated_cargo_geometry
 
     @property
     def robot(self) -> Robot:

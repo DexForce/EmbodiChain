@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import ClassVar
 
@@ -120,6 +120,12 @@ class CoordinatedPickmentOptions(ActionOptions):
     sampled antipodal pairs.
     """
 
+    prefer_cargo_clearance: bool = field(default=False, kw_only=True)
+    """Prefer hand clearance from observed contents without certifying retention."""
+
+    continue_verified_holds: bool = field(default=False, kw_only=True)
+    """Reuse both verified incoming grasps instead of sampling another pickup."""
+
     object_motion_keyframes: int = 6
     """Number of object-pose keyframes solved by IK before joint-space interpolation."""
 
@@ -167,6 +173,11 @@ class CoordinatedPickmentOptions(ActionOptions):
     """Deterministic seed isolated around coordinated grasp sampling."""
 
     def __post_init__(self) -> None:
+        if type(self.prefer_cargo_clearance) is not bool:
+            raise TypeError("prefer_cargo_clearance must be bool.")
+        if type(self.continue_verified_holds) is not bool:
+            raise TypeError("continue_verified_holds must be bool.")
+
         if self.object_motion_keyframes < 2:
             raise ValueError("object_motion_keyframes must be at least 2.")
         for name in ("pre_grasp_distance", "lift_height", "retreat_distance"):
@@ -553,6 +564,19 @@ class CoordinatedPickment(
         tuple[HeldObjectState, HeldObjectState],
         torch.Tensor,
     ]:
+        from embodichain.lab.sim.atomic_actions.primitives._coordinated_cargo import (
+            cargo_preference_bounds,
+        )
+
+        cargo_bounds = (
+            cargo_preference_bounds(
+                context,
+                self.planning_services.coordinated_cargo_geometry,
+                target.semantics.entity_id,
+            )
+            if options.prefer_cargo_clearance
+            else None
+        )
         object_initial_pose = self._resolve_object_initial_pose(target, context)
         object_target_pose = self._resolve_pose(
             resolve_pose_goal(
@@ -574,6 +598,7 @@ class CoordinatedPickment(
                 right_start_qpos,
                 resources.left_arm.control_part,
                 resources.right_arm.control_part,
+                cargo_bounds=cargo_bounds,
             )
         )
         left_object_to_eef = torch.bmm(pose_inv(object_initial_pose), left_grasp_xpos)
@@ -615,6 +640,8 @@ class CoordinatedPickment(
         right_start_qpos: torch.Tensor,
         left_control_part: str,
         right_control_part: str,
+        *,
+        cargo_bounds: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Sample left/right grasp poses from the target antipodal affordance.
 
@@ -726,6 +753,11 @@ class CoordinatedPickment(
                         left_to_right_arm_direction=left_to_right_arm_direction,
                         approach_direction=candidate_approach,
                         middle_empty_ratio=partition_ratio,
+                        **(
+                            {"cargo_bounds": cargo_bounds}
+                            if cargo_bounds is not None
+                            else {}
+                        ),
                     )
                 candidate_left, left_success = self._select_reachable_arm_grasp(
                     dual_results,
@@ -1530,6 +1562,178 @@ class CoordinatedPickment(
             positions.diff(dim=1).abs() <= max_step + 1.0e-6
         ).all(dim=(1, 2))
 
+    def _plan_verified_continuation(
+        self,
+        request: ResolvedActionRequest[CoordinatedPickGoal, CoordinatedPickmentOptions],
+        context: PlanningContext,
+        resources: _CoordinatedPickResources,
+        keys: tuple[str, str],
+        masks: list[torch.Tensor],
+    ) -> ActionPlan:
+        """Compose one synchronized move using the unchanged verified attachments."""
+        held = [context.task.get_held_object(key) for key in keys]
+        entity = request.goal.semantics.entity_id
+        if entity is None or any(
+            item is None or item.semantics.entity_id != entity for item in held
+        ):
+            return self.failed_plan(
+                request,
+                context,
+                message="Coordinated continuation requires both hands to hold the requested object.",
+            )
+        success = masks[0] & masks[1]
+        if not success.any():
+            return self.failed_plan(
+                request,
+                context,
+                message="Coordinated continuation has no jointly verified held rows.",
+            )
+        if (
+            request.motion_policy.strategy == "motion_gen"
+            and self.motion_generator.planner.cfg.planner_type == "curobo"
+        ):
+            raise ValueError(
+                "Coordinated dual-arm planning is not supported by the cuRobo backend."
+            )
+
+        options = request.skill_options
+        initial = self._resolve_object_initial_pose(request.goal, context)
+        target = self._resolve_pose(
+            resolve_pose_goal(
+                request.goal.object_target_pose, context, name="object_target_pose"
+            ),
+            "object_target_pose",
+        )
+        offsets = [
+            self._resolve_pose(item.object_to_eef, "verified_object_to_eef")
+            for item in held
+        ]
+        left_start, right_start = self._resolve_dual_arm_start(context, resources)
+        counts = {
+            "move": 0,
+            "hold": options.hold_steps,
+            "release": max(2, options.release_steps) if options.release else 0,
+            "retreat": max(2, options.retreat_steps) if options.release else 0,
+        }
+        counts["move"] = request.motion_policy.sample_count - sum(counts.values())
+        if counts["move"] < 2:
+            raise ValueError(
+                "Coordinated continuation requires at least two move waypoints."
+            )
+        object_path = self._interpolate_object_pose(
+            initial, target, counts["move"], include_orientation=True
+        )
+        success, left_move, right_move = self._plan_synchronized_object_motion(
+            left_start,
+            right_start,
+            object_path,
+            offsets[0],
+            offsets[1],
+            success,
+            resources,
+            options,
+            velocity_limit=request.motion_policy.velocity_limit,
+            step_dt=context.require_control_dt(),
+        )
+        left_final, right_final = left_move[:, -1], right_move[:, -1]
+        pieces = [
+            self._assemble_segment(
+                context,
+                left_move,
+                right_move,
+                self._repeat_qpos(resources.left_hand_close_qpos, counts["move"]),
+                self._repeat_qpos(resources.right_hand_close_qpos, counts["move"]),
+                resources=resources,
+            )
+        ]
+        if counts["hold"]:
+            pieces.append(
+                self._assemble_segment(
+                    context,
+                    self._repeat_qpos(left_final, counts["hold"]),
+                    self._repeat_qpos(right_final, counts["hold"]),
+                    self._repeat_qpos(resources.left_hand_close_qpos, counts["hold"]),
+                    self._repeat_qpos(resources.right_hand_close_qpos, counts["hold"]),
+                    resources=resources,
+                )
+            )
+        endpoints = [target @ offset for offset in offsets]
+        if options.release:
+            pieces.append(
+                self._assemble_segment(
+                    context,
+                    self._repeat_qpos(left_final, counts["release"]),
+                    self._repeat_qpos(right_final, counts["release"]),
+                    self._interpolate_qpos(
+                        resources.left_hand_close_qpos,
+                        resources.left_hand_open_qpos,
+                        counts["release"],
+                    ),
+                    self._interpolate_qpos(
+                        resources.right_hand_close_qpos,
+                        resources.right_hand_open_qpos,
+                        counts["release"],
+                    ),
+                    resources=resources,
+                )
+            )
+            retreat = target.new_tensor([0.0, 0.0, options.retreat_distance])
+            success, left_retreat = self._plan_masked_arm_trajectory(
+                resources.left_arm.control_part,
+                left_final,
+                translate_pose_world(endpoints[0], retreat)[:, None],
+                counts["retreat"],
+                success,
+            )
+            success, right_retreat = self._plan_masked_arm_trajectory(
+                resources.right_arm.control_part,
+                right_final,
+                translate_pose_world(endpoints[1], retreat)[:, None],
+                counts["retreat"],
+                success,
+            )
+            pieces.append(
+                self._assemble_segment(
+                    context,
+                    left_retreat,
+                    right_retreat,
+                    self._repeat_qpos(resources.left_hand_open_qpos, counts["retreat"]),
+                    self._repeat_qpos(
+                        resources.right_hand_open_qpos, counts["retreat"]
+                    ),
+                    resources=resources,
+                )
+            )
+        effects = StateDelta(
+            held_object_updates={
+                key: (
+                    None
+                    if options.release
+                    else HeldObjectState(item.semantics, offset, endpoint)
+                )
+                for key, item, offset, endpoint in zip(
+                    keys, held, offsets, endpoints, strict=True
+                )
+            }
+        )
+        return self.build_plan(
+            request,
+            context,
+            success=success,
+            trajectory=TimedTrajectory.from_uniform_step(
+                torch.cat(pieces, dim=1),
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
+            expected_effects=effects,
+            segment_lengths=counts,
+            # This object's motion is commanded, not an external target change.
+            # Any independent destination dependencies remain fully monitored.
+            scene_dependency_monitor_until=(
+                {entity: 0} if entity in self._scene_dependencies(request) else {}
+            ),
+        )
+
     def _plan(
         self,
         request: ResolvedActionRequest[CoordinatedPickGoal, CoordinatedPickmentOptions],
@@ -1539,6 +1743,13 @@ class CoordinatedPickment(
         target = request.goal
         options = request.skill_options
         resources = self._resolve_resources(request)
+        if options.continue_verified_holds:
+            keys = (resources.left_task_state_key, resources.right_task_state_key)
+            masks = [context.task.held_object_mask(key) for key in keys]
+            if bool((masks[0] | masks[1]).any()):
+                return self._plan_verified_continuation(
+                    request, context, resources, keys, masks
+                )
         if (
             request.motion_policy.strategy == "motion_gen"
             and self.motion_generator.planner.cfg.planner_type == "curobo"

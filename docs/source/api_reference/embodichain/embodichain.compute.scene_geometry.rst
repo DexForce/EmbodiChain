@@ -393,3 +393,21 @@ limits and observed Robot state are supplied by the Motion owner.
 
 .. automodule:: embodichain.compute.geometry.staging
    :members:
+
+
+Carrier envelope geometry
+-------------------------
+
+The pure tensor envelope test transforms object points into a carrier frame and
+checks horizontal extent and the lowest point with the preserved tolerance. The
+upper vertical extent is unconstrained. This is neither a cavity test nor a
+physical retention certificate and reads no simulation or task objects.
+
+.. currentmodule:: embodichain.compute.geometry.cargo
+
+.. autosummary::
+   :nosignatures:
+
+   inside_carrier_envelope
+
+.. autofunction:: inside_carrier_envelope

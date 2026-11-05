@@ -26,6 +26,8 @@ from embodichain.lab.sim.scene.mesh_snapshot import SceneMeshSnapshot
 from embodichain.lab.sim.scene.planar_observation import NativePlanarPlacement
 
 if TYPE_CHECKING:
+    from .primitives.hand_over import HandOverGoal, HandOverOptions
+    from embodichain.lab.sim.scene.native_hand_scene import NativeHandSceneQuery
     from embodichain.lab.sim.scene.robot_distal import RobotDistalMeshSnapshot
     from embodichain.lab.sim.evidence import RobotCommandObservation
     from embodichain.lab.sim.motion.mesh_collision import (
@@ -50,6 +52,7 @@ if TYPE_CHECKING:
     from embodichain.compute.geometry.pouring import PourGraspProjection
 
 __all__ = [
+    "HandOverSceneProvider",
     "HeldStagingBinding",
     "HeldStagingProvider",
     "HeldArticulationStagingProvider",
@@ -546,4 +549,28 @@ class RetainedCommandProvider(Protocol):
 
     def verify_current(self, observation: RobotCommandObservation) -> None:
         """Reject any changed arrays or source stamp without refreshing values."""
+        ...
+
+
+@runtime_checkable
+class HandOverSceneProvider(Protocol):
+    """Prepare one owned native hand/scene query for an observed transfer."""
+
+    @property
+    def robot(self) -> Robot:
+        """Return the exact borrowed robot whose observed hand is captured."""
+        ...
+
+    def prepare(
+        self,
+        request: ResolvedActionRequest[HandOverGoal, HandOverOptions],
+        context: PlanningContext,
+    ) -> NativeHandSceneQuery:
+        """Return fresh same-observation geometry; the Atomic caller closes it.
+
+        Implementations resolve explicit native UIDs and receiver joints at the
+        integration boundary. The returned Scene query contains no invocation,
+        program or Task Engine objects. Missing source stamps or geometry reject
+        instead of silently disabling receiver qualification.
+        """
         ...
