@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
 import json
+from pathlib import Path
 from types import MethodType, SimpleNamespace
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
@@ -1764,6 +1765,92 @@ def test_adapter_factory_binds_registration_to_initialized_environment(
         "registration": registration,
         "grasp_pose_generators": {},
     }
+
+
+def test_adapter_asset_inventory_aggregates_explicit_factories_without_creating_them(
+    tmp_path: Path,
+) -> None:
+    from embodichain.lab.task_program.integrations import DeclaredAssetFileProvider
+
+    @dataclass(frozen=True)
+    class AssetFactory:
+        files: tuple[Path, ...]
+
+        def declared_asset_files(self) -> tuple[Path, ...]:
+            return self.files
+
+        def __call__(self):
+            raise AssertionError("Asset enumeration must not construct a service.")
+
+    @dataclass(frozen=True)
+    class EvidenceAssetFactory(_ConstraintEvidenceFactory):
+        asset_path: str
+
+        def declared_asset_files(self) -> tuple[Path, ...]:
+            return (Path(self.asset_path),)
+
+        def create(self, **kwargs):
+            raise AssertionError("Asset enumeration must not construct evidence.")
+
+    first = tmp_path / "first.mesh"
+    second = tmp_path / "second.mesh"
+    third = tmp_path / "third.calibration"
+    first.write_bytes(b"first asset")
+    second.write_bytes(b"second asset")
+    third.write_bytes(b"evidence provider calibration")
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+        control_part_evidence_factory=EvidenceAssetFactory(str(third)),
+    )
+    factory = SimulationTaskProgramAdapterFactory(
+        registration,
+        grasp_pose_generator_factories={"hand": AssetFactory((second, first))},
+        hand_geometry_cfg_factories={"hand": AssetFactory((first,))},
+    )
+
+    assert isinstance(factory, DeclaredAssetFileProvider)
+    assert factory.declared_asset_files() == (
+        first.resolve(),
+        second.resolve(),
+        third.resolve(),
+    )
+
+
+def test_adapter_asset_inventory_requires_explicit_declarations() -> None:
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"), _profile_binding()
+    )
+    factory = SimulationTaskProgramAdapterFactory(
+        registration,
+        grasp_pose_generator_factories={
+            "hand": lambda: pytest.fail("Inventory must not call an opaque factory.")
+        },
+    )
+    with pytest.raises(TypeError, match="explicit DeclaredAssetFileProvider"):
+        factory.declared_asset_files()
+
+
+@pytest.mark.parametrize("invalid", ["path_string", "directory"])
+def test_adapter_asset_inventory_rejects_invalid_file_declarations(
+    tmp_path: Path, invalid: str
+) -> None:
+    @dataclass(frozen=True)
+    class InvalidFactory:
+        def declared_asset_files(self):
+            return (str(tmp_path),) if invalid == "path_string" else (tmp_path,)
+
+        def __call__(self):
+            raise AssertionError("Asset enumeration must not construct a service.")
+
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"), _profile_binding()
+    )
+    factory = SimulationTaskProgramAdapterFactory(
+        registration, grasp_pose_generator_factories={"hand": InvalidFactory()}
+    )
+    with pytest.raises((TypeError, ValueError), match="Path values|not a local file"):
+        factory.declared_asset_files()
 
 
 def test_adapter_factory_forwards_policy_planner_config(

@@ -493,3 +493,30 @@ Drawer algorithms consume explicit payload vertices, observed poses and declared
 region bounds. Entry proposals and containment reports preserve source order,
 world-up proposals and exposed-floor rules. They neither acquire native state
 nor select complete motion plans or establish physical retention.
+
+Control source preparation numbers
+----------------------------------
+
+These routines consume explicit dimensions, bounds and calibration values.
+They retain original bounded candidates, XY tie order and coefficient rules,
+and do not acquire assets, robots, scenes or physical acceptance evidence.
+
+.. currentmodule:: embodichain.compute.geometry.control_grasp_scale
+
+.. autoclass:: TwistGripDimensionError
+
+.. autofunction:: select_control_grasp_scale
+
+.. currentmodule:: embodichain.compute.geometry.control_resize
+
+.. autofunction:: control_bounds_overlap
+
+.. autofunction:: control_clearance_translations
+
+.. currentmodule:: embodichain.compute.geometry.press_calibration
+
+.. autofunction:: source_press_release_bias
+
+.. currentmodule:: embodichain.compute.geometry.revolute_support
+
+.. autofunction:: revolute_swept_min_z

@@ -27,6 +27,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
+from pathlib import Path
 from types import MappingProxyType
 from typing import ClassVar, Protocol, runtime_checkable, TYPE_CHECKING
 
@@ -81,6 +82,27 @@ _BUILTIN_EFFECT_EVIDENCE_SOURCE_KEYS = frozenset(
         )
     }
 )
+
+
+@runtime_checkable
+class DeclaredAssetFileProvider(Protocol):
+    """Expose local files selected by an executable-free service declaration.
+
+    Implementations resolve their own effective asset declarations without
+    creating a service, sampling geometry, or inspecting a live environment.
+    Files borrowed from the physical robot or scene remain owned by the
+    corresponding physical declaration. Motion-source manifests are separate
+    inputs, not runtime asset declarations.
+    """
+
+    def declared_asset_files(self) -> tuple[Path, ...]:
+        """Return all local files owned by this provider's asset selection.
+
+        Returns:
+            Actual asset files, including their transitive dependencies. A
+            provider with no separately owned assets returns an empty tuple.
+        """
+        ...
 
 
 def _identifier(value: object, *, field_name: str) -> str:
@@ -1204,6 +1226,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ControlPartEvidenceProviderDeclaration",
     "ControlPartEvidenceProviderFactory",
+    "DeclaredAssetFileProvider",
     "EndpointAdapterDeclaration",
     "ParallelCommandSafetyValidatorFactory",
     "ParallelSafetyDeclaration",

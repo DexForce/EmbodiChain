@@ -654,6 +654,30 @@ validation failures.
 
    SceneServiceError
 
+embodichain.gen_sim.scene_engine.grasp_fit
+------------------------------------------
+
+Explicit source target/opening requests produce owned bounded scale declarations
+and ordered receipts. Shared Compute owns the numeric fit and Scene owns source
+vertices; physical acquisition and asset materialization remain separate.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.grasp_fit
+
+.. autosummary::
+
+   SourceGraspFitRequest
+   SourceGraspFitResult
+   fit_source_grasp_declarations
+
+.. autoclass:: SourceGraspFitRequest
+   :members:
+
+.. autoclass:: SourceGraspFitResult
+   :members:
+
+.. autofunction:: fit_source_grasp_declarations
+
+
 embodichain.gen_sim.scene_engine.pipeline
 -----------------------------------------
 
@@ -875,6 +899,21 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 
    save_layouts
 
+embodichain.gen_sim.task_engine.asset_preparation
+-------------------------------------------------
+
+The semantic frontend selects explicit acquisition identities/openings and keeps
+planner/runtime views consistent while delegating geometric fitting and asset
+materialization to Scene Engine. These adapters implement no fit algorithm and
+construct no simulation or skill.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.asset_preparation
+
+.. autofunction:: fit_prepared_scene_assets
+
+.. autofunction:: normalize_prepared_scene_assets
+
+
 embodichain.gen_sim.task_engine.evidence
 ----------------------------------------
 
@@ -901,6 +940,80 @@ checking that source payload's identity before sharing the same projection.
 Neither entry point derives numerical policy values from task or object names.
 
 .. autofunction:: project_configured_placement_evidence_binding
+
+embodichain.gen_sim.task_engine.orchestration.part_catalog
+----------------------------------------------------------
+
+Semantic part labels consume qualified Scene descriptors without reading live
+state. Missing positions/reset endpoints remain unknown; ranks do not establish
+physical success.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.part_catalog
+
+.. autofunction:: discover_part_catalogs
+
+
+embodichain.gen_sim.task_engine.orchestration.source_scene
+----------------------------------------------------------
+
+The source importer keeps semantic UID/path/provenance correspondence while
+consuming public shared Scene physics, pose/scale and authored-mesh input APIs.
+It emits planner and physical declaration views without running simulation,
+solving IK, creating skills or invoking a generation model. Source files and
+asset hashes remain authoritative; later drift is rejected, never re-signed.
+This surface does not yet connect physical-input snapshots, bundle publication
+or CLI execution.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.source_scene
+
+.. autosummary::
+
+   PreparedScene
+   ResolvedSceneSource
+   is_prompt2scene_export
+   prepare_scene
+   resolve_gym_config_path
+   resolve_source_scene
+
+.. autoclass:: PreparedScene
+   :members:
+
+.. autoclass:: ResolvedSceneSource
+   :members:
+
+.. autofunction:: is_prompt2scene_export
+
+.. autofunction:: prepare_scene
+
+.. autofunction:: resolve_gym_config_path
+
+.. autofunction:: resolve_source_scene
+
+
+embodichain.gen_sim.task_engine.physical_input
+----------------------------------------------
+
+These APIs select explicit physical-owner component declarations and freeze their
+complete current input projection. They reject data/file drift and newly present
+asset dependencies. Selecting physical input does not convert an old program,
+reuse historical evidence or launch simulation; the current runtime bundle
+contract is validated by its separate loader.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.physical_input
+
+.. autosummary::
+
+   FrozenPhysicalInput
+   load_frozen_physical_input
+   verify_physical_input_manifest
+
+.. autoclass:: FrozenPhysicalInput
+   :members:
+
+.. autofunction:: load_frozen_physical_input
+
+.. autofunction:: verify_physical_input_manifest
+
 
 embodichain.gen_sim.task_spec
 -----------------------------
@@ -1667,6 +1780,26 @@ remain NaN. Pure transformed mesh envelopes live in
 ``compute.geometry.rigid.support_mesh_envelope`` and establish no contact.
 
 .. autofunction:: qualified_support_heights
+
+embodichain.lab.task_program.integrations.hand_calibration
+----------------------------------------------------------
+
+Model-owned task-hand descriptions carry explicit physical endpoints, joint
+commands and nominal reserves. ``physical_hand_resources`` resolves declared
+member aliases to unique physical hands without inferring roles from names.
+The interface creates no Robot, geometry observation, skill or TaskSpec result.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.hand_calibration
+
+.. autosummary::
+
+   TaskHandCalibration
+   physical_hand_resources
+
+.. autoclass:: TaskHandCalibration
+   :members:
+
+.. autofunction:: physical_hand_resources
 
 embodichain.lab.task_program.integrations.simulation.grip_evidence
 ------------------------------------------------------------------
@@ -4366,3 +4499,46 @@ or inferred task outcome is produced. Unavailable history fails explicitly.
 .. autofunction:: embodichain.gen_sim.task_engine.evidence.project_condition_evidence_binding
 
 .. autofunction:: embodichain.gen_sim.task_engine.evidence.project_pour_evidence_binding
+
+embodichain.gen_sim.task_engine.embodiment_declarations
+-------------------------------------------------------
+
+The semantic frontend binds public robot-owned hand descriptions into closed
+opening/grip service declarations. Existing physical values and evidence defaults
+remain owner inputs; this module acquires no facts and creates no runtime.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.embodiment_declarations
+
+.. autosummary::
+
+   declare_source_opening_bindings
+   resolve_source_hand_services
+   declare_source_grip_evidence
+
+.. autofunction:: declare_source_opening_bindings
+
+.. autofunction:: resolve_source_hand_services
+
+.. autofunction:: declare_source_grip_evidence
+
+embodichain.gen_sim.task_engine.robot_profiles
+----------------------------------------------
+
+Explicit frontend selectors delegate asset preflight and lateral resource hints
+to public model owners. The legacy dual_tianji spelling selects the existing
+standard native Marvin component; stored historical inputs are not converted.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.robot_profiles
+
+.. autosummary::
+
+   canonical_robot_profile
+   profile_lateral_positions
+   require_robot_assets
+
+.. autofunction:: canonical_robot_profile
+
+.. autofunction:: profile_lateral_positions
+
+.. autofunction:: require_robot_assets
+

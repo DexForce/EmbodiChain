@@ -49,6 +49,7 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Declared geometry planning services and native receiver assembly | `embodichain/lab/task_program/integrations/simulation/planning_services.py`, `handover_scene.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
+| Pure source physical reset/cadence declarations | `embodichain/lab/task_program/integrations/simulation/source_deployment.py` |
 | Physical acquisition, history and support observations | `embodichain/lab/sim/sensors/contact/sampling.py`, `contact/timeline.py`, `support_observation.py` |
 | Physical grip interpretation | `embodichain/lab/sim/atomic_actions/grip_evidence.py` |
 | Evidence declarations and semantic adaptation | `embodichain/lab/task_program/integrations/simulation/grip_evidence.py` |

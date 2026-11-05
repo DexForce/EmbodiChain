@@ -20,13 +20,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import re
 from typing import Any
 
 import numpy as np
 
 from embodichain.lab.sim.spawn.source_geometry import UsdSourceSnapshot, read_usd_source
 
-__all__ = ["PressBinding", "inspect_press"]
+__all__ = ["PressBinding", "inspect_press", "discover_press_source"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,3 +212,68 @@ def inspect_press(
         float(released),
         float(pressed),
     )
+
+
+def discover_press_source(config: dict[str, Any]) -> tuple[PressBinding, float]:
+    """Resolve one explicitly authored button surface and moving-link mass.
+
+    Args:
+        config: Source articulation declaration consumed by ``inspect_press``.
+
+    Returns:
+        Qualified Press binding and authored moving-link mass, preserving the
+        original named-joint/surface disambiguation and source geometry order.
+        It creates no control operation, robot, sensor or simulation.
+    """
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    stage = Usd.Stage.Open(config["fpath"])
+    if stage is None:
+        raise ValueError("Cannot open the declared button USD.")
+    joints = [
+        p
+        for p in stage.Traverse()
+        if p.IsA(UsdPhysics.PrismaticJoint)
+        and UsdPhysics.Joint(p).GetJointEnabledAttr().Get() is not False
+        and re.search(r"button|press|plunger|switch", p.GetName(), re.I)
+    ]
+    if len(joints) != 1:
+        raise ValueError(
+            "E9 needs one unambiguous named button joint, not a substituted part."
+        )
+    joint = UsdPhysics.PrismaticJoint(joints[0])
+    children = joint.GetBody1Rel().GetTargets()
+    if len(children) != 1:
+        raise ValueError("E9 button joint must own one link.")
+    body = stage.GetPrimAtPath(children[0])
+    candidates = []
+    for prim in Usd.PrimRange(body):
+        name = prim.GetName().lower()
+        if (
+            prim.IsA(UsdGeom.Mesh)
+            and prim.HasAPI(UsdPhysics.CollisionAPI)
+            and re.search(r"button|cap|plunger", name)
+            and not re.search(
+                r"label|text|flange|guide|stem", name.replace("and_stem", "")
+            )
+        ):
+            candidates.append(
+                inspect_press(
+                    config,
+                    joint=joints[0].GetName(),
+                    link=body.GetName(),
+                    collision_mesh=str(prim.GetPath()),
+                )
+            )
+    if not candidates:
+        raise ValueError("E9 needs an explicitly named button collision surface.")
+    scores = [float(np.dot(b.press_position, b.axis)) for b in candidates]
+    outer = [
+        b for b, score in zip(candidates, scores) if abs(score - min(scores)) <= 1e-6
+    ]
+    if len(outer) != 1:
+        raise ValueError("E9 button has ambiguous outer collision surfaces.")
+    source_mass = UsdPhysics.MassAPI(body).GetMassAttr().Get()
+    if source_mass is None or not math.isfinite(source_mass) or source_mass <= 0:
+        raise ValueError("E9 calibration requires authored moving-link mass.")
+    return outer[0], float(source_mass)

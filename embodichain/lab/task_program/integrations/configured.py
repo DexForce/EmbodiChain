@@ -25,6 +25,7 @@ from enum import Enum
 import hashlib
 import json
 import math
+from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
 from ._configured_services import (
@@ -139,7 +140,7 @@ from embodichain.lab.task_program.semantics import (
 )
 from embodichain.toolkits.graspkit import (
     ParallelJawGripperModelCfg,
-    get_parallel_jaw_gripper_model,
+    resolve_parallel_jaw_gripper_model,
 )
 
 if TYPE_CHECKING:
@@ -2594,41 +2595,20 @@ def _decode_parallel_jaw_gripper_model(
     path: str,
 ) -> ParallelJawGripperModelCfg:
     """Resolve a registered aperture model, with optional inline bounds."""
-    if type(value) is str:
-        try:
-            return get_parallel_jaw_gripper_model(value)
-        except ValueError as exc:
-            raise ValueError(f"{path}: {exc}") from exc
-    model = _mapping(
-        value,
-        path=path,
-        required=frozenset({"model_id"}),
-        optional=frozenset({"min_opening_width", "max_opening_width"}),
-    )
-    model_id = _identifier(model["model_id"], path=f"{path}.model_id")
-    try:
-        defaults = get_parallel_jaw_gripper_model(model_id)
-    except ValueError as exc:
-        raise ValueError(f"{path}: {exc}") from exc
-    minimum = _real(
-        model.get("min_opening_width", defaults.min_opening_width),
-        path=f"{path}.min_opening_width",
-        minimum=0.0,
-        strict_minimum=True,
-    )
-    maximum = _real(
-        model.get("max_opening_width", defaults.max_opening_width),
-        path=f"{path}.max_opening_width",
-        minimum=0.0,
-        strict_minimum=True,
-    )
-    if minimum >= maximum:
-        raise ValueError(
-            f"{path}.min_opening_width must be less than {path}.max_opening_width."
+    declaration = (
+        value
+        if type(value) is str
+        else _mapping(
+            value,
+            path=path,
+            required=frozenset({"model_id"}),
+            optional=frozenset({"min_opening_width", "max_opening_width"}),
         )
-    return ParallelJawGripperModelCfg(
-        model_id=model_id, min_opening_width=minimum, max_opening_width=maximum
     )
+    try:
+        return resolve_parallel_jaw_gripper_model(declaration)
+    except (TypeError, ValueError) as error:
+        raise type(error)(f"{path}: {error}") from error
 
 
 def _geometry_pose(value: object, *, path: str) -> tuple[float, ...]:
@@ -4683,6 +4663,10 @@ class _ConfiguredTaskProgramAdapterFactory:
     def registration(self) -> SimulationTaskProgramRegistration:
         """Return the immutable registration owned by the delegate."""
         return self.delegate.registration
+
+    def declared_asset_files(self) -> tuple[Path, ...]:
+        """Return effective service asset files through the public delegate API."""
+        return self.delegate.declared_asset_files()
 
     def create_adapter(
         self,

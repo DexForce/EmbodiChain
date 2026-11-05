@@ -1,0 +1,50 @@
+#usda 1.0
+(
+    defaultPrim = "Cabinet"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "Cabinet" (
+    prepend apiSchemas = ["PhysicsArticulationRootAPI"]
+)
+{
+    def Xform "base" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI"]
+    )
+    {
+        def Mesh "collision" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            int[] faceVertexCounts = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+            int[] faceVertexIndices = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7]
+            point3f[] points = [(-0.02, -0.01, -0.01), (0.02, -0.01, -0.01), (0.02, 0.01, -0.01), (-0.02, 0.01, -0.01), (-0.02, -0.01, 0.01), (0.02, -0.01, 0.01), (0.02, 0.01, 0.01), (-0.02, 0.01, 0.01)]
+        }
+    }
+
+    def Xform "drawer" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI"]
+    )
+    {
+        def Mesh "pull_grip" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            int[] faceVertexCounts = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+            int[] faceVertexIndices = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7]
+            point3f[] points = [(0.08, -0.01, -0.01), (0.12, -0.01, -0.01), (0.12, 0.01, -0.01), (0.08, 0.01, -0.01), (0.08, -0.01, 0.01), (0.12, -0.01, 0.01), (0.12, 0.01, 0.01), (0.08, 0.01, 0.01)]
+        }
+    }
+
+    def PhysicsPrismaticJoint "drawer_joint"
+    {
+        custom double gen_sim:closedPosition = 0
+        uniform token physics:axis = "X"
+        rel physics:body0 = </Cabinet/base>
+        rel physics:body1 = </Cabinet/drawer>
+        float physics:lowerLimit = 0
+        float physics:upperLimit = 0.2
+    }
+}
+

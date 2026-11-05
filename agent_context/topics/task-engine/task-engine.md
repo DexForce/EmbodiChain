@@ -13,6 +13,12 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Semantic graph schema, ordering and canonical call validation | `semantic_graph.py` |
 | Roles, binding reports and scene manifest contracts | `orchestration/contracts.py` |
 | Graph/TaskSpec/grounding coverage and source lineage | `semantic_graph_validation.py` |
+| Semantic acquisition requests and normalized-asset view projection | `asset_preparation.py`; consumes public Scene Engine APIs |
+| Source export discovery and pure scene declarations | `orchestration/source_scene.py` |
+| Explicit frozen physical-owner components and drift identity | `physical_input.py` |
+| Semantic part positions/ranks from public Scene descriptions | `orchestration/part_catalog.py` |
+| Normal scene-to-frozen physical declaration composition | `source_physical_input.py` |
+| Semantic control selection and physical-owner receipts | `control_physical_preparation.py` |
 
 TaskSpec identity and predicate evaluation belong to
 [Task specification](../task-spec/task-spec.md). Both mappings and instances must
@@ -28,6 +34,26 @@ Fixed candidate/graph inputs can be checked without invoking a model. Run
 `tests/gen_sim/task_engine/` for candidate/spec, coverage and import/ownership
 boundaries. Public API descriptions are in the
 [Task Engine reference](../../../docs/source/api_reference/embodichain/embodichain.gen_sim.task_engine.rst).
+
+`orchestration/source_scene.py` owns supported source-export discovery, semantic
+UID correspondence and immutable preparation provenance. It delegates physical
+properties and pose/scale normalization to shared Scene ingress, and reads
+mesh-top inputs through the public Scene geometry owner. Use `PreparedScene`'s
+asset identity check before later preparation; missing or changed original input
+cannot be replaced or given a new digest under its old identity. Articulation
+assets use their resolved top-level source path; shape-owned asset digests stay
+unchanged. Asset baking
+remains Scene Engine's existing owner; this importer does not publish bundles
+or connect a runtime/CLI.
+
+`physical_input` imports an explicitly selected set of physical-owner component
+files before semantic planning. Its detached `FrozenPhysicalInput` projection and
+input-file inventory reject nested-data, file and newly discovered dependency
+drift without re-signing an old snapshot. It reads no trajectory, receipt or
+certificate and does not publish or launch a runtime bundle. Shared Scene owns
+pose validation/translation and source geometry; `orchestration/part_catalog`
+adds only conservative semantic part labels. The later bundle loader still owns
+runtime-contract versions and complete current-owner input inventory validation.
 
 ## Read-only graph display
 
@@ -54,3 +80,33 @@ cutout. These images identify the asset; they are not observations after a call.
 Firefox and WebKit; `tests/gen_sim/task_engine/browser_fixture.py` creates
 synthetic inputs through the public renderer without starting simulation.
 See [`web/README.md`](../../../web/README.md) for both frontend build paths.
+
+
+Model declaration binding uses `embodiment_declarations.py` and `robot_profiles.py`.
+These consume public `embodichain_robots.task_program` descriptions and component
+services; they emit declarations and provenance hashes rather than skills,
+physical facts or acceptance. Normal Source physical preparation consumes this descriptor surface; bundle
+publication and CLI routing retain their separate integration layer.
+
+`resolve_source_hand_services()` includes the effective registered grasp-model
+asset inventory in its returned hand-input hashes. It delegates model/side and
+archive-reference selection to GraspKit's public model owner; component fallback
+calibration files remain in the same hand-services provenance group. It creates
+no sampler or Robot and does not add another bundle input group.
+
+`prepare_source_physical_input` composes the explicit existing model component,
+shared Scene declarations, Scene Engine normalization and optional source-control
+preparation into a fresh `FrozenPhysicalInput`. Original source files and newly
+derived provenance remain inventoried, with before/after drift checks. It never
+reprocesses an existing frozen input or constructs Robot, simulation, IK or
+skills. `control_physical_preparation` selects semantic subjects/resources and
+records shared control-resize/mass/calibration receipts; those numerical and
+authored-geometry algorithms stay in Scene/Compute/model owners. The selected
+`dual_arm_trajectory_verified.yaml` component retains source tracking/recovery
+values; Lab owns the pure source reset/cadence declaration helper.
+
+Source effort preparation only reduces semantic acquisition/carrier/blocking
+relationships into neutral robot-owner candidates. The robot facade selects
+model effort thresholds, prismatic gains and initial clearance posture from
+explicit requirements. Task Engine does not hold those machine calibration
+values or rewrite runtime action policies.

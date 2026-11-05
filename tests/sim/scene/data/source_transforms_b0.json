@@ -1,0 +1,797 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "scope": "Frozen source function values, matrix/XYZ authority, order, rounding, error identity; no simulation",
+  "cases": [
+    {
+      "id": "euler-0-world-0.0",
+      "config": {
+        "uid": "source",
+        "init_pos": [
+          1.2,
+          -2.5,
+          0.33
+        ],
+        "init_rot": [
+          10,
+          20,
+          30
+        ],
+        "body_scale": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": 0.0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_pos\":[1.2,-2.5,0.33],\"init_rot\":[10.0,20.0,30.0],\"body_scale\":[2.0,3.0,4.0]}"
+      }
+    },
+    {
+      "id": "euler-0-world--90.0",
+      "config": {
+        "uid": "source",
+        "init_pos": [
+          1.2,
+          -2.5,
+          0.33
+        ],
+        "init_rot": [
+          10,
+          20,
+          30
+        ],
+        "body_scale": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": -90.0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_pos\":[-2.5,-1.2,0.33],\"init_rot\":[20.28355945453,-9.391285802043,-56.548821602981],\"body_scale\":[2.0,3.0,4.0]}"
+      }
+    },
+    {
+      "id": "euler-0-world-90.0",
+      "config": {
+        "uid": "source",
+        "init_pos": [
+          1.2,
+          -2.5,
+          0.33
+        ],
+        "init_rot": [
+          10,
+          20,
+          30
+        ],
+        "body_scale": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": 90.0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_pos\":[2.5,1.2,0.33],\"init_rot\":[-20.28355945453,9.391285802044,123.451178397019],\"body_scale\":[2.0,3.0,4.0]}"
+      }
+    },
+    {
+      "id": "euler-0-world-360.0",
+      "config": {
+        "uid": "source",
+        "init_pos": [
+          1.2,
+          -2.5,
+          0.33
+        ],
+        "init_rot": [
+          10,
+          20,
+          30
+        ],
+        "body_scale": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": 360.0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_pos\":[1.2,-2.5,0.33],\"init_rot\":[10.0,20.0,30.0],\"body_scale\":[2.0,3.0,4.0]}"
+      }
+    },
+    {
+      "id": "euler-1-world-0.0",
+      "config": {
+        "uid": "source",
+        "init_pos": [
+          0,
+          0,
+          0
+        ],
+        "init_rot": [
+          0,
+          90,
+          0
+        ],
+        "body_scale": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": 0.0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_pos\":[0.0,0.0,0.0],\"init_rot\":[0.0,90.0,0.0],\"body_scale\":[2.0,3.0,4.0]}"
+      }
+    },
+    {
+      "id": "euler-1-world--90.0",
+      "config": {
+        "uid": "source",
+        "init_pos": [
+          0,
+          0,
+          0
+        ],
+        "init_rot": [
+          0,
+          90,
+          0
+        ],
+        "body_scale": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": -90.0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_pos\":[0.0,0.0,0.0],\"init_rot\":[90.0,0.0,-90.0],\"body_scale\":[2.0,3.0,4.0]}"
+      }
+    },
+    {
+      "id": "euler-1-world-90.0",
+      "config": {
+        "uid": "source",
+        "init_pos": [
+          0,
+          0,
+          0
+        ],
+        "init_rot": [
+          0,
+          90,
+          0
+        ],
+        "body_scale": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": 90.0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_pos\":[0.0,0.0,0.0],\"init_rot\":[-90.0,0.0,90.0],\"body_scale\":[2.0,3.0,4.0]}"
+      }
+    },
+    {
+      "id": "euler-1-world-360.0",
+      "config": {
+        "uid": "source",
+        "init_pos": [
+          0,
+          0,
+          0
+        ],
+        "init_rot": [
+          0,
+          90,
+          0
+        ],
+        "body_scale": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": 360.0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_pos\":[0.0,0.0,0.0],\"init_rot\":[0.0,90.0,0.0],\"body_scale\":[2.0,3.0,4.0]}"
+      }
+    },
+    {
+      "id": "euler-2-world-0.0",
+      "config": {
+        "uid": "source",
+        "init_pos": [
+          -0.0,
+          1e-14,
+          -1e-13
+        ],
+        "init_rot": [
+          180,
+          -90,
+          180
+        ],
+        "body_scale": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": 0.0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_pos\":[-0.0,1e-14,-1e-13],\"init_rot\":[180.0,-90.0,180.0],\"body_scale\":[2.0,3.0,4.0]}"
+      }
+    },
+    {
+      "id": "euler-2-world--90.0",
+      "config": {
+        "uid": "source",
+        "init_pos": [
+          -0.0,
+          1e-14,
+          -1e-13
+        ],
+        "init_rot": [
+          180,
+          -90,
+          180
+        ],
+        "body_scale": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": -90.0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_pos\":[0.0,0.0,0.0],\"init_rot\":[-90.0,0.0,-90.0],\"body_scale\":[2.0,3.0,4.0]}"
+      }
+    },
+    {
+      "id": "euler-2-world-90.0",
+      "config": {
+        "uid": "source",
+        "init_pos": [
+          -0.0,
+          1e-14,
+          -1e-13
+        ],
+        "init_rot": [
+          180,
+          -90,
+          180
+        ],
+        "body_scale": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": 90.0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_pos\":[0.0,0.0,0.0],\"init_rot\":[90.0,0.0,90.0],\"body_scale\":[2.0,3.0,4.0]}"
+      }
+    },
+    {
+      "id": "euler-2-world-360.0",
+      "config": {
+        "uid": "source",
+        "init_pos": [
+          -0.0,
+          1e-14,
+          -1e-13
+        ],
+        "init_rot": [
+          180,
+          -90,
+          180
+        ],
+        "body_scale": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": 360.0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_pos\":[0.0,0.0,0.0],\"init_rot\":[0.0,-90.0,0.0],\"body_scale\":[2.0,3.0,4.0]}"
+      }
+    },
+    {
+      "id": "matrix-authority-0",
+      "config": {
+        "uid": "source",
+        "init_local_pose": [
+          [
+            0,
+            -1,
+            0,
+            0.2
+          ],
+          [
+            1,
+            0,
+            0,
+            -0.3
+          ],
+          [
+            0,
+            0,
+            1,
+            0.7
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "init_pos": [
+          99,
+          99,
+          99
+        ],
+        "init_rot": [
+          30,
+          40,
+          50
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": 0
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_local_pose\":[[0.0,-1.0,0.0,0.2],[1.0,0.0,0.0,-0.3],[0.0,0.0,1.0,0.7],[0.0,0.0,0.0,1.0]],\"init_pos\":[0.2,-0.3,0.7],\"init_rot\":[-0.0,0.0,90.0]}"
+      }
+    },
+    {
+      "id": "matrix-authority--90",
+      "config": {
+        "uid": "source",
+        "init_local_pose": [
+          [
+            0,
+            -1,
+            0,
+            0.2
+          ],
+          [
+            1,
+            0,
+            0,
+            -0.3
+          ],
+          [
+            0,
+            0,
+            1,
+            0.7
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "init_pos": [
+          99,
+          99,
+          99
+        ],
+        "init_rot": [
+          30,
+          40,
+          50
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": -90
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_local_pose\":[[1.0,-2.220446049250313e-16,0.0,-0.3],[2.220446049250313e-16,1.0,0.0,-0.2],[0.0,0.0,1.0,0.7],[0.0,0.0,0.0,1.0]],\"init_pos\":[-0.3,-0.2,0.7],\"init_rot\":[0.0,0.0,0.0]}"
+      }
+    },
+    {
+      "id": "matrix-authority-45",
+      "config": {
+        "uid": "source",
+        "init_local_pose": [
+          [
+            0,
+            -1,
+            0,
+            0.2
+          ],
+          [
+            1,
+            0,
+            0,
+            -0.3
+          ],
+          [
+            0,
+            0,
+            1,
+            0.7
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "init_pos": [
+          99,
+          99,
+          99
+        ],
+        "init_rot": [
+          30,
+          40,
+          50
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "rotate",
+          {
+            "degrees": 45
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"init_local_pose\":[[-0.7071067811865476,-0.7071067811865475,0.0,0.353553390593],[0.7071067811865475,-0.7071067811865476,0.0,-0.070710678119],[0.0,0.0,1.0,0.7],[0.0,0.0,0.0,1.0]],\"init_pos\":[0.353553390593,-0.070710678119,0.7],\"init_rot\":[0.0,0.0,135.0]}"
+      }
+    },
+    {
+      "id": "scale-preserve",
+      "config": {
+        "uid": "source",
+        "body_scale": [
+          1.2,
+          0.3,
+          2.5
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "scale",
+          {
+            "policy": "preserve",
+            "requested": [
+              2.0,
+              3.0,
+              0.5
+            ]
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"body_scale\":[1.2,0.3,2.5],\"init_pos\":[0.0,0.0,0.0],\"init_rot\":[0.0,0.0,0.0]}"
+      }
+    },
+    {
+      "id": "scale-multiply",
+      "config": {
+        "uid": "source",
+        "body_scale": [
+          1.2,
+          0.3,
+          2.5
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "scale",
+          {
+            "policy": "multiply",
+            "requested": [
+              2.0,
+              3.0,
+              0.5
+            ]
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"body_scale\":[2.4,0.9,1.25],\"init_pos\":[0.0,0.0,0.0],\"init_rot\":[0.0,0.0,0.0]}"
+      }
+    },
+    {
+      "id": "scale-absolute",
+      "config": {
+        "uid": "source",
+        "body_scale": [
+          1.2,
+          0.3,
+          2.5
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ],
+        [
+          "scale",
+          {
+            "policy": "absolute",
+            "requested": [
+              2.0,
+              3.0,
+              0.5
+            ]
+          }
+        ]
+      ],
+      "expected": {
+        "serialized": "{\"uid\":\"source\",\"body_scale\":[2.0,3.0,0.5],\"init_pos\":[0.0,0.0,0.0],\"init_rot\":[0.0,0.0,0.0]}"
+      }
+    },
+    {
+      "id": "bad-vector",
+      "config": {
+        "init_pos": [
+          1,
+          2
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ]
+      ],
+      "expected": {
+        "error_type": "ValueError",
+        "error": "Expected a finite xyz vector, got: [1, 2]"
+      }
+    },
+    {
+      "id": "bad-matrix",
+      "config": {
+        "init_local_pose": [
+          [
+            1,
+            0
+          ],
+          [
+            0,
+            1
+          ]
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ]
+      ],
+      "expected": {
+        "error_type": "ValueError",
+        "error": "init_local_pose must be a finite rigid 4x4 pose."
+      }
+    },
+    {
+      "id": "nonpositive-scale",
+      "config": {
+        "body_scale": [
+          1,
+          -1,
+          1
+        ]
+      },
+      "steps": [
+        [
+          "pose",
+          {}
+        ]
+      ],
+      "expected": {
+        "error_type": "ValueError",
+        "error": "Object None has non-positive body_scale."
+      }
+    }
+  ],
+  "nonpublic_helper_boundary": {
+    "case": [
+      {
+        "id": "unsupported-scale-policy",
+        "config": {
+          "body_scale": [
+            1,
+            2,
+            3
+          ]
+        },
+        "steps": [
+          [
+            "scale",
+            {
+              "policy": "unsupported",
+              "requested": [
+                1,
+                1,
+                1
+              ]
+            }
+          ]
+        ],
+        "expected": {
+          "serialized": "{\"body_scale\":[1.0,1.0,1.0]}"
+        }
+      }
+    ],
+    "qualification": "The old public prepare_scene rejects unsupported policy before invoking the helper; private helper fallthrough is not an accepted public mode. The new owner preserves that existing public rejection."
+  }
+}

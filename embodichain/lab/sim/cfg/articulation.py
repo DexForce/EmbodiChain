@@ -529,6 +529,8 @@ class ArticulationCfg(ObjectBaseCfg):
         else:
             from scipy.spatial.transform import Rotation as R
 
+            if not isinstance(cfg.init_local_pose, np.ndarray):
+                cfg.init_local_pose = np.asarray(cfg.init_local_pose)
             cfg.init_pos = tuple(cfg.init_local_pose[:3, 3])
             cfg.init_rot = tuple(
                 R.from_matrix(cfg.init_local_pose[:3, :3]).as_euler("xyz", degrees=True)

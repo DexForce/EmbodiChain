@@ -630,6 +630,58 @@ this separate API.
 
 .. autofunction:: capture_rigid_mesh
 
+
+Authored source mesh inputs
+---------------------------
+
+These readers retain authored scene-node transforms and face order, convert the
+source glTF Y-up basis to object-local Z-up and apply body scale once. They read
+files without native simulation. The top estimator preserves unavailable input
+as None; it is not a cooked-collider observation or physical clearance proof.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+
+.. autosummary::
+
+   read_gltf_z_up_mesh
+   estimate_source_mesh_top_z
+
+.. autofunction:: read_gltf_z_up_mesh
+
+.. autofunction:: estimate_source_mesh_top_z
+
+
+Source scene ingress declarations
+--------------------------------
+
+These explicit adapters normalize owned source mappings without constructing a
+simulation or changing shared physical defaults. The source physics adapter
+retains authored/grouped property precedence and legacy collider declarations.
+Pose/scale adapters preserve matrix authority, intrinsic XYZ degree rotations
+and original world-Z rounding; callers supply owned declarations.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_physics
+
+.. autosummary::
+
+   source_scene_object_declaration
+
+.. autofunction:: source_scene_object_declaration
+
+.. currentmodule:: embodichain.lab.sim.scene.source_transforms
+
+.. autosummary::
+
+   normalize_source_pose
+   apply_source_body_scale
+   rotate_source_world_z
+
+.. autofunction:: normalize_source_pose
+
+.. autofunction:: apply_source_body_scale
+
+.. autofunction:: rotate_source_world_z
+
 Authored robot mounting frames
 ------------------------------
 
@@ -839,24 +891,38 @@ qualified public limit-cache repair, and measure declared support geometry.
    :members:
 
 
-Authored source mesh inputs
----------------------------
+Static source declarations
+--------------------------
 
-These readers retain authored scene-node transforms and face order, convert the
-source glTF Y-up basis to object-local Z-up and apply body scale once. They read
-files without native simulation. The top estimator preserves unavailable input
-as None; it is not a cooked-collider observation or physical clearance proof.
+These APIs generate detached physical declarations and source geometry labels.
+They reuse the existing Spawn and authored-geometry readers without creating a
+World or evaluating task success. Frozen pose validation precedes descriptor
+conversion; source scale retains its configured precision. Passive prismatic
+calibration remains explicit and retains other drive/mass owners.
 
-.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+.. currentmodule:: embodichain.lab.sim.scene.frozen_declarations
 
-.. autosummary::
+.. autofunction:: effective_articulation_declaration
 
-   read_gltf_z_up_mesh
-   estimate_source_mesh_top_z
+.. autofunction:: validate_frozen_pose_fields
 
-.. autofunction:: read_gltf_z_up_mesh
+.. currentmodule:: embodichain.lab.sim.scene.component_declarations
 
-.. autofunction:: estimate_source_mesh_top_z
+.. autofunction:: source_scene_component_declaration
+
+.. currentmodule:: embodichain.lab.sim.scene.source_contact
+
+.. autofunction:: source_grasp_contact_clearances
+
+.. currentmodule:: embodichain.lab.sim.scene.prismatic_declarations
+
+.. autofunction:: source_prismatic_physics_declarations
+
+.. currentmodule:: embodichain.lab.sim.scene.articulation_inputs
+
+.. autofunction:: prismatic_reset_state
+
+.. autofunction:: prismatic_handle_center_world
 
 Local source vertices
 ----------------------
@@ -870,3 +936,72 @@ this does not qualify cooked collision shapes or physical containment.
 .. currentmodule:: embodichain.lab.sim.scene.source_geometry
 
 .. autofunction:: read_source_vertices
+
+Explicit source control preparation
+-----------------------------------
+
+These static adapters consume explicit authored bindings, masses and measured
+source geometry. Source resize/support candidates and press release bias retain
+their original bounded semantics. They edit owned declarations, not source files
+or simulation state; source geometry and offsets do not certify physical success.
+
+.. currentmodule:: embodichain.lab.sim.scene.control_preparation
+
+.. autoclass:: ControlSourceScene
+   :members:
+
+.. autoclass:: ControlSourceResizeRequest
+   :members:
+
+.. autofunction:: prepare_control_source_scene
+
+.. currentmodule:: embodichain.lab.sim.scene.source_measurement
+
+.. autofunction:: measure_source_geometry
+
+.. currentmodule:: embodichain.lab.sim.scene.control_support
+
+.. autoclass:: TwistSupportPenetrationError
+
+.. autofunction:: adjust_revolute_source_support
+
+.. currentmodule:: embodichain.lab.sim.scene.press_calibration
+
+.. autoclass:: PressSourceCalibrationRequest
+   :members:
+
+.. autofunction:: calibrate_press_source_declarations
+
+.. currentmodule:: embodichain.lab.sim.scene.press_inputs
+
+.. autofunction:: discover_press_source
+
+.. currentmodule:: embodichain.lab.sim.scene.control_mass_source
+
+.. autofunction:: requires_derived_revolute_mass_source
+
+Static world source inputs
+--------------------------
+
+These readers retain authored local dimensions, basis and world pose. The slider
+obstacle envelope deliberately overestimates aggregate fixed/prismatic geometry;
+revolute/floating obstacles reject. These static bounds are not native collision,
+approach-path or contact evidence. No source file or simulation state is changed.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+
+.. autofunction:: source_rotation
+
+.. autofunction:: source_position
+
+.. autofunction:: read_source_world_mesh
+
+.. autofunction:: source_local_bounds
+
+.. autofunction:: source_longest_local_axis
+
+.. currentmodule:: embodichain.lab.sim.scene.source_envelopes
+
+.. autofunction:: source_world_vertices
+
+.. autofunction:: source_obstacle_bounds
