@@ -37,7 +37,8 @@ def asset_dependency_files(
     glTF/GLB buffers/images and OBJ/MTL material textures are included. Embedded
     data URIs remain covered by their container bytes. XML mesh, texture and
     include references are traversed transitively. USD
-    sources additionally retain an adjacent ``.twist.json`` annotation. This
+    sources include composed layers and authored asset properties through the
+    OpenUSD dependency API, and retain adjacent ``.twist.json`` annotations. This
     reader checks file presence, not geometry or annotation validity; callers
     acquire content hashes and choose their own qualification boundary.
 
@@ -65,6 +66,7 @@ def asset_dependency_files(
         raise ValueError("Asset overrides require exact references and absolute paths.")
     pending = [asset_path.resolve()]
     visited: set[Path] = set()
+    usd_scanned: set[Path] = set()
     while pending:
         path = pending.pop()
         if path in visited:
@@ -73,6 +75,17 @@ def asset_dependency_files(
             raise FileNotFoundError(f"Scene asset dependency does not exist: {path}")
         visited.add(path)
         pending.extend(_mesh_dependency_files(path))
+        if (
+            path.suffix.lower() in {".usd", ".usda", ".usdc", ".usdz"}
+            and path not in usd_scanned
+        ):
+            usd_files = _usd_dependency_files(path)
+            pending.extend(usd_files)
+            usd_scanned.update(
+                value
+                for value in usd_files
+                if value.suffix.lower() in {".usd", ".usda", ".usdc", ".usdz"}
+            )
         if path.suffix.lower() in {".usd", ".usda", ".usdc"}:
             semantics = path.with_suffix(".twist.json")
             if semantics.is_file():
@@ -288,3 +301,26 @@ def _mesh_dependency_files(owner: Path) -> tuple[Path, ...]:
                 raise ValueError(f"MTL texture reference is missing: {owner}")
             references.append(_resolve_asset_reference(owner, " ".join(tokens[index:])))
     return tuple(references)
+
+
+def _usd_dependency_files(owner: Path) -> tuple[Path, ...]:
+    """Use the USD owner API for composed layers and authored asset properties."""
+    from pxr import Ar, Sdf, UsdUtils
+
+    layers, assets, unresolved = UsdUtils.ComputeAllDependencies(
+        Sdf.AssetPath(str(owner))
+    )
+    if unresolved:
+        raise FileNotFoundError(
+            f"USD asset dependencies are unresolved for {owner}: {sorted(unresolved)}"
+        )
+    files = set()
+    for reference in [*(layer.realPath for layer in layers if layer.realPath), *assets]:
+        value = str(reference)
+        while Ar.IsPackageRelativePath(value):
+            value, _ = Ar.SplitPackageRelativePathOuter(value)
+        selected = Path(value).expanduser()
+        if not selected.is_absolute():
+            selected = _resolve_asset_reference(owner, value)
+        files.add(selected.resolve())
+    return tuple(sorted(files))

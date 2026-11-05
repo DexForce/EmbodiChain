@@ -48,7 +48,9 @@ buffers/images, OBJ material libraries and MTL texture references, plus local XM
 texture/include references and adjacent USD control annotations. Plain nested
 configuration fields are resolved by `collect_declared_asset_files()`, preferring
 the owner directory before registered asset lookup and retaining file-backed used
-USD layers. Both return resolved unique paths without editing sources or opening
+USD layers and authored asset-valued properties/textures via OpenUSD. Missing
+USD dependencies reject; contained package references are represented by their
+outer package bytes. Both return resolved unique paths without editing sources or opening
 a simulator. They do not evaluate geometry, compute content identities or replace
 missing assets. Frozen-input consumers own their hashes and validity decisions.
 
