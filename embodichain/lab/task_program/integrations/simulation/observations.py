@@ -361,6 +361,8 @@ class SimulationStateObservationCollector(_SimulationObservationCollector):
     collection. It never creates an engine, changes a target or computes task
     acceptance. Current reads reject stale native owners and session clocks;
     historical poses use only the existing exact seeded recording slots.
+    Native ownership is checked before and after capture. A missing original
+    timestamp leaves that recorded row unavailable; read time cannot replace it.
 
     Args:
         environment: Initialized environment whose native owners are observed.
@@ -514,6 +516,7 @@ class SimulationStateObservationCollector(_SimulationObservationCollector):
         result = self._packet(
             entity_id, uid, values, kind="rigid_pose", observation_kind="final"
         )
+        self._native(entity_id, articulated=False)
         self._port.validate_observation_scope(self._bridge.clock)
         return result
 
@@ -556,6 +559,7 @@ class SimulationStateObservationCollector(_SimulationObservationCollector):
             observation_kind="final",
             joint=joint,
         )
+        self._native(entity_id, articulated=True)
         self._port.validate_observation_scope(self._bridge.clock)
         return result
 
@@ -575,9 +579,7 @@ class SimulationStateObservationCollector(_SimulationObservationCollector):
         from embodichain.utils.math import xyz_quat_to_4x4_matrix
 
         self._check_episode()
-        uid, owner = self._rigid_owners[entity_id]
-        if owner is None:
-            raise ValueError("The rigid entity had no bound native owner.")
+        uid, _ = self._native(entity_id, articulated=False)
         if self._observations is None:
             raise RuntimeError("Observation history is unavailable.")
         candidates = [
@@ -596,6 +598,14 @@ class SimulationStateObservationCollector(_SimulationObservationCollector):
         snapshot = self._observations.read_history(
             frame_indices, fields=(field,), episode_ids=self._episodes
         )
+        source_valid = snapshot.valid[field].clone()
+        source_errors = list(snapshot.acquisition_errors[field])
+        for row, timestamp in enumerate(snapshot.timestamps):
+            if timestamp is None and bool(source_valid[row]):
+                source_valid[row] = False
+                source_errors[row] = (
+                    "Recorded raw pose acquisition timestamp is unavailable."
+                )
         result = self._packet(
             entity_id,
             uid,
@@ -603,8 +613,8 @@ class SimulationStateObservationCollector(_SimulationObservationCollector):
             kind="rigid_pose",
             observation_kind="recorded",
             frame_indices=snapshot.frame_indices,
-            source_valid=snapshot.valid[field],
-            source_errors=snapshot.acquisition_errors[field],
+            source_valid=source_valid,
+            source_errors=source_errors,
         )
         result["recorded_acquisition"] = {
             "field_id": self._observations.field_ids[field],
@@ -615,6 +625,7 @@ class SimulationStateObservationCollector(_SimulationObservationCollector):
             "timestamps": list(snapshot.timestamps),
             "clock_domain": snapshot.clock_domain,
         }
+        self._native(entity_id, articulated=False)
         return result
 
     def capture_recorded_joint_policy(

@@ -4094,6 +4094,8 @@ State observation acquisition
 collects current poses or explicit joint positions without interpreting task
 acceptance. Recorded poses read the canonical ObservationManager's raw history;
 invalid finite values remain unavailable and original temporal metadata is kept.
+Missing source timestamps remain unavailable per environment. Owner replacement
+during capture raises before a packet can be published.
 Current reads work without history. Native owners, episodes and clocks cannot be
 substituted, and recorded joint claims require the original executed policy.
 
