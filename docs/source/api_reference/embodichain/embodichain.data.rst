@@ -71,6 +71,25 @@ Dataset Resolution
    :undoc-members:
    :show-inheritance:
 
+Declared Source Dependencies
+----------------------------
+
+These readers enumerate supported local source files without loading simulation.
+They preserve original bytes and leave content hashing and model qualification
+with their callers. XML references and file-backed used USD layers retain their
+existing local resolution; remote dependencies reject explicitly.
+
+.. currentmodule:: embodichain.data.asset_dependencies
+
+.. autosummary::
+
+   asset_dependency_files
+   collect_declared_asset_files
+
+.. autofunction:: asset_dependency_files
+
+.. autofunction:: collect_declared_asset_files
+
 Asset Download CLI
 ------------------
 
