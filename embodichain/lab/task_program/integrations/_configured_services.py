@@ -22,6 +22,7 @@ from .simulation.targets import _pose
 
 from dataclasses import dataclass
 import math
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import torch
@@ -345,6 +346,14 @@ class _AntipodalGraspPoseGeneratorFactory:
     center_mode: str | None = None
     filter_ground_collision: bool | None = None
     force_refresh: bool | None = None
+
+    def declared_asset_files(self) -> tuple[Path, ...]:
+        """Return the model owner's exact assets without creating a generator."""
+        from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+            get_parallel_jaw_model_asset_files,
+        )
+
+        return get_parallel_jaw_model_asset_files(self.model_id, side=self.side)
 
     def __call__(self) -> GraspPoseGenerator:
         """Create a fresh configured antipodal grasp-pose generator."""

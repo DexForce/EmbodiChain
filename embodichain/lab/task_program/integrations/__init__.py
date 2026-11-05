@@ -63,6 +63,7 @@ from .composition import (
 from .extensions import (
     ControlPartEvidenceProviderDeclaration,
     ControlPartEvidenceProviderFactory,
+    DeclaredAssetFileProvider,
     EndpointAdapterDeclaration,
     ParallelCommandSafetyValidatorFactory,
     ParallelSafetyDeclaration,
@@ -107,6 +108,7 @@ __all__ = [
     "ControlPartCommandPreset",
     "ControlPartEvidenceProviderDeclaration",
     "ControlPartEvidenceProviderFactory",
+    "DeclaredAssetFileProvider",
     "ControlPartEndpointBinding",
     "ControlPartResourceBinding",
     "ConfiguredHandOverPoseProvider",

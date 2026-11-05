@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from collections.abc import Mapping
 import math
 from types import MappingProxyType
 
@@ -32,6 +33,7 @@ __all__ = [
     "ParallelJawGraspPoseGenerator",
     "ParallelJawGripperModelCfg",
     "get_parallel_jaw_gripper_model",
+    "resolve_parallel_jaw_gripper_model",
 ]
 
 
@@ -179,6 +181,46 @@ def get_parallel_jaw_gripper_model(model_id: str) -> ParallelJawGripperModelCfg:
             f"available models are {available}."
         ) from exc
     return ParallelJawGripperModelCfg(**dict(values))
+
+
+def resolve_parallel_jaw_gripper_model(
+    value: str | Mapping[str, object],
+) -> ParallelJawGripperModelCfg:
+    """Resolve a named hand or a closed declaration with explicit aperture bounds.
+
+    Args:
+        value: Registered model ID or mapping with ``model_id`` and optional
+            ``min_opening_width``/``max_opening_width`` in metres.
+
+    Returns:
+        An owned configuration using the same registered defaults as ordinary
+        GraspKit calls. No geometry, robot or simulation is initialized.
+
+    Raises:
+        TypeError: The declaration or a bound has an unsupported type.
+        ValueError: A model is unknown, a field is unsupported or bounds are invalid.
+    """
+    if type(value) is str:
+        return get_parallel_jaw_gripper_model(value)
+    if not isinstance(value, Mapping):
+        raise TypeError("A parallel-jaw model requires a registered ID or mapping.")
+    if any(type(key) is not str for key in value):
+        raise TypeError("Parallel-jaw model field names must be strings.")
+    missing = {"model_id"} - value.keys()
+    extra = value.keys() - {"model_id", "min_opening_width", "max_opening_width"}
+    if missing or extra:
+        raise ValueError(
+            f"Parallel-jaw model has missing fields {sorted(missing)} or unsupported fields {sorted(extra)}."
+        )
+    identity = value["model_id"]
+    if type(identity) is not str or not identity or identity != identity.strip():
+        raise ValueError("model_id must be an exact nonempty string.")
+    defaults = get_parallel_jaw_gripper_model(identity)
+    return ParallelJawGripperModelCfg(
+        model_id=identity,
+        min_opening_width=value.get("min_opening_width", defaults.min_opening_width),
+        max_opening_width=value.get("max_opening_width", defaults.max_opening_width),
+    )
 
 
 class GraspPoseGenerator(ABC):

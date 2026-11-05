@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -43,6 +44,10 @@ class _RobotHandGeometryCfgFactory:
     body_max_edge: float
     pad_max_edge: float
     max_subdivisions: int
+
+    def declared_asset_files(self) -> tuple[Path, ...]:
+        """Return no extra assets; calibration borrows the physical robot links."""
+        return ()
 
     def __call__(self) -> RobotHandGeometryCfg:
         from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg

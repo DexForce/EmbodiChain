@@ -1,0 +1,370 @@
+{
+  "status": "passed",
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "cases": [
+    {
+      "scale": 0.5,
+      "depth": 0.003,
+      "width": 0.01,
+      "candidate": null,
+      "result": 1.6666666666666667,
+      "audit": {
+        "policy": "adapt_only_dimensional_mismatch_prefer_10mm_grip_depth",
+        "object_id": "control",
+        "arm": "left",
+        "source_sha256": "source",
+        "status": "candidate_scaled",
+        "reasons": [
+          "insufficient_axial_grip_depth"
+        ],
+        "source_scale": 0.5,
+        "source_grip_depth": 0.003,
+        "source_grip_width": 0.01,
+        "finger_thickness": 0.01,
+        "minimum_opening_width": 0.0,
+        "maximum_opening_width": 0.128,
+        "opening_margin": 0.003,
+        "minimum_knob_grip_depth": 0.0075,
+        "depth_screening_basis": "canonical_pad_mesh_and_7p5mm_grip_depth_physical_qualification",
+        "pad_collision_extents": [
+          0.027,
+          0.065,
+          0.0075
+        ],
+        "usable_maximum_opening_width": 0.125,
+        "preferred_grip_depth": 0.01,
+        "candidate_grip_depth": 0.01,
+        "candidate_grip_width": 0.03333333333333333,
+        "candidate_body_scale": 1.6666666666666667,
+        "assembly_uniform_scale_factor": 3.3333333333333335,
+        "qualification": "dimensional_candidate_only_runtime_checks_required",
+        "source_edited": false
+      }
+    },
+    {
+      "scale": 0.5,
+      "depth": 0.003,
+      "width": 0.01,
+      "candidate": 0.01,
+      "result": 1.6666666666666667,
+      "audit": {
+        "policy": "bounded_runtime_uniform_scale_candidate",
+        "object_id": "control",
+        "arm": "left",
+        "source_sha256": "source",
+        "status": "candidate_scaled",
+        "reasons": [
+          "insufficient_axial_grip_depth"
+        ],
+        "source_scale": 0.5,
+        "source_grip_depth": 0.003,
+        "source_grip_width": 0.01,
+        "finger_thickness": 0.01,
+        "minimum_opening_width": 0.0,
+        "maximum_opening_width": 0.128,
+        "opening_margin": 0.003,
+        "minimum_knob_grip_depth": 0.0075,
+        "depth_screening_basis": "canonical_pad_mesh_and_7p5mm_grip_depth_physical_qualification",
+        "pad_collision_extents": [
+          0.027,
+          0.065,
+          0.0075
+        ],
+        "usable_maximum_opening_width": 0.125,
+        "preferred_grip_depth": 0.01,
+        "candidate_grip_depth": 0.01,
+        "candidate_grip_width": 0.03333333333333333,
+        "candidate_body_scale": 1.6666666666666667,
+        "assembly_uniform_scale_factor": 3.3333333333333335,
+        "qualification": "dimensional_candidate_only_runtime_checks_required",
+        "source_edited": false,
+        "requested_grip_depth": 0.01
+      }
+    },
+    {
+      "scale": 0.5,
+      "depth": 0.0075,
+      "width": 0.01,
+      "candidate": null,
+      "result": null,
+      "audit": {
+        "policy": "adapt_only_dimensional_mismatch_prefer_10mm_grip_depth",
+        "object_id": "control",
+        "arm": "left",
+        "source_sha256": "source",
+        "status": "source_dimensions_preserved",
+        "reasons": [],
+        "source_scale": 0.5,
+        "source_grip_depth": 0.0075,
+        "source_grip_width": 0.01,
+        "finger_thickness": 0.01,
+        "minimum_opening_width": 0.0,
+        "maximum_opening_width": 0.128,
+        "opening_margin": 0.003,
+        "minimum_knob_grip_depth": 0.0075,
+        "depth_screening_basis": "canonical_pad_mesh_and_7p5mm_grip_depth_physical_qualification",
+        "pad_collision_extents": [
+          0.027,
+          0.065,
+          0.0075
+        ],
+        "usable_maximum_opening_width": 0.125,
+        "preferred_grip_depth": 0.01,
+        "candidate_grip_depth": 0.0075,
+        "candidate_grip_width": 0.01,
+        "candidate_body_scale": 0.5,
+        "assembly_uniform_scale_factor": 1.0,
+        "qualification": "dimensional_candidate_only_runtime_checks_required",
+        "source_edited": false
+      }
+    },
+    {
+      "scale": 0.5,
+      "depth": 0.0075,
+      "width": 0.01,
+      "candidate": 0.01,
+      "result": 0.6666666666666667,
+      "audit": {
+        "policy": "bounded_runtime_uniform_scale_candidate",
+        "object_id": "control",
+        "arm": "left",
+        "source_sha256": "source",
+        "status": "candidate_scaled",
+        "reasons": [],
+        "source_scale": 0.5,
+        "source_grip_depth": 0.0075,
+        "source_grip_width": 0.01,
+        "finger_thickness": 0.01,
+        "minimum_opening_width": 0.0,
+        "maximum_opening_width": 0.128,
+        "opening_margin": 0.003,
+        "minimum_knob_grip_depth": 0.0075,
+        "depth_screening_basis": "canonical_pad_mesh_and_7p5mm_grip_depth_physical_qualification",
+        "pad_collision_extents": [
+          0.027,
+          0.065,
+          0.0075
+        ],
+        "usable_maximum_opening_width": 0.125,
+        "preferred_grip_depth": 0.01,
+        "candidate_grip_depth": 0.01,
+        "candidate_grip_width": 0.013333333333333336,
+        "candidate_body_scale": 0.6666666666666667,
+        "assembly_uniform_scale_factor": 1.3333333333333335,
+        "qualification": "dimensional_candidate_only_runtime_checks_required",
+        "source_edited": false,
+        "requested_grip_depth": 0.01
+      }
+    },
+    {
+      "scale": 0.5,
+      "depth": 0.02,
+      "width": 0.01,
+      "candidate": null,
+      "result": null,
+      "audit": {
+        "policy": "adapt_only_dimensional_mismatch_prefer_10mm_grip_depth",
+        "object_id": "control",
+        "arm": "left",
+        "source_sha256": "source",
+        "status": "source_dimensions_preserved",
+        "reasons": [],
+        "source_scale": 0.5,
+        "source_grip_depth": 0.02,
+        "source_grip_width": 0.01,
+        "finger_thickness": 0.01,
+        "minimum_opening_width": 0.0,
+        "maximum_opening_width": 0.128,
+        "opening_margin": 0.003,
+        "minimum_knob_grip_depth": 0.0075,
+        "depth_screening_basis": "canonical_pad_mesh_and_7p5mm_grip_depth_physical_qualification",
+        "pad_collision_extents": [
+          0.027,
+          0.065,
+          0.0075
+        ],
+        "usable_maximum_opening_width": 0.125,
+        "preferred_grip_depth": 0.01,
+        "candidate_grip_depth": 0.02,
+        "candidate_grip_width": 0.01,
+        "candidate_body_scale": 0.5,
+        "assembly_uniform_scale_factor": 1.0,
+        "qualification": "dimensional_candidate_only_runtime_checks_required",
+        "source_edited": false
+      }
+    },
+    {
+      "scale": 0.5,
+      "depth": 0.02,
+      "width": 0.01,
+      "candidate": 0.01,
+      "result": 0.25,
+      "audit": {
+        "policy": "bounded_runtime_uniform_scale_candidate",
+        "object_id": "control",
+        "arm": "left",
+        "source_sha256": "source",
+        "status": "candidate_scaled",
+        "reasons": [],
+        "source_scale": 0.5,
+        "source_grip_depth": 0.02,
+        "source_grip_width": 0.01,
+        "finger_thickness": 0.01,
+        "minimum_opening_width": 0.0,
+        "maximum_opening_width": 0.128,
+        "opening_margin": 0.003,
+        "minimum_knob_grip_depth": 0.0075,
+        "depth_screening_basis": "canonical_pad_mesh_and_7p5mm_grip_depth_physical_qualification",
+        "pad_collision_extents": [
+          0.027,
+          0.065,
+          0.0075
+        ],
+        "usable_maximum_opening_width": 0.125,
+        "preferred_grip_depth": 0.01,
+        "candidate_grip_depth": 0.01,
+        "candidate_grip_width": 0.005,
+        "candidate_body_scale": 0.25,
+        "assembly_uniform_scale_factor": 0.5,
+        "qualification": "dimensional_candidate_only_runtime_checks_required",
+        "source_edited": false,
+        "requested_grip_depth": 0.01
+      }
+    },
+    {
+      "scale": 1.0,
+      "depth": 0.003,
+      "width": 0.01,
+      "candidate": null,
+      "result": 3.3333333333333335,
+      "audit": {
+        "policy": "adapt_only_dimensional_mismatch_prefer_10mm_grip_depth",
+        "object_id": "control",
+        "arm": "left",
+        "source_sha256": "source",
+        "status": "candidate_scaled",
+        "reasons": [
+          "insufficient_axial_grip_depth"
+        ],
+        "source_scale": 1.0,
+        "source_grip_depth": 0.003,
+        "source_grip_width": 0.01,
+        "finger_thickness": 0.01,
+        "minimum_opening_width": 0.0,
+        "maximum_opening_width": 0.128,
+        "opening_margin": 0.003,
+        "minimum_knob_grip_depth": 0.0075,
+        "depth_screening_basis": "canonical_pad_mesh_and_7p5mm_grip_depth_physical_qualification",
+        "pad_collision_extents": [
+          0.027,
+          0.065,
+          0.0075
+        ],
+        "usable_maximum_opening_width": 0.125,
+        "preferred_grip_depth": 0.01,
+        "candidate_grip_depth": 0.01,
+        "candidate_grip_width": 0.03333333333333333,
+        "candidate_body_scale": 3.3333333333333335,
+        "assembly_uniform_scale_factor": 3.3333333333333335,
+        "qualification": "dimensional_candidate_only_runtime_checks_required",
+        "source_edited": false
+      }
+    },
+    {
+      "scale": 1.0,
+      "depth": 0.0075,
+      "width": 0.1,
+      "candidate": null,
+      "result": null,
+      "audit": {
+        "policy": "adapt_only_dimensional_mismatch_prefer_10mm_grip_depth",
+        "object_id": "control",
+        "arm": "left",
+        "source_sha256": "source",
+        "status": "source_dimensions_preserved",
+        "reasons": [],
+        "source_scale": 1.0,
+        "source_grip_depth": 0.0075,
+        "source_grip_width": 0.1,
+        "finger_thickness": 0.01,
+        "minimum_opening_width": 0.0,
+        "maximum_opening_width": 0.128,
+        "opening_margin": 0.003,
+        "minimum_knob_grip_depth": 0.0075,
+        "depth_screening_basis": "canonical_pad_mesh_and_7p5mm_grip_depth_physical_qualification",
+        "pad_collision_extents": [
+          0.027,
+          0.065,
+          0.0075
+        ],
+        "usable_maximum_opening_width": 0.125,
+        "preferred_grip_depth": 0.01,
+        "candidate_grip_depth": 0.0075,
+        "candidate_grip_width": 0.1,
+        "candidate_body_scale": 1.0,
+        "assembly_uniform_scale_factor": 1.0,
+        "qualification": "dimensional_candidate_only_runtime_checks_required",
+        "source_edited": false
+      }
+    },
+    {
+      "scale": 2.0,
+      "depth": 0.003,
+      "width": 0.1,
+      "candidate": 0.01,
+      "error": "E8 grip-depth candidate cannot satisfy the selected gripper's depth and opening bounds."
+    },
+    {
+      "scale": 2.0,
+      "depth": 0.02,
+      "width": 0.3,
+      "candidate": null,
+      "result": 0.8333333333333334,
+      "audit": {
+        "policy": "adapt_only_dimensional_mismatch_prefer_10mm_grip_depth",
+        "object_id": "control",
+        "arm": "left",
+        "source_sha256": "source",
+        "status": "candidate_scaled",
+        "reasons": [
+          "outside_usable_gripper_opening"
+        ],
+        "source_scale": 2.0,
+        "source_grip_depth": 0.02,
+        "source_grip_width": 0.3,
+        "finger_thickness": 0.01,
+        "minimum_opening_width": 0.0,
+        "maximum_opening_width": 0.128,
+        "opening_margin": 0.003,
+        "minimum_knob_grip_depth": 0.0075,
+        "depth_screening_basis": "canonical_pad_mesh_and_7p5mm_grip_depth_physical_qualification",
+        "pad_collision_extents": [
+          0.027,
+          0.065,
+          0.0075
+        ],
+        "usable_maximum_opening_width": 0.125,
+        "preferred_grip_depth": 0.01,
+        "candidate_grip_depth": 0.008333333333333333,
+        "candidate_grip_width": 0.125,
+        "candidate_body_scale": 0.8333333333333334,
+        "assembly_uniform_scale_factor": 0.4166666666666667,
+        "qualification": "dimensional_candidate_only_runtime_checks_required",
+        "source_edited": false,
+        "candidate_selection": "preferred_depth_clamped_to_feasible_scale_interval",
+        "feasible_uniform_scale_factor_interval": [
+          0.375,
+          0.4166666666666667
+        ],
+        "preferred_candidate_limit": "maximum_opening_width"
+      }
+    },
+    {
+      "scale": 2.0,
+      "depth": 0.02,
+      "width": 0.3,
+      "candidate": 0.01,
+      "error": "E8 grip-depth candidate cannot satisfy the selected gripper's depth and opening bounds."
+    }
+  ]
+}

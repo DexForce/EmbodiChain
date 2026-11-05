@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
 import hashlib
 from numbers import Real
@@ -28,6 +29,7 @@ from typing import Any
 import numpy as np
 
 from embodichain.lab.sim.spawn.source_geometry import UsdSourceSnapshot, read_usd_source
+from .articulation_geometry import read_articulation_geometry, _root_pose
 
 __all__ = [
     "PrismaticBinding",
@@ -36,6 +38,8 @@ __all__ = [
     "inspect_prismatic",
     "inspect_prismatic_part",
     "handle_mesh",
+    "prismatic_reset_state",
+    "prismatic_handle_center_world",
 ]
 
 
@@ -531,3 +535,67 @@ def handle_mesh(
     )
     source.assert_current()
     return vertices, faces
+
+
+def prismatic_reset_state(config: Mapping[str, Any], part_id: str) -> dict[str, str]:
+    """Describe a qualified authored zero-reset endpoint.
+
+    Args:
+        config: Physical source declaration. Explicit initial vectors require
+            runtime joint ordering and therefore advertise no inferred state.
+        part_id: Exact qualified source part identity.
+
+    Returns:
+        An openness label only when zero uniquely identifies a qualified limit
+        endpoint; otherwise an empty mapping. This is not physical observation.
+    """
+    # Articulation.reset uses zero for every joint when init_qpos is absent.
+    # Explicit vectors need runtime joint ordering; do not guess that mapping.
+    if config.get("init_qpos") is not None:
+        return {}
+    try:
+        binding = inspect_prismatic_part(dict(config), part_id)
+    except (KeyError, TypeError, ValueError):
+        return {}
+    # A zero reset alone does not identify which endpoint means closed.
+    if (
+        binding.closed_position is None
+        or not binding.limits[0] <= 0 <= binding.limits[1]
+    ):
+        return {}
+    matches = [
+        state
+        for state in ("closed", "open")
+        if np.isclose(binding.target(state), 0.0, atol=1e-6, rtol=0.0)
+    ]
+    return {"openness": matches[0]} if len(matches) == 1 else {}
+
+
+def prismatic_handle_center_world(
+    config: Mapping[str, Any], part_id: str
+) -> list[float]:
+    """Measure one selected authored handle center in the declared world frame.
+
+    Args:
+        config: Qualified source declaration with its root pose and uniform scale.
+        part_id: Exact qualified source part identity.
+
+    Returns:
+        Three finite coordinates preserving the original scale/link/root order.
+        They describe authored source geometry rather than live joint state.
+
+    Raises:
+        ValueError: Source geometry, part identity or the center is invalid.
+    """
+    binding = inspect_prismatic_part(dict(config), part_id)
+    geometry = read_articulation_geometry(config["fpath"])
+    vertices, _ = handle_mesh(binding, config["fpath"])
+    link_pose = geometry.link_poses[binding.link]
+    center = (
+        vertices.mean(axis=0) @ link_pose[:3, :3].T + link_pose[:3, 3] * binding.scale
+    )
+    root_pose = _root_pose(config)
+    center = root_pose[:3, :3] @ center + root_pose[:3, 3]
+    if center.shape != (3,) or not np.isfinite(center).all():
+        raise ValueError("Articulation handle center must be finite and 3D.")
+    return [float(value) for value in center]
