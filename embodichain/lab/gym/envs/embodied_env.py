@@ -582,6 +582,7 @@ class EmbodiedEnv(BaseEnv):
                 ),
                 episode_context=self.episode_context,
                 is_closed=lambda: getattr(self, "_closed", False),
+                robot_identity=lambda: (self.robot.uid, self.robot),
             )
 
             self.rollout_steps = torch.zeros(

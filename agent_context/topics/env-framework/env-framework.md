@@ -109,8 +109,13 @@ and recording lifetime before and after copying. Injected readers must share the
 consumer's actual episode owner; numeric episode IDs alone cannot establish that
 ownership. Env assembles `trajectory_reader` from recording sources and lifecycle
 callbacks; it does not define rigid-pose query methods. Consumers inject the reader into their acquisition adapter.
-The reader requires exact seeded `end_step` slots and returns owned CPU matrices;
-missing capacity/rows never select `end_step - 1` or current live state. Frame
+Rigid-pose reads require exact seeded `end_step` slots and return owned CPU matrices;
+`read_robot_qpos` instead preserves the recorded joint dtype/device, requiring an
+explicit host robot UID/opaque-owner callback checked around the copy. The Env
+supplies this optional dependency without new robot reads; existing pose readers
+retain their old call shape. `read_step_counts` validates completed row boundaries
+under the same initialized episode/lifetime. Missing capacity/rows never select
+`end_step - 1` or current live state. Frame
 indices describe row-local recording, not simulation timestamps.
 
 ## Lifecycle and boundaries

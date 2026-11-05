@@ -42,6 +42,8 @@ __all__ = [
     "read_recorded_rigid_pose_snapshot",
     "RecordedRigidPoseWindow",
     "read_recorded_rigid_pose_window",
+    "RecordedRobotJointSnapshot",
+    "read_recorded_robot_joint_snapshot",
 ]
 
 
@@ -252,6 +254,8 @@ class RecordedTrajectoryReader:
         episode_context: Recording owner's row-local episode lifecycle. Its
             identity prevents borrowing a reader from another environment.
         is_closed: Owner callback indicating whether recording access has ended.
+        robot_identity: Optional actual robot UID and opaque owner callback.
+            Robot qpos reads require this explicit identity dependency.
 
     The recording host supplies these dependencies during assembly. This reader
     imports no environment or simulator and performs no physical acquisition.
@@ -264,12 +268,16 @@ class RecordedTrajectoryReader:
         source: Callable[[], tuple[_TrajectoryState, torch.Tensor] | None],
         episode_context: EpisodeContext,
         is_closed: Callable[[], bool],
+        robot_identity: Callable[[], tuple[str, object]] | None = None,
     ) -> None:
         if not all(callable(value) for value in (source, is_closed)):
             raise TypeError("Recording sources and lifetime checks must be callable.")
         self._source = source
         self._episode_context = episode_context
+        if robot_identity is not None and not callable(robot_identity):
+            raise TypeError("Recorded robot identity source must be callable.")
         self._is_closed = is_closed
+        self._robot_identity = robot_identity
 
     def _check_episode(self, expected: tuple[int, ...]) -> None:
         current = self._episode_context.snapshot()
@@ -382,6 +390,84 @@ class RecordedTrajectoryReader:
             episode_ids=expected,
         )
         self._check_open()
+        self._check_episode(expected)
+        return result
+
+    def read_step_counts(self, *, episode_ids: Sequence[int]) -> tuple[int, ...]:
+        """Copy the exact completed boundary for each bound recording row.
+
+        Args:
+            episode_ids: Expected initialized recording episode identities.
+
+        Returns:
+            Completed step counts without reading a simulator or current robot.
+
+        Raises:
+            ValueError: Recording, initialized rows, or boundaries are unavailable.
+        """
+        if self._is_closed():
+            raise ValueError("No active recorded environment boundary is available.")
+        recording = self._source()
+        if recording is None:
+            raise ValueError("No active recorded environment boundary is available.")
+        expected = tuple(episode_ids)
+        self._check_episode(expected)
+        _, written_steps = recording
+        if (
+            not isinstance(written_steps, torch.Tensor)
+            or written_steps.ndim != 1
+            or written_steps.dtype != torch.long
+        ):
+            raise ValueError("Recorded boundary rows are invalid.")
+        values = written_steps.detach().cpu().tolist()
+        if len(values) != len(expected) or any(
+            type(value) is not int or value < 0 for value in values
+        ):
+            raise ValueError("Recorded boundary rows are invalid.")
+        if self._is_closed():
+            raise ValueError("No active recorded environment boundary is available.")
+        self._check_episode(expected)
+        return tuple(values)
+
+    def read_robot_qpos(
+        self, frame_indices: Sequence[int], *, episode_ids: Sequence[int]
+    ) -> RecordedRobotJointSnapshot:
+        """Copy exact recorded joint positions under the actual robot identity.
+
+        Args:
+            frame_indices: Positive completed slots for every native row.
+            episode_ids: Expected initialized recording episode identities.
+
+        Returns:
+            Owned positions with original dtype/device and row/robot identity.
+
+        Raises:
+            RuntimeError: Recording, robot identity, or its lifetime is unavailable.
+            ValueError: The robot, episode, or requested recorded slots changed.
+        """
+        self._check_open()
+        recording = self._source()
+        if recording is None:
+            raise RuntimeError("Robot trajectory recording is unavailable.")
+        if self._robot_identity is None:
+            raise RuntimeError("Recorded robot identity is unavailable.")
+        expected = tuple(episode_ids)
+        self._check_episode(expected)
+        uid, owner = self._robot_identity()
+        states, written_steps = recording
+        result = read_recorded_robot_joint_snapshot(
+            states,
+            written_steps,
+            robot_uid=uid,
+            frame_indices=frame_indices,
+            episode_ids=expected,
+        )
+        self._check_open()
+        next_uid, next_owner = self._robot_identity()
+        if next_owner is not owner or next_uid != uid:
+            raise ValueError(
+                "The robot or episode changed during recorded qpos capture."
+            )
         self._check_episode(expected)
         return result
 
@@ -574,4 +660,104 @@ def read_recorded_rigid_pose_window(
     )
     return RecordedRigidPoseWindow(
         object_uid, tuple(range(size)), episodes, starts, ends, poses
+    )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class RecordedRobotJointSnapshot:
+    """Owned exact recorded robot positions on the original FK input device."""
+
+    robot_uid: str
+    env_ids: tuple[int, ...]
+    episode_ids: tuple[int, ...]
+    frame_indices: tuple[int, ...]
+    qpos: torch.Tensor
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.robot_uid) is not str
+            or not self.robot_uid
+            or self.robot_uid != self.robot_uid.strip()
+        ):
+            raise ValueError("Recorded robot UID must be an exact identifier.")
+        size = len(self.env_ids)
+        if not size or len(set(self.env_ids)) != size:
+            raise ValueError("Recorded robot rows must be nonempty and unique.")
+        for name, lower in (("env_ids", 0), ("episode_ids", 0), ("frame_indices", 1)):
+            values = tuple(getattr(self, name))
+            if len(values) != size or any(
+                type(value) is not int or value < lower for value in values
+            ):
+                raise ValueError(
+                    "Recorded robot row, episode and slot identities are invalid."
+                )
+            object.__setattr__(self, name, values)
+        if (
+            not isinstance(self.qpos, torch.Tensor)
+            or self.qpos.ndim != 2
+            or self.qpos.shape[0] != size
+            or not self.qpos.shape[1]
+            or not self.qpos.is_floating_point()
+            or not torch.isfinite(self.qpos).all()
+        ):
+            raise ValueError(
+                "Recorded robot positions require finite floating (B, J) values."
+            )
+        object.__setattr__(self, "qpos", self.qpos.detach().clone())
+
+
+def read_recorded_robot_joint_snapshot(
+    states: _TrajectoryState,
+    written_steps: torch.Tensor,
+    *,
+    robot_uid: str,
+    frame_indices: Sequence[int],
+    episode_ids: Sequence[int],
+) -> RecordedRobotJointSnapshot:
+    """Read exact seeded robot qpos slots without changing their device or dtype.
+
+    Args:
+        states: Existing recording state buffers containing the selected robot.
+        written_steps: Completed transition counts for all native rows.
+        robot_uid: Exact robot identity supplied by the recording owner.
+        frame_indices: Positive completed end-step slots for every row.
+        episode_ids: Host-validated episode identities for these buffers.
+
+    Returns:
+        Owned positions suitable for the original Robot FK path. No live qpos,
+        previous slot or CPU reinterpretation substitutes for the requested data.
+    """
+    if (
+        not isinstance(written_steps, torch.Tensor)
+        or written_steps.ndim != 1
+        or written_steps.dtype != torch.long
+    ):
+        raise ValueError("Recording requires an integer completed-step vector.")
+    frames, episodes = tuple(frame_indices), tuple(episode_ids)
+    size = written_steps.numel()
+    if (
+        len(frames) != size
+        or len(episodes) != size
+        or any(type(value) is not int or value <= 0 for value in frames)
+    ):
+        raise ValueError("Recorded robot positions require one positive slot per row.")
+    values = states["robot"]["qpos"]
+    if (
+        not isinstance(values, torch.Tensor)
+        or values.ndim != 3
+        or values.shape[0] != size
+        or not values.shape[-1]
+    ):
+        raise ValueError("Recorded robot positions must contain every native row.")
+    completed = written_steps.detach().cpu().tolist()
+    if any(frame > completed[row] for row, frame in enumerate(frames)):
+        raise ValueError("The requested robot boundary is not fully recorded.")
+    if any(frame >= values.shape[1] for frame in frames):
+        raise ValueError("The seeded terminal robot state slot is unavailable.")
+    return RecordedRobotJointSnapshot(
+        robot_uid,
+        tuple(range(size)),
+        episodes,
+        frames,
+        torch.stack([values[row, frame] for row, frame in enumerate(frames)]),
     )

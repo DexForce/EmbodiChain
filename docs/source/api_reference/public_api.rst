@@ -1806,6 +1806,8 @@ Slot indices are not simulation timestamps.
    read_recorded_rigid_pose_snapshot
    RecordedRigidPoseWindow
    read_recorded_rigid_pose_window
+   RecordedRobotJointSnapshot
+   read_recorded_robot_joint_snapshot
 
 .. autoclass:: RecordedRigidPoseSnapshot
    :members:
@@ -1826,6 +1828,21 @@ historical pose access; unavailable recordings reject the read.
    :members:
 
 .. autofunction:: read_recorded_rigid_pose_window
+
+Robot-joint snapshots select the same exact positive seeded end-step slots and
+retain the recording's original floating dtype and device for later FK.
+``RecordedTrajectoryReader.read_robot_qpos`` requires an explicit host robot UID
+and opaque owner callback, checking that identity, the initialized episodes and
+lifetime before/after copying. Readers without that optional capability reject
+robot-joint requests while retaining their original rigid-pose APIs.
+``read_step_counts`` returns owned completed row boundaries under the same
+episode/lifetime guards. Neither method reads a live robot, reconstructs a pose,
+selects another slot or interprets physical success.
+
+.. autoclass:: RecordedRobotJointSnapshot
+   :members:
+
+.. autofunction:: read_recorded_robot_joint_snapshot
 
 
 embodichain.lab.scripts.analyze_workspace
