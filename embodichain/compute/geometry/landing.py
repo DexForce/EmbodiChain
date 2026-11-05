@@ -24,7 +24,7 @@ from typing import Any
 
 import numpy as np
 from shapely.affinity import translate
-from shapely.geometry import MultiPoint, Point, Polygon
+from shapely.geometry import MultiPoint, Point, Polygon, box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import nearest_points, unary_union
 import torch
@@ -33,6 +33,7 @@ import trimesh
 __all__ = [
     "planar_floor_region",
     "select_container_landing",
+    "select_table_landing",
     "planar_placement_metrics",
     "validate_planar_pose",
 ]
@@ -308,3 +309,96 @@ def planar_placement_metrics(
         metrics["reference_has_raised_geometry"] = nonplanar
         metrics["reference_aabb_overlap"] = overlapping
     return metrics
+
+
+def select_table_landing(
+    table_mesh: trimesh.Trimesh,
+    object_vertices: np.ndarray,
+    position: Sequence[float],
+    obstacle_bounds: Sequence[np.ndarray],
+    *,
+    table_top_z: float,
+    object_bottom: float,
+    object_top: float,
+    axis_aligned_axis: int | None,
+    placement_clearance: float,
+    relation_clearance: float,
+) -> tuple[float, float, float]:
+    """Preserve a supported XY or move an occupied full footprint to free support.
+
+    The table mesh is already in world coordinates. Object vertices are scaled
+    local coordinates for explicit axis alignment, otherwise already rotated
+    into the intended orientation. Obstacles arrive in the owning declaration's
+    stable order as world-frame envelopes. This pure endpoint calculation keeps
+    source triangle unions, Minkowski exclusions and nearest-point tie behavior;
+    it proves neither approach-path clearance nor physical placement success.
+
+    Args:
+        table_mesh: World-frame table triangles.
+        object_vertices: Payload vertices in the frame described above.
+        position: Proposed world XYZ origin.
+        obstacle_bounds: Ordered world-frame minimum/maximum corner arrays.
+        table_top_z: Declared support height in metres.
+        object_bottom: Payload lower vertical extent relative to its origin.
+        object_top: Payload upper vertical extent relative to its origin.
+        axis_aligned_axis: Explicit local long axis, or no axis alignment.
+        placement_clearance: Release clearance in metres.
+        relation_clearance: Horizontal obstacle clearance in metres.
+
+    Returns:
+        Supported world XYZ origin, preserving the proposed Z coordinate.
+    """
+    position = tuple(float(value) for value in position)
+    if len(position) != 3 or not all(math.isfinite(value) for value in position):
+        raise ValueError("Table landing position must be a finite XYZ vector.")
+    vertices = np.asarray(object_vertices)
+    if vertices.ndim != 2 or vertices.shape[1] != 3 or not len(vertices):
+        raise ValueError("Table landing requires nonempty (V, 3) object vertices.")
+    points = np.asarray(table_mesh.vertices)
+    measured = planar_floor_region(table_mesh)
+    if (
+        measured is None
+        or abs(float(points[:, 2].max()) - table_top_z) > 1e-4
+        or abs(measured[1] - table_top_z) > placement_clearance
+    ):
+        raise ValueError("Table landing requires a measured matching planar support.")
+    floor = measured[0]
+    vertices = np.asarray(object_vertices)
+    if axis_aligned_axis is not None:
+        if type(axis_aligned_axis) is not int or axis_aligned_axis not in (0, 1, 2):
+            raise ValueError("Axis-aligned landing requires an explicit XYZ axis.")
+        radius = float(
+            np.linalg.norm(np.delete(vertices, axis_aligned_axis, axis=1), axis=1).max()
+        )
+        footprint = box(-radius, -radius, radius, radius)
+    else:
+        footprint = MultiPoint(vertices[:, :2]).convex_hull
+    if footprint.is_empty or footprint.area <= 0 or not np.isfinite(vertices).all():
+        raise ValueError("Table landing requires a finite full object footprint.")
+    original = translate(footprint, xoff=position[0], yoff=position[1])
+    if not floor.buffer(1e-9).covers(original):
+        raise ValueError(
+            "Original table landing footprint lacks full measured support."
+        )
+    release_top = table_top_z + object_top - object_bottom + placement_clearance
+    excluded = []
+    footprint_points = np.asarray(footprint.exterior.coords[:-1])
+    for bounds in obstacle_bounds:
+        if bounds[1, 2] < table_top_z or bounds[0, 2] > release_top:
+            continue
+        corners = np.asarray(box(*bounds[0, :2], *bounds[1, :2]).exterior.coords[:-1])
+        forbidden = MultiPoint(
+            (corners[:, None, :] - footprint_points[None, :, :]).reshape(-1, 2)
+        ).convex_hull.buffer(relation_clearance + 1e-6, join_style=2)
+        excluded.append(forbidden)
+    occupied = unary_union(excluded)
+    if occupied.is_empty or not occupied.covers(Point(position[:2])):
+        return tuple(position)
+    radius = float(np.linalg.norm(footprint_points, axis=1).max())
+    available = floor.buffer(-radius - relation_clearance).difference(occupied)
+    if available.is_empty or available.area <= 1e-8:
+        raise ValueError("Table support has no remaining legal landing space.")
+    point = nearest_points(available, Point(position[:2]))[0]
+    if not floor.covers(translate(footprint, xoff=point.x, yoff=point.y)):
+        raise ValueError("Selected table landing lacks full measured support.")
+    return float(point.x), float(point.y), position[2]

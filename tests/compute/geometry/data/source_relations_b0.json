@@ -1,0 +1,411 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "orientation": [
+    {
+      "input": {
+        "shape_type": "Cube",
+        "local_extents": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "axis_transform": [
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "expected": "unknown"
+    },
+    {
+      "input": {
+        "shape_type": "Mesh",
+        "local_extents": [
+          1.0,
+          0.1,
+          0.1
+        ],
+        "axis_transform": [
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "expected": "lying"
+    },
+    {
+      "input": {
+        "shape_type": "Mesh",
+        "local_extents": [
+          1.0,
+          0.1,
+          0.1
+        ],
+        "axis_transform": [
+          [
+            2.220446049250313e-16,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            -1.0,
+            0.0,
+            2.220446049250313e-16
+          ]
+        ]
+      },
+      "expected": "standing"
+    },
+    {
+      "input": {
+        "shape_type": "Mesh",
+        "local_extents": [
+          1.0,
+          0.1,
+          0.1
+        ],
+        "axis_transform": [
+          [
+            0.7660444431189781,
+            0.0,
+            0.6427876096865394
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            -0.6427876096865394,
+            0.0,
+            0.7660444431189781
+          ]
+        ]
+      },
+      "expected": "unknown"
+    },
+    {
+      "input": {
+        "shape_type": "Sphere",
+        "local_extents": [
+          2.0,
+          0.1,
+          0.1
+        ],
+        "axis_transform": [
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "expected": "unknown"
+    }
+  ],
+  "support": [
+    {
+      "uid": "child",
+      "child": [
+        [
+          0.25,
+          0.25,
+          1.0
+        ],
+        [
+          0.75,
+          0.75,
+          1.2
+        ]
+      ],
+      "objects": {
+        "floor": {
+          "world_aabb": {
+            "min": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "max": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      },
+      "tolerance": 0.03,
+      "expected": {
+        "parent_uid": "floor",
+        "relation": "on",
+        "confidence": 1.0,
+        "gap_m": 0.0,
+        "xy_overlap_ratio": 1.0
+      }
+    },
+    {
+      "uid": "child",
+      "child": [
+        [
+          0.25,
+          0.25,
+          1.0
+        ],
+        [
+          0.75,
+          0.75,
+          1.2
+        ]
+      ],
+      "objects": {
+        "a": {
+          "world_aabb": {
+            "min": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "max": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "b": {
+          "world_aabb": {
+            "min": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "max": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      },
+      "tolerance": 0.03,
+      "expected": {
+        "parent_uid": "b",
+        "relation": "on",
+        "confidence": 1.0,
+        "gap_m": 0.0,
+        "xy_overlap_ratio": 1.0
+      }
+    },
+    {
+      "uid": "child",
+      "child": [
+        [
+          0.25,
+          0.25,
+          1.0
+        ],
+        [
+          0.75,
+          0.75,
+          1.2
+        ]
+      ],
+      "objects": {
+        "floor": {
+          "world_aabb": {
+            "min": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "max": [
+              1.0,
+              1.0,
+              0.98
+            ]
+          }
+        }
+      },
+      "tolerance": 0.03,
+      "expected": {
+        "parent_uid": "floor",
+        "relation": "on",
+        "confidence": 0.3333333333333327,
+        "gap_m": 0.020000000000000018,
+        "xy_overlap_ratio": 1.0
+      }
+    },
+    {
+      "uid": "child",
+      "child": [
+        [
+          0.25,
+          0.25,
+          1.0
+        ],
+        [
+          0.75,
+          0.75,
+          1.2
+        ]
+      ],
+      "objects": {
+        "a": {
+          "world_aabb": {
+            "min": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "max": [
+              1.0,
+              1.0,
+              0.98
+            ]
+          }
+        },
+        "b": {
+          "world_aabb": {
+            "min": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "max": [
+              1.0,
+              1.0,
+              0.98
+            ]
+          }
+        }
+      },
+      "tolerance": 0.03,
+      "expected": {
+        "parent_uid": "b",
+        "relation": "on",
+        "confidence": 0.3333333333333327,
+        "gap_m": 0.020000000000000018,
+        "xy_overlap_ratio": 1.0
+      }
+    },
+    {
+      "uid": "child",
+      "child": [
+        [
+          0.25,
+          0.25,
+          1.0
+        ],
+        [
+          0.75,
+          0.75,
+          1.2
+        ]
+      ],
+      "objects": {
+        "floor": {
+          "world_aabb": {
+            "min": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "max": [
+              1.0,
+              1.0,
+              0.95
+            ]
+          }
+        }
+      },
+      "tolerance": 0.03,
+      "expected": null
+    },
+    {
+      "uid": "child",
+      "child": [
+        [
+          0.25,
+          0.25,
+          1.0
+        ],
+        [
+          0.75,
+          0.75,
+          1.2
+        ]
+      ],
+      "objects": {
+        "a": {
+          "world_aabb": {
+            "min": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "max": [
+              1.0,
+              1.0,
+              0.95
+            ]
+          }
+        },
+        "b": {
+          "world_aabb": {
+            "min": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "max": [
+              1.0,
+              1.0,
+              0.95
+            ]
+          }
+        }
+      },
+      "tolerance": 0.03,
+      "expected": null
+    }
+  ]
+}
