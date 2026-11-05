@@ -37,6 +37,11 @@ CPU routines additionally consume Trimesh meshes and Shapely polygons for
 triangle-union floor and silhouette measurements. Scene CPU strategies own
 support selection, polygon search, greedy packing and SciPy SLSQP optimization.
 
+Pure control dimension candidates, ordered XY clearance proposals and source
+press release-bias coefficients also live under `compute.geometry`; they consume
+explicit numeric dimensions/bounds, never a robot, task graph or physical state.
+Their callers own calibrated inputs, asset adaptation and qualification.
+
 Pure grasp samples, release clearances, ordered footprint proposals, source-axis
 adaptation and distal staging also live in `compute.geometry`. They consume
 explicit arrays, tensors or mesh/polygon inputs and retain no scene, Robot or
