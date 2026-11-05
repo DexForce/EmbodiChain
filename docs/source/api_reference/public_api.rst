@@ -1084,8 +1084,9 @@ Raw snapshots require the complete ``support.com_patch`` acquisition channel,
 including values, validity/errors, timestamp, environment IDs, observation
 revision and clock domain. Values must agree with the native measurements.
 Adding a ``record`` cannot downgrade raw validation, and reports reject mixed
-raw/historical input contracts. Raw sampled-timeline collection is not yet
-implemented and cannot be substituted with the COM-patch channel.
+raw/historical input contracts. Explicit version-4 raw sampled timelines seal
+the native/program acquisition universe and original substep lineage; a
+COM-patch sample cannot substitute for that timeline.
 
 Rigid ``on`` relations retain their explicit legacy ``native_contact_support``
 or ``native_stable_reference_support/v2`` sampled-window contract. The separate
@@ -1094,8 +1095,11 @@ release phase, actor/episode provenance, original stable-clock trace and raw
 contact COM patch. Its explicitly declared ``supported_region`` variant also
 checks complete planar-footprint measurements for ``on`` or ``inside``; it does
 not claim general volume containment. A stronger payload never selects a scope
-implicitly. Explicit E4/E5 task families remain rejected until their independent
-transfer/coordinated-transport proofs are supplied.
+implicitly. Operation-linked version-3 E4/E5 declarations require the independent
+transfer/coordinated-transport proof before the receiver/coordinated release.
+Version-5 planar and version-6 directional declarations preserve their explicit
+native geometry mode, owners, bounds and unavailable cases. Finite-count
+version-7 placement groups retain every declared member/occurrence.
 
 Imports and binding validation use only the standard library; numerical proof
 re-evaluation lazily loads the existing shared Torch/NumPy/Shapely algorithms.
@@ -1129,6 +1133,10 @@ invariants. The ordinary TaskSpec evaluator remains the certificate authority.
 .. autofunction:: evaluate_supported_placement_evidence
 
 .. autofunction:: evaluate_placement_evidence_report
+
+.. autofunction:: embodichain.gen_sim.task_spec.evidence.directional_observation_axes
+
+.. autofunction:: embodichain.gen_sim.task_spec.evidence.sampled_support_window
 
 embodichain.gen_sim.task_spec.evidence_report
 ---------------------------------------------
@@ -1206,6 +1214,22 @@ facts. This function performs no physical read and changes no success rule.
 .. currentmodule:: embodichain.gen_sim.task_spec.observation_requests
 
 .. autofunction:: held_observation_request
+
+embodichain.gen_sim.task_spec.placement_group_evidence
+------------------------------------------------------
+
+A complete finite-count declaration binds every member to its exact release,
+settle and boundary occurrence. All member outcomes contribute without filling
+missing evidence or collapsing native environment identity. This layer evaluates
+facts; Lab owns collection and the frontend owns semantic projection.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.placement_group_evidence
+
+.. autoclass:: PlacementEvidenceGroupBinding
+   :members:
+
+.. autofunction:: evaluate_placement_group_evidence
+
 
 embodichain.gen_sim.task_spec.pour_evidence
 -------------------------------------------

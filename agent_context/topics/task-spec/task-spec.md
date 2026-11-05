@@ -16,6 +16,7 @@ of those owners.
 | Predicate vocabulary and temporal windows | `expressions.py` |
 | Structure validation and evidence evaluation | `validation.py` |
 | Placement bindings and physical proof checks | `evidence.py` |
+| Complete finite-count placement groups | `placement_group_evidence.py` |
 | Orientation/joint state and milestone qualification | `condition_evidence.py` |
 | Complete finite orientation/part groups | `condition_group_evidence.py`; common member aggregation in `_group_evidence.py` |
 | Operation-bound historical Press/Twist qualification | `control_evidence.py` |
@@ -81,7 +82,12 @@ The explicit revision-1 scope additionally verifies release-phase windows,
 actor/episode identity, stable policy clocks and raw contact patches. Declared
 full-footprint regions preserve the original planar `on`/`inside` checks; they
 are not general volume containment. Task families requiring handover or
-coordinated transport cannot use a single placement proof. Raw Lab snapshots
+coordinated transport requires its explicit operation linkage: transfer precedes
+receiver release, or both acquisitions and releases precede sampled support.
+Raw sampled timelines require explicit native/program acquisition identities;
+planar and directional scopes declare their exact native geometry mode/owners.
+Complete finite-count placement groups require every member and occurrence,
+without copying missing members or accepting a partial group. Raw Lab snapshots
 carry no accepted/released claim; historical claims are checked when present.
 Recorded region geometry is recomputed from seeded poses and the original
 native load, then compared with the original policy snapshot, without sampling

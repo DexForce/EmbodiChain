@@ -199,3 +199,100 @@ def read_sampled_timeline(binding: Any, raw: Mapping[str, Any]) -> dict[str, Any
         samples=samples,
     )
     return timeline
+
+
+def prepare_sampled_support(
+    binding: Any, snapshot: Mapping[str, Any], boundary: Mapping[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    import torch
+    from embodichain.compute.geometry.rigid import validate_rigid_pose_batch
+
+    raw = snapshot["recorded_contacts"]
+    identity = binding.sampled_contact_identity
+    dt = identity["step_dt"]
+    timeline = read_sampled_timeline(binding, raw)
+    ends = boundary["end_steps"]
+    if (
+        len(ends) != 1
+        or type(ends[0]) is not int
+        or ends[0] <= 0
+        or raw.get("boundary_frames") != ends
+        or any(type(x) is not int for x in raw["boundary_frames"])
+    ):
+        raise ValueError("Sampled support has another completed boundary.")
+    if "boundary_frames" in snapshot and snapshot["boundary_frames"] != ends:
+        raise ValueError("Sampled support report has another completed boundary.")
+    end = ends[0]
+    from .evidence import sampled_support_window
+
+    starts, _ = sampled_support_window(binding, ends)
+    start = starts[0]
+    if (
+        start < 0
+        or raw.get("window_start_frames") != [start]
+        or type(raw["window_start_frames"][0]) is not int
+    ):
+        raise ValueError(
+            "Sampled support must retain its original exact duration window."
+        )
+    frame = raw["pose_frame"]
+    number(frame["timestamp"])
+    if (
+        frame["env_ids"] != [0]
+        or any(type(x) is not int for x in frame["env_ids"])
+        or type(frame["observation_revision"]) is not int
+        or frame["observation_revision"] < 0
+        or frame["clock_domain"] != "simulation_time"
+        or frame["revision_kind"] != "recorded_contact_pose_acquisition"
+    ):
+        raise ValueError("Sampled support pose acquisition has another clock or row.")
+    poses = []
+    for entity in (binding.object_id, binding.reference_id):
+        key = "rigid.pose_window:" + entity
+        batch = frame["batches"][key]
+        if (
+            batch["evidence_id"] != key
+            or batch["value_dtype"] != "torch.float64"
+            or batch["env_ids"] != [0]
+            or any(type(x) is not int for x in batch["env_ids"])
+            or batch["timestamp"] != frame["timestamp"]
+            or type(batch["observation_revision"]) is not int
+            or batch["observation_revision"] != frame["observation_revision"]
+            or batch["acquisition_errors"] != [None]
+        ):
+            raise ValueError("Sampled support pose channel is missing or inconsistent.")
+        flags(batch["valid"], 1)
+        pose = torch.as_tensor(batch["values"], dtype=torch.float64)
+        if pose.shape != (1, end - start + 1, 4, 4):
+            raise ValueError("Sampled support poses have another exact seeded window.")
+        validate_rigid_pose_batch(pose[0], end - start + 1)
+        poses.append(pose[0])
+    relative = torch.linalg.solve(poses[1], poses[0])
+    metrics = dict(
+        scope="native_stable_support",
+        criterion="native_stable_reference_support/v2",
+        entity=binding.object_id,
+        reference=binding.reference_id,
+        reference_uid=binding.reference_id,
+        relation="on",
+        observation_kind=binding.observation_kind,
+        placement_node_id=binding.release_segment_id,
+        boundary_frames=ends,
+        start_step=start,
+        end_step=end,
+        step_dt=dt,
+        duration=binding.condition["duration"],
+        constraint=binding.condition,
+        relative_poses=relative.tolist(),
+        timeline_digest=canonical_hash(timeline),
+        object_pose=poses[0][-1:].tolist(),
+        reference_pose=poses[1][-1:].tolist(),
+    )
+    return (
+        metrics,
+        timeline,
+        {
+            binding.object_id: metrics["object_pose"],
+            binding.reference_id: metrics["reference_pose"],
+        },
+    )
