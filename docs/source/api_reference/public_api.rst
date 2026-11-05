@@ -3732,6 +3732,7 @@ classes; sensor acquisition never imports Task Program or Atomic implementation.
 .. autosummary::
 
    PhysicalObservationStamp
+   RobotCommandObservation
 
    PhysicalEvidenceRequest
    PhysicalEvidenceBatch
@@ -3742,6 +3743,15 @@ revision kind and manager-relative time. Semantic scene versions do not replace
 this native source identity. Values are immutable and contain no simulator.
 
 .. autoclass:: PhysicalObservationStamp
+   :members:
+
+``RobotCommandObservation`` owns measured qpos/qvel and native position/velocity
+drive targets from one B=1 observation. Array dtype/device and full joint order
+are retained. Its host timestamp and native source stamp have distinct clock
+domains. Targets are commands rather than measurements or attachment evidence;
+the value grants no retained-command authority.
+
+.. autoclass:: RobotCommandObservation
    :members:
 
 
