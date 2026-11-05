@@ -234,3 +234,23 @@ measurements leave task acceptance and support thresholds to callers.
 .. autofunction:: planar_placement_metrics
 
 .. autofunction:: validate_planar_pose
+
+Ordered IK seed and pose residual arithmetic
+--------------------------------------------
+
+These functions consume numeric joint candidates and transforms, without Robot,
+simulation or task state. Seed selection keeps the original stable separation
+and ordering. The two pose checks retain their distinct source residual laws and
+rounding margins; neither changes the environment support of its caller or
+provides a physical-effect certificate.
+
+.. automodule:: embodichain.compute.kinematics.seed_selection
+   :members:
+
+.. currentmodule:: embodichain.compute.geometry.pose_checks
+
+.. autosummary::
+   :nosignatures:
+
+   fk_pose_error_mask
+   sampled_pose_path_matches

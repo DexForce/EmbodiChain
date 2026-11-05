@@ -385,6 +385,10 @@ uses explicit TCP/root geometry to produce the ordered outward translations;
 rejected geometry or bounds remain unavailable proposals. Robot kinematics,
 collision queries and execution policy are outside these numeric operations.
 
+The FK and sampled-path residual helpers preserve their distinct source
+precision and rounding margins. They compare numeric transforms only; solver
+limits and observed Robot state are supplied by the Motion owner.
+
 .. automodule:: embodichain.compute.geometry.pose_checks
    :members:
 

@@ -1,0 +1,7 @@
+{
+  "valid": "f485e5c6310ba477cb56140867fb50256d29735f8d61c97887db03743f3e00fa",
+  "release_failed": "20cdd0c61ca7e27403f352fef49f0294582b5d420e12ddfad511224e70f5c2e3",
+  "partial_mask": "d19f6b37a45fb23c556c9cdb653f0f2463268ca2ceabd5568bbd04bfce7d0657",
+  "false_fk": "27c8b8779f527778db720cf59da14c17719678478be06f8de7d0eb1ab0ccfe15",
+  "aggregate_mask": "d19f6b37a45fb23c556c9cdb653f0f2463268ca2ceabd5568bbd04bfce7d0657"
+}
