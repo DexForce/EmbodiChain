@@ -52,7 +52,7 @@ from .plans import (
     TrajectorySegment,
     normalize_success_mask,
 )
-from .policies import DynamicCollisionMode
+from .policies import DynamicCollisionMode, PlanningRecovery, RecoveryPolicy
 from .requirements import GRASP_CAPABILITY, SkillBindingContract
 from .runtime_commands import (
     EndpointCommand,
@@ -152,6 +152,10 @@ class SkillDescriptor:
     """Whether completion reports motion execution without physical-effect proof."""
     binding_contract: SkillBindingContract | None = None
     """Explicit generic resource contract used by Task Program lowering."""
+    planning_recovery_type: (
+        type[PlanningRecovery] | tuple[type[PlanningRecovery], ...] | None
+    ) = None
+    """Exact supported declaration type(s); None rejects nonempty declarations."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id:
@@ -169,12 +173,55 @@ class SkillDescriptor:
             )
         if not isinstance(self.open_loop, bool):
             raise TypeError("SkillDescriptor.open_loop must be a bool.")
+        recovery_types = (
+            self.planning_recovery_type
+            if isinstance(self.planning_recovery_type, tuple)
+            else (
+                ()
+                if self.planning_recovery_type is None
+                else (self.planning_recovery_type,)
+            )
+        )
+        if self.planning_recovery_type is not None and (
+            not recovery_types
+            or len(set(recovery_types)) != len(recovery_types)
+            or any(
+                not isinstance(value, type) or not issubclass(value, PlanningRecovery)
+                for value in recovery_types
+            )
+        ):
+            raise TypeError(
+                "planning_recovery_type requires distinct PlanningRecovery types or None."
+            )
         if self.binding_contract is not None:
             if not isinstance(self.binding_contract, SkillBindingContract):
                 raise TypeError(
                     "SkillDescriptor.binding_contract must be a "
                     "SkillBindingContract or None."
                 )
+
+    def validate_planning_recovery(self, policy: RecoveryPolicy) -> None:
+        """Reject incompatible declarations before grounding or planning.
+
+        Args:
+            policy: Selected immutable recovery policy.
+
+        Raises:
+            TypeError: The policy or concrete declaration type is unsupported.
+            ValueError: The declaration belongs to another skill.
+        """
+        if not isinstance(policy, RecoveryPolicy):
+            raise TypeError("policy must be a RecoveryPolicy.")
+        policy.validate_skill(self.skill_id)
+        declaration = policy.planning_recovery
+        if declaration is not None and type(declaration) not in (
+            self.planning_recovery_type
+            if isinstance(self.planning_recovery_type, tuple)
+            else (self.planning_recovery_type,)
+        ):
+            raise TypeError(
+                f"Skill {self.skill_id!r} does not support planning recovery {type(declaration).__name__}."
+            )
 
 
 class AtomicAction(Generic[GoalT, OptionsT], ABC):
@@ -193,6 +240,11 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
 
     OptionsType: ClassVar[type[ActionOptions]] = ActionOptions
     """Concrete per-invocation runtime options accepted by this skill."""
+
+    PlanningRecoveryType: ClassVar[
+        type[PlanningRecovery] | tuple[type[PlanningRecovery], ...] | None
+    ] = None
+    """Exact opt-in planning declarations supported by this skill."""
 
     agent_visible: ClassVar[bool] = True
     """Whether an Action Agent should expose this skill by default."""
@@ -305,6 +357,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             agent_visible=cls.agent_visible,
             open_loop=cls.open_loop,
             binding_contract=cls.__dict__.get("binding_contract"),
+            planning_recovery_type=cls.PlanningRecoveryType,
         )
 
     def resolve_request(
@@ -329,6 +382,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 f"Invocation skill_id {invocation.skill_id!r} does not match "
                 f"{self.skill_id!r}."
             )
+        self.descriptor().validate_planning_recovery(invocation.recovery_policy)
         if not isinstance(invocation.goal, self.GoalType):
             expected = (
                 " | ".join(item.__name__ for item in self.GoalType)
@@ -381,6 +435,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 f"Request skill_id {request.skill_id!r} does not match "
                 f"{self.skill_id!r}."
             )
+        self.descriptor().validate_planning_recovery(request.recovery_policy)
         if not isinstance(request.goal, self.GoalType):
             raise TypeError(
                 f"Skill {self.skill_id!r} received incompatible goal "
