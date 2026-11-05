@@ -107,6 +107,11 @@ PickUp, MoveHeldObject and Place can also assemble a pre-planning nominal motion
 source. The source does not own semantic effects or environment lifecycle; see
 [Real2Sim motion](../data-pipeline/real2sim.md) for source and replay limits.
 
+`PressOptions.dwell_duration` adds a finite pose hold at the pressed endpoint,
+rounded up to the observed control cadence. It preserves the grasp command and
+adds samples/time before retract; zero keeps the original phases. This is not
+contact-force regulation.
+
 `SlideGoal.joint_target` optionally supplies a public `SlideJointTarget` with an
 absolute prismatic coordinate and a calibrated axis sign. Slide resolves the
 remaining distance from same-timestamp joint/robot observations per planning row;

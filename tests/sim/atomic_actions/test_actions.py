@@ -6178,7 +6178,15 @@ def test_press_plans_from_rigid_object_pose_snapshot_with_option_position() -> N
     )
 
 
-def test_press_fk_path_passes_contact_and_remains_on_press_axis() -> None:
+@pytest.mark.parametrize(
+    ("dwell_duration", "expected_steps", "control_dt"),
+    [(0.0, 0, CONTROL_DT), (0.001, 1, 0.02), (0.05, 3, 0.02), (0.14, 7, 0.02)],
+)
+def test_press_fk_path_passes_contact_and_remains_on_press_axis(
+    dwell_duration: float,
+    expected_steps: int,
+    control_dt: float,
+) -> None:
     generator = _motion_generator()
 
     def position_ik(
@@ -6211,17 +6219,17 @@ def test_press_fk_path_passes_contact_and_remains_on_press_axis() -> None:
         entity_id="button",
     )
     action = _bind_action(generator, Press())
-    plan = _plan_action(
-        action,
-        ActionInvocation(
-            skill_id="press",
-            goal=PressGoal(semantics, torch.eye(4)),
-            binding=_binding(action),
-            motion_policy=MotionPolicy(sample_count=24),
-            skill_options=PressOptions(hand_interp_steps=3, press_distance=0.04),
+    invocation = ActionInvocation(
+        skill_id="press",
+        goal=PressGoal(semantics, torch.eye(4)),
+        binding=_binding(action),
+        motion_policy=MotionPolicy(sample_count=24),
+        skill_options=PressOptions(
+            hand_interp_steps=3, press_distance=0.04, dwell_duration=dwell_duration
         ),
-        _context(),
     )
+    context = replace(_context(), control_dt=control_dt)
+    plan = _plan_action(action, invocation, context)
 
     trajectory = _joint_trajectory(plan)
     contact_arm = trajectory.positions[:, plan.segment("contact").stop - 1, :ARM_DOF]
@@ -6239,6 +6247,68 @@ def test_press_fk_path_passes_contact_and_remains_on_press_axis() -> None:
     orthogonal = positions - (positions * axis).sum(dim=-1, keepdim=True) * axis
     assert torch.allclose(orthogonal, torch.zeros_like(orthogonal), atol=1.0e-6)
     assert torch.allclose(positions[:, -1], torch.tensor([0.04, 0.0, 0.0]))
+
+    assert all(
+        previous.stop == current.start
+        for previous, current in zip(plan.segments, plan.segments[1:])
+    )
+    assert plan.segments[-1].stop == plan.commands.frame_count
+    if expected_steps:
+        dwell = plan.segment("dwell")
+        retract = plan.segment("retract")
+        assert dwell.start == press_segment.stop
+        assert dwell.stop == retract.start
+        assert dwell.stop - dwell.start == expected_steps
+        terminal = trajectory.positions[:, press_segment.stop - 1 : press_segment.stop]
+        torch.testing.assert_close(
+            trajectory.positions[:, dwell.start : dwell.stop],
+            terminal.expand(-1, expected_steps, -1),
+        )
+        assert (
+            torch.count_nonzero(trajectory.velocities[:, dwell.start : dwell.stop]) == 0
+        )
+        assert torch.all(
+            trajectory.positions[:, dwell.start : dwell.stop, ARM_DOF:] == 1.0
+        )
+        for index in range(dwell.start, dwell.stop):
+            assert plan.segment_at(index).name == "dwell"
+            frame = plan.commands.frames[index]
+            torch.testing.assert_close(
+                frame.hold_duration, torch.full((NUM_ENVS,), control_dt)
+            )
+            for command in frame.commands:
+                assert torch.count_nonzero(command.payload.velocities) == 0
+        # Compare to the zero-dwell public contract: only the terminal hold was
+        # inserted; native motion samples/timing and the retreat stay identical.
+        baseline = _plan_action(
+            action,
+            replace(
+                invocation,
+                skill_options=replace(invocation.skill_options, dwell_duration=0.0),
+            ),
+            context,
+        )
+        baseline_trajectory = _joint_trajectory(baseline)
+        torch.testing.assert_close(
+            torch.cat(
+                (
+                    trajectory.positions[:, : dwell.start],
+                    trajectory.positions[:, dwell.stop :],
+                ),
+                dim=1,
+            ),
+            baseline_trajectory.positions,
+        )
+        torch.testing.assert_close(
+            trajectory.duration - baseline_trajectory.duration,
+            torch.full((NUM_ENVS,), expected_steps * control_dt),
+        )
+        torch.testing.assert_close(
+            trajectory.dt[:, dwell.start : dwell.stop].sum(dim=1),
+            torch.full((NUM_ENVS,), expected_steps * control_dt),
+        )
+    else:
+        assert "dwell" not in [segment.name for segment in plan.segments]
 
 
 def test_press_preserves_failed_environment_at_observed_qpos() -> None:
@@ -6305,6 +6375,12 @@ def test_press_rejects_non_press_affordance() -> None:
             _invocation(action, PressGoal(semantics, torch.eye(4))),
             _context(),
         )
+
+
+@pytest.mark.parametrize("duration", [-0.01, float("nan"), float("inf"), True, "0.1"])
+def test_press_rejects_invalid_dwell_duration(duration: object) -> None:
+    with pytest.raises((TypeError, ValueError), match="dwell_duration"):
+        PressOptions(dwell_duration=duration)
 
 
 def test_press_requires_primary_arm_and_end_effector_bindings() -> None:
