@@ -78,7 +78,7 @@ checks provide no physical attachment, collision or acceptance certificate.
    :members:
 
 Explicit CPU worker scope
-------------------------
+-------------------------
 
 This opt-in context owns process-wide Torch intra-op settings for an isolated
 worker. Capture capacity before applying serial overrides. Large CPU

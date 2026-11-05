@@ -211,7 +211,7 @@ measurements leave task acceptance and support thresholds to callers.
 .. autofunction:: validate_planar_pose
 
 Ordered IK seed and pose residual arithmetic
--------------------------------------------
+--------------------------------------------
 
 These functions consume numeric joint candidates and transforms, without Robot,
 simulation or task state. Seed selection keeps the original stable separation
