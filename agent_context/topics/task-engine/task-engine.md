@@ -14,6 +14,8 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Roles, binding reports and scene manifest contracts | `orchestration/contracts.py` |
 | Graph/TaskSpec/grounding coverage and source lineage | `semantic_graph_validation.py` |
 | Source export discovery and pure scene declarations | `orchestration/source_scene.py` |
+| Explicit frozen physical-owner components and drift identity | `physical_input.py` |
+| Semantic part positions/ranks from public Scene descriptions | `orchestration/part_catalog.py` |
 
 TaskSpec identity and predicate evaluation belong to
 [Task specification](../task-spec/task-spec.md). Both mappings and instances must
@@ -40,6 +42,15 @@ assets use their resolved top-level source path; shape-owned asset digests stay
 unchanged. Asset baking
 remains Scene Engine's existing owner; this importer does not publish bundles
 or connect a runtime/CLI.
+
+`physical_input` imports an explicitly selected set of physical-owner component
+files before semantic planning. Its detached `FrozenPhysicalInput` projection and
+input-file inventory reject nested-data, file and newly discovered dependency
+drift without re-signing an old snapshot. It reads no trajectory, receipt or
+certificate and does not publish or launch a runtime bundle. Shared Scene owns
+pose validation/translation and source geometry; `orchestration/part_catalog`
+adds only conservative semantic part labels. The later bundle loader still owns
+runtime-contract versions and complete current-owner input inventory validation.
 
 ## Read-only graph display
 

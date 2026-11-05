@@ -902,6 +902,18 @@ Neither entry point derives numerical policy values from task or object names.
 
 .. autofunction:: project_configured_placement_evidence_binding
 
+embodichain.gen_sim.task_engine.orchestration.part_catalog
+----------------------------------------------------------
+
+Semantic part labels consume qualified Scene descriptors without reading live
+state. Missing positions/reset endpoints remain unknown; ranks do not establish
+physical success.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.part_catalog
+
+.. autofunction:: discover_part_catalogs
+
+
 embodichain.gen_sim.task_engine.orchestration.source_scene
 ----------------------------------------------------------
 
@@ -937,6 +949,31 @@ or CLI execution.
 .. autofunction:: resolve_gym_config_path
 
 .. autofunction:: resolve_source_scene
+
+
+embodichain.gen_sim.task_engine.physical_input
+----------------------------------------------
+
+These APIs select explicit physical-owner component declarations and freeze their
+complete current input projection. They reject data/file drift and newly present
+asset dependencies. Selecting physical input does not convert an old program,
+reuse historical evidence or launch simulation; the current runtime bundle
+contract is validated by its separate loader.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.physical_input
+
+.. autosummary::
+
+   FrozenPhysicalInput
+   load_frozen_physical_input
+   verify_physical_input_manifest
+
+.. autoclass:: FrozenPhysicalInput
+   :members:
+
+.. autofunction:: load_frozen_physical_input
+
+.. autofunction:: verify_physical_input_manifest
 
 
 embodichain.gen_sim.task_spec
