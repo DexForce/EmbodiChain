@@ -2700,6 +2700,11 @@ embodichain.lab.sim.motion.planners.base_planner
 embodichain.lab.sim.motion.planners.curobo.curobo_planner
 ---------------------------------------------------------
 
+Native self-collision is enabled by default in planning and exact trajectory
+validation. Generated models include mechanical adjacency exemptions and
+padding; authored maps remain authoritative. Failed or incomplete sphere fitting
+rejects model generation. Old generated caches are invalidated.
+
 .. currentmodule:: embodichain.lab.sim.motion.planners.curobo.curobo_planner
 
 .. autosummary::
@@ -4207,8 +4212,10 @@ source-excluding precontact scopes remain distinct in MotionCollisionReport.
 Snapshot scopes retain the exact robot/model input identity and reject drift.
 Nested robot_collision_query_scope restores the previous call-local scope.
 
-These queries require the explicit ``planning-geometry`` optional dependency.
-Missing FCL rejects before capture; existing Newton queries keep their backend.
+These queries reuse Scene's isolated Newton CollisionPipeline. Missing Newton
+rejects before capture. Non-operated robot branches must keep their observed
+joint values. Explicit closed triangle inputs retain their nonconvex topology;
+unsupported geometry, precision or exhausted buffers cannot certify clearance.
 Input proxies and sampled checks establish neither CCD nor physical contact.
 
 .. currentmodule:: embodichain.lab.sim.motion.mesh_collision
@@ -4245,6 +4252,7 @@ Input proxies and sampled checks establish neither CCD nor physical contact.
 
 .. autoclass:: RobotArticulationCollisionSnapshot
    :members:
+
 State observation acquisition
 -----------------------------
 

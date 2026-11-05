@@ -72,7 +72,7 @@ dependencies = [
 
 [project.optional-dependencies]
 geometry = [
-  # Optional mesh inputs for pure numerical geometry; no simulation/FCL backend.
+  # Optional mesh inputs for pure numerical geometry; no native collision backend.
   "trimesh>=4.9",
 ]
 rigidformer = [
@@ -84,10 +84,6 @@ rigidformer = [
 policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
   "onnxruntime-gpu>=1.20,<1.27",
-]
-planning-geometry = [
-  # Qualified native/FCL query backend; it is not enabled by a core install.
-  "python-fcl==0.7.0.11",
 ]
 gensim = [
   # Blender runs in a separate Python 3.11 runtime; see docker/README.md.

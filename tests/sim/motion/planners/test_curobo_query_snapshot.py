@@ -68,11 +68,34 @@ def _snapshot(*, payload=True, transform=None):
                 control_part="arm",
                 spheres=torch.tensor([[0.0, 0.0, 0.0, 0.1]]).repeat(27, 1),
                 object_pose=torch.eye(4)[None],
+                touch_links=("gripper",),
             )
             if payload
             else None
         ),
     )
+
+
+def test_payload_self_collision_permissions_keep_unlisted_links_checked():
+    from copy import deepcopy
+    from embodichain.lab.sim.motion.planners.curobo.payload import _query_robot_config
+
+    config = deepcopy(_CONFIG)
+    config["robot_cfg"]["kinematics"]["collision_link_names"].append("other_arm")
+    snapshot = _snapshot()
+    result = _query_robot_config(config, snapshot, ["arm_joint", "passive"])
+    assert result["robot_cfg"]["kinematics"]["self_collision_ignore"] == {
+        "gen_sim_payload": ["gripper"],
+    }
+    assert "self_collision_ignore" not in config["robot_cfg"]["kinematics"]
+    with pytest.raises(ValueError, match="unknown robot"):
+        _query_robot_config(
+            config,
+            replace(
+                snapshot, payload=replace(snapshot.payload, touch_links=("missing",))
+            ),
+            ["arm_joint", "passive"],
+        )
 
 
 def _cpu_constructor(monkeypatch):
@@ -339,6 +362,10 @@ def test_no_payload_validation_uses_observed_passive_locks(monkeypatch, tmp_path
         ),
         get_bound=lambda sample: torch.zeros(1, 1, 1),
         collision_constraint=None,
+        self_collision_cost=SimpleNamespace(
+            setup_batch_tensors=lambda *args: None,
+            forward=lambda spheres: torch.zeros(spheres.shape[:2]),
+        ),
     )
     result = planner.validate_joint_trajectory(
         torch.tensor([[[0.1], [0.2]]]), control_part="arm"
@@ -403,9 +430,13 @@ def test_owned_factory_preserves_source_options_grid_and_result_lifetime(
         backend = _backend()
         backend.planner.close = lambda: samples.fill_(99)
         self._backend_cache[("arm", 1, False, MoveType.EEF_MOVE)] = backend
-        assert (
-            self._query_runtime_robot_config("ignored") == trace["runtime_robot_config"]
-        )
+        expected_config = deepcopy(trace["runtime_robot_config"])
+        if snapshot.payload is not None:
+            expected_config["robot_cfg"]["kinematics"].update(
+                self_collision_ignore={"gen_sim_payload": ["gripper"]},
+                self_collision_buffer={"gen_sim_payload": 0.0},
+            )
+        assert self._query_runtime_robot_config("ignored") == expected_config
         return self._assemble_result(
             [[samples]],
             [[torch.tensor([0.0, 0.04, 0.04, 0.04])]],

@@ -641,7 +641,10 @@ def test_curobo_planner_class_is_lazy_import_safe():
     assert "curobo" not in sys.modules
 
 
-def test_backend_disables_curobo_self_collision(monkeypatch):
+@pytest.mark.parametrize("self_collision", [True, False])
+def test_backend_uses_explicit_curobo_self_collision_setting(
+    monkeypatch, self_collision
+):
     create_kwargs = {}
 
     class FakeMotionPlannerCfg:
@@ -663,6 +666,7 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
         world=SimpleNamespace(multi_env=False),
         collision_activation_distance=0.01,
         interpolation_dt=0.025,
+        self_collision_check=self_collision,
     )
     planner._curobo_device = torch.device("cuda:0")
     planner._bindings = SimpleNamespace(
@@ -698,7 +702,7 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
         planning_mode=MoveType.EEF_MOVE,
     )
 
-    assert create_kwargs["self_collision_check"] is False
+    assert create_kwargs["self_collision_check"] is self_collision
     assert create_kwargs["robot"]["robot_cfg"]["kinematics"] == {
         "source": "robot.yml",
         "self_collision_buffer": {},
@@ -745,11 +749,135 @@ def test_runtime_robot_config_adds_only_curobo_compatibility_placeholders(tmp_pa
     runtime_config = CuroboPlanner._load_runtime_robot_config(str(config_path))
     kinematics = runtime_config["robot_cfg"]["kinematics"]
 
-    assert kinematics["self_collision_buffer"] == {}
+    assert kinematics["self_collision_buffer"] == {"base": 0.0}
     assert kinematics["self_collision_ignore"] == {}
     persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert "self_collision_buffer" not in persisted["robot_cfg"]["kinematics"]
     assert "self_collision_ignore" not in persisted["robot_cfg"]["kinematics"]
+
+
+def test_runtime_self_collision_config_uses_mechanical_adjacency_and_preserves_authored_maps(
+    tmp_path,
+):
+    urdf = tmp_path / "topology.urdf"
+    urdf.write_text("""<robot name="custom">
+      <link name="root"/><link name="fixed"/><link name="near"/><link name="far"/>
+      <joint name="mount" type="fixed"><parent link="root"/><child link="fixed"/></joint>
+      <joint name="a" type="revolute"><parent link="fixed"/><child link="near"/></joint>
+      <joint name="b" type="revolute"><parent link="near"/><child link="far"/></joint>
+    </robot>""")
+    path = tmp_path / "robot.yml"
+    kinematics = dict(
+        urdf_path=str(urdf), collision_link_names=["root", "fixed", "near", "far"]
+    )
+    path.write_text(yaml.safe_dump({"robot_cfg": {"kinematics": kinematics}}))
+    result = CuroboPlanner._load_runtime_robot_config(str(path))["robot_cfg"][
+        "kinematics"
+    ]
+    assert result["self_collision_ignore"] == {
+        "root": ["fixed", "near"],
+        "fixed": ["near"],
+        "near": ["far"],
+    }
+    assert result["self_collision_buffer"] == {
+        name: 0.0 for name in kinematics["collision_link_names"]
+    }
+    # A complete authored table takes precedence; no pose-based exemptions are added.
+    kinematics.update(
+        self_collision_ignore={"root": ["far"]}, self_collision_buffer={"far": 0.003}
+    )
+    path.write_text(yaml.safe_dump({"robot_cfg": {"kinematics": kinematics}}))
+    result = CuroboPlanner._load_runtime_robot_config(str(path))["robot_cfg"][
+        "kinematics"
+    ]
+    assert result["self_collision_ignore"] == {"root": ["far"]}
+    assert result["self_collision_buffer"] == {"far": 0.003}
+    kinematics["self_collision_ignore"] = {"root": ["unknown"]}
+    path.write_text(yaml.safe_dump({"robot_cfg": {"kinematics": kinematics}}))
+    with pytest.raises(ValueError, match="known links"):
+        CuroboPlanner._load_runtime_robot_config(str(path))
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("enabled", [True, False])
+def test_exact_validation_uses_native_curobo_self_collision(tmp_path, enabled):
+    """Real sibling-link sphere collisions go through the production validator."""
+    if not torch.cuda.is_available():
+        pytest.skip("native cuRobo self-collision requires CUDA")
+    from curobo.collision_checking import (
+        RobotCollisionChecker,
+        RobotCollisionCheckerCfg,
+    )
+
+    bindings = _require_curobo()
+    JointState, DeviceCfg = bindings.JointState, bindings.DeviceCfg
+
+    urdf = tmp_path / "two_arms.urdf"
+    urdf.write_text("""<robot name="two_arms">
+      <link name="base"/><link name="left"/><link name="right"/>
+      <joint name="left_joint" type="prismatic"><parent link="base"/><child link="left"/>
+        <axis xyz="1 0 0"/><limit lower="-2" upper="2" effort="10" velocity="1"/></joint>
+      <joint name="right_joint" type="prismatic"><parent link="base"/><child link="right"/>
+        <origin xyz="1 0 0"/><axis xyz="1 0 0"/><limit lower="-2" upper="2" effort="10" velocity="1"/></joint>
+    </robot>""")
+    names = ["left_joint", "right_joint"]
+    path = tmp_path / "robot.yml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "robot_cfg": {
+                    "kinematics": {
+                        "format_version": 2.0,
+                        "base_link": "base",
+                        "urdf_path": str(urdf),
+                        "tool_frames": ["left"],
+                        "collision_link_names": ["left", "right"],
+                        "collision_spheres": {
+                            name: [{"center": [0.0, 0.0, 0.0], "radius": 0.1}]
+                            for name in ["left", "right"]
+                        },
+                        "self_collision_ignore": {},
+                        "self_collision_buffer": {},
+                        "cspace": {
+                            "joint_names": names,
+                            "default_joint_position": [0.0, 0.0],
+                            "max_acceleration": [5.0, 5.0],
+                            "max_jerk": 100.0,
+                        },
+                    }
+                }
+            }
+        )
+    )
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="analytic", self_collision_check=enabled)
+    planner.robot = SimpleNamespace(joint_names=names)
+    planner._curobo_device = torch.device("cuda:0")
+    planner._bindings = SimpleNamespace(
+        RobotCollisionChecker=RobotCollisionChecker,
+        RobotCollisionCheckerCfg=RobotCollisionCheckerCfg,
+        JointState=JointState,
+        DeviceCfg=DeviceCfg,
+    )
+    backend = SimpleNamespace(
+        sim_joint_names=names,
+        sim_to_curobo_col_idx=None,
+        collision_checker=None,
+        profile=SimpleNamespace(
+            robot_config_path=str(path),
+            sim_to_curobo_joint_names=dict(zip(names, names)),
+        ),
+        planner=SimpleNamespace(joint_names=names, scene_collision_checker=None),
+    )
+    planner._backend_cache = {("arm", 1, False, MoveType.JOINT_MOVE): backend}
+    trajectory = torch.tensor([[[0.0, 0.0], [0.0, -0.9], [0.4, 0.0]]], device="cuda:0")
+    try:
+        assert planner.validate_joint_trajectory(
+            trajectory, control_part="arm"
+        ).tolist() == [[True, not enabled, True]]
+    finally:
+        backend.collision_checker = None
+        planner._backend_cache.clear()
 
 
 def test_disable_self_collision_reaches_all_curobo_rollouts():
@@ -846,6 +974,45 @@ def test_graph_capture_mode_rejects_unknown_value():
 
 
 # Robot YAML generation
+
+
+@pytest.mark.parametrize("invalid", ["failed_fit", "nonfinite_sphere"])
+def test_robot_yaml_rejects_incomplete_collision_geometry(
+    tmp_path, monkeypatch, invalid
+):
+    import dexsim.kit.meshproc as meshproc
+
+    urdf = tmp_path / "arm.urdf"
+    urdf.write_text(_NO_MIMIC_URDF.format(velocity_attr='velocity="1"'))
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=str(urdf), init_qpos=[0.0]),
+        joint_names=["joint1"],
+        active_joint_ids=[0],
+        control_parts={"arm": ["joint1"]},
+        get_qvel_limits=lambda **kw: torch.ones(1, 1),
+        get_link_names=lambda: ["base", "link1"],
+        get_link_vert_face=lambda name: (_unit_cube_vertices(), _cube_faces()),
+        get_control_part_link_names=lambda name: ["link1"],
+    )
+    calls = []
+
+    def fit(*args, **kwargs):
+        calls.append(1)
+        good = len(calls) == 1
+        return (
+            good or invalid != "failed_fit",
+            torch.zeros(1, 3),
+            torch.tensor(
+                [float("nan") if not good and invalid == "nonfinite_sphere" else 0.1]
+            ),
+        )
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(meshproc, "sphere_fit", fit)
+    output = tmp_path / "robot.yml"
+    with pytest.raises(RuntimeError, match="link1"):
+        generate_curobo_robot_yaml(robot, "arm", str(output), device="cpu")
+    assert not output.exists()
 
 
 @pytest.mark.no_sim
@@ -964,8 +1131,8 @@ def test_robot_yaml_preserves_limits_through_curobo_loading(
         "kinematics"
     ]
     assert kinematics["collision_spheres"]["base"][0]["radius"] == pytest.approx(0.25)
-    assert "self_collision_buffer" not in kinematics
-    assert "self_collision_ignore" not in kinematics
+    assert kinematics["self_collision_buffer"] == {"base": 0.0}
+    assert kinematics["self_collision_ignore"] == {}
     assert kinematics["urdf_path"] != str(urdf_path)
     assert kinematics["asset_root_path"] == str(urdf_path.parent)
     assert urdf_path.read_text(encoding="utf-8") == source_xml
@@ -1682,21 +1849,24 @@ def test_dynamic_update_uses_registry_id_in_curobo_backend():
     assert [(name, env_idx) for name, _, env_idx in updates] == [("registry_cube", 0)]
 
 
+@pytest.mark.parametrize("self_collision", [False, True])
 @pytest.mark.parametrize("create_checker", [False, True])
 @pytest.mark.parametrize("with_world", [False, True])
 @pytest.mark.parametrize("cached_backend", [False, True])
 def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order(
-    tmp_path, create_checker, with_world, cached_backend
+    tmp_path, create_checker, with_world, cached_backend, self_collision
 ):
     """The collision gate preserves samples and maps simulator joint order."""
     planner = object.__new__(CuroboPlanner)
     planner.cfg = CuroboPlannerCfg(
         robot_uid="robot",
         world=CuroboWorldCfg(multi_env=True),
+        self_collision_check=self_collision,
     )
     planner._curobo_device = torch.device("cpu")
     joint_states = []
     collision_queries = []
+    self_queries, self_setups = [], []
     sphere_updates = []
     checker_configs = []
     config_path = tmp_path / "robot.yml"
@@ -1724,11 +1894,26 @@ def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order(
     def update_spheres(count, *, batch_size, horizon):
         sphere_updates.append((count, batch_size, horizon))
 
+    def self_cost(spheres):
+        self_queries.append(spheres.clone())
+        cost = torch.zeros(spheres.shape[:2])
+        if len(self_queries) == 2:
+            cost[0, 0] = 0.1
+        return cost
+
     def make_checker(cfg=None):
         if cfg is not None:
-            assert cfg.self_collision_cost is None
+            assert (cfg.self_collision_cost is not None) is self_collision
         return SimpleNamespace(
             get_kinematics=kinematics,
+            self_collision_cost=(
+                SimpleNamespace(
+                    setup_batch_tensors=lambda *shape: self_setups.append(shape),
+                    forward=self_cost,
+                )
+                if self_collision
+                else None
+            ),
             get_bound=lambda sample: torch.where(sample > 3.1, 0.1, 0.0),
             collision_constraint=(
                 SimpleNamespace(
@@ -1797,8 +1982,10 @@ def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order(
 
     assert torch.equal(
         validity,
-        torch.tensor(((True, True, True), (True, not with_world, False))),
+        torch.tensor(((True, not self_collision, True), (True, not with_world, False))),
     )
+    assert len(self_queries) == (trajectory.shape[1] if self_collision else 0)
+    assert self_setups == ([(2, 1)] if self_collision else [])
     assert len(collision_queries) == (trajectory.shape[1] if with_world else 0)
     assert sphere_updates == ([(3, 2, 1)] if with_world else [])
     for sample_index, (sample, env_query_idx) in enumerate(collision_queries):

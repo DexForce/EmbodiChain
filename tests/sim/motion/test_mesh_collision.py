@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Standalone FCL comparisons against the frozen source query."""
+"""Standalone Newton comparisons against the frozen source query."""
 
 from __future__ import annotations
 
@@ -27,9 +27,9 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-_requires_fcl = pytest.mark.skipif(
-    importlib.util.find_spec("fcl") is None,
-    reason="actual FCL comparisons require planning-geometry; skipped coverage is unqualified",
+_requires_newton = pytest.mark.skipif(
+    importlib.util.find_spec("newton") is None,
+    reason="actual collision checks require the shared Newton runtime",
 )
 
 from embodichain.lab.sim.motion.mesh_collision import (
@@ -44,7 +44,7 @@ _REFERENCE = json.loads(
 )
 
 
-def test_missing_fcl_is_reported_before_any_robot_or_scene_capture(monkeypatch):
+def test_missing_newton_is_reported_before_any_robot_or_scene_capture(monkeypatch):
     from embodichain.lab.sim.scene import _collision_backends
 
     def missing(name):
@@ -52,18 +52,18 @@ def test_missing_fcl_is_reported_before_any_robot_or_scene_capture(monkeypatch):
 
     monkeypatch.setattr(_collision_backends, "import_module", missing)
     robot, simulation = mesh_query_fixture()
-    with pytest.raises(ImportError, match=r"embodichain\[planning-geometry\]"):
+    with pytest.raises(ImportError, match="Newton"):
         SimulationFreeMotionQuery(robot, simulation)
-    with pytest.raises(ImportError, match=r"embodichain\[planning-geometry\]"):
+    with pytest.raises(ImportError, match="Newton"):
         RobotMeshCollisionSnapshot(robot, control_part="arm")
-    with pytest.raises(ImportError, match=r"embodichain\[planning-geometry\]"):
+    with pytest.raises(ImportError, match="Newton"):
         RobotArticulationCollisionSnapshot(robot, simulation, control_part="arm")
     robot.get_qpos.assert_not_called()
     robot.get_local_pose.assert_not_called()
 
 
 @pytest.mark.parametrize("case", _REFERENCE["cases"], ids=lambda case: case["name"])
-@_requires_fcl
+@_requires_newton
 def test_sampled_query_matches_source_pair_order_and_exemptions(case):
     robot, simulation = mesh_query_fixture()
     observed = robot.get_qpos().clone()
@@ -73,7 +73,7 @@ def test_sampled_query_matches_source_pair_order_and_exemptions(case):
     torch.testing.assert_close(robot.get_qpos(), observed)
 
 
-@_requires_fcl
+@_requires_newton
 def test_free_motion_query_reads_fresh_scene_and_rejects_bad_fk():
     robot, simulation = mesh_query_fixture()
     query = SimulationFreeMotionQuery(robot, simulation)
@@ -91,7 +91,43 @@ def test_free_motion_query_reads_fresh_scene_and_rejects_bad_fk():
         query.inspect(positions, control_part="arm")
 
 
-@_requires_fcl
+@_requires_newton
+def test_free_query_reuses_only_equal_geometry_and_closes_replaced_resources(
+    monkeypatch,
+):
+    from embodichain.lab.sim.scene import feasibility
+
+    original = feasibility.NewtonCollisionChecker
+    created = []
+
+    def capture(*args, **kwargs):
+        query = original(*args, **kwargs)
+        created.append(query)
+        return query
+
+    monkeypatch.setattr(feasibility, "NewtonCollisionChecker", capture)
+    robot, simulation = mesh_query_fixture()
+    positions = robot.get_qpos().clone()
+    obstacle = simulation.get_rigid_object("obstacle")
+    with SimulationFreeMotionQuery(robot, simulation) as query:
+        assert query.inspect(positions, control_part="arm").valid
+        pose = obstacle.get_local_pose(to_matrix=True)
+        pose[:, 0, 3] = 0.55
+        obstacle.get_local_pose = lambda **kw: pose.clone()
+        assert not query.inspect(positions, control_part="arm").valid
+        assert len(created) == 1
+        obstacle.get_collision_shapes()[0].half_extents *= 1.5
+        assert not query.inspect(positions, control_part="arm").valid
+        assert len(created) == 2
+        with pytest.raises(RuntimeError, match="closed"):
+            created[0].check({})
+    with pytest.raises(RuntimeError, match="closed"):
+        query.inspect(positions, control_part="arm")
+    with pytest.raises(RuntimeError, match="closed"):
+        created[1].check({})
+
+
+@_requires_newton
 def test_robot_articulation_snapshot_excludes_rigids_but_checks_articulations(
     monkeypatch,
 ):
@@ -138,7 +174,7 @@ def test_robot_articulation_snapshot_excludes_rigids_but_checks_articulations(
         assert any("drawer:mesh" in pair for pair in blocked.pairs)
 
 
-@_requires_fcl
+@_requires_newton
 def test_owned_robot_query_scope_reuses_only_current_robot_and_restores_nested_scope(
     monkeypatch,
 ):
@@ -182,7 +218,7 @@ def test_owned_robot_query_scope_reuses_only_current_robot_and_restores_nested_s
     assert len(created) == 5
 
 
-@_requires_fcl
+@_requires_newton
 def test_owned_robot_query_scope_rejects_model_drift_without_refresh(monkeypatch):
     from embodichain.lab.sim.motion import mesh_collision as owner
 
@@ -195,7 +231,7 @@ def test_owned_robot_query_scope_rejects_model_drift_without_refresh(monkeypatch
             owner.inspect_robot_collision(robot, positions, control_part="arm")
 
 
-@_requires_fcl
+@_requires_newton
 def test_precontact_scope_keeps_fixed_arm_and_explicit_exclusion_local():
     robot, simulation = mesh_query_fixture()
     query = SimulationFreeMotionQuery(robot, simulation)
@@ -226,3 +262,20 @@ def test_precontact_scope_keeps_fixed_arm_and_explicit_exclusion_local():
             contact_fraction=0.5,
             grid_samples=5,
         )
+
+
+@pytest.mark.parametrize("snapshot", [False, True])
+def test_single_arm_queries_reject_changes_to_passive_robot_joints(snapshot):
+    robot, simulation = mesh_query_fixture()
+    positions = robot.get_qpos().repeat(2, 1)
+    # This other-branch motion was previously accepted without checking its world collision.
+    positions[1, 4] = 0.2
+    if snapshot:
+        with RobotMeshCollisionSnapshot(robot, control_part="arm") as query:
+            with pytest.raises(ValueError, match="passive joints"):
+                query.inspect(positions)
+    else:
+        with pytest.raises(ValueError, match="passive joints"):
+            SimulationFreeMotionQuery(robot, simulation).inspect(
+                positions, control_part="arm"
+            )

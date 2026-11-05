@@ -138,11 +138,11 @@ class CollisionBody:
 
 
 class NewtonCollisionChecker:
-    """Check an isolated B=1 convex collision state without advancing physics.
+    """Check isolated B=1 physical collision inputs without advancing physics.
 
     Args:
-        bodies: Physical shapes, including fixed scene geometry. Triangle mesh
-            and SDF inputs require an explicit adapter and return unsupported.
+        bodies: Physical shapes, including fixed scene geometry. The default
+            accepts convex shapes; SDF inputs remain unsupported.
         ignored_pairs: Permanent structural exemptions, as physical IDs or
             frame aliases. Adjacency is never inferred from link names.
         clearance_m: Required separation for non-exempt pairs, in metres.
@@ -153,6 +153,13 @@ class NewtonCollisionChecker:
         use_cuda_graph: Capture repeated CUDA queries after a warm call.
         max_shapes: Explicit shape budget, at most 512; bounds pair storage.
         max_contacts: Upper contact-buffer budget; saturation is unsupported.
+        allow_triangle_meshes: Explicitly enable Newton's triangle-input route.
+            Nonconvex inputs retain closed, consistently oriented triangles;
+            they are never convexified. Convex inputs use their declared hull
+            as triangles in this route to preserve enclosed-volume checks.
+            Mixed primitive inputs require an explicit triangle representation.
+            The default remains the existing convex-only contract.
+        max_triangle_pairs: Bounded native mesh/triangle work capacity.
 
     Returns from check contain a capped conservative clearance estimate, not
     a global minimum distance or a continuous collision certificate. Halfspaces
@@ -175,10 +182,19 @@ class NewtonCollisionChecker:
         use_cuda_graph: bool = True,
         max_shapes: int = 256,
         max_contacts: int = 1048576,
+        allow_triangle_meshes: bool = False,
+        max_triangle_pairs: int = 262144,
     ) -> None:
         self.bodies = tuple(bodies)
         count(max_shapes, "max_shapes")
         count(max_contacts, "max_contacts")
+        count(max_triangle_pairs, "max_triangle_pairs")
+        if type(allow_triangle_meshes) is not bool:
+            raise TypeError("allow_triangle_meshes must be boolean")
+        if max_triangle_pairs > 1048576:
+            raise ValueError("max_triangle_pairs must not exceed 1048576")
+        self._allow_triangle_meshes = allow_triangle_meshes
+        self._max_triangle_pairs = max_triangle_pairs
         if max_contacts > 1048576:
             raise ValueError("max_contacts must not exceed 1048576")
         if max_shapes > 512 or not 1 <= len(self.bodies) <= max_shapes:
@@ -189,10 +205,41 @@ class NewtonCollisionChecker:
             raise TypeError("collision bodies must be CollisionBody values")
         if len({b.collision_id for b in self.bodies}) != len(self.bodies):
             raise ValueError("collision bodies must have unique IDs")
-        if any(b.kind == "mesh" for b in self.bodies):
+        if not allow_triangle_meshes and any(b.kind == "mesh" for b in self.bodies):
             raise UnsupportedFeasibilityError(
                 "Triangle meshes require an explicit collision adapter; preserve native CONVEX shapes as convex"
             )
+        self._triangle_query = any(body.kind == "mesh" for body in self.bodies)
+        self._triangle_geometry = {}
+        if self._triangle_query:
+            import trimesh
+
+            for index, body in enumerate(self.bodies):
+                if body.kind == "halfspace":
+                    continue
+                if body.kind not in {"convex", "mesh"}:
+                    raise UnsupportedFeasibilityError(
+                        "Mixed triangle/primitive containment requires explicit triangle geometry."
+                    )
+                mesh = (
+                    trimesh.convex.convex_hull(np.asarray(body.vertices))
+                    if body.kind == "convex"
+                    else trimesh.Trimesh(
+                        vertices=body.vertices, faces=body.triangles, process=False
+                    )
+                )
+                if (
+                    not mesh.is_watertight
+                    or not mesh.is_winding_consistent
+                    or not mesh.is_volume
+                ):
+                    raise UnsupportedFeasibilityError(
+                        "Triangle collision queries require closed consistently oriented solids."
+                    )
+                self._triangle_geometry[index] = (
+                    np.asarray(mesh.vertices),
+                    np.asarray(mesh.faces),
+                )
         if not isinstance(device, str) or not (
             device == "cpu" or device.startswith("cuda")
         ):
@@ -228,7 +275,7 @@ class NewtonCollisionChecker:
         for body in self.bodies:
             if body.kind == "halfspace":
                 continue
-            if body.kind == "convex":
+            if body.kind in {"convex", "mesh"}:
                 original = np.asarray(body.vertices)
                 converted = _query_float32(original, "Convex vertices")
                 radius = float(np.linalg.norm(original, axis=1).max())
@@ -270,6 +317,7 @@ class NewtonCollisionChecker:
             self._aliases.setdefault(collision_id, {collision_id})
         self.ignored_pairs = frozenset(self._expand_pairs(ignored_pairs))
         self.last_pair = None
+        self.last_pairs: tuple[tuple[str, str], ...] = ()
         self.last_clearance_interval: tuple[float, float] | None = None
         self._frame_uids = tuple(dict.fromkeys(b.frame_uid for b in self.bodies))
         self._native = tuple(
@@ -292,6 +340,13 @@ class NewtonCollisionChecker:
             if i in self._native_lookup and j in self._native_lookup
         ]
         requested_capacity = max(64, 16 * len(native_pairs))
+        if allow_triangle_meshes:
+            mesh_contacts = 4 * sum(
+                len(faces) for _, faces in self._triangle_geometry.values()
+            )
+            requested_capacity = max(
+                requested_capacity, min(max_contacts, mesh_contacts)
+            )
         if requested_capacity > 1048576:
             raise UnsupportedFeasibilityError("Physical collision pair budget exceeded")
         self._capacity = min(max_contacts, requested_capacity)
@@ -301,6 +356,7 @@ class NewtonCollisionChecker:
             self._explicit
         ) = None
         self._tolerance = None
+        self._pair_distances = None
         self._meshes = []
         self._closed = False
         self._version = version("newton")
@@ -318,6 +374,11 @@ class NewtonCollisionChecker:
                 self._capacity,
                 device,
                 use_cuda_graph,
+                *(
+                    ("explicit-triangle-input/v1", max_triangle_pairs)
+                    if allow_triangle_meshes
+                    else ()
+                ),
             )
         )
         try:
@@ -390,14 +451,20 @@ class NewtonCollisionChecker:
                     **options,
                 )
             else:
+                vertices, triangles = self._triangle_geometry.get(
+                    index, (body.vertices, body.triangles)
+                )
                 mesh = newton.Mesh(
-                    np.asarray(body.vertices, dtype=np.float32),
-                    np.asarray(body.triangles, dtype=np.int32).reshape(-1),
+                    np.asarray(vertices, dtype=np.float32),
+                    np.asarray(triangles, dtype=np.int32).reshape(-1),
                     compute_inertia=False,
                     maxhullvert=len(body.vertices),
                 )
                 self._meshes.append(mesh)
-                shape = builder.add_shape_convex_hull(mesh=mesh, **options)
+                if self._triangle_query:
+                    shape = builder.add_shape_mesh(mesh=mesh, **options)
+                else:
+                    shape = builder.add_shape_convex_hull(mesh=mesh, **options)
             if shape != owner:
                 raise UnsupportedFeasibilityError(
                     "Collision query requires one physical shape per owned body"
@@ -414,8 +481,12 @@ class NewtonCollisionChecker:
             include_static_kinematic_pairs=True,
             rigid_contact_max=self._capacity,
             soft_contact_max=0,
+            max_triangle_pairs=self._max_triangle_pairs,
         )
-        if self._pipeline.narrow_phase.global_contact_reducer is not None:
+        if (
+            not self._allow_triangle_meshes
+            and self._pipeline.narrow_phase.global_contact_reducer is not None
+        ):
             raise UnsupportedFeasibilityError(
                 "Unsupported Newton narrow-phase route for declared convex shapes"
             )
@@ -426,6 +497,11 @@ class NewtonCollisionChecker:
         self._output = wp.empty(4, dtype=float, device=self.device)
         self._empty_count = wp.zeros(1, dtype=wp.int32, device=self.device)
         self._tolerance = wp.empty(1, dtype=float, device=self.device)
+        self._pair_distances = wp.empty(
+            len(self._native) ** 2 if self._allow_triangle_meshes else 0,
+            dtype=float,
+            device=self.device,
+        )
 
     def _expand_pairs(self, pairs: Sequence[tuple[str, str]]) -> set[frozenset[str]]:
         output = set()
@@ -491,14 +567,20 @@ class NewtonCollisionChecker:
     def _run_query(self) -> None:
         wp, phase, c = self._wp, self._pipeline.narrow_phase, self._contacts
         self._output.fill_(math.inf)
+        self._pair_distances.fill_(math.inf)
         self._pipeline.collide(self._state, self._contacts)
         counters = []
         for count_name, storage_name in (
             ("gjk_candidate_pairs_count", "gjk_candidate_pairs"),
             ("split_gjk_work_count", "split_gjk_work_items"),
             ("split_manifold_work_count", "split_manifold_work_items"),
+            ("shape_pairs_mesh_count", "shape_pairs_mesh"),
+            ("triangle_pairs_count", "triangle_pairs"),
+            ("shape_pairs_mesh_mesh_count", "shape_pairs_mesh_mesh"),
         ):
-            value, storage = getattr(phase, count_name), getattr(phase, storage_name)
+            value, storage = getattr(phase, count_name, None), getattr(
+                phase, storage_name, None
+            )
             counters.extend(
                 (
                     value if value is not None else self._empty_count,
@@ -527,6 +609,12 @@ class NewtonCollisionChecker:
                 self._pipeline.broad_phase_pair_count,
                 len(self._explicit),
                 *counters,
+                (
+                    phase.global_contact_reducer.ht_insert_failures
+                    if phase.global_contact_reducer is not None
+                    else self._empty_count
+                ),
+                self._pair_distances,
                 self._output,
             ],
             device=self.device,
@@ -541,7 +629,7 @@ class NewtonCollisionChecker:
             )
         normal = pp[:3, :3] @ np.asarray(plane.dimensions[:3])
         local_normal = sp[:3, :3].T @ normal
-        if shape.kind == "convex":
+        if shape.kind in {"convex", "mesh"}:
             support = float((np.asarray(shape.vertices) @ local_normal).min())
         elif shape.kind == "sphere":
             support = -shape.dimensions[0]
@@ -589,6 +677,7 @@ class NewtonCollisionChecker:
         if self._closed:
             raise RuntimeError("collision checker is closed")
         self.last_pair = None
+        self.last_pairs = ()
         self.last_clearance_interval = None
         frames = {}
         for uid in self._frame_uids:
@@ -684,6 +773,17 @@ class NewtonCollisionChecker:
                 raise UnsupportedFeasibilityError(
                     "Newton returned a nonfinite separation"
                 )
+            if self._allow_triangle_meshes and math.isfinite(summary[1]):
+                distances = self._pair_distances.numpy().reshape(
+                    len(self._native), len(self._native)
+                )
+                self.last_pairs = tuple(
+                    (
+                        self.bodies[self._native[i]].collision_id,
+                        self.bodies[self._native[j]].collision_id,
+                    )
+                    for i, j in np.argwhere(distances <= self.clearance_m + tolerance)
+                )
             clearance = min(
                 clearance,
                 max(
@@ -705,6 +805,8 @@ class NewtonCollisionChecker:
 
     def _failure(self, i: int, j: int) -> FeasibilityCheck:
         self.last_pair = self.bodies[i].collision_id, self.bodies[j].collision_id
+        if not self.last_pairs:
+            self.last_pairs = (self.last_pair,)
         return FeasibilityCheck(
             "collision",
             "failed",
@@ -716,7 +818,9 @@ class NewtonCollisionChecker:
         self._graph = self._pipeline = self._contacts = self._state = self._model = None
         self._active = self._output = self._empty_count = None
         self._tolerance = None
+        self._pair_distances = None
         self._explicit = None
         self._meshes.clear()
+        self._triangle_geometry.clear()
         self._mask_cache.clear()
         self._closed = True

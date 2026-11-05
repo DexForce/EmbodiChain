@@ -349,6 +349,12 @@ class CuroboAutoGenCfg:
     collision_sphere_buffer: float = 0.0
     """Padding added to every fitted sphere's radius (m)."""
 
+    self_collision_ignore: dict[str, list[str]] | None = None
+    """Complete explicit link exemptions; None derives mechanical adjacency."""
+
+    self_collision_buffer: float | dict[str, float] = 0.0
+    """Nonnegative self-collision padding, shared or keyed by collision link."""
+
     force: bool = False
     """Regenerate the robot YAML and voxel world on the next plan."""
 
@@ -367,6 +373,12 @@ class CuroboPlannerCfg(BasePlannerCfg):
     """
 
     planner_type: str = "curobo"
+
+    self_collision_check: bool = True
+    """Check native robot self-collision during planning and exact validation.
+
+    False is an explicit opt-out; world collision checking remains independent.
+    """
 
     max_velocity: float | list[float] | None = field(default=None, kw_only=True)
     """Optional speed request intersected with effective Robot velocity caps.
@@ -889,7 +901,8 @@ class CuroboPlanner(BasePlanner):
     Cartesian (``EEF_MOVE``) targets are forwarded to cuRobo unchanged because
     the backend accepts them directly and performs its own collision-aware IK
     and trajectory optimization. Robot-to-world collision checking remains
-    enabled, but robot self-collision checking is temporarily disabled.
+    enabled. Native self-collision checking is enabled by default and shares
+    the configured model/exemptions with exact trajectory validation.
     By default the returned collision-checked samples are arc-length resampled to
     the action's ``sample_interval`` waypoint count
     (``preserve_plan_samples=False``); set
@@ -947,7 +960,7 @@ class CuroboPlanner(BasePlanner):
         The samples are not replanned or replaced. They are mapped from the
         simulator's control-part order into the exact cuRobo model, then checked
         against joint bounds and the live world collision model. Self-collision
-        is disabled consistently with motion planning. Each sample uses cuRobo's
+        follows the explicit planner setting. Each sample uses cuRobo's
         kinematics and public costs directly to accommodate its 0.8 state and
         buffer contracts while retaining batched environments.
 
@@ -1027,7 +1040,8 @@ class CuroboPlanner(BasePlanner):
                 num_envs=batch_size,
                 collision_activation_distance=self.cfg.collision_activation_distance,
             )
-            checker_cfg.self_collision_cost = None
+            if not self.cfg.self_collision_check:
+                checker_cfg.self_collision_cost = None
             backend.collision_checker = self._bindings.RobotCollisionChecker(
                 checker_cfg
             )
@@ -1057,6 +1071,16 @@ class CuroboPlanner(BasePlanner):
                 checker = backend.collision_checker
                 state = checker.get_kinematics(sample)
                 valid = checker.get_bound(sample).sum(dim=-1) == 0.0
+                if self.cfg.self_collision_check:
+                    self_cost = getattr(checker, "self_collision_cost", None)
+                    if self_cost is None:
+                        raise RuntimeError(
+                            "cuRobo self-collision validation is unavailable."
+                        )
+                    if sample_index == 0:
+                        self_cost.setup_batch_tensors(batch_size, 1)
+                    self_value = self_cost.forward(state.robot_spheres)
+                    valid &= (self_value == 0.0).reshape(batch_size, 1, -1).all(dim=-1)
                 # cuRobo 0.8's validate() passes raw sphere tensors to a cost
                 # that now expects KinematicsState. Use its public costs with
                 # that state and the same world/limits as the planner.
@@ -1080,6 +1104,8 @@ class CuroboPlanner(BasePlanner):
         *,
         query_snapshot: CuroboQuerySnapshot | None = None,
     ) -> None:
+        if type(cfg.self_collision_check) is not bool:
+            raise TypeError("self_collision_check must be boolean.")
         if (
             query_snapshot is not None
             and type(query_snapshot) is not CuroboQuerySnapshot
@@ -1573,7 +1599,7 @@ class CuroboPlanner(BasePlanner):
             planner_cfg = self._bindings.MotionPlannerCfg.create(
                 robot=robot_config,
                 scene_model=scene_model,
-                self_collision_check=False,
+                self_collision_check=self.cfg.self_collision_check,
                 device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
                 max_batch_size=batch_size,
                 multi_env=bool(self.cfg.world.multi_env),
@@ -1582,7 +1608,8 @@ class CuroboPlanner(BasePlanner):
                 ),
                 use_cuda_graph=use_cuda_graph,
             )
-            self._disable_curobo_self_collision_rollouts(planner_cfg)
+            if not self.cfg.self_collision_check:
+                self._disable_curobo_self_collision_rollouts(planner_cfg)
             # cuRobo 0.8 reads interpolation_dt from the trajectory optimizer
             # config rather than accepting it in MotionPlannerCfg.create().
             planner_cfg.trajopt_solver_config.interpolation_dt = float(
@@ -1747,21 +1774,13 @@ class CuroboPlanner(BasePlanner):
 
     @staticmethod
     def _load_runtime_robot_config(robot_config_path: str) -> dict:
-        """Load robot YAML and add cuRobo 0.8's required empty placeholders.
+        """Load owned native self-collision maps without overwriting authored data."""
+        from ._self_collision import _complete_self_collision_config
 
-        Self-collision metadata is intentionally absent from EmbodiChain's
-        generated cache. cuRobo 0.8 nevertheless builds internal sphere-pair
-        bookkeeping while loading robot spheres, even when
-        ``self_collision_check=False``, and assumes these two values are
-        mappings. Supplying empty runtime-only mappings avoids its ``None``
-        dereference without restoring self-collision checking or persisting
-        self-collision configuration.
-        """
         with open(robot_config_path, encoding="utf-8") as robot_config_file:
             robot_config = yaml.safe_load(robot_config_file)
         kinematics = robot_config["robot_cfg"]["kinematics"]
-        kinematics["self_collision_buffer"] = {}
-        kinematics["self_collision_ignore"] = {}
+        _complete_self_collision_config(kinematics, config_path=robot_config_path)
         return robot_config
 
     @staticmethod
@@ -2101,6 +2120,8 @@ class CuroboPlanner(BasePlanner):
             surface_radius=auto.surface_radius,
             iterations=auto.iterations,
             collision_sphere_buffer=auto.collision_sphere_buffer,
+            self_collision_ignore=auto.self_collision_ignore,
+            self_collision_buffer=auto.self_collision_buffer,
             max_velocity=self.cfg.max_velocity,
             max_acceleration=self.cfg.max_acceleration,
             device=str(self._curobo_device),
@@ -2115,7 +2136,7 @@ class CuroboPlanner(BasePlanner):
     ) -> str:
         """Hash the URDF path/content and fit parameters into a stable cache key."""
         hasher = hashlib.md5()
-        hasher.update(b"absolute-motion-limits-v2")
+        hasher.update(b"absolute-motion-limits-v3-self-collision")
         hasher.update(urdf_path.encode("utf-8"))
         try:
             with open(urdf_path, "rb") as urdf_file:
@@ -2129,6 +2150,9 @@ class CuroboPlanner(BasePlanner):
         hasher.update(str(auto.surface_radius).encode("utf-8"))
         hasher.update(str(auto.iterations).encode("utf-8"))
         hasher.update(str(auto.collision_sphere_buffer).encode("utf-8"))
+        hasher.update(str(self.cfg.self_collision_check).encode("utf-8"))
+        hasher.update(repr(auto.self_collision_ignore).encode("utf-8"))
+        hasher.update(repr(auto.self_collision_buffer).encode("utf-8"))
         hasher.update(
             repr(
                 _curobo_joint_limits(

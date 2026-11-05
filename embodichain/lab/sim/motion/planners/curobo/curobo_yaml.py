@@ -172,6 +172,8 @@ def generate_curobo_robot_yaml(
     surface_radius: float = 0.005,
     iterations: int = 200,
     collision_sphere_buffer: float = 0.0,
+    self_collision_ignore: Mapping[str, Sequence[str]] | None = None,
+    self_collision_buffer: float | Mapping[str, float] = 0.0,
     max_velocity: float | list[float] | None = None,
     max_acceleration: float | list[float] | None = None,
     max_jerk: float = 500.0,
@@ -213,6 +215,9 @@ def generate_curobo_robot_yaml(
         surface_radius: Fixed radius used by MorphIt's surface fallback.
         iterations: Adam iterations for MorphIt.
         collision_sphere_buffer: Padding added to every sphere's radius (m).
+        self_collision_ignore: Complete authored link exemptions, or None for
+            fixed-component and moving-joint adjacency from the assembled URDF.
+        self_collision_buffer: Nonnegative padding, shared or per collision link.
         max_velocity: Optional speed request intersected with effective Robot
             caps. Scalars apply to all active joints; lists follow
             ``robot.active_joint_ids`` order.
@@ -299,10 +304,25 @@ def generate_curobo_robot_yaml(
                 device=device,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.log_warning(f"Sphere fitting failed for link {link_name!r}: {exc}")
-            continue
+            raise RuntimeError(
+                f"Sphere fitting failed for collision link {link_name!r}."
+            ) from exc
         if not is_success:
-            continue
+            raise RuntimeError(
+                f"Sphere fitting failed for collision link {link_name!r}."
+            )
+        if (
+            not isinstance(centers, torch.Tensor)
+            or not isinstance(radii, torch.Tensor)
+            or centers.ndim != 2
+            or centers.shape[1] != 3
+            or not len(centers)
+            or radii.shape != (len(centers),)
+            or not torch.isfinite(centers).all()
+            or not torch.isfinite(radii).all()
+            or (radii <= 0).any()
+        ):
+            raise RuntimeError(f"Invalid collision spheres for link {link_name!r}.")
         collision_spheres[link_name] = [
             {"center": list(c), "radius": float(r)}
             for c, r in zip(
@@ -316,6 +336,14 @@ def generate_curobo_robot_yaml(
             "No collision spheres could be fitted from the robot's link meshes."
         )
     collision_link_names = list(collision_spheres.keys())
+    from ._self_collision import _self_collision_config
+
+    ignored, self_buffers = _self_collision_config(
+        urdf_path,
+        collision_link_names,
+        ignore=self_collision_ignore,
+        buffer=self_collision_buffer,
+    )
 
     # 3. cspace from the robot's joints + init qpos. Mimic joints are excluded -
     #    cuRobo drives them from their active joint and rejects them in cspace.
@@ -377,6 +405,8 @@ def generate_curobo_robot_yaml(
                 "collision_link_names": collision_link_names,
                 "collision_spheres": collision_spheres,
                 "collision_sphere_buffer": float(collision_sphere_buffer),
+                "self_collision_ignore": ignored,
+                "self_collision_buffer": self_buffers,
                 "mesh_link_names": collision_link_names,
                 "lock_joints": lock_joints or None,
                 "cspace": cspace,

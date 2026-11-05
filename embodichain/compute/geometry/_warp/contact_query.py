@@ -48,6 +48,14 @@ def _contact_summary(
     split_capacity: int,
     manifold_count: wp.array(dtype=wp.int32),
     manifold_capacity: int,
+    mesh_count: wp.array(dtype=wp.int32),
+    mesh_capacity: int,
+    triangle_count: wp.array(dtype=wp.int32),
+    triangle_capacity: int,
+    mesh_mesh_count: wp.array(dtype=wp.int32),
+    mesh_mesh_capacity: int,
+    reduction_failures: wp.array(dtype=wp.int32),
+    pair_distances: wp.array(dtype=float),
     output: wp.array(dtype=float),
 ):
     index = wp.tid()
@@ -59,6 +67,10 @@ def _contact_summary(
             or gjk_count[0] > gjk_capacity
             or split_count[0] > split_capacity
             or manifold_count[0] > manifold_capacity
+            or mesh_count[0] > mesh_capacity
+            or triangle_count[0] > triangle_capacity
+            or mesh_mesh_count[0] > mesh_mesh_capacity
+            or reduction_failures[0] > 0
         ):
             wp.atomic_min(output, 3, 0.0)
     if index < count[0] and index < contact_capacity:
@@ -78,6 +90,10 @@ def _contact_summary(
                 wp.atomic_min(output, 3, 0.0)
             else:
                 wp.atomic_min(output, 0, distance)
+                if pair_distances.shape[0] > 0:
+                    wp.atomic_min(
+                        pair_distances, wp.min(a, b) * shapes + wp.max(a, b), distance
+                    )
                 if distance <= required + tolerance[0]:
                     wp.atomic_min(
                         output, 1, float(wp.min(a, b) * shapes + wp.max(a, b))

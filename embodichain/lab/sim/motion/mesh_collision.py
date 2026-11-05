@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""B=1 discrete URDF/FCL motion queries with explicit topology exclusions.
+"""B=1 discrete URDF/Newton motion queries with explicit topology exclusions.
 
 These input meshes are sampled planning proxies. They are not native-cooked
 geometry, continuous collision detection or physical contact evidence.
@@ -29,6 +29,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 import math
+from threading import RLock
 import numpy as np
 import torch
 
@@ -205,24 +206,31 @@ class PrecontactMotionQuery(FreeMotionQuery, Protocol):
 
 
 class SimulationFreeMotionQuery:
-    """Capture a fresh read-only collision world for each B=1 query.
+    """Recapture B=1 world inputs while owning reusable Newton geometry.
 
     Args:
         robot: Borrowed robot with an assembled URDF and explicit solver root/TCP.
+            Its device owns the isolated query; CUDA queries use graph replay.
         simulation: Borrowed scene owning the current rigid/articulation poses.
 
     Source exclusions are retained: URDF neighbours within two joints, the
     mechanism below the declared TCP, and the first moving link against its
     rigid mounting ancestors. No task or robot model names select exemptions.
+    Each call reloads model/geometry declarations and observed poses; equal
+    immutable geometry/filter declarations can reuse native buffers. Calls and
+    close are serialized. Use the context manager or close to release resources.
     """
 
     def __init__(self, robot: Robot, simulation: SimulationManager) -> None:
-        from embodichain.lab.sim.scene._collision_backends import _require_fcl
+        from embodichain.lab.sim.scene._collision_backends import _require_newton
 
-        _require_fcl()
+        _require_newton()
         if simulation.num_envs != 1:
             raise ValueError("Discrete free-motion queries require B=1.")
         self._robot, self._simulation = robot, simulation
+        self._lock = RLock()
+        self._checker: _OwnedMotionChecker | None = None
+        self._closed = False
 
     @property
     def robot(self) -> Robot:
@@ -247,9 +255,7 @@ class SimulationFreeMotionQuery:
             or not torch.isfinite(positions).all()
         ):
             raise ValueError("Free-motion samples must be finite (T, robot.dof).")
-        checked = _make_checker(
-            self.robot, self._simulation, control_part, include_scene=True
-        )(positions)
+        checked = self._inspect(positions, self._simulation, control_part)
         return MotionCollisionReport(
             valid=checked["valid"],
             frame=checked.get("frame"),
@@ -314,9 +320,7 @@ class SimulationFreeMotionQuery:
         )
         samples = torch.lerp(positions[:1], positions[-1:], fractions[:, None])
         world = _SourceExcludedWorld(self._simulation, source_uid)
-        checked = _make_checker(self.robot, world, control_part, include_scene=True)(
-            samples
-        )
+        checked = self._inspect(samples, world, control_part)
         return MotionCollisionReport(
             valid=checked["valid"],
             frame=checked.get("frame"),
@@ -326,6 +330,43 @@ class SimulationFreeMotionQuery:
             scope="discrete_precontact_meshes",
             excluded_rigid_uid=source_uid,
         )
+
+    def _inspect(
+        self, positions: torch.Tensor, world: Any, control_part: str
+    ) -> dict[str, Any]:
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Free-motion collision query is closed.")
+            # Recapture FK, poses and shapes on every inspection. Only an exactly
+            # equal immutable geometry/filter declaration can reuse native buffers.
+            self._checker = _make_checker(
+                self.robot,
+                world,
+                control_part,
+                include_scene=True,
+                reuse=self._checker,
+            )
+            return self._checker(positions)
+
+    def close(self) -> None:
+        """Release this query's cached native geometry; repeated close is harmless."""
+        with self._lock:
+            if self._checker is not None:
+                self._checker.close()
+                self._checker = None
+            self._closed = True
+
+    def __enter__(self) -> SimulationFreeMotionQuery:
+        if self._closed:
+            raise RuntimeError("Free-motion collision query is closed.")
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        if getattr(self, "_checker", None) is not None:
+            self.close()
 
 
 @dataclass(frozen=True)
@@ -351,11 +392,11 @@ class _SourceExcludedWorld:
 
 
 class RobotMeshCollisionSnapshot:
-    """Own one calibrated B=1 robot-only FCL query for a bounded planning scope.
+    """Own one calibrated B=1 robot-only Newton query for a bounded planning scope.
 
     Observed qpos, root frame, model path and declared solver links must remain
     unchanged across queries. No rigid/articulation scene or payload is checked.
-    Closing releases only this query's owned Python/FCL resources.
+    Closing releases only this query's owned Newton resources.
     """
 
     def __init__(self, robot: Robot, *, control_part: str) -> None:
@@ -365,9 +406,9 @@ class RobotMeshCollisionSnapshot:
             robot: Borrowed B=1 robot with complete assembled URDF geometry.
             control_part: Explicit solver/control group selecting the moving arm.
         """
-        from embodichain.lab.sim.scene._collision_backends import _require_fcl
+        from embodichain.lab.sim.scene._collision_backends import _require_newton
 
-        _require_fcl()
+        _require_newton()
         if robot.get_qpos().shape[0] != 1:
             raise ValueError("Robot mesh snapshots require B=1.")
         self._dof = robot.dof
@@ -402,7 +443,9 @@ class RobotMeshCollisionSnapshot:
 
     def close(self) -> None:
         """Release owned query resources without mutating the borrowed robot."""
-        self._checker = None
+        if self._checker is not None:
+            self._checker.close()
+            self._checker = None
 
     def __enter__(self) -> RobotMeshCollisionSnapshot:
         if self._checker is None:
@@ -437,9 +480,9 @@ class RobotArticulationCollisionSnapshot(RobotMeshCollisionSnapshot):
             simulation: Exact owner of the articulation collision sources/poses.
             control_part: Explicit active control group; names infer no exemptions.
         """
-        from embodichain.lab.sim.scene._collision_backends import _require_fcl
+        from embodichain.lab.sim.scene._collision_backends import _require_newton
 
-        _require_fcl()
+        _require_newton()
         if simulation.num_envs != 1 or robot.get_qpos().shape[0] != 1:
             raise ValueError("Robot/articulation mesh snapshots require B=1.")
         self._dof = robot.dof
@@ -468,6 +511,38 @@ def _descendants(children: dict[str, set[str]], root: str) -> set[str]:
     return result
 
 
+class _OwnedMotionChecker:
+    """Close isolated native resources even when a discrete inspection raises."""
+
+    def __init__(self, check: Callable, query: Any, signature: tuple) -> None:
+        self._check, self._query = check, query
+        self._signature = signature
+
+    def transfer(self, signature: tuple) -> Any:
+        if signature != self._signature:
+            return None
+        query, self._query = self._query, None
+        return query
+
+    def __call__(self, positions: torch.Tensor) -> dict[str, Any]:
+        if self._check is None:
+            raise RuntimeError("Motion collision query is closed.")
+        return self._check(positions)
+
+    def close(self) -> None:
+        if self._query is not None:
+            self._query.close()
+        self._check = self._query = None
+
+    def __enter__(self) -> _OwnedMotionChecker:
+        if self._query is None:
+            raise RuntimeError("Motion collision query is closed.")
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+
 def _make_checker(
     robot: Robot,
     simulation: SimulationManager | None,
@@ -475,10 +550,15 @@ def _make_checker(
     *,
     include_scene: bool,
     include_rigids: bool = True,
-) -> Callable[[torch.Tensor], dict[str, Any]]:
-    """Own one read-only FK-calibrated geometry snapshot."""
+    reuse: _OwnedMotionChecker | None = None,
+) -> _OwnedMotionChecker:
+    """Bind FK and pair policy to the existing isolated Newton pipeline."""
     import trimesh
     import yourdfpy
+    from embodichain.lab.sim.scene.feasibility import (
+        CollisionBody,
+        NewtonCollisionChecker,
+    )
 
     model = yourdfpy.URDF.load(
         robot.cfg.fpath,
@@ -487,37 +567,6 @@ def _make_checker(
         build_collision_scene_graph=True,
         load_collision_meshes=True,
     )
-    world = trimesh.collision.CollisionManager()
-    if include_scene:
-        from embodichain.lab.sim.scene._collision_query_inputs import (
-            _capture_free_motion_sources,
-        )
-
-        for identity, snapshot in _capture_free_motion_sources(
-            simulation, include_rigids=include_rigids
-        ).items():
-            shape = snapshot.shapes[0]
-            if shape.vertices is not None and shape.triangles is not None:
-                mesh = trimesh.Trimesh(
-                    vertices=shape.vertices.cpu().numpy(),
-                    faces=shape.triangles.cpu().numpy(),
-                    process=False,
-                )
-            elif shape.half_extents is not None:
-                mesh = trimesh.creation.box(
-                    extents=2 * shape.half_extents.cpu().numpy()
-                )
-            else:
-                raise ValueError(
-                    "Unsupported physical collision shape for free motion."
-                )
-            world.add_object(
-                identity,
-                mesh,
-                transform=snapshot.pose[0].cpu().numpy()
-                @ shape.local_pose.cpu().numpy(),
-            )
-
     links = set(model.link_map)
     children: dict[str, set[str]] = {}
     fixed_children: dict[str, set[str]] = {}
@@ -533,8 +582,6 @@ def _make_checker(
     solver = robot.get_solver(control_part)
     active_links = _descendants(children, solver.root_link_name)
     hand_links = _descendants(children, solver.end_link_name)
-    # Virtual solver frames do not turn the shoulder's own rigid mounting body
-    # into another arm. Do not exempt fixed siblings or later moving links.
     mount_ancestors = {solver.root_link_name}
     parent = solver.root_link_name
     while parent in fixed_parents:
@@ -547,23 +594,31 @@ def _make_checker(
         if joint.type != "fixed" and joint.parent in mount_branch
     }
     near = {name: set.union(*(neighbors[n] for n in neighbors[name])) for name in links}
-    world_root = robot.get_local_pose(to_matrix=True)[0].cpu().numpy().copy()
+    world_root = robot.get_local_pose(to_matrix=True)[0].detach().cpu().numpy().copy()
+    observed_qpos = robot.get_qpos()[0].detach().cpu().clone()
+    model_path, joint_names = str(robot.cfg.fpath), tuple(robot.joint_names)
+    solver_links = (solver.root_link_name, solver.end_link_name)
+    passive_ids = [
+        index
+        for index, name in enumerate(joint_names)
+        if name in model.joint_map and model.joint_map[name].child not in active_links
+    ]
 
     def configure(q: torch.Tensor) -> None:
         model.update_cfg(
             {
                 name: float(value)
-                for name, value in zip(robot.joint_names, q)
+                for name, value in zip(joint_names, q, strict=True)
                 if name in model.joint_map
             }
         )
 
-    observed_qpos = robot.get_qpos()[0].clone()
-    model_path, joint_names = str(robot.cfg.fpath), tuple(robot.joint_names)
-    solver_links = (solver.root_link_name, solver.end_link_name)
     configure(observed_qpos)
     observed = (
-        robot.get_link_pose(solver.end_link_name, to_matrix=True)[0].cpu().numpy()
+        robot.get_link_pose(solver.end_link_name, to_matrix=True)[0]
+        .detach()
+        .cpu()
+        .numpy()
     )
     if not np.allclose(
         world_root @ model.get_transform(solver.end_link_name),
@@ -584,15 +639,106 @@ def _make_checker(
         geometry.append((node, owner, model.collision_scene.geometry[mesh_name]))
     if not any(owner in active_links for _, owner, _ in geometry):
         raise ValueError("The operated arm has no collision geometry.")
-    owners = {node: owner for node, owner, _ in geometry}
-    active = trimesh.collision.CollisionManager()
-    passive = trimesh.collision.CollisionManager()
+
+    bodies, info, static_poses = [], {}, {}
+
+    def add_mesh(
+        identity: str, frame: str, mesh: trimesh.Trimesh, *, moving: bool
+    ) -> None:
+        # A convex input retains the same hull. Nonconvex inputs keep their
+        # original triangles and enter Newton's explicit triangle route.
+        kind = "convex" if mesh.is_convex and mesh.is_volume else "mesh"
+        bodies.append(
+            CollisionBody(
+                identity,
+                frame,
+                kind,
+                vertices=tuple(map(tuple, np.asarray(mesh.vertices))),
+                triangles=tuple(map(tuple, np.asarray(mesh.faces))),
+                robot=moving,
+            )
+        )
+
     for node, owner, mesh in geometry:
-        pose, _ = graph[node]
-        manager = active if owner in active_links else passive
-        manager.add_object(node, mesh, transform=world_root @ pose)
+        identity = "robot:" + node
+        add_mesh(identity, "robot_frame:" + node, mesh, moving=owner in active_links)
+        info[identity] = ("active" if owner in active_links else "passive", node, owner)
+    if include_scene:
+        from embodichain.lab.sim.scene._collision_query_inputs import (
+            _capture_free_motion_sources,
+        )
+
+        for name, snapshot in _capture_free_motion_sources(
+            simulation, include_rigids=include_rigids
+        ).items():
+            shape = snapshot.shapes[0]
+            if shape.vertices is not None and shape.triangles is not None:
+                mesh = trimesh.Trimesh(
+                    vertices=shape.vertices.cpu().numpy(),
+                    faces=shape.triangles.cpu().numpy(),
+                    process=False,
+                )
+            elif shape.half_extents is not None:
+                mesh = trimesh.creation.box(
+                    extents=2 * shape.half_extents.cpu().numpy()
+                )
+            else:
+                raise ValueError(
+                    "Unsupported physical collision shape for free motion."
+                )
+            identity, frame = "scene:" + name, "scene_frame:" + name
+            add_mesh(identity, frame, mesh, moving=False)
+            info[identity] = ("scene", name, name)
+            static_poses[frame] = (
+                snapshot.pose[0].cpu().numpy() @ shape.local_pose.cpu().numpy()
+            )
+
+    ignored = []
+    for index, a in enumerate(bodies):
+        ga, _, oa = info[a.collision_id]
+        for b in bodies[index + 1 :]:
+            gb, _, ob = info[b.collision_id]
+            skip = "active" not in (ga, gb)
+            if ga == gb == "active":
+                skip = ob in near[oa] or {oa, ob} <= hand_links
+            elif {ga, gb} == {"active", "passive"}:
+                moving, fixed = (oa, ob) if ga == "active" else (ob, oa)
+                skip = moving in mounting_links and fixed in mount_ancestors
+            if skip:
+                ignored.append((a.collision_id, b.collision_id))
+    signature = (tuple(bodies), tuple(ignored), str(robot.device))
+    query = None if reuse is None else reuse.transfer(signature)
+    if query is None:
+        query = NewtonCollisionChecker(
+            bodies,
+            ignored_pairs=ignored,
+            allow_triangle_meshes=True,
+            device=str(robot.device),
+            use_cuda_graph=str(robot.device).startswith("cuda"),
+        )
+    if reuse is not None:
+        reuse.close()
 
     def check(positions: torch.Tensor) -> dict[str, Any]:
+        if (
+            positions.ndim != 2
+            or positions.shape[1] != len(joint_names)
+            or not len(positions)
+            or not torch.isfinite(positions).all()
+        ):
+            raise ValueError(
+                "Motion collision samples must be finite nonempty (T, robot.dof)."
+            )
+        positions = positions.detach().cpu()
+        if passive_ids and not torch.allclose(
+            positions[:, passive_ids],
+            observed_qpos[passive_ids][None].expand(len(positions), -1),
+            atol=1e-7,
+            rtol=0,
+        ):
+            raise ValueError(
+                "Single-arm collision queries require passive joints to remain at their observed positions."
+            )
         if not include_scene and (
             str(robot.cfg.fpath) != model_path
             or tuple(robot.joint_names) != joint_names
@@ -601,9 +747,10 @@ def _make_checker(
                 robot.get_solver(control_part).end_link_name,
             )
             != solver_links
-            or not torch.equal(robot.get_qpos()[0], observed_qpos)
+            or not torch.equal(robot.get_qpos()[0].detach().cpu(), observed_qpos)
             or not np.array_equal(
-                robot.get_local_pose(to_matrix=True)[0].cpu().numpy(), world_root
+                robot.get_local_pose(to_matrix=True)[0].detach().cpu().numpy(),
+                world_root,
             )
         ):
             raise ValueError(
@@ -611,50 +758,35 @@ def _make_checker(
             )
         for frame, q in enumerate(positions):
             configure(q)
-            # Geometry is immutable for this checker; only FK transforms change.
-            for node, owner, _ in geometry:
+            poses = dict(static_poses)
+            for node, _, _ in geometry:
                 pose, _ = graph[node]
-                manager = active if owner in active_links else passive
-                manager.set_transform(
-                    node, np.asarray(world_root @ pose, dtype=np.float32)
+                poses["robot_frame:" + node] = world_root @ pose
+            result, _ = query.check(poses, all_pairs=True)
+            if result.status != "passed":
+                groups = {"scene": [], "other_arm": [], "self": []}
+                for a, b in query.last_pairs:
+                    ia, ib = info[a], info[b]
+                    if ia[0] != "active":
+                        ia, ib = ib, ia
+                    kind = (
+                        "scene"
+                        if ib[0] == "scene"
+                        else "other_arm" if ib[0] == "passive" else "self"
+                    )
+                    pair = (ia[1], ib[1])
+                    groups[kind].append(tuple(sorted(pair)) if kind == "self" else pair)
+                for kind, pairs in groups.items():
+                    if pairs:
+                        return {
+                            "valid": False,
+                            "frame": frame,
+                            "kind": kind,
+                            "pairs": sorted(map(list, pairs)),
+                        }
+                raise RuntimeError(
+                    "Newton rejected a collision query without qualified pair evidence."
                 )
-            obstacles = (
-                (("scene", world), ("other_arm", passive))
-                if include_scene
-                else (("other_arm", passive),)
-            )
-            for kind, other in obstacles:
-                hit, pairs = active.in_collision_other(other, return_names=True)
-                if hit and kind == "other_arm":
-                    pairs = {
-                        (a, b)
-                        for a, b in pairs
-                        if not (
-                            owners[a] in mounting_links and owners[b] in mount_ancestors
-                        )
-                    }
-                    hit = bool(pairs)
-                if hit:
-                    return {
-                        "valid": False,
-                        "frame": frame,
-                        "kind": kind,
-                        "pairs": sorted(map(list, pairs)),
-                    }
-            _, pairs = active.in_collision_internal(return_names=True)
-            invalid = [
-                [a, b]
-                for a, b in pairs
-                if owners[b] not in near[owners[a]]
-                and not ({owners[a], owners[b]} <= hand_links)
-            ]
-            if invalid:
-                return {
-                    "valid": False,
-                    "frame": frame,
-                    "kind": "self",
-                    "pairs": sorted(invalid),
-                }
         return {
             "valid": True,
             "frames": len(positions),
@@ -665,7 +797,7 @@ def _make_checker(
             ),
         }
 
-    return check
+    return _OwnedMotionChecker(check, query, signature)
 
 
 _ROBOT_QUERY_SCOPE: ContextVar[

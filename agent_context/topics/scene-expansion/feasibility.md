@@ -40,7 +40,9 @@ screening uses explicit physical geometry and phase contact permissions.
 `collision.py` lazily builds a Newton `CollisionPipeline` over isolated query
 states. The physical extractor preserves native convex shapes, includes the
 global ground, and rejects triangle meshes, SDFs, non-robot articulations and
-unsupported robot asset scales/formats. No collider is silently convexified.
+unsupported robot asset scales/formats. No collider is silently convexified. The separate Motion input-mesh adapter
+can explicitly enable closed triangle inputs on the shared checker; that does
+not change this feasibility host's convex-only physical extraction contract.
 Halfspaces use analytic physical-shape support. Phase masks do not mutate live
 filters, and the query never advances the simulation clock. Shape/pair/contact
 storage is bounded; saturation and nonfinite results remain unverified.

@@ -36,18 +36,18 @@ Dense allocations obey `max_voxel_count`, and representation changes require
 cache-version invalidation. Compatibility-only options must not silently regain
 old representation-selection behavior; inspect their config definitions.
 
-Generated robot YAML omits self-collision metadata. Both the motion planner
-and the exact trajectory collision checker load it through
-`CuroboPlanner._load_runtime_robot_config()`, which supplies cuRobo 0.8's
-required empty `self_collision_buffer` and `self_collision_ignore` mappings
-in memory. Loading the unpatched YAML path in either consumer can dereference
-`None` while building spheres. The cached YAML remains unchanged. Exact sample
-validation also disables self-collision, makes each batched joint sample
-contiguous, and passes `KinematicsState` to cuRobo's public world cost rather
-than its incompatible 0.8 `validate()` wrapper. Joint-limit and world-collision
-costs must both be zero for a sample to pass. Reuse an existing backend with
-the same control part and batch size for validation, including a backend
-created for EEF planning; only a cold validation call creates a joint backend.
+Generated robot YAML carries cuRobo self-collision exemptions and per-link
+padding. Default exemptions join fixed rigid components and their immediate
+moving-joint neighbors; a complete authored mapping overrides that topology.
+No sampled collision or task/model name creates an exemption. Generation and
+runtime completion share `_self_collision.py`, preserve authored maps, and
+invalidate older generated caches. `CuroboPlannerCfg.self_collision_check`
+enables the native cost by default in planning and exact-sample validation;
+False is an explicit opt-out. The validator makes each sample contiguous and
+uses the same configured cuRobo joint-bound, self-collision and world costs.
+It passes `KinematicsState` to the world cost to avoid the incompatible 0.8
+`validate()` wrapper. Reuse an existing backend with the same control part and
+batch size; only cold validation creates a joint backend.
 
 Shared pose conventions belong to [simulation](../simulation-system/simulation-system.md).
 cuRobo goal/scene adapters alone convert `xyzw` to native `wxyz`, exactly once;
@@ -57,7 +57,8 @@ homogeneous dynamic-pose matrices need no quaternion conversion until then.
 
 `CuroboQuerySnapshot` owns full observed joint positions and an explicit
 `world_to_base` transform. Its optional `CuroboPayload` owns object identity,
-control part, local sphere envelope and same-observation world pose. These are
+control part, local sphere envelope, explicit `touch_links` permissions and
+same-observation world pose. Unlisted robot links retain self-collision checks. These are
 runtime observations, not serialized configuration. All world providers must be
 `CollisionObjectSnapshot` values projected with the same transform; the planner
 does not reread live object or robot-base poses in this mode.
@@ -74,8 +75,7 @@ world; its shape descriptors declare geometry shared by all rows. Payloads
 remain B=1 and attach only to distinct buffers owned by the fresh backend's IK/optimization/
 metric models, with alias deduplication and cleanup on failure/close. Arbitrary
 trajectory validation with payload is unavailable because its separate checker
-does not own those attachments; direct calls fail closed. Default planner
-behavior without a query snapshot is unchanged.
+does not own those attachments; direct calls fail closed. Native self-collision defaults apply to both observed and ordinary planners.
 
 `curobo_motion_generator()` provides a context-managed standard facade and makes
 no phase decisions. Callers must choose explicit backend velocity/acceleration
@@ -147,5 +147,14 @@ The existing batched no-payload snapshot path remains separate and unchanged.
 scopes. Precontact reports explicitly identify their excluded rigid owner.
 `robot_collision_query_scope` reuses only the exact current robot/model identity
 and restores nested scopes. These APIs retain B1 limits and source pair order.
-The optional `planning-geometry` extra supplies qualified FCL; unavailable FCL
-raises before robot/scene reads and does not select another backend.
+These queries use the shared Scene `NewtonCollisionChecker` and isolated
+`newton.CollisionPipeline`. Newton must be available before robot/scene capture.
+Single-arm input trajectories keep other robot branches at their observed joints;
+they cannot certify an uninspected moving arm. Convex inputs use the native
+convex route. Explicit closed triangle inputs preserve nonconvex topology and
+use triangle/BVH pairs for the whole query, including containment. Open solids,
+implicit triangle/primitive mixtures, precision or buffer exhaustion are
+unsupported. Motion queries use the robot device, with CUDA graph replay on CUDA.
+Free queries recapture model, shape and pose inputs each call; only equal
+geometry/filter declarations reuse native buffers. Snapshots build geometry once;
+only owned transforms change, and close releases native resources. No physics step or backend fallback occurs.

@@ -69,6 +69,60 @@ def test_newton_self_interarm_payload_and_phase_contacts():
         checker.check({"left": pose(0)})
 
 
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_explicit_triangle_query_preserves_a_nonconvex_gap(device):
+    """A block in a U-shaped gap must not collide with an implicit convex hull."""
+    import trimesh
+
+    pytest.importorskip("newton")
+    pieces = []
+    for size, center in (
+        ((0.2, 1.0, 0.4), (-0.4, 0.0, 0.0)),
+        ((0.2, 1.0, 0.4), (0.4, 0.0, 0.0)),
+        ((0.6, 0.2, 0.4), (0.0, -0.4, 0.0)),
+    ):
+        mesh = trimesh.creation.box(extents=size)
+        mesh.apply_translation(center)
+        pieces.append(mesh)
+    mesh = trimesh.util.concatenate(pieces)
+    body = CollisionBody(
+        "u",
+        "u",
+        "mesh",
+        vertices=tuple(map(tuple, mesh.vertices)),
+        triangles=tuple(map(tuple, mesh.faces)),
+    )
+    block = trimesh.creation.box(extents=(0.1, 0.1, 0.1))
+    cube = CollisionBody(
+        "cube",
+        "cube",
+        "convex",
+        robot=True,
+        vertices=tuple(map(tuple, block.vertices)),
+        triangles=tuple(map(tuple, block.faces)),
+    )
+    with pytest.raises(UnsupportedFeasibilityError, match="Triangle meshes"):
+        NewtonCollisionChecker((body, cube))
+    with pytest.raises(UnsupportedFeasibilityError, match="explicit triangle geometry"):
+        NewtonCollisionChecker(
+            (body, CollisionBody("primitive", "primitive", "box", (0.1, 0.1, 0.1))),
+            allow_triangle_meshes=True,
+        )
+    checker = NewtonCollisionChecker(
+        (body, cube), allow_triangle_meshes=True, device=device
+    )
+    try:
+        assert checker.check({"u": np.eye(4), "cube": np.eye(4)})[0].status == "passed"
+        moved = np.eye(4)
+        moved[0, 3] = 0.4
+        assert checker.check({"u": np.eye(4), "cube": moved})[0].status == "failed"
+        assert checker.last_pairs == (("u", "cube"),)
+    finally:
+        checker.close()
+
+
 def test_phase_branches_must_connect_and_dual_targets_stay_synchronized():
     identity = np.eye(4).tolist()
     mode = TaskOperationMode(

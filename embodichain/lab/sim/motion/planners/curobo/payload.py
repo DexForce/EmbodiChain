@@ -51,6 +51,8 @@ class CuroboPayload:
         spheres: Already-scaled object-local centers/radii, shape ``(N, 4)``,
             with positive radii.
         object_pose: Same-observation world pose, shape ``(1, 4, 4)``.
+        touch_links: Explicit collision links allowed to contact this payload.
+            Other robot links retain native self-collision checks.
 
     Geometry is caller-provided input, not a native-cooked or CCD certificate.
     This value owns copies and carries no robot or simulation handle.
@@ -60,8 +62,18 @@ class CuroboPayload:
     control_part: str
     spheres: torch.Tensor
     object_pose: torch.Tensor
+    touch_links: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        if (
+            type(self.touch_links) is not tuple
+            or len(set(self.touch_links)) != len(self.touch_links)
+            or any(
+                type(name) is not str or not name or name != name.strip()
+                for name in self.touch_links
+            )
+        ):
+            raise ValueError("Payload touch links require unique exact identifiers.")
         for name in ("object_id", "control_part"):
             value = getattr(self, name)
             if type(value) is not str or not value or value != value.strip():
@@ -175,6 +187,21 @@ def _query_robot_config(
     ):
         raise ValueError("The reserved payload link already exists in the robot model.")
     parent = kinematics["tool_frames"][0]
+    known = set(kinematics["collision_link_names"])
+    if set(payload.touch_links) - known:
+        raise ValueError("Payload touch links name unknown robot collision geometry.")
+    # Contact permissions belong to the declared holder, never all robot links.
+    # A collidable attachment parent is mechanically adjacent to its payload.
+    touched = tuple(
+        dict.fromkeys((*payload.touch_links, *((parent,) if parent in known else ())))
+    )
+    ignored = deepcopy(kinematics.get("self_collision_ignore") or {})
+    if touched:
+        ignored[_PAYLOAD_LINK] = list(touched)
+    kinematics["self_collision_ignore"] = ignored
+    buffers = dict(kinematics.get("self_collision_buffer") or {})
+    buffers[_PAYLOAD_LINK] = 0.0
+    kinematics["self_collision_buffer"] = buffers
     kinematics["extra_links"] = dict(kinematics.get("extra_links") or {})
     kinematics["extra_links"][_PAYLOAD_LINK] = {
         "link_name": _PAYLOAD_LINK,
