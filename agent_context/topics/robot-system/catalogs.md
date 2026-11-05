@@ -47,15 +47,11 @@ providers append separate left/right hand components. Robotiq observed-aperture
 conversion remains tool-owned and does not select a robot class. PGI fixtures
 remain example/benchmark-owned. Root public class exports remain available.
 
-`TianjiMarvinRobotiq140` selects the independent full-body Robotiq assembly in
-`tianji/marvin/robotiq.py`. Its raw arm chains use the same generated URDF as
-simulation; six-joint hand control includes five mimic followers per side.
-The `tianji_marvin_robotiq_arg2f_140` component owns explicit home, Pytorch
-sampling/tolerance and armature calibration. The corresponding Franka and UR10
-Robotiq components retain their explicit asset assembly and TCP declarations.
-All three declare hand topology and GraspKit search settings in their existing
-skill profiles. Scene placement and operation-specific physical overrides
-remain deployment inputs. Standard Marvin presets retain their own ownership.
+The `dual_franka_robotiq_arg2f_140` and `dual_ur10_robotiq_arg2f_140`
+embodiment components retain their explicit arm/tool assembly, complete hand
+joints and calibrated TCPs. Their skill profiles declare hand topology and
+GraspKit search settings. Scene placement and operation-specific physical
+overrides remain deployment inputs.
 
 `resolve_robot_cfg(..., variant=...)` selects a declared profile's defaults
 between catalog defaults and caller overrides. Omitting the variant keeps

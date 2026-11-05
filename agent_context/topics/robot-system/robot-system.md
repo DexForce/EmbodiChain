@@ -13,7 +13,6 @@
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
 | Bare Franka arm selection and explicit tool assembly | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
-| Full-body Marvin with fixed Robotiq wrists | `extensions/embodichain_robots/tianji/marvin/robotiq.py`; explicit Robotiq embodiment owns sampling/home/armature |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Independent Revo1 hand or shared hand asset names | `extensions/embodichain_robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
@@ -194,11 +193,18 @@ hand-root and pad links, joint commands and sampling bounds. Control names never
 imply capabilities. Commands cover every moving hand-subtree joint, including
 mimic followers, in the resolved control-part order. Named full-articulation FK
 uses the first measured row as its reference posture without changing robot state.
+The private stroke sampler is shared with native cooked-shape capture; native
+consumers supply their explicit same-observation state and retain their original
+link order and inverse arithmetic. URDF surface population and native 65-sample
+qualification budgets remain separately selected by their callers.
 The hand root and solver end link must connect through fixed URDF joints;
 fixed virtual TCP links may lie upstream or downstream. A stationary opposite-arm
 TCP is not a valid hand reference. The declared TCP must also remain fixed
 throughout hand actuation. Model-specific commands and TCP
 calibration remain in concrete robot/embodiment configuration.
+`ordered_pad_line_world` validates the same explicit topology and reads only the
+two live pad poses in declaration order; use it for a jaw line without sampled
+FK or surface capture. This order is distinct from the sampled surfaces' TCP-X order.
 The [configured hand declaration](../task-programs/configuration.md) resolves
 those settings through the existing runtime-services owner; it does not create
 a second robot registry or infer topology from model/control-part names.
@@ -208,6 +214,11 @@ Retain that provider with its owning Robot/environment adapter across bridge,
 engine and episode resets while the model, calibration and commands are unchanged.
 Single-arm facade calls never trigger capture. A different Robot needs its own
 providers; model names are not cache identities. GraspKit receives explicit
+
+providers; model names are not cache identities. The provider's `clear_cache()`
+releases asset-query state without reading the Robot or recapturing its hand
+geometry; it does not replace rebuilding after calibration/command changes.
+GraspKit receives explicit
 sampled data and numeric queries, while scene observation and cargo membership
 remain caller-owned. The source-equivalence and lifetime coverage lives in
 `tests/sim/utility/test_grasp_geometry.py`.

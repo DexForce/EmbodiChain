@@ -14,7 +14,9 @@ semantic scene graph, generation model client or task lifecycle.
 | UID-based support geometry and group placement | `embodichain/lab/sim/scene/geometry.py`, `placement.py` |
 | Fixed-orientation XY constraints and solution status | `embodichain/lab/sim/scene/layout.py` |
 | Existing binding selection and cloned poses | `embodichain/lab/sim/scene/query.py` |
+| Exact native planar footprint observations | `embodichain/lab/sim/scene/planar_observation.py` |
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
+| Exact native hand/rigid shape and physical-offset capture | `embodichain/lab/sim/scene/native_hand.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
@@ -23,9 +25,46 @@ semantic scene graph, generation model client or task lifecycle.
 | Existing-entity expansion proposals and host integration | [Scene expansion](../scene-expansion/scene-expansion.md) |
 
 The package facade resolves services lazily. Expansion has its own
-`scene.expansion` namespace. `compute.geometry` takes Torch tensors, never entity UIDs,
-polygon objects, simulation or GenSim models. Scene CPU strategies own support
+`scene.expansion` namespace. `compute.geometry` takes numerical geometry, never entity UIDs,
+simulation or GenSim models. Its `landing.py` CPU routines additionally consume
+Trimesh meshes and Shapely polygons for triangle-union floor and silhouette measurements.
+Scene CPU strategies own support
 selection, polygon search, greedy packing and SciPy SLSQP optimization.
+
+`native_hand.py` captures cooked convex/box geometry and explicitly requested
+rest/contact offsets for the exact simulation-owned Robot and native rigid UIDs.
+It requires Default/B1/env0, checks named FK against native frames, and validates
+original owners before subsequent rigid reads. Strict shape conversion and offset
+reads belong to `objects/backends/collision.py`; closing FK reuses
+[hand geometry](../robot-system/robot-system.md#sampled-hand-geometry).
+It creates no collision query and selects no grasp policy. Geometric qualification
+belongs to [GraspKit](../motion-planning/motion-planning.md); query composition and
+cleanup belong to `ActionPlanningServices` in [Atomic Actions](../atomic-actions/atomic-actions.md).
+Captured shapes and nominal queries do not establish physical acquisition/release.
+
+`NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
+recreate it after replacing either object or changing its model/scale. Queries
+take explicit observed poses and return footprint containment, area and vertical
+gap, without accepting a task or inferring contact support. Exact silhouette mode
+retains concavities and holes; convex-hull mode remains explicit. Acquisition
+errors remain unavailable evidence. Callers own thresholds, invocation/episode
+association, observation timing and evidence publication.
+
+`mesh_snapshot.py` captures scaled rigid visual vertices and ordered articulation
+collision-input components from explicit UID/link mappings. It reads no live
+poses and keeps unavailable geometry distinct from usable components. Neutral
+planner roles are metadata: `none` does not remove a selected physical input.
+Connected nonconvex inputs remain unavailable in this capture path. The separate
+`collision_sources.py` link-box adapter retains its conservative component AABB
+policy; it is not a native cooked-shape/contact oracle.
+`snapshot_collision_sources()` combines common shape descriptors and explicitly
+supplied same-observation poses through `world_to_frame`. Batched inputs require
+matching pose/transform batch axes and equal projected obstacle poses; otherwise
+the helper rejects them rather than selecting row zero. It returns B=1 providers
+for the declared shared geometry/world, not per-environment world providers.
+It preserves topology/shape order,
+applies no second scale, and supplies owned providers to existing planner APIs.
+See [collision worlds](../motion-planning/collision-worlds.md) for cuRobo query lifetimes.
 
 ## Construction and proposal flow
 

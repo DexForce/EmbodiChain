@@ -7,10 +7,56 @@ They consume existing entity configurations and UIDs; Spawn and
 ``SimulationManager`` remain the owners of native resources and topology.
 
 Public poses are arena-local Z-up transforms in metres. Seven-component
-physical poses use position followed by ``xyzw`` quaternion. Array geometry
-already includes asset scale and orientation. GenSim adapts its Y-up editing
+physical poses use position followed by ``xyzw`` quaternion. Layout array geometry
+already includes asset scale and orientation. Input-mesh snapshots retain scaled
+owning-frame vertices until their separately observed poses are projected.
+GenSim adapts its Y-up editing
 model at its existing boundary; shared services never load prompts or assets
 from generation directories.
+
+Observed geometry and collision sources
+---------------------------------------
+
+Geometry capture accepts plain logical/native UID maps and explicit link bindings.
+Rigid visual envelopes and articulation collision-input components remain distinct,
+with ordered topology, neutral role metadata and explicit unavailable results.
+The capture reads no live poses. ``NONE`` planner metadata does not remove a
+selected collider input. These are materialization/input envelopes, not native
+cooked-shape or contact evidence.
+
+``snapshot_collision_sources`` projects explicitly supplied shape/pose values
+through one ``world_to_frame`` transform. Its owned providers reuse
+``CollisionShapeDesc`` and can be passed to ``CuroboWorldCfg.rigid_objects``.
+The link-box reader preserves separate connected components and applies scale once.
+
+.. currentmodule:: embodichain.lab.sim.scene
+
+.. autosummary::
+
+   SceneMeshComponent
+   SceneMeshSnapshot
+   capture_scene_meshes
+   iter_scene_components
+   CollisionObjectSnapshot
+   read_articulation_link_boxes
+   snapshot_collision_sources
+
+.. autoclass:: SceneMeshComponent
+   :members:
+
+.. autoclass:: SceneMeshSnapshot
+   :members:
+
+.. autoclass:: CollisionObjectSnapshot
+   :members:
+
+.. autofunction:: capture_scene_meshes
+
+.. autofunction:: iter_scene_components
+
+.. autofunction:: read_articulation_link_boxes
+
+.. autofunction:: snapshot_collision_sources
 
 Robot-aware workspace proposals
 ------------------------------
@@ -351,6 +397,34 @@ A report passes only when its nonempty required checks all pass. Fixed-step sett
    :members:
    :imported-members:
 
+embodichain.lab.sim.scene.native_hand
+--------------------------------------
+
+These read-only services capture Default cooked convex/box shapes, native
+rest/contact offsets and the configured hand stroke through named FK. They reuse
+object-backend physical geometry/offset capture and the existing hand-stroke sampler. Capture
+requires the exact simulation-owned Robot, registered native UIDs and B1/env0;
+subsequent rigid reads reject replaced owners. No query, grasp policy or
+experiment revision is selected here.
+
+GraspKit owns discrete geometric qualification through an injected collision
+backend. ``ActionPlanningServices`` binds an explicitly supplied geometric policy
+and owns query lifetimes. Captured geometry does not establish physical acquisition or release.
+
+.. currentmodule:: embodichain.lab.sim.scene.native_hand
+
+.. autosummary::
+   :nosignatures:
+
+   NativeHandGeometry
+   capture_native_hand_geometry
+   capture_native_rigid_geometry
+   capture_native_rigid_obstacles
+
+.. automodule:: embodichain.lab.sim.scene.native_hand
+   :members:
+
+
 Related integrations
 --------------------
 
@@ -379,3 +453,20 @@ robot installation search, independent validation and the configured entry point
    :maxdepth: 1
 
    embodichain.lab.sim.scene.feasibility
+
+Native planar observations
+--------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.planar_observation
+
+Capture scaled native geometry using exact object UIDs and measure supplied
+observation poses. Object replacement invalidates the observer. Unsupported or
+missing geometry raises an acquisition error; measured footprint containment
+is not evidence of contact support, release, stability or task completion.
+
+.. autosummary::
+
+   NativePlanarPlacement
+
+.. autoclass:: NativePlanarPlacement
+   :members:

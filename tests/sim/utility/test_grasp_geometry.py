@@ -202,7 +202,42 @@ def test_opposite_arm_tcp_is_rejected_even_when_it_is_stationary(tmp_path):
 
     with pytest.raises(ValueError, match="fixed URDF joints"):
         capture.build_parallel_jaw_hand_geometry(robot, cfg=cfg)
+    robot.get_link_pose = Mock(
+        side_effect=AssertionError("Do not read unrelated pads.")
+    )
+    with pytest.raises(ValueError, match="fixed URDF joints"):
+        capture.ordered_pad_line_world(robot, cfg=cfg)
+    robot.get_link_pose.assert_not_called()
     assert robot.reads == 0 and robot.calls == []
+
+
+def test_ordered_pad_line_reads_only_declared_poses_without_sampling(
+    tmp_path, monkeypatch
+):
+    robot, cfg = _case(tmp_path)
+    first, second = torch.eye(4).repeat(2, 1, 1), torch.eye(4).repeat(2, 1, 1)
+    first[:, :3, 3] = torch.tensor([[1, 2, 3], [2, 0, -1]])
+    second[:, :3, 3] = torch.tensor([[4, 0, 4], [1, 5, 1]])
+    poses = dict(zip(cfg.pad_link_names, (first, second), strict=True))
+    robot.get_link_pose = Mock(side_effect=lambda name, **kwargs: poses[name])
+    robot.compute_fk = Mock(
+        side_effect=AssertionError("Pad-line reading needs no FK grid.")
+    )
+    surfaces = Mock(
+        side_effect=AssertionError("Pad-line reading needs no mesh samples.")
+    )
+    monkeypatch.setattr(capture, "sample_urdf_collision_surfaces", surfaces)
+    expected = torch.tensor([[3, -2, 1], [-1, 5, 2]], dtype=torch.float32)
+    line = capture.ordered_pad_line_world(robot, cfg=cfg)
+    torch.testing.assert_close(line, expected)
+    line.zero_()
+    cfg.pad_link_names = tuple(reversed(cfg.pad_link_names))
+    torch.testing.assert_close(
+        capture.ordered_pad_line_world(robot, cfg=cfg), -expected
+    )
+    assert robot.reads == 0
+    robot.compute_fk.assert_not_called()
+    surfaces.assert_not_called()
 
 
 def test_moving_finger_tcp_is_rejected_before_surface_capture(tmp_path, monkeypatch):
@@ -262,6 +297,8 @@ def test_single_arm_does_not_capture_and_geometry_reuses_the_same_environment_ow
             queries.append(kwargs)
             return [None]
 
+        clear_cache = Mock()
+
     monkeypatch.setattr(capture, "CoordinatedGraspSampler", Sampler)
     robot, cfg = _case(tmp_path)
     left, right = _delegate(), _delegate()
@@ -270,6 +307,8 @@ def test_single_arm_does_not_capture_and_geometry_reuses_the_same_environment_ow
     provider = capture.RobotCoordinatedGraspProvider(
         left, right, left_capture, right_capture, cfg=_paired_cfg()
     )
+    provider.clear_cache()
+    Sampler.clear_cache.assert_not_called()
     facade = CoordinatedGraspPoseGenerator(left, provider)
     single = [(torch.eye(4)[None], torch.zeros(1))]
     left.get_valid_grasp_poses = Mock(return_value=single)
@@ -287,6 +326,9 @@ def test_single_arm_does_not_capture_and_geometry_reuses_the_same_environment_ow
     assert second_facade.get_dual_arm_valid_grasp_poses(**_query(None)) == [None]
     assert robot.reads == 2 and len(robot.calls) == 2 and len(constructed) == 1
     assert queries[0]["cargo_bounds"] is bounds and queries[1]["cargo_bounds"] is None
+    provider.clear_cache()
+    Sampler.clear_cache.assert_called_once_with()
+    assert robot.reads == 2 and len(robot.calls) == 2
 
     other = _Robot(Path(robot.cfg.fpath))
     other_left = capture.RobotHandGeometryProvider(other, cfg=cfg)

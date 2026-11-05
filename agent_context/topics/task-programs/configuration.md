@@ -36,6 +36,9 @@ selected effect authority and validators, not on the presence of a label.
 
 Measured segment validators can check lift from the segment's incoming pose,
 world-axis position relative to another live object, and object uprightness.
+`object_near_relative_target` compares an object's measured position against a
+fresh reference position plus a declared world-axis displacement; it does not
+reuse the reference pose captured for planning.
 They belong to the program's acceptance contract; a projected call completing
 does not replace these measurements. The Gym tutorial at
 `scripts/tutorials/gym/simple_task_program.py` shows Cartesian end-effector
@@ -72,6 +75,9 @@ fingerprint covers scene/profile declarations, the Semantic Call catalog,
 settling presets, grounders, endpoint transports, evidence and safety
 factories, and registered-call lowerers. Adapter creation calls
 `assert_unchanged()` and revalidates all live bindings.
+`fingerprint_payload()` returns an independent, revalidated JSON declaration.
+Reconstructing a registration with `dataclasses.replace` does not duplicate its
+scene-derived standard grounders; duplicate custom grounders remain errors.
 
 Configured environments use runnable `task.<embodiment>.yaml` deployments with
 three typed selections: `environment.component`,
@@ -148,6 +154,16 @@ preparation and pouring path from the held transform. Keep these geometry
 declarations in the integration and timing in the execution policy, rather
 than placing a precomputed bottle world pose in the program. Omitting `target`
 retains the original internal-axis pouring behavior.
+
+The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
+relative Place and coordinated transport. Their declarations in
+`integrations/_configured_services.py` select exact Atomic Skill descriptors;
+the closed decoder in `configured.py` owns accepted options and route fields.
+Relative Place resolves a live reference plus world-axis displacement and
+requires the verified held-object transform. Coordinated transport must select
+the real primitive's release mode. Do not install frontend skill replacements.
+Container affordances may declare a local-z release clearance while retaining
+their original semantic target for final acceptance.
 
 `motion.plan_opts.kind: trapezoidal` selects typed backend options for
 `stop_at_waypoints`, `blend_tolerance`, and `collinearity_tolerance`. It requires

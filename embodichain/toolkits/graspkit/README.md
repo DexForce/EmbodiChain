@@ -73,6 +73,37 @@ collision, swept paths or physical grasp success.
 These are contact-pair eligibility bounds. The actual URDF/open-state geometry
 owns collision checking.
 
+## Explicit contact refinement
+
+The ordinary generator continues to check its fixed pre-grasp collision geometry.
+`get_dual_arm_grasp_proposals()` is an explicit alternative for callers that own
+a later qualification stage: it returns angle/NMS/ranking-qualified proposals,
+without target/ground collision or closing-contact qualification.
+`CoordinatedGraspSampler` composes these proposals with
+`HandContactChecker.refine()`, preserving candidate order and population bounds.
+Its left/right refiners share one target-surface query per mesh identity/version,
+while retaining their own geometry and diagnostics. Model geometry sampling and
+runtime ownership remain with Lab.
+
+An explicit proposal `role="left"` or `role="right"` returns that side only.
+Both sides consume their original eligibility-dependent direction draws, keeping
+the chosen population and final Torch RNG unchanged; unrequested pose building,
+NMS and ranking are skipped. Omission retains the ordinary two-sided API.
+Raw and validated backends share read-only mesh/antipodal buffers while retaining
+separate collision state, including under the first-query refresh policy.
+
+Changing either mesh tensor retires its previous version's cached queries,
+refiners and backends, including after storage/shape changes. Distinct tensor
+pairs remain cached until `clear_cache()` on the sampler or
+`AntipodalGraspPoseGenerator`. Hosts
+should clear between unrelated asset cohorts. Lab's paired provider exposes the
+same cleanup without recapturing hand geometry; changing model calibration or
+commands still requires rebuilding the provider.
+
+Fixed-opening and closing-stroke geometry share URDF mesh/box decoding and
+collision-origin handling. Their barycentric and subdivision sampling policies
+remain separate, preserving their existing samples and provenance.
+
 ## Versioned geometry sources
 
 The source archives are the official assets selected by

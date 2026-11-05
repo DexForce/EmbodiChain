@@ -9,17 +9,16 @@
 [![Version](https://img.shields.io/github/v/release/DexForce/EmbodiChain?style=for-the-badge&label=version)](https://github.com/DexForce/EmbodiChain/releases)
 ---
 
-EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It streamlines research and development by unifying high-performance simulation, automated generative data pipelines, modular model architectures, and efficient training workflows. This integration enables rapid experimentation, seamless deployment of intelligent agents, and effective Sim2Real transfer for real-world robotic systems.
-
-Official task and robot modules live under [extensions/](extensions/README.md)
-and ship with the main distribution. Their Python imports remain
-`embodichain_tasks` and `embodichain_robots`.
+EmbodiChain is an end-to-end, GPU-accelerated framework for embodied AI. It brings
+robot simulation, generative data pipelines, and learning workflows together
+so you can build environments, collect demonstrations, train policies, and
+evaluate them in simulation.
 
 > [!NOTE]
-> EmbodiChain is in Alpha and under active development:
-> * More features will be continually added in the coming months. You can find more details in the [roadmap](https://dexforce.github.io/EmbodiChain/main/resources/roadmap.html).
-> * Since this is an early release, we welcome feedback (bug reports, feature requests, etc.) via GitHub Issues.
-
+> EmbodiChain is in Alpha and under active development. See the
+> [roadmap](https://dexforce.github.io/EmbodiChain/main/resources/roadmap.html)
+> for planned work, and share bug reports or feature requests through
+> [GitHub Issues](https://github.com/DexForce/EmbodiChain/issues).
 
 ## Key Features
 
@@ -37,88 +36,66 @@ The figure below illustrates the overall architecture of EmbodiChain:
 
 Explore EmbodiChain's module relationships with the [interactive architecture visualization](https://dexforce.github.io/EmbodiChain/main/overview/architecture/index.html#).
 
-
 ## Getting Started
 
-To get started with EmbodiChain, follow these steps:
+1. **Set up your environment** with the [Installation Guide](https://dexforce.github.io/EmbodiChain/main/quick_start/install.html), including Docker, local installation, Python compatibility, and optional dependencies.
+2. **Build your first simulation** with the [Quick Start Tutorial](https://dexforce.github.io/EmbodiChain/main/tutorial/index.html).
+3. **Explore runnable workflows** in the [examples](examples/README.md), or consult the [API Reference](https://dexforce.github.io/EmbodiChain/main/api_reference/index.html) to build your own.
 
-- [Installation Guide](https://dexforce.github.io/EmbodiChain/main/quick_start/install.html)
-- [Quick Start Tutorial](https://dexforce.github.io/EmbodiChain/main/tutorial/index.html)
-- [API Reference](https://dexforce.github.io/EmbodiChain/main/api_reference/index.html)
-
-### Python and LeRobot dependencies
-
-Installation selects the LeRobot SDK by Python version:
-
-| Python | LeRobot | Hugging Face Hub | Torch / torchvision / TorchCodec | TensorDict |
-| --- | --- | --- | --- | --- |
-| 3.10 / 3.11 | 0.4.4 | >=0.35.3, <0.36 | 2.7.x / 0.22.x / 0.5.x | >=0.13, <0.15 |
-| 3.12 | 0.6.1, including training/dataset dependencies | >=1.6, <2 | 2.11.x / 0.26.x / >=0.11.1, <0.12 | >=0.15.3, <0.16 |
-
-Torch remains a direct dependency because the framework uses it independently
-of LeRobot. TorchCodec must match the Torch binary interface; LeRobot's wider
-dependency ranges alone do not enforce that pairing. CI pins exact patch
-versions within each supported profile; package metadata allows patch updates
-within those version lines. Further qualification is tracked in
-[#883](https://github.com/DexForce/EmbodiChain/issues/883).
-Select matching CPU or CUDA wheels when installing the Torch stack. For the
-Python 3.12 GPU profile, select the CUDA 12.8 wheels explicitly when using the
-existing CUDA 12.8 runtime; PyPI's default Torch wheel may select CUDA 13:
+After installation, discover the available tasks, robots, and examples:
 
 ```bash
-python -m pip install torch==2.11.0 torchvision==0.26.0 torchcodec==0.11.1 \
-  --index-url https://download.pytorch.org/whl/cu128
+embodichain list-task
+embodichain list-robot
+embodichain run-example --list
 ```
-
-The SDK matrix CI checks a clean CPU installation, recording/loading, video
-decoding, and an official ACT update/checkpoint/reset. GPU simulation and full policy learning acceptance
-are separate checks. Python versions above 3.12 select the newer SDK but are not
-part of this validation matrix.
-
-Recordings retain the existing task/subtask table and depth-sidecar schema on
-both routes. LeRobot 0.6.1 exposes `subtask_index` but does not automatically
-resolve `meta/subtasks.parquet`; the EmbodiChain preview resolves it explicitly.
-Use the [standalone exporter](tools/lerobot_export/README.md) for native 0.6.1
-persistent-language annotations and depth features. The [ACT example](examples/learning/act/README.md) uses the official LeRobot
-0.6.1 trainer and policy on Python 3.12. Historical custom ACT checkpoints require
-retraining.
-
-### Container environments
-
-The public container provides the complete Python 3.12 runtime, including
-GenSim, cuRobo and ONNX CUDA deployment. The internal container additionally
-provides a complete Python 3.11 environment. Both use an isolated Blender
-runtime to preserve Python/NumPy compatibility.
-
-On a Linux amd64 host with NVIDIA Container Toolkit installed:
-
-```bash
-docker pull dexforce/embodichain:ubuntu22.04-cuda12.8
-docker run --rm --gpus all -it --shm-size 8g \
-  -v "$PWD":/workspace --workdir /workspace \
-  dexforce/embodichain:ubuntu22.04-cuda12.8 bash
-```
-
-The public `ubuntu22.04-cuda12.8` and `ubuntu22.04-cuda12.8-py312` tags
-provide the same Python 3.12 image. Internal users can select `py311` or `py312`
-in `192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312`.
-See [container installation and environments](docker/README.md) for host
-requirements, environment selection, source development and dependency locks.
 
 ### Task Environments
 
-Official task environments are included in the main `embodichain` installation.
 Use `embodichain list-task` to discover tasks and `embodichain run-task` to launch
 one with its configuration. See [Supported Tasks](https://dexforce.github.io/EmbodiChain/main/resources/task/index.html)
 for available tasks, runnable configurations, and task authoring guides.
 
-For external training, see the optional
-[RLinf integration](https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html)
-and the [official RLinf EmbodiChain recipe](https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/embodichain.html).
+### Third-party Training Frameworks
+
+EmbodiChain supports **RLinf** and **LeRobot** alongside its native trainers.
+EmbodiChain owns simulation, task configuration and demonstration collection;
+the selected framework owns its training runtime and checkpoints.
+
+| Workflow | Entry point |
+| --- | --- |
+| RLinf: train against EmbodiChain Gym environments; the upstream example uses CartPole PPO | [RLinf integration](https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html) |
+| LeRobot: collect demonstrations, train official ACT and evaluate in simulation | [LeRobot integration](https://dexforce.github.io/EmbodiChain/main/guides/lerobot.html) · [Runnable ACT example](examples/learning/act/README.md) |
+| Export finalized recordings for LeRobot 0.6.1 consumers | [Dataset export](https://dexforce.github.io/EmbodiChain/main/guides/lerobot_export.html) |
+
+See [training framework selection](https://dexforce.github.io/EmbodiChain/main/guides/training_frameworks.html)
+for dependency profiles, ownership and compatibility boundaries.
+
+## Official Extensions
+
+EmbodiChain bundles four extension modules alongside the core framework. They
+provide reusable tasks, robot presets, models, and evaluation workflows, and
+ship in the main `embodichain` distribution with the same version.
+
+| Module | What it provides | Explore |
+| --- | --- | --- |
+| `embodichain_tasks` | Official task environments, runnable deployments, and reusable scene and embodiment components for manipulation, locomotion, and classic control. | [Task configurations and authoring](extensions/embodichain_tasks/README.md) |
+| `embodichain_robots` | Concrete robot presets, model assets, and calibrated defaults, organized by vendor and model. | [Robot catalog and configuration](extensions/embodichain_robots/README.md) |
+| `embodichain_models` | Policy models for action prediction, and world models / neural dynamics models for predicting future states and environment dynamics. | [Model families and workflows](extensions/embodichain_models/README.md) |
+| `embodichain_benchmarks` | Motion planning and Atomic Skill evaluation suites with scenarios, planner adapters, scoring, and reports. | [Benchmark suites and usage](extensions/embodichain_benchmarks/motion_generation/README.md) |
+
+The core provides shared simulation, data, and learning infrastructure; extensions
+build on those APIs for specific robots, tasks, models, and evaluations. Import
+modules by their `embodichain_*` names: `extensions/` is their source directory,
+not a Python import prefix. Model weights, datasets, and optional runtime
+dependencies are configured through each workflow's guide.
+
+See the [extension development guide](extensions/README.md) for package layout
+and how to add a bundled extension.
 
 ## Contribution Guide
 
-We welcome contributions! Please see the [CONTRIBUTING.md](https://github.com/DexForce/EmbodiChain/blob/main/CONTRIBUTING.md) file in this repository for guidelines on how to get started.
+We welcome contributions! Please see the [contribution guide](CONTRIBUTING.md) for guidelines on how to get started.
 
 ## Publications
 

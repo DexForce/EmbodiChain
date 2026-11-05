@@ -24,18 +24,12 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import numpy as np
-from scipy.spatial.transform import Rotation
 import torch
 import trimesh
 
+from ._urdf_geometry import _load_collision_geometry
+
 __all__ = ["sample_urdf_collision_surfaces"]
-
-
-def _vector(value: str, *, field: str) -> np.ndarray:
-    result = np.fromstring(value, sep=" ")
-    if result.shape != (3,) or not np.isfinite(result).all():
-        raise ValueError(f"{field} must contain three finite values.")
-    return result
 
 
 def _link_surface(
@@ -47,34 +41,10 @@ def _link_surface(
 ) -> torch.Tensor:
     clouds = []
     for collision in link.findall("collision"):
-        mesh = collision.find("geometry/mesh")
-        box = collision.find("geometry/box")
-        if mesh is not None:
-            shape = trimesh.load(
-                directory / Path(mesh.attrib["filename"]),
-                force="mesh",
-                process=False,
-            )
-            shape.vertices *= _vector(mesh.get("scale", "1 1 1"), field="mesh scale")
-        elif box is not None:
-            size = _vector(box.attrib["size"], field="collision box size")
-            if (size <= 0).any():
-                raise ValueError("Collision box dimensions must be positive.")
-            shape = trimesh.creation.box(size)
-        else:
-            raise ValueError(
-                "Selected collision surfaces require URDF meshes or boxes."
-            )
-        pose = np.eye(4)
-        origin = collision.find("origin")
-        if origin is not None:
-            pose[:3, :3] = Rotation.from_euler(
-                "xyz", _vector(origin.get("rpy", "0 0 0"), field="collision rpy")
-            ).as_matrix()
-            pose[:3, 3] = _vector(origin.get("xyz", "0 0 0"), field="collision xyz")
+        vertices, faces, pose, _ = _load_collision_geometry(collision, directory)
         vertices, _ = trimesh.remesh.subdivide_to_size(
-            shape.vertices,
-            shape.faces,
+            vertices,
+            faces,
             max_edge=max_edge,
             max_iter=max_subdivisions,
         )

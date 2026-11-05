@@ -1,0 +1,488 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "source_sha256": "e79a46889d465d97d05102c37b21c114816344474932177e9e85de9e86d65116",
+  "poses": [
+    [
+      [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      [
+        [
+          1.0,
+          -0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    ],
+    [
+      [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      [
+        [
+          0.9689124226570129,
+          -0.24740396440029144,
+          0.0,
+          0.10000000149011612
+        ],
+        [
+          0.24740396440029144,
+          0.9689124226570129,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    ],
+    [
+      [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      [
+        [
+          0.8775825500488281,
+          -0.4794255495071411,
+          0.0,
+          0.20000000298023224
+        ],
+        [
+          0.4794255495071411,
+          0.8775825500488281,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    ],
+    [
+      [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      [
+        [
+          0.7316888570785522,
+          -0.681638777256012,
+          0.0,
+          0.30000001192092896
+        ],
+        [
+          0.681638777256012,
+          0.7316888570785522,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    ]
+  ],
+  "commands": [
+    [
+      [
+        1.0,
+        2.0
+      ],
+      [
+        3.0,
+        4.0
+      ]
+    ],
+    [
+      [
+        1.0,
+        2.0
+      ],
+      [
+        3.0,
+        4.0
+      ]
+    ],
+    [
+      [
+        1.0,
+        2.0
+      ],
+      [
+        3.0,
+        4.0
+      ]
+    ]
+  ],
+  "trace": [
+    {
+      "kind": "wait_stable",
+      "entity_id": "cube",
+      "preset": "contained_rigid_object",
+      "measurement_source": "pose_delta",
+      "source_path": [
+        "program",
+        "post",
+        0
+      ],
+      "active_mask": [
+        true,
+        true
+      ],
+      "status": "running",
+      "thresholds": {
+        "linear_velocity": 0.03,
+        "angular_velocity": 0.2,
+        "min_steps": 0,
+        "max_steps": 3,
+        "check_interval_steps": 1,
+        "required_stable_checks": 2
+      },
+      "state": {
+        "elapsed_steps": 0,
+        "observation_count": 1,
+        "env_ids": [
+          0,
+          1
+        ],
+        "active_mask": [
+          true,
+          true
+        ],
+        "stable_counts": [
+          0,
+          0
+        ],
+        "settled_mask": [
+          false,
+          false
+        ],
+        "timeout_mask": [
+          false,
+          false
+        ],
+        "checked": true,
+        "max_linear_speed": [
+          null,
+          null
+        ],
+        "max_angular_speed": [
+          null,
+          null
+        ]
+      }
+    },
+    {
+      "kind": "wait_stable",
+      "entity_id": "cube",
+      "preset": "contained_rigid_object",
+      "measurement_source": "pose_delta",
+      "source_path": [
+        "program",
+        "post",
+        0
+      ],
+      "active_mask": [
+        true,
+        true
+      ],
+      "status": "running",
+      "thresholds": {
+        "linear_velocity": 0.03,
+        "angular_velocity": 0.2,
+        "min_steps": 0,
+        "max_steps": 3,
+        "check_interval_steps": 1,
+        "required_stable_checks": 2
+      },
+      "state": {
+        "elapsed_steps": 1,
+        "observation_count": 2,
+        "env_ids": [
+          0,
+          1
+        ],
+        "active_mask": [
+          true,
+          true
+        ],
+        "stable_counts": [
+          1,
+          0
+        ],
+        "settled_mask": [
+          false,
+          false
+        ],
+        "timeout_mask": [
+          false,
+          false
+        ],
+        "checked": true,
+        "max_linear_speed": [
+          0.0,
+          5.0
+        ],
+        "max_angular_speed": [
+          0.0,
+          12.500012397766113
+        ]
+      }
+    },
+    {
+      "kind": "wait_stable",
+      "entity_id": "cube",
+      "preset": "contained_rigid_object",
+      "measurement_source": "pose_delta",
+      "source_path": [
+        "program",
+        "post",
+        0
+      ],
+      "active_mask": [
+        true,
+        true
+      ],
+      "status": "running",
+      "thresholds": {
+        "linear_velocity": 0.03,
+        "angular_velocity": 0.2,
+        "min_steps": 0,
+        "max_steps": 3,
+        "check_interval_steps": 1,
+        "required_stable_checks": 2
+      },
+      "state": {
+        "elapsed_steps": 2,
+        "observation_count": 3,
+        "env_ids": [
+          0,
+          1
+        ],
+        "active_mask": [
+          true,
+          true
+        ],
+        "stable_counts": [
+          2,
+          0
+        ],
+        "settled_mask": [
+          true,
+          false
+        ],
+        "timeout_mask": [
+          false,
+          false
+        ],
+        "checked": true,
+        "max_linear_speed": [
+          0.0,
+          5.0
+        ],
+        "max_angular_speed": [
+          0.0,
+          12.500012397766113
+        ]
+      }
+    },
+    {
+      "kind": "wait_stable",
+      "entity_id": "cube",
+      "preset": "contained_rigid_object",
+      "measurement_source": "pose_delta",
+      "source_path": [
+        "program",
+        "post",
+        0
+      ],
+      "active_mask": [
+        true,
+        true
+      ],
+      "status": "timed_out",
+      "thresholds": {
+        "linear_velocity": 0.03,
+        "angular_velocity": 0.2,
+        "min_steps": 0,
+        "max_steps": 3,
+        "check_interval_steps": 1,
+        "required_stable_checks": 2
+      },
+      "state": {
+        "elapsed_steps": 3,
+        "observation_count": 4,
+        "env_ids": [
+          0,
+          1
+        ],
+        "active_mask": [
+          true,
+          true
+        ],
+        "stable_counts": [
+          2,
+          0
+        ],
+        "settled_mask": [
+          true,
+          false
+        ],
+        "timeout_mask": [
+          false,
+          true
+        ],
+        "checked": true,
+        "max_linear_speed": [
+          0.0,
+          5.000000476837158
+        ],
+        "max_angular_speed": [
+          0.0,
+          12.500012397766113
+        ]
+      }
+    }
+  ],
+  "result": [
+    true,
+    false
+  ]
+}
