@@ -695,6 +695,8 @@ installed plan without planning again or copying all trajectory samples.
 
 .. autofunction:: action_plan_proposal_evidence
 
+.. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
+
 .. autosummary::
    :nosignatures:
 
