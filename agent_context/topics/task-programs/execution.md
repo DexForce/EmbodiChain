@@ -217,6 +217,23 @@ executable lowerers. The current frontend permits the constrained node/call
 subset enforced by its decoder; Task Program itself supports the complete
 language.
 
+## Explicit runtime observation scope
+
+`TaskProgramEnvironmentAdapter.assemble_runtime()` and `create_bridge()` accept
+an optional `runtime_scope_guard`. The standard factory forwards this host-owned
+validator to `SimulationPlanningObservationProvider` and its shared scene cache.
+`validate_runtime_scope()` checks both the factory lifetime and that explicit
+scope without reading robot state, sensors or simulation samples. Hosts bind
+actual session/episode/owner epochs; a factory-open check alone cannot establish
+that an earlier bridge is still current.
+
+Explicit scopes are checked before and after cached or live reads. A scope change
+during joint/root or scene acquisition cannot publish a context or snapshot.
+Cached qpos also rejects a closed factory. The default `None` performs no scope
+callback and leaves legacy custom factory calls unchanged; callers requesting a
+scope must use a factory implementing the optional keyword. These checks do not
+acquire evidence, create control services or select atomic skills.
+
 ## Evidence ownership across integrations
 
 Task Engine selects declared evidence requirements and named policies from skill,
