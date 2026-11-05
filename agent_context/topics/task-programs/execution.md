@@ -224,6 +224,23 @@ explicitly; source-specific lowerers and services remain with their owning
 integration layers. Semantic preflight checks planning recovery against the
 actual target SkillDescriptor before grounding or physical acquisition.
 
+## Explicit runtime observation scope
+
+`TaskProgramEnvironmentAdapter.assemble_runtime()` and `create_bridge()` accept
+an optional `runtime_scope_guard`. The standard factory forwards this host-owned
+validator to `SimulationPlanningObservationProvider` and its shared scene cache.
+`validate_runtime_scope()` checks both the factory lifetime and that explicit
+scope without reading robot state, sensors or simulation samples. Hosts bind
+actual session/episode/owner epochs; a factory-open check alone cannot establish
+that an earlier bridge is still current.
+
+Explicit scopes are checked before and after cached or live reads. A scope change
+during joint/root or scene acquisition cannot publish a context or snapshot.
+Cached qpos also rejects a closed factory. The default `None` performs no scope
+callback and leaves legacy custom factory calls unchanged; callers requesting a
+scope must use a factory implementing the optional keyword. These checks do not
+acquire evidence, create control services or select atomic skills.
+
 ## Evidence ownership across integrations
 
 Task Engine selects declared evidence requirements and named policies from skill,
