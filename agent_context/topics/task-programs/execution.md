@@ -337,3 +337,18 @@ boundary/revision/timestamp metadata. A missing original timestamp leaves only
 its affected row unavailable; the read timestamp cannot substitute for it.
 It does not evaluate TaskSpec conditions,
 resample past state or alter execution targets.
+
+`capture_held_poses` uses one canonical history read for the exact rigid pose and
+full robot joint vector. It retains the original fixed-base, calibrated named
+TCP FK contract, source joint dtype/device, float64 reported matrices and final
+current-state agreement. Raw validity/time and episode/native ownership are
+checked before publication. The packet also preserves original recorded field,
+row, revision and time identities. Missing history never substitutes a live
+joint read; moving bases and changing chain mounts remain unsupported.
+
+`SimulationStateObservationCollector.capture_recorded_pour_geometry` reads one
+owned snapshot from the explicitly supplied ObservationManager, then selects
+exact inclusive source slots and receiver slots at the first maximum tilt.
+Raw validity/errors, episode and written-boundary identity remain authoritative.
+Geometry functions live in Compute and choose no Pour thresholds or release
+verdicts. The collector does not read live poses or acquire new sensor samples.
