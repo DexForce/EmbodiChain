@@ -631,7 +631,7 @@ this separate API.
 .. autofunction:: capture_rigid_mesh
 
 Same-observation native hand and motion queries
-----------------------------------------------
+-----------------------------------------------
 
 The explicit native query modules retain the Default backend's B=1/env0 shape
 coverage and observation ownership. Capture does not step simulation. Replacing
