@@ -312,9 +312,23 @@ def test_grip_trace_keeps_explicit_loss_and_nonfinite_accounting():
     source = ContactSource()
     reader = observer(source, capacity=1)
     reader(query(), context())
+    latest = reader.snapshot_latest_query(object_id="subject", control_part="hand")
+    latest["query"]["rows"][0]["raw_contacts"]["pairs"][0][0] = 999
+    assert (
+        reader.snapshot_latest_query(object_id="subject", control_part="hand")["query"][
+            "rows"
+        ][0]["raw_contacts"]["pairs"][0][0]
+        != 999
+    )
+    with pytest.raises(ValueError, match="another participant"):
+        reader.snapshot_latest_query(object_id="subject", control_part="other")
     source.data["normal"][0, 0, 0] = float("nan")
     reader(query(), context(revision=2))
     snapshot = reader.snapshot_trace()
+    with pytest.raises(RuntimeError, match="requested acquisition"):
+        reader.snapshot_latest_query(
+            object_id="subject", control_part="hand", query_index=1
+        )
     assert snapshot["cumulative_query_count"] == 2
     assert snapshot["retained_query_count"] == 1
     assert snapshot["evicted_query_count"] == 1
@@ -332,6 +346,8 @@ def test_grip_trace_keeps_explicit_loss_and_nonfinite_accounting():
     result = reader(query(), context(revision=3))
     assert not result.valid.any()
     assert reader.snapshot_trace()["unrecorded_query_count"] == 1
+    with pytest.raises(RuntimeError, match="latest grip acquisition"):
+        reader.snapshot_latest_query(object_id="subject", control_part="hand")
 
 
 @pytest.mark.parametrize("revision", [1, 2])
@@ -445,6 +461,28 @@ def test_shared_factory_uses_explicit_bindings_and_keeps_provider_identity_and_i
     source.cfg.filter_need_both_actor = False
     with pytest.raises(ValueError, match="contact scope"):
         factory.create(**arguments)
+    source.cfg.filter_need_both_actor = True
+    original_update = source.update
+    for when in ("before", "during"):
+        sensors[cfg.sensor_uid] = source
+        before = first.grip_observer.cumulative_query_count
+        if when == "before":
+            sensors[cfg.sensor_uid] = object()
+        else:
+
+            def update_and_replace():
+                original_update()
+                sensors[cfg.sensor_uid] = object()
+
+            source.update = update_and_replace
+        with pytest.raises(ValueError, match="observation ownership changed"):
+            first.capture_grip_observation(
+                PhysicalEvidenceRequest(3.0, 7, torch.arange(3)),
+                object_id="subject",
+                control_part="precision_clamp",
+            )
+        assert first.grip_observer.cumulative_query_count == before + (when == "during")
+        source.update = original_update
 
 
 def make_timeline(source, *, max_steps=30000, max_rows=1_000_000, max_substeps=256):

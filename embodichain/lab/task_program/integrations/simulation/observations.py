@@ -905,3 +905,108 @@ class SimulationStateObservationCollector(_SimulationObservationCollector):
                 },
             },
         }
+
+    def capture_current_grip(
+        self,
+        object_id: str,
+        control_part: str,
+        *,
+        observation_revision: int,
+        frame_indices: Sequence[int],
+    ) -> dict[str, Any]:
+        """Acquire one fresh grip through this bridge's configured native provider.
+
+        Args:
+            object_id: Exact registered object selected by the source receipt.
+            control_part: Exact resolved grasp endpoint, not an inferred hand name.
+            observation_revision: Explicit semantic query revision. This is not
+                advertised as a native impulse revision.
+            frame_indices: Current completed boundary slots for all native rows.
+
+        Returns:
+            One exact owned raw query, actor identities, acquisition validity and
+            its declared clock scope. A failed query cannot borrow an older trace.
+        """
+        import torch
+        from embodichain.lab.sim.evidence import PhysicalEvidenceRequest
+        from embodichain.lab.task_program.semantics.evidence import (
+            EffectEvidenceCollector,
+        )
+        from embodichain.lab.sim.atomic_actions.grip_evidence import (
+            GripEvidenceObservationPort,
+        )
+
+        self._check_episode()
+        if self._observations is None:
+            raise RuntimeError("Observation history is unavailable.")
+        self._native(object_id, articulated=False)
+        self._port.validate_observation_scope(self._bridge.clock)
+        frames = tuple(frame_indices)
+        if (
+            len(frames) != len(self._episodes)
+            or any(type(frame) is not int or frame <= 0 for frame in frames)
+            or max(frames) != self._bridge.clock.step_index
+            or frames
+            != self._observations.read_history_step_counts(episode_ids=self._episodes)
+        ):
+            raise ValueError(
+                "Current grip evidence requires its actual current boundary."
+            )
+        collector = self._bridge.evidence_collector
+        if type(collector) is not EffectEvidenceCollector:
+            raise ValueError(
+                "This runtime has no supported physical evidence collector."
+            )
+        provider = collector.registry.providers.get(("builtin.control_part", "1"))
+        if not isinstance(provider, GripEvidenceObservationPort):
+            raise ValueError(
+                "Native grip evidence was not explicitly configured for this runtime."
+            )
+        request = PhysicalEvidenceRequest(
+            self._bridge.clock.now(),
+            observation_revision,
+            torch.arange(len(self._episodes), dtype=torch.long),
+            ("grip.bilateral",),
+        )
+        robot = self._env.robot
+        if robot is not self._port._robot:
+            raise ValueError("Grip evidence belongs to another runtime robot.")
+        batch, sample = provider.capture_grip_observation(
+            request, object_id=object_id, control_part=control_part
+        )
+        if (
+            sample["query"]["timestamp"] != request.timestamp
+            or sample["query"]["observation_revision"] != request.observation_revision
+        ):
+            raise ValueError(
+                "The fresh grip query belongs to another observation request."
+            )
+        self._check_episode()
+        self._native(object_id, articulated=False)
+        self._port.validate_observation_scope(self._bridge.clock)
+        if (
+            self._env.robot is not robot
+            or self._bridge.evidence_collector is not collector
+            or collector.registry.providers.get(("builtin.control_part", "1"))
+            is not provider
+        ):
+            raise ValueError(
+                "The execution evidence owner changed during grip capture."
+            )
+        return {
+            **sample,
+            "episode_ids": list(self._episodes),
+            "boundary_frames": list(frames),
+            "timestamp_scope": "collection_query_clock_not_native_impulse_refresh",
+            "grip_acquisition": dict(
+                evidence_id=batch.evidence_id,
+                values=batch.values.tolist(),
+                valid=batch.valid.tolist(),
+                acquisition_errors=list(batch.acquisition_errors),
+                timestamp=batch.timestamp,
+                observation_revision=batch.observation_revision,
+                env_ids=batch.env_ids.tolist(),
+                clock_domain="environment_step",
+                revision_kind="semantic_query_revision",
+            ),
+        }

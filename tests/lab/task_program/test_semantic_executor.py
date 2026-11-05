@@ -1068,6 +1068,8 @@ def test_executor_without_transform_factory_is_unchanged() -> None:
         (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
         install_effect_monitor=False,
     )
+    assert system.runtime.evidence_collector is system.collector
+    assert system.collector.calls == []
 
     result = system.runtime.start(_call("baseline"), workflow_id="baseline-workflow")
 
