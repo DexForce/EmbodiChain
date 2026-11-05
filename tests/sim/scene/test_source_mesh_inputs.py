@@ -23,6 +23,7 @@ import pytest
 from embodichain.lab.sim.scene.source_geometry import (
     read_gltf_z_up_mesh,
     estimate_source_mesh_top_z,
+    read_source_vertices,
 )
 
 _FROZEN = json.loads(
@@ -60,3 +61,54 @@ def test_unavailable_authored_geometry_stays_unavailable(tmp_path):
     )
     with pytest.raises(ValueError, match="Could not inspect source mesh"):
         read_gltf_z_up_mesh(source["shape"]["fpath"])
+
+
+def test_local_source_vertices_keep_frozen_order_scale_dtype_and_ignore_world_pose():
+    source = {
+        "shape": {"shape_type": "Mesh", "fpath": str(_FIXTURE)},
+        "body_scale": [2.0, 0.5, 3.0],
+        "init_pos": [99, 88, 77],
+        "init_rot": [10, 20, 30],
+    }
+    original = _FIXTURE.read_bytes()
+    vertices = read_source_vertices(source)
+    assert vertices.dtype == np.float64
+    assert np.array_equal(
+        vertices, np.asarray(_FROZEN["source_vertices_z_up"]) * [2.0, 0.5, 3.0]
+    )
+    vertices[:] = 0
+    assert _FIXTURE.read_bytes() == original
+
+
+def test_source_local_override_keeps_its_own_scale_and_dtype():
+    vertices = np.arange(6, dtype=np.float32).reshape(2, 3)
+    expected = vertices.copy()
+    output = read_source_vertices({"body_scale": [4, 4, 4]}, local_vertices=vertices)
+    assert output.dtype == np.float32 and np.array_equal(output, expected)
+    with pytest.raises(ValueError, match="no mesh geometry"):
+        read_source_vertices({"shape": {"shape_type": "Cube", "size": [1, 1, 1]}})
+
+
+def test_articulation_source_vertices_match_original_source_reader(
+    tmp_path, monkeypatch
+):
+    monkeypatch.syspath_prepend(str(Path(__file__).parent))
+    from _control_source_fixture import knob_source
+
+    config = knob_source(tmp_path)
+    frozen = json.loads(
+        (
+            Path(__file__).parent / "data/source_local_vertices_reference.json"
+        ).read_text()
+    )
+    assert (
+        hashlib.sha256(Path(config["fpath"]).read_bytes()).hexdigest()
+        == frozen["fixture_sha256"]
+    )
+    config["body_scale"] = [2.0, 2.0, 2.0]
+    vertices = read_source_vertices(config, articulation=True)
+    assert vertices.dtype == np.float64 and np.array_equal(
+        vertices, np.asarray(frozen["vertices"])
+    )
+    with pytest.raises(ValueError, match="finite positive"):
+        read_source_vertices(dict(config, body_scale=[1, -1, 1]), articulation=True)

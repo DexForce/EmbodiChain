@@ -745,3 +745,15 @@ calibration remains explicit and retains other drive/mass owners.
 .. autofunction:: prismatic_reset_state
 
 .. autofunction:: prismatic_handle_center_world
+Local source vertices
+----------------------
+
+``read_source_vertices`` retains source-local ordering and one body scale for
+mesh and articulation geometry. Explicit local overrides already own their scale.
+It reads no native state and applies no world pose. Missing mesh geometry is an
+error, including primitive configurations without an explicit local override;
+this does not qualify cooked collision shapes or physical containment.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+
+.. autofunction:: read_source_vertices
