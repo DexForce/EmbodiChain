@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -28,6 +29,8 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
+    "TaskGripEffortCandidate",
+    "declare_task_source_execution_calibration",
     "declare_source_task_embodiment",
     "resolve_task_hand_calibrations",
     "declare_task_robot_mount",
@@ -35,6 +38,117 @@ __all__ = [
     "task_robot_lateral_positions",
     "require_task_robot_assets",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class TaskGripEffortCandidate:
+    """Semantic resource eligibility and declared payload masses, without a recipe.
+
+    The frontend supplies exact resource identity, aggregate eligibility and
+    whether the acquisition carries a pouring payload. Masses are physical
+    declaration values in kilograms; missing or invalid values cannot qualify
+    a reduced drive limit. No task-family ID or object name is interpreted here.
+
+    Attributes:
+        resource_id: Exact physical resource declaration identity.
+        eligible: Whether semantic acquisition/carrier relationships qualify.
+        pouring: Whether the acquisition supports a pouring payload.
+        payload_masses: Declared payload masses in kilograms; None is missing.
+    """
+
+    resource_id: str
+    eligible: bool
+    pouring: bool
+    payload_masses: tuple[float | int | None, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.resource_id) is not str
+            or not self.resource_id
+            or self.resource_id != self.resource_id.strip()
+        ):
+            raise ValueError(
+                "Source grip candidates require exact resource identities."
+            )
+        if type(self.eligible) is not bool or type(self.pouring) is not bool:
+            raise TypeError("Source grip eligibility and pouring must be booleans.")
+        object.__setattr__(self, "payload_masses", tuple(self.payload_masses))
+
+
+def declare_task_source_execution_calibration(
+    embodiment: Mapping[str, Any],
+    candidates: Sequence[TaskGripEffortCandidate],
+    *,
+    runtime_profile: str,
+    requires_prismatic_stiffness: bool,
+    initial_prismatic_clearance: bool,
+    active_resource_id: str | None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Compose selected model calibration from neutral semantic requirements.
+
+    Args:
+        embodiment: Existing qualified physical component declaration.
+        candidates: Resource eligibility and declared payload masses.
+        runtime_profile: Explicit default, contact or composition profile.
+        requires_prismatic_stiffness: Enable the original source-prismatic gain.
+        initial_prismatic_clearance: Whether the first declared move needs the
+            original prismatic clearance posture, if owned by this model.
+        active_resource_id: Explicit first-move resource, or None when absent.
+
+    Returns:
+        Independent component and optional model-owned initial-posture receipt.
+        Standard Marvin retains its existing component values; Robotiq model
+        owners keep the original mass/effort/gain/park calibration. No task ID,
+        object name, cached analysis, Robot or simulator is consumed.
+
+    Raises:
+        TypeError: Calibration selection flags are not explicit booleans.
+        ValueError: The selected model or runtime profile is unsupported.
+    """
+    if (
+        type(requires_prismatic_stiffness) is not bool
+        or type(initial_prismatic_clearance) is not bool
+    ):
+        raise TypeError("Source calibration requirements must be explicit booleans.")
+    if runtime_profile not in {
+        "default",
+        "contact_experiment",
+        "composition_experiment",
+    }:
+        raise ValueError("Source calibration requires an explicit supported profile.")
+    identity = embodiment.get("embodiment_id")
+    if identity == "tianji_marvin":
+        return deepcopy(dict(embodiment)), None
+    if identity not in {
+        "dual_franka_robotiq_arg2f_140",
+        "dual_ur10_robotiq_arg2f_140",
+    }:
+        raise ValueError("No configured source calibration owner for the component.")
+    from .robotiq.deployment import (
+        source_arm_stiffness_declaration,
+        source_grip_effort_caps,
+        source_grip_effort_declaration,
+        source_ur10_idle_posture_declaration,
+    )
+
+    owned = source_grip_effort_declaration(
+        embodiment,
+        source_grip_effort_caps(
+            embodiment, candidates, runtime_profile=runtime_profile
+        ),
+    )
+    posture = None
+    if (
+        identity == "dual_ur10_robotiq_arg2f_140"
+        and initial_prismatic_clearance
+        and active_resource_id in {"left", "right"}
+    ):
+        owned, posture = source_ur10_idle_posture_declaration(
+            owned, active_resource_id=active_resource_id
+        )
+    if requires_prismatic_stiffness:
+        owned = source_arm_stiffness_declaration(owned)
+    return owned, posture
 
 
 def declare_source_task_embodiment(embodiment: Mapping[str, Any]) -> dict[str, Any]:

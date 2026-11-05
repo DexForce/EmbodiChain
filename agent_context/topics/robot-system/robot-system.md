@@ -304,3 +304,10 @@ backend binding rather than adding robot-specific post-bind fixes. For missing
 IK, inspect configured solver coverage; a gripper control part need not have a
 solver. For asset changes, validate round-trip and chain DOF/frame agreement
 before using executable robot smoke programs.
+
+Source execution calibration is selected through the public robot Task Program
+facade `declare_task_source_execution_calibration`. The frontend supplies neutral
+resource/payload eligibility, explicit experiment profile and prismatic-clearance
+requirements. Robotiq deployment owns the original model-specific mass/effort
+thresholds, gain and UR10 park rule; standard Marvin preserves native component
+values. This pure declaration route consumes no task-family IDs or live facts.

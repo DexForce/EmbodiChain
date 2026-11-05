@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -26,11 +26,13 @@ import math
 import numpy as np
 from scipy.spatial.transform import Rotation
 from .task_program import robotiq140_task_hand_calibrations
+from embodichain_robots.task_program import TaskGripEffortCandidate
 
 __all__ = [
     "source_robotiq_opening_declaration",
     "source_contact_pad_declaration",
     "source_robot_mount_declaration",
+    "source_grip_effort_caps",
     "source_grip_effort_declaration",
     "source_ur10_idle_posture_declaration",
     "source_arm_stiffness_declaration",
@@ -143,14 +145,93 @@ def source_robot_mount_declaration(
     return owned
 
 
+def source_grip_effort_caps(
+    embodiment: Mapping[str, Any],
+    candidates: Sequence[TaskGripEffortCandidate],
+    *,
+    runtime_profile: str,
+) -> dict[str, float]:
+    """Select original model-owned drive caps from explicit neutral candidates.
+
+    The source-qualified payload-mass threshold and Franka/UR10 effort values
+    belong to this robot owner. Contact/composition experiments require their
+    explicit profile selection; ordinary component drive defaults are unchanged.
+    This is static calibration selection, not measured grip-effect evidence.
+
+    Args:
+        embodiment: Explicit supported Robotiq embodiment declaration.
+        candidates: Ordered semantic eligibility, payload masses and pour flags.
+        runtime_profile: Explicit default, contact or composition profile.
+
+    Returns:
+        Original per-resource drive caps. Unqualified or missing payload masses
+        and ineligible resources leave their component limits unchanged.
+
+    Raises:
+        ValueError: The embodiment/profile is unsupported or a resource repeats.
+        TypeError: A candidate does not implement the typed declaration contract.
+    """
+    identity = embodiment.get("embodiment_id")
+    if identity not in {
+        "dual_franka_robotiq_arg2f_140",
+        "dual_ur10_robotiq_arg2f_140",
+    }:
+        raise ValueError(
+            "Source grip calibration requires a supported Robotiq embodiment."
+        )
+    if runtime_profile not in {
+        "default",
+        "contact_experiment",
+        "composition_experiment",
+    }:
+        raise ValueError(
+            "Source grip calibration requires an explicit supported profile."
+        )
+    effort = (
+        5.0
+        if runtime_profile == "contact_experiment"
+        or identity == "dual_ur10_robotiq_arg2f_140"
+        else 0.5
+    )
+    result = {}
+    seen = set()
+    for candidate in candidates:
+        if not isinstance(candidate, TaskGripEffortCandidate):
+            raise TypeError("Source grip calibration requires typed candidates.")
+        if candidate.resource_id in seen:
+            raise ValueError("Source grip calibration resources cannot repeat.")
+        seen.add(candidate.resource_id)
+        if not candidate.eligible or (
+            runtime_profile == "composition_experiment" and not candidate.pouring
+        ):
+            continue
+        if not candidate.payload_masses or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or not 0.0 < value <= 0.01
+            for value in candidate.payload_masses
+        ):
+            continue
+        result[candidate.resource_id] = 5.0 if candidate.pouring else effort
+    return result
+
+
 def source_grip_effort_declaration(
     embodiment: Mapping[str, Any],
     caps: Mapping[str, float],
 ) -> dict[str, Any]:
     """Apply explicit resource effort caps without selecting task/recipe eligibility.
 
-    Caps are chosen by the deployment declaration owner. This model adapter maps
+    Explicit caps can be selected through :func:`source_grip_effort_caps`. This adapter maps
     declared resources to actual hand control parts and preserves lower limits.
+
+    Args:
+        embodiment: Explicit component with physical hand resources and drives.
+        caps: Positive finite per-resource effort caps.
+
+    Returns:
+        Independent component retaining any already lower hand drive limits.
     """
     owned = deepcopy(dict(embodiment))
     parts = {
@@ -227,9 +308,17 @@ def source_ur10_idle_posture_declaration(
 def source_arm_stiffness_declaration(
     embodiment: Mapping[str, Any],
     *,
-    stiffness: float,
+    stiffness: float = 50000.0,
 ) -> dict[str, Any]:
-    """Apply an explicit motion-endpoint gain override without recipe inference."""
+    """Apply explicitly enabled source arm-gain calibration without recipe inference.
+
+    Args:
+        embodiment: Supported component with declared motion endpoints.
+        stiffness: Explicit override, or the original source-prismatic gain.
+
+    Returns:
+        Independent component preserving all hand drives and other parameters.
+    """
     if (
         isinstance(stiffness, bool)
         or not isinstance(stiffness, (int, float))

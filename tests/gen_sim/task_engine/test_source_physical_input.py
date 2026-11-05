@@ -24,6 +24,8 @@ import hashlib
 import json
 import pytest
 import trimesh
+
+pytestmark = pytest.mark.no_sim
 from embodichain.gen_sim.task_engine.orchestration.source_scene import PreparedScene
 from embodichain.gen_sim.task_engine.source_physical_input import (
     prepare_source_physical_input,
@@ -81,11 +83,18 @@ def fixture(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "profile,effort",
-    [("default", 0.5), ("contact_experiment", 5.0), ("composition_experiment", 500.0)],
+    "robot_profile,profile,effort,position",
+    [
+        ("dual_franka", "default", 0.5, [-0.7, 0.0, 0.38]),
+        ("dual_franka", "contact_experiment", 5.0, [-0.7, 0.0, 0.38]),
+        ("dual_franka", "composition_experiment", 500.0, [-0.7, 0.0, 0.38]),
+        ("dual_ur10", "default", 5.0, [0.55, 0.0, 0.78]),
+        ("dual_ur10", "contact_experiment", 5.0, [0.55, 0.0, 0.78]),
+        ("dual_ur10", "composition_experiment", 500.0, [0.55, 0.0, 0.78]),
+    ],
 )
 def test_source_preparation_keeps_exact_default_and_explicit_physical_selections(
-    tmp_path, monkeypatch, profile, effort
+    tmp_path, monkeypatch, robot_profile, profile, effort, position
 ):
     from embodichain.lab.sim.sim_manager import SimulationManager
 
@@ -101,13 +110,13 @@ def test_source_preparation_keeps_exact_default_and_explicit_physical_selections
     prepared = prepare_source_physical_input(
         scene,
         graph,
-        robot_profile="dual_franka",
+        robot_profile=robot_profile,
         cache_root=tmp_path / "derived",
         runtime_profile=profile,
     )
     physical = prepared.physical
     physical.assert_unchanged()
-    assert physical.embodiment["simulation"]["init_pos"] == [-0.7, 0.0, 0.38]
+    assert physical.embodiment["simulation"]["init_pos"] == pytest.approx(position)
     assert (
         physical.embodiment["simulation"]["joint_drive_props"]["max_effort"]["left_eef"]
         == effort
@@ -338,9 +347,12 @@ def test_normal_source_preparation_selects_existing_native_marvin_without_other_
     monkeypatch.setattr(Robot, "__init__", forbidden)
     monkeypatch.setattr(SimulationManager, "__init__", forbidden)
     scene, graph = fixture(tmp_path)
-    component = (
-        Path(__file__).parents[3]
-        / "extensions/embodichain_tasks/configs/components/embodiments/tianji_marvin.yaml"
+    from embodichain.utils.config_paths import resolve_config_path
+
+    component = Path(
+        resolve_config_path(
+            "extensions/embodichain_tasks/configs/components/embodiments/tianji_marvin.yaml"
+        )
     )
     original = yaml.safe_load(component.read_text())
     prepared = prepare_source_physical_input(
@@ -373,3 +385,17 @@ def test_normal_source_preparation_selects_existing_native_marvin_without_other_
     assert not any("Robotiq" in name for name in physical.input_files)
     assert not (tmp_path / "derived/robot_model").exists()
     assert physical.robot_profile == "tianji_marvin"
+
+
+@pytest.fixture(autouse=True)
+def forbid_native_construction(monkeypatch):
+    from embodichain.lab.sim.objects import Robot
+    from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.lab.sim.motion.solvers import BaseSolver
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("static physical declarations constructed a native runtime")
+
+    monkeypatch.setattr(Robot, "__init__", forbidden)
+    monkeypatch.setattr(SimulationManager, "__init__", forbidden)
+    monkeypatch.setattr(BaseSolver, "__init__", forbidden)

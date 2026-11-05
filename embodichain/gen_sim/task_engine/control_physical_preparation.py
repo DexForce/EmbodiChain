@@ -165,6 +165,7 @@ def prepare_source_control_physics(
         twist_grip_depth_m: Optional measured depth candidate.
         twist_mass_source: Explicit derived mass-source selection, with the source
             compatibility fallback when the Lab config lacks the old scale field.
+        press_extra_distance: Optional declared original press overtravel.
 
     Returns:
         Detached scene, owned source receipts and every additional input file.

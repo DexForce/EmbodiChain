@@ -104,3 +104,9 @@ records shared control-resize/mass/calibration receipts; those numerical and
 authored-geometry algorithms stay in Scene/Compute/model owners. The selected
 `dual_arm_trajectory_verified.yaml` component retains source tracking/recovery
 values; Lab owns the pure source reset/cadence declaration helper.
+
+Source effort preparation only reduces semantic acquisition/carrier/blocking
+relationships into neutral robot-owner candidates. The robot facade selects
+model effort thresholds, prismatic gains and initial clearance posture from
+explicit requirements. Task Engine does not hold those machine calibration
+values or rewrite runtime action policies.

@@ -40,11 +40,10 @@ from embodichain.lab.task_program.integrations.simulation.source_deployment impo
 )
 from embodichain_robots.robotiq.deployment import (
     source_robotiq_opening_declaration,
-    source_grip_effort_declaration,
-    source_ur10_idle_posture_declaration,
-    source_arm_stiffness_declaration,
 )
 from embodichain_robots.task_program import (
+    TaskGripEffortCandidate,
+    declare_task_source_execution_calibration,
     declare_source_task_embodiment,
     resolve_task_hand_calibrations,
     declare_task_robot_mount,
@@ -71,15 +70,10 @@ class SourcePhysicalPreparation:
     artifacts: Mapping[str, Any]
 
 
-def _resource_effort_caps(graph, scene, embodiment, runtime_profile):
-    # Semantic eligibility stays here; applying model calibration stays in robots.
-    identity = embodiment["embodiment_id"]
-    effort = (
-        5.0
-        if runtime_profile == "contact_experiment"
-        or identity == "dual_ur10_robotiq_arg2f_140"
-        else 0.5
-    )
+def _resource_effort_candidates(
+    graph: Mapping[str, Any], scene: PreparedScene
+) -> tuple[TaskGripEffortCandidate, ...]:
+    # Reduce semantic relationships only; model calibration stays in robots.
     picks = []
     blocked = set()
     pour = set()
@@ -118,17 +112,11 @@ def _resource_effort_caps(graph, scene, embodiment, runtime_profile):
         if node["task_type"] == "E3":
             pour.add(resource)
     if not picks:
-        return {}
+        return ()
     blocked.update(press - pour)
     objects = {value["uid"]: value for value in scene.rigid_objects}
-    result = {}
+    result = []
     for resource in {value for _, value in picks}:
-        if (
-            resource in blocked
-            or runtime_profile == "composition_experiment"
-            and resource not in pour
-        ):
-            continue
         payloads = {uid for uid, owner in picks if owner == resource} | carriers.get(
             resource, set()
         )
@@ -136,16 +124,15 @@ def _resource_effort_caps(graph, scene, embodiment, runtime_profile):
             objects.get(uid, {}).get("attrs", {}).get("mass_props", {}).get("mass")
             for uid in payloads
         ]
-        if any(
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-            or not 0.0 < value <= 0.01
-            for value in masses
-        ):
-            continue
-        result[resource] = 5.0 if resource in pour else effort
-    return result
+        result.append(
+            TaskGripEffortCandidate(
+                resource_id=resource,
+                eligible=resource not in blocked,
+                pouring=resource in pour,
+                payload_masses=tuple(masses),
+            )
+        )
+    return tuple(result)
 
 
 def prepare_source_physical_input(
@@ -324,25 +311,19 @@ def prepare_source_physical_input(
     embodiment = declare_task_robot_mount(
         embodiment, table_top_z=scene.table_top_z, table_bounds=table_bounds
     )
-    if not native_marvin:
-        # The legacy angular Robotiq caps are not native prismatic-drive units.
-        # Standard Marvin retains the explicit existing component's drive limits.
-        embodiment = source_grip_effort_declaration(
-            embodiment, _resource_effort_caps(graph, scene, embodiment, runtime_profile)
-        )
     first = graph["nodes"][0]["call"]
-    active = first.get("resources", {}).get("primary")
-    if (
-        normalized == "dual_ur10"
-        and first.get("call_id") == "gen_sim.articulation_slide"
-        and active in {"left", "right"}
-    ):
-        embodiment, posture = source_ur10_idle_posture_declaration(
-            embodiment, active_resource_id=active
-        )
+    embodiment, posture = declare_task_source_execution_calibration(
+        embodiment,
+        _resource_effort_candidates(graph, scene),
+        runtime_profile=runtime_profile,
+        requires_prismatic_stiffness=bool(prismatic_uids),
+        initial_prismatic_clearance=(
+            first.get("call_id") == "gen_sim.articulation_slide"
+        ),
+        active_resource_id=first.get("resources", {}).get("primary"),
+    )
+    if posture is not None:
         artifacts["ur10_initial_posture_selection.json"] = posture
-    if prismatic_uids and not native_marvin:
-        embodiment = source_arm_stiffness_declaration(embodiment, stiffness=50000.0)
     component_scene = source_scene_component_declaration(
         "source_prepared_scene",
         background=scene.background,

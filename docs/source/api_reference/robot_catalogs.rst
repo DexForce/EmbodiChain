@@ -819,3 +819,24 @@ values, with original model/command units and physical endpoint identities.
 
 .. autofunction:: require_task_robot_assets
 
+
+
+Source execution calibration requirements
+-----------------------------------------
+
+Task Engine supplies neutral semantic resource eligibility, declared payload
+masses and explicit profile/clearance flags. Robot owners retain the source
+Franka/UR10 effort thresholds, arm-gain calibration and initial posture rules.
+Standard Marvin preserves its original component values and native hand units.
+These APIs return declarations; they provide no physical effect evidence.
+
+.. currentmodule:: embodichain_robots.task_program
+
+.. autoclass:: TaskGripEffortCandidate
+   :members:
+
+.. autofunction:: declare_task_source_execution_calibration
+
+.. currentmodule:: embodichain_robots.robotiq.deployment
+
+.. autofunction:: source_grip_effort_caps

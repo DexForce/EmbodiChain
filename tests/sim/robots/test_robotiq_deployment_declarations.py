@@ -183,12 +183,21 @@ def test_explicit_deployment_profiles_keep_six_frozen_complete_declaration_hashe
     frozen = json.loads(
         (Path(__file__).parent / "data/robotiq_task_declarations_489.json").read_text()
     )
+    from embodichain_robots.task_program import TaskGripEffortCandidate
+    from embodichain_robots.robotiq.deployment import source_grip_effort_caps
+
     for case in frozen["cases"]:
         value = source_robotiq_opening_declaration(component(case["model"]))
         if case["profile"] == "contact_experiment":
             value = source_contact_pad_declaration(value)
         value = source_robot_mount_declaration(value, table_top_z=frozen["table_top_z"])
-        value = source_grip_effort_declaration(value, case["caps"])
+        caps = source_grip_effort_caps(
+            value,
+            [TaskGripEffortCandidate("left", True, False, (0.005,))],
+            runtime_profile=case["profile"],
+        )
+        assert caps == case["caps"]
+        value = source_grip_effort_declaration(value, caps)
         payload = json.dumps(
             value,
             sort_keys=True,
@@ -199,3 +208,44 @@ def test_explicit_deployment_profiles_keep_six_frozen_complete_declaration_hashe
         assert (
             hashlib.sha256(payload.encode()).hexdigest() == case["declaration_sha256"]
         ), (case["model"], case["profile"])
+
+
+@pytest.mark.parametrize(
+    "masses,eligible,pouring,profile,expected",
+    [
+        ((0.01,), True, False, "default", {"left": 0.5}),
+        ((0.010001,), True, False, "default", {}),
+        ((None,), True, False, "default", {}),
+        ((False,), True, False, "default", {}),
+        ((0.005,), False, True, "composition_experiment", {}),
+        ((0.005,), True, True, "composition_experiment", {"left": 5.0}),
+    ],
+)
+def test_model_owned_grip_calibration_requires_qualified_neutral_payloads(
+    masses, eligible, pouring, profile, expected
+):
+    from embodichain_robots.task_program import TaskGripEffortCandidate
+    from embodichain_robots.robotiq.deployment import source_grip_effort_caps
+
+    candidate = TaskGripEffortCandidate("left", eligible, pouring, masses)
+    assert (
+        source_grip_effort_caps(
+            component("dual_franka"), [candidate], runtime_profile=profile
+        )
+        == expected
+    )
+
+
+def test_source_calibration_rejects_unknown_profiles_and_duplicate_resources():
+    from embodichain_robots.task_program import TaskGripEffortCandidate
+    from embodichain_robots.robotiq.deployment import source_grip_effort_caps
+
+    candidate = TaskGripEffortCandidate("left", True, False, (0.005,))
+    with pytest.raises(ValueError, match="explicit supported profile"):
+        source_grip_effort_caps(
+            component("dual_franka"), [candidate], runtime_profile="unknown"
+        )
+    with pytest.raises(ValueError, match="cannot repeat"):
+        source_grip_effort_caps(
+            component("dual_franka"), [candidate, candidate], runtime_profile="default"
+        )
