@@ -938,7 +938,9 @@ def test_builtin_descriptors_expose_strict_goal_types() -> None:
     assert AxisAlign.GoalType is AxisAlignGoal
     assert MoveHeldObject.GoalType is HeldObjectPoseGoal
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
-    assert Pour.GoalType is PourGoal
+    from embodichain.lab.sim.atomic_actions import JawPourGoal, RetainedPourGoal
+
+    assert Pour.GoalType == (PourGoal, JawPourGoal, RetainedPourGoal)
     assert Press.GoalType is PressGoal
     assert PushObject.GoalType is PushObjectGoal
     assert Slide.GoalType is SlideGoal

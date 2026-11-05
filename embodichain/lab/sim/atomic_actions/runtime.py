@@ -21,7 +21,6 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 import time
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -40,6 +39,23 @@ from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
     _neutral_identity,
     _rigid_pose,
 )
+
+from embodichain.lab.sim.motion.mesh_collision import FreeMotionQuery
+from .released_continuation import ReleasedHandContinuationProvider
+from .drawer_planning import DrawerPlanningProvider
+from .articulation_continuation import ArticulationContinuationProvider
+from .planning_probes import (
+    SlideHandClearanceProvider,
+    HeldStagingProvider,
+    RetainedCommandProvider,
+    JointPrefixPlanner,
+    ObservedCuroboQueryService,
+    PourGraspProjectionProvider,
+    PickClosingQueryProvider,
+    PlaceSceneProvider,
+)
+from .place_continuation import PlaceContinuationProvider
+from .measured_rigid import MeasuredRigidPlanningProvider
 
 from .bindings import ActionBinding, EndpointBinding, JointPositionTarget
 from .control import ActionControlOverrides, ControlPartCommandProfile
@@ -65,41 +81,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
 
 
-@dataclass(frozen=True, slots=True, eq=False)
-class GraspOpeningTarget:
-    """Already-grounded support and object poses from the closing observation.
-
-    Args:
-        support_uid: Exact native rigid support UID selected by the caller.
-        reference_pose: Support-to-world pose, shape (4, 4), copied to CPU float64.
-        object_target_pose: Final placed-object-to-world pose, shape (4, 4), copied
-            to CPU float64. Tensor inputs are detached without changing the input.
-        scope: Must equal the closing query's fresh preparation scope.
-        identity: Optional neutral diagnostic IDs; never runtime or program objects.
-    """
-
-    support_uid: str
-    reference_pose: np.ndarray | torch.Tensor
-    object_target_pose: np.ndarray | torch.Tensor
-    scope: NativeQueryScope
-    identity: Mapping[str, object] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if (
-            type(self.support_uid) is not str
-            or not self.support_uid
-            or self.support_uid != self.support_uid.strip()
-        ):
-            raise ValueError("Opening requires an explicit native support UID.")
-        if not isinstance(self.scope, NativeQueryScope):
-            raise TypeError("Opening scope must be NativeQueryScope.")
-        for name in ("reference_pose", "object_target_pose"):
-            pose = _rigid_pose(getattr(self, name))
-            pose.setflags(write=False)
-            object.__setattr__(self, name, pose)
-        object.__setattr__(
-            self, "identity", MappingProxyType(_neutral_identity(self.identity))
-        )
+from .grasp_geometry import GraspOpeningTarget
 
 
 def _physical_identity(
@@ -127,6 +109,21 @@ class ActionPlanningServices:
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
         hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
+        free_motion_query: FreeMotionQuery | None = None,
+        pour_grasp_projection_provider: PourGraspProjectionProvider | None = None,
+        joint_prefix_planner: JointPrefixPlanner | None = None,
+        pick_closing_query_provider: PickClosingQueryProvider | None = None,
+        place_scene_provider: PlaceSceneProvider | None = None,
+        place_continuation_provider: PlaceContinuationProvider | None = None,
+        measured_rigid_provider: MeasuredRigidPlanningProvider | None = None,
+        held_staging_provider: HeldStagingProvider | None = None,
+        retained_command_provider: RetainedCommandProvider | None = None,
+        released_hand_provider: ReleasedHandContinuationProvider | None = None,
+        slide_hand_clearance_provider: SlideHandClearanceProvider | None = None,
+        drawer_planning_provider: DrawerPlanningProvider | None = None,
+        articulation_continuation_provider: (
+            ArticulationContinuationProvider | None
+        ) = None,
     ) -> None:
         """Retain shared services and snapshot caller-owned calibration data.
 
@@ -137,11 +134,158 @@ class ActionPlanningServices:
             grasp_pose_generators: Existing grasp services by endpoint target ID.
             hand_geometry_cfgs: Explicit Lab hand settings by grasp target ID;
                 copied independently without capturing geometry or reading state.
+            free_motion_query: Borrowed same-robot discrete collision service.
+            pour_grasp_projection_provider: Numeric grasp projection operands.
+            joint_prefix_planner: Same-robot observed motion service.
+            pick_closing_query_provider: Owned native closing-query lifetimes.
+            place_scene_provider: Owned placement geometry and support roles.
+            place_continuation_provider: Same-robot occurrence-bound predictions.
+            measured_rigid_provider: Same-robot measured manipulation facts.
+            held_staging_provider: Same-robot staging declarations and geometry.
+            retained_command_provider: Same-robot retained-command provenance.
+            slide_hand_clearance_provider: Explicit same-robot slide hand clearance service.
+            drawer_planning_provider: Explicit same-robot drawer planning service.
+            articulation_continuation_provider: Explicit same-robot articulation continuation service.
+            released_hand_provider: Same-robot released suffix authority.
         """
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
         self._device = resolve_runtime_device(motion_generator.device)
         self._binding_owner_id = uuid4().hex
+        if free_motion_query is not None and not isinstance(
+            free_motion_query, FreeMotionQuery
+        ):
+            raise TypeError(
+                "free_motion_query must implement its declared planning port."
+            )
+        if free_motion_query is not None and free_motion_query.robot is not self._robot:
+            raise ValueError("free_motion_query must own this engine's exact robot.")
+        self._free_motion_query = free_motion_query
+        if pour_grasp_projection_provider is not None and not isinstance(
+            pour_grasp_projection_provider, PourGraspProjectionProvider
+        ):
+            raise TypeError(
+                "pour_grasp_projection_provider must implement its declared planning port."
+            )
+        self._pour_grasp_projection_provider = pour_grasp_projection_provider
+        if joint_prefix_planner is not None and not isinstance(
+            joint_prefix_planner, JointPrefixPlanner
+        ):
+            raise TypeError(
+                "joint_prefix_planner must implement its declared planning port."
+            )
+        if (
+            joint_prefix_planner is not None
+            and joint_prefix_planner.robot is not self._robot
+        ):
+            raise ValueError("joint_prefix_planner must own this engine's exact robot.")
+        self._joint_prefix_planner = joint_prefix_planner
+        if pick_closing_query_provider is not None and not isinstance(
+            pick_closing_query_provider, PickClosingQueryProvider
+        ):
+            raise TypeError(
+                "pick_closing_query_provider must implement its declared planning port."
+            )
+        self._pick_closing_query_provider = pick_closing_query_provider
+        if place_scene_provider is not None and not isinstance(
+            place_scene_provider, PlaceSceneProvider
+        ):
+            raise TypeError(
+                "place_scene_provider must implement its declared planning port."
+            )
+        self._place_scene_provider = place_scene_provider
+        if place_continuation_provider is not None and not isinstance(
+            place_continuation_provider, PlaceContinuationProvider
+        ):
+            raise TypeError(
+                "place_continuation_provider must implement its declared planning port."
+            )
+        if (
+            place_continuation_provider is not None
+            and place_continuation_provider.robot is not self._robot
+        ):
+            raise ValueError(
+                "place_continuation_provider must own this engine's exact robot."
+            )
+        self._place_continuation_provider = place_continuation_provider
+        if measured_rigid_provider is not None and not isinstance(
+            measured_rigid_provider, MeasuredRigidPlanningProvider
+        ):
+            raise TypeError(
+                "measured_rigid_provider must implement its declared planning port."
+            )
+        if (
+            measured_rigid_provider is not None
+            and measured_rigid_provider.robot is not self._robot
+        ):
+            raise ValueError(
+                "measured_rigid_provider must own this engine's exact robot."
+            )
+        self._measured_rigid_provider = measured_rigid_provider
+        if held_staging_provider is not None and not isinstance(
+            held_staging_provider, HeldStagingProvider
+        ):
+            raise TypeError(
+                "held_staging_provider must implement its declared planning port."
+            )
+        if (
+            held_staging_provider is not None
+            and held_staging_provider.robot is not self._robot
+        ):
+            raise ValueError(
+                "held_staging_provider must own this engine's exact robot."
+            )
+        self._held_staging_provider = held_staging_provider
+        if retained_command_provider is not None and not isinstance(
+            retained_command_provider, RetainedCommandProvider
+        ):
+            raise TypeError(
+                "retained_command_provider must implement its declared planning port."
+            )
+        if (
+            retained_command_provider is not None
+            and retained_command_provider.robot is not self._robot
+        ):
+            raise ValueError(
+                "retained_command_provider must own this engine's exact robot."
+            )
+        self._retained_command_provider = retained_command_provider
+        if released_hand_provider is not None and not isinstance(
+            released_hand_provider, ReleasedHandContinuationProvider
+        ):
+            raise TypeError(
+                "released_hand_provider must implement its declared planning port."
+            )
+        if (
+            released_hand_provider is not None
+            and released_hand_provider.robot is not self._robot
+        ):
+            raise ValueError(
+                "released_hand_provider must own this engine's exact robot."
+            )
+        self._released_hand_provider = released_hand_provider
+        if slide_hand_clearance_provider is not None and (
+            not isinstance(slide_hand_clearance_provider, SlideHandClearanceProvider)
+            or slide_hand_clearance_provider.robot is not motion_generator.robot
+        ):
+            raise TypeError("Slide hand clearance requires this engine's exact robot.")
+        self._slide_hand_clearance_provider = slide_hand_clearance_provider
+        if drawer_planning_provider is not None and (
+            not isinstance(drawer_planning_provider, DrawerPlanningProvider)
+            or drawer_planning_provider.robot is not motion_generator.robot
+        ):
+            raise TypeError("Drawer provider must own the exact engine robot.")
+        self._drawer_planning_provider = drawer_planning_provider
+        if articulation_continuation_provider is not None and (
+            not isinstance(
+                articulation_continuation_provider, ArticulationContinuationProvider
+            )
+            or articulation_continuation_provider.robot is not self._robot
+        ):
+            raise TypeError(
+                "articulation_continuation_provider must own this engine's robot."
+            )
+        self._articulation_continuation_provider = articulation_continuation_provider
         if tracking_runtime is not None and not isinstance(
             tracking_runtime,
             TrackingRuntime,
@@ -162,6 +306,84 @@ class ActionPlanningServices:
     def motion_generator(self) -> MotionGenerator:
         """Return the single motion generator owned by the engine."""
         return self._motion_generator
+
+    @property
+    def free_motion_query(self) -> FreeMotionQuery | None:
+        """Return the borrowed discrete robot/scene qualification service."""
+        return self._free_motion_query
+
+    @property
+    def pour_grasp_projection_provider(self) -> PourGraspProjectionProvider | None:
+        """Return the borrowed provider of per-invocation numeric Pour constraints."""
+        return self._pour_grasp_projection_provider
+
+    @property
+    def joint_prefix_planner(self) -> JointPrefixPlanner | None:
+        """Return the optional locked-state joint-prefix backend adapter."""
+        return self._joint_prefix_planner
+
+    @property
+    def pick_closing_query_provider(self) -> PickClosingQueryProvider | None:
+        """Return the optional provider of fresh owned native closing queries."""
+        return self._pick_closing_query_provider
+
+    @property
+    def place_scene_provider(self) -> PlaceSceneProvider | None:
+        """Return the optional provider of owned Place input envelopes."""
+        return self._place_scene_provider
+
+    @property
+    def place_continuation_provider(self) -> PlaceContinuationProvider | None:
+        """Return exact occurrence-bound private release prediction services."""
+        return self._place_continuation_provider
+
+    @property
+    def measured_rigid_provider(self) -> MeasuredRigidPlanningProvider | None:
+        """Return the explicit same-observation measured manipulation fact provider."""
+        return self._measured_rigid_provider
+
+    @property
+    def curobo_queries(self) -> ObservedCuroboQueryService | None:
+        """Expose the typed observed-query capability of the same prefix adapter.
+
+        Prefix-only implementations remain supported. Payload consumers must
+        explicitly reject an absent capability instead of inspecting private
+        adapter fields or constructing another configuration/geometry registry.
+        """
+        service = self._joint_prefix_planner
+        return service if isinstance(service, ObservedCuroboQueryService) else None
+
+    @property
+    def held_staging_provider(self) -> HeldStagingProvider | None:
+        """Return static bindings and opt-in late same-observation geometry capture."""
+        return self._held_staging_provider
+
+    @property
+    def retained_command_provider(self) -> RetainedCommandProvider | None:
+        """Return opt-in authority and same-observation native target capture."""
+        return self._retained_command_provider
+
+    @property
+    def released_hand_provider(self) -> ReleasedHandContinuationProvider | None:
+        """Return the exact engine-owned cleanup/Park continuation service."""
+        return self._released_hand_provider
+
+    @property
+    def articulation_continuation_provider(
+        self,
+    ) -> ArticulationContinuationProvider | None:
+        """Return explicit invocation-owned installed articulation plan facts."""
+        return self._articulation_continuation_provider
+
+    @property
+    def drawer_planning_provider(self) -> DrawerPlanningProvider | None:
+        """Return the explicitly installed live drawer input provider."""
+        return self._drawer_planning_provider
+
+    @property
+    def slide_hand_clearance_provider(self) -> SlideHandClearanceProvider | None:
+        """Return the explicitly installed prismatic hand geometry service."""
+        return self._slide_hand_clearance_provider
 
     @property
     def robot(self) -> Robot:

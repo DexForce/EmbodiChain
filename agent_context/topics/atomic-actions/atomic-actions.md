@@ -51,6 +51,49 @@ values contain only immutable finite data and name their skill/revision.
 tuple; unsupported declarations fail before skill preparation. These contracts
 add no alternate built-in skill implementation or source-specific decoder.
 
+`SkillDescriptor.supports_segment_motion_recovery` is read-only and derived
+from the actual Atomic validation override. A copied class marker does not
+advertise a handler. Semantic preflight rejects unsupported segment policy
+before acquisition; the default false field is omitted from canonical descriptor
+metadata, while true capabilities participate in the effective fingerprint.
+
+`MotionPolicy` separates whole-action sample retries, segment recovery and a
+final full-robot speed gate. The complete builder retains exact request/engine
+identity, applies scoped transforms and performs rejection-only qualification.
+`plan_preview` accepts only a same-observation projected context with explicit
+preview role and a different occurrence; it uses the same engine. Preview
+callbacks never become global engine configuration. Unsupported segment recovery
+rejects before provider preparation, and external nominal motion is not replaced
+by native sampling retries. No new Source skill implementation is registered.
+
+Pick and Place keep their shared default path. Explicit typed options select
+source geometry and native screens; `PickPlanningRecovery` and
+`PlacePlanningRecovery` own bounded searches. Their descriptors advertise the
+actual recovery type and segment handler. `ActionPlanningServices` borrows
+same-robot Motion/collision services and typed Pick/Place fact providers from
+`planning_probes`, `measured_rigid` and `place_continuation`; no semantic graph,
+compiler, skill-registry replacement or simulator stepping belongs here.
+Required missing providers fail before planning. Complete release previews stay
+on the same engine and observation and authorize no physical effects. The
+single-environment source paths reject other batches. AxisAlign rejects inherited
+Pick-only options it does not implement; explicit drawer Place and held transport require the installed
+`drawer_planning` provider and complete-plan handler.
+
+Held transport and Pour retain their default paths. Explicit held-alignment and
+staging recovery consume declared geometry and owned command observations from
+Lab; retained-command provenance never certifies physical attachment. Ordered-pad
+and retained Pour goals own their original arc construction. Idle uses the normal
+MoveJoints entry, with declared relative joints and optional Motion-owned link
+clearance, and rejects nonempty resources under free-motion qualification.
+
+Released-hand cleanup and Park use exact suffix authority and the existing
+complete-plan/preview pipeline. `_released_park.py` is the unique owner of generic
+empty-hand Park qualification and bounded vias; articulation integrations reuse
+it rather than duplicating the algorithm. Articulation authorization, withdrawal
+and drawer handlers belong to `articulation_continuation`,
+`primitives/_articulation_recovery` and `primitives/_drawer_planning`. New service ports are optional, typed, same-robot and
+borrowed; construction captures no native state or commands.
+
 `ExecutionPlanLifecycle` is an optional host-owned adoption port. It receives an
 owned validated attempt before dispatch. Installation rejection latches the
 session: later ticks/revisions cannot resume commands. `ExecutionRunner` keeps
@@ -263,3 +306,11 @@ python docs/scripts/check_api_docs.py
 For public API changes also run the docs checker tests and Sphinx dummy build.
 For simulator adapters add an environment-level test that exercises normal
 `env.step()` consumption and safe cancellation.
+
+
+Prismatic recovery keeps explicit B1/env0, 390-frame and original segment retry
+bounds. Exact installed predecessor facts authorize continuation; planning
+previews cannot advance that history. `simulation/articulation_session.py`
+implements the shared planning/lifecycle provider, while physical drawer and
+preshape reads remain in the Scene and simulation adapters. Candidate selection,
+reverse entry, release lifts, retry budgets and RNG stay with the shared skill.

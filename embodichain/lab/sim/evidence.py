@@ -26,6 +26,8 @@ from types import MappingProxyType
 import torch
 
 __all__ = [
+    "PhysicalObservationStamp",
+    "RobotCommandObservation",
     "PhysicalEvidenceBatch",
     "PhysicalEvidenceFrame",
     "PhysicalEvidenceRequest",
@@ -63,6 +65,38 @@ def _validate_timestamp(value: float, *, name: str) -> float:
     if not math.isfinite(normalized) or normalized < 0.0:
         raise ValueError(f"{name} must be finite and non-negative.")
     return normalized
+
+
+@dataclass(frozen=True, slots=True)
+class PhysicalObservationStamp:
+    """Identify one native-world observation independently of semantic versions.
+
+    Args:
+        source_id: Unique host-owned source/lifetime identity.
+        source_kind: Native revision contract, such as ``default.contacts``.
+        revision: Actual revision read from that native source.
+        simulation_time: Native manager-relative time, including warmup steps.
+    """
+
+    source_id: str
+    source_kind: str
+    revision: int
+    simulation_time: float
+
+    def __post_init__(self) -> None:
+        for name in ("source_id", "source_kind"):
+            value = getattr(self, name)
+            if type(value) is not str or not value or value != value.strip():
+                raise ValueError(f"{name} must be a canonical nonempty identity.")
+        if type(self.revision) is not int or self.revision < 0:
+            raise ValueError(
+                "Native observation revision must be a nonnegative integer."
+            )
+        object.__setattr__(
+            self,
+            "simulation_time",
+            _validate_timestamp(self.simulation_time, name="simulation_time"),
+        )
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -338,3 +372,68 @@ class PhysicalEvidenceFrame:
             env_ids=self.env_ids,
             batches=self.batches,
         )
+
+
+@dataclass(frozen=True, slots=True, eq=False, kw_only=True)
+class RobotCommandObservation:
+    """Owned measured state and native drive targets from one B1 observation.
+
+    Args:
+        robot_uid: Exact host-selected robot identity.
+        joint_names: Full robot joint order for every array column.
+        timestamp: Host observation time, distinct from native manager time.
+        source_stamp: Complete native observation lifetime/revision/time identity.
+        qpos: Measured positions with shape ``(1, D)``.
+        qvel: Measured velocities with shape ``(1, D)``.
+        target_qpos: Native drive position targets with shape ``(1, D)``.
+        target_qvel: Native drive velocity targets with shape ``(1, D)``.
+
+    Targets are commands, not measurements or proof of physical attachment.
+    The capture owner verifies the exact robot and current source stamp.
+    """
+
+    robot_uid: str
+    joint_names: tuple[str, ...]
+    timestamp: float
+    source_stamp: PhysicalObservationStamp
+    qpos: torch.Tensor
+    qvel: torch.Tensor
+    target_qpos: torch.Tensor
+    target_qvel: torch.Tensor
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.robot_uid) is not str
+            or not self.robot_uid
+            or self.robot_uid != self.robot_uid.strip()
+        ):
+            raise ValueError("robot_uid must be an exact nonempty identity.")
+        names = tuple(self.joint_names)
+        if (
+            not names
+            or len(set(names)) != len(names)
+            or any(type(name) is not str or not name for name in names)
+        ):
+            raise ValueError(
+                "joint_names must preserve unique explicit column identities."
+            )
+        if type(self.source_stamp) is not PhysicalObservationStamp:
+            raise TypeError("source_stamp must be PhysicalObservationStamp.")
+        object.__setattr__(
+            self, "timestamp", _validate_timestamp(self.timestamp, name="timestamp")
+        )
+        object.__setattr__(self, "joint_names", names)
+        for name in ("qpos", "qvel", "target_qpos", "target_qvel"):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, torch.Tensor)
+                or value.shape != (1, len(names))
+                or not value.is_floating_point()
+                or not torch.isfinite(value).all()
+                or value.device != self.qpos.device
+                or value.dtype != self.qpos.dtype
+            ):
+                raise ValueError(
+                    "Robot command arrays require one finite row with matching dtype/device and joint order."
+                )
+            object.__setattr__(self, name, value.detach().clone())

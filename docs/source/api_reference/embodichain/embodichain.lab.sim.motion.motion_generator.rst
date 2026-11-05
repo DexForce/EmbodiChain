@@ -76,3 +76,15 @@ Ordinary calls, planner-owned retries, sampled input paths and complete-action
 retry policies keep their existing owners and defaults. The internal helper is
 not a second public generation entry. Geometric collision and physical-effect
 acceptance remain caller-owned.
+
+
+Bounded drawer endpoint ranking
+-------------------------------
+
+The prefilter tests explicit outside/rim/release poses from the original seed,
+retaining stage failure records and the bounded complete-plan candidate list.
+Ranking does not certify a complete path; a failed prefilter still permits the
+source's first ranked complete-planner attempt.
+
+.. automodule:: embodichain.lab.sim.motion.drawer_ranking
+   :members:

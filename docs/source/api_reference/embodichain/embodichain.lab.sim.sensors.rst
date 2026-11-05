@@ -195,6 +195,27 @@ returns owned full or incremental history. Callers retain the window generation
 when reusing an incremental offset.
 
 
+Native command observations
+---------------------------
+
+These opt-in helpers read actual qpos/qvel, then native position/velocity drive
+targets in the original order. Capture requires one explicit measured row and
+an unchanged host-provided source stamp before/after the reads. Verification
+reads again only to reject identity or array changes; fresh values never replace
+the captured observation. Neither helper steps physics, writes commands, grants
+retained-command authority or interprets task success. Unsupported batches reject
+before acquisition.
+
+.. currentmodule:: embodichain.lab.sim.sensors.command_sampling
+
+.. autosummary::
+
+   capture_robot_commands
+   verify_robot_commands
+
+.. automodule:: embodichain.lab.sim.sensors.command_sampling
+   :members:
+
 Import migration
 ----------------
 

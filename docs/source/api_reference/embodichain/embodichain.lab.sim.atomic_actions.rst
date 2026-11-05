@@ -517,5 +517,323 @@ calibration fails before capture. Diagnostic metadata never selects policy.
 
 .. autoclass:: GraspOpeningTarget
    :members:
+   :no-index:
 
 .. automethod:: ActionPlanningServices.prepare_grasp_query
+
+Explicit source contact-policy composition
+------------------------------------------
+
+The shared ``GraspOpeningTarget`` definition lives in ``grasp_geometry``;
+``atomic_actions`` and ``runtime`` retain the same public class identity. Its
+poses and metadata stay owned and bound to one preparation scope.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.grasp_geometry
+   :members:
+
+``source_native_contact`` maps the explicitly selected preserved source revision
+to GraspKit's existing typed ``ClosingContactPolicy`` and the requested FCL
+service. Closing, opening and rigid-clearance algorithms remain solely in
+GraspKit. Source builders consume the existing Default/B1 native capture API,
+retain the explicit hand sampling grid and original distances, and never step
+physics or infer a Task Program policy. Missing FCL fails explicitly; this is
+geometric qualification, not physical acquisition/release evidence.
+
+Close each query with its context manager or a ``finally`` block. It releases
+only owned query resources, never borrowed simulation entities. Ordinary
+``prepare_grasp_query`` keeps its existing Newton backend and defaults.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.source_native_contact
+   :members:
+
+
+Explicit Pick and Place planning
+--------------------------------
+
+``PickUpOptions`` and ``PlaceOptions`` select action geometry. Motion sampling,
+segment recovery and timing remain in ``MotionPolicy``; bounded candidate and
+release-path recovery use the exact ``PickPlanningRecovery`` or
+``PlacePlanningRecovery`` value in ``RecoveryPolicy.planning_recovery``. Ordinary
+defaults do not enable these capabilities. The descriptor advertises only each
+installed skill's actual recovery type and segment handler.
+
+The engine borrows typed planning ports. Their owned snapshots contain geometric
+facts and exact occurrence identities, never Task Engine or semantic compiler
+objects. Missing required geometry or a different robot rejects before the
+corresponding query. A continuation preview predicts a complete release using
+the same engine and observation; it authorizes no task-state effect or physical
+success. Native measured paths retain their explicit single-environment scope.
+
+``AxisAlignOptions`` rejects inherited Pick-only requirements that its planner
+does not implement. Explicit drawer Place and held transport use the installed bounded
+drawer handler and declared physical provider; missing inputs fail before
+corresponding planning. Existing external nominal capabilities remain
+available; explicit measured source policies reject incompatible nominal input.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
+.. autosummary::
+   :nosignatures:
+
+   PickPlanningRecovery
+   PlacePlanningRecovery
+   PourGraspProjectionInputs
+   PourGraspProjectionProvider
+   PickClosingQueryProvider
+   PickRigidSceneProvider
+   PlaceSceneInputs
+   PlaceInsideLanding
+   PlaceSceneProvider
+
+Curobo queries
+^^^^^^^^^^^^^^
+
+The joint-prefix adapter preserves the exact observed full robot state and backend options while borrowing Motion's owned query lifetime.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.curobo_queries
+
+.. autosummary::
+   :nosignatures:
+
+   CuroboJointPrefixPlanner
+
+.. autoclass:: CuroboJointPrefixPlanner
+   :members:
+
+Measured rigid
+^^^^^^^^^^^^^^
+
+Physical hosts supply same-observation rigid geometry and query sessions. Atomic skills own candidate selection, plan transformation and bounded recovery.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.measured_rigid
+
+.. autosummary::
+   :nosignatures:
+
+   MeasuredInsidePlanningInputs
+   MeasuredRigidPlanningSession
+   MeasuredRigidPlanningProvider
+
+.. autoclass:: MeasuredInsidePlanningInputs
+   :members:
+
+.. autoclass:: MeasuredRigidPlanningSession
+   :members:
+
+.. autoclass:: MeasuredRigidPlanningProvider
+   :members:
+
+Place continuation
+^^^^^^^^^^^^^^^^^^
+
+Release prediction binds distinct source, optional transport and release occurrences. Predictions cannot collect future physical facts or commit effects.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.place_continuation
+
+.. autosummary::
+   :nosignatures:
+
+   PlaceContinuationRoute
+   PlaceContinuationSession
+   PlaceContinuationProvider
+
+.. autoclass:: PlaceContinuationRoute
+   :members:
+
+.. autoclass:: PlaceContinuationSession
+   :members:
+
+.. autoclass:: PlaceContinuationProvider
+   :members:
+
+Planning probes
+^^^^^^^^^^^^^^^
+
+These ports separate read-only geometry and observed backend queries from Pick and Place phase construction. Missing declared inputs fail explicitly.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
+
+.. autosummary::
+   :nosignatures:
+
+   JointPrefixPlanner
+   CuroboWorldObservationProvider
+   ObservedCuroboQueryService
+   PourGraspProjectionProvider
+   PickClosingQueryProvider
+   PickRigidSceneProvider
+   PlaceInsideLanding
+   PlaceInsideLandingProvider
+   PlaceSceneInputs
+   PlaceSceneProvider
+
+.. autoclass:: JointPrefixPlanner
+   :members:
+
+.. autoclass:: CuroboWorldObservationProvider
+   :members:
+
+.. autoclass:: ObservedCuroboQueryService
+   :members:
+
+.. autoclass:: PourGraspProjectionProvider
+   :members:
+
+.. autoclass:: PickClosingQueryProvider
+   :members:
+
+.. autoclass:: PickRigidSceneProvider
+   :members:
+
+.. autoclass:: PlaceInsideLanding
+   :members:
+
+.. autoclass:: PlaceInsideLandingProvider
+   :members:
+
+.. autoclass:: PlaceSceneInputs
+   :members:
+
+.. autoclass:: PlaceSceneProvider
+   :members:
+
+Pour projection
+^^^^^^^^^^^^^^^
+
+Numeric downstream-pour operands constrain Pick grasp sampling without exposing a task graph or changing Pour execution.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.pour_projection
+
+.. autosummary::
+   :nosignatures:
+
+   PourGraspProjectionInputs
+
+.. autoclass:: PourGraspProjectionInputs
+   :members:
+
+
+Held transport, Pour, Idle and released-hand plans
+--------------------------------------------------
+
+``MoveHeldObjectOptions`` preserves the shared transport path unless an explicit
+alignment/staging rule is selected. Command observations come from Lab's owned
+``RobotCommandObservation`` value; the action consumes static retention authority
+and current facts without changing a verified grasp transform. Observed hand
+posture is an explicit option and does not prove physical attachment.
+
+``JawPourGoal`` and ``RetainedPourGoal`` add the preserved ordered-pad and retained
+arc constructions alongside ``PourGoal``. Relative ``JointOffsetTarget`` values
+use the bound model joint; free-motion qualification checks the full command
+grid, passive joints, original limits and scene queries. Protected-link offset
+search remains in Motion.
+
+``ReleasedHandClearanceRecovery`` and ``ReleasedHandParkRecovery`` require the
+exact declared cleanup/Park occurrences, an empty resource and explicit collision
+queries. Previews use the same engine and complete pipeline, preserve observed
+identity and restore their random streams. They send no commands and commit no
+effects. Missing or foreign suffix authority rejects. Drawer transport and
+articulation withdrawal/authorization are unavailable in this layer.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
+.. autosummary::
+   :nosignatures:
+
+   MoveHeldObjectPlanningRecovery
+   JointOffsetTarget
+   JawPourGoal
+   RetainedPourGoal
+   ReleasedHandClearanceRecovery
+   ReleasedHandParkRecovery
+   ReleasedHandContinuationSession
+   ReleasedHandContinuationProvider
+
+Held planning ports
+^^^^^^^^^^^^^^^^^^^
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
+
+.. autosummary::
+   :nosignatures:
+
+   HeldStagingBinding
+   HeldStagingProvider
+   HeldArticulationStagingProvider
+   RetainedCommandAuthority
+   RetainedCommandProvider
+
+The typed staging ports declare an exact rigid subject and prepare its owned
+distal geometry only when requested. The optional articulation query capability
+uses Motion's existing observation scope; it installs no articulation action.
+Retained-command authority names serial provenance and monitor identities and
+must be checked against an actual command observation by its host.
+
+.. autoclass:: HeldStagingBinding
+   :members:
+
+.. autoclass:: HeldStagingProvider
+   :members:
+
+.. autoclass:: HeldArticulationStagingProvider
+   :members:
+
+.. autoclass:: RetainedCommandAuthority
+   :members:
+
+.. autoclass:: RetainedCommandProvider
+   :members:
+
+Released continuation authority
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.released_continuation
+
+.. autosummary::
+   :nosignatures:
+
+   ReleasedHandClearanceRecovery
+   ReleasedHandParkRecovery
+   ReleasedHandContinuationSession
+   ReleasedHandContinuationProvider
+
+.. autoclass:: ReleasedHandClearanceRecovery
+   :members:
+
+.. autoclass:: ReleasedHandParkRecovery
+   :members:
+
+.. autoclass:: ReleasedHandContinuationSession
+   :members:
+
+.. autoclass:: ReleasedHandContinuationProvider
+   :members:
+
+
+Prismatic articulation and drawer planning
+------------------------------------------
+
+``SlidePlanningRecovery`` preserves explicit B1/env0 fixed-grid sequential IK,
+the original segment retry grid, 390-frame bound, endpoint order, push/withdrawal
+repair and RNG scopes. ``ArticulationWithdrawalPlanningRecovery`` and
+``ArticulationParkPlanningRecovery`` consume actual installed predecessor facts.
+Preview plans do not authorize later withdrawal or PARK. Generic PARK screening
+and bounded vias remain implemented once in ``primitives/_released_park.py``.
+
+Explicit drawer Place and held transport use declared ``DrawerPlanningProvider``
+inputs. The complete-plan builder retains bounded entry ranking, upright release
+lift choices, reverse entry, selected-transform rejection and containment checks
+before motion. Missing geometry or native ownership remains unavailable.
+``SlideHandClearanceProvider`` supplies measured preshape aperture facts; the
+optional 85%-to-75% retry retains original candidate and RNG boundaries.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.articulation_continuation
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.drawer_planning
+   :members:
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
+
+.. autoclass:: SlideHandClearanceProvider
+   :members:

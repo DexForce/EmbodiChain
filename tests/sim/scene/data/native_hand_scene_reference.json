@@ -1,0 +1,134 @@
+{
+  "plane_clear": {
+    "valid": true,
+    "frames": 1,
+    "minimum_checked_distance_m": null,
+    "fcl_queries": 0,
+    "plane_queries": 1,
+    "minimum_plane_signed_distance_m": 0.07
+  },
+  "plane_envelope": {
+    "valid": false,
+    "frames": 1,
+    "minimum_checked_distance_m": null,
+    "fcl_queries": 0,
+    "plane_queries": 1,
+    "minimum_plane_signed_distance_m": 0.029999999999999995,
+    "frame": 0,
+    "receiver_link": "finger",
+    "obstacle_owner": "floor",
+    "obstacle_link": null,
+    "obstacle_name": "floor",
+    "minimum_signed_distance_m": 0.029999999999999995,
+    "native_pair_contact_offset_m": 0.03,
+    "plane_normal_arena": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "plane_point_arena": [
+      0.0,
+      0.0,
+      0.02
+    ],
+    "reason": "receiver_hand_non_target_plane_contact_envelope"
+  },
+  "mesh_clear": {
+    "valid": true,
+    "frames": 1,
+    "minimum_checked_distance_m": null,
+    "fcl_queries": 0,
+    "plane_queries": 0,
+    "minimum_plane_signed_distance_m": null
+  },
+  "mesh_envelope": {
+    "valid": false,
+    "frames": 1,
+    "minimum_checked_distance_m": 0.025000002980232222,
+    "fcl_queries": 1,
+    "plane_queries": 0,
+    "minimum_plane_signed_distance_m": null,
+    "frame": 0,
+    "receiver_link": "finger",
+    "obstacle_owner": "wall",
+    "obstacle_link": null,
+    "obstacle_name": "wall",
+    "minimum_distance_m": 0.025000002980232222,
+    "native_pair_contact_offset_m": 0.03,
+    "reason": "receiver_hand_non_target_contact_envelope"
+  },
+  "mesh_intersection": {
+    "valid": false,
+    "frames": 1,
+    "minimum_checked_distance_m": 0.0,
+    "fcl_queries": 1,
+    "plane_queries": 0,
+    "minimum_plane_signed_distance_m": null,
+    "frame": 0,
+    "receiver_link": "finger",
+    "obstacle_owner": "wall",
+    "obstacle_link": null,
+    "obstacle_name": "wall",
+    "minimum_distance_m": 0.0,
+    "native_pair_contact_offset_m": 0.03,
+    "reason": "receiver_hand_non_target_contact_envelope"
+  },
+  "later_frame": {
+    "valid": false,
+    "frames": 2,
+    "minimum_checked_distance_m": 0.0,
+    "fcl_queries": 1,
+    "plane_queries": 0,
+    "minimum_plane_signed_distance_m": null,
+    "frame": 1,
+    "receiver_link": "finger",
+    "obstacle_owner": "wall",
+    "obstacle_link": null,
+    "obstacle_name": "wall",
+    "minimum_distance_m": 0.0,
+    "native_pair_contact_offset_m": 0.03,
+    "reason": "receiver_hand_non_target_contact_envelope"
+  },
+  "ordered_obstacles": {
+    "valid": false,
+    "frames": 1,
+    "minimum_checked_distance_m": 0.0,
+    "fcl_queries": 1,
+    "plane_queries": 0,
+    "minimum_plane_signed_distance_m": null,
+    "frame": 0,
+    "receiver_link": "finger",
+    "obstacle_owner": "first",
+    "obstacle_link": null,
+    "obstacle_name": "first",
+    "minimum_distance_m": 0.0,
+    "native_pair_contact_offset_m": 0.03,
+    "reason": "receiver_hand_non_target_contact_envelope"
+  },
+  "mixed": {
+    "valid": false,
+    "frames": 1,
+    "minimum_checked_distance_m": null,
+    "fcl_queries": 0,
+    "plane_queries": 1,
+    "minimum_plane_signed_distance_m": 0.029999999999999995,
+    "frame": 0,
+    "receiver_link": "finger",
+    "obstacle_owner": "mixed",
+    "obstacle_link": null,
+    "obstacle_name": "mixed",
+    "minimum_signed_distance_m": 0.029999999999999995,
+    "native_pair_contact_offset_m": 0.03,
+    "plane_normal_arena": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "plane_point_arena": [
+      0.0,
+      0.0,
+      0.02
+    ],
+    "reason": "receiver_hand_non_target_plane_contact_envelope"
+  }
+}

@@ -1,0 +1,230 @@
+{
+  "success": [
+    true
+  ],
+  "positions_sha256": "c630e34239f6b62c897c1518b3c4051249cb5714e927a91a85ea87b32cb80c18",
+  "dt_sha256": "97927e2a5ac55f57c33dc484ae9343097321c319c4cc42a1ac2d7a5a894ef3e5",
+  "segments": [
+    [
+      "approach",
+      0,
+      106
+    ],
+    [
+      "release",
+      106,
+      118
+    ],
+    [
+      "retract",
+      118,
+      169
+    ]
+  ],
+  "collision_hashes": [
+    "c630e34239f6b62c897c1518b3c4051249cb5714e927a91a85ea87b32cb80c18"
+  ],
+  "payload": [],
+  "prefix_calls": [],
+  "closed": [],
+  "dense_counts": [
+    128,
+    260,
+    320
+  ],
+  "after_rng": [
+    "297b63d19280f3f52612d0daff0614fdccc2c5a18174b9534fe5b18d7f905633",
+    0.4348634278587159,
+    0.5503559142848047
+  ],
+  "branch": {
+    "release_seed": {
+      "ik_ok": true,
+      "finite": true,
+      "in_limits": true,
+      "fk_valid": true,
+      "desired_eef": [
+        [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.30000001192092896
+          ],
+          [
+            0.0,
+            -1.0,
+            0.0,
+            0.15000000596046448
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.10000000149011612
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      ],
+      "position_error_m": [
+        0.0
+      ],
+      "rotation_error_rad": [
+        0.0
+      ],
+      "valid": true
+    },
+    "waypoints": {
+      "ik_ok": true,
+      "finite": true,
+      "in_limits": true,
+      "fk_valid": true,
+      "desired_eef": [
+        [
+          [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.30000001192092896
+            ],
+            [
+              0.0,
+              -1.0,
+              0.0,
+              0.15000000596046448
+            ],
+            [
+              0.0,
+              0.0,
+              -1.0,
+              0.20000000298023224
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.30000001192092896
+            ],
+            [
+              0.0,
+              -1.0,
+              0.0,
+              0.15000000596046448
+            ],
+            [
+              0.0,
+              0.0,
+              -1.0,
+              0.10000000149011612
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.30000001192092896
+            ],
+            [
+              0.0,
+              -1.0,
+              0.0,
+              0.15000000596046448
+            ],
+            [
+              0.0,
+              0.0,
+              -1.0,
+              0.20000000298023224
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ]
+      ],
+      "position_error_m": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "rotation_error_rad": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "valid": true
+    },
+    "velocity_phase_intervals": {
+      "approach": [
+        55,
+        50
+      ],
+      "retract": [
+        50
+      ]
+    },
+    "mandatory_indices": {
+      "approach": [
+        55,
+        105
+      ],
+      "retract": [
+        168
+      ]
+    },
+    "emitted_mandatory_fk_valid": true,
+    "inspection": {
+      "valid": true,
+      "scope": "discrete_robot_self_meshes_and_bound_scene_component_envelopes",
+      "geometry_sources": "legacy_rigid_visual_vertices_and_articulation_collision_components",
+      "not_certified": "continuous_collision_contact_or_robot_scene_clearance",
+      "minimum_table_gap_m": 0.9699999690055847,
+      "rotation_max_rad": 0.0,
+      "rotation_path_rad": 0.0,
+      "orientation_preserved": true,
+      "convex_clearance": [],
+      "release_pose_valid": true,
+      "physical_evidence": false
+    },
+    "accepted": true,
+    "physical_evidence": false,
+    "scope": "goal_conditioned_waypoint_ik_and_emitted_phase_checks",
+    "mandatory_counts": [
+      2,
+      1
+    ],
+    "solve_requests": 1,
+    "retries": 0,
+    "timing_unchanged": true
+  },
+  "ik_sha256": "44cd5fb311952eec1cd80e64f143006018965669b39831a64375628fda4f67e9",
+  "batch_sha256": "7bfaa1b1390b2e5e1ffd4c8f4cd5cace950ea20fd5b07061c64a6a630a6d88b5"
+}

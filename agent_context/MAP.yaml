@@ -132,7 +132,8 @@ topics:
   keywords: [UnitreeGo1Cfg, UnitreeGo2Cfg, UnitreeG1Cfg, UnitreeH12Cfg, ANYmalCCfg, MicroDuckCfg, load_locomotion_robot_profile, RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg, ARX5Cfg, ARX5, FlexivRizon4SCfg, FlexivRizon4S,
     FrankaCfg, FrankaPandaCfg, URRobotCfg, BrainCoRevo1Cfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
     asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot,
-    RobotHandGeometryCfg, RobotHandGeometryProvider, RobotCoordinatedGraspProvider, 机器人手部几何采样]
+    RobotHandGeometryCfg, RobotHandGeometryProvider, RobotCoordinatedGraspProvider,
+    HandCollisionTipCalibration, closed_native_hand_tip_offset, capture_preshape_hand_clearance, RobotDistalMeshSnapshot, capture_robot_distal_meshes, 机器人手部几何采样]
   paths: [topics/robot-system/robot-system.md]
   source_of_truth:
   - embodichain/lab/sim/objects/robot.py
@@ -201,7 +202,7 @@ topics:
     trajectory expansion, trajectory augmentation, expansion profile, configured trajectory expansion,
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
     轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体, kinematic trajectory refinement, 轨迹修正]
-  keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
+  keywords: [CpuIKBranchSearch, solve_goal_seeded_waypoints, cpu_planning_threads, SimulationFreeMotionQuery, ObservedCuroboQueryFactory, select_clearance_joint_offset, BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
     CuroboPayload, CuroboQuerySnapshot, curobo_motion_generator,
     interpolation_mode, ik_seed_mode, resolve_continuous_ik_path, search_cost_scope, RejectedMotionCandidate, MotionRecoveryTrace,
     expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
@@ -220,6 +221,12 @@ topics:
   - embodichain/lab/sim/motion/motion_generator.py
   - embodichain/lab/sim/motion/ik.py
   - embodichain/lab/sim/motion/_cartesian.py
+  - embodichain/lab/sim/motion/cpu_threads.py
+  - embodichain/lab/sim/motion/ik_branches.py
+  - embodichain/lab/sim/motion/goal_seeded.py
+  - embodichain/lab/sim/motion/solvers/tolerances.py
+  - embodichain/compute/kinematics/seed_selection.py
+  - embodichain/compute/geometry/pose_checks.py
   - embodichain/lab/sim/motion/limits.py
   - embodichain/lab/sim/motion/search.py
   - embodichain/lab/sim/motion/refinement.py
@@ -256,9 +263,12 @@ topics:
 - id: scene-services
   title: Scene Services
   aliases: [sim.scene, scene services, procedural scene, 场景服务, 程序化场景, 场景布局, 场景快照]
-  keywords: [SceneFragment, SceneRecipe, GeneratedScene, SupportRegion, LayoutProblem,
+  keywords: [DrawerPayloadObservation, SceneFragment, SceneRecipe, GeneratedScene, SupportRegion, LayoutProblem,
     RigidMeshSnapshot, capture_rigid_mesh,
     NativeHandGeometry, capture_native_hand_geometry, capture_native_rigid_obstacles, native hand capture,
+    source_fixed_frame_pose, source_arm_base_position, load_urdf_collision_inputs,
+
+    NativeHandSceneQuery, capture_native_hand_scene, NativeRestSceneQuery, capture_native_rest_scene, convex_input_clearance,
     NativePlanarPlacement, planar_floor_region, planar_placement_metrics, select_container_landing,
     SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
@@ -268,12 +278,15 @@ topics:
     geometry kernels, support_from_contacts, RobotSceneWorkspace, SceneWorkspaceCandidate, robot_workspace demo, 场景几何核]
   paths: [topics/scene-services/scene-services.md]
   source_of_truth:
+  - embodichain/lab/sim/scene/drawer_observation.py
+  - embodichain/lab/sim/scene/prismatic_control.py
   - embodichain/lab/sim/scene/
   - embodichain/compute/geometry/
   - embodichain/compute/geometry/pouring.py
   - embodichain/compute/geometry/projection.py
   - embodichain/lab/sim/objects/backends/_collision_inputs.py
-  watch_paths: [embodichain/lab/sim/scene/, embodichain/compute/geometry/,
+  - embodichain/lab/sim/utility/urdf_collision.py
+  watch_paths: [embodichain/lab/sim/scene/, embodichain/lab/sim/utility/urdf_collision.py, embodichain/compute/geometry/,
     tests/sim/scene/, tests/compute/geometry/]
   related_topics: [simulation-system, scene-expansion, gen-sim, task-programs]
   status: active
@@ -429,12 +442,14 @@ topics:
 - id: atomic-actions
   title: Atomic Skills
   aliases: [atomic action, atomic skill, 原子动作, 原子技能]
-  keywords: [PlanningBudget, PlanningRecovery, ExecutionPlanLifecycle, AtomicActionEngine, run-atomic-action, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
+  keywords: [SlidePlanningRecovery, DrawerPlanningProvider, ReleasedHandClearanceRecovery, MoveHeldObjectPlanningRecovery, RetainedPourGoal, JointOffsetTarget, PlanningBudget, PlanningRecovery, ExecutionPlanLifecycle, AtomicActionEngine, run-atomic-action, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
     hand_geometry_cfgs, GraspOpeningTarget, prepare_grasp_query, scoped grasp preparation,
     RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry, control-grid retiming,
     AffordanceSamplingContext, AffordancePoseCandidates, AffordanceSample, affordance sampling]
   paths: [topics/atomic-actions/atomic-actions.md]
   source_of_truth:
+  - embodichain/compute/geometry/drawer.py
+  - embodichain/compute/geometry/drawer_path.py
   - embodichain/lab/sim/atomic_actions/engine.py
   - embodichain/lab/sim/atomic_actions/core.py
   - embodichain/lab/sim/atomic_actions/goals.py
@@ -444,6 +459,8 @@ topics:
   - embodichain/lab/sim/atomic_actions/articulation_geometry.py
   - embodichain/lab/sim/atomic_actions/affordance_sampling.py
   - embodichain/lab/sim/atomic_actions/runtime.py
+  - embodichain/lab/sim/atomic_actions/released_continuation.py
+  - embodichain/lab/sim/atomic_actions/planning_probes.py
   - embodichain/lab/sim/atomic_actions/primitives/
   - embodichain/cli/run_example.py
   - examples/sim/atomic_action/
@@ -454,7 +471,7 @@ topics:
 - id: task-programs
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
-  keywords: [TaskProgramCfg, SimulationSettleMonitorCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
+  keywords: [ArticulationContinuationRegistry, SimulationDrawerPlanningProvider, TaskProgramCfg, SimulationSettleMonitorCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
     hand_geometries,
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,

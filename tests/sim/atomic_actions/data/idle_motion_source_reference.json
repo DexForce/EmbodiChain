@@ -1,0 +1,114 @@
+{
+  "source_commit": "05da44bd8f9c0fdace1a6c793d73d927daf10e72",
+  "scope": "real source GenSimActionEngine + IdleGuardMoveJoints + CheckedMotionGenerator sampled contract + yourdfpy/FCL; no native simulator claim",
+  "cases": [
+    {
+      "name": "clear",
+      "target": [
+        0.1,
+        0
+      ],
+      "positions": [
+        [
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.05000000074505806,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.10000000149011612,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ]
+      ],
+      "dt": [
+        [
+          0.0,
+          0.03999999910593033,
+          0.03999999910593033
+        ]
+      ],
+      "success": [
+        true
+      ],
+      "active_masks": [
+        [
+          true
+        ],
+        [
+          true
+        ],
+        [
+          true
+        ]
+      ],
+      "rng_unchanged": true
+    },
+    {
+      "name": "scene",
+      "target": [
+        0.25,
+        0
+      ],
+      "positions": [
+        []
+      ],
+      "dt": [
+        []
+      ],
+      "success": [
+        false
+      ],
+      "active_masks": [],
+      "rng_unchanged": true
+    },
+    {
+      "name": "other_arm",
+      "target": [
+        0.65,
+        0
+      ],
+      "positions": [
+        []
+      ],
+      "dt": [
+        []
+      ],
+      "success": [
+        false
+      ],
+      "active_masks": [],
+      "rng_unchanged": true
+    },
+    {
+      "name": "self",
+      "target": [
+        0.4,
+        -0.55
+      ],
+      "positions": [
+        []
+      ],
+      "dt": [
+        []
+      ],
+      "success": [
+        false
+      ],
+      "active_masks": [],
+      "rng_unchanged": true
+    }
+  ]
+}

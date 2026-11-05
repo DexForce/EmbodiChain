@@ -12,6 +12,8 @@ binding. Return to [motion planning](motion-planning.md) for other entry points.
 | cuRobo world config, cache and updates | `embodichain/lab/sim/motion/planners/curobo/curobo_planner.py` |
 | Collision-shape descriptors to native scene | `embodichain/lab/sim/motion/planners/curobo/curobo_yaml.py` |
 | Owned observed query/payload values and scoped motion factory | `embodichain/lab/sim/motion/planners/curobo/payload.py` |
+| Complete observed collision roster and fresh cuRobo scope | `motion/planners/curobo/observed.py`, `scene/collision_sources.py` |
+| Discrete B1 input-mesh robot/scene queries | `motion/mesh_collision.py`, `scene/_collision_query_inputs.py` |
 | Registry/provider agreement | `embodichain/lab/task_program/semantics/scene.py` → `SceneRegistry` |
 
 ## Logical identity survives geometry expansion
@@ -131,3 +133,19 @@ cache and live-update behavior; `test_curobo_integration.py` in that directory
 covers the backend integration. Registry/provider contracts are exercised under
 `tests/lab/task_program/semantics/`. Include logical-ID/compound-shape and
 shared/per-env cases when changing geometry or dynamic binding.
+
+## Explicit B1 source-compatible query scopes
+
+`ObservedCuroboQueryFactory` owns one fresh static-world backend and verifies the
+explicit generated-URDF root identity. Its geometry reader keeps the complete
+ordered roster, including collision-only links; missing selected poses reject.
+Payload exclusions are explicit and snapshot outputs survive backend close.
+The existing batched no-payload snapshot path remains separate and unchanged.
+
+`SimulationFreeMotionQuery` captures current input geometry per discrete query;
+`RobotMeshCollisionSnapshot` and `RobotArticulationCollisionSnapshot` own narrower
+scopes. Precontact reports explicitly identify their excluded rigid owner.
+`robot_collision_query_scope` reuses only the exact current robot/model identity
+and restores nested scopes. These APIs retain B1 limits and source pair order.
+The optional `planning-geometry` extra supplies qualified FCL; unavailable FCL
+raises before robot/scene reads and does not select another backend.

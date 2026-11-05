@@ -1,6 +1,5 @@
 Geometry arrays and tensor kernels
 ==================================
-
 ``embodichain.compute.geometry`` provides reusable Torch operations on dense
 float32/float64 tensors. Inputs share dtype and device; outputs stay on that
 CPU or CUDA device. The kernels do not accept entity UIDs, asset paths, mesh
@@ -385,6 +384,10 @@ uses explicit TCP/root geometry to produce the ordered outward translations;
 rejected geometry or bounds remain unavailable proposals. Robot kinematics,
 collision queries and execution policy are outside these numeric operations.
 
+The FK and sampled-path residual helpers preserve their distinct source
+precision and rounding margins. They compare numeric transforms only; solver
+limits and observed Robot state are supplied by the Motion owner.
+
 .. automodule:: embodichain.compute.geometry.pose_checks
    :members:
 
@@ -401,3 +404,18 @@ produce NaN and preserve the caller's conservative envelope. The sensor-facing
 uses it without importing Lab or acquiring physical state.
 
 .. autofunction:: embodichain.compute.geometry.contact_support.contact_support_heights
+
+
+Drawer proposal and containment arithmetic
+------------------------------------------
+
+Drawer algorithms consume explicit payload vertices, observed poses and declared
+region bounds. Entry proposals and containment reports preserve source order,
+world-up proposals and exposed-floor rules. They neither acquire native state
+nor select complete motion plans or establish physical retention.
+
+.. automodule:: embodichain.compute.geometry.drawer
+   :members:
+
+.. automodule:: embodichain.compute.geometry.drawer_path
+   :members:
