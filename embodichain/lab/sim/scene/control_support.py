@@ -121,6 +121,16 @@ def adjust_revolute_source_support(
     depth or the pair's equilibrium rest separation. An explicit 1--4 mm total
     lift is a geometrically screened runtime candidate, not a no-contact
     certificate; its conservative reference and actual gap are both recorded.
+
+    Args:
+        config: Fixed-base source articulation declaration to copy.
+        binding: Source-qualified moving link and revolute-axis binding.
+        table: Collision-enabled physical table declaration.
+        table_top_z: Measured table surface height in world coordinates.
+        requested_total_lift_m: Optional explicit 1--4 mm lift candidate.
+
+    Returns:
+        Independent adjusted declaration and original numeric clearance receipt.
     """
     if not _fixed_base(config):
         raise ValueError("E8 support adjustment requires a fixed base.")

@@ -544,6 +544,9 @@ def requires_derived_revolute_mass_source() -> bool:
     When that field is absent, the original deployment fallback uses a qualified
     derived USD mass source. This descriptor reads configuration capability only;
     it creates no simulator or asset and supplies no physical success verdict.
+
+    Returns:
+        Whether the schema requires the derived-source mass route.
     """
     from embodichain.lab.sim.cfg import ArticulationCfg
 
