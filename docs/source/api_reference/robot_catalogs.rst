@@ -696,7 +696,7 @@ embodichain_robots.wuji.hand
 
 
 Explicit Robotiq task-hand contact roles
----------------------------------------
+----------------------------------------
 
 The Franka and UR10 dual-arm Robotiq embodiments already own their public
 ``hand_geometries`` mappings. This model helper reuses those exact declarations,
@@ -714,7 +714,7 @@ reserve dimensions; neither is substituted for measured native geometry.
 .. autofunction:: robotiq140_task_hand_calibrations
 
 Explicit source deployment calibration
--------------------------------------
+--------------------------------------
 
 These helpers return owned declarations for the Franka and UR10 Robotiq
 embodiments. They retain the source 0.128 m opening cap and bench mounting,

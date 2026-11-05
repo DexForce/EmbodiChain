@@ -174,3 +174,28 @@ def test_source_robot_preflight_constructs_no_simulator_or_robot(monkeypatch, mo
         Robot, "__init__", lambda *a, **k: pytest.fail("preflight created Robot")
     )
     require_source_robot_assets(model)
+
+
+def test_explicit_deployment_profiles_keep_six_frozen_complete_declaration_hashes():
+    import hashlib
+    import json
+
+    frozen = json.loads(
+        (Path(__file__).parent / "data/robotiq_task_declarations_489.json").read_text()
+    )
+    for case in frozen["cases"]:
+        value = source_robotiq_opening_declaration(component(case["model"]))
+        if case["profile"] == "contact_experiment":
+            value = source_contact_pad_declaration(value)
+        value = source_robot_mount_declaration(value, table_top_z=frozen["table_top_z"])
+        value = source_grip_effort_declaration(value, case["caps"])
+        payload = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        assert (
+            hashlib.sha256(payload.encode()).hexdigest() == case["declaration_sha256"]
+        ), (case["model"], case["profile"])
