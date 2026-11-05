@@ -1068,3 +1068,22 @@ TaskSpec, and imports no Task Engine implementation.
 
 .. automodule:: embodichain.lab.task_program.integrations.simulation.observation_services
    :members:
+Explicit initial planning diagnostics
+-------------------------------------
+
+The configured probe uses the same adapter, compiler, occurrence policy and
+Atomic engine as execution, analyzing only the first sequential window and
+planning its first occurrence once. It never resets, steps or dispatches.
+Process and environment RNG streams restore on success and error; borrowed
+host adapters remain open and temporary bridge resources close. Probe-only
+nominal sources and a parallel initial window are rejected explicitly.
+
+``create_bridge(initial_plan_observer=...)`` instead emits owned proposal data
+from the actual installed first complete plan before dispatch. The callback is
+explicit application code, not a declaration or a plan transform. With None,
+ordinary creation, nominal support and execution retain their existing paths.
+``task_success`` remains None in both forms.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.planning_probe
+
+.. autofunction:: probe_configured_task_program_initial_plan

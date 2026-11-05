@@ -75,6 +75,12 @@ callbacks never become global engine configuration. Unsupported segment recovery
 rejects before provider preparation, and external nominal motion is not replaced
 by native sampling retries. No new Source skill implementation is registered.
 
+`plan_evidence.action_plan_proposal_evidence` and the execution session's
+`active_plan_proposal_evidence()` read the retained complete plan without another
+plan/transform or full sample snapshot. They return owned proposal and velocity
+diagnostics, not acquired attachment or physical success. None is returned when
+no plan is installed; successful plans need final joint trajectory evidence.
+
 Pick and Place keep their shared default path. Explicit typed options select
 source geometry and native screens; `PickPlanningRecovery` and
 `PlacePlanningRecovery` own bounded searches. Their descriptors advertise the

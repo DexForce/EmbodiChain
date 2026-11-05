@@ -773,6 +773,8 @@ class TaskProgramEnvironmentAdapter:
         runtime_scope_guard: Callable[[], None] | None = None,
         clock: EnvironmentStepClock | None = None,
         plan_lifecycle_factory: TaskProgramPlanLifecycleFactory | None = None,
+        initial_plan_observer: Callable[[dict[str, object]], None] | None = None,
+        initial_plan_invocation_id: str | None = None,
     ) -> TaskProgramRuntimeAssembly:
         """Attach live observation, evidence, command, and runtime boundaries."""
         self._require_open()
@@ -886,6 +888,14 @@ class TaskProgramEnvironmentAdapter:
             plan_transform_factory=plan_transform_factory,
             nominal_source_factory=nominal_source_factory,
             plan_lifecycle_factory=plan_lifecycle_factory,
+            **(
+                {
+                    "initial_plan_observer": initial_plan_observer,
+                    "initial_plan_invocation_id": initial_plan_invocation_id,
+                }
+                if initial_plan_observer is not None
+                else {}
+            ),
         )
         parallel_safety_validator = self._parallel_safety_validator
         if (
@@ -1016,11 +1026,14 @@ class TaskProgramEnvironmentAdapter:
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
         invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
         runtime_scope_guard: Callable[[], None] | None = None,
+        initial_plan_observer: Callable[[dict[str, object]], None] | None = None,
     ) -> TaskProgramDemoBridge:
         """Create a fresh Gym bridge for one provider-free compiled program.
 
         Args:
             program: Program compiled for this adapter's exact integration IDs.
+            initial_plan_observer: Optional passive first-plan data callback, after
+                installation and before dispatch. None preserves normal assembly.
             runtime_scope_guard: Optional host scope validator bound to this bridge.
             invocation_policy_bindings: Named preset selections for exact sequential
                 occurrences, sealed to this compiled program's fingerprint.
@@ -1028,11 +1041,59 @@ class TaskProgramEnvironmentAdapter:
         Returns:
             Lazy bridge sharing one newly assembled runtime, clock, and sink.
         """
+        bridge, _ = self._create_bridge_with_assembly(
+            program,
+            expansion_profile=expansion_profile,
+            candidate_index=candidate_index,
+            recipe_indices=recipe_indices,
+            nominal_source_factory=nominal_source_factory,
+            plan_transform_factory=plan_transform_factory,
+            invocation_policy_bindings=invocation_policy_bindings,
+            runtime_scope_guard=runtime_scope_guard,
+            **(
+                {"initial_plan_observer": initial_plan_observer}
+                if initial_plan_observer is not None
+                else {}
+            ),
+        )
+        return bridge
+
+    def _create_bridge_with_assembly(
+        self,
+        program: CompiledTaskProgram,
+        *,
+        expansion_profile: CombinedExpansionProfile | None = None,
+        candidate_index: int = 0,
+        recipe_indices: tuple[int, ...] | None = None,
+        nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
+        plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
+        runtime_scope_guard: Callable[[], None] | None = None,
+        initial_plan_probe: bool = False,
+        initial_plan_observer: Callable[[dict[str, object]], None] | None = None,
+    ) -> tuple[TaskProgramDemoBridge, TaskProgramRuntimeAssembly]:
+        """Share one guarded assembly path for execution and explicit diagnostics."""
         self._require_open()
         if runtime_scope_guard is not None and not callable(runtime_scope_guard):
             raise TypeError("runtime_scope_guard must be callable or None.")
         if type(program) is not CompiledTaskProgram:
             raise TypeError("program must be exactly CompiledTaskProgram.")
+        if type(initial_plan_probe) is not bool:
+            raise TypeError("initial_plan_probe must be bool.")
+        observer = None
+        observer_invocation = None
+        if initial_plan_observer is not None:
+            from .simulation.planning_probe import _execution_initial_plan_observer
+
+            observer_invocation, observer = _execution_initial_plan_observer(
+                program, initial_plan_observer
+            )
+        if initial_plan_probe and (
+            self._configured_nominal_sources or nominal_source_factory is not None
+        ):
+            raise ValueError(
+                "Initial planning probe does not consume configured nominal sources."
+            )
         configured_bindings = (
             ()
             if self._registration is None
@@ -1140,11 +1201,16 @@ class TaskProgramEnvironmentAdapter:
                 policies.validate_manifest(
                     program, semantic.compiler.integration.manifest
                 )
-            self._preflight_program(
-                program,
-                semantic.compiler,
-                **({"invocation_policies": policies} if policies is not None else {}),
-            )
+            if not initial_plan_probe:
+                self._preflight_program(
+                    program,
+                    semantic.compiler,
+                    **(
+                        {"invocation_policies": policies}
+                        if policies is not None
+                        else {}
+                    ),
+                )
             if expansion_profile is not None and not isinstance(
                 expansion_profile, CombinedExpansionProfile
             ):
@@ -1181,6 +1247,14 @@ class TaskProgramEnvironmentAdapter:
                 validate_owner()
             assembly = self._assemble_execution_runtime(
                 semantic,
+                **(
+                    {
+                        "initial_plan_observer": observer,
+                        "initial_plan_invocation_id": observer_invocation,
+                    }
+                    if observer is not None
+                    else {}
+                ),
                 plan_transform_factory=(
                     expansion if expansion is not None else plan_transform_factory
                 ),
@@ -1238,7 +1312,7 @@ class TaskProgramEnvironmentAdapter:
             bind_owner = getattr(self._factory, "bind_runtime_bridge", None)
             if callable(bind_owner):
                 bind_owner(bridge)
-            return bridge
+            return bridge, assembly
         except Exception:
             if control_services is not None:
                 control_services.close_host_resources()

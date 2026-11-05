@@ -20,8 +20,10 @@ import zlib
 
 import math
 import inspect
+import random
+from contextlib import contextmanager
 from copy import deepcopy
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from numbers import Integral, Real
 
 import torch
@@ -1106,6 +1108,63 @@ class BaseEnv(gym.Env):
                 generator.manual_seed(self._component_seed(name, self.cfg.seed))
             self._component_generators[name] = generator
         return self._component_generators[name]
+
+    @contextmanager
+    def preserve_random_state(self) -> Iterator[None]:
+        """Preserve process and environment random streams during a diagnostic.
+
+        Yields:
+            A scope restoring Python, NumPy, Torch CPU and already initialized
+            CUDA streams, named component generators and the Gym NumPy generator.
+            Existing generator identities are retained. Streams first registered
+            inside the scope are removed on exit, including exceptions.
+
+        The scope neither resets nor steps the environment and does not initialize
+        CUDA solely to capture its RNG state.
+        """
+        python_state = random.getstate()
+        numpy_state = np.random.get_state()
+        owned_names = ("_component_generators", "_np_random", "_np_random_seed")
+        original = {
+            name: self.__dict__[name] for name in owned_names if name in self.__dict__
+        }
+        component_generators = dict(getattr(self, "_component_generators", {}))
+        component_states = {
+            name: generator.get_state()
+            for name, generator in component_generators.items()
+        }
+        numpy_generator = getattr(self, "_np_random", None)
+        generator_state = (
+            deepcopy(numpy_generator.bit_generator.state)
+            if isinstance(numpy_generator, np.random.Generator)
+            else None
+        )
+        devices = (
+            list(range(torch.cuda.device_count()))
+            if torch.cuda.is_initialized()
+            else []
+        )
+        with torch.random.fork_rng(devices=devices):
+            try:
+                yield
+            finally:
+                try:
+                    for name, generator in component_generators.items():
+                        generator.set_state(component_states[name])
+                    if generator_state is not None:
+                        numpy_generator.bit_generator.state = generator_state
+                    previous_components = original.get("_component_generators")
+                    if previous_components is not None:
+                        previous_components.clear()
+                        previous_components.update(component_generators)
+                    for name in owned_names:
+                        if name in original:
+                            self.__dict__[name] = original[name]
+                        else:
+                            self.__dict__.pop(name, None)
+                finally:
+                    random.setstate(python_state)
+                    np.random.set_state(numpy_state)
 
     def _set_seed(self, seed: int) -> int:
         """Set the effective environment seed and rewind seeded managers."""

@@ -681,6 +681,20 @@ These ports separate read-only geometry and observed backend queries from Pick a
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
 
+Complete plan proposal diagnostics
+----------------------------------
+
+``action_plan_proposal_evidence`` reads a retained complete plan and returns
+independent plain data for proposed grasps and full-robot velocity validity.
+The returned planning mask includes the velocity check; it does not replace
+the installed plan, verify an attachment or establish task success.
+``ExecutionSession.active_plan_proposal_evidence()`` observes its current
+installed plan without planning again or copying all trajectory samples.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.plan_evidence
+
+.. autofunction:: action_plan_proposal_evidence
+
 .. autosummary::
    :nosignatures:
 

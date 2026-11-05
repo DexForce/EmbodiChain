@@ -32,6 +32,17 @@ The manifest check owns profile/preset validation. Scene registry IDs belong to
 the host selection, not `SceneManifest`; the standard adapter checks them, while
 a host constructing `TaskProgramDemoBridge` directly must validate scene ownership.
 
+Explicit initial diagnostics live in `integrations/simulation/planning_probe.py`.
+The probe borrows a matching initialized host adapter, uses the same compiler and
+exact occurrence presets, and plans only the first sequential occurrence without
+dispatch, effect commit, reset or step. Temporary resources close and the public
+`BaseEnv.preserve_random_state()` scope restores process, named and Gym streams;
+configured nominal sources and initial parallel windows are unsupported for probes.
+The optional `create_bridge(initial_plan_observer=...)` callback instead observes
+the actual installed first complete execution plan once, before dispatch. Default
+None does not change normal bridge assembly, nominal support or semantic guards.
+These are data-only runtime APIs, not declaration callbacks or TaskSpec evidence.
+
 ## Effect assurance and acceptance
 
 Every `SkillPolicyPreset` explicitly selects one authority:

@@ -3281,6 +3281,7 @@ class EmbodiedEnv(BaseEnv):
         expansion_recipe_indices: tuple[int, ...] | None = None,
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        initial_plan_observer: Callable[[dict[str, object]], None] | None = None,
     ) -> TaskProgramDemoBridge:
         """Create the Gym demo bridge through the explicit adapter.
 
@@ -3289,6 +3290,7 @@ class EmbodiedEnv(BaseEnv):
             expansion_profile: Optional episode-scoped Expansion Profile.
             expansion_candidate_index: FIFO candidate ordinal selected from
                 each matching Atomic plan.
+            initial_plan_observer: Optional first canonical plan diagnostics callback.
 
         Returns:
             Atomic demo bridge whose segments are consumed lazily.
@@ -3299,6 +3301,8 @@ class EmbodiedEnv(BaseEnv):
             kwargs["nominal_source_factory"] = nominal_source_factory
         if plan_transform_factory is not None:
             kwargs["plan_transform_factory"] = plan_transform_factory
+        if initial_plan_observer is not None:
+            kwargs["initial_plan_observer"] = initial_plan_observer
         return self._checked_task_program_adapter().create_bridge(
             program,
             expansion_profile=expansion_profile,
@@ -3306,6 +3310,16 @@ class EmbodiedEnv(BaseEnv):
             recipe_indices=expansion_recipe_indices,
             **kwargs,
         )
+
+    @property
+    def active_task_program_bridge(self) -> TaskProgramDemoBridge | None:
+        """Borrow the bridge selected for this episode, without creating another.
+
+        Call create_demo_segments() after reset to select a bridge before its
+        first segment is consumed. Reset clears the selection; a completed
+        bridge remains available for final evidence until its owner closes it.
+        """
+        return getattr(self, "_active_task_program_bridge", None)
 
     @property
     def task_program_expansion_records(
@@ -3363,6 +3377,7 @@ class EmbodiedEnv(BaseEnv):
         expansion_recipe_indices: tuple[int, ...] | None = None,
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        initial_plan_observer: Callable[[dict[str, object]], None] | None = None,
         **kwargs,
     ) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
@@ -3381,6 +3396,8 @@ class EmbodiedEnv(BaseEnv):
                 matching grounded Atomic calls in this episode.
             expansion_candidate_index: FIFO candidate ordinal selected from
                 each generated reference.
+            initial_plan_observer: Optional data-only first-plan callback, requiring
+                a selected Task Program. None preserves the ordinary call shape.
             **kwargs: Keyword arguments forwarded to the legacy planner.
 
         Returns:
@@ -3407,6 +3424,7 @@ class EmbodiedEnv(BaseEnv):
                 and expansion_recipe_indices is None
                 and nominal_source_factory is None
                 and plan_transform_factory is None
+                and initial_plan_observer is None
             ):
                 bridge = self.create_task_program_bridge(compiled_program)
             else:
@@ -3415,6 +3433,8 @@ class EmbodiedEnv(BaseEnv):
                     bridge_kwargs["nominal_source_factory"] = nominal_source_factory
                 if plan_transform_factory is not None:
                     bridge_kwargs["plan_transform_factory"] = plan_transform_factory
+                if initial_plan_observer is not None:
+                    bridge_kwargs["initial_plan_observer"] = initial_plan_observer
                 bridge = self.create_task_program_bridge(
                     compiled_program,
                     expansion_profile=expansion_profile,
@@ -3440,6 +3460,8 @@ class EmbodiedEnv(BaseEnv):
             raise ValueError("nominal_source_factory requires a selected Task Program")
         if plan_transform_factory is not None:
             raise ValueError("plan_transform_factory requires a selected Task Program")
+        if initial_plan_observer is not None:
+            raise ValueError("initial_plan_observer requires a selected Task Program")
         if expansion_candidate_index != 0:
             raise ValueError(
                 "expansion_candidate_index requires a selected Task Program"

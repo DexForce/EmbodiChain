@@ -1302,6 +1302,11 @@ class TaskProgramDemoBridge:
         return self._clock
 
     @property
+    def program(self) -> CompiledTaskProgramPort:
+        """Return the program selected for this execution."""
+        return self._program
+
+    @property
     def execution_finished(self) -> bool:
         """Return whether segment iteration ended with no outstanding action owner.
 

@@ -270,6 +270,8 @@ class SemanticCallExecutor:
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
         plan_lifecycle_factory: TaskProgramPlanLifecycleFactory | None = None,
+        initial_plan_observer: Callable[[dict[str, object]], None] | None = None,
+        initial_plan_invocation_id: str | None = None,
     ) -> None:
         if not isinstance(compiler, SemanticCallCompiler):
             raise TypeError("compiler must be a SemanticCallCompiler.")
@@ -305,6 +307,17 @@ class SemanticCallExecutor:
             raise TypeError(
                 "plan_lifecycle_factory must implement TaskProgramPlanLifecycleFactory or be None."
             )
+        if initial_plan_observer is not None and not callable(initial_plan_observer):
+            raise TypeError("initial_plan_observer must be callable or None.")
+        if initial_plan_invocation_id is not None and (
+            type(initial_plan_invocation_id) is not str
+            or not initial_plan_invocation_id
+            or initial_plan_invocation_id.strip() != initial_plan_invocation_id
+            or initial_plan_observer is None
+        ):
+            raise ValueError(
+                "An exact initial_plan_invocation_id requires its observer."
+            )
         integration = compiler.integration
         engine = integration.engine
         if not isinstance(engine, AtomicActionEngine):
@@ -329,6 +342,8 @@ class SemanticCallExecutor:
         self._plan_transform_factory = plan_transform_factory
         self._nominal_source_factory = nominal_source_factory
         self._plan_lifecycle_factory = plan_lifecycle_factory
+        self._initial_plan_observer = initial_plan_observer
+        self._initial_plan_invocation_id = initial_plan_invocation_id
         self._step_observer: Callable[[RunnerStep], None] | None = None
         self._last_sent_plan_reference: tuple[int, str | None, int] | None = None
         self._task_state = _snapshot_task_state(initial_task)
@@ -1229,6 +1244,31 @@ class SemanticCallExecutor:
         )
         primed = _PrimedObservationProvider(context, self._observation_provider)
         try:
+            if self._initial_plan_observer is not None and (
+                self._initial_plan_invocation_id is None
+                or invocation.invocation_id == self._initial_plan_invocation_id
+            ):
+                evidence = session.active_plan_proposal_evidence()
+                if evidence is not None:
+                    observer = self._initial_plan_observer
+                    self._initial_plan_observer = None
+                    observer(
+                        dict(
+                            **evidence,
+                            invocation_id=invocation.invocation_id,
+                            invocation_revision=invocation.revision,
+                            call_index=workflow_call_index,
+                            analysis_call_count=len(workflow.calls),
+                            initial_downstream_target_count=len(
+                                workflow.calls[
+                                    analysis_call_index
+                                ].downstream_object_targets
+                            ),
+                            unplanned_call_indices=list(
+                                range(analysis_call_index + 1, len(workflow.calls))
+                            ),
+                        )
+                    )
             runner = ExecutionRunner(
                 session,
                 primed,

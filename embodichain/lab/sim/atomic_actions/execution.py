@@ -806,6 +806,20 @@ class ExecutionSession:
         assert self._plan is not None
         return self._plan.snapshot()
 
+    def active_plan_proposal_evidence(self) -> dict[str, object] | None:
+        """Read plain proposal/velocity diagnostics without copying full samples.
+
+        Returns:
+            Owned data for the installed plan, or None before a plan exists.
+            This optional observation performs no planning, transformation,
+            recovery, effect commit or trajectory mutation.
+        """
+        if self._plan is None:
+            return None
+        from .plan_evidence import action_plan_proposal_evidence
+
+        return action_plan_proposal_evidence(self._plan, self._engine.robot)
+
     @property
     def plan_attempts(self) -> tuple[ExecutionPlanAttempt, ...]:
         """Return every installed plan in deterministic recovery order.
