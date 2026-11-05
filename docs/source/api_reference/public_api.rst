@@ -2500,6 +2500,7 @@ embodichain.lab.sim.motion.planners.utils
    PlanState
    PlanResult
    RejectedMotionCandidate
+   MotionRecoveryTrace
    normalize_success_mask
    calculate_point_allocations
    interpolate_xpos
