@@ -45,7 +45,7 @@ from .observation_types import (
     ObservationFrame,
     ObservationHistorySnapshot,
 )
-from .manager_base import ManagerBase
+from .manager_base import Functor, ManagerBase
 from .cfg import ObservationCfg
 
 __all__ = ["ObservationManager"]
@@ -434,7 +434,7 @@ class ObservationManager(ManagerBase):
             self._mode_functor_names.setdefault(mode, []).append(name)
             self._mode_functor_cfgs.setdefault(mode, []).append(cfg)
             self._mode_class_functor_cfgs.setdefault(mode, [])
-            if inspect.isclass(cfg.func):
+            if isinstance(cfg.func, Functor):
                 self._mode_class_functor_cfgs[mode].append(cfg)
             self._has_raw_channels |= "recording" in cfg.consumers
 

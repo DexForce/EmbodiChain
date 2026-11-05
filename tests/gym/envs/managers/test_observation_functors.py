@@ -1276,3 +1276,36 @@ def test_manager_binds_required_recording_source_once_after_callable_resolution(
         ObservationManager(
             {"cube": conflicting}, env, recording={"recording:cube": required}
         )
+
+
+def test_stateful_observation_manager_reset_clears_only_selected_rows() -> None:
+    from types import SimpleNamespace
+    from tensordict import TensorDict
+    from embodichain.lab.gym.envs.managers import ObservationCfg, ObservationManager
+    from embodichain.lab.gym.envs.managers.manager_base import Functor
+
+    class Counter(Functor):
+        def __init__(self, cfg, env):
+            super().__init__(cfg, env)
+            self.value = torch.zeros(env.num_envs)
+
+        def __call__(self, env, obs):
+            self.value += 1
+            return self.value.clone()
+
+        def reset(self, env_ids=None):
+            self.value[slice(None) if env_ids is None else env_ids] = 0
+
+    env = SimpleNamespace(num_envs=2, device=torch.device("cpu"))
+    manager = ObservationManager(
+        {
+            "counter": ObservationCfg(
+                func=Counter, mode="add", name="trace/count", params={}
+            )
+        },
+        env,
+    )
+    manager.compute(TensorDict({}, batch_size=[2]))
+    manager.reset([0])
+    value = manager.compute(TensorDict({}, batch_size=[2]))
+    torch.testing.assert_close(value["trace"]["count"], torch.tensor([1.0, 2.0]))

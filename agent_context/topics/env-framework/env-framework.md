@@ -170,9 +170,11 @@ flat action validation/slicing → term processing → term application
 
 Raw policy input is one ordered flat floating tensor. `ActionManager` validates
 it before state changes, processes every slice, and applies each term's owned
-resources. `ControllerAction` stays wrapped through preprocessing, bypasses the
-manager entirely, and validates qpos/qvel/qf keys, batch, joint width, floating
-dtype, and device at the direct controller boundary. Both paths retain the
+resources. `ControllerAction` stays wrapped through preprocessing and normally validates
+qpos/qvel/qf keys, batch, joint width, floating dtype and device at the direct
+controller boundary. The position-only `expert_trajectory.use_action_manager`
+opt-in instead processes joint targets through the configured policy terms,
+retaining exact FK targets and expert recording schema. Both paths retain the
 ordinary observation, reward, termination, and rollout lifecycle.
 
 Read final task success before resetting scene/bridge state. A Task Program
@@ -243,7 +245,14 @@ the traceback can retain native resources not yet registered with the manager.
 
 ### Stateful sensor and action lifecycle
 
-BaseEnv starts one simulation-manager update per control interval and samples
-participating sensors through its `after_substep` observer. See the sensor-owned [contact history contract](../sensor-system/contact-history.md)
+`BaseEnv._advance_physics()` starts one simulation-manager update per control
+interval and samples participating sensors through its `after_substep` observer.
+`EmbodiedEnv._advance_physics()` connects an ActionManager control-interval callback
+to the batched simulation update after sensor sampling, and delegates ordinary
+actions to the base implementation. ActionManager owns the substep count, term
+refresh and inactive-row holds. Intermediate
+recording and visualization frames retain the simulation manager's publication cadence.
+Direct controller-ready commands bypass
+this refresh path; the explicit expert ActionManager route participates. See the sensor-owned [contact history contract](../sensor-system/contact-history.md)
 for interval accumulation, counterpart filtering and selective reset.
 EmbodiedEnv resets action and event managers before applying reset-mode events.

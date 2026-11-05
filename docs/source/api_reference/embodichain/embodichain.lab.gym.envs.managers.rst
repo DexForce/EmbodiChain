@@ -59,6 +59,7 @@ functors), :class:`ActionManager` (``process_action(action)`` then
       JointPositionToLimitsAction
       JointVelocityAction
       ParallelGripperAction
+      RelativeEefDlsAction
       RelativeEefPoseAction
       RelativeJointPositionAction
       LeRobotRecorder
@@ -193,6 +194,34 @@ offset on the environment device. This backend approximates a local pose step;
 The action descriptor records its method, damping, bound, and success semantics.
 ``joint_delta``, ``joint_step_limited``, and ``joint_limit_clipped_mask`` expose
 the applied increment and both forms of limiting; resets clear selected rows.
+
+``RelativeEefDlsAction`` keeps an unbounded xyz/rotation-vector request as one
+fixed arena-frame target for the control interval. It recomputes the damped
+Jacobian solve from measured joints before each physics substep and clips only
+joint-position limits. It shares solver-order mapping and arena/TCP Jacobian
+adaptation with the single-step relative controller. Its ``eef_pose.relative_substep_dls@1`` contract selects
+this behavior separately from the bounded, single-step relative-pose contract.
+``ActionManager.get_substep_callback(num_substeps)`` owns the remaining-step
+count, action refresh and inactive-row holds for one control interval.
+``EmbodiedEnv`` connects that callback after sensor sampling through the batched
+simulation update, preserving intermediate recording and visualization frames.
+
+Configure the same arm and binary gripper terms for expert and policy execution.
+Set ``env.expert_trajectory.use_action_manager: true`` to route position-only
+``ControllerAction`` commands through ``ActionManager.process_joint_targets``.
+The DLS term retains the expert's exact FK target while recording the
+corresponding relative request, and keeps the existing expert storage schema.
+Completed demo rows retain measured joint holds after conversion and refresh.
+The default controller-ready route stays direct. Every configured term must
+support joint-target processing.
+For binary grippers, ``open_on_zero=False`` makes zero a closing request;
+the default retains nonnegative opening requests. The descriptor records this
+boundary together with the gripper mode.
+
+.. autoclass:: RelativeEefDlsAction
+    :members:
+    :inherited-members:
+    :show-inheritance:
 
 .. autoclass:: RelativeEefPoseAction
     :members:

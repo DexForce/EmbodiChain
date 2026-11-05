@@ -3314,6 +3314,27 @@ def test_condition_snapshot_is_idempotent_and_plain_matching_data_has_no_sensor_
         owned.snapshot()
 
 
+def test_generic_planning_budget_decodes_without_source_recovery_factories():
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_recovery_policy,
+    )
+    from embodichain.lab.sim.atomic_actions import PlanningBudget
+
+    config = dict(
+        max_replans=0,
+        max_action_retries=0,
+        planning_budget={"wall_seconds": 0.25},
+        retry_all_failed_plans=False,
+    )
+    policy = _decode_recovery_policy(config, path="recovery")
+    assert policy.planning_budget == PlanningBudget(0.25)
+    assert policy.retry_all_failed_plans is False
+    with pytest.raises(ValueError, match="planning_recovery"):
+        _decode_recovery_policy(
+            {**config, "planning_recovery": {"kind": "not_installed"}}, path="recovery"
+        )
+
+
 def test_configured_joint_stability_owns_target_and_requires_articulation():
     from embodichain.lab.task_program.integrations.simulation.stability import (
         SimulationJointStabilityConditionCfg,

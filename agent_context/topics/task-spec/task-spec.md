@@ -30,6 +30,11 @@ one in place invalidates its original identity. Construct a new TaskSpec for an
 intentional semantic change. Instructions, task identifiers and provenance
 metadata do not participate in normative identity.
 
+`RoleSpec.is_single_member` is a read-only query for `one` or explicit
+`count=1`. It does not rewrite the authored selector, serialized fields or
+semantic identity. Larger counts and `all` require complete separate binding
+and evidence; they cannot be reduced to an available subset.
+
 Milestone dependencies must be acyclic. All predicates for one milestone must
 hold at the same snapshot strictly after its predecessors. Missing evidence and
 incomplete temporal windows cannot certify success. Only an entirely satisfied
