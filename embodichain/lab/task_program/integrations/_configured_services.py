@@ -153,20 +153,6 @@ def _world_displacement(
     return normalized
 
 
-def _world_displacement(
-    value: tuple[float, float, float],
-) -> tuple[float, float, float]:
-    """Validate one finite non-zero world-frame displacement."""
-    if type(value) is not tuple or len(value) != 3:
-        raise TypeError("world_displacement must be an exact three-value tuple.")
-    normalized = tuple(float(item) for item in value)
-    if not all(math.isfinite(item) for item in normalized):
-        raise ValueError("world_displacement must contain only finite values.")
-    if math.sqrt(sum(item * item for item in normalized)) <= 1.0e-6:
-        raise ValueError("world_displacement must be non-zero.")
-    return normalized
-
-
 def _slide_target_pose_mode(value: object) -> str:
     """Validate how a configured Slide resolves its target pose."""
     if type(value) is not str or value not in _SLIDE_TARGET_POSE_MODES:
