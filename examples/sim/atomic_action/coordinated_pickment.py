@@ -226,7 +226,16 @@ def create_dual_robot(
     robot_type: TutorialRobot,
     solver: Literal["pytorch", "ur"] = "pytorch",
 ) -> Robot:
-    """Create the selected dual-arm robot with its matching grippers."""
+    """Create the selected dual-arm robot with its matching grippers.
+
+    Args:
+        sim: Simulation manager owning the fixture.
+        robot_type: Robot preset family.
+        solver: Existing PyTorch or analytic UR IK backend for UR arms.
+
+    Returns:
+        The declared dual-arm robot.
+    """
     return add_dual_tutorial_robot(
         sim,
         robot_type=robot_type,
