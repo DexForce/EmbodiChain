@@ -6321,8 +6321,8 @@ def test_native_grip_evidence_config_is_closed_bound_and_provider_free(
     assert factory.pad_bindings[0][1][0] != "mutated"
     assert registration.fingerprint == before
     registration.validate_physics("default")
-    with pytest.raises(ValueError, match="Default physics"):
-        registration.validate_physics("newton")
+    # A read-only contact provider does not select native planning algorithms.
+    registration.validate_physics("newton")
     unknown = deepcopy(payload)
     unknown["runtime_services"]["control_part_evidence"][
         "hidden_callback"
@@ -6343,8 +6343,9 @@ def test_native_grip_evidence_config_is_closed_bound_and_provider_free(
         wrong["runtime_services"]["control_part_evidence"]["opening_bindings"][0][
             "control_part"
         ] = "foreign_hand"
-    with pytest.raises(ValueError, match="grasp control parts"):
-        _decode_configured_task_program_integration(wrong)
+    # Physical observation hands need not be selected as semantic action resources.
+    observed = _decode_configured_task_program_integration(wrong).registration
+    assert observed.control_part_evidence_factory.pad_bindings[0][0] == "foreign_hand"
     if revision == 2:
         wrong = deepcopy(payload)
         wrong["runtime_services"]["control_part_evidence"]["opening_bindings"] = []

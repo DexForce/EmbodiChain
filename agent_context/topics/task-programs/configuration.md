@@ -180,6 +180,12 @@ the same public loader. Provider-free compilation may establish occurrence
 fingerprints before service binding; final deployment loading still performs the
 complete catalog preflight.
 
+Read-only `native_grip` evidence declarations do not add grasp execution
+capabilities or select a planning backend. Their physical hand bindings may be
+observed independently of the semantic profile. Actual manipulation calls still
+link their required grasp endpoints, and native planning/recorded-source services
+retain their explicit backend and batch restrictions.
+
 Continuation providers bind to the one assembled compiler/engine. Released
 cleanup/Park authority additionally binds to the actual EpisodeContext identity
 and closes through the existing bridge cleanup callback; previews cannot mutate

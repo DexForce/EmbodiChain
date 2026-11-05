@@ -2007,16 +2007,6 @@ def _validate_native_planning_registration(
             raise ValueError(
                 "Native grip object bindings must match exact registered rigid owners."
             )
-        grasp_parts = {
-            endpoint.control_part
-            for resource in self.robot_profile_binding.resources
-            for endpoint in resource.endpoints
-            if endpoint.endpoint_id == "grasp"
-        }
-        if any((part not in grasp_parts for (part, _) in evidence.pad_bindings)):
-            raise ValueError(
-                "Native grip pads must select declared grasp control parts."
-            )
         if any(
             (
                 binding.control_part not in dict(evidence.pad_bindings)
@@ -2555,14 +2545,6 @@ class SimulationTaskProgramRegistration:
             raise ValueError("Recorded source contacts require Default physics.")
         if self.planning_services is not None:
             self.planning_services.validate_physics(physics)
-
-        from .simulation.grip_evidence import NativeGripEvidenceFactory
-
-        if (
-            type(self.control_part_evidence_factory) is NativeGripEvidenceFactory
-            and physics != "default"
-        ):
-            raise ValueError("Native grip evidence requires Default physics.")
 
     @property
     def requires_scoped_control_services(self) -> bool:
