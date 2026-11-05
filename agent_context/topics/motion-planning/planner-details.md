@@ -293,8 +293,20 @@ Cached solvers retain these construction-time settings.
 RRT lane capacity is rounded to a power of two covering batch × trajectory seeds,
 so small backends avoid unused tree buffers and larger batches are not limited
 to the native factory's default lane count.
-TimeOpt uses source-model inertial data and effort limits; world collision
-geometry alone does not model carried payload dynamics. Preserve native timing
+
+cuRobo 0.9's RRT and lazy solver helpers can ignore per-solver graph flags.
+Scope the effective native runtime graph switch during construction, warmup and
+planning, serialize changes, and restore the caller's value on exit. This also
+applies to capture-timeout fallback. While capture ownership is held, warm the
+actual batch × seed lane shapes, the B-spline graph-seed fitter and complete fallback
+seed merging. Graph-enabled planning also holds capture ownership so an unseen
+data-dependent executor cannot overlap a Newton capture.
+
+TimeOpt loads dynamics with simulator gravity transformed into the same cuRobo
+base frame used for goals. Differing per-row gravity cannot share one native
+solver and requires `enable_timeopt=False`; gravity/frame changes invalidate the
+cached backend. TimeOpt uses source-model inertial data and effort limits; world
+collision geometry alone does not model carried payload dynamics. Preserve native timing
 and derivatives through result normalization and control-grid playback.
 
 ## Retiming and playback

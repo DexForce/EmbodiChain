@@ -88,10 +88,11 @@ _CUROBO_INSTALL_URL = (
     "https://nvlabs.github.io/curobo/latest/getting-started/installation.html"
 )
 
-# cuRobo 0.8 does not expose PyTorch's CUDA stream-capture error mode. The
+# cuRobo does not expose PyTorch's CUDA stream-capture error mode. The
 # temporary adapter below therefore replaces ``torch.cuda.graph`` only while
 # cuRobo can lazily record graphs. Serialize that small process-wide patch.
-_TORCH_CUDA_GRAPH_PATCH_LOCK = threading.Lock()
+# Runtime-mode and capture-error-mode scopes share this lock and may nest.
+_TORCH_CUDA_GRAPH_PATCH_LOCK = threading.RLock()
 
 
 @dataclass
@@ -423,6 +424,8 @@ class CuroboPlannerCfg(BasePlannerCfg):
     TimeOpt respects sampled velocity, acceleration, jerk and torque limits.
     It requires valid robot inertial data and effort limits in the source URDF;
     carried-object inertia is not inferred from collision geometry.
+    Simulator gravity is expressed in the cuRobo base frame. Differently
+    oriented batch rows requiring distinct gravity vectors must disable TimeOpt.
     """
 
     max_attempts: int = 5
@@ -451,7 +454,7 @@ class CuroboPlannerCfg(BasePlannerCfg):
     """
 
     cuda_graph_fallback: bool = True
-    """Use non-graph mode if the capture coordinator times out before capture.
+    """Use non-graph mode if coordination times out during backend initialization.
 
     An error after capture starts is never downgraded in-process because CUDA
     may leave the context in an invalid state. Such errors are raised and the
@@ -469,11 +472,12 @@ class CuroboPlannerCfg(BasePlannerCfg):
     """
 
     capture_acquire_timeout: float | None = 2.0
-    """Seconds to wait for the per-device capture coordinator.
+    """Seconds to wait for coordination during initialization or graph planning.
 
     ``None`` waits indefinitely. After a finite timeout, graph mode falls back
     to non-graph mode, then waits for the active capture to finish before
     launching planner initialization kernels.
+    A cached graph-planning call instead raises on timeout before native execution.
     """
 
     capture_wait_log_interval: float | None = 10.0
@@ -701,7 +705,7 @@ class _CaptureOwner:
 def _torch_cuda_graph_capture_mode(mode: str) -> Iterator[None]:
     """Temporarily force a capture mode for cuRobo's PyTorch graph contexts.
 
-    cuRobo 0.8 creates every graph through ``torch.cuda.graph`` but does not
+    cuRobo graph executors use ``torch.cuda.graph`` but do not
     forward its ``capture_error_mode`` argument. The patch is deliberately
     scoped to planner warmup/planning and restored even when capture raises.
     """
@@ -794,6 +798,7 @@ def _require_curobo(log_level: str = "error") -> "Any":
         collision_mod = importlib.import_module("curobo.collision_checking")
         scene_mod = importlib.import_module("curobo.scene")
         types_mod = importlib.import_module("curobo.types")
+        runtime_mod = importlib.import_module("curobo._src.runtime")
     except ModuleNotFoundError as exc:
         raise ImportError(
             "cuRobo V2-Fast (0.9+) is required for the 'curobo' planner but was not found. "
@@ -821,6 +826,7 @@ def _require_curobo(log_level: str = "error") -> "Any":
         GoalToolPose=types_mod.GoalToolPose,
         DeviceCfg=types_mod.DeviceCfg,
         ToolPoseCriteria=types_mod.ToolPoseCriteria,
+        Runtime=runtime_mod,
         Scene=scene_mod.Scene,
     )
 
@@ -1224,7 +1230,7 @@ class CuroboPlanner(BasePlanner):
             "move_type": backend.planning_mode.name,
             "multi_env": bool(self.cfg.world.multi_env),
             "use_cuda_graph": backend.use_cuda_graph,
-            "graph_planner_algorithm": self.cfg.graph_planner_algorithm,
+            "graph_planner_algorithm": backend.graph_planner_algorithm,
             "enable_timeopt": self.cfg.enable_timeopt,
         }
 
@@ -1427,7 +1433,8 @@ class CuroboPlanner(BasePlanner):
         )
         cached = self._backend_cache.get(key)
         if cached is not None:
-            if cached.motion_limits_key == limits_key:
+            gravity = self._timeopt_gravity(cached) if self.cfg.enable_timeopt else None
+            if cached.motion_limits_key == limits_key and cached.gravity == gravity:
                 return cached
             if getattr(self, "_query_snapshot", None) is not None:
                 detach_error = self._detach_payload(cached)
@@ -1560,8 +1567,27 @@ class CuroboPlanner(BasePlanner):
         planning_mode: MoveType,
     ) -> "_CuroboBackend":
         """Construct and validate one cuRobo planner on the selected CUDA device."""
+        algorithm = self.cfg.graph_planner_algorithm
+        backend = _CuroboBackend(
+            planner=None,
+            control_part=control_part,
+            sim_joint_names=sim_joint_names,
+            tool_frame="",
+            profile=profile,
+            batch_size=batch_size,
+            use_cuda_graph=use_cuda_graph,
+            planning_mode=planning_mode,
+            graph_planner_algorithm=algorithm,
+        )
+        if self.cfg.enable_timeopt:
+            backend.gravity = self._timeopt_gravity(backend)
         robot_config = self._query_runtime_robot_config(profile.robot_config_path)
-        with torch.cuda.device(self._curobo_device):
+        if backend.gravity is not None:
+            robot_config["robot_cfg"]["load_dynamics"] = True
+        with (
+            self._native_graph_mode(use_cuda_graph),
+            torch.cuda.device(self._curobo_device),
+        ):
             planner_cfg = self._bindings.MotionPlannerCfg.create(
                 robot=robot_config,
                 scene_model=scene_model,
@@ -1573,11 +1599,17 @@ class CuroboPlanner(BasePlanner):
                     self.cfg.collision_activation_distance
                 ),
                 use_cuda_graph=use_cuda_graph,
-                graph_planner_algorithm=self.cfg.graph_planner_algorithm,
+                graph_planner_algorithm=algorithm,
                 enable_timeopt=self.cfg.enable_timeopt,
                 interpolation_dt=float(self.cfg.interpolation_dt),
             )
-            if self.cfg.graph_planner_algorithm == "rrt":
+            if backend.gravity is not None:
+                # All rollout configurations share this native model. Bind its
+                # dynamics before constructing any solver or TimeOpt buffers.
+                planner_cfg.trajopt_solver_config.robot_config.dynamics.gravity = list(
+                    backend.gravity
+                )
+            if algorithm == "rrt":
                 # RRT reserves tree/search buffers per lane. Size its power-of-two
                 # capacity for this cached backend's actual batch and seed count
                 # rather than always allocating the upstream 128-lane default.
@@ -1601,16 +1633,38 @@ class CuroboPlanner(BasePlanner):
         except Exception:
             self._close_planner(planner)
             raise
-        return _CuroboBackend(
-            planner=planner,
-            control_part=control_part,
-            sim_joint_names=sim_joint_names,
-            tool_frame=tool_frame,
-            profile=profile,
-            batch_size=batch_size,
-            use_cuda_graph=use_cuda_graph,
-            planning_mode=planning_mode,
+        backend.planner = planner
+        backend.tool_frame = tool_frame
+        return backend
+
+    def _timeopt_gravity(self, backend: "_CuroboBackend") -> tuple[float, float, float]:
+        """Resolve one gravity vector shared by every native planning row.
+
+        cuRobo 0.9 accepts only one dynamics frame per solver. Reject missing
+        physics state or differing per-row gravity rather than silently using
+        its default Earth gravity. Rebuild cached solvers when this frame moves.
+        """
+        from embodichain.lab.sim import SimulationManager
+
+        manager = SimulationManager.get_instance(self.cfg.sim_instance_id)
+        world_gravity = torch.as_tensor(
+            manager.sim_config.physics_cfg.gravity,
+            dtype=torch.float32,
+            device=self._curobo_device,
         )
+        world_to_base = self._sim_base_to_curobo_matrix(backend)[None] @ pose_inv(
+            self._get_sim_base_pose(backend, backend.batch_size)
+        )
+        gravity = world_to_base[:, :3, :3] @ world_gravity
+        if not torch.isfinite(gravity).all() or not torch.allclose(
+            gravity, gravity[:1].expand_as(gravity), atol=1e-5, rtol=0.0
+        ):
+            raise ValueError(
+                "TimeOpt requires one known gravity vector in the cuRobo base "
+                "frame for the entire batch; set enable_timeopt=False for "
+                "differently oriented bases."
+            )
+        return tuple(round(value, 6) for value in gravity[0].tolist())
 
     @staticmethod
     def _validate_query_cfg(cfg: CuroboPlannerCfg) -> None:
@@ -1812,7 +1866,11 @@ class CuroboPlanner(BasePlanner):
             if backend.use_cuda_graph
             else nullcontext()
         )
-        with capture_mode, torch.cuda.device(self._curobo_device):
+        with (
+            self._native_graph_mode(backend.use_cuda_graph),
+            capture_mode,
+            torch.cuda.device(self._curobo_device),
+        ):
             planner = backend.planner
             default_position = planner.default_joint_state.position
             if default_position.dim() == 1:
@@ -1856,7 +1914,30 @@ class CuroboPlanner(BasePlanner):
 
                 graph_planner = getattr(planner, "graph_planner", None)
                 if backend.use_cuda_graph and graph_planner is not None:
-                    graph_planner.warmup(num_warmup_iterations=iterations)
+                    warmup_kwargs = {"num_warmup_iterations": iterations}
+                    if backend.graph_planner_algorithm == "rrt":
+                        warmup_kwargs["max_batch_size"] = (
+                            backend.batch_size * planner.trajopt_solver.config.num_seeds
+                        )
+                    graph_planner.warmup(**warmup_kwargs)
+                seed_fitter = getattr(planner, "graph_seed_fitter", None)
+                if backend.use_cuda_graph and seed_fitter is not None:
+                    seed_fitter.warmup()
+                if backend.use_cuda_graph and graph_planner is not None:
+                    # Native graph-seed merging has a separate lazy executor.
+                    # Exercise the full fallback while capture is coordinated.
+                    if backend.planning_mode == MoveType.EEF_MOVE:
+                        planner.plan_pose(
+                            goal, current_state, max_attempts=1, enable_graph_attempt=0
+                        )
+                    else:
+                        planner.plan_cspace(
+                            goal_state,
+                            current_state,
+                            max_attempts=1,
+                            enable_graph_attempt=0,
+                        )
+                    planner.reset_seed()
             finally:
                 planner.ik_solver.config.exit_early = original_exit_early
         self._synchronize_device()
@@ -1864,6 +1945,54 @@ class CuroboPlanner(BasePlanner):
     def _synchronize_device(self) -> None:
         """Synchronize only the CUDA device used by this planner."""
         torch.cuda.synchronize(self._curobo_device)
+
+    @contextmanager
+    def _native_graph_mode(self, enabled: bool) -> Iterator[None]:
+        """Scope cuRobo 0.9's effective graph switch, including lazy helpers.
+
+        Some native executors ignore solver flags. The public runtime facade
+        copies flag values, so update the module actually read by executors.
+        Serialize with all adapter graph construction and restore on failure.
+        """
+        with _TORCH_CUDA_GRAPH_PATCH_LOCK:
+            runtime = self._bindings.Runtime
+            previous = runtime.cuda_graphs
+            runtime.cuda_graphs = previous and enabled
+            try:
+                yield
+            finally:
+                runtime.cuda_graphs = previous
+
+    @contextmanager
+    def _planning_capture_scope(self, backend: "_CuroboBackend") -> Iterator[None]:
+        """Coordinate native graph replay and any data-dependent lazy captures."""
+        if not backend.use_cuda_graph:
+            with self._native_graph_mode(False):
+                yield
+            return
+        coordinator = _get_capture_coordinator()
+        owner = _CaptureOwner()
+        if not coordinator.acquire_for_capture(
+            str(self._curobo_device),
+            owner,
+            timeout=self.cfg.capture_acquire_timeout,
+            wait_log_interval=self.cfg.capture_wait_log_interval,
+        ):
+            raise RuntimeError(
+                "Timed out waiting for coordinated cuRobo graph planning."
+            )
+        try:
+            self._synchronize_device()
+            with (
+                self._native_graph_mode(True),
+                _torch_cuda_graph_capture_mode(self.cfg.cuda_graph_capture_error_mode),
+            ):
+                yield
+        finally:
+            try:
+                self._synchronize_device()
+            finally:
+                coordinator.release_for_capture(str(self._curobo_device), owner)
 
     @staticmethod
     def _close_planner(planner: "Any") -> None:
@@ -2340,13 +2469,7 @@ class CuroboPlanner(BasePlanner):
                         xpos[:, :3, :3] = target.xpos[:, :3, :3]
                 goal = self._to_curobo_pose_goal(xpos, backend, sim_base_pose_inv)
                 start_time = time.time()
-                capture_mode = (
-                    _torch_cuda_graph_capture_mode(
-                        self.cfg.cuda_graph_capture_error_mode
-                    )
-                    if backend.use_cuda_graph
-                    else nullcontext()
-                )
+                capture_mode = self._planning_capture_scope(backend)
                 with capture_mode, torch.cuda.device(self._curobo_device):
                     v2_result = backend.planner.plan_pose(
                         goal,
@@ -2368,13 +2491,7 @@ class CuroboPlanner(BasePlanner):
                     )
                 goal_state = self._to_curobo_joint_goal(target.qpos, backend)
                 start_time = time.time()
-                capture_mode = (
-                    _torch_cuda_graph_capture_mode(
-                        self.cfg.cuda_graph_capture_error_mode
-                    )
-                    if backend.use_cuda_graph
-                    else nullcontext()
-                )
+                capture_mode = self._planning_capture_scope(backend)
                 with capture_mode, torch.cuda.device(self._curobo_device):
                     # The native solver already constructs start-to-goal seeds.
                     # Keep the same direct-first policy as Cartesian planning.
@@ -3203,6 +3320,8 @@ class _CuroboBackend:
     batch_size: int
     use_cuda_graph: bool
     planning_mode: MoveType
+    graph_planner_algorithm: str = "prm"
+    gravity: tuple[float, float, float] | None = None
     motion_limits_key: str | None = None
     collision_checker: "Any | None" = None
     # Lazily-built device-tensor caches for the shared post-processing. The
