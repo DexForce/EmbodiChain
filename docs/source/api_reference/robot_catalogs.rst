@@ -669,3 +669,27 @@ embodichain_robots.sharpa.wave
 .. automethod:: embodichain_robots.sharpa.wave.cfg.SharpaWaveCfg.from_dict
 
 .. automethod:: embodichain_robots.sharpa.wave.cfg.SharpaWaveCfg.build_pk_serial_chain
+
+
+embodichain_robots.wuji.hand
+-----------------------------
+
+.. py:class:: embodichain_robots.WujiHandCfg
+   :no-index:
+
+   Standalone fixed-base Wuji Hand, with left/right variants and 20
+   independent joint commands. No serial-chain solver or single TCP is declared.
+
+.. py:class:: embodichain_robots.wuji.hand.WujiHandCfg
+   :no-index:
+
+   Model-local lazy export of :class:`embodichain_robots.WujiHandCfg`.
+
+.. py:class:: embodichain_robots.wuji.hand.cfg.WujiHandCfg
+   :no-index:
+
+   Implementation of the source-preserving standalone hand configuration.
+
+.. automethod:: embodichain_robots.wuji.hand.cfg.WujiHandCfg.from_dict
+
+.. automethod:: embodichain_robots.wuji.hand.cfg.WujiHandCfg.build_pk_serial_chain

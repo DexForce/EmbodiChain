@@ -39,6 +39,10 @@ Manufacturers
      - :doc:`Revo 1 <brainco/revo1>`
      - ``BrainCoRevo1Cfg``
      - Standalone left/right hand with six joint commands and four source mimic followers.
+   * - :doc:`Wuji Technology <wuji/index>`
+     - :doc:`Wuji Hand <wuji/hand>`
+     - ``WujiHandCfg``
+     - Standalone left/right hand with 20 independent source joints.
    * - :doc:`Sharpa Robotics <sharpa/index>`
      - :doc:`Sharpa Wave 01 <sharpa/wave>`
      - ``SharpaWaveCfg``
@@ -102,6 +106,7 @@ Manufacturers
    arx/index
    brainco/index
    sharpa/index
+   wuji/index
    changingtek/index
    dh_robotics/index
    inspire/index
@@ -120,7 +125,8 @@ End-effector Assets
 -------------------
 
 Hands and grippers share the manufacturer/model organization above.
-BrainCo Revo 1 and Sharpa Wave 01 provide standalone hand presets; asset-only
+BrainCo Revo 1, Sharpa Wave 01 and Wuji Hand provide standalone hand presets;
+asset-only
 entries provide source assets for caller-owned assembly. ``eef`` is a control-group
 convention and does not identify grasping capabilities.
 
@@ -140,6 +146,9 @@ instructions, provenance boundaries and rendered source-model illustrations.
      - Gripper asset; host-owned mounting.
    * - :doc:`BrainCo <brainco/index>`
      - :doc:`Revo 1 <brainco/revo1>`
+     - Left/right assets and standalone preset.
+   * - :doc:`Wuji Technology <wuji/index>`
+     - :doc:`Wuji Hand <wuji/hand>`
      - Left/right assets and standalone preset.
    * - :doc:`Sharpa Robotics <sharpa/index>`
      - :doc:`Sharpa Wave 01 <sharpa/wave>`

@@ -44,6 +44,7 @@ __all__ = [
     "SO101FollowerCfg",
     "BrainCoRevo1Cfg",
     "SharpaWaveCfg",
+    "WujiHandCfg",
 ]
 
 _EXPORTS = {
@@ -65,6 +66,7 @@ _EXPORTS = {
     "SO101FollowerCfg": ".the_robot_studio.so101",
     "BrainCoRevo1Cfg": ".brainco.revo1",
     "SharpaWaveCfg": ".sharpa.wave",
+    "WujiHandCfg": ".wuji.hand",
 }
 
 

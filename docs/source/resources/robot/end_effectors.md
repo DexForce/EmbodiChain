@@ -28,6 +28,7 @@ asset ID. No compatibility forwarding module is provided.
 | `Robotiq2F85` | `embodichain_robots.robotiq.robotiq_2f85.assets` | [Separate 2F-85 archive](robotiq/robotiq_2f85.md) |
 | `WheelTecFA2F` | `embodichain_robots.wheeltec.fa2f.assets` | [FA2F asset](wheeltec/fa2f.md) |
 | `PikaGripper` | `embodichain_robots.agilex.pika.assets` | [AgileX Pika](agilex/pika.md) |
+| `WujiHand` | `embodichain_robots.wuji.hand.assets` | [Wuji Hand](wuji/hand.md) |
 | `SharpaWave` | `embodichain_robots.sharpa.wave.assets` | [Sharpa Wave 01](sharpa/wave.md) |
 
 The existing asset IDs, class names, archive URLs, checksum validation and cache
@@ -69,6 +70,9 @@ headers are not evidence of asset licensing. In particular:
 - Missing modification records do not establish an original or unmodified asset.
 
 ## Standalone hands and mounted tools
+
+`WujiHandCfg` adds a standalone left/right hand with 20 independent
+source joints; see [Wuji Hand](wuji/hand.md) for control and physical defaults.
 
 `SharpaWaveCfg` adds a standalone left/right hand with 22 independent
 source joints; see [Sharpa Wave 01](sharpa/wave.md) for control and physical defaults.

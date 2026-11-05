@@ -39,6 +39,7 @@ _CONFIG_CLASSES = {
     "SO101Follower": "embodichain_robots.the_robot_studio.so101:SO101FollowerCfg",
     "BrainCoRevo1": "embodichain_robots.brainco.revo1:BrainCoRevo1Cfg",
     "SharpaWave": "embodichain_robots.sharpa.wave:SharpaWaveCfg",
+    "WujiHand": "embodichain_robots.wuji.hand:WujiHandCfg",
 }
 
 _DEFAULT_CONTROL_INFO = {
@@ -97,6 +98,7 @@ _DEFAULT_CONTROL_INFO = {
     "FlexivRizon4S": {"dof": 7, "control_parts": {"arm": 7}},
     "BrainCoRevo1": {"dof": 6, "control_parts": {"eef": 6}},
     "SharpaWave": {"dof": 22, "control_parts": {"eef": 22}},
+    "WujiHand": {"dof": 20, "control_parts": {"eef": 20}},
 }
 
 _MIMIC_JOINTS = {
@@ -147,6 +149,7 @@ _CLASSIFICATION = {
     "SO101Follower": ("the_robot_studio", "fixed_manipulator", 1),
     "BrainCoRevo1": ("BrainCo", "dexterous_hand", 0),
     "SharpaWave": ("sharpa", "dexterous_hand", 0),
+    "WujiHand": ("wuji", "dexterous_hand", 0),
 }
 
 ROBOT_CONFIGS = {
@@ -293,6 +296,20 @@ ROBOT_CONFIGS["SharpaWave"].update(
     variants={
         side: {
             **_DEFAULT_CONTROL_INFO["SharpaWave"],
+            "defaults": {"side": side},
+            "supports_dual_arm": False,
+        }
+        for side in ("left", "right")
+    },
+)
+
+
+ROBOT_CONFIGS["WujiHand"].update(
+    defaults={"side": "right"},
+    default_variant="right",
+    variants={
+        side: {
+            **_DEFAULT_CONTROL_INFO["WujiHand"],
             "defaults": {"side": side},
             "supports_dual_arm": False,
         }
