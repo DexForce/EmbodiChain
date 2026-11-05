@@ -37,6 +37,13 @@ CPU routines additionally consume Trimesh meshes and Shapely polygons for
 triangle-union floor and silhouette measurements. Scene CPU strategies own
 support selection, polygon search, greedy packing and SciPy SLSQP optimization.
 
+Pure grasp samples, release clearances, ordered footprint proposals, source-axis
+adaptation and distal staging also live in `compute.geometry`. They consume
+explicit arrays, tensors or mesh/polygon inputs and retain no scene, Robot or
+semantic graph. Runtime acquisition, policy selection, ownership and physical
+acceptance remain with their consuming subsystems. `pose_checks.as_rigid_matrix`
+only validates one input transform; it neither repairs it nor invokes FK/IK.
+
 `rigid_mesh.capture_rigid_mesh` snapshots scaled native input vertices and
 matching triangles as owned CPU data with the environment axis intact. It reads
 no poses, preserves duplicates/winding/order and never substitutes a hull or box
@@ -241,7 +248,10 @@ bridge recreation, initial-state identity and persistence eligibility. General
 by Spawn and SimulationManager.
 
 CPU strategies use SciPy and Trimesh supplied by DexSim; EmbodiChain's core
-dependency requires Shapely 2 or newer. No scene-specific extra is needed. The standalone
+dependency requires Shapely 2 or newer. The `geometry` extra declares Trimesh
+for standalone numerical mesh consumers; it adds no FCL or simulation backend.
+Torch-only `mesh_bounds` entry points do not load that optional dependency.
+No scene-specific extra is needed. The standalone
 `scripts/tutorials/scene/tabletop_recipe.py` demonstrates a workbench, two
 panel-built containers, parts and a keep-out region with native preparation,
 settling, measured layout and restoration; it requires the installed simulation
