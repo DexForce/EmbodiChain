@@ -38,6 +38,7 @@ _CONFIG_CLASSES = {
     "URRobot": "embodichain_robots.universal_robots.ur_robot:URRobotCfg",
     "SO101Follower": "embodichain_robots.the_robot_studio.so101:SO101FollowerCfg",
     "BrainCoRevo1": "embodichain_robots.brainco.revo1:BrainCoRevo1Cfg",
+    "SharpaWave": "embodichain_robots.sharpa.wave:SharpaWaveCfg",
 }
 
 _DEFAULT_CONTROL_INFO = {
@@ -95,6 +96,7 @@ _DEFAULT_CONTROL_INFO = {
     "SO101Follower": {"dof": 6, "control_parts": {"arm": 5, "eef": 1}},
     "FlexivRizon4S": {"dof": 7, "control_parts": {"arm": 7}},
     "BrainCoRevo1": {"dof": 6, "control_parts": {"eef": 6}},
+    "SharpaWave": {"dof": 22, "control_parts": {"eef": 22}},
 }
 
 _MIMIC_JOINTS = {
@@ -144,6 +146,7 @@ _CLASSIFICATION = {
     "URRobot": ("universal_robots", "fixed_manipulator", 1),
     "SO101Follower": ("the_robot_studio", "fixed_manipulator", 1),
     "BrainCoRevo1": ("BrainCo", "dexterous_hand", 0),
+    "SharpaWave": ("sharpa", "dexterous_hand", 0),
 }
 
 ROBOT_CONFIGS = {
@@ -282,3 +285,17 @@ ROBOT_CONFIGS["Franka"].update(
     default_variant="fr3",
 )
 ROBOT_CONFIGS["FrankaPanda"]["variant_of"] = "Franka"
+
+
+ROBOT_CONFIGS["SharpaWave"].update(
+    defaults={"side": "right"},
+    default_variant="right",
+    variants={
+        side: {
+            **_DEFAULT_CONTROL_INFO["SharpaWave"],
+            "defaults": {"side": side},
+            "supports_dual_arm": False,
+        }
+        for side in ("left", "right")
+    },
+)

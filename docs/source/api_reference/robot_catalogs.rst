@@ -645,3 +645,27 @@ and cache prefixes while using the shared core download and locking services.
    :no-index:
 
    Dataset class for the Universal Robots.
+
+
+embodichain_robots.sharpa.wave
+-------------------------------
+
+.. py:class:: embodichain_robots.SharpaWaveCfg
+   :no-index:
+
+   Standalone fixed-base Sharpa Wave 01, with left/right variants and 22
+   independent joint commands. No serial-chain solver or single TCP is declared.
+
+.. py:class:: embodichain_robots.sharpa.wave.SharpaWaveCfg
+   :no-index:
+
+   Model-local lazy export of :class:`embodichain_robots.SharpaWaveCfg`.
+
+.. py:class:: embodichain_robots.sharpa.wave.cfg.SharpaWaveCfg
+   :no-index:
+
+   Implementation of the source-preserving standalone hand configuration.
+
+.. automethod:: embodichain_robots.sharpa.wave.cfg.SharpaWaveCfg.from_dict
+
+.. automethod:: embodichain_robots.sharpa.wave.cfg.SharpaWaveCfg.build_pk_serial_chain

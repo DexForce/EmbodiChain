@@ -1,8 +1,8 @@
 # Sharpa Wave 01 assets
 
 `SharpaWave` registers the official left/right hand descriptions as an `eef`
-asset. Each hand has 22 active joints. This is an asset-only integration;
-it does not register a RobotCfg, controller, tactile model or RL task.
+asset. Each hand has 22 active joints. The companion `SharpaWaveCfg` provides a
+fixed-base, joint-controlled standalone hand with left/right variants. Tactile models and RL tasks are not bundled.
 
 - **Manufacturer and original publisher:** [sharpa-robotics](https://github.com/sharpa-robotics).
 - **Pinned source:** [`0d19cac602f46456b819e4b6a2c09a74982c9a3e`](https://github.com/sharpa-robotics/sharpa-urdf-usd-xml/tree/0d19cac602f46456b819e4b6a2c09a74982c9a3e).

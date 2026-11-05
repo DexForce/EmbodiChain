@@ -14,8 +14,23 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Sharpa Wave 01 asset package; implementations load on demand."""
+"""SharpaWave hand configurations, imported lazily."""
 
 from __future__ import annotations
 
-__all__ = []
+from importlib import import_module
+from typing import Any
+
+__all__ = ["SharpaWaveCfg"]
+
+
+def __getattr__(name: str) -> Any:
+    if name != "SharpaWaveCfg":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(".cfg", __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

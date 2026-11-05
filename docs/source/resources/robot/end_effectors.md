@@ -28,6 +28,7 @@ asset ID. No compatibility forwarding module is provided.
 | `Robotiq2F85` | `embodichain_robots.robotiq.robotiq_2f85.assets` | [Separate 2F-85 archive](robotiq/robotiq_2f85.md) |
 | `WheelTecFA2F` | `embodichain_robots.wheeltec.fa2f.assets` | [FA2F asset](wheeltec/fa2f.md) |
 | `PikaGripper` | `embodichain_robots.agilex.pika.assets` | [AgileX Pika](agilex/pika.md) |
+| `SharpaWave` | `embodichain_robots.sharpa.wave.assets` | [Sharpa Wave 01](sharpa/wave.md) |
 
 The existing asset IDs, class names, archive URLs, checksum validation and cache
 prefixes are preserved. All entries remain in the `eef` data category and use
@@ -67,47 +68,27 @@ headers are not evidence of asset licensing. In particular:
   unverified formal commercial model.
 - Missing modification records do not establish an original or unmodified asset.
 
-## Sharpa Wave 01 descriptions
-
-`SharpaWave` is an additional `eef` asset from the official
-[sharpa-robotics/sharpa-urdf-usd-xml](https://github.com/sharpa-robotics/sharpa-urdf-usd-xml) repository,
-pinned to `0d19cac602f46456b819e4b6a2c09a74982c9a3e`. Both hands have 22 active joints.
-The bundle preserves upstream licensing, MJCF and mesh dependencies, with
-source revision and original/prepared checksums in `manifest.json`.
-
-```python
-from embodichain.data import get_data_path
-from embodichain_robots.sharpa.wave.assets import SharpaWave
-
-right_urdf = get_data_path("SharpaWave/right_sharpa_wave/right_sharpa_wave.urdf")
-left_urdf = get_data_path("SharpaWave/left_sharpa_wave/left_sharpa_wave.urdf")
-```
-
-The two URDF mesh URI prefixes `package://left_sharpa_wave/` and `package://right_sharpa_wave/` become relative paths. The original URDFs remain under `source/`. Joint/link names, frames, limits, inertials, mesh bytes and MJCF files are unchanged.
-
-The versioned bundle is `eef_assets/SharpaWaveV1.zip`; it uses cache prefix
-`SharpaWaveV1`. This adds descriptions only, with no standalone RobotCfg,
-tactile simulation or RL task. Model loading does not establish contact-rich
-manipulation performance.
-
 ## Standalone hands and mounted tools
 
-`BrainCoRevo1Cfg` is the new standalone joint-controlled hand preset. It uses
+`SharpaWaveCfg` adds a standalone left/right hand with 22 independent
+source joints; see [Sharpa Wave 01](sharpa/wave.md) for control and physical defaults.
+
+`BrainCoRevo1Cfg` is a standalone joint-controlled hand preset. It uses
 six active joints and retains the four source mimic followers. Its native
 model specification is also consumed by W1, whose installation calibration and
 existing configuration interface remain W1-owned. See [Revo 1](brainco/revo1.md)
 for variants, commands and physical defaults, and [W1](dexforce/w1.md) for the
 host assembly.
 
-The other migrated packages expose download assets rather than new `RobotCfg`
+The remaining asset-only packages expose download assets rather than `RobotCfg`
 classes. Resolve their URDFs and configure their host assembly explicitly. A
 control group named `eef` does not turn a dexterous hand into a parallel gripper
 or imply an open/close service, finger IK, retargeting or grasping strategy.
 
 ## Rendered illustrations
 
-The linked manufacturer/model pages show native OfflineRT renders for all 11
-asset IDs, including both BrainCo and INSPIRE hands and both models in the shared
+The linked manufacturer/model pages show native OfflineRT renders for the listed
+asset IDs, including standalone and asset-only hands and both models in the shared
 Robotiq archive. Each image has a neighboring JSON manifest with source URDF
 SHA256, source reference, image SHA256, camera, root transform, joint positions,
 lighting and renderer settings.

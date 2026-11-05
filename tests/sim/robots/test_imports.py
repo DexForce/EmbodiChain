@@ -59,6 +59,7 @@ _CONFIG_CLASSES = (
     "DexforceW1Cfg",
     "SO101FollowerCfg",
     "BrainCoRevo1Cfg",
+    "SharpaWaveCfg",
 )
 
 
@@ -100,6 +101,7 @@ def test_concrete_robot_class_uses_canonical_package(class_name: str) -> None:
         "embodichain_robots.anybotics.anymal_c",
         "embodichain_robots.pollen_robotics.microduck",
         "embodichain_robots.brainco.revo1",
+        "embodichain_robots.sharpa.wave",
         "embodichain_robots.dh_robotics.pgc_140_50",
         "embodichain_robots.agilex.pika",
         "embodichain.robot_registry",
@@ -126,6 +128,7 @@ for name in (
     "pollen_robotics.microduck.cfg",
     "arx.arx5.cfg", "the_robot_studio.so101.cfg", "flexiv.rizon4s.cfg",
     "brainco.revo1.cfg",
+    "sharpa.wave.cfg",
 ):
     assert "embodichain_robots." + name not in sys.modules, name
 if module.startswith("embodichain_robots") or module == "embodichain.robot_registry":

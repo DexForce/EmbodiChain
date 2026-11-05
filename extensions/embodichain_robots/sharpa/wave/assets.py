@@ -35,8 +35,9 @@ class SharpaWave(EmbodiChainDataset):
     Resolve a URDF with
     ``get_data_path("SharpaWave/right_sharpa_wave/right_sharpa_wave.urdf")``.
     The bundle also retains the upstream MJCF models, mesh dependencies,
-    licensing and a source/checksum manifest. It provides no robot preset,
-    controller, tactile simulation or trained manipulation policy.
+    licensing and a source/checksum manifest. Configure the standalone preset
+    separately with :class:`embodichain_robots.SharpaWaveCfg`; tactile
+    simulation and trained policies are not bundled.
 
     Args:
         data_root: Optional cache root; defaults to ``EMBODICHAIN_DATA_ROOT``.
