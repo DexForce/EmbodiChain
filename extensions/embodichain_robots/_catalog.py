@@ -30,6 +30,7 @@ _CONFIG_CLASSES = {
     "ARX5": "embodichain_robots.arx.arx5:ARX5Cfg",
     "AlohaMini": "embodichain_robots.alohamini.aloha_mini:AlohaMiniCfg",
     "TianjiMarvin": "embodichain_robots.tianji.marvin:TianjiMarvinCfg",
+    "TianjiMarvinRobotiq140": "embodichain_robots.tianji.marvin:TianjiMarvinRobotiq140Cfg",
     "DexforceW1": "embodichain_robots.dexforce.w1:DexforceW1Cfg",
     "CobotMagic": "embodichain_robots.agilex.cobotmagic:CobotMagicCfg",
     "Franka": "embodichain_robots.franka.cfg:FrankaCfg",
@@ -43,6 +44,16 @@ _CONFIG_CLASSES = {
 }
 
 _DEFAULT_CONTROL_INFO = {
+    "TianjiMarvinRobotiq140": {
+        "dof": 16,
+        "control_parts": {
+            "left_arm": 7,
+            "right_arm": 7,
+            "left_eef": 6,
+            "right_eef": 6,
+            "dual_arm": 14,
+        },
+    },
     "UnitreeGo1": {"dof": 12, "control_parts": {"locomotion": 12}},
     "UnitreeGo2": {"dof": 12, "control_parts": {"locomotion": 12}},
     "UnitreeG1": {"dof": 29, "control_parts": {"locomotion": 29}},
@@ -102,6 +113,18 @@ _DEFAULT_CONTROL_INFO = {
 }
 
 _MIMIC_JOINTS = {
+    "TianjiMarvinRobotiq140": {
+        "left_inner_knuckle_joint": "left_finger_joint",
+        "left_inner_finger_joint": "left_finger_joint",
+        "left_right_outer_knuckle_joint": "left_finger_joint",
+        "left_right_inner_knuckle_joint": "left_finger_joint",
+        "left_right_inner_finger_joint": "left_finger_joint",
+        "right_left_inner_knuckle_joint": "right_finger_joint",
+        "right_left_inner_finger_joint": "right_finger_joint",
+        "right_outer_knuckle_joint": "right_finger_joint",
+        "right_inner_knuckle_joint": "right_finger_joint",
+        "right_inner_finger_joint": "right_finger_joint",
+    },
     "AlohaMini": {},
     "TianjiMarvin": {
         "LEFT_HAND_FINGER_2": "LEFT_HAND_FINGER_1",
@@ -121,6 +144,22 @@ _MIMIC_JOINTS = {
     "URRobot": {},
 }
 _CONTROL_PART_MIMICS = {
+    "TianjiMarvinRobotiq140": {
+        "left_eef": (
+            "left_inner_knuckle_joint",
+            "left_inner_finger_joint",
+            "left_right_outer_knuckle_joint",
+            "left_right_inner_knuckle_joint",
+            "left_right_inner_finger_joint",
+        ),
+        "right_eef": (
+            "right_left_inner_knuckle_joint",
+            "right_left_inner_finger_joint",
+            "right_outer_knuckle_joint",
+            "right_inner_knuckle_joint",
+            "right_inner_finger_joint",
+        ),
+    },
     "TianjiMarvin": {
         "left_eef": ("LEFT_HAND_FINGER_2",),
         "right_eef": ("RIGHT_HAND_FINGER_2",),
@@ -140,6 +179,7 @@ _CLASSIFICATION = {
     "ARX5": ("arx", "fixed_manipulator", 1),
     "AlohaMini": (None, "wheeled_manipulator", 2),
     "TianjiMarvin": ("tianji", "fixed_manipulator", 2),
+    "TianjiMarvinRobotiq140": ("tianji", "fixed_manipulator", 2),
     "DexforceW1": ("dexforce", "wheeled_humanoid", 2),
     "CobotMagic": ("agilex", "fixed_manipulator", 2),
     "Franka": ("franka", "fixed_manipulator", 1),

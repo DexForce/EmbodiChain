@@ -13,6 +13,7 @@
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
 | Bare Franka arm selection and explicit tool assembly | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
+| Explicit Robotiq source calibration and full Marvin assembly | `extensions/embodichain_robots/robotiq/task_program.py`, `deployment.py`, `tianji/marvin/robotiq.py` |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Independent Revo1 hand or shared hand asset names | `extensions/embodichain_robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
@@ -62,6 +63,16 @@ existing similarly named Franka/FR3 or Panda-Hand configuration is not equivalen
 Observed aperture mapping does not substitute a full-close actuator command for
 measured linkage positions. See [Real2Sim motion](../data-pipeline/real2sim.md)
 for coupled contact prediction and transfer qualification.
+
+`TianjiMarvinRobotiq140Cfg` independently assembles the complete bare body with
+two fixed Robotiq wrists; catalog imports remain lazy. Its embodiment owns the
+source home, camera, command, sampling and armature declarations. Robotiq's
+`task_program` calibration adapters preserve explicit component hand geometry
+and resource identities. `deployment` produces copied opening, pad-material,
+mount, effort, stiffness and idle-posture overrides only when explicitly called;
+it never selects these by task number or object name. Static URDF inputs and
+fixed mounts use `utility/urdf_collision.py` and `scene/source_robot_geometry.py`;
+these readers create no Robot, solver or simulation.
 
 Locomotion presets and pure Torch task contracts share backend-free model
 profiles. For source/contract joint ordering, drive ownership and solver limits,

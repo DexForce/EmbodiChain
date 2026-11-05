@@ -470,6 +470,26 @@ nor collision freedom.
 .. autoclass:: LinkMesh
    :members:
 
+Authored robot mounting inputs
+------------------------------
+
+These URDF readers require exact declared frames and control groups. Fixed
+frame resolution rejects moving or cyclic parent chains. Shoulder positions
+retain explicit component transforms or the first declared arm joint's source
+origin; no runtime posture or inferred left/right naming is used.
+
+.. automodule:: embodichain.lab.sim.scene.source_robot_geometry
+   :members:
+
+``load_urdf_collision_inputs`` returns the same canonical ``LinkMesh`` value
+from explicit mesh/box collisions, preserving link/collider order, local
+origins and once-applied scales. Vertex-envelope mode is explicit and provides
+no triangle-surface certificate. It does not substitute visuals, resolve asset
+URIs, sample surfaces or capture native cooked shapes.
+
+.. automodule:: embodichain.lab.sim.utility.urdf_collision
+   :members:
+
 Static articulation and control inputs
 --------------------------------------
 

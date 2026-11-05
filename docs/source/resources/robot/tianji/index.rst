@@ -15,6 +15,9 @@ Official Tianji robot configurations live in the
    * - :doc:`Tianji Marvin <marvin>`
      - ``TianjiMarvinCfg``
      - Dual 7-DOF arms with optional parallel-jaw grippers.
+   * - :doc:`Marvin with Robotiq 2F-140 <marvin>`
+     - ``TianjiMarvinRobotiq140Cfg``
+     - Complete bare body with two fixed, explicitly calibrated Robotiq hands.
 
 .. toctree::
    :maxdepth: 1

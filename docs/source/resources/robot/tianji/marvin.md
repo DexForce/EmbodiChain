@@ -134,6 +134,41 @@ cfg = TianjiMarvinCfg.from_dict(
 )
 ```
 
+## Explicit Robotiq 2F-140 assembly
+
+The separate `TianjiMarvinRobotiq140` catalog entry selects
+`TianjiMarvinRobotiq140Cfg`. It preserves the complete bare fourteen-joint body
+and mounts the existing Robotiq 2F-140 models to `left_ee` and `right_ee` through
+fixed joints. The configuration retains six declared joints per hand, including
+five mimic followers; the catalog reports 16 independent control DOFs.
+
+This simulation assembly uses the source numerical arm solver settings and an
+end-link-to-TCP transform of `Rz(pi/2)` with a 0.2 m translation along +Z. Its
+raw seven-joint PK chains end at the wrist; apply the configured TCP separately.
+It declares no mounted cameras. The reusable
+`tianji_marvin_robotiq_arg2f_140.yaml` embodiment owns its zero home posture,
+independent high camera, solver sampling/tolerance, explicit armature and full
+open/grasp commands. Effort, stiffness and contact-material experiment overlays
+remain explicit deployment inputs.
+
+```python
+from embodichain_robots import TianjiMarvinRobotiq140Cfg
+
+# Builds a static model/configuration; no Robot or simulator is created.
+cfg = TianjiMarvinRobotiq140Cfg.from_dict({})
+```
+
+The assembly cache identity includes both source URDFs and their resources.
+Construction writes a complete generated resource directory atomically under
+the configured `assembly_directory` or the standard data assembly cache.
+Provide an explicit `fpath` to use an existing assembled model. Existing
+Franka/UR10 Robotiq components and this component share model-owned hand-role
+declarations while retaining their own commands, control names and TCPs.
+
+These are preserved simulation calibrations from the migration baseline.
+Static configuration and chain checks establish no physical grasp or motion
+qualification.
+
 ## Preview
 
 Run the preview and FK/IK smoke check in the project environment:

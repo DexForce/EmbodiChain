@@ -85,6 +85,13 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
 
+.. py:class:: embodichain_robots.TianjiMarvinRobotiq140Cfg
+
+   Configure the complete bare fourteen-joint Marvin body with two explicitly
+   mounted Robotiq 2F-140 hands. Its source TCP and simulation defaults are
+   independent of the native-gripper Marvin preset. See the canonical
+   implementation below for static assembly and configuration behavior.
+
 .. py:class:: embodichain_robots.DexforceW1Cfg
 
    DexforceW1 specific configuration, inherits from RobotCfg and allows custom parameters.
@@ -587,6 +594,28 @@ and cache prefixes while using the shared core download and locking services.
 .. autofunction:: embodichain_robots.robotiq.two_finger.robotiq85_joint_positions
 
 
+Explicit Robotiq source declarations
+------------------------------------
+
+These model-owned adapters produce independent physical/profile declarations.
+Hand roles retain the selected component's exact control parts, commands,
+pad links and geometry service settings. Nominal envelopes are declared
+heuristic dimensions, separate from collision surfaces and physical evidence.
+Opening, material, effort, stiffness and idle-posture changes require explicit
+calls; neither task identifiers nor object names select these calibrations.
+
+Mounting and lateral hints consume explicit table measurements and authored
+robot frames, without constructing a Robot or solver. Asset preflight checks
+the existing registered model resources and static configurations. None of
+these declarations establishes physical clearance or task success.
+
+.. automodule:: embodichain_robots.robotiq.task_program
+   :members:
+
+.. automodule:: embodichain_robots.robotiq.deployment
+   :members:
+
+
 embodichain_robots.the_robot_studio.so101
 -----------------------------------------
 
@@ -621,6 +650,24 @@ does not import this configuration implementation.
    :no-index:
 
    Lazy model-level export of :class:`embodichain_robots.TianjiMarvinCfg`.
+
+.. py:class:: embodichain_robots.tianji.marvin.TianjiMarvinRobotiq140Cfg
+
+   Lazy model-level export of
+   :class:`embodichain_robots.TianjiMarvinRobotiq140Cfg`.
+
+
+embodichain_robots.tianji.marvin.robotiq
+---------------------------------------
+
+The configuration keeps the entire bare body and fixed wrist mounts, with
+six declared joints per hand and explicit mimic metadata. Static assembly
+publishes a content-addressed complete resource directory atomically; its
+identity covers the source URDFs, meshes, textures and assembly recipe.
+An explicit ``fpath`` bypasses assembly. Catalog imports perform no asset IO.
+
+.. automodule:: embodichain_robots.tianji.marvin.robotiq
+   :members:
 
 
 embodichain_robots.tianji.marvin.assets

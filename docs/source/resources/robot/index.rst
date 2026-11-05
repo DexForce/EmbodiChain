@@ -75,6 +75,10 @@ Manufacturers
      - :doc:`Tianji Marvin <tianji/marvin>`
      - ``TianjiMarvinCfg``
      - Dual 7-DOF arms with optional parallel-jaw grippers and Warp SRS IK on CPU/CUDA.
+   * - :doc:`Tianji <tianji/index>`
+     - :doc:`Marvin with Robotiq 2F-140 <tianji/marvin>`
+     - ``TianjiMarvinRobotiq140Cfg``
+     - Full fourteen-joint body with two fixed Robotiq hands and explicit source TCPs.
    * - :doc:`Unitree <unitree/index>`
      - :doc:`Unitree G1 <unitree/g1>`
      - ``UnitreeG1Cfg``

@@ -1060,5 +1060,560 @@
         }
       }
     }
+  },
+  "dual_tianji": {
+    "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+    "embodiment_sha256": "36fd418b4cbf783dd9a9813db347f544408a6b76984dec0eb396de478602efaf",
+    "embodiment": {
+      "embodiment_id": "tianji_marvin_robotiq_arg2f_140",
+      "simulation": {
+        "uid": "TianjiMarvin",
+        "init_pos": [
+          1.9629207599999998,
+          0.0,
+          0.10091454
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          180.0
+        ],
+        "init_qpos": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "joint_drive_props": {
+          "stiffness": {
+            "left_arm": 70000.0,
+            "right_arm": 70000.0,
+            "left_eef": 50.0,
+            "right_eef": 50.0
+          },
+          "damping": {
+            "left_arm": 1000.0,
+            "right_arm": 1000.0,
+            "left_eef": 5.0,
+            "right_eef": 5.0
+          },
+          "max_effort": {
+            "left_arm": 3000000.0,
+            "right_arm": 3000000.0,
+            "left_eef": 500.0,
+            "right_eef": 500.0
+          },
+          "armature": {
+            "left_arm": 0.01,
+            "right_arm": 0.01,
+            "left_eef": 0.0,
+            "right_eef": 0.0
+          }
+        },
+        "control_parts": {
+          "left_arm": [
+            "SHOULDER_PITCH_L_J1",
+            "SHOULDER_ROLL_L_J2",
+            "ELBOW_PITCH_L_J3",
+            "ELBOW_YAW_L_J4",
+            "WRIST_PITCH_L_J5",
+            "WRIST_YAW_L_J6",
+            "WRIST_ROLL_L_J7"
+          ],
+          "left_eef": [
+            "left_finger_joint",
+            "left_inner_knuckle_joint",
+            "left_inner_finger_joint",
+            "left_right_outer_knuckle_joint",
+            "left_right_inner_knuckle_joint",
+            "left_right_inner_finger_joint"
+          ],
+          "right_arm": [
+            "SHOULDER_PITCH_R_J1",
+            "SHOULDER_ROLL_R_J2",
+            "ELBOW_PITCH_R_J3",
+            "ELBOW_YAW_R_J4",
+            "WRIST_PITCH_R_J5",
+            "WRIST_YAW_R_J6",
+            "WRIST_ROLL_R_J7"
+          ],
+          "right_eef": [
+            "right_finger_joint",
+            "right_left_inner_knuckle_joint",
+            "right_left_inner_finger_joint",
+            "right_outer_knuckle_joint",
+            "right_inner_knuckle_joint",
+            "right_inner_finger_joint"
+          ],
+          "dual_arm": [
+            "SHOULDER_PITCH_L_J1",
+            "SHOULDER_ROLL_L_J2",
+            "ELBOW_PITCH_L_J3",
+            "ELBOW_YAW_L_J4",
+            "WRIST_PITCH_L_J5",
+            "WRIST_YAW_L_J6",
+            "WRIST_ROLL_L_J7",
+            "SHOULDER_PITCH_R_J1",
+            "SHOULDER_ROLL_R_J2",
+            "ELBOW_PITCH_R_J3",
+            "ELBOW_YAW_R_J4",
+            "WRIST_PITCH_R_J5",
+            "WRIST_YAW_R_J6",
+            "WRIST_ROLL_R_J7"
+          ]
+        },
+        "solver_cfg": {
+          "left_arm": {
+            "class_type": "PytorchSolver",
+            "urdf_path": null,
+            "end_link_name": "left_ee",
+            "root_link_name": "left_arm_base",
+            "tcp": [
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.2
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "num_samples": 15,
+            "pos_eps": 0.005
+          },
+          "right_arm": {
+            "class_type": "PytorchSolver",
+            "urdf_path": null,
+            "end_link_name": "right_ee",
+            "root_link_name": "right_arm_base",
+            "tcp": [
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.2
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "num_samples": 15,
+            "pos_eps": 0.005
+          }
+        },
+        "fpath": "<frozen_tianji_assembly>",
+        "root_props": {
+          "fixed_base": true,
+          "self_collision_enabled": false,
+          "sleep_threshold": null,
+          "min_position_iters": 8,
+          "min_velocity_iters": 2
+        }
+      },
+      "sensor": [
+        {
+          "sensor_type": "Camera",
+          "uid": "cam_high",
+          "width": 960,
+          "height": 540,
+          "intrinsics": [
+            420,
+            420,
+            480,
+            270
+          ],
+          "extrinsics": {
+            "pos": [
+              0.4,
+              0.0,
+              2.2
+            ],
+            "eye": [
+              -0.6,
+              0.0,
+              1.8
+            ],
+            "target": [
+              0.0,
+              0.0,
+              0.75
+            ],
+            "up": [
+              1.0,
+              0.0,
+              0.0
+            ]
+          }
+        }
+      ],
+      "skill_profile": {
+        "contract_id": "dual_arm_parallel_gripper",
+        "profile_id": "tianji_marvin_robotiq_arg2f_140",
+        "resources": [
+          {
+            "resource_id": "left",
+            "endpoints": [
+              {
+                "endpoint_id": "motion",
+                "control_part": "left_arm",
+                "command_preset": "left_arm_postures",
+                "capabilities": [
+                  "kinematics.inverse",
+                  "kinematics.batch_inverse",
+                  "motion.cartesian_pose",
+                  "motion.joint_position",
+                  "kinematics.forward"
+                ]
+              },
+              {
+                "endpoint_id": "grasp",
+                "control_part": "left_eef",
+                "capabilities": [
+                  "interaction.grasp"
+                ],
+                "command_preset": "left_parallel_gripper"
+              }
+            ]
+          },
+          {
+            "resource_id": "right",
+            "endpoints": [
+              {
+                "endpoint_id": "motion",
+                "control_part": "right_arm",
+                "command_preset": "right_arm_postures",
+                "capabilities": [
+                  "kinematics.inverse",
+                  "kinematics.batch_inverse",
+                  "motion.cartesian_pose",
+                  "motion.joint_position",
+                  "kinematics.forward"
+                ]
+              },
+              {
+                "endpoint_id": "grasp",
+                "control_part": "right_eef",
+                "capabilities": [
+                  "interaction.grasp"
+                ],
+                "command_preset": "right_parallel_gripper"
+              }
+            ]
+          }
+        ],
+        "command_presets": [
+          {
+            "preset_id": "left_arm_postures",
+            "control_part": "left_arm",
+            "commands": {
+              "park": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "preset_id": "right_arm_postures",
+            "control_part": "right_arm",
+            "commands": {
+              "park": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "preset_id": "left_parallel_gripper",
+            "control_part": "left_eef",
+            "commands": {
+              "open": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "grasp": [
+                0.7,
+                -0.7,
+                0.7,
+                -0.7,
+                -0.7,
+                0.7
+              ]
+            }
+          },
+          {
+            "preset_id": "right_parallel_gripper",
+            "control_part": "right_eef",
+            "commands": {
+              "open": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "grasp": [
+                0.7,
+                -0.7,
+                0.7,
+                -0.7,
+                -0.7,
+                0.7
+              ]
+            }
+          }
+        ],
+        "runtime_services": {
+          "grasp_pose_generators": {
+            "left_eef": {
+              "kind": "antipodal_parallel_jaw",
+              "sample_count": 10000,
+              "approach_deviation_angle": 0.3490658503988659,
+              "approach_direction_samples": 4,
+              "max_candidates": 500,
+              "center_mode": "centroid",
+              "point_spacing": 0.012,
+              "root_from_tcp": [
+                [
+                  0.0,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.2
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "filter_ground_collision": false,
+              "model": {
+                "model_id": "robotiq_arg2f_140",
+                "min_opening_width": 0.002,
+                "max_opening_width": 0.128
+              }
+            },
+            "right_eef": {
+              "kind": "antipodal_parallel_jaw",
+              "sample_count": 10000,
+              "approach_deviation_angle": 0.3490658503988659,
+              "approach_direction_samples": 4,
+              "max_candidates": 500,
+              "center_mode": "centroid",
+              "point_spacing": 0.012,
+              "root_from_tcp": [
+                [
+                  0.0,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.2
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "filter_ground_collision": false,
+              "model": {
+                "model_id": "robotiq_arg2f_140",
+                "min_opening_width": 0.002,
+                "max_opening_width": 0.128
+              }
+            }
+          },
+          "control_part_evidence": {
+            "kind": "joint_position_constraint",
+            "control_parts": [
+              "left_eef",
+              "right_eef"
+            ],
+            "open_qpos": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "minimum_displacement": 0.05
+          }
+        }
+      }
+    },
+    "assembly_resources_sha256": {
+      "Collision/chassis/base_link_auto_convex.obj": "7db5f43763e435c61ae49d044011c8e7b74c7f7e9e4a56df4e52769a7a574799",
+      "Collision/chassis/elbow_pitch_l_j3_link_auto_convex.obj": "720f50025135b860c4241c396ff959f2afcd0b3266c969c4a4f54f578cfa524d",
+      "Collision/chassis/elbow_pitch_r_j3_link_auto_convex.obj": "72204e69c95b100568ef13b1b700d4f7fc5359f007da623b6dfca64787bb10e0",
+      "Collision/chassis/elbow_yaw_l_j4_link_auto_convex.obj": "4f66a6787e287a5530e2f5e91f917cd68285562464a9cb13b3726254151633ac",
+      "Collision/chassis/elbow_yaw_r_j4_link_auto_convex.obj": "8718e76d5770c6fdca1c8ee9917c095d6d32bb4bf2d5246673273dd030cf4034",
+      "Collision/chassis/shoulder_pitch_l_j1_link_auto_convex.obj": "6c36cf2435cd130c3602b5ab8ff2e2eb7dbbb5c4580d3a09cabcfdbf33864082",
+      "Collision/chassis/shoulder_pitch_r_j1_link_auto_convex.obj": "c73796b8c7540af52855406c4d6090fe527bdbd1a76a7b02333edec3e1152e63",
+      "Collision/chassis/shoulder_roll_l_j2_link_auto_convex.obj": "0da4065ccfb8ea4a5d3cc73dab57006db14015e76c7a7b10999738c8dcd1e5ea",
+      "Collision/chassis/shoulder_roll_r_j2_link_auto_convex.obj": "9ddb8c5b654865bb8110aa96be5c54aa0ba92030c5a521781738e19797395356",
+      "Collision/chassis/wrist_pitch_l_j5_link_auto_convex.obj": "f8b059ed51699ce9dd724aa949cffd5e7def78e5b16c83724f761ac2c58c01c2",
+      "Collision/chassis/wrist_pitch_r_j5_link_auto_convex.obj": "c96d6a5afa1cea62198b2bf907bc4eb2d8708f5052e737f0e12cf2270b19446a",
+      "Collision/chassis/wrist_roll_l_j7_link_auto_convex.obj": "38eaac512e8f334515038103de708e98b5c61d9d71abdebe834a8d12c18444fd",
+      "Collision/chassis/wrist_roll_r_j7_link_auto_convex.obj": "1aed5c373ae7765821561a5db863e2171cdd2626f812625452cdacc9c464602c",
+      "Collision/chassis/wrist_yaw_l_j6_link_auto_convex.obj": "0ca8a4c3161afc19a8083ec98affc9e698841b1d356595bc76d63788bb563cde",
+      "Collision/chassis/wrist_yaw_r_j6_link_auto_convex.obj": "0164ec9071232d907bc63dd855a4c4d13ad31177e765d71b1a34a94e946abd87",
+      "Collision/left_hand/finger_pad_collision.stl": "336621cb26f9c51d5f991b3c1570da0801f82dc74a097cddf5f0e0cc5b8a4d93",
+      "Collision/left_hand/robotiq_arg2f_140_inner_finger.stl": "043901d9c22b38d09b30d11326108ab3ef1445b4bd655ef313f94199f25f57ed",
+      "Collision/left_hand/robotiq_arg2f_140_inner_knuckle.stl": "d341d986aa8aca7262565c039c04fb6b4c0f2f5c93443519eb7ca9bfc67ba17c",
+      "Collision/left_hand/robotiq_arg2f_140_outer_finger.stl": "bd7da1b31b73f1aa1d61b26a582cea10f16f17396d54b8937890fa51547d26b0",
+      "Collision/left_hand/robotiq_arg2f_140_outer_knuckle.stl": "37c1779f71fb5504a5898048a36f9f4bfce0f5e7039ff1dce53808b95c229777",
+      "Collision/left_hand/robotiq_arg2f_base_link.stl": "111e37f13a664989dd54226f80f521b32ea0b71c975282a16696b14be7cc9249",
+      "Collision/right_hand/finger_pad_collision.stl": "336621cb26f9c51d5f991b3c1570da0801f82dc74a097cddf5f0e0cc5b8a4d93",
+      "Collision/right_hand/robotiq_arg2f_140_inner_finger.stl": "043901d9c22b38d09b30d11326108ab3ef1445b4bd655ef313f94199f25f57ed",
+      "Collision/right_hand/robotiq_arg2f_140_inner_knuckle.stl": "d341d986aa8aca7262565c039c04fb6b4c0f2f5c93443519eb7ca9bfc67ba17c",
+      "Collision/right_hand/robotiq_arg2f_140_outer_finger.stl": "bd7da1b31b73f1aa1d61b26a582cea10f16f17396d54b8937890fa51547d26b0",
+      "Collision/right_hand/robotiq_arg2f_140_outer_knuckle.stl": "37c1779f71fb5504a5898048a36f9f4bfce0f5e7039ff1dce53808b95c229777",
+      "Collision/right_hand/robotiq_arg2f_base_link.stl": "111e37f13a664989dd54226f80f521b32ea0b71c975282a16696b14be7cc9249",
+      "Visual/chassis/base_link.glb": "403bc9896e0fdc478a59455e969e106c326d6b849ff329d0f4b9c8c0a1ca24b4",
+      "Visual/chassis/elbow_pitch_l_j3_link.glb": "0dd4184c1c34dbdfc2bbc48d46f35380d76b95caa9c8212d49fbd32bfd9c557e",
+      "Visual/chassis/elbow_pitch_r_j3_link.glb": "135bd0cf37914cb2b0f1104a7f09a49c41e4df753457e7d901204d4bb7c76565",
+      "Visual/chassis/elbow_yaw_l_j4_link.glb": "462ac907b7fe5f610eb055140c722e0bcbbc3e7829581998e9c23b19dcb8876c",
+      "Visual/chassis/elbow_yaw_r_j4_link.glb": "52778d1d7c66bcadd0ba91cc7a9f1057ba34bdcc50f84690ad71d3033d3e914b",
+      "Visual/chassis/shoulder_pitch_l_j1_link.glb": "0eb4425e55db81a71acb39200626c841430a294e0c377423dd4146983ffa136c",
+      "Visual/chassis/shoulder_pitch_r_j1_link.glb": "056b532416d1d6bd08da9bfc4f3578d56fd6115b6c186473e836d65a301d1861",
+      "Visual/chassis/shoulder_roll_l_j2_link.glb": "06f6f84649da207283dd7b7ba0c367b0bdf39a4dfc48331d00f75de0703ae17f",
+      "Visual/chassis/shoulder_roll_r_j2_link.glb": "68ab0bea2f30973caf856499ba6d1313e3ebd02b0e251bf0f05af5050520329c",
+      "Visual/chassis/wrist_pitch_l_j5_link.glb": "f872cf91c10f2758597cf9819ffd09ed2ae11008bec84b6e360e7670b416d515",
+      "Visual/chassis/wrist_pitch_r_j5_link.glb": "331d1a9927f0b2b592448c671c0dc648522943b3f91d7057d764773bb402a387",
+      "Visual/chassis/wrist_roll_l_j7_link.glb": "a08ab6cb2b77697575c971ea5154822b43646892773ac6c0b964b94a9837843c",
+      "Visual/chassis/wrist_roll_r_j7_link.glb": "9ec83b14cb26a0bec9aa55b7c29acef06cda0e761c44740e102331508ba3ae54",
+      "Visual/chassis/wrist_yaw_l_j6_link.glb": "564028a21d1038f8eadef49d1303a7fbdeeaf68000a41c1a9daaf3cfef980e2c",
+      "Visual/chassis/wrist_yaw_r_j6_link.glb": "aaf547040d57c51faa8c95a5a1abdd34c5aad7ee1de9f703f304f76104b367b8",
+      "Visual/left_hand/left_inner_finger_robotiq_arg2f_140_inner_finger.mtl": "d95aa5c66815ff0ac856c0bfed51cf26021f7eaf88cb61aa83774b1e47541b91",
+      "Visual/left_hand/left_inner_finger_robotiq_arg2f_140_inner_finger.obj": "6167bd03c85ffd4891cddf6f11e375bf1c5a49e552d81cb30db02c1ab1beb78b",
+      "Visual/left_hand/left_inner_knuckle_robotiq_arg2f_140_inner_knuckle.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/left_hand/left_inner_knuckle_robotiq_arg2f_140_inner_knuckle.obj": "e1a88b028c1bec1ec95071df5c1252bb76ccb515c9e0f823f96015b263763e8c",
+      "Visual/left_hand/left_outer_finger_robotiq_arg2f_140_outer_finger.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/left_hand/left_outer_finger_robotiq_arg2f_140_outer_finger.obj": "5bc2297336e00a32f1e9052abe3476da05e7a638ad991ff45e765fa044cbaa3d",
+      "Visual/left_hand/left_outer_knuckle_robotiq_arg2f_140_outer_knuckle.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/left_hand/left_outer_knuckle_robotiq_arg2f_140_outer_knuckle.obj": "4f5452f09bf97b708343fe1466523aeba6dc70469e4a1f796eea531a9adbd552",
+      "Visual/left_hand/right_inner_finger_robotiq_arg2f_140_inner_finger.mtl": "d95aa5c66815ff0ac856c0bfed51cf26021f7eaf88cb61aa83774b1e47541b91",
+      "Visual/left_hand/right_inner_finger_robotiq_arg2f_140_inner_finger.obj": "543844cbcec218a3171c98bbe4f0d10c27f94a55ea5a6bdc0d1400af2471c0aa",
+      "Visual/left_hand/right_inner_knuckle_robotiq_arg2f_140_inner_knuckle.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/left_hand/right_inner_knuckle_robotiq_arg2f_140_inner_knuckle.obj": "b969e8348dc539954ad687d6b011e299e0fc48a7188fffb9578b6301498420d9",
+      "Visual/left_hand/right_outer_finger_robotiq_arg2f_140_outer_finger.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/left_hand/right_outer_finger_robotiq_arg2f_140_outer_finger.obj": "b4051a794ab8d1ff66599b2dde2773ad5c9794e1383d6c224512219b4a6622b2",
+      "Visual/left_hand/right_outer_knuckle_robotiq_arg2f_140_outer_knuckle.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/left_hand/right_outer_knuckle_robotiq_arg2f_140_outer_knuckle.obj": "8e24f7e8b4f611580241b52775a58246c82384c784b2d64ee1d41fe38fd341b1",
+      "Visual/left_hand/robotiq_arg2f_base_link_robotiq_arg2f_base_link.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/left_hand/robotiq_arg2f_base_link_robotiq_arg2f_base_link.obj": "0e61a1aa81bf2f412dd3711dd18b4a5c85839624546dc9985594bb54912c62d9",
+      "Visual/right_hand/left_inner_finger_robotiq_arg2f_140_inner_finger.mtl": "d95aa5c66815ff0ac856c0bfed51cf26021f7eaf88cb61aa83774b1e47541b91",
+      "Visual/right_hand/left_inner_finger_robotiq_arg2f_140_inner_finger.obj": "6167bd03c85ffd4891cddf6f11e375bf1c5a49e552d81cb30db02c1ab1beb78b",
+      "Visual/right_hand/left_inner_knuckle_robotiq_arg2f_140_inner_knuckle.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/right_hand/left_inner_knuckle_robotiq_arg2f_140_inner_knuckle.obj": "e1a88b028c1bec1ec95071df5c1252bb76ccb515c9e0f823f96015b263763e8c",
+      "Visual/right_hand/left_outer_finger_robotiq_arg2f_140_outer_finger.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/right_hand/left_outer_finger_robotiq_arg2f_140_outer_finger.obj": "5bc2297336e00a32f1e9052abe3476da05e7a638ad991ff45e765fa044cbaa3d",
+      "Visual/right_hand/left_outer_knuckle_robotiq_arg2f_140_outer_knuckle.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/right_hand/left_outer_knuckle_robotiq_arg2f_140_outer_knuckle.obj": "4f5452f09bf97b708343fe1466523aeba6dc70469e4a1f796eea531a9adbd552",
+      "Visual/right_hand/right_inner_finger_robotiq_arg2f_140_inner_finger.mtl": "d95aa5c66815ff0ac856c0bfed51cf26021f7eaf88cb61aa83774b1e47541b91",
+      "Visual/right_hand/right_inner_finger_robotiq_arg2f_140_inner_finger.obj": "543844cbcec218a3171c98bbe4f0d10c27f94a55ea5a6bdc0d1400af2471c0aa",
+      "Visual/right_hand/right_inner_knuckle_robotiq_arg2f_140_inner_knuckle.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/right_hand/right_inner_knuckle_robotiq_arg2f_140_inner_knuckle.obj": "b969e8348dc539954ad687d6b011e299e0fc48a7188fffb9578b6301498420d9",
+      "Visual/right_hand/right_outer_finger_robotiq_arg2f_140_outer_finger.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/right_hand/right_outer_finger_robotiq_arg2f_140_outer_finger.obj": "b4051a794ab8d1ff66599b2dde2773ad5c9794e1383d6c224512219b4a6622b2",
+      "Visual/right_hand/right_outer_knuckle_robotiq_arg2f_140_outer_knuckle.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/right_hand/right_outer_knuckle_robotiq_arg2f_140_outer_knuckle.obj": "8e24f7e8b4f611580241b52775a58246c82384c784b2d64ee1d41fe38fd341b1",
+      "Visual/right_hand/robotiq_arg2f_base_link_robotiq_arg2f_base_link.mtl": "fffba5cc0bdca284b38c3643e15f5ba1803575ac798a306f3b013111c9e11ee1",
+      "Visual/right_hand/robotiq_arg2f_base_link_robotiq_arg2f_base_link.obj": "0e61a1aa81bf2f412dd3711dd18b4a5c85839624546dc9985594bb54912c62d9",
+      "tianji_marvin_robotiq_arg2f_140.urdf": "1902ac4e3a13ae56a712cf0d4b7b26e7f78c6c0b33ab1a57a37b322dcacc5b79"
+    }
   }
 }
