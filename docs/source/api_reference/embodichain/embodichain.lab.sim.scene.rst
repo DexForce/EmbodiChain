@@ -493,4 +493,3 @@ this separate API.
    :members:
 
 .. autofunction:: capture_rigid_mesh
-
