@@ -1048,7 +1048,7 @@ missing final goals, past milestones or continuous trajectory requirements.
 .. autofunction:: evaluate_control_evidence
 
 embodichain.gen_sim.task_spec.coordinated_evidence
-------------------------------------------------
+--------------------------------------------------
 
 The coordinated-hold binding verifies the original single-object
 ``held_by_both_grippers`` contract. It rechecks both resource attachments,
@@ -1171,7 +1171,7 @@ not-run outcomes; an incomplete always-window cannot certify success.
    lookup_observation
 
 embodichain.gen_sim.task_spec.handover_evidence
----------------------------------------------
+-----------------------------------------------
 
 These data-only proofs seal source/destination resources, transfer/boundary
 occurrences, cadence, native identities and the unchanged TaskSpec/program.
@@ -1195,7 +1195,7 @@ is imported for qualification.
 .. autofunction:: evaluate_handover_evidence
 
 embodichain.gen_sim.task_spec.observation_requests
-------------------------------------------------
+--------------------------------------------------
 
 Request projection validates the normative/program identity and original
 execution receipts before returning plain boundary, motion-part and fresh-grip
