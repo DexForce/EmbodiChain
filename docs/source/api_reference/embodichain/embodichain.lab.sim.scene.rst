@@ -1045,3 +1045,16 @@ precedence over a single-file shoulder lookup. No model or hand is selected.
 .. autofunction:: source_fixed_frame_pose
 
 .. autofunction:: source_arm_base_position
+
+Authored drawer placement inputs
+--------------------------------
+
+Read authored moving-link topology, drawer-local floor regions and source
+payload targets through shared Scene geometry. Fixed descendants follow enabled
+physical joints rather than USD namespace ancestry. The adapters retain source
+scale and link frames, delegate numeric targets to Compute and keep the original
+finite handle-only fallback. They construct no Robot, simulator or motion solver;
+source targets and bounds do not certify physical fit or successful placement.
+
+.. automodule:: embodichain.lab.sim.scene.drawer
+   :members:

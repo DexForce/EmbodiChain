@@ -28,6 +28,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Explicit control roles, collider inputs and source lineage | `embodichain/lab/sim/scene/control_semantics.py`, `revolute_geometry.py`, `control_source.py`, `control_mass_source.py` |
 | Static source support/container/Pour target affordances and horizontal permission | `declaration_placement.py`; explicit source views/reserves, no semantic graph or runtime planning |
 | Enabled authored collision meshes in owning-link frames | `source_collisions.py`; shared source snapshot, ordered polygon-fan topology and uniform-scale boundary |
+| Authored moving drawer topology, local floor region and source payload pose | `drawer.py`; original source/link frames and uniform scale, no runtime success claim |
 | Declared world source meshes and conservative slider envelopes | `source_geometry.py`, `source_envelopes.py`; static source/scale/pose only, no native collision claim |
 | Declared local source vertices | `source_geometry.read_source_vertices`; authored mesh/articulation data or an explicitly scaled local override, with no native observation |
 | Read-only source glTF basis/top inputs | `source_geometry.py`; original scene transforms, scale and topology, with no native acquisition |
@@ -97,6 +98,13 @@ discrete geometric checks, not continuous-path or physical-effect evidence.
 `convex_clearance.py` checks conservative input-mesh solids at explicit frame
 indices, preserving order and first rejection; it also catches full containment.
 It takes explicit margins and never substitutes for a native contact witness.
+
+Drawer source adapters follow enabled fixed-joint descendants of the selected
+prismatic body, independently of USD parent paths. Structural meshes exclude the
+qualified handle; the original handle-only fallback remains finite. Region and
+target arithmetic delegates to Compute, while source readers preserve explicit
+authored frames and apply uniform scale once. These APIs inspect source inputs,
+not cooked native collision geometry or observed placement success.
 
 Static control readers consume explicit authored roles, keep source mesh frames
 and identity, and never build semantic graphs or select execution/recovery
