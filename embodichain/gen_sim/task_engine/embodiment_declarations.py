@@ -62,7 +62,8 @@ def resolve_source_hand_services(
 
     Returns:
         Independent component declaration, model-owned hand role descriptors and
-        any additional canonical component file digests. Effective native physics
+        effective grasp-model dependency digests plus any additional canonical
+        component file digests. Effective native physics
         and sensors retain their existing owner; standard presets can be expanded
         to complete declarations. Already-present geometry declarations
         retain their values; no code-default calibration silently replaces them.
