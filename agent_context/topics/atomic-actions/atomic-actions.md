@@ -79,6 +79,21 @@ single-environment source paths reject other batches. AxisAlign rejects inherite
 Pick-only options it does not implement; drawer-specific Place is unavailable
 until its separate action owner is installed.
 
+Held transport and Pour retain their default paths. Explicit held-alignment and
+staging recovery consume declared geometry and owned command observations from
+Lab; retained-command provenance never certifies physical attachment. Ordered-pad
+and retained Pour goals own their original arc construction. Idle uses the normal
+MoveJoints entry, with declared relative joints and optional Motion-owned link
+clearance, and rejects nonempty resources under free-motion qualification.
+
+Released-hand cleanup and Park use exact suffix authority and the existing
+complete-plan/preview pipeline. `_released_park.py` is the unique owner of generic
+empty-hand Park qualification and bounded vias; articulation integrations reuse
+it rather than duplicating the algorithm. Articulation authorization, withdrawal
+and drawer handlers belong to their separate owner; drawer transport explicitly
+rejects until installed. New service ports are optional, typed, same-robot and
+borrowed; construction captures no native state or commands.
+
 `ExecutionPlanLifecycle` is an optional host-owned adoption port. It receives an
 owned validated attempt before dispatch. Installation rejection latches the
 session: later ticks/revisions cannot resume commands. `ExecutionRunner` keeps

@@ -2361,6 +2361,8 @@ def test_integration_config_rejects_unknown_fields_before_live_construction() ->
     [
         ("pick_up", "native_closing_revision", 4),
         ("place", "measured_inside", True),
+        ("move_held_object", "linear_segments", True),
+        ("move_joints", "require_free_motion", True),
     ],
 )
 def test_source_manipulation_config_requires_its_published_service_decoder(

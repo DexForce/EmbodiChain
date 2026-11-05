@@ -361,11 +361,16 @@ EEF pose or an ordered set of pose waypoints.
 | Motion | EEF planning from observed arm qpos; output expanded to full robot DoF |
 | Completion | `EEF_GOAL_REACHED` |
 | Effect | none |
-| Skill options | none; reusable motion choices are in `MotionPolicy` |
+| Skill options | `MoveEndEffectorOptions.linear_segments` selects the explicit Cartesian grid; motion choices remain in `MotionPolicy` |
 
 Use an explicit pose for a fixed target, `SceneEntityPose` for a tracked target,
 or `(B, N, 4, 4)` for intermediate waypoints. The action does not command an end
 effector/hand resource.
+
+Explicit released-hand cleanup uses `ReleasedHandClearanceRecovery` plus exact
+following Park authority and a free-motion query. It checks the cleanup and the
+one or two following Parks using the same complete planning/preview pipeline.
+Previews execute no commands and grant no physical effects.
 
 **Example:** `examples/sim/atomic_action/move_end_effector.py`
 
@@ -403,6 +408,13 @@ engine = AtomicActionEngine(
 explicit_goal = JointPositionGoal(target=home_qpos)
 named_goal = JointPositionGoal(target="home")
 ```
+
+`JointOffsetTarget` declares one exact bound model joint and an observed-state
+relative displacement. `MoveJointsOptions(require_free_motion=True)` is required
+for this goal and checks the full emitted command grid, passive joints and the
+original limits/scene geometry. Its optional protected-link search belongs to
+Motion. Released Park recovery additionally requires its declared suffix
+occurrence; it never selects resources from their names.
 
 **Example:** `examples/sim/atomic_action/move_joint.py`
 
@@ -631,6 +643,12 @@ marked unsuccessful and held in place.
 cube scene (`--skill move_held_object`);
 `examples/sim/atomic_action/move_held_object_cup.py` preserves the paper-cup sequence.
 
+Explicit `MoveHeldObjectPlanningRecovery` enables preserved bounded heading and
+staging alternatives. The action borrows declared staging geometry and command
+observations; provenance and command continuity do not certify physical retention.
+`hand_hold="observed"` is an explicit behavior, and drawer transport remains
+unavailable until its separate implementation is installed.
+
 (builtin-pour)=
 
 ## `Pour`
@@ -662,6 +680,11 @@ planner can chain the outbound and return legs.
 
 **Example:** `examples/sim/atomic_action/pour.py` compiles a horizontal
 `PickUp` followed by `Pour`.
+
+`JawPourGoal` and `RetainedPourGoal` provide explicit ordered-pad and retained
+arc constructions alongside `PourGoal`. They use the declared hand calibration,
+current scene poses and shared Motion validation, retaining the original default
+Pour behavior when those goals are absent.
 
 (builtin-push-object)=
 

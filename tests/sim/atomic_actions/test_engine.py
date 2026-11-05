@@ -271,6 +271,9 @@ def test_engine_can_disable_builtin_loading() -> None:
         "place_scene_provider",
         "place_continuation_provider",
         "measured_rigid_provider",
+        "held_staging_provider",
+        "retained_command_provider",
+        "released_hand_provider",
     ],
 )
 def test_pick_place_services_reject_untyped_ports_before_binding(name: str) -> None:
@@ -285,6 +288,9 @@ def test_pick_place_services_reject_untyped_ports_before_binding(name: str) -> N
         ("joint_prefix_planner", "plan"),
         ("place_continuation_provider", "prepare"),
         ("measured_rigid_provider", "prepare"),
+        ("held_staging_provider", "binding"),
+        ("retained_command_provider", "authority"),
+        ("released_hand_provider", "prepare"),
     ],
 )
 def test_pick_place_services_reject_another_robot_before_binding(
@@ -294,7 +300,14 @@ def test_pick_place_services_reject_another_robot_before_binding(
 
     calls: list[object] = []
     provider = SimpleNamespace(
-        robot=object(), **{method: lambda *args, **kwargs: calls.append(args)}
+        robot=object(),
+        **{
+            method: lambda *args, **kwargs: calls.append(args),
+            "capture_distal_geometry": lambda *args: None,
+            "capture": lambda *args: None,
+            "verify_current": lambda *args: None,
+            "require_park": lambda *args: None,
+        },
     )
     with pytest.raises(ValueError, match="exact robot"):
         AtomicActionEngine(_motion_generator(), **{name: provider})

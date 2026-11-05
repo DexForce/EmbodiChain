@@ -80,7 +80,15 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
 )
 """Built-in action implementations instantiated once per action engine."""
 
+from .move_held_object import MoveHeldObjectPlanningRecovery
+from .move_joints import JointOffsetTarget
+from .pour import RetainedPourGoal, JawPourGoal
+
 __all__ = [
+    "MoveHeldObjectPlanningRecovery",
+    "JointOffsetTarget",
+    "RetainedPourGoal",
+    "JawPourGoal",
     "AssembleGoal",
     "AxisAlign",
     "AxisAlignGoal",

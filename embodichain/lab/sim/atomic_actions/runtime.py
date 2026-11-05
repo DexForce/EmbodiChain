@@ -41,7 +41,10 @@ from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
 )
 
 from embodichain.lab.sim.motion.mesh_collision import FreeMotionQuery
+from .released_continuation import ReleasedHandContinuationProvider
 from .planning_probes import (
+    HeldStagingProvider,
+    RetainedCommandProvider,
     JointPrefixPlanner,
     ObservedCuroboQueryService,
     PourGraspProjectionProvider,
@@ -110,6 +113,9 @@ class ActionPlanningServices:
         place_scene_provider: PlaceSceneProvider | None = None,
         place_continuation_provider: PlaceContinuationProvider | None = None,
         measured_rigid_provider: MeasuredRigidPlanningProvider | None = None,
+        held_staging_provider: HeldStagingProvider | None = None,
+        retained_command_provider: RetainedCommandProvider | None = None,
+        released_hand_provider: ReleasedHandContinuationProvider | None = None,
     ) -> None:
         """Retain shared services and snapshot caller-owned calibration data.
 
@@ -127,6 +133,9 @@ class ActionPlanningServices:
             place_scene_provider: Owned placement geometry and support roles.
             place_continuation_provider: Same-robot occurrence-bound predictions.
             measured_rigid_provider: Same-robot measured manipulation facts.
+            held_staging_provider: Same-robot staging declarations and geometry.
+            retained_command_provider: Same-robot retained-command provenance.
+            released_hand_provider: Same-robot released suffix authority.
         """
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
@@ -202,6 +211,48 @@ class ActionPlanningServices:
                 "measured_rigid_provider must own this engine's exact robot."
             )
         self._measured_rigid_provider = measured_rigid_provider
+        if held_staging_provider is not None and not isinstance(
+            held_staging_provider, HeldStagingProvider
+        ):
+            raise TypeError(
+                "held_staging_provider must implement its declared planning port."
+            )
+        if (
+            held_staging_provider is not None
+            and held_staging_provider.robot is not self._robot
+        ):
+            raise ValueError(
+                "held_staging_provider must own this engine's exact robot."
+            )
+        self._held_staging_provider = held_staging_provider
+        if retained_command_provider is not None and not isinstance(
+            retained_command_provider, RetainedCommandProvider
+        ):
+            raise TypeError(
+                "retained_command_provider must implement its declared planning port."
+            )
+        if (
+            retained_command_provider is not None
+            and retained_command_provider.robot is not self._robot
+        ):
+            raise ValueError(
+                "retained_command_provider must own this engine's exact robot."
+            )
+        self._retained_command_provider = retained_command_provider
+        if released_hand_provider is not None and not isinstance(
+            released_hand_provider, ReleasedHandContinuationProvider
+        ):
+            raise TypeError(
+                "released_hand_provider must implement its declared planning port."
+            )
+        if (
+            released_hand_provider is not None
+            and released_hand_provider.robot is not self._robot
+        ):
+            raise ValueError(
+                "released_hand_provider must own this engine's exact robot."
+            )
+        self._released_hand_provider = released_hand_provider
         if tracking_runtime is not None and not isinstance(
             tracking_runtime,
             TrackingRuntime,
@@ -268,6 +319,21 @@ class ActionPlanningServices:
         """
         service = self._joint_prefix_planner
         return service if isinstance(service, ObservedCuroboQueryService) else None
+
+    @property
+    def held_staging_provider(self) -> HeldStagingProvider | None:
+        """Return static bindings and opt-in late same-observation geometry capture."""
+        return self._held_staging_provider
+
+    @property
+    def retained_command_provider(self) -> RetainedCommandProvider | None:
+        """Return opt-in authority and same-observation native target capture."""
+        return self._retained_command_provider
+
+    @property
+    def released_hand_provider(self) -> ReleasedHandContinuationProvider | None:
+        """Return the exact engine-owned cleanup/Park continuation service."""
+        return self._released_hand_provider
 
     @property
     def robot(self) -> Robot:

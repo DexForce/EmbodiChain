@@ -41,7 +41,10 @@ from .plans import (
 )
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
+from .released_continuation import ReleasedHandContinuationProvider
 from .planning_probes import (
+    HeldStagingProvider,
+    RetainedCommandProvider,
     JointPrefixPlanner,
     PourGraspProjectionProvider,
     PickClosingQueryProvider,
@@ -90,6 +93,9 @@ class AtomicActionEngine:
         place_scene_provider: PlaceSceneProvider | None = None,
         place_continuation_provider: PlaceContinuationProvider | None = None,
         measured_rigid_provider: MeasuredRigidPlanningProvider | None = None,
+        held_staging_provider: HeldStagingProvider | None = None,
+        retained_command_provider: RetainedCommandProvider | None = None,
+        released_hand_provider: ReleasedHandContinuationProvider | None = None,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
@@ -115,6 +121,12 @@ class AtomicActionEngine:
                 predictions; predictions authorize no physical effects.
             measured_rigid_provider: Same-robot measured preshape and inside
                 geometry, acquired only by explicitly selected action options.
+            held_staging_provider: Same-robot staging bindings and late owned
+                distal geometry for explicitly selected held-path recovery.
+            retained_command_provider: Same-robot verified command provenance and
+                same-observation command snapshots; no physical success is implied.
+            released_hand_provider: Same-robot authority for the exact cleanup
+                and following Park occurrences.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
             tracking_runtime: Optional exact-version feedback, projector, and
@@ -139,6 +151,9 @@ class AtomicActionEngine:
             place_scene_provider=place_scene_provider,
             place_continuation_provider=place_continuation_provider,
             measured_rigid_provider=measured_rigid_provider,
+            held_staging_provider=held_staging_provider,
+            retained_command_provider=retained_command_provider,
+            released_hand_provider=released_hand_provider,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}

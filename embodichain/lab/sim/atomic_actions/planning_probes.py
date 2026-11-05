@@ -26,6 +26,11 @@ from embodichain.lab.sim.scene.mesh_snapshot import SceneMeshSnapshot
 from embodichain.lab.sim.scene.planar_observation import NativePlanarPlacement
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.scene.robot_distal import RobotDistalMeshSnapshot
+    from embodichain.lab.sim.evidence import RobotCommandObservation
+    from embodichain.lab.sim.motion.mesh_collision import (
+        RobotArticulationCollisionSnapshot,
+    )
     from .invocation import ResolvedActionRequest
     from .primitives.pick_up import GraspGoal, PickUpOptions
     from .primitives.place import PlaceGoal, PlaceOptions
@@ -45,6 +50,11 @@ if TYPE_CHECKING:
     from embodichain.compute.geometry.pouring import PourGraspProjection
 
 __all__ = [
+    "HeldStagingBinding",
+    "HeldStagingProvider",
+    "HeldArticulationStagingProvider",
+    "RetainedCommandAuthority",
+    "RetainedCommandProvider",
     "JointPrefixPlanner",
     "CuroboWorldObservationProvider",
     "ObservedCuroboQueryService",
@@ -365,4 +375,175 @@ class PlaceSceneProvider(Protocol):
             Planning-only input envelopes. Unavailable required inputs raise,
             rather than replacing collision inputs with a different oracle.
         """
+        ...
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class HeldStagingBinding:
+    """Host-validated rigid subject selected for one exact staging invocation.
+
+    Args:
+        rigid_entity_id: Exact held subject backed by a registered rigid object.
+            The integration validates role and occurrence; no name inference.
+        articulation_scene: Also capture the source robot/articulation-only scope,
+            excluding rigids. The final command guard remains robot-only.
+    """
+
+    rigid_entity_id: str
+    articulation_scene: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.articulation_scene) is not bool:
+            raise TypeError("articulation_scene must be bool.")
+        value = self.rigid_entity_id
+        if type(value) is not str or not value or value != value.strip():
+            raise ValueError("rigid_entity_id must be an exact nonempty identity.")
+
+
+@runtime_checkable
+class HeldStagingProvider(Protocol):
+    """Separate static occurrence binding from late same-observation geometry."""
+
+    @property
+    def robot(self) -> Robot:
+        """Return the exact borrowed engine robot."""
+        ...
+
+    def binding(self, request: ResolvedActionRequest) -> HeldStagingBinding | None:
+        """Return a declared rigid occurrence without reading native state.
+
+        Args:
+            request: Exact resolved occurrence and resource binding.
+
+        Returns:
+            Static source-compatible binding, or None when unselected.
+        """
+        ...
+
+    def capture_distal_geometry(
+        self, request: ResolvedActionRequest, context: PlanningContext
+    ) -> RobotDistalMeshSnapshot:
+        """Delegate late Scene capture under the complete original world stamp.
+
+        Args:
+            request: Exact active-arm binding for the eligible staging occurrence.
+            context: The observed/projected planning context; native capture uses
+                observed_robot when present, never the projected command start.
+
+        Returns:
+            Owned distal input geometry. The host validates complete source
+            identity before/after capture and never falls back to a later world.
+        """
+        ...
+
+
+@runtime_checkable
+class HeldArticulationStagingProvider(HeldStagingProvider, Protocol):
+    """Optional explicit source robot/articulation capture capability."""
+
+    @property
+    def robot(self) -> Robot:
+        """Return the exact borrowed engine robot."""
+        ...
+
+    def prepare_articulation_query(
+        self, request: ResolvedActionRequest, context: PlanningContext
+    ) -> RobotArticulationCollisionSnapshot:
+        """Return a fresh owned robot/articulation snapshot, never a full scene query.
+
+        The host binds the actual original observation and complete source stamp.
+        Capture cannot substitute projected joints or read a later world on error.
+        The Atomic planning scope closes the returned query.
+        """
+        ...
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RetainedCommandAuthority:
+    """Host-validated serial provenance for retaining an already applied target.
+
+    Args:
+        preset_id: Host's verified policy preset identity.
+        predecessor_call_id: Exact prior acquisition/retention semantic identity.
+        predecessor_invocation_id: Exact serial predecessor occurrence.
+        entity_id: The same rigid payload identity.
+        resource_id: The same ownership resource identity.
+        attachment_monitor_id: Explicit verified acquisition monitor identity.
+        attachment_monitor_revision: Its declared revision.
+        retention_monitor_id: Explicit verified retention monitor identity.
+        retention_monitor_revision: Its declared revision.
+
+    The integration validates adjacency, resource identity and verified monitor
+    declarations. This record does not prove physical attachment or authorize a
+    new hand target.
+    """
+
+    preset_id: str
+    predecessor_call_id: str
+    predecessor_invocation_id: str
+    entity_id: str
+    resource_id: str
+    attachment_monitor_id: str
+    attachment_monitor_revision: str
+    retention_monitor_id: str
+    retention_monitor_revision: str
+
+    def __post_init__(self) -> None:
+        for name in self.__dataclass_fields__:
+            value = getattr(self, name)
+            if type(value) is not str or not value or value != value.strip():
+                raise ValueError(f"{name} must be an exact nonempty identity.")
+
+    def metadata(self) -> dict[str, str | dict[str, str]]:
+        """Return independent source-compatible provenance.
+
+        Returns:
+            Declared serial identities and monitor references. This mapping is
+            not physical evidence and cannot authorize a changed hand target.
+        """
+        return {
+            "preset_id": self.preset_id,
+            "predecessor_call_id": self.predecessor_call_id,
+            "predecessor_invocation_id": self.predecessor_invocation_id,
+            "entity_id": self.entity_id,
+            "resource_id": self.resource_id,
+            "attachment_monitor": {
+                "monitor_id": self.attachment_monitor_id,
+                "revision": self.attachment_monitor_revision,
+            },
+            "retention_monitor": {
+                "monitor_id": self.retention_monitor_id,
+                "revision": self.retention_monitor_revision,
+            },
+        }
+
+
+@runtime_checkable
+class RetainedCommandProvider(Protocol):
+    """Separate static authority from opt-in same-observation native reads."""
+
+    @property
+    def robot(self) -> Robot:
+        """Return the exact engine robot; callers never rediscover a native owner."""
+        ...
+
+    def authority(
+        self, request: ResolvedActionRequest
+    ) -> RetainedCommandAuthority | None:
+        """Return validated serial provenance without reading native state."""
+        ...
+
+    def capture(
+        self, request: ResolvedActionRequest, context: PlanningContext
+    ) -> RobotCommandObservation:
+        """Capture original actual state and drive targets using the full stamp.
+
+        Implementations use context.observed_robot for projected planning starts,
+        never projected qpos as the expected native observation. Missing original
+        observations or changed sources reject without a live-later fallback.
+        """
+        ...
+
+    def verify_current(self, observation: RobotCommandObservation) -> None:
+        """Reject any changed arrays or source stamp without refreshing values."""
         ...

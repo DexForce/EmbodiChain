@@ -1,0 +1,54 @@
+{
+  "mode": "safe",
+  "success": [
+    true
+  ],
+  "positions_sha256": "0e1de40a8555c7128b28ac437d0d2da3f1ee11d6767d1e71229f89ab9b951716",
+  "dt_sha256": "a7d6453f6fc1cc42f6adcb3846195e151df210f8ae3318108da4e4eb179c69a0",
+  "segments": [
+    [
+      "transport",
+      0,
+      45
+    ]
+  ],
+  "metadata": {
+    "world_yaw_offsets_rad": [
+      0.0
+    ],
+    "yaw_plan_attempts": 1,
+    "held_alignment": {
+      "robot_proxy_attempts": [
+        {
+          "raw_success": true,
+          "collision": {
+            "valid": true,
+            "frames": 45,
+            "scope": "discrete_robot_meshes"
+          }
+        }
+      ],
+      "rejected_raw_success": 0,
+      "final_command_check": {
+        "valid": true,
+        "collision": {
+          "valid": true,
+          "frames": 45,
+          "scope": "discrete_robot_meshes"
+        }
+      }
+    }
+  },
+  "failure": null,
+  "held_keys": [
+    "source_arm"
+  ],
+  "rng": [
+    "c27b58ca1de8d22987675cb1eb8921685571f49cee02313a4bf8108043c5adef",
+    0.5305867556052941,
+    0.8066907771186791
+  ],
+  "calls_sha256": "60e5d814a2c480967a0cf4515a558ad2e6bfb8b24b32d1aeba6be9b6b0d35a5a",
+  "checks_sha256": "4424742a6296fed5a94bbac23aa77dc36c951b92e25d98a984e38e2a4ca06f9a",
+  "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+}

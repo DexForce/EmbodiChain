@@ -293,7 +293,37 @@ from .state import (
     TaskState,
 )
 
+from .primitives.move_held_object import MoveHeldObjectPlanningRecovery
+from .primitives.move_joints import JointOffsetTarget
+from .primitives.pour import RetainedPourGoal, JawPourGoal
+from .released_continuation import (
+    ReleasedHandClearanceRecovery,
+    ReleasedHandParkRecovery,
+    ReleasedHandContinuationSession,
+    ReleasedHandContinuationProvider,
+)
+from .planning_probes import (
+    HeldStagingBinding,
+    HeldStagingProvider,
+    HeldArticulationStagingProvider,
+    RetainedCommandAuthority,
+    RetainedCommandProvider,
+)
+
 __all__ = [
+    "MoveHeldObjectPlanningRecovery",
+    "JointOffsetTarget",
+    "RetainedPourGoal",
+    "JawPourGoal",
+    "ReleasedHandClearanceRecovery",
+    "ReleasedHandParkRecovery",
+    "ReleasedHandContinuationSession",
+    "ReleasedHandContinuationProvider",
+    "HeldStagingBinding",
+    "HeldStagingProvider",
+    "HeldArticulationStagingProvider",
+    "RetainedCommandAuthority",
+    "RetainedCommandProvider",
     "PourGraspProjectionProvider",
     "PickClosingQueryProvider",
     "PickRigidSceneProvider",

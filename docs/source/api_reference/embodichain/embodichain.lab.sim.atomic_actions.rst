@@ -710,3 +710,100 @@ Numeric downstream-pour operands constrain Pick grasp sampling without exposing 
 
 .. autoclass:: PourGraspProjectionInputs
    :members:
+
+
+Held transport, Pour, Idle and released-hand plans
+--------------------------------------------------
+
+``MoveHeldObjectOptions`` preserves the shared transport path unless an explicit
+alignment/staging rule is selected. Command observations come from Lab's owned
+``RobotCommandObservation`` value; the action consumes static retention authority
+and current facts without changing a verified grasp transform. Observed hand
+posture is an explicit option and does not prove physical attachment.
+
+``JawPourGoal`` and ``RetainedPourGoal`` add the preserved ordered-pad and retained
+arc constructions alongside ``PourGoal``. Relative ``JointOffsetTarget`` values
+use the bound model joint; free-motion qualification checks the full command
+grid, passive joints, original limits and scene queries. Protected-link offset
+search remains in Motion.
+
+``ReleasedHandClearanceRecovery`` and ``ReleasedHandParkRecovery`` require the
+exact declared cleanup/Park occurrences, an empty resource and explicit collision
+queries. Previews use the same engine and complete pipeline, preserve observed
+identity and restore their random streams. They send no commands and commit no
+effects. Missing or foreign suffix authority rejects. Drawer transport and
+articulation withdrawal/authorization are unavailable in this layer.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
+.. autosummary::
+   :nosignatures:
+
+   MoveHeldObjectPlanningRecovery
+   JointOffsetTarget
+   JawPourGoal
+   RetainedPourGoal
+   ReleasedHandClearanceRecovery
+   ReleasedHandParkRecovery
+   ReleasedHandContinuationSession
+   ReleasedHandContinuationProvider
+
+Held planning ports
+^^^^^^^^^^^^^^^^^^^
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
+
+.. autosummary::
+   :nosignatures:
+
+   HeldStagingBinding
+   HeldStagingProvider
+   HeldArticulationStagingProvider
+   RetainedCommandAuthority
+   RetainedCommandProvider
+
+The typed staging ports declare an exact rigid subject and prepare its owned
+distal geometry only when requested. The optional articulation query capability
+uses Motion's existing observation scope; it installs no articulation action.
+Retained-command authority names serial provenance and monitor identities and
+must be checked against an actual command observation by its host.
+
+.. autoclass:: HeldStagingBinding
+   :members:
+
+.. autoclass:: HeldStagingProvider
+   :members:
+
+.. autoclass:: HeldArticulationStagingProvider
+   :members:
+
+.. autoclass:: RetainedCommandAuthority
+   :members:
+
+.. autoclass:: RetainedCommandProvider
+   :members:
+
+Released continuation authority
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.released_continuation
+
+.. autosummary::
+   :nosignatures:
+
+   ReleasedHandClearanceRecovery
+   ReleasedHandParkRecovery
+   ReleasedHandContinuationSession
+   ReleasedHandContinuationProvider
+
+.. autoclass:: ReleasedHandClearanceRecovery
+   :members:
+
+.. autoclass:: ReleasedHandParkRecovery
+   :members:
+
+.. autoclass:: ReleasedHandContinuationSession
+   :members:
+
+.. autoclass:: ReleasedHandContinuationProvider
+   :members:
