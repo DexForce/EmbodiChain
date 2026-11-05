@@ -1159,3 +1159,127 @@ def test_adapter_restores_protected_phases_gripper_and_near_equal_zero_time_join
         assert torch.equal(restored[endpoint], positions[0, endpoint])
     assert not torch.equal(restored[1, :2], positions[0, 1, :2])
     assert not torch.equal(restored[7, :2], positions[0, 7, :2])
+
+
+def test_complete_request_budget_inherits_parent_and_preserves_default(monkeypatch):
+    from embodichain.lab.sim.atomic_actions import PlanningBudget, RecoveryPolicy
+    from embodichain.lab.sim.motion import search
+
+    clock = [0.0]
+    monkeypatch.setattr(search, "perf_counter", lambda: clock[0])
+
+    class Measured(StubAction):
+        binding_contract = StubAction.binding_contract
+
+        def _plan(self, request, context):
+            clock[0] += 1.0
+            search.record_search("native_operation")
+            return super()._plan(request, context)
+
+    engine = _engine()
+    engine.register(Measured())
+    invocation = _invocation(engine, torch.ones(2, 3))
+    default = engine.plan(invocation)
+    assert "search_cost" not in default.diagnostics.metadata
+    bounded = replace(
+        invocation, recovery_policy=RecoveryPolicy(planning_budget=PlanningBudget(0.1))
+    )
+    exhausted = engine.plan(bounded)
+    assert not exhausted.plan_success.any()
+    assert exhausted.diagnostics.failure.code == "planning_wall_budget_exhausted"
+    assert exhausted.diagnostics.failure.retryable is False
+    assert search.current_search_cost() is None
+    for parent_deadline in (None, 50.0):
+        with search.search_cost_scope(wall_seconds=parent_deadline) as parent:
+            plan = engine.plan(bounded)
+            assert plan.plan_success.all()
+            assert parent.counters["native_operation"] == 1
+            assert plan.diagnostics.metadata["search_cost"]["budget_enforced"] is (
+                parent_deadline is not None
+            )
+
+
+@pytest.mark.parametrize("retry_all_failed", [False, True])
+def test_explicit_all_failed_retry_policy_preserves_failure_reason(retry_all_failed):
+    from embodichain.lab.sim.atomic_actions import RecoveryPolicy
+
+    class Failed(StubAction):
+        binding_contract = StubAction.binding_contract
+
+        def _plan(self, request, context):
+            return self.failed_plan(
+                request,
+                context,
+                message="original rejection",
+                failure_code="original",
+                retryable=True,
+            )
+
+    engine = _engine()
+    engine.register(Failed())
+    invocation = replace(
+        _invocation(engine, torch.ones(2, 3)),
+        recovery_policy=RecoveryPolicy(retry_all_failed_plans=retry_all_failed),
+    )
+    failure = engine.plan(invocation).diagnostics.failure
+    assert failure.code == "original" and failure.retryable is retry_all_failed
+
+
+def test_unsupported_planning_recovery_rejects_before_planner():
+    from embodichain.lab.sim.atomic_actions import PlanningRecovery, RecoveryPolicy
+
+    engine = _engine()
+    action = StubAction()
+    engine.register(action)
+    action._plan = Mock(side_effect=AssertionError("unsupported planner ran"))
+    invocation = replace(
+        _invocation(engine, torch.ones(2, 3)),
+        recovery_policy=RecoveryPolicy(
+            planning_recovery=PlanningRecovery("not_installed", "stub", 1)
+        ),
+    )
+    with pytest.raises(TypeError, match="does not support planning recovery"):
+        engine.resolve(invocation)
+    action._plan.assert_not_called()
+
+
+def test_typed_recovery_proposal_owns_snapshot_and_rejects_foreign_invocation():
+    from embodichain.lab.sim.atomic_actions import (
+        PlanningRecovery,
+        PlanningRecoveryOutcome,
+        RecoveryPolicy,
+    )
+
+    class Proposed(StubAction):
+        binding_contract = StubAction.binding_contract
+        PlanningRecoveryType = PlanningRecovery
+
+        def _plan(self, request, context):
+            plan = super()._plan(request, context)
+            rule = request.recovery_policy.planning_recovery
+            proposal = PlanningRecoveryOutcome(
+                self.skill_id, request.invocation_id, request.revision, rule.kind
+            )
+            return replace(plan, planning_recovery_outcome=proposal)
+
+    engine = _engine()
+    engine.register(Proposed())
+    invocation = replace(
+        _invocation(engine, torch.ones(2, 3)),
+        recovery_policy=RecoveryPolicy(
+            planning_recovery=PlanningRecovery("proposal", "stub", 1)
+        ),
+        invocation_id="unit/declared-occurrence",
+    )
+    plan = engine.plan(invocation)
+    snapshot = plan.snapshot()
+    assert snapshot.planning_recovery_outcome == plan.planning_recovery_outcome
+    assert snapshot.planning_recovery_outcome is not plan.planning_recovery_outcome
+    assert plan.plan_success.tolist() == [True, True]
+    with pytest.raises(ValueError, match="does not identify this plan"):
+        replace(
+            plan,
+            planning_recovery_outcome=replace(
+                plan.planning_recovery_outcome, invocation_id="foreign"
+            ),
+        )

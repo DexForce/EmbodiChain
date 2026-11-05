@@ -21,7 +21,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import MISSING, fields
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from embodichain.utils import configclass
 
@@ -320,6 +320,10 @@ class SimulationJointStabilityConditionCfg:
     duration: float = 1.0
     timeout: float = 5.0
     position_drift: float = 0.001
+    invalid_observation_policy: Literal["abort_batch", "isolate_rows"] = "abort_batch"
+    """Retain source batch abort, or explicitly isolate invalid active rows."""
+    max_observation_samples: int = 4096
+    """Bound retained raw samples; truncation is explicit and never a full record."""
 
     def snapshot(self) -> SimulationJointStabilityConditionCfg:
         """Return a detached, normalized complete condition declaration."""
@@ -342,11 +346,23 @@ class SimulationJointStabilityConditionCfg:
             setattr(owned, name, float(value))
         if owned.timeout < owned.duration:
             raise ValueError("Joint stability timeout cannot precede its duration.")
+        if owned.invalid_observation_policy not in {"abort_batch", "isolate_rows"}:
+            raise ValueError("Unknown joint invalid_observation_policy.")
+        if (
+            type(owned.max_observation_samples) is not int
+            or owned.max_observation_samples < 2
+        ):
+            raise ValueError(
+                "max_observation_samples must be an integer of at least two."
+            )
         return owned
 
     def to_condition_dict(self) -> dict[str, object]:
         """Return detached policy values for independent normative matching."""
         owned = self.snapshot()
         return {
-            field.name: deepcopy(getattr(owned, field.name)) for field in fields(owned)
+            field.name: deepcopy(getattr(owned, field.name))
+            for field in fields(owned)
+            if field.name
+            not in {"invalid_observation_policy", "max_observation_samples"}
         }

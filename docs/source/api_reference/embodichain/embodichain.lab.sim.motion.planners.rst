@@ -18,6 +18,7 @@ embodichain.lab.sim.motion.planners
     MoveType
     PlanResult
     RejectedMotionCandidate
+    MotionRecoveryTrace
     PlanState
 
 .. currentmodule:: embodichain.lab.sim.motion.planners
@@ -143,6 +144,15 @@ Utilities
 
 .. autoclass:: RejectedMotionCandidate
     :members:
+
+.. autoclass:: MotionRecoveryTrace
+    :members:
+
+``PlanResult.recovery`` is an optional immutable receipt for one linear motion
+request. It records actual sample-count attempts and whether continuous IK
+supplied the result. The default is ``None``; complete-action retry counters and
+physical success remain separate. The result type, timing and failure holds stay
+under the existing ``PlanResult`` contract.
 
 Fixed-grid rejection retains the original candidate in
 ``PlanResult.rejected_candidate`` while failed executable rows hold the start.
