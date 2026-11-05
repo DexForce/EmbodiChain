@@ -4051,3 +4051,47 @@ pass the selected port to AtomicActionEngine.start.
 
 .. autoclass:: CompositeTaskProgramPlanLifecycleFactory
    :members:
+
+
+embodichain.gen_sim.task_engine.embodiment_declarations
+-------------------------------------------------------
+
+The semantic frontend binds public robot-owned hand descriptions into closed
+opening/grip service declarations. Existing physical values and evidence defaults
+remain owner inputs; this module acquires no facts and creates no runtime.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.embodiment_declarations
+
+.. autosummary::
+
+   declare_source_opening_bindings
+   resolve_source_hand_services
+   declare_source_grip_evidence
+
+.. autofunction:: declare_source_opening_bindings
+
+.. autofunction:: resolve_source_hand_services
+
+.. autofunction:: declare_source_grip_evidence
+
+embodichain.gen_sim.task_engine.robot_profiles
+----------------------------------------------
+
+Explicit frontend selectors delegate asset preflight and lateral resource hints
+to public model owners. The legacy dual_tianji spelling selects the existing
+standard native Marvin component; stored historical inputs are not converted.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.robot_profiles
+
+.. autosummary::
+
+   canonical_robot_profile
+   profile_lateral_positions
+   require_robot_assets
+
+.. autofunction:: canonical_robot_profile
+
+.. autofunction:: profile_lateral_positions
+
+.. autofunction:: require_robot_assets
+
