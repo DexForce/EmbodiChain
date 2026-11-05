@@ -29,6 +29,41 @@ if TYPE_CHECKING:
 __all__ = ["RigidMeshSnapshot", "capture_rigid_mesh"]
 
 
+def _validate_mesh_metadata(
+    vertices: torch.Tensor,
+    triangles: torch.Tensor,
+    *,
+    expected_batch_size: int | None = None,
+) -> None:
+    """Reject invalid layouts before transferring or copying mesh buffers."""
+    if not isinstance(vertices, torch.Tensor) or not isinstance(
+        triangles, torch.Tensor
+    ):
+        raise TypeError("Rigid mesh inputs must be tensors.")
+    if (
+        vertices.ndim != 3
+        or vertices.shape[-1] != 3
+        or not vertices.shape[0]
+        or not vertices.shape[1]
+        or not vertices.is_floating_point()
+    ):
+        raise ValueError(
+            "Rigid mesh vertices require finite floating (B, V, 3) coordinates."
+        )
+    if (
+        triangles.ndim != 3
+        or triangles.shape[0] != vertices.shape[0]
+        or triangles.shape[-1] != 3
+        or not triangles.shape[1]
+        or triangles.dtype not in (torch.int32, torch.int64)
+    ):
+        raise ValueError(
+            "Rigid mesh triangles must index their own environment's vertices."
+        )
+    if expected_batch_size is not None and vertices.shape[0] != expected_batch_size:
+        raise ValueError("Rigid mesh capture differs from the expected observed batch.")
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class RigidMeshSnapshot:
     """Own scaled local vertices and their exact indexed triangle topology.
@@ -56,32 +91,16 @@ class RigidMeshSnapshot:
             or self.source_uid != self.source_uid.strip()
         ):
             raise ValueError("Rigid mesh source_uid must be an exact identifier.")
-        if not isinstance(self.vertices, torch.Tensor) or not isinstance(
-            self.triangles, torch.Tensor
-        ):
-            raise TypeError("Rigid mesh inputs must be tensors.")
+        _validate_mesh_metadata(self.vertices, self.triangles)
         vertices = self.vertices.detach().cpu().clone()
         triangles = self.triangles.detach().cpu().clone()
-        if (
-            vertices.ndim != 3
-            or vertices.shape[-1] != 3
-            or not vertices.shape[0]
-            or not vertices.shape[1]
-            or not vertices.is_floating_point()
-            or not torch.isfinite(vertices).all()
-        ):
+        # Retained buffers still validate independently of mutable input tensors.
+        _validate_mesh_metadata(vertices, triangles)
+        if not torch.isfinite(vertices).all():
             raise ValueError(
                 "Rigid mesh vertices require finite floating (B, V, 3) coordinates."
             )
-        if (
-            triangles.ndim != 3
-            or triangles.shape[0] != vertices.shape[0]
-            or triangles.shape[-1] != 3
-            or not triangles.shape[1]
-            or triangles.dtype not in (torch.int32, torch.int64)
-            or (triangles < 0).any()
-            or (triangles >= vertices.shape[1]).any()
-        ):
+        if (triangles < 0).any() or (triangles >= vertices.shape[1]).any():
             raise ValueError(
                 "Rigid mesh triangles must index their own environment's vertices."
             )
@@ -124,9 +143,6 @@ def capture_rigid_mesh(
     native = simulation.get_rigid_object(uid)
     if native is None:
         raise ValueError("Rigid mesh capture requires its exact bound native object.")
-    result = RigidMeshSnapshot(
-        uid, native.get_vertices(scale=True), native.get_triangles()
-    )
-    if result.batch_size != batch_size:
-        raise ValueError("Rigid mesh capture differs from the expected observed batch.")
-    return result
+    vertices, triangles = native.get_vertices(scale=True), native.get_triangles()
+    _validate_mesh_metadata(vertices, triangles, expected_batch_size=batch_size)
+    return RigidMeshSnapshot(uid, vertices, triangles)

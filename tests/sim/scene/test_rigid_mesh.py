@@ -87,3 +87,43 @@ def test_mesh_snapshot_revalidates_mutable_inputs_and_never_fabricates_topology(
     simulation = SimpleNamespace(get_rigid_object=lambda uid: None)
     with pytest.raises(ValueError, match="exact bound"):
         capture_rigid_mesh(simulation, "missing", batch_size=1)
+
+
+@pytest.mark.parametrize("mismatch", ["expected_batch", "triangle_batch"])
+def test_capture_rejects_batch_mismatch_before_copy(monkeypatch, mismatch):
+    vertices = torch.zeros(2, 3, 3)
+    triangle_batch = 1 if mismatch == "triangle_batch" else 2
+    triangles = torch.zeros(triangle_batch, 1, 3, dtype=torch.int64)
+    native = SimpleNamespace(
+        get_vertices=lambda **kwargs: vertices, get_triangles=lambda: triangles
+    )
+    simulation = SimpleNamespace(get_rigid_object=lambda uid: native)
+
+    def unexpected_copy(*args, **kwargs):
+        raise AssertionError("Invalid mesh metadata must reject before copying")
+
+    monkeypatch.setattr(torch.Tensor, "cpu", unexpected_copy)
+    monkeypatch.setattr(torch.Tensor, "clone", unexpected_copy)
+    expected_batch = 1 if mismatch == "expected_batch" else 2
+    message = "expected observed batch" if mismatch == "expected_batch" else "triangles"
+    with pytest.raises(ValueError, match=message):
+        capture_rigid_mesh(simulation, "object", batch_size=expected_batch)
+
+
+@pytest.mark.parametrize("damage", ["vertex_shape", "vertex_dtype", "triangle_dtype"])
+def test_snapshot_rejects_invalid_metadata_before_copy(monkeypatch, damage):
+    vertices = torch.zeros(1, 3, 2 if damage == "vertex_shape" else 3)
+    triangles = torch.zeros(1, 1, 3, dtype=torch.int64)
+    if damage == "vertex_dtype":
+        vertices = vertices.to(torch.int64)
+    if damage == "triangle_dtype":
+        triangles = triangles.to(torch.float32)
+
+    def unexpected_copy(*args, **kwargs):
+        raise AssertionError("Invalid mesh metadata must reject before copying")
+
+    monkeypatch.setattr(torch.Tensor, "cpu", unexpected_copy)
+    monkeypatch.setattr(torch.Tensor, "clone", unexpected_copy)
+    message = "triangles" if damage == "triangle_dtype" else "coordinates"
+    with pytest.raises(ValueError, match=message):
+        RigidMeshSnapshot("object", vertices, triangles)
