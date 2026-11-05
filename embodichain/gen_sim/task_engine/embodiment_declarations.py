@@ -27,6 +27,10 @@ from embodichain.utils.utility import load_config
 from embodichain.lab.task_program.integrations.hand_calibration import (
     TaskHandCalibration,
 )
+from embodichain.toolkits.graspkit import resolve_parallel_jaw_gripper_model
+from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+    get_parallel_jaw_model_asset_files,
+)
 from embodichain_robots.task_program import (
     declare_source_task_embodiment,
     resolve_task_hand_calibrations,
@@ -58,7 +62,8 @@ def resolve_source_hand_services(
 
     Returns:
         Independent component declaration, model-owned hand role descriptors and
-        any additional canonical component file digests. Effective native physics
+        effective grasp-model dependency digests plus any additional canonical
+        component file digests. Effective native physics
         and sensors retain their existing owner; standard presets can be expanded
         to complete declarations. Already-present geometry declarations
         retain their values; no code-default calibration silently replaces them.
@@ -84,6 +89,16 @@ def resolve_source_hand_services(
             raise ValueError("Canonical hand-service component changed during reading.")
         inputs[str(path)] = hashlib.sha256(original).hexdigest()
     hands = resolve_task_hand_calibrations(owned)
+    generators = services.get("grasp_pose_generators", {})
+    model_selections = set()
+    for generator in generators.values():
+        model = resolve_parallel_jaw_gripper_model(generator["model"])
+        model_selections.add((model.model_id, generator.get("side")))
+    for model_id, side in sorted(
+        model_selections, key=lambda value: (value[0], value[1] or "")
+    ):
+        for path in get_parallel_jaw_model_asset_files(model_id, side=side):
+            inputs[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
     return owned, hands, inputs
 
 

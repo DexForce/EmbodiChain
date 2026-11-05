@@ -85,3 +85,9 @@ These consume public `embodichain_robots.task_program` descriptions and componen
 services; they emit declarations and provenance hashes rather than skills,
 physical facts or acceptance. This standalone descriptor surface does not yet
 connect Source physical-input preparation, bundle publication or CLI routing.
+
+`resolve_source_hand_services()` includes the effective registered grasp-model
+asset inventory in its returned hand-input hashes. It delegates model/side and
+archive-reference selection to GraspKit's public model owner; component fallback
+calibration files remain in the same hand-services provenance group. It creates
+no sampler or Robot and does not add another bundle input group.

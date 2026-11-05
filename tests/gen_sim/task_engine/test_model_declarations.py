@@ -45,11 +45,13 @@ def test_model_hand_binding_uses_public_descriptors_and_preserves_declared_evide
 
     monkeypatch.setattr(Robot, "__init__", forbidden)
     monkeypatch.setattr(SimulationManager, "__init__", forbidden)
-    root = Path(__file__).parents[3]
-    component = (
-        root
-        / f"extensions/embodichain_tasks/configs/components/embodiments/{identity}.yaml"
-    )
+    from embodichain.utils.config_paths import resolve_config_path
+
+    component = Path(
+        resolve_config_path(
+            f"extensions/embodichain_tasks/configs/components/embodiments/{identity}.yaml"
+        )
+    ).resolve()
     original = yaml.safe_load(component.read_text())
     before = deepcopy(original)
     if identity != "tianji_marvin":
@@ -57,10 +59,30 @@ def test_model_hand_binding_uses_public_descriptors_and_preserves_declared_evide
     resolved, hands, inputs = resolve_source_hand_services(original)
     assert len(hands) == 2 and original["simulation"] == before["simulation"]
     if identity != "tianji_marvin":
-        assert inputs == {
-            str(component.resolve()): hashlib.sha256(component.read_bytes()).hexdigest()
-        }
-    else:
+        assert (
+            inputs[str(component.resolve())]
+            == hashlib.sha256(component.read_bytes()).hexdigest()
+        )
+    from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+        get_parallel_jaw_model_asset_files,
+    )
+
+    generators = resolved["skill_profile"]["runtime_services"]["grasp_pose_generators"]
+    from embodichain.toolkits.graspkit import resolve_parallel_jaw_gripper_model
+
+    expected_model_files = set()
+    for generator in generators.values():
+        model = resolve_parallel_jaw_gripper_model(generator["model"])
+        expected_model_files.update(
+            get_parallel_jaw_model_asset_files(
+                model.model_id, side=generator.get("side")
+            )
+        )
+    assert expected_model_files and all(
+        inputs[str(path)] == hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in expected_model_files
+    )
+    if identity == "tianji_marvin":
         assert resolved["simulation"]["class_type"] == "TianjiMarvin"
     opening = declare_source_opening_bindings(resolved, hands)
     for declaration in opening:
