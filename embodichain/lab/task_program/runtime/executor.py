@@ -79,6 +79,7 @@ from embodichain.lab.task_program.semantics.effects import (
     HeldObjectRelation,
     HeldObjectStateExpectation,
     SemanticEffectSpec,
+    SemanticEffectKind,
 )
 from embodichain.lab.task_program.semantics.integration import SemanticValidationError
 from embodichain.lab.task_program.semantics.profiles import (
@@ -1187,6 +1188,16 @@ class SemanticCallExecutor:
                 if plan.plan_success.any():
                     names = {segment.name for segment in plan.segments}
                     for guard in effect_guards:
+                        if (
+                            effect_spec is not None
+                            and effect_spec.effect_kind is SemanticEffectKind.ATTACH
+                            and guard.baseline
+                            is HeldObjectGuardBaseline.VERIFIED_TASK_STATE
+                            and not plan.requires_effect_verification
+                        ):
+                            raise ValueError(
+                                "Retained attachment requires terminal effect verification."
+                            )
                         missing = set(guard.active_segments) - names
                         if missing:
                             raise ValueError(

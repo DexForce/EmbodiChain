@@ -1040,6 +1040,8 @@ state and world-to-base transforms belong to the query snapshot. Payload queries
 remain B=1; the carried body owns its identity, control part, local spheres and
 observed world pose. These values are separate from serialized configuration.
 Subsets, reordered environments, and per-environment worlds are unsupported.
+An omitted start uses the captured selected joint rows; the motion facade reports
+the world as immutable.
 
 The owned motion factory closes backend-local attachments on exit and makes no
 skill-phase decisions. Queries require CUDA graphs off, a static snapshot world
@@ -1144,8 +1146,6 @@ embodichain.lab.sim.scene.expansion.persistence
    save_scene_variants
    load_scene_variants
 
-embodichain.lab.sim.sensors.contact_sampling
-
 embodichain.lab.sim.sensors.contact.sampling
 ---------------------------------------------------------------------
 
@@ -1165,8 +1165,6 @@ observation was produced. The common frame has no invocation field.
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
-
 .. autosummary::
 
    CONTACT_ACTOR_IDS
@@ -1178,8 +1176,6 @@ observation was produced. The common frame has no invocation field.
    ContactEvidenceSampler
    ContactSourceStamp
    native_contact_revision
-
-embodichain.lab.sim.sensors.contact_timeline
 
 embodichain.lab.sim.sensors.contact.timeline
 ---------------------------------------------------------------------
@@ -1201,8 +1197,6 @@ is reached, the next sample records unavailable capacity loss. Control-step and
 substep caps also bound empty histories.
 Frontend code owns actor/semantic label maps, serialized report schema IDs and
 any task-success evaluation.
-
-.. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
 
@@ -1248,6 +1242,7 @@ stability window. Normative task acceptance remains outside this module.
    NativeSupportResult
    NativeSupportObservation
    SupportObservationRegistry
+   qualified_support_heights
 
 .. autoclass:: NativeSupportResult
    :members:
@@ -1258,6 +1253,13 @@ stability window. Normative task acceptance remains outside this module.
 .. autoclass:: SupportObservationRegistry
    :members:
 
+
+Qualified contact-height adaptation remains sensor-owned. It uses only a
+positive-load COM-qualified patch and returns the highest point; invalid rows
+remain NaN. Pure transformed mesh envelopes live in
+``compute.geometry.rigid.support_mesh_envelope`` and establish no contact.
+
+.. autofunction:: qualified_support_heights
 
 embodichain.lab.task_program.integrations.simulation.grip_evidence
 ------------------------------------------------------------------
@@ -3618,20 +3620,6 @@ classes; sensor acquisition never imports Task Program or Atomic implementation.
    PhysicalEvidenceBatch
    PhysicalEvidenceFrame
 
-embodichain.lab.sim.sensors.joint_opening
------------------------------------------
-
-Robot-owned driver calibration and read-only joint-opening observations.
-No model-name or task-name inference is performed.
-
-.. currentmodule:: embodichain.lab.sim.sensors.joint_opening
-
-.. autosummary::
-
-   DriverOpeningBinding
-   create_joint_opening_reader
-
-
 embodichain.compute.geometry.grip_contacts
 ------------------------------------------
 
@@ -3656,7 +3644,6 @@ are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrat
 .. autosummary::
 
    GripContactObserver
-
    DriverOpeningBinding
 
 ``DriverOpeningBinding.bind(robot)`` validates the explicit joint order before
@@ -3672,3 +3659,24 @@ qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
 
 .. autoclass:: DriverOpeningBinding
    :members:
+
+Stability execution ownership
+----------------------------
+
+A simulation factory with native support owns one unfinished bridge at a time.
+``validate_runtime_bridge_creation`` rejects overlap before rebinding clocks;
+``bind_runtime_bridge`` records the bridge created by the standard adapter.
+``TaskProgramDemoBridge.execution_finished`` requires closed segment iteration
+and a consumed/validated or explicitly aborted final segment, with no active
+action generator. It is distinct from ``program_completed`` and does not certify
+success or acknowledge commands. Non-support factories retain existing assembly.
+
+Factory-returned effect providers retain their public IDs/revisions and guard
+all collection through the shared lifetime. The same guard protects live scene
+snapshots and drive-target holds. Independently owned past reports remain readable.
+
+The source control grid, stability counters and held-failure latch are unchanged.
+CPU policy profiling can run with
+``python -m scripts.benchmark.task_program.stability --output /tmp/stability``.
+This measures constant-pose policy overhead and serialization separately from
+native contact acquisition, physical tasks and GPU execution.

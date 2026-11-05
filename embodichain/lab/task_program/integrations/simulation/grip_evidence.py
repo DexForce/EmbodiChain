@@ -29,10 +29,9 @@ from embodichain.lab.sim.sensors.contact.sensor import (
     ArticulationContactFilterCfg,
 )
 from embodichain.lab.sim.evidence import PhysicalEvidenceRequest
-from embodichain.lab.sim.atomic_actions.grip_evidence import GripContactObserver
-from embodichain.lab.sim.sensors.joint_opening import (
+from embodichain.lab.sim.atomic_actions.grip_evidence import (
+    GripContactObserver,
     DriverOpeningBinding,
-    create_joint_opening_reader,
 )
 from embodichain.lab.sim.atomic_actions.scene import SceneProvider
 from embodichain.lab.task_program.semantics.evidence import (
@@ -255,8 +254,18 @@ class NativeGripEvidenceFactory:
             raise TypeError("scene_provider must implement SceneProvider or be None.")
         if engine.robot is not robot:
             raise ValueError("Native grip evidence requires the engine's exact robot.")
+        # Validate calibration before acquiring any sensor resources. Atomic
+        # bindings own the measured opening predicate; this layer only routes it.
+        opening_readers = (
+            {
+                binding.control_part: binding.bind(robot)
+                for binding in self.opening_bindings
+            }
+            if self.algorithm_revision == 2
+            else {}
+        )
         reader = (
-            create_joint_opening_reader(robot, self.opening_bindings)
+            (lambda part, env_id: opening_readers[part](env_id))
             if self.algorithm_revision == 2
             else None
         )

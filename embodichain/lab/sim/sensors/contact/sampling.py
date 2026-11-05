@@ -24,7 +24,7 @@ from typing import Protocol
 
 import torch
 
-from embodichain.lab.sim.sensors.contact.sensor import ContactSensor
+from .sensor import ContactSensor
 from embodichain.lab.sim.evidence import (
     PhysicalEvidenceBatch,
     PhysicalEvidenceFrame,

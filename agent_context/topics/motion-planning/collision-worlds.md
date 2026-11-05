@@ -64,7 +64,7 @@ The opt-in supports one control part, disabled CUDA graphs, a static shared
 world and preserved native samples. Without payload it supports the complete
 robot environment batch in canonical row order through the existing native
 BatchMotionPlanner; subsets, reordered environments and per-env worlds remain
-unsupported. Full qpos and world_to_base carry matching batch axes. Passive
+unsupported. An omitted start uses the captured selected joint rows. The motion facade reports the world as immutable. Full qpos and world_to_base carry matching batch axes. Passive
 joint locks must be identical across rows and use the observed values in both
 planning and the no-payload exact-sample checker. The shared collision source
 helper verifies that all supplied row poses project to the same planning-frame
