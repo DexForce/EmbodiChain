@@ -100,6 +100,14 @@ ObservationManager history as support collection, preserving raw validity,
 acquisition errors and temporal identities without a second acquisition path.
 The Task Engine projection supplies declarations only and selects no thresholds.
 
+`pour_evidence.py` qualifies a recorded rigid tilt/restore occurrence using sealed
+source/receiver, episode, program, release and cadence identities. The original
+30-degree tilt, 15-degree restore and receiver-projection bounds are unchanged;
+this does not qualify fluid transfer. Missing acquisition remains unavailable.
+Lab reads recorded values through the canonical ObservationManager schema/raw
+history, never live poses or a second trajectory buffer. Historical control
+receipts remain qualified by the separate `control_evidence.py` owner.
+
 Historical Press/Twist control proof lives in `control_evidence.py`. Bindings
 seal explicit predicate/joint/direction/resource and compiled occurrence identity.
 TaskSpec replays the original acceptance receipt and complete execution prefix;
