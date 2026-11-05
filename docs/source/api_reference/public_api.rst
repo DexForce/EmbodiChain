@@ -21,6 +21,22 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.compute.geometry.shading
+------------------------------------
+
+Pure float64 triangle/corner-normal consistency for source mesh preparation.
+The check uses equally weighted unit-face accumulation and the source strict
+negative-dot decision. It does not require a mesh library, runtime object or
+simulator, and does not establish collision or manifold validity.
+
+.. currentmodule:: embodichain.compute.geometry.shading
+
+.. autosummary::
+
+   has_inconsistent_shading_normals
+
+.. autofunction:: has_inconsistent_shading_normals
+
 embodichain.compute.kinematics.ik_path
 --------------------------------------
 
@@ -40,12 +56,16 @@ embodichain.compute.trajectory.limits
 Per-environment sampled joint-speed checks with explicit arrival intervals.
 The result checks finite positions and declared speeds; it does not establish
 continuous collision freedom or acceleration compliance.
+``joint_velocity_diagnostics`` retains the worst row, interval, joint and
+original operands, representing nonfinite ratios as None. These diagnostics
+do not make an invalid trajectory valid.
 
 .. currentmodule:: embodichain.compute.trajectory.limits
 
 .. autosummary::
 
    joint_velocity_validity
+   joint_velocity_diagnostics
 
 embodichain.data
 ----------------
@@ -564,6 +584,29 @@ embodichain.gen_sim.gradio_ui.gradio_app
 
    main
 
+embodichain.gen_sim.scene_engine.asset_normalization
+-----------------------------------------------------
+
+Prepare independent runtime declarations and content-addressed GLB assets from
+explicit source objects. Node transforms and source scale are baked using the
+original v3 coordinate policy; safe topology is retained, while inconsistent
+corner normals trigger vertex splitting. Authored files and declarations remain
+unchanged. Invalid geometry is preserved with its original digest and diagnostic
+instead of silently substituting a different asset. This stage creates no task
+bundle or simulator and does not certify physical validity.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.asset_normalization
+
+.. autosummary::
+
+   NormalizedSceneAssets
+   normalize_source_scene_assets
+
+.. autoclass:: NormalizedSceneAssets
+   :members:
+
+.. autofunction:: normalize_source_scene_assets
+
 embodichain.gen_sim.scene_engine.cli.randomization
 --------------------------------------------------
 
@@ -832,6 +875,33 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 
    save_layouts
 
+embodichain.gen_sim.task_engine.evidence
+----------------------------------------
+
+The Task Engine adapter projects frozen role/lineage declarations and explicit
+compiled occurrence descriptors into TaskSpec bindings. It verifies source
+content identities and retains declared preset/occurrence IDs. Missing compiled
+capabilities fail explicitly; projection reads no simulation or physical trace
+and decides no predicate outcome.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.evidence
+
+.. autosummary::
+
+   project_placement_evidence_binding
+   project_configured_placement_evidence_binding
+
+.. autofunction:: project_placement_evidence_binding
+
+New bundles use ``project_configured_placement_evidence_binding`` with a detached
+condition from the configured owner's named settle preset. It requires no
+``constraints.json`` or constraints digest and does not write either artifact.
+The original projection remains only a frozen B0 source-comparison adapter,
+checking that source payload's identity before sharing the same projection.
+Neither entry point derives numerical policy values from task or object names.
+
+.. autofunction:: project_configured_placement_evidence_binding
+
 embodichain.gen_sim.task_spec
 -----------------------------
 
@@ -901,6 +971,35 @@ callables, byte strings and unordered sets are rejected before serialization.
    canonicalize
    json_snapshot
 
+embodichain.gen_sim.task_spec.condition_evidence
+------------------------------------------------
+
+Sealed state bindings select explicit orientation or articulation endpoint
+criteria, native and episode identities, and separate current or recorded input
+contracts. Current orientation uses the shared rigid-pose axis computation;
+current joints use the declared target tolerance. Neither implies task execution
+success. Historical milestones require their full successful occurrence prefix
+and the original policy receipts; E6 also verifies the exact semantic operation,
+joint validator, target bounds and one-second stability contract.
+
+New raw observations require their complete acquisition channels and cannot
+switch to the historical verifier by adding a record. Missing channels, failed
+milestone receipts and unbound episodes remain unavailable per environment.
+Cold import and binding normalization do not load a simulation or numeric backend.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.condition_evidence
+
+.. autosummary::
+
+   ConditionEvidenceBinding
+   evaluate_condition_evidence
+
+.. autoclass:: ConditionEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_condition_evidence
+
+
 embodichain.gen_sim.task_spec.contracts
 ---------------------------------------
 
@@ -908,11 +1007,124 @@ Logical role requirements for downstream grounding, including cardinality,
 affordances, attributes and declared initial state. No simulator handles are
 stored in these contracts.
 
+``RoleSpec.is_single_member`` reports whether ``one`` or an explicit
+``count=1`` selects one member. It preserves authored cardinality, serialization
+and semantic hash; it does not qualify a partial binding or physical evidence.
+
 .. currentmodule:: embodichain.gen_sim.task_spec.contracts
 
 .. autosummary::
 
    RoleSpec
+
+embodichain.gen_sim.task_spec.control_evidence
+----------------------------------------------
+
+Control bindings seal a plain source route payload and explicit terminal policy,
+source path and complete execution prefix. Historical Press/Twist replay checks
+the same operation/source-asset/route digest, sampling window, cleanup, clearance
+and declared coarse or calibrated criterion as the original source observer.
+There are no imports of live factories, sensors or Task Engine objects.
+
+Only explicitly selected ``historical_record`` inputs are currently qualified;
+raw input is rejected at binding construction until its complete operation-window
+acquisition contract is available. Missing or failed receipt qualification stays
+unavailable. A contact-backed Press event is not device activation, and the
+coarse Twist criterion is not silently upgraded to calibrated-setting success.
+The common physical report assembler accepts these bindings without filling
+missing final goals, past milestones or continuous trajectory requirements.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.control_evidence
+
+.. autosummary::
+
+   ControlEvidenceBinding
+   evaluate_control_evidence
+
+.. autoclass:: ControlEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_control_evidence
+
+
+embodichain.gen_sim.task_spec.evidence
+--------------------------------------
+
+Placement evidence binds the frozen serialized-program/TaskSpec digests to exact
+release, support and boundary occurrences. Binding schema version 2 also seals
+``evidence_format``: new runtime snapshots use ``raw_snapshot`` and historical
+B0 re-evaluation explicitly selects ``historical_record``. Existing instances
+are re-decoded and their content hash is checked, including nested JSON data.
+Older binding versions must be rebuilt; the TaskSpec v0.1 identity is unchanged.
+
+Raw snapshots require the complete ``support.com_patch`` acquisition channel,
+including values, validity/errors, timestamp, environment IDs, observation
+revision and clock domain. Values must agree with the native measurements.
+Adding a ``record`` cannot downgrade raw validation, and reports reject mixed
+raw/historical input contracts. Raw sampled-timeline collection is not yet
+implemented and cannot be substituted with the COM-patch channel.
+
+Legacy ``native_contact_support`` and explicit
+``native_stable_reference_support/v2`` sampled windows retain their scopes.
+``native_supported_placement`` requires revision 1 and rechecks release-phase
+windows, actor/episode identity, original stable clocks and raw contact patches.
+Its declared ``supported_region`` variant checks complete planar footprints for
+``on`` and ``inside`` without claiming general volume containment. Stronger
+measurements never select a stronger scope implicitly. E4/E5 still require
+separate transfer/coordinated-transport proofs and reject in this slice.
+
+Recorded region geometry is recomputed from the ObservationManager's exact,
+available history slots and the original owned geometry/support snapshot.
+It cannot borrow the old footprint after a boundary pose changes, resample
+contacts or substitute a live pose. Import is standard-library-only; numerical
+proof re-evaluation lazily uses shared Torch/NumPy/Shapely algorithms.
+
+The verifier distinguishes unavailable acquisition from measured negatives and
+checks measured release receipts independently of plan/segment success. Raw Lab
+snapshots require an explicit episode binding and carry no accepted/released
+conclusion; TaskSpec computes those results. Historical B0 claims are checked
+when supplied. Legacy scope remains legacy even when a timeline is present. Its instantaneous
+final observation needs the exact measured release and actual final runtime
+boundary, not an unexecuted later wait/park policy. This preserves measured final
+negatives when execution stops early, while recorded milestones still require
+the full successful prefix and their original support receipt.
+
+``evaluate_placement_evidence_report`` preserves goal/final and milestone/recorded
+separation, verifies declared execution prefixes and orders exact boundary slots.
+Sparse segment snapshots cannot certify complete temporal windows or continuous
+invariants. The ordinary TaskSpec evaluator remains the certificate authority.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.evidence
+
+.. autosummary::
+
+   SupportedPlacementEvidenceBinding
+   evaluate_supported_placement_evidence
+   evaluate_placement_evidence_report
+
+.. autoclass:: SupportedPlacementEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_supported_placement_evidence
+
+.. autofunction:: evaluate_placement_evidence_report
+
+embodichain.gen_sim.task_spec.evidence_report
+---------------------------------------------
+
+Combine verified placement, orientation and joint evidence using the existing
+TaskSpec evaluator. Bindings must share the native row, episode and input-format
+contract. Final observations cannot fill past milestones; sparse boundary
+observations cannot establish continuous invariants or complete temporal windows.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.evidence_report
+
+.. autosummary::
+
+   evaluate_physical_evidence_report
+
+.. autofunction:: evaluate_physical_evidence_report
+
 
 embodichain.gen_sim.task_spec.expressions
 -----------------------------------------
@@ -937,6 +1149,35 @@ not-run outcomes; an incomplete always-window cannot certify success.
    evaluate_predicate
    evaluate_temporal_condition
    lookup_observation
+
+embodichain.gen_sim.task_spec.pour_evidence
+-------------------------------------------
+
+Rigid Pour proof retains the source ``measured_tilt_restore/v1`` criterion:
+30 degrees of observed tilt, restore error at most 15 degrees, the gravity-top
+proxy above the receiver projection, and an independently measured release.
+This is not a detected spout or fluid-transfer witness. ``poured`` remains
+unqualified by these APIs.
+
+Bindings seal exact compiled segment/invocation IDs, source/receiver/resource
+identities, the actual compiled program fingerprint and recording cadence and explicit raw or historical input format.
+New Lab snapshots carry synchronized geometry channels; missing validity or
+release acquisition remains unavailable per environment. Recorded milestones
+also require their full successful occurrence prefix. Core imports and binding
+normalization are standard-library-only.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.pour_evidence
+
+.. autosummary::
+
+   PourEvidenceBinding
+   evaluate_pour_evidence
+
+.. autoclass:: PourEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_pour_evidence
+
 
 embodichain.gen_sim.task_spec.registry
 --------------------------------------
@@ -1187,6 +1428,31 @@ embodichain.lab.sim.scene.expansion.persistence
    save_scene_variants
    load_scene_variants
 
+embodichain.lab.sim.sensors.contact.observation
+-----------------------------------------------
+
+Standard sensor observers can collect a selected joint alongside native contact
+facts in explicit B=1 windows. Substeps reuse the completed contact sample;
+initial prepare acquisitions explicitly request one refresh. Joint channels use
+actual simulation time and retain independent validity and acquisition errors.
+Only valid contact slots are retained, with native loss diagnostics preserved.
+Window generations reject delayed callbacks across reset/reuse; completed copies
+remain independent. Integrations own invocation/episode binding and action-effect
+interpretation. The observer neither computes success nor advances simulation.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.observation
+
+.. autosummary::
+
+   JointContactObservation
+   JointContactObserver
+
+.. autoclass:: JointContactObservation
+   :members:
+
+.. autoclass:: JointContactObserver
+   :members:
+
 embodichain.lab.sim.sensors.contact.sampling
 ---------------------------------------------------------------------
 
@@ -1213,10 +1479,17 @@ observation was produced. The common frame has no invocation field.
    CONTACT_NORMALS
    CONTACT_IMPULSES
    CONTACT_POSITIONS
+   CONTACT_DISTANCES
+   DEFAULT_CHANNELS
    ContactEvidenceSample
    ContactEvidenceSampler
    ContactSourceStamp
    native_contact_revision
+
+Signed contact distances require explicit channel selection. Empty requests
+retain the original five ``DEFAULT_CHANNELS``; a missing or nonfinite active
+distance keeps that requested channel unavailable without invalidating unrelated
+contact channels.
 
 embodichain.lab.sim.sensors.contact.timeline
 ---------------------------------------------------------------------
@@ -1358,6 +1631,33 @@ embodichain.lab.task_program.integrations.simulation.handover
 
    ConfiguredHandOverPoseProvider
 
+embodichain.lab.task_program.integrations.simulation.observations
+-----------------------------------------------------------------
+
+Bind the physical collector to an initialized environment and its actual bridge
+before the first bridge control step. It uses the bridge's policy session and episode
+IDs; later episodes, closed resources and superseded current clock bindings are
+rejected. Independent runtime owners retain independent state.
+
+Current capture selects the registered pair/scope and uses the native
+rest-envelope COM tolerance. Recorded capture preserves the original policy
+parameters and reads the exact seeded end-step slots through an explicitly
+injected ``ObservationManager``. The collector binds pose fields from its schema,
+reads original values and masks, and converts only qualified arena poses.
+Omitting observation history keeps current capture available but rejects historical capture. It never resamples current contacts for
+a historical pose or falls back to a live pose/previous frame.
+The result owns physical metadata and availability only; TaskSpec and Task Engine
+are not dependencies of this Lab collector.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
+
+.. autosummary::
+
+   SimulationSupportObservationCollector
+
+.. autoclass:: SimulationSupportObservationCollector
+   :members:
+
 embodichain.lab.task_program.integrations.simulation.stability
 --------------------------------------------------------------
 
@@ -1366,6 +1666,49 @@ with ordinary dynamic settle monitors. ``SimulationStabilityConditionCfg`` owns
 its duration, timeout, pose/axis targets, attachment-drift bounds and optional
 native-support declaration. Registration snapshots and fingerprints the complete
 configuration; names do not select hidden behavior.
+
+``SimulationJointStabilityConditionCfg`` observes an explicitly bound native
+joint, with independently declared target tolerance and full-window drift.
+The standard port preserves the initial observed robot hold, counts only
+acknowledged ticks after the initial sample, and records the original
+``joint_position_and_stability`` receipt. This is joint retention evidence;
+it does not qualify contact safety. When an execution clock is bound, the
+receipt additionally includes the actual final joint acquisition with per-row
+validity, environment IDs and a policy-window sample sequence. ``joint_window``
+retains sampled coordinates, validity/errors, actual step/timestamp arrays,
+native joint identity and compiled policy/segment identity for independent
+reassessment. ``monitor_initial_values`` preserves the pre-sample range anchor
+as numerical initialization, separately from the clock-verified acquisitions.
+A final sample alone does not establish a complete time window.
+Without a clock, no timestamped raw evidence is fabricated.
+
+The default ``invalid_observation_policy="abort_batch"`` retains the source
+behavior. Explicit ``isolate_rows`` marks the first invalid active row unavailable
+for that execution while other rows continue. The receipt separates execution
+termination from per-row condition status; timeout, unavailable observation and
+cancellation are not interchangeable. Cancellation preserves partial diagnostic
+facts but publishes no post-policy success.
+
+``max_observation_samples`` bounds raw retention, independently of the runtime
+condition. The default 4096 comfortably holds the 126 samples from a 5-second
+wait at a 0.04-second control period. Longer waits may drop old samples, report
+``dropped_samples`` and set ``record_complete=false``; a truncated history must
+not certify complete coverage. Storage is O(batch times retained samples), and
+conversion to JSON occurs after sampling, without per-step device-to-host trace
+copies. Runtime row handling and retention settings remain registration-owned;
+``to_condition_dict()`` preserves the original normative parameter fields.
+
+Target, tolerance and range drift use native runtime joint units. Translation
+and rotation require their own explicitly selected policy values; the default
+0.001 is not a universal physical distance or velocity threshold. Robot holds
+retain the source observed posture, and neither this monitor nor the policy
+advances environment time itself.
+
+Every environment-adapter bridge obtains fresh policy/validator session state,
+including execution without nominal sources. A later bridge supersedes the
+earlier session's observation ownership instead of replacing its clock. Captured
+position holds use the configured Gym action encoder, supplying zero velocity
+targets in ``position_velocity`` mode while retaining the original positions.
 
 Supported conditions declare a standard contact sensor through
 ``SupportSensorDeclarationCfg``. The scene binding supplies its exact two native
@@ -1391,11 +1734,15 @@ established. This distinguishes unavailable outcomes from measured negatives.
 
    SupportSensorDeclarationCfg
    SimulationStabilityConditionCfg
+   SimulationJointStabilityConditionCfg
 
 .. autoclass:: SupportSensorDeclarationCfg
    :members:
 
 .. autoclass:: SimulationStabilityConditionCfg
+   :members:
+
+.. autoclass:: SimulationJointStabilityConditionCfg
    :members:
 
 embodichain.lab.gym.envs.episode_context
@@ -1439,6 +1786,7 @@ embodichain.lab.gym.envs.managers.actions
    JointPositionToLimitsAction
    JointVelocityAction
    ParallelGripperAction
+   RelativeEefDlsAction
    RelativeEefPoseAction
    RelativeJointPositionAction
 
@@ -1452,6 +1800,24 @@ embodichain.lab.gym.envs.managers.action_types
    ActionDescriptor
    ActionTermDescriptor
    ActionTrace
+
+embodichain.lab.gym.envs.managers.observation_manager
+-----------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observation_manager
+
+.. autosummary::
+
+   ObservationManager
+
+embodichain.lab.gym.envs.managers.reward_manager
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.reward_manager
+
+.. autosummary::
+
+   RewardManager
 
 embodichain.lab.gym.envs.objectives
 ----------------------------------
@@ -1562,8 +1928,51 @@ embodichain.lab.gym.utils.profiler
    EnvProfilerCfg
    EnvProfiler
 
+embodichain.lab.gym.envs.managers.observation_types
+---------------------------------------------------
+
+The observation manager owns source acquisition and the single raw-field schema.
+Policy views receive separate tensors before in-place normalization/noise;
+ordinary queries do not advance history. The existing rollout writer stores raw observations by canonical field ID.
+Indexed reads use those tensors and episode/frame metadata directly, with no
+history instance, separate write lifecycle or entity-specific reader. Internal
+expert policy observations keep T+1 states; the public rollout remains a
+compatible T-transition view and also exposes raw views when enabled. Learner
+windows retain their own horizon/device, and reuse does not erase episode data. Contact histories
+retain their sensor physics clocks and complete-window contracts.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observation_types
+
+.. autosummary::
+
+   ObservationDescriptor
+   ObservationSample
+   ObservationFrame
+   ObservationHistorySnapshot
+
+.. autoclass:: ObservationDescriptor
+   :members:
+
+.. autoclass:: ObservationSample
+   :members:
+
+.. autoclass:: ObservationFrame
+   :members:
+
+.. autoclass:: ObservationHistorySnapshot
+   :members:
+
 embodichain.lab.gym.utils.trajectory_state
 ------------------------------------------
+
+Capture/restore helpers retain the standalone replay surface.
+``export_observation_history`` combines numeric history with the observation
+manager's schema for file output. Alias state views share the same owned tensor
+snapshot. ``trajectory_observation_cfgs`` declares replay state fields as raw observation
+functors, preserving full robot/mimic joint order, articulation root states and
+rigid velocities. Declaration assembly performs no physical acquisition.
+The standard environment recorder uses these functors and shares pose acquisition
+with policy ``get_object_pose`` / ``get_rigid_object_pose`` within a boundary.
 
 .. currentmodule:: embodichain.lab.gym.utils.trajectory_state
 
@@ -1571,6 +1980,12 @@ embodichain.lab.gym.utils.trajectory_state
 
    capture_trajectory_state
    restore_trajectory_state
+   trajectory_observation_cfgs
+   export_observation_history
+
+.. autofunction:: trajectory_observation_cfgs
+
+.. autofunction:: export_observation_history
 
 embodichain.lab.scripts.analyze_workspace
 -----------------------------------------
@@ -2410,6 +2825,7 @@ embodichain.lab.sim.motion.planners.utils
    PlanState
    PlanResult
    RejectedMotionCandidate
+   MotionRecoveryTrace
    normalize_success_mask
    calculate_point_allocations
    interpolate_xpos
@@ -3829,3 +4245,21 @@ Input proxies and sampled checks establish neither CCD nor physical contact.
 
 .. autoclass:: RobotArticulationCollisionSnapshot
    :members:
+State observation acquisition
+-----------------------------
+
+``SimulationStateObservationCollector`` binds the actual bridge/session and
+collects current poses or explicit joint positions without interpreting task
+acceptance. Recorded poses read the canonical ObservationManager's raw history;
+invalid finite values remain unavailable and original temporal metadata is kept.
+Current reads work without history. Native owners, episodes and clocks cannot be
+substituted, and recorded joint claims require the original executed policy.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
+
+.. autoclass:: SimulationStateObservationCollector
+   :members:
+
+.. autofunction:: embodichain.gen_sim.task_engine.evidence.project_condition_evidence_binding
+
+.. autofunction:: embodichain.gen_sim.task_engine.evidence.project_pour_evidence_binding

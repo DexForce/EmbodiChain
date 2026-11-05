@@ -136,36 +136,28 @@ def horizontal_placement_distance(
         Maximum of requested minimum and source-envelope separation. No
         collision or native bearing qualification is implied.
     """
+    object_extent = horizontal_placement_extent(
+        object_vertices,
+        object_rotation,
+        world_axis=world_axis,
+        axis_aligned=object_axis_aligned,
+    )
     if reference_is_articulation:
         # An articulation root need not be at its geometry center. Measure the
         # outward edge in its actual root frame, not half the aggregate span.
         points = reference_vertices @ reference_rotation.T
         edge = float((points[:, world_axis] * reference_direction).max())
-        return max(
-            minimum,
-            edge
-            + horizontal_placement_extent(
-                object_vertices,
-                object_rotation,
-                world_axis=world_axis,
-                axis_aligned=object_axis_aligned,
-            )
-            + (axis_aligned_clearance if object_axis_aligned else relation_clearance),
-        )
-    return max(
-        minimum,
-        horizontal_placement_extent(
-            object_vertices,
-            object_rotation,
-            world_axis=world_axis,
-            axis_aligned=object_axis_aligned,
-        )
-        + horizontal_placement_extent(
+        distance = edge + object_extent
+    else:
+        distance = object_extent + horizontal_placement_extent(
             reference_vertices,
             reference_rotation,
             world_axis=world_axis,
             axis_aligned=reference_axis_aligned,
         )
+    return max(
+        minimum,
+        distance
         + (axis_aligned_clearance if object_axis_aligned else relation_clearance),
     )
 

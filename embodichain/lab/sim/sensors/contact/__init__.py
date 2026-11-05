@@ -33,6 +33,8 @@ from .sampling import (
     CONTACT_NORMALS,
     CONTACT_IMPULSES,
     CONTACT_POSITIONS,
+    CONTACT_DISTANCES,
+    DEFAULT_CHANNELS,
     ContactEvidenceSample,
     ContactEvidenceSampler,
     ContactSourceStamp,
@@ -42,6 +44,7 @@ from .timeline import (
     ContactTimeline,
     ContactTimelineCfg,
 )
+from .observation import JointContactObservation, JointContactObserver
 from .history import (
     ContactHistory,
 )
@@ -56,6 +59,8 @@ __all__ = [
     "CONTACT_NORMALS",
     "CONTACT_IMPULSES",
     "CONTACT_POSITIONS",
+    "CONTACT_DISTANCES",
+    "DEFAULT_CHANNELS",
     "ContactEvidenceSample",
     "ContactEvidenceSampler",
     "ContactSourceStamp",
@@ -63,4 +68,6 @@ __all__ = [
     "ContactTimeline",
     "ContactTimelineCfg",
     "ContactHistory",
+    "JointContactObservation",
+    "JointContactObserver",
 ]

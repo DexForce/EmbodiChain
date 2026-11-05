@@ -1,5 +1,17 @@
 # Motion Planning
 
+`MotionGenerator.generate()` owns sampled Cartesian segment recovery through its
+private `_cartesian.py` helper. Explicit linear keyframes use fixed-grid sequential
+IK; `preserve_cartesian_samples=True` retains the separate pre-sampled contract.
+Segment alternatives are opt-in and B1-only. Their local counts and continuity
+receipt live in `PlanResult.recovery`, separate from complete-action retries.
+Dense attempts advance the original RNG stream; continuous IK uses the original
+grid and its existing Torch fork. Exhaustion retains the first failed result and
+candidate evidence. `defer_recovery=True` lets a caller inspect the nominal result.
+Each actual generation attempt charges the existing host budget once; the public
+entry checks cancellation before FK and adds no planning charge of its own.
+Atomic skills own which segment enables recovery; Task Engine declares policy.
+
 ## Find the owner
 
 | Change or question | Start here |
@@ -81,6 +93,14 @@ adaptive timing remain defaults. Non-default modes require `ik_interp`.
 Failed execution rows hold their start. `PlanResult.rejected_candidate` retains
 owned original positions, intervals and rejected-row identities for retries and
 audit; checking the zero-speed hold is not evidence that the candidate passed.
+
+`compute.trajectory.interpolation.interpolate_velocity_grid` allocates fixed
+B=1 joint-edge intervals from explicit speed caps. It preserves ordered mandatory
+endpoints and requested sample count, rejecting insufficient duration instead of
+retiming. The `limits.joint_velocity_diagnostics` companion reports the worst
+frame/joint operands with nonfinite values represented as None; it does not
+replace or weaken the existing validity mask. Ordinary interpolation remains
+unchanged unless callers explicitly choose the fixed-count helper.
 
 The bounded `resolve_continuous_ik_path()` adapter preserves a single path's
 time grid and restores the caller's random stream. Its numerical seed search

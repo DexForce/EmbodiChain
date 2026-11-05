@@ -241,8 +241,15 @@ hull; no silhouette containment, stability window or task verdict is inferred.
    :nosignatures:
 
    support_from_contacts
+   contact_load_path
 
 .. autofunction:: support_from_contacts
+
+``contact_load_path`` checks one sampled contact graph using positive upward
+loads and explicit dynamic cargo IDs. It does not join paths across substeps or
+choose a stable-window duration. That qualification belongs to the consumer.
+
+.. autofunction:: contact_load_path
 
 Pour arcs and grasp projections
 -------------------------------
@@ -383,3 +390,30 @@ collision queries and execution policy are outside these numeric operations.
 
 .. automodule:: embodichain.compute.geometry.staging
    :members:
+
+Qualified contact heights
+-------------------------
+
+``contact_support_heights`` selects the highest qualified patch point without
+averaging penetration away. Missing load, COM support or finite coordinates
+produce NaN and preserve the caller's conservative envelope. The sensor-facing
+``qualified_support_heights`` API delegates to this shared calculation; TaskSpec
+uses it without importing Lab or acquiring physical state.
+
+.. autofunction:: embodichain.compute.geometry.contact_support.contact_support_heights
+
+Recorded rigid Pour measurements
+--------------------------------
+
+These pure numeric functions measure a recorded rigid tilt/restore window and
+receiver projection. They take explicit source vertices and poses, preserve
+input precision and first-maximum order, and set no acceptance thresholds or
+fluid-transfer conclusions.
+
+.. currentmodule:: embodichain.compute.geometry.pouring
+
+.. autofunction:: measure_pour_tilt
+   :no-index:
+
+.. autofunction:: measure_pour_receiver
+   :no-index:
