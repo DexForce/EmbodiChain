@@ -37,7 +37,7 @@ Base Environment Classes
 
 .. autoclass:: BaseEnv
     :members:
-    :exclude-members: get_generator
+    :exclude-members: get_generator, preserve_random_state
     :inherited-members:
     :show-inheritance:
 
@@ -55,7 +55,7 @@ Embodied Environment Classes
 
 .. autoclass:: EmbodiedEnv
     :members:
-    :exclude-members: get_generator, check_truncated, get_task_initial_state, initialize_task_outcome, restore_task_initial_state
+    :exclude-members: get_generator, preserve_random_state, active_task_program_bridge, check_truncated, get_task_initial_state, initialize_task_outcome, restore_task_initial_state
     :inherited-members:
     :show-inheritance:
 

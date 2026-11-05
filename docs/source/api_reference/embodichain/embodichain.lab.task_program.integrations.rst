@@ -1068,6 +1068,7 @@ TaskSpec, and imports no Task Engine implementation.
 
 .. automodule:: embodichain.lab.task_program.integrations.simulation.observation_services
    :members:
+
 Explicit initial planning diagnostics
 -------------------------------------
 
