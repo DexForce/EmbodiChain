@@ -2179,6 +2179,8 @@ def test_closed_factory_rejects_new_observation_and_assembly_without_native_read
     with pytest.raises(RuntimeError, match="closed"):
         observation.observe(state)
     with pytest.raises(RuntimeError, match="closed"):
+        observation.current_qpos(torch.arange(_BATCH_SIZE, device=robot.device))
+    with pytest.raises(RuntimeError, match="closed"):
         factory.create_scene_registry()
     with pytest.raises(RuntimeError, match="closed"):
         factory.create_adapter()

@@ -519,6 +519,19 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         """Return whether this provider belongs to one factory instance."""
         return self._owner_token is owner_token
 
+    def current_qpos(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Read cached full joint positions only during the factory lifetime.
+
+        Args:
+            env_ids: Ordered subset of this provider's stable environment IDs.
+
+        Returns:
+            Owned cached positions without querying the robot.
+        """
+        if isinstance(self._owner_token, _RuntimeOwner):
+            self._owner_token.require_open()
+        return super().current_qpos(env_ids)
+
     def hold_qpos(self, env_ids: torch.Tensor) -> torch.Tensor:
         """Return the configured source for unaddressed robot joint holds.
 
