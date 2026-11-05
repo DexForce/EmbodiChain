@@ -480,7 +480,7 @@ verifier.
    PhaseEffectGateResult
 
 Named held-object transport
---------------------------
+---------------------------
 
 ``HeldObjectPoseGoal.object_id`` optionally identifies the exact object already
 held by the bound resource. A named goal validates that identity before native
