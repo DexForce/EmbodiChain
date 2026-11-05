@@ -2619,7 +2619,7 @@
           "symbol": "<module>",
           "start_line": 24,
           "end_line": 35,
-          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0…DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
+          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0\u2026DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
         }
       ],
       "documentation": [
@@ -3757,9 +3757,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 847,
-          "end_line": 857,
-          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n            plan_transform_factory=plan_transform_factory,\n            nominal_source_factory=nominal_source_factory,\n            plan_lifecycle_factory=plan_lifecycle_factory,\n        )"
+          "start_line": 881,
+          "end_line": 899,
+          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n            plan_transform_factory=plan_transform_factory,\n            nominal_source_factory=nominal_source_factory,\n            plan_lifecycle_factory=plan_lifecycle_factory,\n            **(\n                {\n                    \"initial_plan_observer\": initial_plan_observer,\n                    \"initial_plan_invocation_id\": initial_plan_invocation_id,\n                }\n                if initial_plan_observer is not None\n                else {}\n            ),\n        )"
         }
       ]
     },
@@ -3770,13 +3770,13 @@
       "relation": "constructs",
       "description": "Pass the compiled program and the shared runtime, sink, and clock into the bridge.",
       "provenance": "source-reviewed",
-      "scope": "create_bridge after integration and program preflight.",
+      "scope": "Shared guarded assembly reached by ordinary create_bridge and explicit initial-plan diagnostics.",
       "evidence": [
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
-          "symbol": "TaskProgramEnvironmentAdapter.create_bridge",
-          "start_line": 1178,
-          "end_line": 1203,
+          "symbol": "TaskProgramEnvironmentAdapter._create_bridge_with_assembly",
+          "start_line": 1285,
+          "end_line": 1310,
           "excerpt": "            bridge = TaskProgramDemoBridge(\n                program,\n                assembly.runtime,\n                assembly.command_sink,\n                assembly.clock,\n                post_policy_port=(\n                    self._post_policy_port\n                    if control_services is None\n                    else control_services.policy_port\n                ),\n                validator_port=(\n                    self._validator_port\n                    if control_services is None\n                    else control_services.policy_port\n                ),\n                runner_cfg=assembly.runner_cfg,\n                parallel_safety_validator=assembly.parallel_safety_validator,\n                expansion_trace_provider=assembly.expansion_trace_provider,\n                isolate_policy_sessions=control_services is None,\n                runtime_resource_cleanup=(\n                    close_bridge_resources\n                    if control_services is not None or callable(close_planning)\n                    else None\n                ),\n                **({\"invocation_policies\": policies} if policies is not None else {}),\n            )"
         }
       ]
