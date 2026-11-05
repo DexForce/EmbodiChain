@@ -23,6 +23,7 @@ from .pose_generator import (
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
     get_parallel_jaw_gripper_model,
+    resolve_parallel_jaw_gripper_model,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "ParallelJawGraspPoseGenerator",
     "ParallelJawGripperModelCfg",
     "get_parallel_jaw_gripper_model",
+    "resolve_parallel_jaw_gripper_model",
 ]

@@ -50,6 +50,7 @@ _EXPORT_MODULES = {
     "ParallelJawGraspPoseGenerator": "..pose_generator",
     "ParallelJawGripperModelCfg": "..pose_generator",
     "get_parallel_jaw_gripper_model": "..pose_generator",
+    "resolve_parallel_jaw_gripper_model": "..pose_generator",
     "AntipodalSamplerCfg": ".antipodal_sampler",
     "AntipodalSampler": ".antipodal_sampler",
     "ConvexCollisionCheckerCfg": ".collision_checker",

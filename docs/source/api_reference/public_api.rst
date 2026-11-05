@@ -1539,6 +1539,26 @@ remain NaN. Pure transformed mesh envelopes live in
 
 .. autofunction:: qualified_support_heights
 
+embodichain.lab.task_program.integrations.hand_calibration
+----------------------------------------------------------
+
+Model-owned task-hand descriptions carry explicit physical endpoints, joint
+commands and nominal reserves. ``physical_hand_resources`` resolves declared
+member aliases to unique physical hands without inferring roles from names.
+The interface creates no Robot, geometry observation, skill or TaskSpec result.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.hand_calibration
+
+.. autosummary::
+
+   TaskHandCalibration
+   physical_hand_resources
+
+.. autoclass:: TaskHandCalibration
+   :members:
+
+.. autofunction:: physical_hand_resources
+
 embodichain.lab.task_program.integrations.simulation.grip_evidence
 ------------------------------------------------------------------
 
