@@ -532,3 +532,68 @@ already available from configuration.
 
 .. autoclass:: SimulationHandOverSceneProvider
    :members: prepare
+
+
+Registered motion aliases
+-------------------------
+
+The closed registered-lowerer declarations ``align_held``, ``clear_released`` and
+``idle_arm_clearance`` retain the existing call IDs ``gen_sim.align_held``,
+``gen_sim.clear_released`` and ``gen_sim.clear_idle_arm``. They bind explicit route,
+resource and geometry operands into ordinary ``MoveHeldObject``,
+``MoveEndEffector`` and ``MoveJoints`` goals. Numerical target construction belongs
+to Compute; the Atomic and Motion owners plan and qualify emitted commands.
+
+Held alignment requires the declared object to be exclusively held and currently
+observed. Its optional retention contract requests verification rather than
+establishing a physical fact. Released clearance requires an empty resource and
+exact hand-model reserves. Idle clear/restore routes bind an ordered pair of
+sequential segments, their resource and a declared joint offset; both calls
+require explicit discrete free-motion qualification. The original shared
+``simulation.park`` call remains the restore entry point.
+
+Configured linear Cartesian modes require their existing fixed-grid/sequential
+IK policies and B=1 scope. Missing services or incompatible policy values reject
+before simulation. Bounded staging and compiler-bound released continuations
+remain unavailable until their runtime providers are installed; ordinary calls
+retain their policies and fingerprints.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.held_alignment
+
+.. autosummary::
+
+   HeldAlignmentRoute
+   HeldAlignmentLowererFactory
+
+.. autoclass:: HeldAlignmentRoute
+   :members: selector
+
+.. autoclass:: HeldAlignmentLowererFactory
+   :members: create, validate_scene_declaration
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.release_clearance
+
+.. autosummary::
+
+   ReleasedHandRoute
+   NominalHandBinding
+   ClearReleasedLowererFactory
+
+.. autoclass:: ReleasedHandRoute
+
+.. autoclass:: NominalHandBinding
+
+.. autoclass:: ClearReleasedLowererFactory
+   :members: create, validate_scene_declaration
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.idle_clearance
+
+.. autosummary::
+
+   IdleClearanceRoute
+   IdleClearanceFactory
+
+.. autoclass:: IdleClearanceRoute
+
+.. autoclass:: IdleClearanceFactory
+   :members: create

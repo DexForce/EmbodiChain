@@ -134,6 +134,14 @@ from .simulation.planning_services import (
     SimulationPlanningServicesCfg,
 )
 from .invocation_policy import InvocationPolicyBinding
+from .simulation.held_alignment import HeldAlignmentRoute, HeldAlignmentLowererFactory
+from .simulation.release_clearance import (
+    ReleasedHandRoute,
+    NominalHandBinding,
+    ClearReleasedLowererFactory,
+)
+from .simulation.idle_clearance import IdleClearanceRoute, IdleClearanceFactory
+from embodichain.toolkits.graspkit.hand_envelope import NominalHandEnvelope
 
 __all__: list[str] = []
 
@@ -1017,6 +1025,10 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "contact_frame_to_eef",
                 "tool_calibrations",
                 "target_axis",
+                "lift_clearance",
+                "hand_hold",
+                "report_retained_attachment",
+                "require_free_motion",
                 "adaptive_receive",
                 "linear_segments",
                 "require_receiver_scene",
@@ -1205,18 +1217,58 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             )
         return PlaceOptions(**kwargs)
     if kind == "move_held_object":
-        _mapping(value, path=path, required=frozenset({"kind"}))
-        return MoveHeldObjectOptions()
-    if kind == "move_joints":
-        _mapping(
+        config = _mapping(
             value,
             path=path,
             required=frozenset({"kind"}),
+            optional=frozenset(
+                {
+                    "linear_segments",
+                    "lift_clearance",
+                    "hand_hold",
+                    "report_retained_attachment",
+                }
+            ),
         )
-        return MoveJointsOptions()
+        kwargs = {}
+        for name in ("linear_segments", "report_retained_attachment"):
+            if name in config:
+                kwargs[name] = _boolean(config[name], path=f"{path}.{name}")
+        if "lift_clearance" in config:
+            kwargs["lift_clearance"] = (
+                None
+                if config["lift_clearance"] is None
+                else _real(
+                    config["lift_clearance"], path=f"{path}.lift_clearance", minimum=0.0
+                )
+            )
+        if "hand_hold" in config:
+            kwargs["hand_hold"] = _identifier(
+                config["hand_hold"], path=f"{path}.hand_hold"
+            )
+        return MoveHeldObjectOptions(**kwargs)
+    if kind == "move_joints":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset({"require_free_motion"}),
+        )
+        return MoveJointsOptions(
+            require_free_motion=config.get("require_free_motion", False)
+        )
     if kind == "move_end_effector":
-        _mapping(value, path=path, required=frozenset({"kind"}))
-        return MoveEndEffectorOptions()
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset({"linear_segments"}),
+        )
+        return MoveEndEffectorOptions(
+            linear_segments=_boolean(
+                config.get("linear_segments", False), path=f"{path}.linear_segments"
+            )
+        )
     if kind == "coordinated_pickment":
         config = _mapping(
             value,
@@ -2407,8 +2459,39 @@ def _decode_registered_lowerer(
     | _PourLowererFactory
     | _PushObjectLowererFactory
     | _RelativePlaceLowererFactory
+    | HeldAlignmentLowererFactory
+    | ClearReleasedLowererFactory
+    | IdleClearanceFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
+    if isinstance(value, Mapping) and value.get("kind") == "idle_arm_clearance":
+        from .simulation.idle_clearance import IdleClearanceFactory, IdleClearanceRoute
+
+        config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
+        routes = tuple(
+            IdleClearanceRoute(
+                **_mapping(
+                    item,
+                    path=f"{path}.routes[{index}]",
+                    required=frozenset(
+                        {
+                            "route_id",
+                            "clear_segment",
+                            "restore_segment",
+                            "resource",
+                            "joint_name",
+                            "offset_rad",
+                        }
+                    ),
+                    optional=frozenset({"search", "protected_control_part"}),
+                )
+            )
+            for index, item in enumerate(
+                _sequence(config["routes"], path=f"{path}.routes")
+            )
+        )
+        return IdleClearanceFactory(routes)
+
     common = _mapping(
         value,
         path=path,
@@ -2428,10 +2511,87 @@ def _decode_registered_lowerer(
                 "routes",
                 "stage_id",
                 "target",
+                "verify_retention",
+                "hands",
+                "retreat_distance",
             }
         ),
     )
     kind = _identifier(common["kind"], path=f"{path}.kind")
+    if kind == "clear_released":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "routes", "hands"}),
+            optional=frozenset({"retreat_distance"}),
+        )
+        routes = tuple(
+            ReleasedHandRoute(
+                **_mapping(
+                    raw,
+                    path=f"{path}.routes[{index}]",
+                    required=frozenset({"object_id", "target_id", "minimum_height"}),
+                )
+            )
+            for index, raw in enumerate(
+                _sequence(config["routes"], path=f"{path}.routes")
+            )
+        )
+        hands = []
+        for index, raw in enumerate(_sequence(config["hands"], path=f"{path}.hands")):
+            hand = _mapping(
+                raw,
+                path=f"{path}.hands[{index}]",
+                required=frozenset({"grasp_target_id", "model_id", "envelope"}),
+            )
+            envelope = NominalHandEnvelope(
+                **_mapping(
+                    hand["envelope"],
+                    path=f"{path}.hands[{index}].envelope",
+                    required=frozenset(
+                        {
+                            "finger_length",
+                            "finger_width",
+                            "finger_thickness",
+                            "palm_depth",
+                            "opening_margin",
+                        }
+                    ),
+                )
+            )
+            hands.append(
+                NominalHandBinding(hand["grasp_target_id"], hand["model_id"], envelope)
+            )
+        return ClearReleasedLowererFactory(
+            routes, tuple(hands), retreat_distance=config.get("retreat_distance", 0.15)
+        )
+    if kind == "align_held":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "routes"}),
+            optional=frozenset({"verify_retention"}),
+        )
+        routes = []
+        for index, raw in enumerate(_sequence(config["routes"], path=f"{path}.routes")):
+            route = _mapping(
+                raw,
+                path=f"{path}.routes[{index}]",
+                required=frozenset(
+                    {
+                        "object_id",
+                        "target_id",
+                        "preserve_yaw",
+                        "axis_direction_free",
+                        "local_axis",
+                    }
+                ),
+                optional=frozenset({"position"}),
+            )
+            routes.append(HeldAlignmentRoute(**route))
+        return HeldAlignmentLowererFactory(
+            tuple(routes), verify_retention=config.get("verify_retention", False)
+        )
     if kind == "axis_align":
         config = _mapping(
             value,
@@ -2746,7 +2906,7 @@ def _decode_registered_lowerer(
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
         "['articulation_link_slide', 'axis_align', 'coordinated_transport', "
-        "'move_held_object', 'park', 'place_relative', 'pour', 'push_object']."
+        "'move_held_object', 'park', 'place_relative', 'pour', 'push_object', 'align_held', 'clear_released', 'idle_arm_clearance']."
     )
 
 
@@ -2819,7 +2979,10 @@ class _DecodedRuntimeServices:
         | RoutedMoveHeldObjectLowererFactory
         | _PourLowererFactory
         | _PushObjectLowererFactory
-        | _RelativePlaceLowererFactory,
+        | _RelativePlaceLowererFactory
+        | HeldAlignmentLowererFactory
+        | ClearReleasedLowererFactory
+        | IdleClearanceFactory,
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None

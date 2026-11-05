@@ -216,6 +216,13 @@ then guards `transport` and requests terminal attachment verification. Projected
 presets reject this contract before motion planning or dispatch. The legacy
 single-target factory keeps its existing effectless behavior and identity.
 
+The same closed route also exposes retained alignment,
+released clearance and paired idle clear/restore declarations. Their factories
+bind explicit operands into the ordinary shared Atomic skills, with target math
+in Compute. The catalog checks idle pairing, required discrete queries, exact
+Cartesian policy modes and B=1 eligibility before simulation. Planning and
+physical effect verification remain separate; bounded staging/released-session
+policies reject until their owning providers are available.
 
 Container affordances may declare a local-z release clearance while retaining
 their original semantic target for final acceptance.

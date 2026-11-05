@@ -54,6 +54,7 @@ from embodichain.lab.task_program.integrations.configured import (
     _decode_grasp_generator,
     _decode_registered_lowerer,
     _decode_motion_policy,
+    _decode_recovery_policy,
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
     _compose_integration_payload,
@@ -2361,8 +2362,6 @@ def test_integration_config_rejects_unknown_fields_before_live_construction() ->
     [
         ("pick_up", "native_closing_revision", 4),
         ("place", "measured_inside", True),
-        ("move_held_object", "linear_segments", True),
-        ("move_joints", "require_free_motion", True),
         ("coordinated_pickment", "continue_verified_holds", True),
     ],
 )
@@ -2483,6 +2482,7 @@ def test_configured_services_reject_task_specific_e2_kinds(kind: str) -> None:
 def test_motion_velocity_target_policy_decodes(mode: str) -> None:
     from embodichain.lab.task_program.integrations.configured import (
         _decode_motion_policy,
+        _decode_recovery_policy,
     )
 
     policy = _decode_motion_policy(
@@ -2496,6 +2496,7 @@ def test_motion_velocity_target_policy_decodes(mode: str) -> None:
 def test_motion_velocity_target_policy_rejects_unknown_mode(mode: str) -> None:
     from embodichain.lab.task_program.integrations.configured import (
         _decode_motion_policy,
+        _decode_recovery_policy,
     )
 
     with pytest.raises(ValueError, match="velocity_targets"):
@@ -2507,6 +2508,7 @@ def test_motion_velocity_target_policy_rejects_unknown_mode(mode: str) -> None:
 def test_motion_limit_policy_decodes() -> None:
     from embodichain.lab.task_program.integrations.configured import (
         _decode_motion_policy,
+        _decode_recovery_policy,
     )
 
     policy = _decode_motion_policy(
@@ -2525,6 +2527,7 @@ def test_motion_limit_policy_decodes() -> None:
 def test_motion_limit_policy_preserves_omitted_velocity_limit() -> None:
     from embodichain.lab.task_program.integrations.configured import (
         _decode_motion_policy,
+        _decode_recovery_policy,
     )
 
     policy = _decode_motion_policy(
@@ -2543,6 +2546,7 @@ def test_motion_limit_policy_rejects_nonpositive_or_nonfinite_values(
 ) -> None:
     from embodichain.lab.task_program.integrations.configured import (
         _decode_motion_policy,
+        _decode_recovery_policy,
     )
 
     with pytest.raises(ValueError, match=field):
@@ -2656,6 +2660,7 @@ def test_configured_motion_budgets_reject_invalid_values(
 ) -> None:
     from embodichain.lab.task_program.integrations.configured import (
         _decode_motion_policy,
+        _decode_recovery_policy,
     )
 
     with pytest.raises((TypeError, ValueError), match=field):
@@ -3469,6 +3474,7 @@ def test_joint_window_runtime_settings_do_not_redefine_normative_condition_data(
 def test_segment_motion_policy_is_closed_forwarded_and_reported_separately():
     from embodichain.lab.task_program.integrations.configured import (
         _decode_motion_policy,
+        _decode_recovery_policy,
     )
     from embodichain.lab.task_program.runtime.results import _motion_policy_to_metadata
 
@@ -3509,6 +3515,7 @@ def test_segment_motion_policy_is_closed_forwarded_and_reported_separately():
 def test_final_velocity_rejection_representation_is_explicit_and_default_identity_stable():
     from embodichain.lab.task_program.integrations.configured import (
         _decode_motion_policy,
+        _decode_recovery_policy,
     )
     from embodichain.lab.task_program.integrations.catalog import _canonical_value
     from embodichain.lab.sim.atomic_actions import MotionPolicy
@@ -3788,3 +3795,198 @@ def test_configured_geometry_physical_scope_fails_before_environment_registratio
     with pytest.raises(ValueError, match="B=1"):
         config_to_cfg(config, source_path=original_path)
     assert _TEST_ENV_ID not in REGISTERED_ENVS
+
+
+def test_idle_declaration_keeps_paired_qualification_and_closed_route_contract():
+    from dataclasses import replace
+    from embodichain.lab.task_program.integrations.simulation.idle_clearance import (
+        IdleClearanceFactory,
+    )
+    from embodichain.lab.task_program.language.decoder import decode_task_program
+
+    payload = _integration_payload("repeated_pick_place")
+    resource = payload["robot_profile"]["resources"][0]["resource_id"]
+    route = {
+        "route_id": "clearance",
+        "clear_segment": "clear",
+        "restore_segment": "restore",
+        "resource": resource,
+        "joint_name": "joint_from_model",
+        "offset_rad": 0.2,
+    }
+    lowerers = payload["runtime_services"].setdefault(
+        "registered_semantic_lowerers", []
+    )
+    lowerers.extend(
+        [{"kind": "idle_arm_clearance", "routes": [route]}, {"kind": "park"}]
+    )
+    profile = payload["robot_profile"]
+    profile["defaults"]["move_joints"] = {"primary": resource}
+    profile["resources"][0]["endpoints"][0]["capabilities"].append(
+        "motion.joint_position"
+    )
+    options = profile["presets"][0]["action_options"]
+    for call in ("gen_sim.clear_idle_arm", "simulation.park"):
+        options[call] = {"kind": "move_joints", "require_free_motion": True}
+    with pytest.raises(ValueError, match="discrete_mesh"):
+        _decode_configured_task_program_integration(payload)
+    payload["runtime_services"]["planning_services"] = {
+        "kind": "simulation_geometry",
+        "free_motion_query": "discrete_mesh",
+    }
+    registration = _decode_configured_task_program_integration(payload).registration
+    factory = next(
+        f
+        for f in registration.registered_semantic_lowerer_factories
+        if type(f) is IdleClearanceFactory
+    )
+    assert factory.routes[0].joint_name == "joint_from_model"
+    program = decode_task_program(
+        {
+            "program_id": "idle",
+            "targets": {},
+            "integration": {
+                "scene_registry": registration.scene_binding.registry_id,
+                "robot_profile": registration.robot_profile_binding.profile_id,
+                "runtime_preset": profile["presets"][0]["preset_id"],
+            },
+            "program": {
+                "kind": "sequence",
+                "items": [
+                    {
+                        "kind": "segment",
+                        "name": name,
+                        "steps": {
+                            "kind": "invoke",
+                            "call": {
+                                "kind": "registered",
+                                "call_id": call,
+                                "arguments": args,
+                                "resources": {"primary": resource},
+                            },
+                        },
+                    }
+                    for name, call, args in (
+                        ("clear", "gen_sim.clear_idle_arm", {"route": "clearance"}),
+                        ("restore", "simulation.park", {}),
+                    )
+                ],
+            },
+        }
+    )
+    registration.catalog.preflight(program)
+    broken = deepcopy(payload)
+    broken["robot_profile"]["presets"][0]["action_options"]["simulation.park"][
+        "require_free_motion"
+    ] = False
+    with pytest.raises(ValueError, match="clear/restore"):
+        _decode_configured_task_program_integration(
+            broken
+        ).registration.catalog.preflight(program)
+    bad = deepcopy(route)
+    bad["search"] = True
+    with pytest.raises(ValueError, match="protected"):
+        _decode_registered_lowerer(
+            {"kind": "idle_arm_clearance", "routes": [bad]}, path="services"
+        )
+
+
+def test_configured_alignment_options_preflight_exact_policy_and_batch_scope() -> None:
+    """Publishing typed flags also publishes their inert capability checks."""
+    from embodichain.lab.task_program import TaskProgramIntegrationCfg
+
+    payload = _integration_payload("repeated_pick_place")
+    profile = payload["robot_profile"]
+    resource = profile["resources"][0]["resource_id"]
+    profile["defaults"]["move_held_object"] = {"primary": resource}
+    payload["runtime_services"].setdefault("registered_semantic_lowerers", []).append(
+        dict(
+            kind="align_held",
+            routes=[
+                dict(
+                    object_id="cube",
+                    target_id="current_object_pose",
+                    preserve_yaw=True,
+                    axis_direction_free=False,
+                    local_axis=[0.0, 0.0, 1.0],
+                )
+            ],
+        )
+    )
+    preset = profile["presets"][0]
+    preset["action_options"]["gen_sim.align_held"] = dict(
+        kind="move_held_object",
+        linear_segments=True,
+        lift_clearance=None,
+        hand_hold="observed",
+        report_retained_attachment=True,
+    )
+    preset["motion"].update(
+        strategy="ik_interp",
+        interpolation_mode="fixed_grid",
+        ik_seed_mode="sequential",
+        dynamic_collision_mode="off",
+        velocity_limit=None,
+        acceleration_limit=None,
+    )
+    registration = _decode_configured_task_program_integration(payload).registration
+    selection = TaskProgramIntegrationCfg(
+        scene_registry=registration.scene_binding.registry_id,
+        robot_profile=registration.robot_profile_binding.profile_id,
+        runtime_preset=preset["preset_id"],
+    )
+    declaration = dict(
+        program_id="alignment",
+        targets={},
+        program=dict(
+            kind="invoke",
+            call=dict(
+                kind="registered",
+                call_id="gen_sim.align_held",
+                arguments=dict(
+                    object="cube", target="current_object_pose", preserve_yaw=True
+                ),
+                resources={"primary": resource},
+            ),
+        ),
+    )
+    # Use the public bound program parser for the same catalog checks as installation.
+    from embodichain.lab.task_program import decode_task_program
+
+    declared = {
+        **declaration,
+        "integration": dict(
+            scene_registry=selection.scene_registry,
+            robot_profile=selection.robot_profile,
+            runtime_preset=selection.runtime_preset,
+        ),
+    }
+    compiled = registration.catalog.preflight(decode_task_program(declared))
+    registration.validate_num_envs(1)
+    with pytest.raises(ValueError, match="B=1"):
+        registration.validate_num_envs(2)
+    options = registration.robot_profile_binding.presets[0].action_option_template(
+        "gen_sim.align_held"
+    )
+    assert (
+        options.linear_segments
+        and options.hand_hold == "observed"
+        and options.report_retained_attachment
+    )
+    assert next(compiled.iter_segments()).calls[0].call.call_id == "gen_sim.align_held"
+    broken = deepcopy(payload)
+    broken["robot_profile"]["presets"][0]["motion"]["dynamic_collision_mode"] = "auto"
+    with pytest.raises(ValueError, match="fixed-grid sequential"):
+        _decode_configured_task_program_integration(
+            broken
+        ).registration.catalog.preflight(decode_task_program(declared))
+    # Bounded staging and compiler-bound release sessions remain closed until their providers land.
+    with pytest.raises(ValueError, match="supported planning recovery"):
+        _decode_recovery_policy(
+            dict(
+                max_replans=0,
+                max_action_retries=0,
+                planning_recovery=dict(kind="held_alignment_bounded", revision=1),
+            ),
+            path="recovery",
+        )

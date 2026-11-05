@@ -127,6 +127,7 @@ from .simulation.policies import (
     default_simulation_settle_presets,
 )
 from .simulation.planning_services import SimulationPlanningServicesCfg
+from .simulation.idle_clearance import IdleClearanceFactory
 
 if TYPE_CHECKING:
     from .invocation_policy import InvocationPolicyBinding
@@ -585,6 +586,8 @@ class TaskProgramIntegrationCatalog:
     )
     """Exact program-bound named presets for sequential execution occurrences."""
 
+    idle_factories: tuple[IdleClearanceFactory, ...] = field(default=(), kw_only=True)
+
     def __post_init__(self) -> None:
         for field_name in ("scene_registry_id", "robot_profile_id"):
             value = getattr(self, field_name)
@@ -894,6 +897,28 @@ class TaskProgramIntegrationCatalog:
                             raise ValueError(
                                 "Cartesian HandOver requires its declared fixed-grid sequential IK source policy."
                             )
+                if linked.descriptor.skill_id in {
+                    "move_held_object",
+                    "move_end_effector",
+                }:
+                    preset = self.robot_profile.presets[linked.preset_id]
+                    options = preset.action_option_template(call.call.semantic_id)
+                    if options.linear_segments:
+                        policy = preset.motion_policy
+                        if (
+                            policy.strategy != "ik_interp"
+                            or policy.interpolation_mode != "fixed_grid"
+                            or policy.ik_seed_mode != "sequential"
+                            or policy.dynamic_collision_mode != "off"
+                            or policy.segment_continuous_ik_recovery
+                            or (
+                                linked.descriptor.skill_id == "move_end_effector"
+                                and policy.segment_sample_count_retries != (260, 320)
+                            )
+                        ):
+                            raise ValueError(
+                                "Cartesian motion aliases require their declared fixed-grid sequential IK source policy."
+                            )
                 if type(linked.call) is Place and linked.call.at is None:
                     destination = linked.affordances.get("destination")
                     if destination is None:
@@ -912,6 +937,12 @@ class TaskProgramIntegrationCatalog:
             BoundInvocationPolicies(
                 compiled, self.invocation_policy_bindings
             ).validate_manifest(compiled, manifest)
+        if self.idle_factories:
+            from .simulation.idle_clearance import _validate_idle_program
+
+            _validate_idle_program(
+                compiled, manifest, self.invocation_policy_bindings, self.idle_factories
+            )
         return compiled
 
     def validate_engine(self, engine: AtomicActionEngine) -> None:
@@ -1457,6 +1488,33 @@ class SimulationTaskProgramRegistration:
                         raise ValueError(
                             "Native receiver qualification requires declared native_handover_scene services."
                         )
+        from embodichain.lab.sim.atomic_actions.primitives.move_joints import (
+            MoveJointsOptions,
+        )
+
+        if any(
+            type(options) is MoveJointsOptions and options.require_free_motion
+            for preset in profile.presets.values()
+            for options in preset.action_option_templates.values()
+        ) and (
+            self.planning_services is None
+            or self.planning_services.free_motion_query != "discrete_mesh"
+        ):
+            raise ValueError(
+                "Qualified joint motion requires explicit discrete_mesh planning services."
+            )
+        idle_factories = tuple(
+            factory
+            for factory in self.registered_semantic_lowerer_factories
+            if type(factory) is IdleClearanceFactory
+        )
+        if idle_factories and (
+            self.planning_services is None
+            or self.planning_services.free_motion_query != "discrete_mesh"
+        ):
+            raise ValueError(
+                "Idle clear/restore requires explicit discrete_mesh planning services."
+            )
         _validate_standard_effect_monitors(profile)
         _validate_standard_tracking_metrics(profile)
         extensions = build_standard_extension_declarations(
@@ -1535,6 +1593,7 @@ class SimulationTaskProgramRegistration:
             "catalog",
             TaskProgramIntegrationCatalog(
                 invocation_policy_bindings=self.invocation_policy_bindings,
+                idle_factories=idle_factories,
                 scene_registry_id=self.scene_binding.registry_id,
                 robot_profile_id=self.robot_profile_binding.profile_id,
                 scene=scene,
@@ -1594,13 +1653,27 @@ class SimulationTaskProgramRegistration:
             HandOverOptions,
         )
 
+        from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
+            MoveHeldObjectOptions,
+        )
+        from embodichain.lab.sim.atomic_actions.primitives.move_end_effector import (
+            MoveEndEffectorOptions,
+        )
+
         adaptive = any(
             type(options) is HandOverOptions and options.adaptive_receive
             for preset in self.catalog.robot_profile.presets.values()
             for options in preset.action_option_templates.values()
         )
-        if adaptive and (type(num_envs) is not int or num_envs != 1):
-            raise ValueError("Adaptive HandOver requires B=1.")
+        linear = any(
+            type(options)
+            in (HandOverOptions, MoveHeldObjectOptions, MoveEndEffectorOptions)
+            and options.linear_segments
+            for preset in self.catalog.robot_profile.presets.values()
+            for options in preset.action_option_templates.values()
+        )
+        if (adaptive or linear) and (type(num_envs) is not int or num_envs != 1):
+            raise ValueError("Declared Cartesian manipulation modes require B=1.")
 
     def validate_physics(self, physics: object) -> None:
         """Preflight declared native observation capabilities without starting Sim.
