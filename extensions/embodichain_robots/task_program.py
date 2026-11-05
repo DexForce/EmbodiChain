@@ -38,11 +38,26 @@ __all__ = [
 
 
 def declare_source_task_embodiment(embodiment: Mapping[str, Any]) -> dict[str, Any]:
-    """Expand explicit model integration services without changing shared components."""
+    """Expand supported model services without changing shared components.
+
+    Args:
+        embodiment: Explicit qualified component declaration.
+
+    Returns:
+        Owned source integration additions from its real model owner.
+
+    Raises:
+        ValueError: No implemented owner supports the selected component.
+    """
     if embodiment.get("embodiment_id") == "tianji_marvin":
         from .tianji.marvin.task_program import declare_tianji_task_program_embodiment
 
         return declare_tianji_task_program_embodiment(embodiment)
+    if embodiment.get("embodiment_id") not in {
+        "dual_franka_robotiq_arg2f_140",
+        "dual_ur10_robotiq_arg2f_140",
+    }:
+        raise ValueError("No configured task-hand owner for the selected embodiment.")
     return deepcopy(dict(embodiment))
 
 
@@ -77,11 +92,26 @@ def declare_task_robot_mount(
 
 
 def declare_task_contact_pads(embodiment: Mapping[str, Any]) -> dict[str, Any]:
-    """Apply an explicit experiment to the actual model's pad declarations."""
+    """Apply an explicit experiment to a supported model's pad declarations.
+
+    Args:
+        embodiment: Explicit qualified component with its real hand bindings.
+
+    Returns:
+        Owned material overlay from the selected model owner.
+
+    Raises:
+        ValueError: No implemented owner supports the selected component.
+    """
     if embodiment.get("embodiment_id") == "tianji_marvin":
         from .tianji.marvin.deployment import source_tianji_contact_pad_declaration
 
         return source_tianji_contact_pad_declaration(embodiment)
+    if embodiment.get("embodiment_id") not in {
+        "dual_franka_robotiq_arg2f_140",
+        "dual_ur10_robotiq_arg2f_140",
+    }:
+        raise ValueError("No configured task-hand owner for the selected embodiment.")
     from .robotiq.deployment import source_contact_pad_declaration
 
     return source_contact_pad_declaration(embodiment)

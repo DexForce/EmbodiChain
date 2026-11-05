@@ -84,3 +84,30 @@ def test_model_owner_dispatch_has_complete_topology_and_owned_declarations(
         else set(hints) == {"left", "right"}
     )
     require_task_robot_assets(identity)
+
+
+@pytest.mark.parametrize("operation", ["declare", "pads", "hands"])
+def test_unknown_model_is_rejected_before_a_generic_declaration_can_claim_capability(
+    operation,
+):
+    from embodichain_robots.task_program import (
+        declare_source_task_embodiment,
+        declare_task_contact_pads,
+        resolve_task_hand_calibrations,
+    )
+
+    root = Path(__file__).parents[3]
+    value = yaml.safe_load(
+        (
+            root
+            / "extensions/embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140.yaml"
+        ).read_text()
+    )
+    value["embodiment_id"] = "unregistered_hand_owner"
+    selected = {
+        "declare": declare_source_task_embodiment,
+        "pads": declare_task_contact_pads,
+        "hands": resolve_task_hand_calibrations,
+    }[operation]
+    with pytest.raises(ValueError, match="owner|calibration"):
+        selected(value)
