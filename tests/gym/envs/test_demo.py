@@ -1505,7 +1505,6 @@ class _TrajectoryRobotStub:
 class _TrajectoryWriterStub:
     num_envs = 2
     device = torch.device("cpu")
-    _seed_trajectory_states = EmbodiedEnv._seed_trajectory_states
 
     def __init__(self) -> None:
         self._traj_buffer = TensorDict(
@@ -1520,7 +1519,54 @@ class _TrajectoryWriterStub:
             },
             batch_size=[2, 4],
         )
-        self._traj_steps = torch.tensor([1, 1])
+        from embodichain.lab.gym.recording import EpisodeRecording
+        from embodichain.lab.gym.observations import (
+            ObservationDescriptor,
+            ObservationSample,
+            ObservationFrame,
+        )
+
+        self.episode_context = EpisodeContext(2)
+        self.episode_context._begin_episode([0, 1])
+        self.episode_context._finish_initialization([0, 1])
+        fields = {"robot/qpos": self._traj_buffer["states"]["robot"]["qpos"]}
+        self.recording = EpisodeRecording(
+            episode_context=self.episode_context,
+            fields=fields,
+            actions=self._traj_buffer["actions"][:, :3],
+        )
+        descriptor = ObservationDescriptor(
+            "robot",
+            "qpos",
+            "joint",
+            "joint_order",
+            ("joint_units",),
+            (2,),
+            torch.float32,
+        )
+
+        def frame(values, revision):
+            return ObservationFrame(
+                None,
+                {
+                    "robot/qpos": ObservationSample(
+                        descriptor,
+                        values,
+                        torch.ones(2, dtype=torch.bool),
+                        (None, None),
+                    )
+                },
+                self.episode_context.episode_ids,
+                revision,
+                episode_owner=self.episode_context,
+            )
+
+        self.frame = frame(torch.tensor([[0.1, 0.2], [0.3, 0.4]]), 0)
+        self.recording.seed(self.frame, [0, 1])
+        self.frame = frame(torch.tensor([[0.1, 0.2], [0.3, 0.4]]), 1)
+        self.recording.append(self.frame, torch.zeros(2, 2))
+        self.frame = frame(torch.tensor([[0.1, 0.2], [0.3, 0.4]]), 2)
+        self._traj_steps = self.recording.steps
         self._traj_raw_action = torch.tensor([[9.0, 9.0], [8.0, 8.0]])
         self._demo_active_mask = torch.tensor([False, True])
         self.robot = _TrajectoryRobotStub()
@@ -1536,12 +1582,11 @@ def test_trajectory_writer_freezes_inactive_demo_row() -> None:
     """Trajectory cursors obey the same sticky activity mask as rollout rows."""
     env = _TrajectoryWriterStub()
 
-    EmbodiedEnv._write_trajectory_step(env)
+    frozen = env._traj_buffer["states"]["robot"]["qpos"][0, 1].clone()
+    EmbodiedEnv._write_trajectory_step(env, env.frame)
 
     assert env._traj_steps.tolist() == [1, 2]
-    assert torch.equal(
-        env._traj_buffer["states"]["robot"]["qpos"][0, 1], torch.zeros(2)
-    )
+    assert torch.equal(env._traj_buffer["states"]["robot"]["qpos"][0, 1], frozen)
     assert torch.equal(
         env._traj_buffer["states"]["robot"]["qpos"][1, 1],
         torch.tensor([0.3, 0.4]),

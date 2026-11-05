@@ -244,3 +244,68 @@ def test_diagnostic_export_does_not_make_rejected_buffers_normal_recordings(tmp_
     with pytest.raises(RuntimeError, match="rejected"):
         EmbodiedEnv.save_trajectory(env, str(tmp_path / "normal.pt"), env_ids=[0])
     assert not (tmp_path / "normal.pt").exists()
+
+
+def test_saved_recording_preserves_terminal_state_and_described_raw_history(tmp_path):
+    from embodichain.lab.gym.recording import EpisodeRecording
+    from embodichain.lab.gym.observations import (
+        ObservationDescriptor,
+        ObservationSample,
+        ObservationFrame,
+    )
+
+    env = make_env()
+    env._traj_buffer = TensorDict(
+        {
+            "states": {"robot": {"qpos": torch.zeros(1, 4, 2)}},
+            "actions": torch.zeros(1, 4, 2),
+        },
+        batch_size=[1, 4],
+    )
+    env.recording = EpisodeRecording(
+        episode_context=env.episode_context,
+        fields={"robot/qpos": env._traj_buffer["states"]["robot"]["qpos"]},
+        actions=env._traj_buffer["actions"][:, :3],
+    )
+    env._traj_steps = env.recording.steps
+    descriptor = ObservationDescriptor(
+        "arm", "qpos", "joint", "joint_order", ("joint_units",), (2,), torch.float32
+    )
+    for step in range(4):
+        values = torch.tensor([[2.0 * step, 2.0 * step + 1.0]])
+        frame = ObservationFrame(
+            None,
+            {
+                "robot/qpos": ObservationSample(
+                    descriptor, values, torch.ones(1, dtype=torch.bool), (None,)
+                )
+            },
+            env.episode_context.episode_ids,
+            step,
+            step * 0.04,
+            "simulation_time",
+            env.episode_context,
+        )
+        if step == 0:
+            env.recording.seed(frame, [0])
+        else:
+            env.recording.append(frame, torch.full((1, 2), float(step)))
+    path = tmp_path / "trajectory.pt"
+    EmbodiedEnv.save_trajectory(env, str(path))
+    payload = torch.load(path, weights_only=False)
+    assert payload["states"]["robot"]["qpos"][0].tolist() == [
+        [0.0, 1.0],
+        [2.0, 3.0],
+        [4.0, 5.0],
+    ]
+    assert payload["actions"].shape == (1, 3, 2)
+    assert payload["terminal_states"]["robot"]["qpos"].tolist() == [[6.0, 7.0]]
+    history = payload["raw_observations"]
+    assert history["fields"]["robot/qpos"]["values"][0].tolist() == [
+        [0.0, 1.0],
+        [2.0, 3.0],
+        [4.0, 5.0],
+        [6.0, 7.0],
+    ]
+    assert history["fields"]["robot/qpos"]["valid"].all()
+    assert history["lengths"].tolist() == payload["meta"]["lengths"] == [3]

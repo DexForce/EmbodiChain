@@ -1073,11 +1073,29 @@ def config_to_cfg(
                 raise_if_not_found=True,
             )
 
+            consumers = obs_params_modified.get("consumers", ("policy",))
+            if (
+                not isinstance(consumers, (list, tuple))
+                or not consumers
+                or any(
+                    not isinstance(value, str)
+                    or value not in {"policy", "recording", "evidence"}
+                    for value in consumers
+                )
+                or len(set(consumers)) != len(consumers)
+            ):
+                raise ValueError(f"Invalid observation consumers for {obs_name!r}.")
+            if obs_params_modified["mode"] == "modify" and tuple(consumers) != (
+                "policy",
+            ):
+                raise ValueError("Modify functors apply only to policy observations.")
             observation = ObservationCfg(
                 func=obs_func,
                 mode=obs_params_modified["mode"],
                 name=obs_params_modified["name"],
                 params=obs_params_modified["params"],
+                consumers=tuple(consumers),
+                extra=obs_params_modified.get("extra", {}),
             )
 
             setattr(env_cfg.observations, obs_name, observation)
@@ -1983,7 +2001,9 @@ def init_rollout_buffer_from_config(
     if "observations" in env_config:
         for obs_name, obs_params in env_config["observations"].items():
             obs_mode = obs_params.get("mode", "modify")
-            if obs_mode == "add":
+            if obs_mode == "add" and "policy" in obs_params.get(
+                "consumers", ("policy",)
+            ):
                 obs_extra = obs_params.get("extra", {})
                 shape = obs_extra.get("shape", None)
                 if shape is not None:

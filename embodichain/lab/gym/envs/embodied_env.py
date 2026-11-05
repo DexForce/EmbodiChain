@@ -95,9 +95,10 @@ from embodichain.lab.gym.utils.gym_utils import (
     build_trajectory_buffer,
     init_rollout_buffer_from_gym_space,
 )
+from embodichain.lab.gym.recording import EpisodeRecording
+from embodichain.lab.gym.observations import ObservationFrame
 from embodichain.lab.gym.utils.trajectory_state import (
-    capture_trajectory_state,
-    RecordedTrajectoryReader,
+    trajectory_observation_cfgs,
 )
 from embodichain.data_pipeline.recording import build_recording_provenance
 from embodichain.utils import configclass, logger
@@ -548,6 +549,7 @@ class EmbodiedEnv(BaseEnv):
                     else "expert_controller_command"
                 )
 
+            self.recording: EpisodeRecording | None = None
             self._traj_buffer: TensorDict | None = None
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
@@ -564,25 +566,26 @@ class EmbodiedEnv(BaseEnv):
                 )
                 self._traj_buffer = build_trajectory_buffer(
                     env=self,
-                    max_steps=self.max_episode_steps,
+                    max_steps=self.max_episode_steps + 1,
                     num_envs=self.num_envs,
                     device=self.device,
                     uids=self.cfg.trajectory_uids,
                     action_space=self._trajectory_action_space(),
                 )
-                self._traj_steps = torch.zeros(
-                    self.num_envs, dtype=torch.long, device=self.device
+                fields = {
+                    "/".join(path): values
+                    for path, values in self._traj_buffer["states"].items(
+                        include_nested=True, leaves_only=True
+                    )
+                }
+                self.recording = EpisodeRecording(
+                    episode_context=self.episode_context,
+                    fields=fields,
+                    actions=self._traj_buffer["actions"][:, : self.max_episode_steps],
                 )
-
-            self.trajectory_reader: RecordedTrajectoryReader = RecordedTrajectoryReader(
-                source=lambda: (
-                    (self._traj_buffer["states"], self._traj_steps)
-                    if self._traj_buffer is not None and self._traj_steps is not None
-                    else None
-                ),
-                episode_context=self.episode_context,
-                is_closed=lambda: getattr(self, "_closed", False),
-            )
+                # Private aliases preserve existing replay/persistence adapters;
+                # acquisition, cursors and lifetime belong to the recorder.
+                self._traj_steps = self.recording.steps
 
             self.rollout_steps = torch.zeros(
                 self.num_envs, dtype=torch.long, device=self.device
@@ -727,9 +730,8 @@ class EmbodiedEnv(BaseEnv):
                     recorder(self, env_ids=env_ids, **params)
 
     def _seed_recording_state(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
-        """Seed pending expert observations and trajectory states."""
+        """Seed pending expert policy observations from the reset observation."""
         self._seed_expert_observations(obs, env_ids)
-        self._seed_trajectory_states(env_ids)
 
     def _seed_expert_observations(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
         """Copy current observations into pending expert-transition slots."""
@@ -753,17 +755,12 @@ class EmbodiedEnv(BaseEnv):
             obs_env_ids
         ].to(buffer_device)
 
-    def _seed_trajectory_states(self, env_ids: torch.Tensor) -> None:
-        """Copy current states into pending trajectory-transition slots."""
-        if self._traj_buffer is None or env_ids.numel() == 0:
-            return
-        env_ids = env_ids.to(device=self.device, dtype=torch.long)
-        eligible = self._traj_steps[env_ids] < self._traj_buffer.shape[1]
-        env_ids = env_ids[eligible]
-        if env_ids.numel() == 0:
-            return
-        step_ids = self._traj_steps[env_ids]
-        capture_trajectory_state(self, self._traj_buffer["states"], env_ids, step_ids)
+    def _record_initial_observation(
+        self, frame: ObservationFrame, env_ids: torch.Tensor
+    ) -> None:
+        recording = getattr(self, "recording", None)
+        if recording is not None:
+            recording.seed(frame, env_ids)
 
     def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
         """Set the rollout buffer for episode data collection.
@@ -830,8 +827,40 @@ class EmbodiedEnv(BaseEnv):
             if "startup" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="startup")
 
-        if self.cfg.observations:
-            self.observation_manager = ObservationManager(self.cfg.observations, self)
+        if self.cfg.observations or self.cfg.record_trajectory:
+            configured = self.cfg.observations
+            observations = (
+                dict(configured)
+                if isinstance(configured, Mapping)
+                else dict(vars(configured)) if configured is not None else {}
+            )
+            if self.cfg.record_trajectory:
+                replay = trajectory_observation_cfgs(self, self.cfg.trajectory_uids)
+                if set(replay).intersection(observations):
+                    raise ValueError(
+                        "Observation names collide with recording declarations."
+                    )
+                existing_fields = {
+                    cfg.name: cfg
+                    for cfg in observations.values()
+                    if cfg is not None and set(cfg.consumers) - {"policy"}
+                }
+                for key, declaration in replay.items():
+                    existing = existing_fields.get(declaration.name)
+                    if existing is not None:
+                        if (
+                            existing.func != declaration.func
+                            or existing.params.get("entity_cfg").uid
+                            != declaration.params["entity_cfg"].uid
+                            or existing.params.get("quantity", "pose")
+                            != declaration.params["quantity"]
+                        ):
+                            raise ValueError(
+                                f"Raw field {declaration.name!r} conflicts with the replay schema."
+                            )
+                        continue
+                    observations[key] = declaration
+            self.observation_manager = ObservationManager(observations, self)
 
         if self.cfg.rewards:
             self.reward_manager = RewardManager(self.cfg.rewards, self)
@@ -1099,7 +1128,10 @@ class EmbodiedEnv(BaseEnv):
                 demo_steps += active_mask.to(demo_steps.device, dtype=demo_steps.dtype)
 
         with self._profiler.section("trajectory_write"):
-            self._write_trajectory_step()
+            self._write_trajectory_step(
+                kwargs.get("observation_frame"),
+                active=kwargs.get("recording_active_mask"),
+            )
 
         self._update_episode_success_status(info, dones)
 
@@ -2126,25 +2158,29 @@ class EmbodiedEnv(BaseEnv):
         self._seed_expert_observations(obs, next_env_ids)
         self.current_rollout_step = int(self.rollout_steps.max().item())
 
-    def _write_trajectory_step(self) -> None:
-        """Complete one pre-action ``state`` + ``action`` trajectory row."""
-        if self._traj_buffer is None:
+    def _write_trajectory_step(
+        self,
+        frame: ObservationFrame | None = None,
+        *,
+        active: torch.Tensor | None = None,
+    ) -> None:
+        """Commit the actual action and its captured post-transition state."""
+        recording = getattr(self, "recording", None)
+        if recording is None:
             return
-        max_steps = self._traj_buffer.shape[1]
-        step = self._traj_steps
-        mask = step < max_steps
-        demo_active = getattr(self, "_demo_active_mask", None)
-        if demo_active is not None:
-            mask &= demo_active.to(mask.device)
-        idx = mask.nonzero(as_tuple=False).squeeze(-1)
-        if idx.numel() == 0:
-            return
-        st = step[idx]
-        if self._traj_raw_action is not None:
-            self._traj_buffer["actions"][idx, st] = self._traj_raw_action[idx]
-        self._traj_steps[idx] += 1
-        next_env_ids = idx[self._traj_steps[idx] < self._traj_buffer.shape[1]]
-        self._seed_trajectory_states(next_env_ids)
+        if frame is None or self._traj_raw_action is None:
+            raise RuntimeError(
+                "Trajectory recording requires an explicit observation frame and action."
+            )
+        recording.append(
+            frame,
+            self._traj_raw_action,
+            active=(
+                active
+                if active is not None
+                else getattr(self, "_demo_active_mask", None)
+            ),
+        )
         self._traj_raw_action = None
 
     def _write_rl_rollout_step(
@@ -3346,7 +3382,9 @@ class EmbodiedEnv(BaseEnv):
         """Save a causally aligned trajectory to a ``.pt`` file.
 
         ``states[t]`` is the state immediately before ``actions[t]`` is applied,
-        matching the frame alignment used by expert/LeRobot trajectories.
+        matching the frame alignment used by expert/LeRobot trajectories. New
+        recordings also include ``terminal_states`` and described
+        ``raw_observations`` with all T+1 state boundaries.
 
         Args:
             path: Destination ``.pt`` file path.
@@ -3441,7 +3479,17 @@ class EmbodiedEnv(BaseEnv):
         )
         try:
             with os.fdopen(descriptor, "wb") as stream:
-                torch.save({"states": states, "actions": actions, "meta": meta}, stream)
+                payload = {"states": states, "actions": actions, "meta": meta}
+                if getattr(self, "recording", None) is not None:
+                    payload["terminal_states"] = self._traj_buffer["states"][
+                        env_ids_t, lengths
+                    ].clone()
+                    meta["state_frame_layout"] = "pre_action_plus_terminal/v1"
+                    if purpose == "recording":
+                        payload["raw_observations"] = self.recording.snapshot_history(
+                            env_ids
+                        )
+                torch.save(payload, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, destination)
@@ -3566,6 +3614,9 @@ class EmbodiedEnv(BaseEnv):
                 return
 
             errors: list[Exception] = []
+            recording = getattr(self, "recording", None)
+            if recording is not None:
+                recording.close()
             try:
                 self._discard_pending_recordings()
             except Exception as error:

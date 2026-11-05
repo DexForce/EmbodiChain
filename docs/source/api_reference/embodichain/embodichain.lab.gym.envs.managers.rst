@@ -240,8 +240,40 @@ Action Descriptors
 .. autoclass:: ActionTrace
     :members:
 
+Observation Manager
+-------------------
+
+.. automodule:: embodichain.lab.gym.envs.managers.observation_manager
+    :members:
+
 Observation Functions
 ---------------------
+
+``ObservationCfg.consumers`` defaults to ``("policy",)``. Add functors may
+select ``recording`` and/or ``evidence`` without expanding the policy space.
+Those consumers require an ``ObservationSample`` with an explicit descriptor
+and row validity; arbitrary policy tensors cannot become physical evidence by
+renaming them. Modify functors remain policy-only.
+
+For example, a single original arena pose can serve all three consumers:
+
+.. code-block:: python
+
+   ObservationCfg(
+       func=observations.get_entity_state,
+       mode="add",
+       name="scene/cube/pose",
+       params={"entity_cfg": SceneEntityCfg(uid="cube"), "quantity": "pose"},
+       consumers=("policy", "recording", "evidence"),
+       extra={"shape": (7,)},
+   )
+
+The descriptor derives the resolved UID, shape, dtype, coordinate frame,
+representation and joint identities from the source. Pose values use arena
+coordinates and ``(x, y, z, qx, qy, qz, qw)``. Missing entities have a false validity
+mask and acquisition reasons; a policy zero-fill is never qualified evidence.
+Original channels are retained before in-place policy transforms. Existing
+Tensor-returning policy functors keep their signature and execution order.
 
 .. automodule:: embodichain.lab.gym.envs.managers.observations
     :members:

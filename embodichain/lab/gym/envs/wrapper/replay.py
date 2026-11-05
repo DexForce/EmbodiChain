@@ -216,7 +216,9 @@ class ReplayWrapper(gym.Wrapper):
         self._replay_steps = torch.zeros(
             self.env.num_envs, dtype=torch.long, device=self.env.device
         )
-        obs = self.env.get_obs()
+        recording = getattr(self.env, "recording", None)
+        frame = self.env._capture_observation() if recording is not None else None
+        obs = frame.policy if frame is not None else self.env.get_obs()
         if self._task_outcome_replay:
             info = self.env.get_info()
 
@@ -226,6 +228,8 @@ class ReplayWrapper(gym.Wrapper):
         seed_recording_state = getattr(self.env, "_seed_recording_state", None)
         if seed_recording_state is not None:
             seed_recording_state(obs, env_ids)
+        if frame is not None:
+            self.env._record_initial_observation(frame, env_ids)
         return obs, info
 
     def step(

@@ -30,8 +30,11 @@ from embodichain.lab.gym.utils.gym_utils import (
     fetch_data_from_dict,
     assign_data_to_dict,
 )
+from embodichain.lab.gym.observations import ObservationSample, _current_capture
 from .manager_base import ManagerBase
 from .cfg import ObservationCfg
+
+__all__ = ["ObservationManager"]
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
@@ -63,6 +66,7 @@ class ObservationManager(ManagerBase):
             env: An environment object.
         """
 
+        self._has_raw_channels = False
         self._mode_functor_names: dict[str, list[str]] = dict()
         self._mode_functor_cfgs: dict[str, list[ObservationCfg]] = dict()
         self._mode_class_functor_cfgs: dict[str, list[ObservationCfg]] = dict()
@@ -117,6 +121,11 @@ class ObservationManager(ManagerBase):
         # nothing to log here
         return {}
 
+    @property
+    def has_raw_channels(self) -> bool:
+        """Whether this manager declares recording or evidence channels."""
+        return self._has_raw_channels
+
     def compute(
         self,
         obs: EnvObs,
@@ -151,7 +160,29 @@ class ObservationManager(ManagerBase):
                     )
                 elif mode == "add":
                     data = self._call_functor(functor_name, functor_cfg, self._env, obs)
-                    assign_data_to_dict(obs, functor_cfg.name, data)
+                    if set(functor_cfg.consumers) - {"policy"}:
+                        if not isinstance(data, ObservationSample):
+                            raise TypeError(
+                                f"Raw observation {functor_name!r} must return "
+                                "ObservationSample; a policy Tensor has no physical identity."
+                            )
+                        capture = _current_capture.get()
+                        if capture is not None:
+                            if functor_cfg.name in capture.fields:
+                                raise ValueError(
+                                    f"Duplicate raw observation field {functor_cfg.name!r}."
+                                )
+                            capture.fields[functor_cfg.name] = capture.acquire(
+                                data.descriptor, lambda: data
+                            )
+                    if "policy" in functor_cfg.consumers:
+                        # In-place policy transforms must not alter original samples.
+                        value = (
+                            data.values.clone()
+                            if isinstance(data, ObservationSample)
+                            else data
+                        )
+                        assign_data_to_dict(obs, functor_cfg.name, value)
                 else:
                     logger.log_error(f"Unsupported observation mode '{mode}'.")
 
@@ -198,6 +229,20 @@ class ObservationManager(ManagerBase):
                     f"Configuration for the functor '{functor_name}' is not of type ObservationCfg."
                     f" Received: '{type(functor_cfg)}'."
                 )
+
+            if not isinstance(functor_cfg.consumers, (tuple, list)):
+                raise ValueError(f"Invalid observation consumers for {functor_name!r}.")
+            consumers = tuple(functor_cfg.consumers)
+            if (
+                not consumers
+                or len(set(consumers)) != len(consumers)
+                or set(consumers) - {"policy", "recording", "evidence"}
+            ):
+                raise ValueError(f"Invalid observation consumers for {functor_name!r}.")
+            if functor_cfg.mode == "modify" and consumers != ("policy",):
+                raise ValueError("Modify functors apply only to policy observations.")
+            functor_cfg.consumers = consumers
+            self._has_raw_channels |= bool(set(consumers) - {"policy"})
 
             # resolve common parameters
             self._resolve_common_functor_cfg(functor_name, functor_cfg, min_argc=2)

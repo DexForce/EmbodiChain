@@ -145,6 +145,13 @@ class ObservationCfg(FunctorCfg):
     `/` is used to separate different levels of hierarchy in the observation dictionary.
     """
 
+    consumers: tuple[Literal["policy", "recording", "evidence"], ...] = ("policy",)
+    """Consumers of this channel. Non-policy consumers require a described raw
+    :class:`~embodichain.lab.gym.observations.ObservationSample` from an add
+    functor. They never add fields to the policy observation space. Modify
+    functors apply only to the policy view, leaving raw channels unchanged.
+    """
+
 
 @configclass
 class SceneEntityCfg:

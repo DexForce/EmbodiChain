@@ -1408,8 +1408,9 @@ rejected. Independent runtime owners retain independent state.
 Current capture selects the registered pair/scope and uses the native
 rest-envelope COM tolerance. Recorded capture preserves the original policy
 parameters and reads the exact seeded end-step slots through an explicitly
-injected ``RecordedTrajectoryReader``. Omitting the reader keeps current capture
-available but rejects historical capture. It never resamples current contacts for
+injected ``EpisodeRecording``. The collector resolves raw pose descriptors,
+reads original values and masks, and converts only qualified arena poses.
+Omitting the recording keeps current capture available but rejects historical capture. It never resamples current contacts for
 a historical pose or falls back to a live pose/previous frame.
 The result owns physical metadata and availability only; TaskSpec and Task Engine
 are not dependencies of this Lab collector.
@@ -1627,19 +1628,78 @@ embodichain.lab.gym.utils.profiler
    EnvProfilerCfg
    EnvProfiler
 
+embodichain.lab.gym.observations
+--------------------------------
+
+An explicit control boundary captures original described channels once. Policy
+views receive separate tensors before in-place normalization/noise; actual policy
+observations continue into the existing rollout recorder. Ordinary ``get_obs()``
+queries do not advance raw history. Repeated captures within one control tick
+have distinct revisions, so external scene edits cannot reuse a step-only cache.
+Contact histories retain the sensor's physics clock and complete-window contract.
+
+.. currentmodule:: embodichain.lab.gym.observations
+
+.. autosummary::
+
+   ObservationDescriptor
+   ObservationSample
+   ObservationFrame
+
+.. autoclass:: ObservationDescriptor
+   :members:
+
+.. autoclass:: ObservationSample
+   :members:
+
+.. autoclass:: ObservationFrame
+   :members:
+
+embodichain.lab.gym.recording
+-----------------------------
+
+``EpisodeRecording`` owns raw field buffers, transition actions, row cursors and
+live recording access. ``seed`` records S0 after reset preparation;
+``append`` commits At and its already captured St+1 before autoreset. Capacity T
+therefore retains T+1 states. ``step(recording_active_mask=...)`` can select raw
+recording rows independently of accepted demonstration rollouts, including a
+reported settling tail. Replay reset reseeds raw history after restoring the
+source initial state. ``read`` accepts original environment rows, expected
+episodes, exact frame indices and arbitrary field names; it returns owned CPU
+snapshots with descriptors, masks, reasons and source sampling identities.
+Missing channels/slots never fall back to earlier frames or current simulation.
+Foreign owners, changed descriptors, reused captures and closed recordings reject.
+Frame indices are row-local recording slots, not timestamps.
+
+``snapshot_history`` archives described raw fields and validity. Trajectory
+``.pt`` exports retain their causal ``states[t]`` / ``actions[t]`` layout and add
+``terminal_states`` plus versioned ``raw_observations`` for all T+1 boundaries.
+Existing consumers can continue to read their original fields. Env dispatches
+capture/reset/close; recording and evidence consumers perform no second state
+acquisition through Env methods or source callbacks.
+
+.. currentmodule:: embodichain.lab.gym.recording
+
+.. autosummary::
+
+   EpisodeRecording
+   RecordedObservationFrame
+
+.. autoclass:: EpisodeRecording
+   :members:
+
+.. autoclass:: RecordedObservationFrame
+   :members:
+
 embodichain.lab.gym.utils.trajectory_state
 ------------------------------------------
 
-Owned recorded pose snapshots identify native rows, episodes and positive
-completed trajectory slots. Missing recording, incomplete rows and unavailable
-terminal slots are errors; these readers do not query current simulation state.
-``RecordedTrajectoryReader`` owns episode, initialization and closed-lifetime
-checks before and after copying. The recording host supplies its episode owner
-and source/lifetime callbacks; consumers verify that owner by identity, so matching
-episode numbers cannot hide a reader from another environment. Readers expose
-owned snapshots instead of mutable buffers. Env only assembles
-``trajectory_reader`` and does not define entity-specific read methods.
-Slot indices are not simulation timestamps.
+Capture/restore helpers retain the standalone replay surface.
+``trajectory_observation_cfgs`` declares replay state fields as raw observation
+functors, preserving full robot/mimic joint order, articulation root states and
+rigid velocities. Declaration assembly performs no physical acquisition.
+The standard environment recorder uses these functors and shares pose acquisition
+with policy ``get_object_pose`` / ``get_rigid_object_pose`` within a boundary.
 
 .. currentmodule:: embodichain.lab.gym.utils.trajectory_state
 
@@ -1647,17 +1707,9 @@ Slot indices are not simulation timestamps.
 
    capture_trajectory_state
    restore_trajectory_state
-   RecordedRigidPoseSnapshot
-   RecordedTrajectoryReader
-   read_recorded_rigid_pose_snapshot
+   trajectory_observation_cfgs
 
-.. autoclass:: RecordedRigidPoseSnapshot
-   :members:
-
-.. autoclass:: RecordedTrajectoryReader
-   :members:
-
-.. autofunction:: read_recorded_rigid_pose_snapshot
+.. autofunction:: trajectory_observation_cfgs
 
 embodichain.lab.scripts.analyze_workspace
 -----------------------------------------

@@ -248,8 +248,10 @@ checks the per-owner clock-binding generation; same-clock binding is idempotent.
 The generation is an ownership guard, not evidence of strong support. Current
 capture uses the native rest-envelope COM tolerance, while recorded snapshots
 retain the policy's original override. Recorded reads combine the original policy
-metadata with exact trajectory boundary slots from an explicitly injected
-`RecordedTrajectoryReader`. The recording component validates its buffer lifetime
-and episode; the collector retains bridge/policy ownership checks. Without a
-reader, current capture remains available and historical capture rejects. It
+metadata with exact described raw pose fields from an explicitly injected
+`EpisodeRecording`. The recording component validates its buffer lifetime,
+actual lifecycle owner and episodes; the collector retains bridge/policy checks.
+Without a recording, current capture remains available and historical capture
+rejects. Raw history and T+1 timing belong to
+[environment recording](../env-framework/env-framework.md#expert-trajectory-contract). It
 never combines current contacts with old poses or accesses Env's private buffers.

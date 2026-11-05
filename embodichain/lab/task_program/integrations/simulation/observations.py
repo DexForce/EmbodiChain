@@ -28,7 +28,7 @@ from .stability import SimulationStabilityConditionCfg
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
-    from embodichain.lab.gym.utils.trajectory_state import RecordedTrajectoryReader
+    from embodichain.lab.gym.recording import EpisodeRecording
     from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
     from ..catalog import SimulationTaskProgramRegistration
 
@@ -47,8 +47,8 @@ class SimulationSupportObservationCollector:
         environment: Initialized recording environment for this execution.
         bridge: Exact bridge whose clock and policy session drive this run.
         registration: Sealed declaration used to create the runtime.
-        recording: Optional read-only trajectory reader supplied by the recording
-            host. Historical capture requires this explicit dependency.
+        recording: Episode-owned raw observation history supplied by the
+            recording host. Historical capture requires this explicit dependency.
     """
 
     def __init__(
@@ -57,7 +57,7 @@ class SimulationSupportObservationCollector:
         bridge: TaskProgramDemoBridge,
         registration: SimulationTaskProgramRegistration,
         *,
-        recording: RecordedTrajectoryReader | None = None,
+        recording: EpisodeRecording | None = None,
     ) -> None:
         from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
         from ..catalog import SimulationTaskProgramRegistration, _canonical_value
@@ -232,8 +232,15 @@ class SimulationSupportObservationCollector:
             RuntimeError: Recording or the requested policy measurement is absent.
         """
         self._check_episode()
+        frames = tuple(frame_indices)
+        if len(frames) != len(self._episodes) or any(
+            type(frame) is not int or frame <= 0 for frame in frames
+        ):
+            raise ValueError(
+                "Recorded support requires one positive completed boundary per row."
+            )
         if self._recording is None:
-            raise RuntimeError("Recorded trajectory reader is unavailable.")
+            raise RuntimeError("Episode recording is unavailable.")
         cfg = self._condition(preset_id)
         segments = [
             segment
@@ -261,13 +268,43 @@ class SimulationSupportObservationCollector:
             raise RuntimeError(
                 "Recorded native support/acquisition measurement is unavailable."
             ) from error
-        poses = {}
+        from embodichain.compute.geometry.rigid import validate_rigid_pose_batch
+        from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+        fields = {}
         for name in (cfg.entity, cfg.reference):
-            poses[name] = self._recording.read_rigid_poses(
-                self._bindings[name].simulation_uid,
-                frame_indices,
-                episode_ids=self._episodes,
-            ).poses.tolist()
+            uid = self._bindings[name].simulation_uid
+            candidates = [
+                field
+                for field, descriptor in self._recording.descriptors.items()
+                if descriptor.entity_uid == uid
+                and descriptor.quantity == "pose"
+                and descriptor.coordinate_frame == "arena"
+                and descriptor.representation == "xyz_xyzw"
+                and descriptor.shape == (7,)
+                and descriptor.units == ("m", "unitless")
+            ]
+            if not candidates:
+                raise RuntimeError(
+                    f"Recorded raw arena pose for {uid!r} is unavailable."
+                )
+            # Described aliases share their raw source; names are consumer projections.
+            fields[name] = candidates[0]
+        snapshot = self._recording.read(
+            frame_indices,
+            fields=tuple(dict.fromkeys(fields.values())),
+            episode_ids=self._episodes,
+        )
+        poses = {}
+        for name, field in fields.items():
+            sample = snapshot.fields[field]
+            if not bool(sample.valid.all()):
+                raise RuntimeError(
+                    f"Recorded raw pose acquisition for {name!r} is unavailable: {sample.acquisition_errors}."
+                )
+            matrices = xyz_quat_to_4x4_matrix(sample.values)
+            validate_rigid_pose_batch(matrices, len(snapshot.env_ids))
+            poses[name] = matrices.tolist()
         self._check_episode()
         acquisition["clock_domain"] = (
             "environment_step"

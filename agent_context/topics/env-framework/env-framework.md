@@ -20,7 +20,7 @@ Lightweight RL environments have a separate owner in
 | Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
 | Scene, managers, RL outcomes and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
-| Historical recording reads and episode/lifetime checks | `gym/utils/trajectory_state.py`: `RecordedTrajectoryReader`; Env assembles the read-only component |
+| Raw observation history, queries and episode/lifetime checks | `gym/recording.py`: `EpisodeRecording`; Env dispatches explicit capture/reset/close boundaries |
 | Optional measured physical objectives | `embodichain/lab/gym/envs/objectives/`; Gym owns observation/reset hooks independently of expert acceptance |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
 | Demo segment execution / outcomes | `embodichain/lab/gym/envs/demo.py` |
@@ -103,15 +103,30 @@ schema version, and `step_dt` in trajectory/demo metadata. Missing qvel fails
 before stepping in position-velocity mode; inactive and hold targets use zero
 qvel.
 
-`RecordedTrajectoryReader` in `gym/utils/trajectory_state.py` owns historical
-recording queries and validates expected `EpisodeContext` IDs, initialized rows
-and recording lifetime before and after copying. Injected readers must share the
-consumer's actual episode owner; numeric episode IDs alone cannot establish that
-ownership. Env assembles `trajectory_reader` from recording sources and lifecycle
-callbacks; it does not define rigid-pose query methods. Consumers inject the reader into their acquisition adapter.
-The reader requires exact seeded `end_step` slots and returns owned CPU matrices;
-missing capacity/rows never select `end_step - 1` or current live state. Frame
-indices describe row-local recording, not simulation timestamps.
+`EpisodeRecording` in `gym/recording.py` owns raw field storage, actions,
+row cursors and live recording access. Standard replay fields are declared by
+`trajectory_observation_cfgs`, using the same raw functors as policy observations;
+Env does not resample state in the recording hook. Raw production and consumer
+selection belong to [manager functors](../manager-functor/manager-functor.md).
+
+An explicit observation boundary follows physics and interval events, before
+reward/action-postprocessing hooks and autoreset. Reset seeds S0 after
+`episode_prepare`; T transitions retain T+1 raw states, including terminal ST.
+Ordinary `get_obs()` queries do not advance history, and explicit captures in the
+same control tick receive separate revisions. Existing policy rollout buffers
+retain actual policy/noise samples and action semantics. An explicit
+`step(..., recording_active_mask=...)` selects raw recording rows independently
+of demonstration rollouts, so a diagnostic settling tail cannot extend accepted
+segment/rollout boundaries or resample state after the step.
+
+Historical consumers inject `env.recording`, select described fields, and query
+exact row-local frame indices with expected episode IDs. The recorder checks the
+actual lifecycle owner and initialized episodes before/after copying. Missing
+fields/slots never select an earlier frame or live state. Snapshots own CPU
+values, validity, missing reasons and source clock/revision metadata. Legacy
+trajectory files keep pre-action `states`/`actions`; new files add terminal state
+and versioned raw history. Private `_traj_buffer`/`_traj_steps` remain projection
+aliases for existing persistence/replay adapters, not acquisition owners.
 
 ## Lifecycle and boundaries
 

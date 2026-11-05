@@ -90,6 +90,23 @@ maps them into `env.active_joint_ids`; observed mimic joints are included.
 Use this selector for reusable arm/gripper observations across robot DOFs and
 state orders. Physical joint IDs are not observation-column indices.
 
+## Raw observations and consumer views
+
+`lab/gym/observations.py` owns raw descriptors, validity-bearing samples and
+explicit observation frames. `ObservationCfg.consumers` defaults to policy.
+Recording/evidence add terms must produce described `ObservationSample` values;
+plain Tensor policy outputs retain their existing contract. Recording-only
+fields never enlarge policy observations or policy rollout allocation.
+
+`observations.get_entity_state` derives native UID, quantity, arena/joint frame,
+representation, shape, dtype and joint order from its source. Explicit boundaries
+share its original acquisition across aliases and existing pose functors.
+Policy transformations receive separate tensors; zero-filled missing sources
+retain false validity and reasons. Preserve configured policy functor/RNG order.
+Contact windows remain sensor-owned and cannot be replaced with a control-rate
+pose/Boolean. History ownership and T+1 timing belong to
+[environment recording](../env-framework/env-framework.md#expert-trajectory-contract).
+
 ## Lifecycle
 
 Managers resolve callable strings, validate parameters, resolve `SceneEntityCfg`
