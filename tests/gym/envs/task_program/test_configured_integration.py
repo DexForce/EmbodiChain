@@ -3442,3 +3442,72 @@ def test_joint_window_runtime_settings_do_not_redefine_normative_condition_data(
     )
     second = _decode_configured_task_program_integration(payload).registration
     assert first.fingerprint != second.fingerprint
+
+
+def test_segment_motion_policy_is_closed_forwarded_and_reported_separately():
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+    from embodichain.lab.task_program.runtime.results import _motion_policy_to_metadata
+
+    declaration = {
+        "sample_count": 140,
+        "interpolation_mode": "fixed_grid",
+        "ik_seed_mode": "sequential",
+        "acceleration_limit": None,
+        "sample_count_retries": [260, 320],
+        "segment_sample_count_retries": [260, 320],
+        "segment_continuous_ik_recovery": True,
+    }
+    policy = _decode_motion_policy(declaration, path="motion")
+    options = policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 3),
+        control_part="arm",
+        interpolation_dt=0.04,
+        cartesian_keyframes=True,
+    )
+    assert (
+        options.segment_sample_count_retries == (260, 320)
+        and options.segment_continuous_ik_recovery
+    )
+    report = _motion_policy_to_metadata(policy)
+    assert report["sample_count_retries"] == [260, 320] and report[
+        "segment_sample_count_retries"
+    ] == [260, 320]
+    assert report["segment_continuous_ik_recovery"] is True
+    for invalid in (
+        {"segment_sample_count_retries": [320, 260]},
+        {"segment_continuous_ik_recovery": 1},
+        {"strategy": "motion_gen"},
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            _decode_motion_policy({**declaration, **invalid}, path="motion")
+
+
+def test_final_velocity_rejection_representation_is_explicit_and_default_identity_stable():
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+    from embodichain.lab.sim.atomic_actions import MotionPolicy
+
+    assert "final_velocity_rejection" not in _canonical_value(MotionPolicy())["fields"]
+    selected = _decode_motion_policy(
+        {
+            "sample_count": 50,
+            "require_final_velocity": True,
+            "final_velocity_rejection": "mask_only",
+        },
+        path="motion",
+    )
+    assert (
+        selected.final_velocity_rejection == "mask_only"
+        and selected.require_final_velocity
+    )
+    assert (
+        _canonical_value(selected)["fields"]["final_velocity_rejection"] == "mask_only"
+    )
+    with pytest.raises((TypeError, ValueError)):
+        _decode_motion_policy(
+            {"sample_count": 50, "final_velocity_rejection": "unknown"}, path="motion"
+        )
