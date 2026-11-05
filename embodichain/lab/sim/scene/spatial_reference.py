@@ -29,7 +29,14 @@ __all__ = ["SpatialReferenceGeometry", "read_spatial_reference"]
 
 @dataclass(frozen=True, slots=True)
 class SpatialReferenceGeometry:
-    """Owned scaled local vertices and initial pose of one qualified native link."""
+    """Owned scaled local vertices and initial pose of one qualified native link.
+
+    Args:
+        link: Exact source-native link selected by the existing catalog.
+        vertices: Finite scaled link-local collision-input vertices.
+        initial_pose: Root-composed initial link pose. Arrays are copied into
+            read-only owned storage; they are not native contact evidence.
+    """
 
     link: str
     vertices: np.ndarray
