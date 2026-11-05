@@ -3667,9 +3667,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
           "symbol": "SimulationTaskProgramFactory.create_atomic_action_engine",
-          "start_line": 1368,
-          "end_line": 1374,
-          "excerpt": "        engine = AtomicActionEngine(\n            motion_generator,\n            free_motion_query=free_motion_query,\n            handover_scene_provider=handover_scene,\n            twist_planning_provider=twist_planning_provider,\n            articulation_continuation_provider=articulation_continuation_provider,\n            control_profiles=profile.action_control_profiles(),"
+          "start_line": 1696,
+          "end_line": 1700,
+          "excerpt": "        engine = AtomicActionEngine(\n            motion_generator,\n            coordinated_cargo_geometry=cargo_geometry,\n            held_staging_provider=held_planning,\n            slide_hand_clearance_provider=slide_clearance,"
         }
       ]
     },

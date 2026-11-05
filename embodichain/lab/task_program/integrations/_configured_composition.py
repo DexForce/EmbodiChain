@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from embodichain.lab.task_program.language.schema import TaskProgramIntegrationCfg
 from embodichain.utils.config_paths import resolve_config_path
@@ -39,6 +39,10 @@ from .configured import (
     _identifier,
     _mapping,
 )
+
+if TYPE_CHECKING:
+    from embodichain.lab.task_program.language.schema import TaskProgramCfg
+    from .catalog import TaskProgramIntegrationCatalog
 
 __all__: list[str] = []
 
@@ -302,12 +306,15 @@ def _resolve_execution_policy(
     value: object,
     *,
     base_dir: Path,
-) -> tuple[Path, dict[str, object]]:
+) -> tuple[Path | None, dict[str, object]]:
     """Load a policy path or component selector with bounded scalar overrides."""
     selection_path = "task_program.execution_policy"
     overrides: Mapping[str, object] = {}
     component_field = selection_path
-    if isinstance(value, str):
+    inline = isinstance(value, Mapping) and "inline" in value
+    if inline:
+        component = None
+    elif isinstance(value, str):
         component = value
     else:
         selection = _mapping(
@@ -324,15 +331,24 @@ def _resolve_execution_policy(
             required=frozenset(),
             optional=frozenset(_EXECUTION_POLICY_OVERRIDE_FIELDS),
         )
-    policy_path = _component_path(
-        component,
-        base_dir=base_dir,
-        path=component_field,
-        suffixes=frozenset({".yaml", ".yml"}),
+    policy_path = (
+        None
+        if inline
+        else _component_path(
+            component,
+            base_dir=base_dir,
+            path=component_field,
+            suffixes=frozenset({".yaml", ".yml"}),
+        )
+    )
+    raw_policy = (
+        _inline_component(value, path=selection_path)
+        if inline
+        else _load_yaml_component(policy_path, field_name="execution policy")
     )
     policy = dict(
         _mapping(
-            _load_yaml_component(policy_path, field_name="execution policy"),
+            raw_policy,
             path="execution policy",
             required=frozenset(
                 {
@@ -386,27 +402,41 @@ def _resolve_task_program_components(
     value: object,
     *,
     base_dir: Path,
-) -> tuple[Path, Mapping[str, object], Mapping[str, object]]:
+) -> tuple[Path | Mapping[str, object], Mapping[str, object], Mapping[str, object]]:
     """Resolve program, task integration, and execution policy selections."""
     declaration = _mapping(
         value,
         path="task_program",
         required=frozenset({"program", "integration", "execution_policy"}),
     )
-    program_path = _component_path(
-        declaration["program"],
-        base_dir=base_dir,
-        path="task_program.program",
-        suffixes=frozenset({".json", ".yaml", ".yml"}),
+    program_path = (
+        _inline_component(declaration["program"], path="task_program.program")
+        if isinstance(declaration["program"], Mapping)
+        else _component_path(
+            declaration["program"],
+            base_dir=base_dir,
+            path="task_program.program",
+            suffixes=frozenset({".json", ".yaml", ".yml"}),
+        )
     )
-    integration_path = _component_path(
-        declaration["integration"],
-        base_dir=base_dir,
-        path="task_program.integration",
-        suffixes=frozenset({".yaml", ".yml"}),
-    )
+    if isinstance(declaration["integration"], Mapping):
+        integration_path = None
+        integration_source = _inline_component(
+            declaration["integration"], path="task_program.integration"
+        )
+    else:
+        integration_path = _component_path(
+            declaration["integration"],
+            base_dir=base_dir,
+            path="task_program.integration",
+            suffixes=frozenset({".yaml", ".yml"}),
+        )
+        integration_source = _load_yaml_component(
+            integration_path, field_name="task integration"
+        )
+    integration_base = base_dir if integration_path is None else integration_path.parent
     integration = _mapping(
-        _load_yaml_component(integration_path, field_name="task integration"),
+        integration_source,
         path="task integration",
         required=frozenset(
             {
@@ -444,10 +474,10 @@ def _resolve_task_program_components(
                         str(
                             _resolve_data_reference(
                                 value["prototype_manifest"],
-                                base_dir=integration_path.parent,
+                                base_dir=integration_base,
                             )
                         ),
-                        base_dir=integration_path.parent,
+                        base_dir=integration_base,
                         path=f"integration.runtime_services.nominal_motion_sources[{index}].prototype_manifest",
                         suffixes=frozenset({".json"}),
                     )
@@ -684,29 +714,159 @@ def _load_configured_task_program_deployment(
     if (
         factory.nominal_motion_sources
         or integration.registration.invocation_policy_bindings
+        or isinstance(program_path, Mapping)
     ):
-        from embodichain.lab.task_program import load_task_program
         from .nominal import _ConfiguredTaskProgramNominalSources
 
         catalog = integration.registration.catalog
-        program = load_task_program(
-            program_path, integration=selection, validation_context=catalog
+        program = _load_deployment_program(
+            program_path, selection=selection, catalog=catalog
         )
         if program.program_id != program_id:
             raise ValueError(
-                "configured nominal sources require the integration's program_id"
+                "configured deployment requires the integration's program_id"
             )
         compiled = catalog.preflight(program)
         if factory.nominal_motion_sources:
+            measured = integration.registration.planning_services
+            measured_ids = (
+                set()
+                if measured is None
+                else {value.invocation_id for value in measured.measured_rigid_bindings}
+            )
+            nominal_indices = {
+                value.call_index for value in factory.nominal_motion_sources
+            }
+            index = 0
+            for segment in compiled.iter_segments():
+                for call in segment.calls:
+                    occurrence = f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}"
+                    if index in nominal_indices and occurrence in measured_ids:
+                        raise ValueError(
+                            "Measured rigid planning does not support an external nominal source for its selected occurrence."
+                        )
+                    index += 1
             _ConfiguredTaskProgramNominalSources(
                 compiled, factory.nominal_motion_sources
+            )
+            _validate_configured_nominal_planning_modes(
+                compiled, integration.registration, factory.nominal_motion_sources
             )
     return _ConfiguredTaskProgramDeployment(
         integration_id=integration_id,
         program_id=program_id,
-        program_path=program_path,
+        program_path=program_path if isinstance(program_path, Path) else None,
+        program_declaration=(
+            deepcopy(dict(program_path)) if isinstance(program_path, Mapping) else None
+        ),
         selection=selection,
         integration=integration,
         scene_binding=deepcopy(dict(scene_binding)),
         planner_config=planner_config,
     )
+
+
+def _inline_component(value: object, *, path: str) -> dict[str, object]:
+    """Own an explicit inline declaration without reading a component file."""
+    selection = _mapping(value, path=path, required=frozenset({"inline"}))
+    return _owned_mapping(selection["inline"], path=f"{path}.inline")
+
+
+def _load_deployment_program(
+    source: Path | Mapping[str, object],
+    *,
+    selection: TaskProgramIntegrationCfg,
+    catalog: TaskProgramIntegrationCatalog,
+) -> TaskProgramCfg:
+    """Use the same strict decoder for inline and file-backed programs."""
+    from embodichain.lab.task_program import decode_task_program, load_task_program
+    from embodichain.lab.task_program.language.loader import (
+        _bind_task_program_integration,
+    )
+
+    if isinstance(source, Mapping):
+        return decode_task_program(
+            _bind_task_program_integration(dict(source), selection),
+            validation_context=catalog,
+        )
+    return load_task_program(source, integration=selection, validation_context=catalog)
+
+
+def _validate_configured_nominal_planning_modes(
+    program, registration, declarations
+) -> None:
+    """Reject known unsupported generated-policy combinations before live assembly."""
+    from embodichain.lab.task_program.semantics import SemanticIntegrationManifest
+    from embodichain.lab.sim.atomic_actions import (
+        PickUpOptions,
+        PlaceOptions,
+        MoveHeldObjectOptions,
+    )
+
+    selected = {item.call_index for item in declarations}
+    if not selected:
+        return
+    registration.assert_unchanged()
+    manifest = SemanticIntegrationManifest(
+        scene=registration.catalog.scene,
+        robot_profile=registration.catalog.robot_profile,
+        call_catalog=registration.call_catalog,
+        runtime_preset=program.integration.runtime_preset,
+    )
+    presets = {
+        item.invocation_id: item.preset_id
+        for item in registration.invocation_policy_bindings
+    }
+    index = 0
+    for segment in program.iter_segments():
+        for call in segment.calls:
+            current = index
+            index += 1
+            if current not in selected:
+                continue
+            occurrence = (
+                f"{program.program_id}/{segment.segment_id}:{call.segment_call_index}"
+            )
+            linked = manifest.link_call(
+                call.call, path=call.source_path, preset_id=presets.get(occurrence)
+            )
+            preset = manifest.robot_profile.presets[linked.preset_id]
+            options = preset.action_option_template(call.call.semantic_id)
+            blocked = preset.recovery_policy.planning_recovery is not None
+            if type(options) is PickUpOptions:
+                blocked = blocked or any(
+                    (
+                        options.adaptive_grasp != "none",
+                        options.constrained_grasp,
+                        options.qualify_fixed_grasp,
+                        options.linear_segments,
+                        options.full_opening_clearance,
+                        options.native_closing_revision is not None,
+                        options.require_qualified_approach,
+                        options.measured_preshape,
+                    )
+                )
+            elif type(options) is PlaceOptions:
+                blocked = blocked or any(
+                    (
+                        options.linear_segments,
+                        options.qualify_required_waypoints,
+                        options.monitor_scene_until_approach,
+                        options.measured_inside,
+                        options.drawer_placement,
+                    )
+                )
+            elif type(options) is MoveHeldObjectOptions:
+                blocked = blocked or any(
+                    (
+                        options.linear_segments,
+                        options.lift_clearance is not None,
+                        options.hand_hold != "grasp_command",
+                        options.report_retained_attachment,
+                        options.drawer_transport,
+                    )
+                )
+            if blocked:
+                raise ValueError(
+                    "Configured external nominal source cannot bypass explicit native/generated planning or recovery for its selected occurrence."
+                )

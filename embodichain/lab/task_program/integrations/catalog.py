@@ -129,6 +129,35 @@ from .simulation.policies import (
 )
 from .simulation.planning_services import SimulationPlanningServicesCfg
 from .simulation.idle_clearance import IdleClearanceFactory
+from .simulation.planning_services import _effective_planning_service_fields
+from .simulation.held_planning import (
+    HeldStagingInvocationBinding,
+    _validate_program_bindings,
+)
+from .simulation.pick_closing import PickClosingBinding, _validate_pick_program
+from .simulation.place_continuation import (
+    PlaceContinuationBinding,
+    HeldAlignmentContinuationBinding,
+    _bind_place_continuation_declarations,
+)
+from .simulation.place_scene import PlaceSceneBinding
+from .simulation.pour_binding import (
+    PourProjectionBinding,
+    resolve_pour_projection_routes,
+)
+from .simulation.pour_projection import ResolvedPourProjectionRoute
+from .simulation.released_continuation import (
+    ReleasedHandContinuationBinding,
+    _bind_released_continuations,
+)
+from .simulation.slide_preshape import SlidePreshapeBinding
+from .simulation.drawer_planning import DrawerInvocationBinding
+from .simulation.measured_rigid import (
+    MeasuredRigidInvocationBinding,
+    _validate_measured_program,
+)
+from .simulation.transport import DrawerTransportLowererFactory
+
 
 from .runtime_services import TaskProgramRuntimeServiceContext
 from .simulation.control_policy import SimulationControlConditionCfg
@@ -237,11 +266,20 @@ def _canonical_value(value: object) -> object:
             metadata.pop("final_velocity_rejection")
         if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
             metadata.pop("retry_all_failed_plans")
+        if type(value) is SimulationPlanningServicesCfg:
+            effective = _effective_planning_service_fields(value, validate=False)
+            metadata = {
+                name: item for name, item in metadata.items() if name in effective
+            }
+        if type(value) is PlaceSceneBinding:
+            for name in ("inside_subject_id", "inside_container_id"):
+                if getattr(value, name) is None:
+                    metadata.pop(name, None)
         if (
-            type(value) is SimulationPlanningServicesCfg
-            and value.native_handover_scene is False
+            type(value) is PickClosingBinding
+            and value.opening_place_invocation_id is None
         ):
-            metadata.pop("native_handover_scene")
+            metadata.pop("opening_place_invocation_id", None)
         return {"type": _qualified_name(value), "fields": metadata}
     raise TypeError(
         "Registration fingerprint metadata contains unsupported value type "
@@ -608,7 +646,151 @@ class TaskProgramIntegrationCatalog:
         default_factory=dict, kw_only=True
     )
 
+    inside_landing_targets: Mapping[str, tuple[str, str]] = field(
+        default_factory=dict, kw_only=True
+    )
+
+    measured_rigid_bindings: tuple[MeasuredRigidInvocationBinding, ...] = field(
+        default=(), kw_only=True
+    )
+
+    drawer_bindings: tuple[DrawerInvocationBinding, ...] = field(
+        default=(), kw_only=True
+    )
+
+    slide_preshape_bindings: tuple[SlidePreshapeBinding, ...] = field(
+        default=(), kw_only=True
+    )
+
+    coordinated_grasp_pairs: tuple[tuple[str, str], ...] = field(
+        default=(), kw_only=True
+    )
+
+    held_staging_bindings: tuple[HeldStagingInvocationBinding, ...] = field(
+        default=(), kw_only=True
+    )
+
+    place_continuation_bindings: tuple[PlaceContinuationBinding, ...] = field(
+        default=(), kw_only=True
+    )
+
+    continuation_scene_invocations: frozenset[str] = field(
+        default_factory=frozenset, kw_only=True
+    )
+
+    native_pick_free_motion: bool = field(default=False, kw_only=True)
+
+    pour_projection_bindings: tuple[PourProjectionBinding, ...] = field(
+        default=(), kw_only=True
+    )
+
+    pour_projection_factories: tuple[RegisteredSemanticLowererFactory, ...] = field(
+        default=(), kw_only=True, repr=False
+    )
+
+    released_hand_continuations: tuple[ReleasedHandContinuationBinding, ...] = field(
+        default=(), kw_only=True
+    )
+
+    pick_closing_bindings: tuple[PickClosingBinding, ...] = field(
+        default=(), kw_only=True
+    )
+
     def __post_init__(self) -> None:
+        from .invocation_policy import InvocationPolicyBinding
+
+        if type(self.measured_rigid_bindings) is not tuple or any(
+            type(value) is not MeasuredRigidInvocationBinding
+            for value in self.measured_rigid_bindings
+        ):
+            raise TypeError(
+                "Measured catalog bindings require immutable typed declarations."
+            )
+        if type(self.held_staging_bindings) is not tuple or any(
+            type(value) is not HeldStagingInvocationBinding
+            for value in self.held_staging_bindings
+        ):
+            raise TypeError(
+                "Held staging declarations must be an immutable typed tuple."
+            )
+        if (
+            type(self.native_pick_free_motion) is not bool
+            or type(self.pick_closing_bindings) is not tuple
+            or any(
+                type(value) is not PickClosingBinding
+                for value in self.pick_closing_bindings
+            )
+        ):
+            raise TypeError(
+                "Native Pick catalog services require immutable typed declarations."
+            )
+        if type(self.drawer_bindings) is not tuple or any(
+            type(value) is not DrawerInvocationBinding for value in self.drawer_bindings
+        ):
+            raise TypeError("Drawer bindings must be an immutable typed tuple.")
+        if type(self.slide_preshape_bindings) is not tuple or any(
+            type(value) is not SlidePreshapeBinding
+            for value in self.slide_preshape_bindings
+        ):
+            raise TypeError("Slide preshape bindings must be an immutable typed tuple.")
+        if (
+            type(self.pour_projection_bindings) is not tuple
+            or any(
+                type(value) is not PourProjectionBinding
+                for value in self.pour_projection_bindings
+            )
+            or type(self.pour_projection_factories) is not tuple
+        ):
+            raise TypeError(
+                "Pour projection catalog data requires immutable typed declarations."
+            )
+        if type(self.coordinated_grasp_pairs) is not tuple or any(
+            type(pair) is not tuple
+            or len(pair) != 2
+            or any(
+                type(name) is not str or not name or name != name.strip()
+                for name in pair
+            )
+            for pair in self.coordinated_grasp_pairs
+        ):
+            raise TypeError(
+                "Coordinated grasp pairs require immutable exact target pairs."
+            )
+        targets = dict(self.inside_landing_targets)
+        if any(
+            type(key) is not str
+            or not key
+            or key != key.strip()
+            or type(value) is not tuple
+            or len(value) != 2
+            or any(
+                type(item) is not str or not item or item != item.strip()
+                for item in value
+            )
+            for key, value in targets.items()
+        ):
+            raise TypeError(
+                "Inside landing targets require exact immutable subject/container identities."
+            )
+        object.__setattr__(self, "inside_landing_targets", MappingProxyType(targets))
+        if type(self.invocation_policy_bindings) is not tuple or not all(
+            type(item) is InvocationPolicyBinding
+            for item in self.invocation_policy_bindings
+        ):
+            raise TypeError(
+                "invocation_policy_bindings must be an immutable tuple of InvocationPolicyBinding."
+            )
+        if (
+            len({item.program_fingerprint for item in self.invocation_policy_bindings})
+            > 1
+        ):
+            raise ValueError(
+                "Configured invocation bindings must select one program fingerprint."
+            )
+        if len({item.invocation_id for item in self.invocation_policy_bindings}) != len(
+            self.invocation_policy_bindings
+        ):
+            raise ValueError("Duplicate invocation policy occurrence.")
         for field_name in ("scene_registry_id", "robot_profile_id"):
             value = getattr(self, field_name)
             if type(value) is not str or not value or value != value.strip():
@@ -870,6 +1052,18 @@ class TaskProgramIntegrationCatalog:
             call_catalog=self.call_catalog,
             runtime_preset=program.integration.runtime_preset,
         )
+        from embodichain.lab.sim.atomic_actions.primitives.place import (
+            PlacePlanningRecovery,
+        )
+
+        inside_presets = {
+            name
+            for name, preset in self.robot_profile.presets.items()
+            if isinstance(
+                preset.recovery_policy.planning_recovery, PlacePlanningRecovery
+            )
+            and preset.recovery_policy.planning_recovery.inside_world_yaw
+        }
         selected_presets = {
             binding.invocation_id: binding.preset_id
             for binding in self.invocation_policy_bindings
@@ -939,6 +1133,70 @@ class TaskProgramIntegrationCatalog:
                             raise ValueError(
                                 "Cartesian motion aliases require their declared fixed-grid sequential IK source policy."
                             )
+                declaration = self.registered_semantic_lowerer_declarations.get(
+                    call.call.semantic_id
+                )
+                if declaration is not None:
+                    from .simulation.transport import (
+                        TerminalAttachmentTransportLowererFactory,
+                    )
+
+                    if (
+                        declaration.factory_type
+                        is TerminalAttachmentTransportLowererFactory
+                    ):
+                        preset = self.robot_profile.presets[linked.preset_id]
+                        TerminalAttachmentTransportLowererFactory.validate_preset(
+                            preset
+                        )
+                if (
+                    self.coordinated_grasp_pairs
+                    and linked.descriptor.target_descriptor.skill_id
+                    == "coordinated_pickment"
+                ):
+                    defaults = self.robot_profile.defaults.get("coordinated_pickment")
+                    selections = {} if defaults is None else dict(defaults.resources)
+                    selections.update(call.call.resources)
+                    targets = []
+                    for slot in ("left", "right"):
+                        resource = self.robot_profile.resources.get(
+                            selections.get(slot)
+                        )
+                        endpoint = (
+                            None
+                            if resource is None
+                            else resource.endpoints.get("grasp")
+                        )
+                        targets.append(getattr(endpoint, "control_part", None))
+                    if tuple(targets) not in self.coordinated_grasp_pairs:
+                        raise ValueError(
+                            "Coordinated call grasp slots differ from the declared geometry pair."
+                        )
+                if inside_presets:
+                    occurrence = f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}"
+                    if (
+                        selected_presets.get(occurrence, linked.preset_id)
+                        in inside_presets
+                        and occurrence not in self.inside_landing_targets
+                    ):
+                        raise ValueError(
+                            "Inside yaw recovery requires an exact occurrence-bound landing declaration."
+                        )
+                    if (
+                        selected_presets.get(occurrence, linked.preset_id)
+                        in inside_presets
+                    ):
+                        destination = linked.affordances.get("destination")
+                        if (
+                            type(linked.call) is not Place
+                            or linked.call.inside is None
+                            or destination is None
+                            or self.inside_landing_targets[occurrence]
+                            != (linked.call.object.entity_id, destination.entity_id)
+                        ):
+                            raise ValueError(
+                                "Inside yaw binding must match the selected inside Place subject and container."
+                            )
                 if type(linked.call) is Place and linked.call.at is None:
                     destination = linked.affordances.get("destination")
                     if destination is None:
@@ -964,8 +1222,108 @@ class TaskProgramIntegrationCatalog:
                 compiled, manifest, self.invocation_policy_bindings, self.idle_factories
             )
 
+        from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
+            MoveHeldObjectPlanningRecovery,
+        )
+
+        if self.held_staging_bindings or any(
+            (
+                isinstance(
+                    preset.recovery_policy.planning_recovery,
+                    MoveHeldObjectPlanningRecovery,
+                )
+                and preset.recovery_policy.planning_recovery.staging
+                for preset in self.robot_profile.presets.values()
+            )
+        ):
+            _validate_program_bindings(
+                compiled,
+                manifest,
+                self.invocation_policy_bindings,
+                self.held_staging_bindings,
+            )
+        continuation_routes = _bind_place_continuation_declarations(
+            compiled,
+            manifest,
+            self.invocation_policy_bindings,
+            self.place_continuation_bindings,
+            held_staging_bindings=self.held_staging_bindings,
+            rigid_entity_ids=self.rigid_settle_entity_ids,
+        )
+        if any(
+            (
+                entry.route.requires_full_preview
+                and entry.route.place_invocation_id
+                not in self.continuation_scene_invocations
+                for entry in continuation_routes
+            )
+        ):
+            raise ValueError(
+                "Full Place continuation requires its exact declared Place scene service."
+            )
+        _bind_released_continuations(
+            compiled,
+            manifest,
+            self.invocation_policy_bindings,
+            self.released_hand_continuations,
+        )
+        _validate_pick_program(
+            compiled,
+            manifest,
+            self.invocation_policy_bindings,
+            self.pick_closing_bindings,
+            free_motion_query=self.native_pick_free_motion,
+            continuation_routes=continuation_routes,
+        )
+        from .simulation.slide_preshape import _validate_slide_preshape_program
+
+        _validate_slide_preshape_program(
+            compiled,
+            manifest,
+            self.invocation_policy_bindings,
+            self.slide_preshape_bindings,
+        )
+        from .simulation.jaw_pour import JawPourFactory
+
+        for factory in self.pour_projection_factories:
+            if type(factory) is JawPourFactory:
+                factory.validate_program(compiled, self.scene)
+        self.resolve_pour_projection_routes(compiled)
+        _validate_measured_program(
+            compiled,
+            manifest,
+            self.invocation_policy_bindings,
+            self.measured_rigid_bindings,
+        )
+        from .simulation.drawer_planning import _validate_drawer_program
+
+        _validate_drawer_program(
+            compiled, manifest, self.invocation_policy_bindings, self.drawer_bindings
+        )
         self.validate_control_program(compiled)
         return compiled
+
+    def resolve_pour_projection_routes(
+        self, program: CompiledTaskProgram
+    ) -> tuple[ResolvedPourProjectionRoute, ...]:
+        """Resolve already-declared runtime planning operands without live assembly.
+
+        Args:
+            program: Exact compiled program owning the selected occurrences.
+
+        Returns:
+            Typed immutable source projection routes, or an empty tuple when
+            this capability is not selected. No Robot or simulator is constructed.
+        """
+        return resolve_pour_projection_routes(
+            program,
+            profile=self.robot_profile,
+            scene=self.scene,
+            call_catalog=self.call_catalog,
+            factories=self.pour_projection_factories,
+            invocation_policies=self.invocation_policy_bindings,
+            bindings=self.pour_projection_bindings,
+        )
 
     def validate_control_program(self, program: CompiledTaskProgram) -> None:
         """Reject foreign targets, budgets or policy phases in a compiled control program."""
@@ -1373,12 +1731,293 @@ def _registration_payload(
     }
 
     if planning_services is not None:
-        payload["planning_services"] = planning_services.snapshot().to_dict()
-        if payload["planning_services"]["native_handover_scene"] is False:
-            payload["planning_services"].pop("native_handover_scene")
+        payload["planning_services"] = _effective_planning_service_fields(
+            planning_services
+        )
     if invocation_policy_bindings:
         payload["invocation_policy_bindings"] = invocation_policy_bindings
     return payload
+
+
+def _validate_native_planning_registration(
+    self: SimulationTaskProgramRegistration, profile: RobotSkillProfile
+) -> None:
+    """Cross-check immutable planning declarations before constructing a live host."""
+    from .simulation.place_scene import _validate_inside_binding
+    from .simulation.targets import SceneEntityTarget
+    from embodichain.lab.sim.atomic_actions.primitives.hand_over import HandOverOptions
+
+    if (
+        self.planning_services is not None
+        and self.planning_services.measured_rigid_bindings
+    ):
+        policies = {value.invocation_id for value in self.invocation_policy_bindings}
+        rigid = {value.entity_id for value in self.scene_binding.rigid_objects}
+        containers = {value.entity_id: value for value in self.scene_binding.containers}
+        for value in self.planning_services.measured_rigid_bindings:
+            if (
+                value.invocation_id not in policies
+                or value.object_id not in rigid
+                or (
+                    value.container_id is not None
+                    and (
+                        value.container_id not in containers
+                        or containers[value.container_id].parent_id not in rigid
+                    )
+                )
+            ):
+                raise ValueError(
+                    "Measured bindings require program-bound policies and exact rigid/container owners."
+                )
+    if self.planning_services is not None:
+        occurrences = {item.invocation_id for item in self.invocation_policy_bindings}
+        if any(
+            item.invocation_id not in occurrences
+            for item in self.planning_services.place_scene_bindings
+        ):
+            raise ValueError(
+                "Place scene roles require a program-bound invocation policy declaration."
+            )
+    if self.planning_services is not None:
+        from .simulation.place_scene import _validate_inside_binding
+
+        containers = {item.entity_id: item for item in self.scene_binding.containers}
+        rigids = {
+            item.entity_id: item.simulation_uid
+            for item in self.scene_binding.rigid_objects
+        }
+        roster = (
+            dict(self.planning_services.collision_roster.rigid_objects)
+            if self.planning_services.collision_roster is not None
+            else {}
+        )
+        for binding in self.planning_services.place_scene_bindings:
+            if binding.inside_subject_id is None:
+                continue
+            _validate_inside_binding(binding, roster, containers)
+            parent = containers[binding.inside_container_id].parent_id
+            if any(
+                rigids.get(entity) != roster[entity]
+                for entity in (binding.inside_subject_id, parent)
+            ):
+                raise ValueError(
+                    "Inside landing roster must retain exact registered native rigid owners."
+                )
+    if self.planning_services is not None and self.planning_services.coordinated_grasps:
+        grasp_targets = {
+            endpoint.control_part
+            for resource in self.robot_profile_binding.resources
+            for endpoint in resource.endpoints
+            if endpoint.endpoint_id == "grasp"
+        }
+        if any(
+            name not in grasp_targets
+            for pair in self.planning_services.coordinated_grasps
+            for name in (pair.left_grasp_target_id, pair.right_grasp_target_id)
+        ):
+            raise ValueError(
+                "Configured coordinated grasp pairs must select declared grasp endpoints."
+            )
+    if self.planning_services is not None:
+        selected_ids = {item.invocation_id for item in self.invocation_policy_bindings}
+        rigid_ids = {item.entity_id for item in self.scene_binding.rigid_objects}
+        for binding in self.planning_services.held_staging_bindings:
+            if (
+                binding.invocation_id not in selected_ids
+                or binding.rigid_entity_id not in rigid_ids
+                or (
+                    binding.predecessor_invocation_id is not None
+                    and binding.predecessor_invocation_id not in selected_ids
+                )
+            ):
+                raise ValueError(
+                    "Held staging requires registered rigid identities and program-bound current/predecessor policies."
+                )
+    if self.planning_services is not None:
+        occurrences = {value.invocation_id for value in self.invocation_policy_bindings}
+        rigid_ids = {value.entity_id for value in self.scene_binding.rigid_objects}
+        for value in self.planning_services.pick_closing_bindings:
+            if (
+                value.invocation_id not in occurrences
+                or value.object_id not in rigid_ids
+                or (
+                    value.opening_reference_id is not None
+                    and value.opening_reference_id not in rigid_ids
+                )
+            ):
+                raise ValueError(
+                    "Native Pick bindings require program-bound policies and explicit rigid subjects/references."
+                )
+    if self.planning_services is not None:
+        policy_ids = {value.invocation_id for value in self.invocation_policy_bindings}
+        if any(
+            identity not in policy_ids
+            for value in self.planning_services.pour_projection_bindings
+            for identity in value.invocation_ids
+        ):
+            raise ValueError(
+                "All Pour projection roles require program-bound invocation policies."
+            )
+    if self.planning_services is not None:
+        occurrences = {value.invocation_id for value in self.invocation_policy_bindings}
+        native_rigids = {
+            value.simulation_uid for value in self.scene_binding.rigid_objects
+        }
+        native_articulations = {
+            value.simulation_uid for value in self.scene_binding.articulations
+        }
+        rigid_owners = {
+            value.entity_id: value.simulation_uid
+            for value in self.scene_binding.rigid_objects
+        }
+        articulation_owners = {
+            value.entity_id: value.simulation_uid
+            for value in self.scene_binding.articulations
+        }
+        link_owners = {
+            value.entity_id: (
+                articulation_owners.get(value.articulation_id),
+                value.native_link_name,
+            )
+            for value in self.scene_binding.links
+        }
+        drawer_target_parents = {
+            value.entity_id: value.parent_id for value in self.scene_binding.containers
+        }
+        for value in self.planning_services.drawer_bindings:
+            if (
+                value.invocation_id not in occurrences
+                or rigid_owners.get(value.object_id) != value.object_id
+                or value.source.object_id not in native_articulations
+                or link_owners.get(value.link_entity_id)
+                != (value.source.object_id, value.source.link)
+            ):
+                raise ValueError(
+                    "Drawer bindings require policy-bound occurrences and exact native entity owners."
+                )
+            if (
+                value.operation in {"place", "transport"}
+                and drawer_target_parents.get(value.target_id) != value.link_entity_id
+            ) or (
+                value.operation == "close" and value.target_id != value.link_entity_id
+            ):
+                raise ValueError(
+                    "Drawer targets must belong to the declared physical drawer link."
+                )
+        for value in self.planning_services.slide_preshape_bindings:
+            if (
+                value.invocation_id not in occurrences
+                or value.table_uid not in native_rigids
+            ):
+                raise ValueError(
+                    "Slide preshape requires program-bound occurrences and declared native support."
+                )
+    from embodichain.lab.sim.atomic_actions.primitives.coordinated_pickment import (
+        CoordinatedPickmentOptions,
+    )
+
+    if (
+        self.planning_services is not None
+        and self.planning_services.capture_coordinated_cargo
+        and not self.scene_binding.rigid_objects
+    ):
+        raise ValueError(
+            "Coordinated cargo capture requires declared native rigid bindings."
+        )
+    for preset in profile.presets.values():
+        for options in preset.action_option_templates.values():
+            if (
+                isinstance(options, CoordinatedPickmentOptions)
+                and options.prefer_cargo_clearance
+            ):
+                if (
+                    self.planning_services is None
+                    or not self.planning_services.capture_coordinated_cargo
+                ):
+                    raise ValueError(
+                        "Cargo preference requires explicit capture_coordinated_cargo services."
+                    )
+            if isinstance(options, HandOverOptions) and options.require_receiver_scene:
+                if (
+                    self.planning_services is None
+                    or not self.planning_services.native_handover_scene
+                ):
+                    raise ValueError(
+                        "Native receiver qualification requires declared native_handover_scene services."
+                    )
+    from .simulation.transport import DrawerTransportLowererFactory
+
+    drawer_factories = tuple(
+        factory
+        for factory in self.registered_semantic_lowerer_factories
+        if type(factory) is DrawerTransportLowererFactory
+    )
+    if drawer_factories:
+        from .simulation.targets import SceneEntityTarget
+
+        transports = (
+            ()
+            if self.planning_services is None
+            else tuple(
+                value
+                for value in self.planning_services.drawer_bindings
+                if value.operation == "transport"
+            )
+        )
+        if not transports:
+            raise ValueError(
+                "Configured drawer transport requires its drawer-specific planning service; generic MoveHeldObject is not a compatible fallback."
+            )
+        routes = {
+            route.target_id: route
+            for factory in drawer_factories
+            for route in factory.routes
+        }
+        for value in transports:
+            route = routes.get(value.target_id)
+            if (
+                route is None
+                or route.object_id != value.object_id
+                or type(route.pose) is not SceneEntityTarget
+                or route.pose.entity_id != value.target_id
+            ):
+                raise ValueError(
+                    "Drawer transport route must retain its declared payload and scene target."
+                )
+
+    from .simulation.grip_evidence import NativeGripEvidenceFactory
+
+    if type(self.control_part_evidence_factory) is NativeGripEvidenceFactory:
+        evidence = self.control_part_evidence_factory
+        objects = {
+            item.entity_id: item.simulation_uid
+            for item in self.scene_binding.rigid_objects
+        }
+        if any(
+            (objects.get(entity) != uid for (entity, uid) in evidence.object_bindings)
+        ):
+            raise ValueError(
+                "Native grip object bindings must match exact registered rigid owners."
+            )
+        grasp_parts = {
+            endpoint.control_part
+            for resource in self.robot_profile_binding.resources
+            for endpoint in resource.endpoints
+            if endpoint.endpoint_id == "grasp"
+        }
+        if any((part not in grasp_parts for (part, _) in evidence.pad_bindings)):
+            raise ValueError(
+                "Native grip pads must select declared grasp control parts."
+            )
+        if any(
+            (
+                binding.control_part not in dict(evidence.pad_bindings)
+                for binding in evidence.opening_bindings
+            )
+        ):
+            raise ValueError(
+                "Native grip opening bindings must select declared pad hands."
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1618,6 +2257,7 @@ class SimulationTaskProgramRegistration:
             raise ValueError(
                 "Idle clear/restore requires explicit discrete_mesh planning services."
             )
+        _validate_native_planning_registration(self, profile)
         _validate_standard_effect_monitors(profile)
         _validate_standard_tracking_metrics(profile)
         extensions = build_standard_extension_declarations(
@@ -1697,6 +2337,77 @@ class SimulationTaskProgramRegistration:
             "catalog",
             TaskProgramIntegrationCatalog(
                 invocation_policy_bindings=self.invocation_policy_bindings,
+                inside_landing_targets={
+                    binding.invocation_id: (
+                        binding.inside_subject_id,
+                        binding.inside_container_id,
+                    )
+                    for binding in (
+                        ()
+                        if self.planning_services is None
+                        else self.planning_services.place_scene_bindings
+                    )
+                    if binding.inside_subject_id is not None
+                },
+                coordinated_grasp_pairs=tuple(
+                    (pair.left_grasp_target_id, pair.right_grasp_target_id)
+                    for pair in (
+                        ()
+                        if self.planning_services is None
+                        else self.planning_services.coordinated_grasps
+                    )
+                ),
+                held_staging_bindings=(
+                    ()
+                    if self.planning_services is None
+                    else self.planning_services.held_staging_bindings
+                ),
+                pour_projection_bindings=(
+                    ()
+                    if self.planning_services is None
+                    else self.planning_services.pour_projection_bindings
+                ),
+                pour_projection_factories=self.registered_semantic_lowerer_factories,
+                place_continuation_bindings=(
+                    ()
+                    if self.planning_services is None
+                    else self.planning_services.place_continuation_bindings
+                ),
+                continuation_scene_invocations=frozenset(
+                    ()
+                    if self.planning_services is None
+                    else (
+                        value.invocation_id
+                        for value in self.planning_services.place_scene_bindings
+                    )
+                ),
+                native_pick_free_motion=self.planning_services is not None
+                and self.planning_services.free_motion_query == "discrete_mesh",
+                released_hand_continuations=(
+                    ()
+                    if self.planning_services is None
+                    else self.planning_services.released_hand_continuations
+                ),
+                pick_closing_bindings=(
+                    ()
+                    if self.planning_services is None
+                    else self.planning_services.pick_closing_bindings
+                ),
+                measured_rigid_bindings=(
+                    ()
+                    if self.planning_services is None
+                    else self.planning_services.measured_rigid_bindings
+                ),
+                drawer_bindings=(
+                    ()
+                    if self.planning_services is None
+                    else self.planning_services.drawer_bindings
+                ),
+                slide_preshape_bindings=(
+                    ()
+                    if self.planning_services is None
+                    else self.planning_services.slide_preshape_bindings
+                ),
                 idle_factories=idle_factories,
                 scene_registry_id=self.scene_binding.registry_id,
                 robot_profile_id=self.robot_profile_binding.profile_id,
@@ -1795,6 +2506,14 @@ class SimulationTaskProgramRegistration:
         self.assert_unchanged()
         if self.planning_services is not None:
             self.planning_services.validate_physics(physics)
+
+        from .simulation.grip_evidence import NativeGripEvidenceFactory
+
+        if (
+            type(self.control_part_evidence_factory) is NativeGripEvidenceFactory
+            and physics != "default"
+        ):
+            raise ValueError("Native grip evidence requires Default physics.")
 
     @property
     def requires_scoped_control_services(self) -> bool:

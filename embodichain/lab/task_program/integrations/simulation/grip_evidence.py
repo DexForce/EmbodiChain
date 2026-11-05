@@ -268,6 +268,31 @@ class NativeGripEvidenceFactory:
         ):
             object.__setattr__(self, name, value)
 
+    def contact_sensor_cfg(self, robot_uid: str) -> ContactSensorCfg:
+        """Describe the exact ordinary sensor scope without native resource creation.
+
+        Args:
+            robot_uid: Explicit selected physical robot identity.
+
+        Returns:
+            Standard contact configuration with ordered declared rigid owners,
+            both pad sets, the declared capacity and match-both filtering.
+        """
+        _identifier(robot_uid, "robot_uid")
+        return ContactSensorCfg(
+            uid=self.sensor_uid,
+            rigid_uid_list=[uid for _, uid in self.object_bindings],
+            articulation_cfg_list=[
+                ArticulationContactFilterCfg(
+                    articulation_uid=robot_uid,
+                    link_name_list=[
+                        name for _, names in self.pad_bindings for name in names
+                    ],
+                )
+            ],
+            max_contacts_per_env=self.max_contacts_per_env,
+        )
+
     def create(
         self,
         *,

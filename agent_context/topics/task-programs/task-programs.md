@@ -44,6 +44,7 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Physical Gym component composition | `embodichain/lab/gym/utils/_component_composition.py` |
 | Public configured deployment composition | `embodichain/lab/task_program/integrations/composition.py` |
 | Component resolution and policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
+| Native planning declarations, providers and one-compiler continuations | `embodichain/lab/task_program/integrations/simulation/planning_services.py`, `pick_closing.py`, `measured_rigid.py`, `place_continuation.py`, `released_continuation.py` |
 | Route-bound retained alignment, released clearance and paired idle lowering | `embodichain/lab/task_program/integrations/simulation/held_alignment.py`, `release_clearance.py`, `idle_clearance.py` |
 | Declared geometry planning services and native receiver assembly | `embodichain/lab/task_program/integrations/simulation/planning_services.py`, `handover_scene.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |

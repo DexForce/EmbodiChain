@@ -168,8 +168,19 @@ a complete ordered collision roster, observed root and actual native revision;
 it retains Default/B=1 qualification. Gym checks declared backend/batch eligibility
 before creating Sim. Planning observations compare the full native source stamp
 before and after capture, and closed factories cannot authorize new captures.
-Unavailable service fields are rejected at decoding rather than selecting a
-fallback. The decoder is the authority for currently supported fields.
+The closed decoder covers native Pick closing, measured Pick/inside Place,
+Place scene roles, held staging and command authority, Pour recipes and observed
+cuRobo inputs. Exact program/preset/resource declarations qualify these services;
+missing bindings never select a generic fallback. File and inline deployments use
+the same public loader. Provider-free compilation may establish occurrence
+fingerprints before service binding; final deployment loading still performs the
+complete catalog preflight.
+
+Continuation providers bind to the one assembled compiler/engine. Released
+cleanup/Park authority additionally binds to the actual EpisodeContext identity
+and closes through the existing bridge cleanup callback; previews cannot mutate
+execution effects or silently acquire another compiler. Fixed source algorithms,
+budgets and physical acceptance remain in their existing owners.
 
 Configured `motion` policies accept optional finite, strictly positive
 `velocity_limit` and `acceleration_limit` values. Configured Pour action options

@@ -1,0 +1,671 @@
+{
+  "source_revision": "42bd43e06a000de7d66a9566d63bde800d999790",
+  "values": {
+    "CoordinatedPickmentOptions": {
+      "fields": {
+        "approach_direction": {
+          "tensor_dtype": "torch.float32",
+          "tensor_shape": [
+            3
+          ],
+          "tensor_value": [
+            0.0,
+            0.0,
+            -1.0
+          ]
+        },
+        "continue_verified_holds": false,
+        "grasp_seed": 17393,
+        "hand_interp_steps": 10,
+        "hold_steps": 4,
+        "left_to_right_arm_direction": {
+          "tensor_dtype": "torch.float32",
+          "tensor_shape": [
+            3
+          ],
+          "tensor_value": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        "lift_height": 0.08,
+        "middle_empty_ratio": 0.4,
+        "object_motion_keyframes": 6,
+        "pre_grasp_distance": 0.1,
+        "prefer_cargo_clearance": false,
+        "release": false,
+        "release_steps": 10,
+        "retreat_distance": 0.08,
+        "retreat_steps": 12
+      },
+      "type": "embodichain.lab.sim.atomic_actions.primitives.coordinated_pickment.CoordinatedPickmentOptions"
+    },
+    "HandOver.descriptor": {
+      "fields": {
+        "agent_visible": true,
+        "binding_contract": {
+          "fields": {
+            "constraints": [
+              {
+                "fields": {
+                  "slots": [
+                    "source",
+                    "destination"
+                  ]
+                },
+                "type": "embodichain.lab.sim.atomic_actions.requirements.DisjointResourceSlots"
+              }
+            ],
+            "slots": [
+              {
+                "fields": {
+                  "constraints": [
+                    {
+                      "fields": {
+                        "endpoint_ids": [
+                          "motion",
+                          "grasp"
+                        ]
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.DisjointSlotEndpoints"
+                    }
+                  ],
+                  "endpoints": [
+                    {
+                      "fields": {
+                        "capabilities": [
+                          "kinematics.forward",
+                          "motion.cartesian_pose"
+                        ],
+                        "endpoint_id": "motion",
+                        "required_commands": {}
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.SkillEndpointRequirement"
+                    },
+                    {
+                      "fields": {
+                        "capabilities": [
+                          "interaction.grasp"
+                        ],
+                        "endpoint_id": "grasp",
+                        "required_commands": {
+                          "grasp": {
+                            "type": "embodichain.lab.sim.atomic_actions.control.JointPositionCommand"
+                          },
+                          "open": {
+                            "type": "embodichain.lab.sim.atomic_actions.control.JointPositionCommand"
+                          }
+                        }
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.SkillEndpointRequirement"
+                    }
+                  ],
+                  "slot_id": "source"
+                },
+                "type": "embodichain.lab.sim.atomic_actions.requirements.SkillResourceSlot"
+              },
+              {
+                "fields": {
+                  "constraints": [
+                    {
+                      "fields": {
+                        "endpoint_ids": [
+                          "motion",
+                          "grasp"
+                        ]
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.DisjointSlotEndpoints"
+                    }
+                  ],
+                  "endpoints": [
+                    {
+                      "fields": {
+                        "capabilities": [
+                          "kinematics.forward",
+                          "motion.cartesian_pose"
+                        ],
+                        "endpoint_id": "motion",
+                        "required_commands": {}
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.SkillEndpointRequirement"
+                    },
+                    {
+                      "fields": {
+                        "capabilities": [
+                          "interaction.grasp"
+                        ],
+                        "endpoint_id": "grasp",
+                        "required_commands": {
+                          "grasp": {
+                            "type": "embodichain.lab.sim.atomic_actions.control.JointPositionCommand"
+                          },
+                          "open": {
+                            "type": "embodichain.lab.sim.atomic_actions.control.JointPositionCommand"
+                          }
+                        }
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.SkillEndpointRequirement"
+                    }
+                  ],
+                  "slot_id": "destination"
+                },
+                "type": "embodichain.lab.sim.atomic_actions.requirements.SkillResourceSlot"
+              }
+            ]
+          },
+          "type": "embodichain.lab.sim.atomic_actions.requirements.SkillBindingContract"
+        },
+        "goal_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.hand_over.HandOverGoal"
+        },
+        "open_loop": true,
+        "options_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.hand_over.HandOverOptions"
+        },
+        "planning_recovery_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.hand_over.HandOverPlanningRecovery"
+        },
+        "skill_id": "hand_over",
+        "supports_segment_motion_recovery": true
+      },
+      "type": "embodichain.lab.sim.atomic_actions.core.SkillDescriptor"
+    },
+    "HandOverOptions": {
+      "fields": {
+        "adaptive_receive": false,
+        "arm_selection": "nearest",
+        "existing_hold_hand_source": "observed",
+        "hand_interp_steps": 10,
+        "hold_steps": 4,
+        "lift_height": 0.1,
+        "linear_segments": false,
+        "pre_grasp_distance": 0.1,
+        "receive_pick_object_part": "bottom",
+        "receive_region": "mesh_extent",
+        "release_at_target": true,
+        "require_receiver_scene": false,
+        "retreat_distance": 0.1,
+        "retreat_steps": 20,
+        "source_retreat_mode": "approach"
+      },
+      "type": "embodichain.lab.sim.atomic_actions.primitives.hand_over.HandOverOptions"
+    },
+    "MoveEndEffector.descriptor": {
+      "fields": {
+        "agent_visible": true,
+        "binding_contract": {
+          "fields": {
+            "constraints": [],
+            "slots": [
+              {
+                "fields": {
+                  "constraints": [],
+                  "endpoints": [
+                    {
+                      "fields": {
+                        "capabilities": [
+                          "motion.cartesian_pose"
+                        ],
+                        "endpoint_id": "motion",
+                        "required_commands": {}
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.SkillEndpointRequirement"
+                    }
+                  ],
+                  "slot_id": "primary"
+                },
+                "type": "embodichain.lab.sim.atomic_actions.requirements.SkillResourceSlot"
+              }
+            ]
+          },
+          "type": "embodichain.lab.sim.atomic_actions.requirements.SkillBindingContract"
+        },
+        "goal_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.move_end_effector.EndEffectorPoseGoal"
+        },
+        "open_loop": false,
+        "options_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.move_end_effector.MoveEndEffectorOptions"
+        },
+        "planning_recovery_type": [
+          {
+            "type": "embodichain.lab.sim.atomic_actions.articulation_continuation.ArticulationWithdrawalPlanningRecovery"
+          },
+          {
+            "type": "embodichain.lab.sim.atomic_actions.released_continuation.ReleasedHandClearanceRecovery"
+          }
+        ],
+        "skill_id": "move_end_effector",
+        "supports_segment_motion_recovery": true
+      },
+      "type": "embodichain.lab.sim.atomic_actions.core.SkillDescriptor"
+    },
+    "MoveEndEffectorOptions": {
+      "fields": {
+        "linear_segments": false
+      },
+      "type": "embodichain.lab.sim.atomic_actions.primitives.move_end_effector.MoveEndEffectorOptions"
+    },
+    "MoveHeldObject.descriptor": {
+      "fields": {
+        "agent_visible": true,
+        "binding_contract": {
+          "fields": {
+            "constraints": [],
+            "slots": [
+              {
+                "fields": {
+                  "constraints": [
+                    {
+                      "fields": {
+                        "endpoint_ids": [
+                          "motion",
+                          "grasp"
+                        ]
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.DisjointSlotEndpoints"
+                    }
+                  ],
+                  "endpoints": [
+                    {
+                      "fields": {
+                        "capabilities": [
+                          "kinematics.forward",
+                          "motion.cartesian_pose"
+                        ],
+                        "endpoint_id": "motion",
+                        "required_commands": {}
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.SkillEndpointRequirement"
+                    },
+                    {
+                      "fields": {
+                        "capabilities": [
+                          "interaction.grasp"
+                        ],
+                        "endpoint_id": "grasp",
+                        "required_commands": {
+                          "grasp": {
+                            "type": "embodichain.lab.sim.atomic_actions.control.JointPositionCommand"
+                          }
+                        }
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.SkillEndpointRequirement"
+                    }
+                  ],
+                  "slot_id": "primary"
+                },
+                "type": "embodichain.lab.sim.atomic_actions.requirements.SkillResourceSlot"
+              }
+            ]
+          },
+          "type": "embodichain.lab.sim.atomic_actions.requirements.SkillBindingContract"
+        },
+        "goal_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.move_held_object.HeldObjectPoseGoal"
+        },
+        "open_loop": false,
+        "options_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.move_held_object.MoveHeldObjectOptions"
+        },
+        "planning_recovery_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.move_held_object.MoveHeldObjectPlanningRecovery"
+        },
+        "skill_id": "move_held_object",
+        "supports_segment_motion_recovery": true
+      },
+      "type": "embodichain.lab.sim.atomic_actions.core.SkillDescriptor"
+    },
+    "MoveHeldObjectOptions": {
+      "fields": {
+        "drawer_transport": false,
+        "hand_hold": "grasp_command",
+        "lift_clearance": null,
+        "linear_segments": false,
+        "preserve_vertical": false,
+        "report_retained_attachment": false
+      },
+      "type": "embodichain.lab.sim.atomic_actions.primitives.move_held_object.MoveHeldObjectOptions"
+    },
+    "MoveHeldObjectPlanningRecovery": {
+      "fields": {
+        "kind": "held_alignment_bounded",
+        "place_continuation": false,
+        "revision": 1,
+        "skill_id": "move_held_object",
+        "staging": false
+      },
+      "type": "embodichain.lab.sim.atomic_actions.primitives.move_held_object.MoveHeldObjectPlanningRecovery"
+    },
+    "MoveJoints.descriptor": {
+      "fields": {
+        "agent_visible": true,
+        "binding_contract": {
+          "fields": {
+            "constraints": [],
+            "slots": [
+              {
+                "fields": {
+                  "constraints": [],
+                  "endpoints": [
+                    {
+                      "fields": {
+                        "capabilities": [
+                          "motion.joint_position"
+                        ],
+                        "endpoint_id": "motion",
+                        "required_commands": {}
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.SkillEndpointRequirement"
+                    }
+                  ],
+                  "slot_id": "primary"
+                },
+                "type": "embodichain.lab.sim.atomic_actions.requirements.SkillResourceSlot"
+              }
+            ]
+          },
+          "type": "embodichain.lab.sim.atomic_actions.requirements.SkillBindingContract"
+        },
+        "goal_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.move_joints.JointPositionGoal"
+        },
+        "open_loop": false,
+        "options_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.move_joints.MoveJointsOptions"
+        },
+        "planning_recovery_type": [
+          {
+            "type": "embodichain.lab.sim.atomic_actions.articulation_continuation.ArticulationParkPlanningRecovery"
+          },
+          {
+            "type": "embodichain.lab.sim.atomic_actions.released_continuation.ReleasedHandParkRecovery"
+          }
+        ],
+        "skill_id": "move_joints"
+      },
+      "type": "embodichain.lab.sim.atomic_actions.core.SkillDescriptor"
+    },
+    "MoveJointsOptions": {
+      "fields": {
+        "require_free_motion": false
+      },
+      "type": "embodichain.lab.sim.atomic_actions.primitives.move_joints.MoveJointsOptions"
+    },
+    "PickPlanningRecovery": {
+      "fields": {
+        "allow_curobo_prefix": true,
+        "allow_joint_prefix": true,
+        "constrained_roll": false,
+        "kind": "pick_bounded",
+        "max_candidate_paths": 4,
+        "max_contact_refinements": 2,
+        "place_continuation": false,
+        "retry_filtered_candidates": true,
+        "retry_raw_candidates": true,
+        "revision": 1,
+        "skill_id": "pick_up"
+      },
+      "type": "embodichain.lab.sim.atomic_actions.primitives.pick_up.PickPlanningRecovery"
+    },
+    "PickUp.descriptor": {
+      "fields": {
+        "agent_visible": true,
+        "binding_contract": {
+          "fields": {
+            "constraints": [],
+            "slots": [
+              {
+                "fields": {
+                  "constraints": [
+                    {
+                      "fields": {
+                        "endpoint_ids": [
+                          "motion",
+                          "grasp"
+                        ]
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.DisjointSlotEndpoints"
+                    }
+                  ],
+                  "endpoints": [
+                    {
+                      "fields": {
+                        "capabilities": [
+                          "kinematics.batch_inverse",
+                          "kinematics.forward",
+                          "motion.cartesian_pose"
+                        ],
+                        "endpoint_id": "motion",
+                        "required_commands": {}
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.SkillEndpointRequirement"
+                    },
+                    {
+                      "fields": {
+                        "capabilities": [
+                          "interaction.grasp"
+                        ],
+                        "endpoint_id": "grasp",
+                        "required_commands": {
+                          "grasp": {
+                            "type": "embodichain.lab.sim.atomic_actions.control.JointPositionCommand"
+                          },
+                          "open": {
+                            "type": "embodichain.lab.sim.atomic_actions.control.JointPositionCommand"
+                          }
+                        }
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.SkillEndpointRequirement"
+                    }
+                  ],
+                  "slot_id": "primary"
+                },
+                "type": "embodichain.lab.sim.atomic_actions.requirements.SkillResourceSlot"
+              }
+            ]
+          },
+          "type": "embodichain.lab.sim.atomic_actions.requirements.SkillBindingContract"
+        },
+        "goal_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.pick_up.GraspGoal"
+        },
+        "open_loop": false,
+        "options_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.pick_up.PickUpOptions"
+        },
+        "planning_recovery_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.pick_up.PickPlanningRecovery"
+        },
+        "skill_id": "pick_up",
+        "supports_segment_motion_recovery": true
+      },
+      "type": "embodichain.lab.sim.atomic_actions.core.SkillDescriptor"
+    },
+    "PickUpOptions": {
+      "fields": {
+        "adaptive_grasp": "none",
+        "approach_alignment_max_angle": null,
+        "approach_direction": {
+          "tensor_dtype": "torch.float32",
+          "tensor_shape": [
+            3
+          ],
+          "tensor_value": [
+            0.0,
+            0.0,
+            -1.0
+          ]
+        },
+        "constrained_grasp": false,
+        "downstream_object_target_poses": [],
+        "fixed_object_to_eef": null,
+        "full_opening_clearance": false,
+        "grasp_commit_fraction": 1.0,
+        "grasp_frame_to_eef": {
+          "tensor_dtype": "torch.float32",
+          "tensor_shape": [
+            4,
+            4
+          ],
+          "tensor_value": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "grasp_settle_steps": 0,
+        "grasp_variant": "closest",
+        "hand_interp_steps": 5,
+        "lift_height": 0.1,
+        "linear_segments": false,
+        "measured_preshape": false,
+        "native_closing_revision": null,
+        "native_scene_trial": false,
+        "obj_upright_direction": null,
+        "pick_object_part": "center",
+        "pre_grasp_distance": 0.15,
+        "qualify_downstream_targets": true,
+        "qualify_fixed_grasp": false,
+        "require_qualified_approach": false,
+        "rotate_upright": null
+      },
+      "type": "embodichain.lab.sim.atomic_actions.primitives.pick_up.PickUpOptions"
+    },
+    "Place.descriptor": {
+      "fields": {
+        "agent_visible": true,
+        "binding_contract": {
+          "fields": {
+            "constraints": [],
+            "slots": [
+              {
+                "fields": {
+                  "constraints": [
+                    {
+                      "fields": {
+                        "endpoint_ids": [
+                          "motion",
+                          "grasp"
+                        ]
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.DisjointSlotEndpoints"
+                    }
+                  ],
+                  "endpoints": [
+                    {
+                      "fields": {
+                        "capabilities": [
+                          "kinematics.forward",
+                          "motion.cartesian_pose"
+                        ],
+                        "endpoint_id": "motion",
+                        "required_commands": {}
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.SkillEndpointRequirement"
+                    },
+                    {
+                      "fields": {
+                        "capabilities": [
+                          "interaction.grasp"
+                        ],
+                        "endpoint_id": "grasp",
+                        "required_commands": {
+                          "grasp": {
+                            "type": "embodichain.lab.sim.atomic_actions.control.JointPositionCommand"
+                          },
+                          "open": {
+                            "type": "embodichain.lab.sim.atomic_actions.control.JointPositionCommand"
+                          }
+                        }
+                      },
+                      "type": "embodichain.lab.sim.atomic_actions.requirements.SkillEndpointRequirement"
+                    }
+                  ],
+                  "slot_id": "primary"
+                },
+                "type": "embodichain.lab.sim.atomic_actions.requirements.SkillResourceSlot"
+              }
+            ]
+          },
+          "type": "embodichain.lab.sim.atomic_actions.requirements.SkillBindingContract"
+        },
+        "goal_type": [
+          {
+            "type": "embodichain.lab.sim.atomic_actions.primitives.place.PlaceGoal"
+          },
+          {
+            "type": "embodichain.lab.sim.atomic_actions.primitives.place.AssembleGoal"
+          }
+        ],
+        "open_loop": false,
+        "options_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.place.PlaceOptions"
+        },
+        "planning_recovery_type": {
+          "type": "embodichain.lab.sim.atomic_actions.primitives.place.PlacePlanningRecovery"
+        },
+        "skill_id": "place",
+        "supports_segment_motion_recovery": true
+      },
+      "type": "embodichain.lab.sim.atomic_actions.core.SkillDescriptor"
+    },
+    "PlaceOptions": {
+      "fields": {
+        "cartesian_waypoint_count": 1,
+        "drawer_placement": false,
+        "hand_interp_steps": 5,
+        "lift_height": 0.1,
+        "linear_segments": false,
+        "max_approach_retract_z": null,
+        "measured_inside": false,
+        "monitor_scene_until_approach": false,
+        "preserve_current_object_orientation": false,
+        "preserve_vertical": false,
+        "qualify_required_waypoints": false,
+        "release_settle_steps": 0
+      },
+      "type": "embodichain.lab.sim.atomic_actions.primitives.place.PlaceOptions"
+    },
+    "PlacePlanningRecovery": {
+      "fields": {
+        "clearance_routes": [
+          0.05,
+          0.1
+        ],
+        "inside_world_yaw": false,
+        "kind": "place_bounded",
+        "max_complete_plans": 10,
+        "max_release_branches": 4,
+        "max_waypoint_batches": 2,
+        "revision": 1,
+        "skill_id": "place",
+        "variant": "waypoint",
+        "waypoint_attempts_per_batch": 3
+      },
+      "type": "embodichain.lab.sim.atomic_actions.primitives.place.PlacePlanningRecovery"
+    }
+  }
+}

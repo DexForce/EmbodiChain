@@ -58,6 +58,7 @@ from .composition import (
     ConfiguredTaskProgramDeployment,
     ConfiguredTaskProgramIntegration,
     load_configured_task_program_deployment,
+    compile_configured_task_program,
 )
 from .extensions import (
     ControlPartEvidenceProviderDeclaration,
@@ -147,4 +148,5 @@ __all__ = [
     "create_simulation_task_program_adapter",
     "default_simulation_settle_presets",
     "load_configured_task_program_deployment",
+    "compile_configured_task_program",
 ]

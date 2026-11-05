@@ -101,6 +101,8 @@ from ..environment import (
     TaskProgramEnvironmentFactory,
     PlanningObservationPort,
 )
+from .pour_projection import ResolvedPourProjectionRoute
+from embodichain.lab.task_program.compiler.lowering import SemanticCallCompiler
 from .policies import SimulationSegmentPolicyPort
 from .stability import SimulationStabilityConditionCfg
 from ..runtime_services import TaskProgramRuntimeServiceContext
@@ -957,6 +959,20 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             field_name="rotation_threshold",
         )
         self._owner_token = _RuntimeOwner()
+        self._coordinated_grasp_services = None
+        if declared_services is not None and declared_services.coordinated_grasps:
+            from .coordinated_grasp import ConfiguredCoordinatedGraspServices
+
+            self._coordinated_grasp_services = ConfiguredCoordinatedGraspServices(
+                robot,
+                generators=self._grasp_pose_generators,
+                geometry_cfgs=self._hand_geometry_cfgs,
+                declarations=declared_services.coordinated_grasps,
+                validate_owner=self._owner_token.require_open,
+            )
+            self._grasp_pose_generators = dict(
+                self._coordinated_grasp_services.generators
+            )
         self._capture_root_pose = capture_root_pose
         self._hold_qpos_source = hold_qpos_source
         self._capture_native_revision = (
@@ -1062,6 +1078,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         if self._owner_token.closed:
             return
         self._owner_token.closed = True
+        if self._coordinated_grasp_services is not None:
+            self._coordinated_grasp_services.close()
         for services in self._control_bridge_services:
             services.close_host_resources()
         self._control_bridge_services.clear()
@@ -1112,7 +1130,10 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             "position",
         )
         episode_identity = None
-        if registration.requires_scoped_control_services:
+        if registration.requires_scoped_control_services or (
+            registration.planning_services is not None
+            and registration.planning_services.released_hand_continuations
+        ):
             context = getattr(environment, "episode_context", None)
             if context is None or not callable(getattr(context, "snapshot", None)):
                 raise ValueError(
@@ -1350,6 +1371,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self,
         profile: RobotSkillProfile,
         *,
+        pour_projection_routes: tuple[ResolvedPourProjectionRoute, ...] = (),
+        planning_program: CompiledTaskProgram | None = None,
         twist_planning_provider: TwistOperationRegistry | None = None,
         articulation_continuation_provider: (
             ArticulationContinuationRegistry | None
@@ -1364,19 +1387,129 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
                 f"profile ID must be {self.robot_profile_id!r}, got "
                 f"{profile.profile_id!r}."
             )
+        continuation = None
+        declared_services = self._registration.planning_services
+        if (
+            declared_services is not None
+            and declared_services.place_continuation_bindings
+        ):
+            if planning_program is None:
+                raise ValueError(
+                    "Place continuations require a compiled planning_program before engine creation."
+                )
+            from .place_continuation import SimulationPlaceContinuationProvider
+
+            continuation = SimulationPlaceContinuationProvider(
+                self._robot,
+                planning_program,
+                self._registration,
+                bindings=declared_services.place_continuation_bindings,
+                require_open=self._owner_token.require_open,
+            )
+        released_provider = None
+        if (
+            declared_services is not None
+            and declared_services.released_hand_continuations
+        ):
+            if not callable(self._episode_identity):
+                raise ValueError(
+                    "Released continuation requires the actual episode identity reader."
+                )
+            if planning_program is None:
+                raise ValueError(
+                    "Released continuations require the exact compiled program scope."
+                )
+            from .released_continuation import (
+                SimulationReleasedHandContinuationProvider,
+            )
+
+            released_provider = SimulationReleasedHandContinuationProvider(
+                self._robot,
+                planning_program,
+                self._registration,
+                bindings=declared_services.released_hand_continuations,
+                require_open=self._owner_token.require_open,
+                read_source_stamp=self.world_source_stamp,
+                read_episode=self._episode_identity,
+            )
         motion_generator = self._create_motion_generator()
         if motion_generator.robot is not self._robot:
             raise ValueError(
                 "Motion generator must own the exact robot selected by the factory."
             )
-        services = self._registration.planning_services
         free_motion_query = None
+        services = self._registration.planning_services
         if services is not None and services.free_motion_query == "discrete_mesh":
             from embodichain.lab.sim.motion.mesh_collision import (
                 SimulationFreeMotionQuery,
             )
 
             free_motion_query = SimulationFreeMotionQuery(self._robot, self._simulation)
+        joint_prefix = None
+        if services is not None and services.observed_curobo is not None:
+            from embodichain.lab.sim.atomic_actions.curobo_queries import (
+                CuroboJointPrefixPlanner,
+            )
+            from embodichain.lab.sim.scene.collision_sources import (
+                SimulationCollisionShapeReader,
+            )
+            from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
+                CuroboPlannerCfg,
+                CuroboWorldCfg,
+            )
+            from embodichain.lab.sim.motion.planners.curobo.observed import (
+                ObservedCuroboQueryFactory,
+            )
+            from .collision_observation import SimulationCollisionObservationProvider
+
+            declared = services.observed_curobo.snapshot()
+            roster = services.collision_roster.snapshot()
+            shapes = SimulationCollisionShapeReader(
+                self._simulation,
+                rigid_objects=dict(roster.rigid_objects),
+                articulation_links={
+                    key: (uid, link) for key, uid, link in roster.articulation_links
+                },
+            )
+            cfg = CuroboPlannerCfg(
+                robot_uid=self._robot.uid,
+                sim_instance_id=self._simulation.instance_id,
+                world=CuroboWorldCfg(max_voxel_count=declared.max_voxel_count),
+                use_cuda_graph=False,
+                warmup_iterations=0,
+                preserve_plan_samples=True,
+                interpolation_dt=self._step_dt,
+                cuda_device=declared.cuda_device,
+            )
+            queries = ObservedCuroboQueryFactory(self._robot, cfg, shapes)
+            world = SimulationCollisionObservationProvider(
+                self._simulation, roster, self.world_source_stamp
+            )
+            joint_prefix = CuroboJointPrefixPlanner(queries, world)
+        place_scene = None
+        if services is not None and services.place_scene_bindings:
+            from .place_scene import SimulationPlaceSceneProvider
+
+            roster = services.collision_roster.snapshot()
+            logical_by_native = {
+                item.simulation_uid: item.entity_id
+                for item in self._scene_binding.articulations
+            }
+            articulation_uids = {
+                logical_by_native.get(uid, uid): uid
+                for _, uid, _ in roster.articulation_links
+            }
+            place_scene = SimulationPlaceSceneProvider(
+                self._simulation,
+                rigid_uids=dict(roster.rigid_objects),
+                articulation_uids=articulation_uids,
+                link_bindings=tuple(
+                    (logical_by_native.get(uid, uid), link, key)
+                    for key, uid, link in roster.articulation_links
+                ),
+                bindings=services.place_scene_bindings,
+                containers=self._scene_binding.containers,
+            )
         handover_scene = None
         if services is not None and services.native_handover_scene:
             from .handover_scene import SimulationHandOverSceneProvider
@@ -1397,18 +1530,222 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
                 required_owner_uids=required,
                 read_source_stamp=self.world_source_stamp,
             )
+        cargo_geometry = None
+        if services is not None and services.capture_coordinated_cargo:
+            from embodichain.lab.sim.scene.mesh_snapshot import capture_scene_meshes
+
+            cargo_geometry = capture_scene_meshes(
+                self._simulation,
+                rigid_uids={
+                    item.entity_id: item.simulation_uid
+                    for item in self._scene_binding.rigid_objects
+                },
+            )
+        held_planning = None
+        if services is not None and services.held_staging_bindings:
+            from .held_planning import (
+                SimulationHeldPlanningProvider,
+                _declared_authorities,
+            )
+            from embodichain.lab.sim.atomic_actions.planning_probes import (
+                HeldStagingBinding,
+            )
+
+            held_planning = SimulationHeldPlanningProvider(
+                self._robot,
+                self._simulation,
+                bindings={
+                    value.invocation_id: HeldStagingBinding(
+                        rigid_entity_id=value.rigid_entity_id,
+                        articulation_scene=value.articulation_scene,
+                    )
+                    for value in services.held_staging_bindings
+                },
+                retained_authorities=_declared_authorities(
+                    profile,
+                    self._registration.invocation_policy_bindings,
+                    services.held_staging_bindings,
+                ),
+                read_source_stamp=self.world_source_stamp,
+            )
+        pour_projection = None
+        declared_pour = () if services is None else services.pour_projection_bindings
+        if (
+            type(pour_projection_routes) is not tuple
+            or {value.pick_id for value in pour_projection_routes}
+            != {value.pick_invocation_id for value in declared_pour}
+            or len(pour_projection_routes) != len(declared_pour)
+        ):
+            raise ValueError("Pour projection requires exact compiled role bindings.")
+        if pour_projection_routes:
+            from embodichain.lab.sim.scene.pour_inputs import (
+                capture_pour_vertices,
+                capture_pour_faces,
+                configured_pour_gravity,
+            )
+            from embodichain.lab.sim.scene.pour_region import PourRegionGeometry
+            from .pour_projection import SimulationPourProjectionProvider
+
+            native_ids = {
+                value.entity_id: value.simulation_uid
+                for value in self._scene_binding.rigid_objects
+            }
+            identifiers = tuple(
+                dict.fromkeys(
+                    identifier
+                    for route in pour_projection_routes
+                    for identifier in (route.object_id, route.receiver_id)
+                )
+            )
+            entities = {
+                identifier: self._simulation.get_rigid_object(native_ids[identifier])
+                for identifier in identifiers
+            }
+            vertices = {
+                identifier: capture_pour_vertices(entity)
+                for identifier, entity in entities.items()
+            }
+            gravity = configured_pour_gravity(self._simulation)
+            faces = {
+                identifier: capture_pour_faces(entities[identifier])
+                for identifier in dict.fromkeys(
+                    route.receiver_id
+                    for route in pour_projection_routes
+                    if route.proxy_position_tolerance_m is not None
+                )
+            }
+            geometries = {
+                budget: PourRegionGeometry(vertices, faces, gravity, budget)
+                for budget in dict.fromkeys(
+                    route.proxy_position_tolerance_m
+                    for route in pour_projection_routes
+                    if route.proxy_position_tolerance_m is not None
+                )
+            }
+            pour_projection = SimulationPourProjectionProvider(
+                self._robot,
+                routes=pour_projection_routes,
+                vertices=vertices,
+                gravity_world=gravity,
+                hand_geometry_cfgs=self._hand_geometry_cfgs,
+                region_geometries={
+                    route.pick_id: geometries[route.proxy_position_tolerance_m]
+                    for route in pour_projection_routes
+                    if route.proxy_position_tolerance_m is not None
+                },
+                read_source_stamp=self.world_source_stamp,
+            )
+        pick_closing = None
+        if services is not None and services.pick_closing_bindings:
+            from .pick_closing import SimulationPickClosingProvider
+
+            pick_closing = SimulationPickClosingProvider(
+                self._robot,
+                self._simulation,
+                rigid_uids={
+                    item.entity_id: item.simulation_uid
+                    for item in self._scene_binding.rigid_objects
+                },
+                bindings=services.pick_closing_bindings,
+                read_source_stamp=self.world_source_stamp,
+            )
+        slide_clearance = None
+        if services is not None and services.slide_preshape_bindings:
+            from .slide_preshape import SimulationSlideHandClearanceProvider
+
+            ordered_cfgs = {
+                resource.endpoints["grasp"].control_part: self._hand_geometry_cfgs[
+                    resource.endpoints["grasp"].control_part
+                ]
+                for resource in profile.resources.values()
+                if "motion" in resource.endpoints and "grasp" in resource.endpoints
+            }
+            slide_clearance = SimulationSlideHandClearanceProvider(
+                self._robot,
+                self._simulation,
+                bindings=services.slide_preshape_bindings,
+                hand_geometry_cfgs=ordered_cfgs,
+                read_source_stamp=self.world_source_stamp,
+            )
+        drawer_planning = None
+        if services is not None and services.drawer_bindings:
+            from .drawer_planning import SimulationDrawerPlanningProvider
+
+            drawer_planning = SimulationDrawerPlanningProvider(
+                self._robot,
+                self._simulation,
+                bindings=services.drawer_bindings,
+                read_source_stamp=self.world_source_stamp,
+            )
+        measured = None
+        if services is not None and services.measured_rigid_bindings:
+            from .measured_rigid import SimulationMeasuredRigidProvider
+
+            measured = SimulationMeasuredRigidProvider(
+                self._robot,
+                self._simulation,
+                bindings=services.measured_rigid_bindings,
+                rigid_uids={
+                    value.entity_id: value.simulation_uid
+                    for value in self._scene_binding.rigid_objects
+                },
+                containers=self._scene_binding.containers,
+                hand_geometry_cfgs=self._hand_geometry_cfgs,
+                read_source_stamp=self.world_source_stamp,
+            )
         engine = AtomicActionEngine(
             motion_generator,
+            coordinated_cargo_geometry=cargo_geometry,
+            held_staging_provider=held_planning,
+            slide_hand_clearance_provider=slide_clearance,
+            drawer_planning_provider=drawer_planning,
+            retained_command_provider=held_planning,
             free_motion_query=free_motion_query,
+            joint_prefix_planner=joint_prefix,
+            place_scene_provider=place_scene,
+            place_continuation_provider=continuation,
+            released_hand_provider=released_provider,
+            measured_rigid_provider=measured,
             handover_scene_provider=handover_scene,
-            twist_planning_provider=twist_planning_provider,
-            articulation_continuation_provider=articulation_continuation_provider,
+            pick_closing_query_provider=pick_closing,
+            pour_grasp_projection_provider=pour_projection,
             control_profiles=profile.action_control_profiles(),
             grasp_pose_generators=self._grasp_pose_generators,
             hand_geometry_cfgs=self._hand_geometry_cfgs,
+            twist_planning_provider=twist_planning_provider,
+            articulation_continuation_provider=articulation_continuation_provider,
         )
         self._registration.validate_engine(engine)
         return engine
+
+    def bind_compiler_planning_services(
+        self, engine: AtomicActionEngine, compiler: SemanticCallCompiler
+    ) -> None:
+        """Bind declared continuation services to the one assembled compiler."""
+        self._owner_token.require_open()
+        provider = engine.planning_services.place_continuation_provider
+        if provider is not None:
+            from .place_continuation import SimulationPlaceContinuationProvider
+
+            if type(provider) is not SimulationPlaceContinuationProvider:
+                raise TypeError("Standard continuation service ownership differs.")
+            provider.bind_compiler(engine, compiler)
+
+        released = engine.planning_services.released_hand_provider
+        if released is not None:
+            from .released_continuation import (
+                SimulationReleasedHandContinuationProvider,
+            )
+
+            if type(released) is not SimulationReleasedHandContinuationProvider:
+                raise TypeError("Released continuation service has another owner.")
+            released.bind_compiler(engine, compiler)
+
+    def close_compiler_planning_services(self, engine: AtomicActionEngine) -> None:
+        """Close this bridge's released continuation authority, without native work."""
+        provider = engine.planning_services.released_hand_provider
+        if provider is not None:
+            provider.close()
 
     def world_source_stamp(self) -> PhysicalObservationStamp:
         """Read this factory's native-world source without sampling or stepping.

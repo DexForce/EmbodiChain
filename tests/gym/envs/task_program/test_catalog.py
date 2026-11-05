@@ -1510,3 +1510,27 @@ def test_twist_final_occurrence_can_use_its_single_release_window(last_phase):
         catalog.validate_control_program(
             TaskProgramCompiler(catalog.scene).compile(decode_task_program(early))
         )
+
+
+def test_native_service_extension_preserves_public_default_values_and_capabilities() -> (
+    None
+):
+    """The prior public owner baseline includes true derived handler capability."""
+    import json
+    from pathlib import Path
+    from embodichain.lab.sim import atomic_actions
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+
+    frozen = json.loads(
+        (
+            Path(__file__).parent / "data/native_public_defaults_base42bd.json"
+        ).read_text()
+    )["values"]
+    actual = {}
+    for name in frozen:
+        if name.endswith(".descriptor"):
+            value = getattr(atomic_actions, name[: -len(".descriptor")]).descriptor()
+        else:
+            value = getattr(atomic_actions, name)()
+        actual[name] = _canonical_value(value)
+    assert actual == frozen

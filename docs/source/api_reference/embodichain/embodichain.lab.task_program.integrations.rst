@@ -721,3 +721,301 @@ refresh or repeat the post-policy's physical acquisition. Bridge cleanup detache
 owned hooks and closes cursors/queries without acknowledging pending commands.
 The borrowed observation owner remains available for final collectors until host
 teardown, while a changed episode invalidates that bridge's live observations.
+
+
+Native planning deployment services
+-----------------------------------
+
+The standard factory resolves explicit planning declarations after the physical
+host exists. It supplies shared collision, observed cuRobo, Pick closing, measured
+rigid, Place-scene, held staging/command, Pour projection and paired-grasp services
+to the ordinary Atomic engine. Static composition creates none of those live
+queries. Default service absence retains the existing shared behavior.
+
+Every occurrence permission is checked against the actual compiled program and
+selected preset. Place/released-hand continuations bind the same existing
+compiler, engine, robot and program; they use the normal complete-plan preview
+pipeline. Released authorities additionally guard the actual episode and close
+through the bridge's existing cleanup callback. They never create a second
+compiler or commit a preview's physical effects.
+
+Public inline composition accepts explicit declarations under ``inline`` and
+retains independently owned program data. ``program_source`` and ``load_program``
+provide the same strict decoding/preflight for file and inline sources.
+``compile_configured_task_program`` computes provider-free occurrence identities
+before their final runtime-service bindings exist; full deployment preflight is
+still required afterwards. Backend/batch, missing services, incompatible modes,
+foreign roles, external nominal incompatibilities and declaration drift reject
+without starting simulation. Measurements and physical acceptance remain with
+their separate evidence and TaskSpec owners.
+
+.. autofunction:: embodichain.lab.task_program.integrations.composition.compile_configured_task_program
+
+.. autoclass:: embodichain.lab.task_program.integrations.simulation.planning_services.ObservedCuroboServicesCfg
+   :members: snapshot
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.collision_observation
+
+.. autosummary::
+
+   SimulationCollisionObservationProvider
+
+.. autoclass:: SimulationCollisionObservationProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.coordinated
+
+.. autosummary::
+
+   CoordinatedHoldLowererFactory
+   CoordinatedTargetRoute
+   CoordinatedPlacementLowererFactory
+
+.. autoclass:: CoordinatedHoldLowererFactory
+   :members:
+
+.. autoclass:: CoordinatedTargetRoute
+   :members:
+
+.. autoclass:: CoordinatedPlacementLowererFactory
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.coordinated_grasp
+
+.. autosummary::
+
+   CoordinatedGraspServiceCfg
+   ConfiguredCoordinatedGraspServices
+
+.. autoclass:: CoordinatedGraspServiceCfg
+   :members:
+
+.. autoclass:: ConfiguredCoordinatedGraspServices
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.effect_contracts
+
+.. autosummary::
+
+   PlacementEffectContract
+   TransportEffectContract
+
+.. autoclass:: PlacementEffectContract
+   :members:
+
+.. autoclass:: TransportEffectContract
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.held_planning
+
+.. autosummary::
+
+   SimulationHeldPlanningProvider
+   resolve_retained_command_authorities
+
+.. autoclass:: SimulationHeldPlanningProvider
+   :members:
+
+.. autofunction:: resolve_retained_command_authorities
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.jaw_pour
+
+.. autosummary::
+
+   JawPourFactory
+
+.. autoclass:: JawPourFactory
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.measured_rigid
+
+.. autosummary::
+
+   MeasuredRigidInvocationBinding
+   SimulationMeasuredRigidProvider
+
+.. autoclass:: MeasuredRigidInvocationBinding
+   :members:
+
+.. autoclass:: SimulationMeasuredRigidProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.pick_closing
+
+.. autosummary::
+
+   PickClosingBinding
+   SimulationPickClosingProvider
+
+.. autoclass:: PickClosingBinding
+   :members:
+
+.. autoclass:: SimulationPickClosingProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.pick_targets
+
+.. autosummary::
+
+   PickTargetRoute
+   ConfiguredPickLowererFactory
+   make_pick_alias_factory
+
+.. autoclass:: PickTargetRoute
+   :members:
+
+.. autoclass:: ConfiguredPickLowererFactory
+   :members:
+
+.. autofunction:: make_pick_alias_factory
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.place_continuation
+
+.. autosummary::
+
+   PlaceContinuationBinding
+   HeldAlignmentContinuationBinding
+   SimulationPlaceContinuationProvider
+
+.. autoclass:: PlaceContinuationBinding
+   :members:
+
+.. autoclass:: HeldAlignmentContinuationBinding
+   :members:
+
+.. autoclass:: SimulationPlaceContinuationProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.place_scene
+
+.. autosummary::
+
+   PlaceSceneBinding
+   SimulationPlaceSceneProvider
+
+.. autoclass:: PlaceSceneBinding
+   :members:
+
+.. autoclass:: SimulationPlaceSceneProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.placement
+
+.. autosummary::
+
+   ObservedRelativePlaceBinding
+   ObservedRelativePlaceLowererFactory
+   UprightPlaceLowererFactory
+
+.. autoclass:: ObservedRelativePlaceBinding
+   :members:
+
+.. autoclass:: ObservedRelativePlaceLowererFactory
+   :members:
+
+.. autoclass:: UprightPlaceLowererFactory
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.pour_binding
+
+.. autosummary::
+
+   PourProjectionBinding
+   resolve_pour_projection_routes
+
+.. autoclass:: PourProjectionBinding
+   :members:
+
+.. autofunction:: resolve_pour_projection_routes
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.pour_projection
+
+.. autosummary::
+
+   ResolvedPourProjectionRoute
+   SimulationPourProjectionProvider
+
+.. autoclass:: ResolvedPourProjectionRoute
+   :members:
+
+.. autoclass:: SimulationPourProjectionProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.pour_transport
+
+.. autosummary::
+
+   PourStageRoute
+   PourTransportFactory
+   PourRegionTransportFactory
+
+.. autoclass:: PourStageRoute
+   :members:
+
+.. autoclass:: PourTransportFactory
+   :members:
+
+.. autoclass:: PourRegionTransportFactory
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.released_continuation
+
+.. autosummary::
+
+   ReleasedHandContinuationBinding
+   SimulationReleasedHandContinuationProvider
+
+.. autoclass:: ReleasedHandContinuationBinding
+   :members:
+
+.. autoclass:: SimulationReleasedHandContinuationProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.retained_pour
+
+.. autosummary::
+
+   RetainedPourFactory
+
+.. autoclass:: RetainedPourFactory
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.stack_placement
+
+.. autosummary::
+
+   StackPlaceLowererFactory
+
+.. autoclass:: StackPlaceLowererFactory
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.transport
+
+.. autosummary::
+
+   TerminalAttachmentTransportLowererFactory
+   DrawerTransportLowererFactory
+
+.. autoclass:: TerminalAttachmentTransportLowererFactory
+   :members:
+
+.. autoclass:: DrawerTransportLowererFactory
+   :members:

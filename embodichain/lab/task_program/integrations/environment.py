@@ -637,6 +637,7 @@ class TaskProgramEnvironmentAdapter:
         integration: TaskProgramIntegrationCfg,
         *,
         control_services: _ControlBridgeServices | None = None,
+        planning_program: CompiledTaskProgram | None = None,
     ) -> SemanticExecutorComponents:
         """Bind compiler dependencies without observation or evidence ports."""
         self._require_open()
@@ -665,8 +666,33 @@ class TaskProgramEnvironmentAdapter:
         if self._registration is not None:
             self._registration.validate_robot_profile(profile)
 
+        planning_services = (
+            None if self._registration is None else self._registration.planning_services
+        )
+        planning_kwargs = {}
+        if planning_services is not None and (
+            planning_services.place_continuation_bindings
+            or planning_services.released_hand_continuations
+        ):
+            planning_kwargs["planning_program"] = planning_program
+        pour_routes = ()
+        if (
+            self._registration is not None
+            and self._registration.planning_services is not None
+            and self._registration.planning_services.pour_projection_bindings
+        ):
+            if planning_program is None:
+                raise ValueError(
+                    "Configured Pour projection requires an exact compiled program scope."
+                )
+            pour_routes = self._registration.catalog.resolve_pour_projection_routes(
+                planning_program
+            )
+        if pour_routes:
+            planning_kwargs["pour_projection_routes"] = pour_routes
         engine = self._factory.create_atomic_action_engine(
             profile,
+            **planning_kwargs,
             **(
                 {
                     "twist_planning_provider": control_services.twist_registry,
@@ -720,6 +746,9 @@ class TaskProgramEnvironmentAdapter:
             handover_pose_providers=self._handover_pose_providers,
             effect_monitor_registry=self._effect_monitor_registry,
         )
+        bind_planning = getattr(self._factory, "bind_compiler_planning_services", None)
+        if callable(bind_planning):
+            bind_planning(engine, semantic.compiler)
         if self._registration is not None:
             self._validate_registration_ownership()
             bound_profile = semantic.compiler.integration.robot_profile
@@ -1070,7 +1099,9 @@ class TaskProgramEnvironmentAdapter:
 
         try:
             semantic = self._assemble_semantic_components(
-                program.integration, control_services=control_services
+                program.integration,
+                control_services=control_services,
+                planning_program=program,
             )
             if policies is not None:
                 policies.validate_manifest(
@@ -1130,6 +1161,20 @@ class TaskProgramEnvironmentAdapter:
                     else control_services.plan_lifecycle_factory
                 ),
             )
+            close_planning = (
+                getattr(self._factory, "close_compiler_planning_services", None)
+                if semantic.engine.planning_services.released_hand_provider is not None
+                else None
+            )
+
+            def close_bridge_resources() -> None:
+                try:
+                    if control_services is not None:
+                        control_services.close()
+                finally:
+                    if callable(close_planning):
+                        close_planning(semantic.engine)
+
             bridge = TaskProgramDemoBridge(
                 program,
                 assembly.runtime,
@@ -1150,7 +1195,9 @@ class TaskProgramEnvironmentAdapter:
                 expansion_trace_provider=assembly.expansion_trace_provider,
                 isolate_policy_sessions=control_services is None,
                 runtime_resource_cleanup=(
-                    None if control_services is None else control_services.close
+                    close_bridge_resources
+                    if control_services is not None or callable(close_planning)
+                    else None
                 ),
                 **({"invocation_policies": policies} if policies is not None else {}),
             )

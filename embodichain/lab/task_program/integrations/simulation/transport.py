@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import ClassVar
 from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
@@ -35,20 +35,19 @@ from embodichain.lab.task_program.semantics import (
     SceneObjectRef,
     SceneRegistry,
     SceneManifest,
-    HeldObjectRelation,
     SemanticEffectKind,
     SemanticPose,
+    SkillPolicyPreset,
 )
 from embodichain.lab.task_program.compiler.lowering import (
     RegisteredSemanticLowerer,
-    RegisteredSemanticEffect,
-    RegisteredHeldObjectEffect,
     SemanticLowering,
     SemanticObjectTarget,
 )
 from embodichain.lab.task_program.integrations.extensions import (
     RegisteredSemanticLowererFactory,
 )
+from .effect_contracts import TransportEffectContract, _attachment_effect
 from .targets import (
     AbsolutePoseTarget,
     SceneEntityTarget,
@@ -56,7 +55,12 @@ from .targets import (
     _identifier,
 )
 
-__all__ = ["HeldObjectTransportRoute", "RoutedMoveHeldObjectLowererFactory"]
+__all__ = [
+    "HeldObjectTransportRoute",
+    "RoutedMoveHeldObjectLowererFactory",
+    "TerminalAttachmentTransportLowererFactory",
+    "DrawerTransportLowererFactory",
+]
 
 _MOVE_HELD_OBJECT_CALL_ID = "simulation.move_held_object"
 
@@ -86,6 +90,9 @@ class _RoutedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
     """Bind absolute or scene-relative targets to the shared transport goal."""
 
     call_id: ClassVar[str] = _MOVE_HELD_OBJECT_CALL_ID
+    effect_contract: ClassVar[TransportEffectContract] = (
+        TransportEffectContract.GUARDED_ATTACHMENT
+    )
     target_descriptor: ClassVar[SkillDescriptor] = MoveHeldObject.descriptor()
     effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.ATTACH
 
@@ -130,23 +137,25 @@ class _RoutedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
             raise TypeError(
                 "Configured transport requires exact MoveHeldObjectOptions."
             )
+        if (
+            self.effect_contract is TransportEffectContract.TERMINAL_ATTACHMENT
+            and not option_template.report_retained_attachment
+        ):
+            raise ValueError(
+                "Terminal attachment requires report_retained_attachment=True."
+            )
         route = self._route(call)
         return SemanticLowering(
             goal=HeldObjectPoseGoal(
-                resolve_pose_target(route.pose), object_id=route.object_id
-            ),
-            registered_effect=RegisteredSemanticEffect(
-                effect_kind=SemanticEffectKind.ATTACH,
-                held_objects=(
-                    RegisteredHeldObjectEffect(
-                        expectation_id="primary",
-                        relation=HeldObjectRelation.ATTACHED,
-                        object_id=route.object_id,
-                        slot_id="primary",
-                        retain_during_segments=("transport",),
-                    ),
+                resolve_pose_target(route.pose),
+                object_id=(
+                    route.object_id
+                    if self.effect_contract
+                    is TransportEffectContract.GUARDED_ATTACHMENT
+                    else None
                 ),
             ),
+            registered_effect=_attachment_effect(route.object_id, self.effect_contract),
         )
 
     def pick_lookahead_targets(
@@ -187,6 +196,9 @@ class RoutedMoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
     revision: ClassVar[str] = "routed-2"
     target_descriptor: ClassVar[SkillDescriptor] = MoveHeldObject.descriptor()
     routes: tuple[HeldObjectTransportRoute, ...]
+    _lowerer_type: ClassVar[type[_RoutedMoveHeldObjectLowerer]] = (
+        _RoutedMoveHeldObjectLowerer
+    )
 
     def __post_init__(self) -> None:
         if (
@@ -223,7 +235,7 @@ class RoutedMoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
         if engine.robot is not robot:
             raise ValueError("MoveHeldObject requires the engine's exact robot.")
         self.validate_scene_declaration(SceneManifest.from_registry(scene_registry))
-        return _RoutedMoveHeldObjectLowerer(self.routes)
+        return self._lowerer_type(self.routes)
 
     def validate_scene_declaration(self, scene: SceneManifest) -> None:
         """Require canonical object and reference IDs without observing providers.
@@ -247,3 +259,122 @@ class RoutedMoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
                     raise ValueError(
                         "Transport references require canonical scene identities."
                     )
+
+
+class _TerminalAttachmentTransportLowerer(_RoutedMoveHeldObjectLowerer):
+    """Keep the original terminal-only attachment proof and identical motion goal."""
+
+    effect_contract: ClassVar[TransportEffectContract] = (
+        TransportEffectContract.TERMINAL_ATTACHMENT
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class TerminalAttachmentTransportLowererFactory(RoutedMoveHeldObjectLowererFactory):
+    """Select the complete source terminal ATTACH contract explicitly.
+
+    The goal and shared action remain unchanged. The selected preset must retain
+    ``report_retained_attachment=True`` and verified terminal effect monitoring;
+    phase-qualified generic transport remains the ordinary default.
+
+    Args:
+        routes: Complete immutable object/target routes using the shared transport skill.
+    """
+
+    revision: ClassVar[str] = "terminal-attachment-1"
+    _lowerer_type: ClassVar[type[_RoutedMoveHeldObjectLowerer]] = (
+        _TerminalAttachmentTransportLowerer
+    )
+
+    @classmethod
+    def validate_preset(cls, preset: SkillPolicyPreset) -> None:
+        """Reject a terminal contract lacking its actual configured verification.
+
+        Args:
+            preset: Exact default or occurrence-selected policy before live assembly.
+
+        Raises:
+            ValueError: Attachment reporting or verified terminal monitoring is absent.
+        """
+        from embodichain.lab.task_program.semantics import EffectAssurance
+
+        options = preset.action_option_template(cls.call_id)
+        if (
+            type(options) is not MoveHeldObjectOptions
+            or not options.report_retained_attachment
+        ):
+            raise ValueError(
+                "Terminal attachment requires report_retained_attachment=True."
+            )
+        if (
+            preset.effect_assurance is not EffectAssurance.VERIFIED
+            or preset.effect_monitors.get(cls.call_id) is None
+        ):
+            raise ValueError(
+                "Terminal attachment requires verified terminal monitoring."
+            )
+
+
+class _DrawerTransportLowerer(_RoutedMoveHeldObjectLowerer):
+    """Retain the original effectless drawer transport call contract."""
+
+    call_id: ClassVar[str] = "gen_sim.drawer_transport"
+    effect_contract_kind: ClassVar[SemanticEffectKind | None] = None
+    preserves_symbolic_state: ClassVar[bool] = True
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        lowered = super().lower(
+            call, context=context, bound=bound, option_template=option_template
+        )
+        return replace(
+            lowered,
+            goal=replace(lowered.goal, object_id=None),
+            registered_effect=None,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DrawerTransportLowererFactory(RoutedMoveHeldObjectLowererFactory):
+    """Declare source drawer targets without claiming generic transport equivalence.
+
+    The configured registration rejects execution until its drawer-specific
+    planning service is declared. Direct declaration inspection remains pure.
+    """
+
+    call_id: ClassVar[str] = "gen_sim.drawer_transport"
+    revision: ClassVar[str] = "drawer-2"
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Validate exact owners and construct the original effectless lowerer.
+
+        Args:
+            simulation: Borrowed simulation; no state is read.
+            robot: Exact engine robot.
+            scene_registry: Canonical object/target registry.
+            engine: Existing shared Atomic engine.
+
+        Returns:
+            A fresh effectless transport lowerer without runtime handles.
+        """
+        RoutedMoveHeldObjectLowererFactory.create(
+            self,
+            simulation=simulation,
+            robot=robot,
+            scene_registry=scene_registry,
+            engine=engine,
+        )
+        return _DrawerTransportLowerer(self.routes)

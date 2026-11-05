@@ -755,6 +755,7 @@ def config_to_cfg(
     configured_task_program_selection = None
     configured_task_program_id: str | None = None
     configured_task_program_path: Path | None = None
+    configured_task_program_deployment = None
     if "task_program" in config:
         if not component_resolution.embodiment_selected:
             raise ValueError(
@@ -789,6 +790,7 @@ def config_to_cfg(
             deployment.scene_binding,
             simulation=component_resolution.scene_config,
         )
+        configured_task_program_deployment = deployment
         configured_task_program_integration = deployment.integration
         configured_task_program_selection = deployment.selection
         configured_task_program_id = deployment.program_id
@@ -798,23 +800,30 @@ def config_to_cfg(
 
     if (
         task_program_path_override is not None
-        or configured_task_program_path is not None
+        or configured_task_program_deployment is not None
     ):
-        if task_program_path_override is not None:
-            task_program_path = task_program_path_override
-            if not isinstance(task_program_path, (str, os.PathLike)):
-                raise TypeError("task_program_path must be a string or path.")
-        else:
-            assert configured_task_program_path is not None
-            task_program_path = configured_task_program_path
-        task_program_path_text = os.fspath(task_program_path)
-        if not task_program_path_text or (
-            task_program_path_text != task_program_path_text.strip()
-        ):
-            raise ValueError(
-                "task_program_path must be a non-empty string without outer "
-                "whitespace."
-            )
+        inline_deployment = (
+            configured_task_program_deployment is not None
+            and configured_task_program_deployment.program_path is None
+            and task_program_path_override is None
+        )
+        task_program_path_text = None
+        if not inline_deployment:
+            if task_program_path_override is not None:
+                task_program_path = task_program_path_override
+                if not isinstance(task_program_path, (str, os.PathLike)):
+                    raise TypeError("task_program_path must be a string or path.")
+            else:
+                assert configured_task_program_path is not None
+                task_program_path = configured_task_program_path
+            task_program_path_text = os.fspath(task_program_path)
+            if not task_program_path_text or (
+                task_program_path_text != task_program_path_text.strip()
+            ):
+                raise ValueError(
+                    "task_program_path must be a non-empty string without outer "
+                    "whitespace."
+                )
         from embodichain.lab.task_program.language.loader import (
             load_task_program,
         )
@@ -829,11 +838,16 @@ def config_to_cfg(
             registration.assert_unchanged()
             registration.validate_num_envs(config.get("num_envs", 1))
             registration.validate_physics(config["physics"])
-        task_program = load_task_program(
-            task_program_path_text,
-            integration=configured_task_program_selection,
-            validation_context=(None if registration is None else registration.catalog),
-        )
+        if inline_deployment:
+            task_program = configured_task_program_deployment.load_program()
+        else:
+            task_program = load_task_program(
+                task_program_path_text,
+                integration=configured_task_program_selection,
+                validation_context=(
+                    None if registration is None else registration.catalog
+                ),
+            )
         if (
             configured_task_program_id is not None
             and task_program.program_id != configured_task_program_id
