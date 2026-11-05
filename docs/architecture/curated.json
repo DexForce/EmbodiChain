@@ -3878,7 +3878,7 @@
         },
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
-          "symbol": "TaskProgramEnvironmentAdapter.create_bridge",
+          "symbol": "TaskProgramEnvironmentAdapter._create_bridge_with_assembly",
           "start_line": 1133,
           "end_line": 1135,
           "excerpt": "            bridge = TaskProgramDemoBridge(\n                program,\n                assembly.runtime,"
