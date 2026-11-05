@@ -36,6 +36,8 @@ from embodichain.lab.sim.types import EnvObs
 from embodichain.lab.gym.utils.gym_utils import (
     fetch_data_from_dict,
     assign_data_to_dict,
+    _read_raw_rollout,
+    _raw_rollout_state,
 )
 from .observation_types import (
     ObservationDescriptor,
@@ -43,7 +45,6 @@ from .observation_types import (
     ObservationFrame,
     ObservationHistorySnapshot,
 )
-from ._observation_history import _ObservationHistory
 from .manager_base import ManagerBase
 from .cfg import ObservationCfg
 
@@ -94,7 +95,7 @@ class ObservationManager(ManagerBase):
         self._schema: dict[str, ObservationDescriptor] | None = None
         self._validated_frame: ObservationFrame | None = None
         self._field_ids: dict[str, str] = {}
-        self.history: _ObservationHistory | None = None
+        self._rollout_storage: TensorDictBase | None = None
         self._mode_functor_names: dict[str, list[str]] = dict()
         self._mode_functor_cfgs: dict[str, list[ObservationCfg]] = dict()
         self._mode_class_functor_cfgs: dict[str, list[ObservationCfg]] = dict()
@@ -197,29 +198,30 @@ class ObservationManager(ManagerBase):
         self._bind_schema(frame)
         return frame
 
-    def enable_history(
-        self,
-        *,
-        fields: Mapping[str, torch.Tensor],
-        actions: torch.Tensor,
-        storage: TensorDictBase | None = None,
-    ) -> None:
-        """Attach optional temporal storage to this observation manager.
+    @property
+    def has_history(self) -> bool:
+        """Whether the host rollout contains raw observation fields."""
+        return (
+            self._rollout_storage is not None
+            and "raw_obs" in self._rollout_storage.keys()
+        )
+
+    def bind_rollout_storage(self, storage: TensorDictBase) -> None:
+        """Bind read access to host-owned rollout data without another cache.
 
         Args:
-            fields: Owned preallocated state buffers with T+1 slots.
-            actions: Owned transition buffer with T slots.
-            storage: Host rollout storage; history exposes its raw observation
-                fields rather than allocating a separate cache.
+            storage: Existing rollout storage, including its raw observation group.
         """
-        if self.history is not None:
-            raise RuntimeError("Observation history is already enabled.")
-        self.history = _ObservationHistory(
-            episode_context=self._env.episode_context,
-            fields=fields,
-            actions=actions,
-            storage=storage,
-        )
+        _raw_rollout_state(storage, self._env.episode_context)
+        self._rollout_storage = storage
+
+    def validate_history_owner(self, episode_context: EpisodeContext) -> None:
+        """Validate the actual rollout episode owner before binding a reader.
+
+        Args:
+            episode_context: Consumer's expected source episode context.
+        """
+        _raw_rollout_state(self._rollout_storage, episode_context)
 
     def snapshot_history(
         self,
@@ -237,9 +239,12 @@ class ObservationManager(ManagerBase):
             Owned numeric history and temporal identities. Semantics remain
             available through this manager's schema and field IDs.
         """
-        if self.history is None:
-            raise RuntimeError("Observation history is unavailable.")
-        return self.history.snapshot_history(env_ids, device=device)
+        return _read_raw_rollout(
+            self._rollout_storage,
+            self._env.episode_context,
+            env_ids=env_ids,
+            device=device,
+        )
 
     def _bind_schema(self, frame: ObservationFrame) -> None:
         if frame is self._validated_frame:
@@ -263,40 +268,6 @@ class ObservationManager(ManagerBase):
                 raise ValueError(f"Raw observation identity drift for {name!r}.")
         self._validated_frame = frame
 
-    def seed_history(
-        self, frame: ObservationFrame, env_ids: Sequence[int] | torch.Tensor
-    ) -> None:
-        """Seed selected history rows from the prepared reset observation.
-
-        Args:
-            frame: Raw frame captured after reset preparation.
-            env_ids: Selected original environment rows.
-        """
-        if self.history is not None:
-            self.history.validate_episode_source(frame.episode_owner)
-            self._bind_schema(frame)
-            self.history.bind(frame, tuple(dict.fromkeys(self._field_ids.values())))
-            self.history.seed(frame, env_ids)
-
-    def append_history(
-        self,
-        frame: ObservationFrame,
-        action: torch.Tensor,
-        *,
-        active: torch.Tensor | None = None,
-    ) -> None:
-        """Append one captured boundary to optional temporal storage.
-
-        Args:
-            frame: Original post-transition raw frame.
-            action: Host-validated action in the fixed recording layout.
-            active: Optional row selection independent of policy transforms.
-        """
-        if self.history is not None:
-            self.history.validate_episode_source(frame.episode_owner)
-            self._bind_schema(frame)
-            self.history.append(frame, action, active=active)
-
     def read_history(
         self,
         frame_indices: Sequence[int],
@@ -316,13 +287,15 @@ class ObservationManager(ManagerBase):
         Returns:
             Owned field tensors and original temporal identities.
         """
-        if self.history is None:
+        if not self.has_history:
             raise RuntimeError("Observation history is unavailable.")
         names = tuple(fields)
         if not names or len(set(names)) != len(names):
             raise ValueError("History queries require unique nonempty field IDs.")
         ids = {name: self._field_ids[name] for name in names}
-        result = self.history.read(
+        result = _read_raw_rollout(
+            self._rollout_storage,
+            self._env.episode_context,
             frame_indices,
             fields=tuple(dict.fromkeys(ids.values())),
             episode_ids=episode_ids,

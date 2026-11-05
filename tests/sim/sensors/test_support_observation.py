@@ -17,6 +17,9 @@
 """CPU native-support contracts on the real ContactSensor observer lifecycle."""
 
 from __future__ import annotations
+from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.gym.utils.gym_utils import _init_raw_rollout
+from tensordict import TensorDict
 
 from copy import deepcopy
 from contextlib import nullcontext
@@ -1055,7 +1058,18 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     )
     fields = {f"poses/{uid}": value["pose"] for uid, value in values.items()}
     recording = ObservationManager({}, env)
-    recording.enable_history(fields=fields, actions=torch.zeros(2, 2, 1))
+    recording._env._rollout_storage = getattr(recording._env, "_rollout_storage", None)
+    if recording._env._rollout_storage is None:
+        recording._env._rollout_storage = TensorDict(
+            {}, batch_size=[len(recording._env.episode_context.episode_ids)]
+        )
+    _init_raw_rollout(
+        recording._env._rollout_storage,
+        recording._env.episode_context,
+        **dict(fields=fields, actions=torch.zeros(2, 2, 1)),
+    )
+    recording.bind_rollout_storage(recording._env._rollout_storage)
+    env.observation_manager = recording
 
     def observation_frame(index):
         samples = {
@@ -1079,8 +1093,10 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
             None, samples, context.episode_ids, index, episode_owner=context
         )
 
-    recording.seed_history(observation_frame(0), [0, 1])
-    recording.append_history(observation_frame(1), torch.zeros(2, 1))
+    EmbodiedEnv._record_initial_observation(
+        recording._env, observation_frame(0), [0, 1]
+    )
+    _append_fixture(recording._env, observation_frame(1), torch.zeros(2, 1))
     if declaration_case == "foreign_scene":
         foreign = replace(
             binding,
@@ -1111,7 +1127,19 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         foreign_recording = ObservationManager(
             {}, SimpleNamespace(episode_context=other_context)
         )
-        foreign_recording.enable_history(fields={}, actions=torch.zeros(2, 2, 1))
+        foreign_recording._env._rollout_storage = getattr(
+            foreign_recording._env, "_rollout_storage", None
+        )
+        if foreign_recording._env._rollout_storage is None:
+            foreign_recording._env._rollout_storage = TensorDict(
+                {}, batch_size=[len(foreign_recording._env.episode_context.episode_ids)]
+            )
+        _init_raw_rollout(
+            foreign_recording._env._rollout_storage,
+            foreign_recording._env.episode_context,
+            **dict(fields={}, actions=torch.zeros(2, 2, 1)),
+        )
+        foreign_recording.bind_rollout_storage(foreign_recording._env._rollout_storage)
         with pytest.raises(ValueError, match="another episode owner"):
             SimulationSupportObservationCollector(
                 env, bridge, registration, observations=foreign_recording
@@ -1215,3 +1243,10 @@ def test_current_observation_rejects_replaced_native_body_before_reading_old_pos
         observer.observe_current()
     assert original.pose_reads == 0
     registry.close()
+
+
+def _append_fixture(env, frame, action):
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    env._traj_raw_action = action
+    EmbodiedEnv._write_trajectory_step(env, frame)

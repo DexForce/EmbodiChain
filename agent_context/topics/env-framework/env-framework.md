@@ -104,7 +104,7 @@ before stepping in position-velocity mode; inactive and hold targets use zero
 qvel.
 
 `ObservationManager` owns raw acquisition, the single field schema, alias
-resolution and optional numeric history. Standard replay fields are declared by
+resolution and read-only access to raw rollout observations. Standard replay fields are declared by
 `trajectory_observation_cfgs`; Env supplies those declarations and the owned
 buffers, without interpreting source functions or maintaining another schema.
 See [manager functors](../manager-functor/manager-functor.md#raw-observations-and-consumer-views).
@@ -115,7 +115,10 @@ learner windows can retain their own time axes and devices without implicit
 copies. Internal expert policy storage keeps T+1 observations; the public
 `rollout_buffer` remains its T-transition view. With trajectory recording, that
 view also exposes raw observation/validity/time views from the same storage.
-`_traj_buffer` and observation history reference the shared raw tensors.
+`_traj_buffer` and indexed observation reads reference the shared raw tensors.
+Raw writes are part of the host rollout callbacks, using the existing buffer
+utilities. Episode IDs, availability, acquisition clocks and closed state are
+rollout metadata; no history class owns another lifecycle or cursor.
 
 An explicit observation boundary follows physics and interval events, before
 reward/action-postprocessing hooks and autoreset. Reset seeds S0 after
@@ -126,9 +129,9 @@ and noisy values. `step(..., recording_active_mask=...)` independently selects
 history rows for a diagnostic settling tail.
 
 Historical consumers bind fields using `observation_manager.schema`, then use
-`read_history` with exact row-local frame indices and episode IDs. The private
-history view accesses shared rollout fields by ID; it checks actual episode
-ownership, initialized rows and lifetime before/after copying. It never queries
+`read_history` with exact row-local frame indices and episode IDs. The indexed
+rollout read checks actual episode ownership, initialized rows and lifecycle
+metadata before/after copying. It never queries
 live state or substitutes a previous frame. Results own values, validity,
 reasons and temporal identities, without another descriptor model.
 

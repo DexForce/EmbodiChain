@@ -17,6 +17,8 @@
 """Tests for segment-aware demonstration execution and annotations."""
 
 from __future__ import annotations
+from embodichain.lab.gym.utils.gym_utils import _init_raw_rollout
+from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
 
@@ -27,7 +29,6 @@ from unittest.mock import Mock
 
 import pytest
 import torch
-from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.demo import (
     DemoExecutionCfg,
@@ -1534,9 +1535,26 @@ class _TrajectoryWriterStub:
         fields = {"robot/qpos": self._traj_buffer["states"]["robot"]["qpos"]}
         self.episode_context = self.episode_context
         self.observation_manager = ObservationManager({}, self)
-        self.observation_manager.enable_history(
-            fields=fields,
-            actions=self._traj_buffer["actions"][:, :3],
+        self.observation_manager._env._rollout_storage = getattr(
+            self.observation_manager._env, "_rollout_storage", None
+        )
+        if self.observation_manager._env._rollout_storage is None:
+            self.observation_manager._env._rollout_storage = TensorDict(
+                {},
+                batch_size=[
+                    len(self.observation_manager._env.episode_context.episode_ids)
+                ],
+            )
+        _init_raw_rollout(
+            self.observation_manager._env._rollout_storage,
+            self.observation_manager._env.episode_context,
+            **dict(
+                fields=fields,
+                actions=self._traj_buffer["actions"][:, :3],
+            ),
+        )
+        self.observation_manager.bind_rollout_storage(
+            self.observation_manager._env._rollout_storage
         )
         descriptor = ObservationDescriptor(
             "robot",
@@ -1565,11 +1583,11 @@ class _TrajectoryWriterStub:
             )
 
         self.frame = frame(torch.tensor([[0.1, 0.2], [0.3, 0.4]]), 0)
-        self.observation_manager.seed_history(self.frame, [0, 1])
+        EmbodiedEnv._record_initial_observation(self, self.frame, [0, 1])
         self.frame = frame(torch.tensor([[0.1, 0.2], [0.3, 0.4]]), 1)
-        self.observation_manager.append_history(self.frame, torch.zeros(2, 2))
+        _append_fixture(self, self.frame, torch.zeros(2, 2))
         self.frame = frame(torch.tensor([[0.1, 0.2], [0.3, 0.4]]), 2)
-        self._traj_steps = self.observation_manager.history.steps
+        self._traj_steps = self._rollout_storage["raw_steps"]
         self._traj_raw_action = torch.tensor([[9.0, 9.0], [8.0, 8.0]])
         self._demo_active_mask = torch.tensor([False, True])
         self.robot = _TrajectoryRobotStub()
@@ -2024,8 +2042,19 @@ def test_expert_rollout_exposes_raw_observation_views_from_the_same_store():
     env.rollout_buffer = full[:, :5]
     env._rollout_buffer_mode = "expert"
     env.observation_manager = ObservationManager({}, env)
-    env.observation_manager.enable_history(
-        fields={}, actions=torch.zeros(2, 5, 2), storage=env._rollout_storage
+    env.observation_manager._env._rollout_storage = env._rollout_storage
+    if env.observation_manager._env._rollout_storage is None:
+        env.observation_manager._env._rollout_storage = TensorDict(
+            {},
+            batch_size=[len(env.observation_manager._env.episode_context.episode_ids)],
+        )
+    _init_raw_rollout(
+        env.observation_manager._env._rollout_storage,
+        env.observation_manager._env.episode_context,
+        **dict(fields={}, actions=torch.zeros(2, 5, 2)),
+    )
+    env.observation_manager.bind_rollout_storage(
+        env.observation_manager._env._rollout_storage
     )
     descriptor = ObservationDescriptor(
         "probe", "value", "sensor", "scalar", ("unit",), (1,), torch.float32
@@ -2054,3 +2083,10 @@ def test_expert_rollout_exposes_raw_observation_views_from_the_same_store():
         env.rollout_buffer["raw_obs", "probe"][:, 0], frame.fields["probe"].values
     )
     assert env.rollout_buffer["raw_valid", "probe"][:, 0].all()
+
+
+def _append_fixture(env, frame, action):
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    env._traj_raw_action = action
+    EmbodiedEnv._write_trajectory_step(env, frame)

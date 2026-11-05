@@ -794,7 +794,7 @@ class BaseEnv(gym.Env):
         """Capture one explicit control boundary without advancing history."""
         manager = getattr(self, "observation_manager", None)
         enabled = manager is not None and (
-            manager.history is not None or manager.has_raw_channels
+            manager.has_history or manager.has_raw_channels
         )
         episodes = self.episode_context.episode_ids
         if not enabled:

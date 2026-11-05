@@ -118,11 +118,11 @@ class SimulationSupportObservationCollector:
                 "Physical support collection requires initialized episode rows."
             )
         if observations is not None:
-            if observations.history is None:
+            if not observations.has_history:
                 raise ValueError(
                     "Historical collection requires enabled observation history."
                 )
-            observations.history.validate_episode_source(environment.episode_context)
+            observations.validate_history_owner(environment.episode_context)
         self._env, self._bridge, self._port = environment, bridge, port
         self._registration = registration
         self._observations = observations

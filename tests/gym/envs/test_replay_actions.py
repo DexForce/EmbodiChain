@@ -15,13 +15,14 @@
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations
+from embodichain.lab.gym.utils.gym_utils import _init_raw_rollout
+from tensordict import TensorDict
 
 from types import SimpleNamespace
 
 import gymnasium as gym
 import pytest
 import torch
-from tensordict import TensorDict
 
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.types import ControllerAction
@@ -325,15 +326,30 @@ def _enable_action_recording(env, actions):
     context._finish_initialization(list(range(env.num_envs)))
     env.episode_context = context
     env.observation_manager = ObservationManager({}, env)
-    env.observation_manager.enable_history(fields={}, actions=actions)
-    env._traj_steps = env.observation_manager.history.steps
+    env.observation_manager._env._rollout_storage = getattr(
+        env.observation_manager._env, "_rollout_storage", None
+    )
+    if env.observation_manager._env._rollout_storage is None:
+        env.observation_manager._env._rollout_storage = TensorDict(
+            {},
+            batch_size=[len(env.observation_manager._env.episode_context.episode_ids)],
+        )
+    _init_raw_rollout(
+        env.observation_manager._env._rollout_storage,
+        env.observation_manager._env.episode_context,
+        **dict(fields={}, actions=actions),
+    )
+    env.observation_manager.bind_rollout_storage(
+        env.observation_manager._env._rollout_storage
+    )
+    env._traj_steps = env._rollout_storage["raw_steps"]
 
     def frame():
         return ObservationFrame(
             None, {}, context.episode_ids, env.step_count, episode_owner=context
         )
 
-    env.observation_manager.seed_history(frame(), list(range(env.num_envs)))
+    EmbodiedEnv._record_initial_observation(env, frame(), list(range(env.num_envs)))
     return frame
 
 
@@ -459,7 +475,22 @@ def test_replay_reset_reseeds_raw_history_after_restoring_source_state():
     env.sim = SimpleNamespace(enable_physics=lambda enabled: None)
     env.episode_context = context
     env.observation_manager = ObservationManager({}, env)
-    env.observation_manager.enable_history(fields={}, actions=torch.zeros(1, 2, 2))
+    env.observation_manager._env._rollout_storage = getattr(
+        env.observation_manager._env, "_rollout_storage", None
+    )
+    if env.observation_manager._env._rollout_storage is None:
+        env.observation_manager._env._rollout_storage = TensorDict(
+            {},
+            batch_size=[len(env.observation_manager._env.episode_context.episode_ids)],
+        )
+    _init_raw_rollout(
+        env.observation_manager._env._rollout_storage,
+        env.observation_manager._env.episode_context,
+        **dict(fields={}, actions=torch.zeros(1, 2, 2)),
+    )
+    env.observation_manager.bind_rollout_storage(
+        env.observation_manager._env._rollout_storage
+    )
     descriptor = ObservationDescriptor(
         "robot", "qpos", "joint", "joint_order", ("joint_units",), (3,), torch.float32
     )
@@ -479,9 +510,9 @@ def test_replay_reset_reseeds_raw_history_after_restoring_source_state():
 
     env._capture_observation = capture
     env._record_initial_observation = (
-        lambda frame, ids: env.observation_manager.seed_history(frame, ids)
+        lambda frame, ids: EmbodiedEnv._record_initial_observation(env, frame, ids)
     )
-    env.observation_manager.seed_history(capture(), [0])
+    EmbodiedEnv._record_initial_observation(env, capture(), [0])
     trajectory = _trajectory()
     trajectory["states"] = TensorDict(
         {

@@ -15,6 +15,8 @@
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations
+from embodichain.lab.gym.utils.gym_utils import _init_raw_rollout
+from tensordict import TensorDict
 
 import hashlib
 from pathlib import Path
@@ -351,17 +353,34 @@ def completed_runner(runner_case, monkeypatch):
             self.episode_context._finish_initialization([0])
             self.episode_context = self.episode_context
             self.observation_manager = ObservationManager({}, self)
-            self.observation_manager.enable_history(
-                fields={},
-                actions=self._traj_buffer["actions"],
+            self._rollout_storage = TensorDict({}, batch_size=[1])
+            if self.observation_manager._env._rollout_storage is None:
+                self.observation_manager._env._rollout_storage = TensorDict(
+                    {},
+                    batch_size=[
+                        len(self.observation_manager._env.episode_context.episode_ids)
+                    ],
+                )
+            _init_raw_rollout(
+                self.observation_manager._env._rollout_storage,
+                self.observation_manager._env.episode_context,
+                **dict(
+                    fields={},
+                    actions=self._traj_buffer["actions"],
+                ),
             )
-            self._traj_steps = self.observation_manager.history.steps
+            self.observation_manager.bind_rollout_storage(
+                self.observation_manager._env._rollout_storage
+            )
+            self._traj_steps = self._rollout_storage["raw_steps"]
             self.rollout_steps = torch.zeros(1, dtype=torch.long)
             self._elapsed_steps = torch.zeros(1, dtype=torch.long)
             self._demo_steps = torch.zeros(1, dtype=torch.long)
             self._demo_active_mask = torch.ones(1, dtype=torch.bool)
             self.episode_success_status = torch.zeros(1, dtype=torch.bool)
-            self.observation_manager.seed_history(self._observation_frame(), [0])
+            EmbodiedEnv._record_initial_observation(
+                self, self._observation_frame(), [0]
+            )
             return {}, {}
 
         def get_obs(self):

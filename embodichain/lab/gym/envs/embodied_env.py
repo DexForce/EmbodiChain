@@ -94,6 +94,9 @@ from embodichain.lab.gym.utils.gym_utils import (
     _collect_sensor_cfgs,
     build_trajectory_buffer,
     init_rollout_buffer_from_gym_space,
+    _init_raw_rollout,
+    _write_raw_rollout,
+    _close_raw_rollout,
 )
 from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
 from embodichain.lab.gym.utils.trajectory_state import (
@@ -584,14 +587,16 @@ class EmbodiedEnv(BaseEnv):
                         include_nested=True, leaves_only=True
                     )
                 }
-                self.observation_manager.enable_history(
-                    fields=fields,
-                    actions=self._traj_buffer["actions"][:, : self.max_episode_steps],
-                    storage=self._rollout_storage,
+                _init_raw_rollout(
+                    self._rollout_storage,
+                    self.episode_context,
+                    fields,
+                    self._traj_buffer["actions"][:, : self.max_episode_steps],
                 )
+                self.observation_manager.bind_rollout_storage(self._rollout_storage)
                 # Private aliases preserve existing replay/persistence adapters;
                 # acquisition, cursors and lifetime belong to the recorder.
-                self._traj_steps = self.observation_manager.history.steps
+                self._traj_steps = self._rollout_storage["raw_steps"]
 
             self.rollout_steps = torch.zeros(
                 self.num_envs, dtype=torch.long, device=self.device
@@ -767,8 +772,17 @@ class EmbodiedEnv(BaseEnv):
         self, frame: ObservationFrame, env_ids: torch.Tensor
     ) -> None:
         manager = getattr(self, "observation_manager", None)
-        if manager is not None and manager.history is not None:
-            manager.seed_history(frame, env_ids)
+        if manager is not None and manager.has_history:
+            if frame.episode_owner is not self.episode_context:
+                raise ValueError("Observation frame belongs to another episode owner.")
+            manager._bind_schema(frame)
+            _write_raw_rollout(
+                self._rollout_storage,
+                self.episode_context,
+                frame,
+                field_ids=tuple(dict.fromkeys(manager.field_ids.values())),
+                env_ids=env_ids,
+            )
             storage = getattr(self, "_rollout_storage", None)
             if (
                 storage is not None
@@ -776,7 +790,7 @@ class EmbodiedEnv(BaseEnv):
                 and self._rollout_buffer_mode == "expert"
             ):
                 policy = storage["policy"]
-                if policy.shape[1] == manager.history.capacity + 1:
+                if policy.shape[1] == self._rollout_storage["raw_actions"].shape[1] + 1:
                     for key in (
                         "raw_obs",
                         "raw_valid",
@@ -2178,15 +2192,18 @@ class EmbodiedEnv(BaseEnv):
     ) -> None:
         """Commit the actual action and its captured post-transition state."""
         manager = getattr(self, "observation_manager", None)
-        if manager is None or manager.history is None:
+        if manager is None or not manager.has_history:
             return
         if frame is None or self._traj_raw_action is None:
             raise RuntimeError(
                 "Trajectory recording requires an explicit observation frame and action."
             )
-        manager.append_history(
+        manager._bind_schema(frame)
+        _write_raw_rollout(
+            self._rollout_storage,
+            self.episode_context,
             frame,
-            self._traj_raw_action,
+            action=self._traj_raw_action,
             active=(
                 active
                 if active is not None
@@ -3428,7 +3445,11 @@ class EmbodiedEnv(BaseEnv):
         lengths = self._traj_steps[env_ids_t]
         max_len = int(lengths.max().item()) if len(env_ids) > 0 else 0
         manager = getattr(self, "observation_manager", None)
-        recording = manager.history if manager is not None else None
+        recording = (
+            self._rollout_storage
+            if manager is not None and manager.has_history
+            else None
+        )
         history = (
             export_observation_history(manager, env_ids, device=self.device)
             if recording is not None and purpose == "recording"
@@ -3446,7 +3467,7 @@ class EmbodiedEnv(BaseEnv):
             terminal_states = all_states[
                 torch.arange(len(env_ids), device=self.device), lengths
             ]
-            actions = recording.actions[env_ids_t, :max_len].detach()
+            actions = recording["raw_actions"][env_ids_t, :max_len].detach()
         else:
             sub = self._traj_buffer[env_ids_t]
             states = sub["states"][:, :max_len].clone()
@@ -3650,9 +3671,7 @@ class EmbodiedEnv(BaseEnv):
                 return
 
             errors: list[Exception] = []
-            manager = getattr(self, "observation_manager", None)
-            if manager is not None and manager.history is not None:
-                manager.history.close()
+            _close_raw_rollout(getattr(self, "_rollout_storage", None))
             try:
                 self._discard_pending_recordings()
             except Exception as error:

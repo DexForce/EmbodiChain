@@ -248,17 +248,19 @@ Observation Manager
     :no-index:
 
 The manager owns the raw field schema, source aliases and acquisition context.
-``capture`` returns the original raw boundary and its actual policy view;
-``enable_history`` attaches a view over optional shared rollout storage. ``seed_history`` and
-``append_history`` retain T+1 boundaries while ``read_history`` returns owned
-values, validity, missing reasons and temporal identities using field IDs.
-Evidence adapters bind semantic roles through ``schema``. History performs no
-entity/quantity lookup and owns no separate dense cache. The host storage holds
-policy, raw observation and learner-window views, preserving their distinct
-masks, time axes and devices. Internal expert policy observations have T+1 slots
-while existing rollout consumers retain their T-transition view. ``snapshot_history`` returns canonical numeric data;
-``utils.trajectory_state.export_observation_history`` adds the single schema for
-compatible file output without copying another complete state history.
+``capture`` returns the raw boundary and its actual policy view. The existing
+host rollout writer fills raw fields and temporal metadata directly;
+``bind_rollout_storage`` grants the manager read access to those tensors.
+``read_history`` returns owned indexed snapshots and ``snapshot_history`` serves
+the export adapter. There is no history instance, allocation engine or separate
+bind/seed/append API. Evidence adapters bind roles through ``schema``; numeric
+buffer operations perform no entity/quantity lookup.
+
+Expert policy state slots retain T+1 observations; existing rollout consumers
+keep their T-transition view. External learner windows preserve their own device
+and horizon. ``utils.trajectory_state.export_observation_history`` combines the
+single observation schema with a numeric snapshot for compatible output,
+without copying another complete state history.
 
 Observation Functions
 ---------------------

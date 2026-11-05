@@ -16,6 +16,9 @@
 """Tests for observation functors."""
 
 from __future__ import annotations
+from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.gym.utils.gym_utils import _init_raw_rollout
+from tensordict import TensorDict
 
 import pytest
 import torch
@@ -1032,9 +1035,20 @@ def test_raw_pose_is_acquired_once_before_policy_noise_and_shared_by_aliases():
     # Alias names select the same described raw acquisition and storage.
     assert frame.fields["cube_pose"] is frame.fields["scene/cube/pose"]
     env.episode_context = context
-    manager.enable_history(fields={}, actions=torch.zeros(2, 1, 1))
+    manager._env._rollout_storage = getattr(manager._env, "_rollout_storage", None)
+    if manager._env._rollout_storage is None:
+        manager._env._rollout_storage = TensorDict(
+            {}, batch_size=[len(manager._env.episode_context.episode_ids)]
+        )
+    _init_raw_rollout(
+        manager._env._rollout_storage,
+        manager._env.episode_context,
+        **dict(fields={}, actions=torch.zeros(2, 1, 1)),
+    )
+    manager.bind_rollout_storage(manager._env._rollout_storage)
+    env.observation_manager = manager
     recording = manager
-    recording.seed_history(frame, [0, 1])
+    EmbodiedEnv._record_initial_observation(recording._env, frame, [0, 1])
     snapshot = recording.read_history(
         [0, 0], fields=["scene/cube/pose"], episode_ids=[0, 0]
     )
@@ -1049,7 +1063,7 @@ def test_raw_pose_is_acquired_once_before_policy_noise_and_shared_by_aliases():
     assert getter.call_count == 2
     assert next_frame.revision != frame.revision
     assert next_frame.fields["cube_pose"].values[:, 0].tolist() == [3.0, 3.0]
-    assert recording.history.steps.tolist() == [0, 0]
+    assert recording._env._rollout_storage["raw_steps"].tolist() == [0, 0]
 
 
 def test_raw_observation_missing_entity_has_validity_and_policy_tensor_is_not_evidence():

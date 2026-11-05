@@ -111,13 +111,14 @@ another `SceneEntityCfg` during each step. Explicit boundaries
 share its original acquisition across aliases and existing pose functors.
 Policy transformations receive separate tensors; zero-filled missing sources
 retain false validity and reasons. Preserve configured policy functor/RNG order.
-Optional `ObservationManager.history` is a view of the host's shared rollout
-TensorDict: raw values, validity, clocks, errors and cursors live in that storage.
-It has no separate dense cache. It never binds semantic aliases or
-interprets UID/quantity/pose descriptors. Evidence adapters resolve fields from
-`manager.schema` and query `read_history`; schema and alias drift are rejected
-by the manager. `export_observation_history` in `utils/trajectory_state.py`
-projects that same schema onto numeric snapshots for compatible file output.
+The host rollout writer stores raw values, availability, clocks, acquisition
+errors and cursors directly in the existing TensorDict. There is no history
+instance or separate bind/seed/append manager. `ObservationManager` binds read
+access with `bind_rollout_storage`, keeps only the semantic schema and source
+aliases, and serves `read_history`/`snapshot_history` as indexed snapshot reads.
+Evidence adapters bind roles through `manager.schema`. Rollout raw writes and
+indexing helpers live beside the existing buffer utilities in `utils/gym_utils.py`.
+`export_observation_history` projects the same schema for compatible output.
 Contact windows remain sensor-owned and cannot be replaced with a control-rate
 pose/Boolean. History timing and host lifecycle belong to
 [environment recording](../env-framework/env-framework.md#expert-trajectory-contract).
