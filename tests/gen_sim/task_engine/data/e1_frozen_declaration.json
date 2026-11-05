@@ -1,0 +1,462 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "spec": {
+    "schema_version": "task_spec/v0.1",
+    "canonicalization_version": "task_spec_c14n/v1",
+    "roles": [
+      {
+        "id": "role_001",
+        "kind": "object",
+        "cardinality": "one",
+        "affordances": [
+          "graspable",
+          "placeable"
+        ],
+        "properties": {},
+        "source_structure": "rigid_object"
+      },
+      {
+        "id": "role_002",
+        "kind": "surface",
+        "cardinality": "one",
+        "affordances": [],
+        "properties": {},
+        "source_structure": "physical_entity"
+      }
+    ],
+    "init": [],
+    "goal": [
+      {
+        "id": "goal_001",
+        "predicate": "semantic_goal",
+        "operator": "eq",
+        "expected": true,
+        "subject": "role_001",
+        "reference": "role_002",
+        "relation": "on",
+        "arguments": {
+          "required_arm": "left_arm",
+          "task_type": "E1"
+        }
+      }
+    ],
+    "invariants": [],
+    "temporal": [],
+    "milestones": [
+      {
+        "id": "step_01",
+        "achieve": [
+          {
+            "id": "milestone:step_01:0",
+            "predicate": "semantic_goal",
+            "operator": "eq",
+            "expected": true,
+            "subject": "role_001",
+            "reference": "role_002",
+            "relation": "on",
+            "arguments": {
+              "required_arm": "left_arm",
+              "task_type": "E1"
+            }
+          }
+        ]
+      }
+    ],
+    "requirements": [
+      {
+        "consumer": "asset",
+        "key": "role_001",
+        "value": {
+          "affordances": [
+            "graspable",
+            "placeable"
+          ],
+          "attributes": {},
+          "source_structure": "rigid_object"
+        }
+      },
+      {
+        "consumer": "asset",
+        "key": "role_002",
+        "value": {
+          "affordances": [],
+          "attributes": {},
+          "source_structure": "physical_entity"
+        }
+      },
+      {
+        "consumer": "embodiment",
+        "key": "required_arms",
+        "value": [
+          "left_arm"
+        ]
+      },
+      {
+        "consumer": "expansion",
+        "key": "lineage_key",
+        "value": "task_spec.semantic_hash"
+      },
+      {
+        "consumer": "scene",
+        "key": "role_001",
+        "value": {
+          "initial_state": {},
+          "kind": "object"
+        }
+      },
+      {
+        "consumer": "scene",
+        "key": "role_002",
+        "value": {
+          "initial_state": {},
+          "kind": "surface"
+        }
+      },
+      {
+        "consumer": "task_program",
+        "key": "goal_predicates",
+        "value": [
+          "semantic_goal"
+        ]
+      }
+    ],
+    "task_id": "demo",
+    "instruction": "Validated multi-stage task",
+    "metadata": {
+      "candidate_id": "candidate_01",
+      "generator": "embodichain.gen_sim.task_engine",
+      "goal_sources": {
+        "goal_001": [
+          "step_01"
+        ]
+      },
+      "instruction_coverage": "validated_draft_only",
+      "legacy_semantic_hash": "60ed9d59f3f78f53f45963aef02c68318d37f148d053256eb065996564d64747",
+      "milestone_sources": {
+        "step_01": "step_01"
+      },
+      "role_references": {
+        "role_001": [
+          "step_01.object"
+        ],
+        "role_002": [
+          "step_01.target"
+        ]
+      },
+      "step_roles": {
+        "step_01": {
+          "object": "role_001",
+          "target": "role_002"
+        }
+      },
+      "task_candidate_schema": "action_engine_task_draft_v1",
+      "terminal_goal_policy": "explicit_state_slots/v1"
+    },
+    "semantic_hash": "1c2ff8ac477af4ae1e9345c8d9b75587c1d8eeb8676dd45dde9e70dddb5a6a9b"
+  },
+  "graph": {
+    "schema_version": "semantic_task_graph/v1",
+    "task_id": "demo",
+    "instruction": "Validated multi-stage task",
+    "planner_route": "offline",
+    "integration_fingerprint": "f842cf63c67f122ec66cfe9817df0f8755550ccb3219af4db37d37c66d556e99",
+    "targets": {},
+    "nodes": [
+      {
+        "id": "step_01__call_01",
+        "call": {
+          "kind": "pick",
+          "object": "cylinder",
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [],
+        "task_instance_id": "step_01",
+        "task_type": "E1",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__call_02",
+        "call": {
+          "kind": "registered",
+          "call_id": "simulation.place_relative",
+          "arguments": {
+            "object": "cylinder",
+            "reference": "pad",
+            "relation": "on"
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__call_01"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E1",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__call_03",
+        "call": {
+          "kind": "registered",
+          "call_id": "simulation.park",
+          "arguments": {},
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__call_02"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E1",
+        "role": "cleanup"
+      }
+    ],
+    "task_groups": [
+      {
+        "id": "step_01",
+        "task_type": "E1",
+        "node_ids": [
+          "step_01__call_01",
+          "step_01__call_02",
+          "step_01__call_03"
+        ],
+        "depends_on": [],
+        "success": {
+          "kind": "semantic_task_term",
+          "step_id": "step_01",
+          "type": "semantic_goal"
+        }
+      }
+    ],
+    "success": {
+      "kind": "all_task_groups",
+      "source": {
+        "schema_version": "action_engine_success_spec_v1",
+        "task_id": "demo",
+        "op": "all",
+        "terms": [
+          {
+            "step_id": "step_01",
+            "type": "semantic_goal"
+          }
+        ]
+      }
+    }
+  },
+  "program": {
+    "program_id": "gen_sim_demo",
+    "targets": {},
+    "program": {
+      "kind": "sequence",
+      "items": [
+        {
+          "kind": "segment",
+          "name": "step_01__call_01",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "pick",
+              "object": "cylinder",
+              "resources": {
+                "primary": "left"
+              }
+            }
+          }
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__call_02",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "cylinder",
+                "reference": "pad",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": [
+            {
+              "kind": "wait_stable",
+              "entity": "cylinder",
+              "preset": "rigid_object"
+            },
+            {
+              "kind": "wait_stable",
+              "entity": "cylinder",
+              "preset": "gen_sim.step_01__call_02.stable"
+            }
+          ],
+          "validators": [
+            {
+              "kind": "object_near_relative_target",
+              "object": "cylinder",
+              "reference": "pad",
+              "displacement": [
+                0.0,
+                0.0,
+                0.05999999888241291
+              ],
+              "position_tolerance": 0.1
+            }
+          ]
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__call_03",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": [
+            {
+              "kind": "wait_stable",
+              "entity": "cylinder",
+              "preset": "gen_sim.step_01__call_02.stable"
+            }
+          ],
+          "validators": [
+            {
+              "kind": "object_near_relative_target",
+              "object": "cylinder",
+              "reference": "pad",
+              "displacement": [
+                0.0,
+                0.0,
+                0.05999999888241291
+              ],
+              "position_tolerance": 0.1
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "constraints": {
+    "schema_version": "gen_sim_task_constraints/v1",
+    "presets": {
+      "gen_sim.step_01__call_02.stable": {
+        "kind": "supported_placement",
+        "entity": "cylinder",
+        "reference": "pad",
+        "displacement": [
+          0.0,
+          0.0,
+          0.05999999888241291
+        ],
+        "position_tolerance": 0.1,
+        "support_tolerance": 0.03,
+        "com_tolerance": 0.1
+      }
+    },
+    "adaptive_pick": true,
+    "pick_purposes": {
+      "step_01__call_01": "ordinary"
+    },
+    "motion_samples": {
+      "step_01__call_01": 140,
+      "step_01__call_02": 140,
+      "step_01__call_03": 140
+    },
+    "motion_contract": "gen_sim.sampled_velocity/v1",
+    "cartesian_calls": [],
+    "pour_receivers": {},
+    "staging_calls": [],
+    "staging_retention_sources": [],
+    "runtime_profile": "default"
+  },
+  "validation": {
+    "task_spec_digest": "cc12ef6c8dc0b7d7f79a9c3f53dd3fa10c70cd6cff9d0c809a714bb09439e369",
+    "graph_digest": "dd902425cfb1f056200c60c886282f751259d03fb88fbf755366964b5782a6e0",
+    "program_digest": "d6ed6c3c243e03c47b95c369f84135ff69b9151762cb0a7e9f4e0eba0c68eaf5",
+    "constraints_digest": "6ede4bb23fa217a95b9562c22168854622fd5affaa5fca0686812fd31f913624",
+    "coverage": {
+      "status": "covered",
+      "issues": [],
+      "roles": {
+        "role_001": [
+          {
+            "uid": "cylinder",
+            "part_id": null
+          }
+        ],
+        "role_002": [
+          {
+            "uid": "pad",
+            "part_id": null
+          }
+        ]
+      },
+      "goals": [
+        {
+          "id": "goal_001",
+          "predicate": {
+            "id": "goal_001",
+            "predicate": "semantic_goal",
+            "arguments": {
+              "reference": "role_002",
+              "relation": "on",
+              "required_arm": "left_arm",
+              "subject": "role_001",
+              "task_type": "E1"
+            },
+            "operator": "eq",
+            "expected": true,
+            "observation": null
+          },
+          "source_steps": [
+            "step_01"
+          ],
+          "groups": [
+            "step_01"
+          ],
+          "status": "declared"
+        }
+      ],
+      "milestones": [
+        {
+          "id": "step_01",
+          "source_step": "step_01",
+          "groups": [
+            "step_01"
+          ],
+          "members": [
+            {
+              "group_id": "step_01",
+              "object_uid": "cylinder",
+              "object_part_id": null
+            }
+          ]
+        }
+      ],
+      "lineage": {
+        "step_01": [
+          {
+            "group_id": "step_01",
+            "object_uid": "cylinder",
+            "object_part_id": null
+          }
+        ]
+      },
+      "runtime_evidence_status": "not_run",
+      "instruction_coverage": "validated_draft_only"
+    }
+  }
+}

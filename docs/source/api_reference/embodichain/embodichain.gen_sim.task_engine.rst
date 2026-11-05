@@ -76,3 +76,64 @@ Compare graph calls and lineage with the complete candidate, TaskSpec and role b
 
 .. automodule:: embodichain.gen_sim.task_engine.semantic_graph_validation
    :members:
+
+Offline semantic graph viewer
+-----------------------------
+
+Render an existing semantic graph into one HTML document with embedded styles,
+a compiled React/TypeScript interface, licensed local fonts and React Flow interactions. TaskSpec, declaration
+coverage, report overlays, thumbnails and translated display labels are optional.
+The pure renderer makes no model, network or simulator call. Display data keeps
+program outcomes and normative verdicts separate; unavailable evidence is never
+converted into success. Report and companion identities must match the graph,
+and supplied coverage is recomputed from its original declarations.
+
+``write_semantic_task_graph_html`` writes a caller-selected display outside every
+sealed bundle. Original JSON/YAML reports, graph declarations and certificates
+remain read-only. Missing thumbnails stay unavailable; supplied scene provenance
+selects exact source UIDs rather than guessing replacement assets.
+
+.. automodule:: embodichain.gen_sim.task_engine.semantic_graph_html
+   :members:
+
+For an existing declaration file, choose a separate display directory:
+
+.. code-block:: python
+
+   import json
+   from pathlib import Path
+   from embodichain.gen_sim.task_engine.semantic_graph_html import (
+       write_semantic_task_graph_html,
+   )
+
+   graph = json.loads(Path("bundle/semantic_task_graph.json").read_text())
+   write_semantic_task_graph_html(graph, "run/semantic_graph.html")
+
+.. image:: /_static/task_engine/semantic_graph_viewer.png
+   :alt: Offline semantic graph with unexecuted and unavailable evidence states.
+
+Recorded report contract
+------------------------
+
+Validate and detach the original finite execution-report shape for read-only
+rendering. This validation does not execute a program, acquire physical evidence,
+or reclassify a recorded outcome.
+
+.. automodule:: embodichain.gen_sim.task_engine.reporting
+   :members:
+
+Optional TaskSpec companion
+---------------------------
+
+Preserve valid TaskSpec identities and the explicit closed absence marker.
+Absence carries no normative success or certificate.
+
+.. automodule:: embodichain.gen_sim.task_engine.bundle_spec
+   :members:
+
+The frontend build uses the same React/TypeScript/Vite/React Flow versions as
+the architecture explorer. Shared viewport controls and theme tokens live in
+``web/graph-ui``; each app retains its own data model and layout. The Python
+API embeds committed build outputs, so installed offline rendering has no Node
+runtime requirement. Vector SVG export serializes the current task layout and
+retains the original evidence status rather than generating a new verdict.

@@ -43,6 +43,8 @@ __all__ = [
     "CONTACT_NORMALS",
     "CONTACT_IMPULSES",
     "CONTACT_POSITIONS",
+    "CONTACT_DISTANCES",
+    "DEFAULT_CHANNELS",
     "ContactEvidenceSample",
     "ContactEvidenceSampler",
     "ContactSourceStamp",
@@ -54,12 +56,21 @@ CONTACT_VALID_MASK = "contact.is_valid"
 CONTACT_NORMALS = "contact.normal"
 CONTACT_IMPULSES = "contact.impulse"
 CONTACT_POSITIONS = "contact.position"
+CONTACT_DISTANCES = "contact.distance"
+DEFAULT_CHANNELS = (
+    CONTACT_ACTOR_IDS,
+    CONTACT_VALID_MASK,
+    CONTACT_NORMALS,
+    CONTACT_IMPULSES,
+    CONTACT_POSITIONS,
+)
 _CHANNELS = {
     CONTACT_ACTOR_IDS: ("user_ids", (2,)),
     CONTACT_VALID_MASK: ("is_valid", ()),
     CONTACT_NORMALS: ("normal", (3,)),
     CONTACT_IMPULSES: ("impulse", ()),
     CONTACT_POSITIONS: ("position", (3,)),
+    CONTACT_DISTANCES: ("distance", ()),
 }
 _ERRORS = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
 
@@ -137,7 +148,8 @@ class ContactEvidenceSampler:
     zeroed and remain masked out; they are never treated as measured contacts.
     Positions and normals retain the sensor's Arena frame; impulse values stay
     impulses rather than forces. No contact-frame field assumes a single
-    invocation or a task family.
+    invocation or a task family. Empty channel requests preserve the original
+    five-channel contract; signed contact distances require explicit selection.
     """
 
     def __init__(
@@ -277,7 +289,7 @@ class ContactEvidenceSampler:
         # once before native acquisition, then transfer only freshly computed
         # channels; no per-channel identity cache or public validation bypass.
         request = request.snapshot()
-        channels = request.channels or tuple(_CHANNELS)
+        channels = request.channels or DEFAULT_CHANNELS
         if CONTACT_VALID_MASK not in channels:
             channels = (CONTACT_VALID_MASK, *channels)
         if any(channel not in _CHANNELS for channel in channels):
@@ -337,7 +349,12 @@ class ContactEvidenceSampler:
             batches = {}
             for channel in channels:
                 key, trailing = _CHANNELS[channel]
-                raw = data[key]
+                missing_distance = channel == CONTACT_DISTANCES and key not in data
+                raw = (
+                    torch.zeros(mask.shape, dtype=torch.float32, device=mask.device)
+                    if missing_distance
+                    else data[key]
+                )
                 if raw.device != mask.device:
                     raise ValueError(
                         "Contact channels must share the source buffer device."
@@ -369,7 +386,11 @@ class ContactEvidenceSampler:
                     if values.is_floating_point()
                     else torch.ones(len(ids), dtype=torch.bool, device=ids.device)
                 )
-                channel_error = shared_error
+                channel_error = shared_error or (
+                    "Contact distance evidence is unavailable from this source."
+                    if missing_distance
+                    else None
+                )
                 if capabilities.geometry is not True:
                     channel_error = (
                         channel_error

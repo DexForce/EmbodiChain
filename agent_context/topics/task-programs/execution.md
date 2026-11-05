@@ -88,6 +88,18 @@ Named geometric/held/support stability conditions execute through the standard
 `SimulationSegmentPolicyPort`; they do not install another constraints registry.
 The initial sample does not count toward duration. Ordinary drift resets the
 object/reference anchors, while a held-state failure stays latched for the row.
+Joint stability uses the actual joint coordinate and full-window range, holding
+the original observed robot position. Its receipt does not claim contact safety.
+The pure ``compute.trajectory.PositionRangeMonitor`` owns candidate-window
+statistics; the port owns observation and hold scheduling. An execution clock
+adds the final raw sample and a bounded ``joint_window`` record with actual
+steps/times, per-sample validity/errors and policy/segment/native identity.
+The pre-sample range anchor is retained separately as numerical initialization.
+Incomplete retention is explicit and cannot prove full coverage. Unclocked
+default execution retains its legacy receipt without fabricated timestamps.
+Execution termination and per-row condition status remain separate. The default
+invalid-row mode aborts the batch; explicit isolation lets other rows continue.
+Cancelled/interrupted waits keep partial diagnostics and no success result.
 Native support and qualified planar-region inputs remain distinct measurements;
 missing acquisition cannot become geometric success. Pure task/report matching
 stays outside Lab and can consume owned condition data without a runtime.
@@ -248,3 +260,48 @@ The result records missing-observation counts and the last reasons. A row that
 never reestablishes a successful window after missing evidence reports
 `support_result_available=false`; consumers must not interpret that false result
 as a measured task failure. Source-global errors still invalidate every witness.
+
+`SimulationSegmentPolicyPort.observation_clock` exposes only the requesting
+session's current observation binding; an unbound port returns None and a
+superseded session rejects new reads. Same-clock binding is idempotent and the
+generation belongs to the existing owner lifetime, not a global active-run
+registry. Default execution, cancellation and cleanup retain their own protocols.
+The environment adapter requests a fresh policy/validator session for every
+bridge, including ordinary execution without nominal sources. Creating a later
+bridge cannot replace the clock stored by an earlier session. Position-only
+post-policy holds pass through the configured Gym action encoder, preserving the
+captured positions and supplying zero velocity targets in position-velocity mode.
+
+`SimulationSupportObservationCollector` binds before the first action to an
+explicit environment and the bridge's actual policy session. Current capture
+uses that session's clock ownership and the native rest-envelope COM tolerance;
+recorded snapshots retain the policy's original override. Recorded reads combine
+the original policy metadata with exact described raw pose fields from an
+explicitly injected `ObservationManager`. The collector binds semantic fields
+from its schema; optional numeric history validates buffer lifetime, actual
+episode owner and temporal identities. The collector retains bridge/policy
+checks. Without observation history, current capture remains available and
+historical capture rejects. Raw history and T+1 timing belong to
+[environment recording](../env-framework/env-framework.md#expert-trajectory-contract).
+It never combines current contacts with old poses or accesses Env's private buffers.
+`SimulationSupportObservationCollector` receives the host's actual
+`ObservationManager` for historical reads. Full-footprint geometry is recomputed
+through the existing policy session's `measure_support_geometry` using exact
+recorded poses and original support metadata. It does not resample contacts or
+read current poses. Invalid raw history remains unavailable before reprojection;
+TaskSpec independently checks that recomputed geometry matches the bound proof.
+
+`simulation.observations.SimulationStateObservationCollector` binds the exact
+pre-execution bridge, sealed registration and initialized episode. Current pose
+and joint queries validate the selected native owner and observation clock.
+Historical pose reads require an explicitly supplied ObservationManager and
+reuse its semantic schema/raw store, including unavailable rows and original
+boundary/revision/timestamp metadata. It does not evaluate TaskSpec conditions,
+resample past state or alter execution targets.
+
+`SimulationStateObservationCollector.capture_recorded_pour_geometry` reads one
+owned snapshot from the explicitly supplied ObservationManager, then selects
+exact inclusive source slots and receiver slots at the first maximum tilt.
+Raw validity/errors, episode and written-boundary identity remain authoritative.
+Geometry functions live in Compute and choose no Pour thresholds or release
+verdicts. The collector does not read live poses or acquire new sensor samples.

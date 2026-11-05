@@ -32,6 +32,7 @@ __all__ = [
     "PlanState",
     "PlanResult",
     "RejectedMotionCandidate",
+    "MotionRecoveryTrace",
     "normalize_success_mask",
     "calculate_point_allocations",
     "interpolate_xpos",
@@ -214,6 +215,38 @@ class RejectedMotionCandidate:
             object.__setattr__(self, name, getattr(self, name).detach().clone())
 
 
+@dataclass(frozen=True, slots=True)
+class MotionRecoveryTrace:
+    """Actual attempts within one Cartesian motion request.
+
+    Args:
+        attempted_counts: Nominal and actually attempted denser sample counts,
+            in order. Complete-action retries have separate counters.
+        used_continuity: Whether continuous IK supplied the accepted path on
+            the original sampling grid. This trace certifies no physical effect.
+    """
+
+    attempted_counts: tuple[int, ...]
+    used_continuity: bool = False
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.attempted_counts) is not tuple
+            or not self.attempted_counts
+            or any(
+                type(count) is not int or count < 2 for count in self.attempted_counts
+            )
+            or any(
+                a >= b for a, b in zip(self.attempted_counts, self.attempted_counts[1:])
+            )
+        ):
+            raise ValueError(
+                "Recovery attempts require increasing integer sample counts >=2."
+            )
+        if type(self.used_continuity) is not bool:
+            raise TypeError("used_continuity must be a boolean.")
+
+
 @dataclass
 class PlanResult:
     r"""Data class representing the result of a motion plan (env-batched).
@@ -292,8 +325,15 @@ class PlanResult:
     )
     """Original rejected samples, retained separately from executable holds."""
 
+    recovery: MotionRecoveryTrace | None = field(default=None, kw_only=True)
+    """Optional immutable segment recovery receipt, separate from the trajectory."""
+
     def __post_init__(self) -> None:
         """Validate trajectory timing and optional original policy traces."""
+        if self.recovery is not None and not isinstance(
+            self.recovery, MotionRecoveryTrace
+        ):
+            raise TypeError("recovery must be a MotionRecoveryTrace.")
         if self.rejected_candidate is not None and not isinstance(
             self.rejected_candidate, RejectedMotionCandidate
         ):

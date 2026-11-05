@@ -3333,3 +3333,112 @@ def test_generic_planning_budget_decodes_without_source_recovery_factories():
         _decode_recovery_policy(
             {**config, "planning_recovery": {"kind": "not_installed"}}, path="recovery"
         )
+
+
+def test_configured_joint_stability_owns_target_and_requires_articulation():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationJointStabilityConditionCfg,
+    )
+    from embodichain.lab.task_program.integrations.catalog import (
+        IntegrationFingerprintMismatch,
+    )
+    from embodichain.lab.task_program import WaitStablePostCfg
+
+    payload = _integration_payload("open_drawer")
+    declaration = {
+        "kind": "joint_position_and_stability",
+        "entity": "drawer",
+        "joint": "cabinet_to_drawer",
+        "target": 0.1,
+        "tolerance": 0.03,
+    }
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "retained": declaration,
+    }
+    value = _decode_configured_task_program_integration(payload)
+    cfg = value.registration.settle_presets["retained"]
+    assert type(cfg) is SimulationJointStabilityConditionCfg
+    assert (cfg.duration, cfg.timeout, cfg.position_drift) == (1.0, 5.0, 0.001)
+    value.registration.catalog.validate_post_policy(
+        WaitStablePostCfg(entity="drawer", preset="retained"), path=("post",)
+    )
+    declaration["target"] = 0.2
+    assert cfg.target == 0.1
+    cfg.target = 0.3
+    with pytest.raises(IntegrationFingerprintMismatch):
+        value.registration.assert_unchanged()
+    declaration["entity"] = "drawer_handle"
+    with pytest.raises(ValueError, match="explicit articulation binding"):
+        _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize("change", ["missing_tolerance", "unknown_field", "bad_window"])
+def test_configured_joint_stability_rejects_incomplete_policy(change):
+    payload = _integration_payload("open_drawer")
+    declaration = {
+        "kind": "joint_position_and_stability",
+        "entity": "drawer",
+        "joint": "cabinet_to_drawer",
+        "target": 0.1,
+        "tolerance": 0.03,
+    }
+    if change == "missing_tolerance":
+        del declaration["tolerance"]
+    elif change == "unknown_field":
+        declaration["infer_target"] = True
+    else:
+        declaration["timeout"] = 0.5
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "retained": declaration,
+    }
+    with pytest.raises((TypeError, ValueError)):
+        _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"invalid_observation_policy": "ignore"},
+        {"max_observation_samples": 1},
+        {"max_observation_samples": True},
+    ],
+)
+def test_joint_window_configuration_rejects_unknown_runtime_modes(changes):
+    payload = _integration_payload("open_drawer")
+    declaration = dict(
+        kind="joint_position_and_stability",
+        entity="drawer",
+        joint="cabinet_to_drawer",
+        target=0.1,
+        tolerance=0.03,
+        **changes,
+    )
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "retained": declaration
+    }
+    with pytest.raises((ValueError, TypeError)):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_joint_window_runtime_settings_do_not_redefine_normative_condition_data():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationJointStabilityConditionCfg,
+    )
+
+    baseline = SimulationJointStabilityConditionCfg(
+        entity="drawer", joint="cabinet_to_drawer", target=0.1, tolerance=0.03
+    )
+    changed = baseline.snapshot()
+    changed.invalid_observation_policy = "isolate_rows"
+    changed.max_observation_samples = 128
+    assert baseline.to_condition_dict() == changed.to_condition_dict()
+    payload = _integration_payload("open_drawer")
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "retained": dict(kind="joint_position_and_stability", **baseline.to_dict())
+    }
+    first = _decode_configured_task_program_integration(payload).registration
+    payload["runtime_services"]["settle_presets"]["retained"] = dict(
+        kind="joint_position_and_stability", **changed.to_dict()
+    )
+    second = _decode_configured_task_program_integration(payload).registration
+    assert first.fingerprint != second.fingerprint

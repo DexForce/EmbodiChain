@@ -37,6 +37,8 @@ __all__ = [
     "pour_frames",
     "jaw_tilt_axis",
     "jaw_pour_frames",
+    "measure_pour_tilt",
+    "measure_pour_receiver",
 ]
 
 
@@ -577,9 +579,6 @@ def source_pour_staging_frame(
         Receiver-relative translation pose, world orientation and local pivot.
         The original 15 mm reserve and axis-alignment order remain unchanged.
     """
-    from scipy.spatial.transform import Rotation
-    import math
-
     vertices = np.asarray(vertices)
     upright = np.asarray(upright_axis)
     rotation = np.asarray(initial_rotation)
@@ -616,3 +615,60 @@ def source_pour_staging_frame(
     relative = np.eye(4)
     relative[:3, 3] = rotation.T @ offset - pivot
     return relative, rotation, pivot
+
+
+def measure_pour_tilt(
+    vertices: torch.Tensor, poses: torch.Tensor
+) -> tuple[int, float, float, torch.Tensor]:
+    """Measure a recorded rigid tilt/restore window in the source numeric order.
+
+    Args:
+        vertices: Validated scaled CPU local vertices, shape ``(V, 3)``.
+        poses: Validated CPU pose window, shape ``(T, 4, 4)``, including its
+            original start and end states. Input precision is retained.
+
+    Returns:
+        First maximum-tilt row, maximum tilt in radians, final restore error in
+        radians and the gravity-top proxy's world point at that row. These are
+        geometric measurements without tilt thresholds or fluid conclusions.
+    """
+    up, pivot = gravity_top_frame(vertices.numpy(), poses[0, :3, :3].numpy())
+    up_world = poses[:, :3, :3] @ torch.as_tensor(up).to(poses)
+    tilts = torch.acos(up_world[:, 2].clamp(-1, 1))
+    peak = int(tilts.argmax())
+    anchor = poses[peak, :3, :3] @ torch.as_tensor(pivot).to(poses) + poses[peak, :3, 3]
+    return peak, float(tilts[peak]), float(tilts[-1]), anchor
+
+
+def measure_pour_receiver(
+    anchor: torch.Tensor,
+    vertices: torch.Tensor,
+    triangles: torch.Tensor,
+    pose: torch.Tensor,
+) -> tuple[float, float, bool]:
+    """Measure a source proxy against its observed receiver mesh projection.
+
+    Args:
+        anchor: Observed CPU world point, shape ``(3,)``.
+        vertices: Validated scaled CPU receiver vertices, shape ``(V, 3)``.
+        triangles: Original CPU triangle indices, shape ``(F, 3)``.
+        pose: Receiver's validated CPU world pose at the same selected slot.
+
+    Returns:
+        XY projection distance, height above the receiver's maximum world Z and
+        exact projected coverage. Original Torch precision is retained before
+        the source-compatible float64 triangle union. No semantic verdict is made.
+    """
+    from shapely.geometry import Point
+    from .projection import triangle_mesh_xy_projection
+
+    world = vertices.to(pose) @ pose[:3, :3].T + pose[:3, 3]
+    projection = triangle_mesh_xy_projection(world.numpy(), triangles.numpy())
+    if projection.is_empty or not projection.is_valid:
+        raise ValueError("Pour receiver has no valid native mesh projection.")
+    point = Point(anchor[:2].tolist())
+    return (
+        float(projection.distance(point)),
+        float(anchor[2] - world[:, 2].max()),
+        bool(projection.covers(point)),
+    )

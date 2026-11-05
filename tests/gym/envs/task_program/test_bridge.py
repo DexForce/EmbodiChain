@@ -40,6 +40,10 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 import embodichain.lab.gym.envs.task_program.bridge as bridge_module
 from embodichain.lab.gym.envs.types import ControllerAction
+from embodichain.lab.gym.envs.expert_trajectory import (
+    ExpertActionSpec,
+    encode_expert_action,
+)
 from embodichain.lab.sim.atomic_actions.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
@@ -900,13 +904,26 @@ def _bridge(
     parallel_safety_validator: object | None = None,
     runner_cfg: ExecutionRunnerCfg | None = None,
     isolate_policy_sessions: bool = False,
+    joint_command_mode: str = "position",
 ) -> tuple[TaskProgramDemoBridge, _FakeRuntime, EnvironmentStepClock]:
     clock = EnvironmentStepClock(STEP_DT)
     encoder = RuntimeCommandFrameEncoder(
-        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))
+        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF)),
+        joint_command_mode=joint_command_mode,
     )
     sink = BufferedGymCommandSink(encoder, clock)
-    runtime = _FakeRuntime(sink, clock, _joint_frame(duration=duration))
+    runtime = _FakeRuntime(
+        sink,
+        clock,
+        _joint_frame(
+            duration=duration,
+            velocities=(
+                torch.ones(BATCH_SIZE, 2)
+                if joint_command_mode == "position_velocity"
+                else None
+            ),
+        ),
+    )
     bridge = TaskProgramDemoBridge(
         _FakeProgram(_FakeSegment() if segment is None else segment),
         runtime,
@@ -2047,7 +2064,8 @@ def test_row_independent_partial_failure_does_not_abort_healthy_peer() -> None:
     assert runtime.sink.pending_count == 0
 
 
-def test_post_policy_and_validator_ports_stay_at_demo_boundary() -> None:
+@pytest.mark.parametrize("mode", ["position", "position_velocity"])
+def test_post_policy_and_validator_ports_stay_at_demo_boundary(mode) -> None:
     post_policy = object()
     validator = object()
     segment = _FakeSegment(
@@ -2061,6 +2079,7 @@ def test_post_policy_and_validator_ports_stay_at_demo_boundary() -> None:
         segment=segment,
         post_policy_port=post_port,
         validator_port=validator_port,
+        joint_command_mode=mode,
     )
     demo_segment = next(bridge.iter_segments())
     actions = iter(demo_segment.actions)
@@ -2070,6 +2089,24 @@ def test_post_policy_and_validator_ports_stay_at_demo_boundary() -> None:
     post_action = next(actions)
     assert clock.step_index == 1
     assert post_action.metadata["bridge_action_kind"] == "program_post_policy"
+    if mode == "position_velocity":
+        assert runtime_action.value["qvel"].any()
+        assert torch.equal(post_action.value["qpos"], post_port.action)
+        assert not post_action.value["qvel"].any()
+    else:
+        assert torch.equal(post_action.value, post_port.action)
+    encoded = encode_expert_action(
+        post_action.value,
+        spec=ExpertActionSpec(
+            joint_command_mode=mode,
+            joint_names=tuple(f"joint_{i}" for i in range(ROBOT_DOF)),
+        ),
+        active_joint_ids=tuple(range(ROBOT_DOF)),
+    )
+    assert encoded.shape == (
+        BATCH_SIZE,
+        ROBOT_DOF * (2 if mode == "position_velocity" else 1),
+    )
     with pytest.raises(StopIteration):
         next(actions)
 
