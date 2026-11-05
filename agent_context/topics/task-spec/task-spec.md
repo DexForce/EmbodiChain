@@ -16,6 +16,8 @@ of those owners.
 | Predicate vocabulary and temporal windows | `expressions.py` |
 | Structure validation and evidence evaluation | `validation.py` |
 | Placement binding, physical proof checks and certificate assembly | `evidence.py` |
+| Orientation/joint state and milestone qualification | `condition_evidence.py` |
+| Common per-environment physical reports | `evidence_report.py` |
 | Frozen graph/role/lineage projection | `embodichain/gen_sim/task_engine/evidence.py` |
 | Cache reads, identity checks and atomic writes | `registry.py`: `TaskSpecCache` |
 | JSON snapshots and semantic hashing | `canonicalization.py` |
@@ -70,10 +72,15 @@ boundary, but not an unexecuted later wait/park policy. Failed post-policy execu
 therefore does not erase an available final physical negative. Recorded milestones
 still require their complete group prefix and original support receipt. Boundary snapshots do
 not establish a complete control-step trajectory. The explicit legacy contact
-scope and version-2 sampled-support scope retain their original meanings;
-revision-1/full-footprint region declarations require their own verifier and are
-rejected by this initial rigid-on slice. Raw Lab snapshots carry no accepted or
-released claim. Historical claims are checked when present.
+scope and version-2 sampled-support scope retain their original meanings.
+Explicit revision-1 support also checks release-phase windows, actor/episode
+identity, stable policy clocks and raw contact patches. Declared full-footprint
+regions retain the original planar `on`/`inside` checks; they do not establish
+general volume containment. Transfer/coordinated-transport tasks still require
+their separate operation proofs. Raw Lab snapshots carry no accepted/released
+claim; historical claims are checked when present. For a recorded region, Lab
+reprojects the exact raw history poses against owned geometry and the original
+support snapshot, retaining availability/errors and making no live acquisition.
 
 ## Focused validation
 
@@ -82,3 +89,13 @@ serialization, cache, missing-evidence, temporal-window and milestone contracts.
 The [API supplement](../../../docs/source/api_reference/public_api.rst) documents
 the public imports. Provider calls and simulation runs are unnecessary for this
 protocol and snapshot-validation package.
+
+Orientation and articulation state bindings seal criteria, native identities,
+episode, format and exact execution occurrences. Current state is independent
+of program success. Recorded milestones retain their complete successful prefix
+and original policy/validator receipts. E6 rechecks the authored joint target,
+tolerance and one-second stable window; invalid or missing evidence remains
+unavailable per environment. Lab state collectors use the same canonical
+ObservationManager history as support collection, preserving raw validity,
+acquisition errors and temporal identities without a second acquisition path.
+The Task Engine projection supplies declarations only and selects no thresholds.

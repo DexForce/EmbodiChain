@@ -309,3 +309,17 @@ checks. Without observation history, current capture remains available and
 historical capture rejects. Raw history and T+1 timing belong to
 [environment recording](../env-framework/env-framework.md#expert-trajectory-contract).
 It never combines current contacts with old poses or accesses Env's private buffers.
+`SimulationSupportObservationCollector` receives the host's actual
+`ObservationManager` for historical reads. Full-footprint geometry is recomputed
+through the existing policy session's `measure_support_geometry` using exact
+recorded poses and original support metadata. It does not resample contacts or
+read current poses. Invalid raw history remains unavailable before reprojection;
+TaskSpec independently checks that recomputed geometry matches the bound proof.
+
+`simulation.observations.SimulationStateObservationCollector` binds the exact
+pre-execution bridge, sealed registration and initialized episode. Current pose
+and joint queries validate the selected native owner and observation clock.
+Historical pose reads require an explicitly supplied ObservationManager and
+reuse its semantic schema/raw store, including unavailable rows and original
+boundary/revision/timestamp metadata. It does not evaluate TaskSpec conditions,
+resample past state or alter execution targets.
