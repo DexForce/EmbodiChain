@@ -33,6 +33,7 @@ __all__ = [
     "FrankaPandaCfg",
     "FrankaPandaPgiCfg",
     "URRobotCfg",
+    "YamI2rtCfg",
 ]
 
 _EXPORTS = {
@@ -43,6 +44,7 @@ _EXPORTS = {
     "FrankaPandaCfg": ".franka_panda",
     "FrankaPandaPgiCfg": ".franka_panda",
     "URRobotCfg": ".ur_robot",
+    "YamI2rtCfg": ".yam_i2rt",
 }
 
 

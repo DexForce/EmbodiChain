@@ -84,6 +84,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.shapes import (
     CubeCfg,
+    CylinderCfg,
     MeshCfg,
     MeshCollisionCfg,
     SphereCfg,
@@ -809,9 +810,22 @@ def articulation_desc_from_cfg(
         # inertia. MassPropertiesCfg can request geometry-based recomputation
         # after exact source names are available.
         urdf_read_inertia=True,
+        newton_gravity_compensation=_articulation_gravity_compensation(cfg),
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),
     )
+
+
+def _articulation_gravity_compensation(cfg: ArticulationCfg) -> float:
+    """Validate creation intent shared by URDF and parsed USD descriptors."""
+    value = cfg.newton_gravity_compensation
+    if (
+        not isinstance(value, numbers.Real)
+        or not math.isfinite(value)
+        or not 0.0 <= value <= 1.0
+    ):
+        raise ValueError("newton_gravity_compensation must be finite and in [0, 1].")
+    return float(value)
 
 
 def _validate_articulation_rigid_physics(
@@ -1809,6 +1823,20 @@ def _compile_geometry(
             raise ValueError("CubeCfg.size must contain three positive values.")
         return GeometryDesc.cube(size), CollisionApproximation.NONE, 1, "coacd"
 
+    if isinstance(shape, CylinderCfg):
+        if (
+            not math.isfinite(shape.radius)
+            or not math.isfinite(shape.height)
+            or min(shape.radius, shape.height) <= 0
+        ):
+            raise ValueError("Cylinder radius and height must be finite and positive.")
+        return (
+            GeometryDesc.cylinder(shape.radius, shape.height / 2),
+            CollisionApproximation.NONE,
+            1,
+            "coacd",
+        )
+
     if isinstance(shape, SphereCfg):
         if shape.radius <= 0:
             raise ValueError("SphereCfg.radius must be positive.")
@@ -1821,7 +1849,7 @@ def _compile_geometry(
 
     raise NotImplementedError(
         f"RigidObjectCfg shape {type(shape).__name__!r} is not supported by "
-        "the Spawn converter; supported shapes are MeshCfg, CubeCfg, and SphereCfg."
+        "the Spawn converter; supported shapes are MeshCfg, CubeCfg, CylinderCfg, and SphereCfg."
     )
 
 

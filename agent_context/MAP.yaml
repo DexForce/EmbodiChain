@@ -44,7 +44,7 @@ topics:
   title: Environment Framework
   aliases: [env framework, environment framework, task registration, list task, expert trajectory, 环境框架, 任务环境,
     专家轨迹]
-  keywords: [BaseEnv, EmbodiedEnv, EpisodeContext, EnvCfg, register_env, list-task, run-task, run-example, target_control_frequency,
+  keywords: [BaseEnv, EmbodiedEnv, RouteTheCableEnv, EpisodeContext, EnvCfg, register_env, list-task, run-task, run-example, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
@@ -124,7 +124,7 @@ topics:
   title: Robot System
   aliases: [robot system, robot config, robot catalog, list robot, robot preview, 机器人配置, 机器人系统, 机型解析, 列出机器人, 机器人预览]
   keywords: [RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg,
-    FrankaPandaCfg, FrankaPandaPgiCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
+    FrankaPandaCfg, FrankaPandaPgiCfg, YamI2rtCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
     asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot]
   paths: [topics/robot-system/robot-system.md]
   source_of_truth:
@@ -355,7 +355,7 @@ topics:
 - id: atomic-actions
   title: Atomic Skills
   aliases: [atomic action, atomic skill, 原子动作, 原子技能]
-  keywords: [AtomicActionEngine, run-atomic-action, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
+  keywords: [AtomicActionEngine, GraspCable, CableGraspGoal, GraspCableOptions, run-atomic-action, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
     RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry, control-grid retiming,
     AffordanceSamplingContext, AffordancePoseCandidates, AffordanceSample, affordance sampling]
   paths: [topics/atomic-actions/atomic-actions.md]
@@ -431,7 +431,9 @@ topics:
   - embodichain/data/download.py
   - embodichain/data/__init__.py
   - embodichain/data/assets/__init__.py
-  watch_paths: [embodichain/data/, embodichain/cli/main.py, tests/data/]
+  - scripts/tools/prepare_yam_i2rt_assets.py
+  watch_paths: [embodichain/data/, embodichain/cli/main.py, tests/data/,
+    scripts/tools/prepare_yam_i2rt_assets.py, tests/scripts/tools/test_prepare_yam_i2rt_assets.py]
   related_topics: [gen-sim, robot-system, data-pipeline]
   status: active
 - id: data-pipeline

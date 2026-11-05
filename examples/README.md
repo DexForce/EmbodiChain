@@ -28,3 +28,28 @@ distributions preserve this same tree and its resources; wheels install it under
 `share/embodichain/examples/`. The CLI locates the installed data through the
 distribution metadata and works outside the repository. Example code is not
 installed inside the `embodichain` Python package.
+
+## Newton cable demo
+
+Use CUDA and a cable-capable DexSim build. The package version alone does not
+prove cable support: the published `0.5.1rc1`, `0.5.1rc2` and `0.5.1` release
+snapshots lack the public cable interfaces used by this example. The dependency
+range therefore selects the 0.5.1 development series, before its alpha/RC/final
+releases. An available Python 3.12 development baseline is `0.5.1.dev10194`, built from
+`6dfb756f151d0d704d8a0583afa2c16d245e0ea5`:
+
+```bash
+python -m pip install --extra-index-url http://192.168.3.43:8080/simple \
+  --trusted-host 192.168.3.43 'dexsim-engine==0.5.1.dev10194'
+python -c "import dexsim; from dexsim.scene import SpawnedCable; from dexsim.engine.newton_physics import DexUniSolverCfg; print(dexsim.__version__, dexsim.__commit_id__)"
+python -m embodichain run-example sim/demo/cable_viser \
+  --num-envs 2 --port 8080 --duration 12
+```
+
+The internal package index requires access to the DexForce network. A newer
+complete development wheel can also be installed with its own declared
+dependencies; record its build SHA. Switching a source branch does not update
+an installed wheel. EmbodiChain defaults to DexUni when no solver is selected;
+legacy `auto`/`AutoSolverCfg` selections must migrate to `dexuni` or the concrete
+solver needed by the scene. Explicit `semi_implicit` remains required for
+Newton gradient mode.

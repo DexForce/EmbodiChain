@@ -50,6 +50,14 @@ gate, or held-object guard. Evidence acquisition stays outside planning and
 does not mutate symbolic task state; verification results are the only path
 that commits or invalidates observed effects.
 
+`GraspCable` directly extends `AtomicAction`: its caller
+supplies an observed material-coordinate pinch pose, and its plan declares no
+rigid attachment. An optional stationary closed-command hold belongs to the
+`close` phase on the control grid; its end precedes lifting and is the routing
+host's grasp-reference sampling boundary. The routing expert validates actual
+lift and tool-frame material slip; numerical cable observations live in
+`compute/geometry/cable.py`.
+
 `MoveHeldObject` accepts ordered object-pose waypoints without rebasing the
 verified grasp. Its goal optionally frees only the final world yaw; default
 goals remain exact. Heading alternatives are checked as complete motion paths,

@@ -68,6 +68,13 @@ concrete seedless path rather than assuming zero is legal for every robot.
 remaining slots sample within limits. Target repetition must use the same
 expanded batch ordering.
 
+Pytorch iteration and sample-count overrides mutate the live solver. A consumer
+temporarily using a caller-seeded tracking solve must restore the previous
+settings before global planning, including on failure or generator cancellation.
+Single-target, single-start numerical solves must preserve their target batch
+dimension; coverage is in `test_pytorch_solver.py` under the IK overview's test
+directory.
+
 `QposSeedSelSampler` is an opt-in Pytorch multi-start extension. Its lazy Sobol FK
 database stores flange poses, so retrieval receives the TCP-stripped target and
 `set_tcp()` does not invalidate the database. Joint-limit changes do trigger a

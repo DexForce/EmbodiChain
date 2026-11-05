@@ -26,6 +26,20 @@ below identify canonical imports without re-expanding inherited configuration
 fields or generated constructors.
 
 
+embodichain.data.assets
+-----------------------
+
+.. py:class:: embodichain.data.assets.YamI2rt(data_root=None)
+
+   Download the versioned YAM dual-arm URDF, visual meshes, convex fingertip
+   collisions, MIT license and provenance through the shared dataset cache.
+   ``data_root`` selects the cache root; when omitted, the configured
+   ``EMBODICHAIN_DATA_ROOT`` or its default is used. The archive is checked
+   against its registered MD5. Prefer ``get_data_path("YamI2rt/yam_i2rt.urdf")``
+   when resolving the model for a robot. Publication status and offline
+   preparation are documented in :doc:`/resources/robot/yam_i2rt`.
+
+
 embodichain.robot_registry
 --------------------------
 

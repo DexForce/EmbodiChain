@@ -21,13 +21,14 @@ device, not a separate environment tensor device.
 `None` retains the native default. Gym accepts the former in `physics_config`
 and the latter at the top level through `config_to_cfg()`.
 
-Newton `solver_cfg=None` preserves DexSim's scene-aware `AutoSolverCfg`.
-The concrete solver is resolved from the complete Spawn scene, then exposed
-through `NewtonPhysicsBackend.solver_type`. Do not guess a solver-specific robot
-preset while it is unresolved. Gradient mode requires an explicit
-`semi_implicit` solver. Read exact solver options/defaults in
-`cfg/simulation.py` and the installed DexSim config types; do not substitute a
-hardcoded fallback when an expected DexSim API is absent.
+Newton omitted solver configs and mappings without a selector use
+`DexUniSolverCfg`, matching current DexSim. Robot presets select `newton_dexuni`
+when available, then `newton` and `default`; `NewtonPhysicsBackend.solver_type`
+reads the live backend after preparation. Legacy `auto`/`AutoSolverCfg` selectors
+raise a migration error: use `dexuni` or explicitly select the solver required
+by the former scene-dependent policy. Gradient mode still requires an explicit
+`semi_implicit` solver. Read solver options in `cfg/physics.py` and the installed
+DexSim config types.
 
 `collision_cfg` owns the external Newton contact pipeline. Its
 `update_interval=None` updates at the first local solver substep; positive `k`

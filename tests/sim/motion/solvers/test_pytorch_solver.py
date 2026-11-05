@@ -30,6 +30,42 @@ from embodichain.utils.utility import reset_all_seeds
 
 
 @pytest.mark.no_sim
+@pytest.mark.parametrize("batch_size", [1, 3])
+@pytest.mark.parametrize("num_samples", [1, 2])
+def test_single_seed_ik_preserves_target_batch_dimension(batch_size, num_samples):
+    from types import SimpleNamespace
+
+    solver = object.__new__(PytorchSolver)
+    solver.device = torch.device("cpu")
+    solver.dof = 2
+    solver._num_samples = num_samples
+    solver._seed_sampler = None
+    solver._solution_selection = "nearest"
+    solver.ik_nearest_weight = torch.ones(2)
+    solver.lower_qpos_limits = torch.full((2,), -2.0)
+    solver.upper_qpos_limits = torch.full((2,), 2.0)
+    solver.pk = SimpleNamespace(Transform3d=lambda **kwargs: kwargs)
+    solver.pik = SimpleNamespace()
+
+    def solve(transform):
+        seeds = solver.pik.initial_config
+        return SimpleNamespace(
+            converged_any=torch.ones(len(seeds), dtype=torch.bool),
+            solutions=seeds[:, None, :].clone(),
+        )
+
+    solver.pik.solve = solve
+    solver.set_tcp(np.eye(4))
+    seed = torch.full((batch_size, 2), 0.3)
+    success, joints = solver.get_ik(
+        torch.eye(4).expand(batch_size, -1, -1), qpos_seed=seed
+    )
+    assert success.shape == (batch_size,) and bool(success.all())
+    assert joints.shape == (batch_size, 1, 2)
+    torch.testing.assert_close(joints[:, 0], seed)
+
+
+@pytest.mark.no_sim
 @pytest.mark.parametrize(
     "tcp_kind", ["identity", "translation", "rotation_translation"]
 )

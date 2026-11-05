@@ -7812,3 +7812,85 @@ def test_push_object_motion_gen_rejects_uncertified_contact_path() -> None:
     with pytest.raises(ValueError, match="requires strategy='ik_interp'"):
         _plan_action(action, invocation, _context(scene=scene))
     assert calls == []
+
+
+@pytest.mark.parametrize("close_hold_duration", [0.0, 2.25 * CONTROL_DT])
+def test_cable_grasp_plan_preserves_other_arm_and_declares_no_attachment(
+    close_hold_duration,
+) -> None:
+    from embodichain.lab.sim.atomic_actions.primitives.grasp_cable import (
+        CableGraspGoal,
+        GraspCable,
+        GraspCableOptions,
+    )
+
+    generator = _dual_motion_generator()
+    action = _bind_action(generator, GraspCable())
+    context = _dual_context()
+    context.robot.qpos[:, ARM_DOF:DUAL_ARM_DOF] = 0.37
+    before = context.robot.qpos.clone()
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="grasp_cable",
+            goal=CableGraspGoal("wire", 0.12, torch.eye(4)),
+            binding=_binding(action, motion="left_arm", grasp="left_hand"),
+            motion_policy=MotionPolicy(sample_count=5),
+            skill_options=GraspCableOptions(
+                close_steps=4, close_hold_duration=close_hold_duration
+            ),
+        ),
+        context,
+    )
+    assert plan.plan_success.all()
+    assert [segment.name for segment in plan.segments] == ["descend", "close", "lift"]
+    torch.testing.assert_close(context.robot.qpos, before)
+    positions = plan.joint_trajectory.positions
+    close = next(segment for segment in plan.segments if segment.name == "close")
+    hold_steps = math.ceil(close_hold_duration / CONTROL_DT)
+    assert close.stop - close.start == 4 + hold_steps
+    closed_frames = positions[:, close.stop - hold_steps - 1 : close.stop]
+    torch.testing.assert_close(
+        closed_frames, closed_frames[:, -1:].expand_as(closed_frames)
+    )
+    torch.testing.assert_close(
+        positions[:, :, ARM_DOF:DUAL_ARM_DOF],
+        before[:, None, ARM_DOF:DUAL_ARM_DOF].expand(-1, positions.shape[1], -1),
+    )
+    lift = next(segment for segment in plan.segments if segment.name == "lift")
+    assert (lift.stop - lift.start) * CONTROL_DT <= 0.45
+    assert context.task.get_held_object("left_arm") is None
+    projected = plan.expected_effects.apply(context.task, plan.plan_success)
+    assert projected.get_held_object("left_arm") is None
+    generator.robot.set_qpos.assert_not_called()
+
+
+@pytest.mark.parametrize("distance", [-1.0, float("nan"), float("inf")])
+def test_cable_grasp_rejects_invalid_material_coordinate(distance) -> None:
+    from embodichain.lab.sim.atomic_actions.primitives.grasp_cable import CableGraspGoal
+
+    with pytest.raises(ValueError):
+        CableGraspGoal("wire", distance, torch.eye(4))
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"close_steps": True},
+        {"close_steps": 2.5},
+        {"close_steps": 1},
+        {"close_hold_duration": -0.1},
+        {"close_hold_duration": float("nan")},
+        {"close_hold_duration": float("inf")},
+        {"close_hold_duration": True},
+        {"lift_height": float("nan")},
+        {"lift_height": 0.0},
+    ],
+)
+def test_cable_grasp_rejects_invalid_options(options) -> None:
+    from embodichain.lab.sim.atomic_actions.primitives.grasp_cable import (
+        GraspCableOptions,
+    )
+
+    with pytest.raises(ValueError):
+        GraspCableOptions(**options)

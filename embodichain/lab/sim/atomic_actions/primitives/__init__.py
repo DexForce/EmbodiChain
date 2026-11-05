@@ -31,6 +31,7 @@ from .coordinated_placement import (
     CoordinatedPlacementOptions,
 )
 from .hand_over import HandOver, HandOverGoal, HandOverOptions
+from .grasp_cable import CableGraspGoal, GraspCable, GraspCableOptions
 from .move_end_effector import (
     EndEffectorPoseGoal,
     MoveEndEffector,
@@ -65,6 +66,7 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     MoveEndEffector,
     MoveJoints,
     PickUp,
+    GraspCable,
     AxisAlign,
     MoveHeldObject,
     Place,
@@ -86,6 +88,9 @@ __all__ = [
     "AxisAlignGoal",
     "AxisAlignOptions",
     "BUILTIN_ACTION_TYPES",
+    "CableGraspGoal",
+    "GraspCable",
+    "GraspCableOptions",
     "CoordinatedPickGoal",
     "CoordinatedPickment",
     "CoordinatedPickmentOptions",

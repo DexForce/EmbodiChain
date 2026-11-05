@@ -350,7 +350,7 @@ class PytorchSolver(BaseSolver):
         self.pik.initial_config = joint_seed
 
         result = self.pik.solve(tf)
-        return result.converged_any, result.solutions[:, 0, :].squeeze(0)
+        return result.converged_any, result.solutions[:, 0, :]
 
     def _qpos_map_to_limits(
         self, qpos: torch.Tensor

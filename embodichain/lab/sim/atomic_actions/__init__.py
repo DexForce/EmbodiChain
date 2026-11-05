@@ -177,6 +177,9 @@ from .tracking import (
     WholeBodyPoseTrackingState,
 )
 from .primitives import (
+    CableGraspGoal,
+    GraspCable,
+    GraspCableOptions,
     AssembleGoal,
     AxisAlign,
     AxisAlignGoal,
@@ -271,6 +274,9 @@ from .state import (
 )
 
 __all__ = [
+    "CableGraspGoal",
+    "GraspCable",
+    "GraspCableOptions",
     "ActionBinding",
     "ActionControlOverrides",
     "ActionInvocation",

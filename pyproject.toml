@@ -25,7 +25,8 @@ dynamic = ["version"]
 
 # Core install dependencies (kept from requirements.txt).
 dependencies = [
-  "dexsim_engine==0.5.1rc1",
+  # Release-branch RC/final wheels do not include the cable API.
+  "dexsim_engine>=0.5.1.dev10194,<0.5.1a0",
   "shapely>=2.0",
   "setuptools>=78.1.1",
   "gymnasium>=0.29.1",
@@ -97,6 +98,7 @@ version = { file = ["VERSION"] }
 
 [tool.setuptools]
 include-package-data = false
+license-files = ["LICEN[CS]E*", "COPYING*", "NOTICE*", "AUTHORS*", "licenses/*.txt"]
 
 [tool.black]
 
