@@ -16,10 +16,12 @@
 
 from __future__ import annotations
 
+import inspect
 import numpy as np
 import pytest
 import torch
 
+from embodichain.utils import math as math_utils
 from embodichain.utils.math import (
     convert_quat,
     default_orientation,
@@ -35,6 +37,19 @@ from embodichain.utils.math import (
     trans_matrix_to_xyz_quat,
     xyz_quat_to_4x4_matrix,
 )
+
+
+def test_math_wildcard_import_exposes_public_math_functions() -> None:
+    expected = {
+        name
+        for name, value in vars(math_utils).items()
+        if not name.startswith("_")
+        and (inspect.isfunction(value) or isinstance(value, torch.jit.ScriptFunction))
+    }
+    namespace: dict[str, object] = {}
+    exec("from embodichain.utils.math import *", namespace)
+
+    assert {name for name in namespace if not name.startswith("_")} == expected
 
 
 @pytest.mark.parametrize(

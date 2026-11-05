@@ -1144,8 +1144,6 @@ embodichain.lab.sim.scene.expansion.persistence
    save_scene_variants
    load_scene_variants
 
-embodichain.lab.sim.sensors.contact_sampling
-
 embodichain.lab.sim.sensors.contact.sampling
 ---------------------------------------------------------------------
 
@@ -1165,8 +1163,6 @@ observation was produced. The common frame has no invocation field.
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
-
 .. autosummary::
 
    CONTACT_ACTOR_IDS
@@ -1178,8 +1174,6 @@ observation was produced. The common frame has no invocation field.
    ContactEvidenceSampler
    ContactSourceStamp
    native_contact_revision
-
-embodichain.lab.sim.sensors.contact_timeline
 
 embodichain.lab.sim.sensors.contact.timeline
 ---------------------------------------------------------------------
@@ -1201,8 +1195,6 @@ is reached, the next sample records unavailable capacity loss. Control-step and
 substep caps also bound empty histories.
 Frontend code owns actor/semantic label maps, serialized report schema IDs and
 any task-success evaluation.
-
-.. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
 
@@ -3613,7 +3605,6 @@ are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrat
 .. autosummary::
 
    GripContactObserver
-
    DriverOpeningBinding
 
 ``DriverOpeningBinding.bind(robot)`` validates the explicit joint order before
