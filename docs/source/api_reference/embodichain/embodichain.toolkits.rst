@@ -32,6 +32,7 @@ or installed in a higher-level planning runtime.
    ParallelJawGraspPoseGenerator
    ParallelJawGripperModelCfg
    get_parallel_jaw_gripper_model
+   resolve_parallel_jaw_gripper_model
 
 .. autoclass:: GraspPoseGenerator
    :members:
@@ -46,6 +47,8 @@ or installed in a higher-level planning runtime.
 
 .. autofunction:: get_parallel_jaw_gripper_model
 
+.. autofunction:: resolve_parallel_jaw_gripper_model
+
 .. currentmodule:: embodichain.toolkits.graspkit.pose_generator
 
 .. autosummary::
@@ -55,6 +58,7 @@ or installed in a higher-level planning runtime.
    ParallelJawGraspPoseGenerator
    ParallelJawGripperModelCfg
    get_parallel_jaw_gripper_model
+   resolve_parallel_jaw_gripper_model
 
 Box-side grasp regions
 ~~~~~~~~~~~~~~~~~~~~~

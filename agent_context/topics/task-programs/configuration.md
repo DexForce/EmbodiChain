@@ -215,6 +215,15 @@ catalog lookup. The catalog is owned by
 collision fields to use GraspKit defaults; task-specific tuning belongs in
 the allowlisted `grasp_pose_generator_overrides` mapping.
 
+Model-owned task-hand descriptions implement the pure
+`integrations.hand_calibration.TaskHandCalibration` interface. They declare
+physical endpoints and independent opening drivers, not acquisition or success.
+`physical_hand_resources` resolves explicit `members` aliases before counting
+hands. Grasp aperture declarations use GraspKit's public
+`resolve_parallel_jaw_gripper_model` for both registered string IDs and closed
+inline bounds. Do not assume a model declaration is always a dictionary or
+transfer another hand's joint units, TCP or physical qualification.
+
 `runtime_services.hand_geometries` declares explicit hand calibration by grasp
 endpoint target ID. Its `sampled_parallel_jaw` entries reference an existing
 endpoint command preset and declare motion/hand parts, the hand root, ordered
