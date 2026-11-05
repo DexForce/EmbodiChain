@@ -2196,7 +2196,7 @@ def quat_slerp(q1: torch.Tensor, q2: torch.Tensor, tau: float) -> torch.Tensor:
         tau: Interpolation coefficient between 0 (q1) and 1 (q2).
 
     Returns:
-        Interpolated quaternion in (x, y, z, w) format.
+        Interpolated quaternion in (x, y, z, w) format. Inputs are not modified.
     """
     assert isinstance(q1, torch.Tensor), "Input must be a torch tensor"
     assert isinstance(q2, torch.Tensor), "Input must be a torch tensor"
@@ -2210,7 +2210,7 @@ def quat_slerp(q1: torch.Tensor, q2: torch.Tensor, tau: float) -> torch.Tensor:
     if d < 0.0:
         # Invert rotation
         d = -d
-        q2 *= -1.0
+        q2 = -q2
     angle = torch.acos(torch.clamp(d, -1, 1))
     if abs(angle) < torch.finfo(q1.dtype).eps * 4.0:
         return q1

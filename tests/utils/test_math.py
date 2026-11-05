@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import inspect
+import math
 import numpy as np
 import pytest
 import torch
@@ -32,6 +33,7 @@ from embodichain.utils.math import (
     quat_conjugate,
     quat_from_matrix,
     quat_mul,
+    quat_slerp,
     quat_wxyz_to_xyzw,
     quat_xyzw_to_wxyz,
     trans_matrix_to_xyz_quat,
@@ -349,3 +351,42 @@ def test_named_quaternion_boundary_helpers_preserve_numpy_backend() -> None:
 
     np.testing.assert_array_equal(quat_xyzw_to_wxyz(xyzw), wxyz)
     np.testing.assert_array_equal(quat_wxyz_to_xyzw(wxyz), xyzw)
+
+
+@pytest.mark.parametrize(
+    ("endpoint_sign", "device"),
+    [(1, "cpu"), (-1, "cpu"), pytest.param(-1, "cuda:0", marks=pytest.mark.gpu)],
+)
+def test_quat_slerp_preserves_endpoint_views_and_uses_the_shortest_arc(
+    endpoint_sign: int, device: str
+) -> None:
+    root_half = 2**-0.5
+    endpoints = torch.tensor(
+        [[0, 0, 0, 1], [0, 0, endpoint_sign * root_half, endpoint_sign * root_half]],
+        dtype=torch.float64,
+        device=device,
+    )
+    original = endpoints.clone()
+
+    result = quat_slerp(endpoints[0], endpoints[1], 0.5)
+
+    torch.testing.assert_close(endpoints, original, rtol=0, atol=0)
+    # Halfway from identity to a +90-degree Z rotation is +45 degrees,
+    # regardless of the endpoint quaternion's equivalent sign.
+    expected = endpoints.new_tensor(
+        [0, 0, math.sin(math.pi / 8), math.cos(math.pi / 8)]
+    )
+    torch.testing.assert_close(result, expected)
+    torch.testing.assert_close(result.norm(), result.new_tensor(1.0))
+
+
+def test_quat_slerp_accepts_leaf_endpoints_with_gradients() -> None:
+    root_half = 2**-0.5
+    start = torch.tensor([0.0, 0.0, 0.0, 1.0], dtype=torch.float64, requires_grad=True)
+    end = torch.tensor(
+        [0.0, 0.0, -root_half, -root_half], dtype=torch.float64, requires_grad=True
+    )
+
+    assert torch.autograd.gradcheck(
+        lambda first, second: quat_slerp(first, second, 0.25), (start, end)
+    )
