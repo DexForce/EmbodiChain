@@ -9,6 +9,7 @@ semantic scene graph, generation model client or task lifecycle.
 
 | Request | Owner |
 |---|---|
+| Static source component/pose/contact/prismatic declarations | `component_declarations.py`, `frozen_declarations.py`, `source_contact.py`, `prismatic_declarations.py`; explicit owned configuration only |
 | Compose existing configurations and anchors | `embodichain/lab/sim/scene/composition.py` |
 | Seeded proposals and measured XY layout checks | `embodichain/lab/sim/scene/procedural.py` |
 | UID-based support geometry and group placement | `embodichain/lab/sim/scene/geometry.py`, `placement.py` |
@@ -74,6 +75,18 @@ source-label targets and geometry derivation; live state uses Object APIs.
 in a content-addressed derived source; it never edits the original asset.
 `control_source` rejects source/sidecar drift, including newly present optional
 sidecars. Source mesh proofs do not certify native cooked shapes or paths.
+
+Static source declarations reuse Spawn's USD translator without creating a
+World. `frozen_declarations` checks raw matrix/position/intrinsic-XYZ redundancy
+before descriptor conversion and retains configured scale precision in override
+and overlay modes. `component_declarations` serializes source poses and collider
+choices into owned component mappings; it selects no physics backend.
+`source_contact` exposes Default descriptor contact margins for static fitting.
+`prismatic_declarations` applies the existing passive source calibration only to
+explicit selected UIDs while preserving declared drive and separate mass owners.
+The optional prismatic reset label and authored handle-center readers remain in
+`articulation_inputs`; neither is an observed or settled physical state. Task
+Engine may bind these public descriptions, but owns no implementation here.
 
 `NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
 recreate it after replacing either object or changing its model/scale. Queries
