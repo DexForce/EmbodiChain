@@ -18,6 +18,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
+from collections.abc import Mapping
 import json
 import shlex
 import struct
@@ -28,7 +29,9 @@ import xml.etree.ElementTree as ET
 __all__ = ["asset_dependency_files", "collect_declared_asset_files"]
 
 
-def asset_dependency_files(asset_path: Path) -> tuple[Path, ...]:
+def asset_dependency_files(
+    asset_path: Path, *, reference_overrides: Mapping[str, str | Path] | None = None
+) -> tuple[Path, ...]:
     """Enumerate one source and its supported local declared dependencies.
 
     glTF/GLB buffers/images and OBJ/MTL material textures are included. Embedded
@@ -41,6 +44,9 @@ def asset_dependency_files(asset_path: Path) -> tuple[Path, ...]:
     Args:
         asset_path: Existing local source path. XML references may use relative,
             file or locally resolvable ROS package URIs.
+        reference_overrides: Optional model-owner mapping from exact authored XML
+            references to their existing absolute local files. These explicit
+            bindings preserve registered archive repairs without path guessing.
 
     Returns:
         Sorted unique resolved paths. Opaque non-XML input remains a direct
@@ -51,6 +57,12 @@ def asset_dependency_files(asset_path: Path) -> tuple[Path, ...]:
         ValueError: A dependency uses a remote or unsupported URI scheme, or
             supported mesh metadata cannot be inventoried without guessing.
     """
+    overrides = dict(reference_overrides or {})
+    if any(
+        type(key) is not str or not key or not Path(value).is_absolute()
+        for key, value in overrides.items()
+    ):
+        raise ValueError("Asset overrides require exact references and absolute paths.")
     pending = [asset_path.resolve()]
     visited: set[Path] = set()
     while pending:
@@ -80,7 +92,11 @@ def asset_dependency_files(asset_path: Path) -> tuple[Path, ...]:
             for attribute in ("filename", "file", "url"):
                 reference = element.attrib.get(attribute)
                 if reference:
-                    pending.append(_resolve_asset_reference(path, reference))
+                    pending.append(
+                        Path(overrides[reference]).resolve()
+                        if reference in overrides
+                        else _resolve_asset_reference(path, reference)
+                    )
     return tuple(sorted(visited))
 
 

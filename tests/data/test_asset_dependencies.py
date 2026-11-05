@@ -286,3 +286,25 @@ def test_obj_material_dependency_options_do_not_hide_texture_paths(tmp_path):
     material.write_text("newmtl surface\nmap_Kd -unknown x normal.png\n")
     with pytest.raises(ValueError, match="Unsupported MTL"):
         asset_dependency_files(path)
+
+
+def test_model_owner_can_bind_exact_existing_archive_reference_without_guessing(
+    tmp_path,
+):
+    original = tmp_path / "model.urdf"
+    mesh = tmp_path / "relocated.obj"
+    mesh.write_text("v 0 0 0\n")
+    reference = "../legacy/Collision/mesh.obj"
+    original.write_text(f'<robot><mesh filename="{reference}"/></robot>')
+    with pytest.raises(FileNotFoundError):
+        asset_dependency_files(original)
+    assert set(
+        asset_dependency_files(original, reference_overrides={reference: mesh})
+    ) == {original, mesh}
+    with pytest.raises(ValueError, match="absolute paths"):
+        asset_dependency_files(
+            original, reference_overrides={reference: "relative.obj"}
+        )
+    mesh.unlink()
+    with pytest.raises(FileNotFoundError):
+        asset_dependency_files(original, reference_overrides={reference: mesh})
