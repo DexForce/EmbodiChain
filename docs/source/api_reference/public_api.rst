@@ -654,6 +654,30 @@ validation failures.
 
    SceneServiceError
 
+embodichain.gen_sim.scene_engine.grasp_fit
+------------------------------------------
+
+Explicit source target/opening requests produce owned bounded scale declarations
+and ordered receipts. Shared Compute owns the numeric fit and Scene owns source
+vertices; physical acquisition and asset materialization remain separate.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.grasp_fit
+
+.. autosummary::
+
+   SourceGraspFitRequest
+   SourceGraspFitResult
+   fit_source_grasp_declarations
+
+.. autoclass:: SourceGraspFitRequest
+   :members:
+
+.. autoclass:: SourceGraspFitResult
+   :members:
+
+.. autofunction:: fit_source_grasp_declarations
+
+
 embodichain.gen_sim.scene_engine.pipeline
 -----------------------------------------
 

@@ -15,6 +15,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
 | Audited image/edit stages | `scene_engine/pipeline/api.py`: `analyze_image()`, `analyze_edit()`, and their materialization functions |
+| Explicit source grasp-fit declarations | `scene_engine/grasp_fit.py`; uses shared numerical fit and static Scene vertices, preserves mass/support and original files |
 | Prepare source GLB geometry before publication | `scene_engine/asset_normalization.py`: `normalize_source_scene_assets()`; owned declarations and content-addressed output, no simulator |
 | Portable scene contract | `scene_engine/pipeline/utils/scene_exporter.py`, `scene_importer.py` |
 | Grouped layouts from an existing export | `scene_engine/cli/randomization.py`, `scene_engine/randomization/generation.py` |
@@ -46,6 +47,13 @@ does not load them as a complete task deployment. Whole-scene rotations also
 rotate planar graph relations and table regions; directional graphs require
 quarter turns because their vocabulary is axis-aligned.
 The `simready` CLI remains available, while Python imports use `asset_engine`.
+
+`scene_engine.grasp_fit` accepts explicit target/opening/margin requests rather
+than task types or semantic graphs. It delegates numerical scale selection to
+Compute and source-local geometry reads to Scene, returning owned declarations
+and ordered receipts without writing geometry or constructing simulation. The
+existing asset-normalization stage remains responsible for later materialization.
+Grasp fit is a bounded geometric adaptation, not physical acquisition evidence.
 
 ## Durable scene boundary
 
