@@ -50,6 +50,27 @@ capped intervals under the query precision policy. A threshold inside an interva
 remains unavailable, never a fabricated contact or free path. CPU comparisons
 remain separate from GPU and physical-task qualification.
 
+`ik_branches.CpuIKBranchSearch` owns the explicit B1 CPU endpoint/continuation
+search, with fixed seed order, separated branch selection and original residual
+rules. `capture` reads the configured root once; a supplied-root constructor
+keeps geometry reads caller-owned. Its legacy CPU-only Torch fork plus
+`manual_seed(0)` also reseeds visible CUDA streams. Do not claim CUDA RNG isolation
+or change that behavior as part of ownership migration. Numeric branch selection
+and pose residuals live in `compute.kinematics.seed_selection` and
+`compute.geometry.pose_checks`.
+
+`goal_seeded` supplies bounded endpoints and distinguished-goal/common-seed pose
+paths. Callers supply mandatory poses, source time samples and same-observation
+state. Motion owns solver/FK masks and limit qualification; Atomic Skills own
+phase composition, retry choices and physical effects. `solvers.tolerances` reads
+explicit full-pose solver budgets without replacing them with task thresholds.
+
+`cpu_threads.cpu_planning_threads` is an explicit isolated-worker scope, never a
+shared default. It captures capacity before overrides and restores process-wide
+Torch settings on exit; `candidate_ik_threads` uses that capacity only for
+eligible CPU PytorchSolver pose products. Hosts serialize those process-wide
+changes and retain lifecycle ownership.
+
 ## Timing and batch boundary
 
 Planning is environment-batched: waypoint qpos is `(B, dof)`, TCP transforms
