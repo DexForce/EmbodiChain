@@ -658,7 +658,7 @@ does not import this configuration implementation.
 
 
 embodichain_robots.tianji.marvin.robotiq
----------------------------------------
+----------------------------------------
 
 The configuration keeps the entire bare body and fixed wrist mounts, with
 six declared joints per hand and explicit mimic metadata. Static assembly
