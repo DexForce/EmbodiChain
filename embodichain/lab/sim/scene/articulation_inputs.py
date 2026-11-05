@@ -239,6 +239,13 @@ class ArticulationPartCandidate:
         }
 
 
+def _stage(path: str | Path | UsdSourceSnapshot) -> Any:
+    """Read the shared fresh geometry snapshot for existing source consumers."""
+    source = read_usd_source(path)
+    source.require_geometry()
+    return source.stage
+
+
 def discover_prismatic_parts(
     config: dict[str, Any],
     *,
