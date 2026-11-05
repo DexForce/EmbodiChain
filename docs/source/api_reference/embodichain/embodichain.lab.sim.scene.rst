@@ -757,3 +757,45 @@ this does not qualify cooked collision shapes or physical containment.
 .. currentmodule:: embodichain.lab.sim.scene.source_geometry
 
 .. autofunction:: read_source_vertices
+Explicit source control preparation
+-----------------------------------
+
+These static adapters consume explicit authored bindings, masses and measured
+source geometry. Source resize/support candidates and press release bias retain
+their original bounded semantics. They edit owned declarations, not source files
+or simulation state; source geometry and offsets do not certify physical success.
+
+.. currentmodule:: embodichain.lab.sim.scene.control_preparation
+
+.. autoclass:: ControlSourceScene
+   :members:
+
+.. autoclass:: ControlSourceResizeRequest
+   :members:
+
+.. autofunction:: prepare_control_source_scene
+
+.. currentmodule:: embodichain.lab.sim.scene.source_measurement
+
+.. autofunction:: measure_source_geometry
+
+.. currentmodule:: embodichain.lab.sim.scene.control_support
+
+.. autoclass:: TwistSupportPenetrationError
+
+.. autofunction:: adjust_revolute_source_support
+
+.. currentmodule:: embodichain.lab.sim.scene.press_calibration
+
+.. autoclass:: PressSourceCalibrationRequest
+   :members:
+
+.. autofunction:: calibrate_press_source_declarations
+
+.. currentmodule:: embodichain.lab.sim.scene.press_inputs
+
+.. autofunction:: discover_press_source
+
+.. currentmodule:: embodichain.lab.sim.scene.control_mass_source
+
+.. autofunction:: requires_derived_revolute_mass_source

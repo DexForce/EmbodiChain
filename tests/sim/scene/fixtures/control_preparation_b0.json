@@ -1,0 +1,1050 @@
+{
+  "status": "passed",
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "cases": [
+    {
+      "scale": 0.5,
+      "lift": null,
+      "records": [
+        {
+          "object_id": "control",
+          "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+          "original_body_scale": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "adapted_body_scale": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "original_init_pos": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "adapted_init_pos": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "support_bottom_z": 0.7900000002235175,
+          "source_edited": false,
+          "physics_policy": "fixed_mass_source_to_scaled_actor_frame",
+          "scale_policy": "preserve_source",
+          "relayout": [],
+          "support_clearance": {
+            "policy": "moving_link_swept_no_support_contact",
+            "object_id": "control",
+            "joint": "knob_rotation",
+            "moving_link": "knob",
+            "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+            "source_edited": false,
+            "geometry_frame": "unscaled_native_root_link",
+            "height_frame": "runtime_world_z_up_meters",
+            "body_scale": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "joint_limits": [
+              -1.5707963267948966,
+              0.0
+            ],
+            "pivot_root": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "joint_axis_root": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "moving_vertices_root_bounds": [
+              [
+                -0.029999999329447746,
+                -0.029999999329447746,
+                0.009999999776482582
+              ],
+              [
+                0.029999999329447746,
+                0.029999999329447746,
+                0.030500000342726707
+              ]
+            ],
+            "moving_collision_envelopes": [
+              {
+                "collision_index": 0,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              },
+              {
+                "collision_index": 1,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              }
+            ],
+            "runtime_asset_physics_mode": "overlay",
+            "table_id": "table",
+            "table_top_z": 0.7000000000000001,
+            "table_contact_offset": 0.006000000052154064,
+            "table_rest_offset": 0.0010000000474974513,
+            "moving_max_contact_offset": 0.006000000052154064,
+            "numerical_clearance": 0.0001,
+            "required_no_contact_gap": 0.012100000104308128,
+            "conservative_translation_z": 0.0,
+            "requested_total_lift_m": null,
+            "geometric_penetration_free": true,
+            "no_contact_envelope_satisfied": true,
+            "qualification": "runtime_initial_stability_and_terminal_checks_required",
+            "moving_swept_min_z_before": 0.8049999998882413,
+            "moving_swept_min_z_after": 0.8049999998882413,
+            "support_gap_before": 0.10499999988824127,
+            "support_gap_after": 0.10499999988824127,
+            "translation_z": 0.0,
+            "original_init_pos": [
+              0.0,
+              0.0,
+              0.8
+            ],
+            "adapted_init_pos": [
+              0.0,
+              0.0,
+              0.8
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "scale": 0.5,
+      "lift": 0.001,
+      "records": [
+        {
+          "object_id": "control",
+          "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+          "original_body_scale": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "adapted_body_scale": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "original_init_pos": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "adapted_init_pos": [
+            0.0,
+            0.0,
+            0.801
+          ],
+          "support_bottom_z": 0.7900000002235175,
+          "source_edited": false,
+          "physics_policy": "fixed_mass_source_to_scaled_actor_frame",
+          "scale_policy": "preserve_source",
+          "relayout": [],
+          "support_clearance": {
+            "policy": "bounded_total_lift_geometric_candidate",
+            "object_id": "control",
+            "joint": "knob_rotation",
+            "moving_link": "knob",
+            "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+            "source_edited": false,
+            "geometry_frame": "unscaled_native_root_link",
+            "height_frame": "runtime_world_z_up_meters",
+            "body_scale": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "joint_limits": [
+              -1.5707963267948966,
+              0.0
+            ],
+            "pivot_root": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "joint_axis_root": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "moving_vertices_root_bounds": [
+              [
+                -0.029999999329447746,
+                -0.029999999329447746,
+                0.009999999776482582
+              ],
+              [
+                0.029999999329447746,
+                0.029999999329447746,
+                0.030500000342726707
+              ]
+            ],
+            "moving_collision_envelopes": [
+              {
+                "collision_index": 0,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              },
+              {
+                "collision_index": 1,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              }
+            ],
+            "runtime_asset_physics_mode": "overlay",
+            "table_id": "table",
+            "table_top_z": 0.7000000000000001,
+            "table_contact_offset": 0.006000000052154064,
+            "table_rest_offset": 0.0010000000474974513,
+            "moving_max_contact_offset": 0.006000000052154064,
+            "numerical_clearance": 0.0001,
+            "required_no_contact_gap": 0.012100000104308128,
+            "conservative_translation_z": 0.0,
+            "requested_total_lift_m": 0.001,
+            "geometric_penetration_free": true,
+            "no_contact_envelope_satisfied": true,
+            "qualification": "runtime_initial_stability_and_terminal_checks_required",
+            "moving_swept_min_z_before": 0.8049999998882413,
+            "moving_swept_min_z_after": 0.8059999998882413,
+            "support_gap_before": 0.10499999988824127,
+            "support_gap_after": 0.10599999988824127,
+            "translation_z": 0.001,
+            "original_init_pos": [
+              0.0,
+              0.0,
+              0.8
+            ],
+            "adapted_init_pos": [
+              0.0,
+              0.0,
+              0.801
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "scale": 0.5,
+      "lift": 0.004,
+      "records": [
+        {
+          "object_id": "control",
+          "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+          "original_body_scale": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "adapted_body_scale": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "original_init_pos": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "adapted_init_pos": [
+            0.0,
+            0.0,
+            0.804
+          ],
+          "support_bottom_z": 0.7900000002235175,
+          "source_edited": false,
+          "physics_policy": "fixed_mass_source_to_scaled_actor_frame",
+          "scale_policy": "preserve_source",
+          "relayout": [],
+          "support_clearance": {
+            "policy": "bounded_total_lift_geometric_candidate",
+            "object_id": "control",
+            "joint": "knob_rotation",
+            "moving_link": "knob",
+            "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+            "source_edited": false,
+            "geometry_frame": "unscaled_native_root_link",
+            "height_frame": "runtime_world_z_up_meters",
+            "body_scale": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "joint_limits": [
+              -1.5707963267948966,
+              0.0
+            ],
+            "pivot_root": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "joint_axis_root": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "moving_vertices_root_bounds": [
+              [
+                -0.029999999329447746,
+                -0.029999999329447746,
+                0.009999999776482582
+              ],
+              [
+                0.029999999329447746,
+                0.029999999329447746,
+                0.030500000342726707
+              ]
+            ],
+            "moving_collision_envelopes": [
+              {
+                "collision_index": 0,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              },
+              {
+                "collision_index": 1,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              }
+            ],
+            "runtime_asset_physics_mode": "overlay",
+            "table_id": "table",
+            "table_top_z": 0.7000000000000001,
+            "table_contact_offset": 0.006000000052154064,
+            "table_rest_offset": 0.0010000000474974513,
+            "moving_max_contact_offset": 0.006000000052154064,
+            "numerical_clearance": 0.0001,
+            "required_no_contact_gap": 0.012100000104308128,
+            "conservative_translation_z": 0.0,
+            "requested_total_lift_m": 0.004,
+            "geometric_penetration_free": true,
+            "no_contact_envelope_satisfied": true,
+            "qualification": "runtime_initial_stability_and_terminal_checks_required",
+            "moving_swept_min_z_before": 0.8049999998882413,
+            "moving_swept_min_z_after": 0.8089999998882413,
+            "support_gap_before": 0.10499999988824127,
+            "support_gap_after": 0.10899999988824127,
+            "translation_z": 0.004,
+            "original_init_pos": [
+              0.0,
+              0.0,
+              0.8
+            ],
+            "adapted_init_pos": [
+              0.0,
+              0.0,
+              0.804
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "scale": 1.0,
+      "lift": null,
+      "records": [
+        {
+          "object_id": "control",
+          "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+          "original_body_scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "adapted_body_scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "original_init_pos": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "adapted_init_pos": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "support_bottom_z": 0.7800000004470349,
+          "source_edited": false,
+          "physics_policy": "fixed_mass_source_to_scaled_actor_frame",
+          "scale_policy": "preserve_source",
+          "relayout": [],
+          "support_clearance": {
+            "policy": "moving_link_swept_no_support_contact",
+            "object_id": "control",
+            "joint": "knob_rotation",
+            "moving_link": "knob",
+            "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+            "source_edited": false,
+            "geometry_frame": "unscaled_native_root_link",
+            "height_frame": "runtime_world_z_up_meters",
+            "body_scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "joint_limits": [
+              -1.5707963267948966,
+              0.0
+            ],
+            "pivot_root": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "joint_axis_root": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "moving_vertices_root_bounds": [
+              [
+                -0.029999999329447746,
+                -0.029999999329447746,
+                0.009999999776482582
+              ],
+              [
+                0.029999999329447746,
+                0.029999999329447746,
+                0.030500000342726707
+              ]
+            ],
+            "moving_collision_envelopes": [
+              {
+                "collision_index": 0,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              },
+              {
+                "collision_index": 1,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              }
+            ],
+            "runtime_asset_physics_mode": "overlay",
+            "table_id": "table",
+            "table_top_z": 0.7000000000000001,
+            "table_contact_offset": 0.006000000052154064,
+            "table_rest_offset": 0.0010000000474974513,
+            "moving_max_contact_offset": 0.006000000052154064,
+            "numerical_clearance": 0.0001,
+            "required_no_contact_gap": 0.012100000104308128,
+            "conservative_translation_z": 0.0,
+            "requested_total_lift_m": null,
+            "geometric_penetration_free": true,
+            "no_contact_envelope_satisfied": true,
+            "qualification": "runtime_initial_stability_and_terminal_checks_required",
+            "moving_swept_min_z_before": 0.8099999997764826,
+            "moving_swept_min_z_after": 0.8099999997764826,
+            "support_gap_before": 0.10999999977648256,
+            "support_gap_after": 0.10999999977648256,
+            "translation_z": 0.0,
+            "original_init_pos": [
+              0.0,
+              0.0,
+              0.8
+            ],
+            "adapted_init_pos": [
+              0.0,
+              0.0,
+              0.8
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "scale": 1.0,
+      "lift": 0.001,
+      "records": [
+        {
+          "object_id": "control",
+          "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+          "original_body_scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "adapted_body_scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "original_init_pos": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "adapted_init_pos": [
+            0.0,
+            0.0,
+            0.801
+          ],
+          "support_bottom_z": 0.7800000004470349,
+          "source_edited": false,
+          "physics_policy": "fixed_mass_source_to_scaled_actor_frame",
+          "scale_policy": "preserve_source",
+          "relayout": [],
+          "support_clearance": {
+            "policy": "bounded_total_lift_geometric_candidate",
+            "object_id": "control",
+            "joint": "knob_rotation",
+            "moving_link": "knob",
+            "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+            "source_edited": false,
+            "geometry_frame": "unscaled_native_root_link",
+            "height_frame": "runtime_world_z_up_meters",
+            "body_scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "joint_limits": [
+              -1.5707963267948966,
+              0.0
+            ],
+            "pivot_root": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "joint_axis_root": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "moving_vertices_root_bounds": [
+              [
+                -0.029999999329447746,
+                -0.029999999329447746,
+                0.009999999776482582
+              ],
+              [
+                0.029999999329447746,
+                0.029999999329447746,
+                0.030500000342726707
+              ]
+            ],
+            "moving_collision_envelopes": [
+              {
+                "collision_index": 0,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              },
+              {
+                "collision_index": 1,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              }
+            ],
+            "runtime_asset_physics_mode": "overlay",
+            "table_id": "table",
+            "table_top_z": 0.7000000000000001,
+            "table_contact_offset": 0.006000000052154064,
+            "table_rest_offset": 0.0010000000474974513,
+            "moving_max_contact_offset": 0.006000000052154064,
+            "numerical_clearance": 0.0001,
+            "required_no_contact_gap": 0.012100000104308128,
+            "conservative_translation_z": 0.0,
+            "requested_total_lift_m": 0.001,
+            "geometric_penetration_free": true,
+            "no_contact_envelope_satisfied": true,
+            "qualification": "runtime_initial_stability_and_terminal_checks_required",
+            "moving_swept_min_z_before": 0.8099999997764826,
+            "moving_swept_min_z_after": 0.8109999997764826,
+            "support_gap_before": 0.10999999977648256,
+            "support_gap_after": 0.11099999977648256,
+            "translation_z": 0.001,
+            "original_init_pos": [
+              0.0,
+              0.0,
+              0.8
+            ],
+            "adapted_init_pos": [
+              0.0,
+              0.0,
+              0.801
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "scale": 1.0,
+      "lift": 0.004,
+      "records": [
+        {
+          "object_id": "control",
+          "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+          "original_body_scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "adapted_body_scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "original_init_pos": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "adapted_init_pos": [
+            0.0,
+            0.0,
+            0.804
+          ],
+          "support_bottom_z": 0.7800000004470349,
+          "source_edited": false,
+          "physics_policy": "fixed_mass_source_to_scaled_actor_frame",
+          "scale_policy": "preserve_source",
+          "relayout": [],
+          "support_clearance": {
+            "policy": "bounded_total_lift_geometric_candidate",
+            "object_id": "control",
+            "joint": "knob_rotation",
+            "moving_link": "knob",
+            "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+            "source_edited": false,
+            "geometry_frame": "unscaled_native_root_link",
+            "height_frame": "runtime_world_z_up_meters",
+            "body_scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "joint_limits": [
+              -1.5707963267948966,
+              0.0
+            ],
+            "pivot_root": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "joint_axis_root": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "moving_vertices_root_bounds": [
+              [
+                -0.029999999329447746,
+                -0.029999999329447746,
+                0.009999999776482582
+              ],
+              [
+                0.029999999329447746,
+                0.029999999329447746,
+                0.030500000342726707
+              ]
+            ],
+            "moving_collision_envelopes": [
+              {
+                "collision_index": 0,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              },
+              {
+                "collision_index": 1,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              }
+            ],
+            "runtime_asset_physics_mode": "overlay",
+            "table_id": "table",
+            "table_top_z": 0.7000000000000001,
+            "table_contact_offset": 0.006000000052154064,
+            "table_rest_offset": 0.0010000000474974513,
+            "moving_max_contact_offset": 0.006000000052154064,
+            "numerical_clearance": 0.0001,
+            "required_no_contact_gap": 0.012100000104308128,
+            "conservative_translation_z": 0.0,
+            "requested_total_lift_m": 0.004,
+            "geometric_penetration_free": true,
+            "no_contact_envelope_satisfied": true,
+            "qualification": "runtime_initial_stability_and_terminal_checks_required",
+            "moving_swept_min_z_before": 0.8099999997764826,
+            "moving_swept_min_z_after": 0.8139999997764826,
+            "support_gap_before": 0.10999999977648256,
+            "support_gap_after": 0.11399999977648256,
+            "translation_z": 0.004,
+            "original_init_pos": [
+              0.0,
+              0.0,
+              0.8
+            ],
+            "adapted_init_pos": [
+              0.0,
+              0.0,
+              0.804
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "scale": 1.5,
+      "lift": null,
+      "records": [
+        {
+          "object_id": "control",
+          "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+          "original_body_scale": [
+            1.5,
+            1.5,
+            1.5
+          ],
+          "adapted_body_scale": [
+            1.5,
+            1.5,
+            1.5
+          ],
+          "original_init_pos": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "adapted_init_pos": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "support_bottom_z": 0.7700000006705523,
+          "source_edited": false,
+          "physics_policy": "fixed_mass_source_to_scaled_actor_frame",
+          "scale_policy": "preserve_source",
+          "relayout": [],
+          "support_clearance": {
+            "policy": "moving_link_swept_no_support_contact",
+            "object_id": "control",
+            "joint": "knob_rotation",
+            "moving_link": "knob",
+            "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+            "source_edited": false,
+            "geometry_frame": "unscaled_native_root_link",
+            "height_frame": "runtime_world_z_up_meters",
+            "body_scale": [
+              1.5,
+              1.5,
+              1.5
+            ],
+            "joint_limits": [
+              -1.5707963267948966,
+              0.0
+            ],
+            "pivot_root": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "joint_axis_root": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "moving_vertices_root_bounds": [
+              [
+                -0.029999999329447746,
+                -0.029999999329447746,
+                0.009999999776482582
+              ],
+              [
+                0.029999999329447746,
+                0.029999999329447746,
+                0.030500000342726707
+              ]
+            ],
+            "moving_collision_envelopes": [
+              {
+                "collision_index": 0,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              },
+              {
+                "collision_index": 1,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              }
+            ],
+            "runtime_asset_physics_mode": "overlay",
+            "table_id": "table",
+            "table_top_z": 0.7000000000000001,
+            "table_contact_offset": 0.006000000052154064,
+            "table_rest_offset": 0.0010000000474974513,
+            "moving_max_contact_offset": 0.006000000052154064,
+            "numerical_clearance": 0.0001,
+            "required_no_contact_gap": 0.012100000104308128,
+            "conservative_translation_z": 0.0,
+            "requested_total_lift_m": null,
+            "geometric_penetration_free": true,
+            "no_contact_envelope_satisfied": true,
+            "qualification": "runtime_initial_stability_and_terminal_checks_required",
+            "moving_swept_min_z_before": 0.8149999996647239,
+            "moving_swept_min_z_after": 0.8149999996647239,
+            "support_gap_before": 0.11499999966472385,
+            "support_gap_after": 0.11499999966472385,
+            "translation_z": 0.0,
+            "original_init_pos": [
+              0.0,
+              0.0,
+              0.8
+            ],
+            "adapted_init_pos": [
+              0.0,
+              0.0,
+              0.8
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "scale": 1.5,
+      "lift": 0.001,
+      "records": [
+        {
+          "object_id": "control",
+          "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+          "original_body_scale": [
+            1.5,
+            1.5,
+            1.5
+          ],
+          "adapted_body_scale": [
+            1.5,
+            1.5,
+            1.5
+          ],
+          "original_init_pos": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "adapted_init_pos": [
+            0.0,
+            0.0,
+            0.801
+          ],
+          "support_bottom_z": 0.7700000006705523,
+          "source_edited": false,
+          "physics_policy": "fixed_mass_source_to_scaled_actor_frame",
+          "scale_policy": "preserve_source",
+          "relayout": [],
+          "support_clearance": {
+            "policy": "bounded_total_lift_geometric_candidate",
+            "object_id": "control",
+            "joint": "knob_rotation",
+            "moving_link": "knob",
+            "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+            "source_edited": false,
+            "geometry_frame": "unscaled_native_root_link",
+            "height_frame": "runtime_world_z_up_meters",
+            "body_scale": [
+              1.5,
+              1.5,
+              1.5
+            ],
+            "joint_limits": [
+              -1.5707963267948966,
+              0.0
+            ],
+            "pivot_root": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "joint_axis_root": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "moving_vertices_root_bounds": [
+              [
+                -0.029999999329447746,
+                -0.029999999329447746,
+                0.009999999776482582
+              ],
+              [
+                0.029999999329447746,
+                0.029999999329447746,
+                0.030500000342726707
+              ]
+            ],
+            "moving_collision_envelopes": [
+              {
+                "collision_index": 0,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              },
+              {
+                "collision_index": 1,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              }
+            ],
+            "runtime_asset_physics_mode": "overlay",
+            "table_id": "table",
+            "table_top_z": 0.7000000000000001,
+            "table_contact_offset": 0.006000000052154064,
+            "table_rest_offset": 0.0010000000474974513,
+            "moving_max_contact_offset": 0.006000000052154064,
+            "numerical_clearance": 0.0001,
+            "required_no_contact_gap": 0.012100000104308128,
+            "conservative_translation_z": 0.0,
+            "requested_total_lift_m": 0.001,
+            "geometric_penetration_free": true,
+            "no_contact_envelope_satisfied": true,
+            "qualification": "runtime_initial_stability_and_terminal_checks_required",
+            "moving_swept_min_z_before": 0.8149999996647239,
+            "moving_swept_min_z_after": 0.8159999996647239,
+            "support_gap_before": 0.11499999966472385,
+            "support_gap_after": 0.11599999966472385,
+            "translation_z": 0.001,
+            "original_init_pos": [
+              0.0,
+              0.0,
+              0.8
+            ],
+            "adapted_init_pos": [
+              0.0,
+              0.0,
+              0.801
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "scale": 1.5,
+      "lift": 0.004,
+      "records": [
+        {
+          "object_id": "control",
+          "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+          "original_body_scale": [
+            1.5,
+            1.5,
+            1.5
+          ],
+          "adapted_body_scale": [
+            1.5,
+            1.5,
+            1.5
+          ],
+          "original_init_pos": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "adapted_init_pos": [
+            0.0,
+            0.0,
+            0.804
+          ],
+          "support_bottom_z": 0.7700000006705523,
+          "source_edited": false,
+          "physics_policy": "fixed_mass_source_to_scaled_actor_frame",
+          "scale_policy": "preserve_source",
+          "relayout": [],
+          "support_clearance": {
+            "policy": "bounded_total_lift_geometric_candidate",
+            "object_id": "control",
+            "joint": "knob_rotation",
+            "moving_link": "knob",
+            "source_sha256": "2c0c1008514d0cc336d7489db9b7e043502836056779ba62c1fefac8de82860d",
+            "source_edited": false,
+            "geometry_frame": "unscaled_native_root_link",
+            "height_frame": "runtime_world_z_up_meters",
+            "body_scale": [
+              1.5,
+              1.5,
+              1.5
+            ],
+            "joint_limits": [
+              -1.5707963267948966,
+              0.0
+            ],
+            "pivot_root": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "joint_axis_root": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "moving_vertices_root_bounds": [
+              [
+                -0.029999999329447746,
+                -0.029999999329447746,
+                0.009999999776482582
+              ],
+              [
+                0.029999999329447746,
+                0.029999999329447746,
+                0.030500000342726707
+              ]
+            ],
+            "moving_collision_envelopes": [
+              {
+                "collision_index": 0,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              },
+              {
+                "collision_index": 1,
+                "contact_offset": 0.006000000052154064,
+                "rest_offset": 0.0010000000474974513
+              }
+            ],
+            "runtime_asset_physics_mode": "overlay",
+            "table_id": "table",
+            "table_top_z": 0.7000000000000001,
+            "table_contact_offset": 0.006000000052154064,
+            "table_rest_offset": 0.0010000000474974513,
+            "moving_max_contact_offset": 0.006000000052154064,
+            "numerical_clearance": 0.0001,
+            "required_no_contact_gap": 0.012100000104308128,
+            "conservative_translation_z": 0.0,
+            "requested_total_lift_m": 0.004,
+            "geometric_penetration_free": true,
+            "no_contact_envelope_satisfied": true,
+            "qualification": "runtime_initial_stability_and_terminal_checks_required",
+            "moving_swept_min_z_before": 0.8149999996647239,
+            "moving_swept_min_z_after": 0.8189999996647239,
+            "support_gap_before": 0.11499999966472385,
+            "support_gap_after": 0.11899999966472385,
+            "translation_z": 0.004,
+            "original_init_pos": [
+              0.0,
+              0.0,
+              0.8
+            ],
+            "adapted_init_pos": [
+              0.0,
+              0.0,
+              0.804
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

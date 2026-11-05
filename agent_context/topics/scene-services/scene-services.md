@@ -22,6 +22,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
 | Static USD root/link geometry and explicit proxy fitting | `embodichain/lab/sim/scene/articulation_geometry.py` |
+| Explicit source control resize/support/press calibration | `control_preparation.py`, `control_support.py`, `source_measurement.py`, `press_calibration.py`; static source data, never live acquisition |
 | Source-declared prismatic, press and revolute physical bindings | `embodichain/lab/sim/scene/articulation_inputs.py`, `press_inputs.py`, `revolute_inputs.py` |
 | Explicit control roles, collider inputs and source lineage | `embodichain/lab/sim/scene/control_semantics.py`, `revolute_geometry.py`, `control_source.py`, `control_mass_source.py` |
 | Declared local source vertices | `source_geometry.read_source_vertices`; authored mesh/articulation data or an explicitly scaled local override, with no native observation |
@@ -41,6 +42,11 @@ to the [sensor integration](../sensor-system/contact-history.md). Its `landing.p
 CPU routines additionally consume Trimesh meshes and Shapely polygons for
 triangle-union floor and silhouette measurements. Scene CPU strategies own
 support selection, polygon search, greedy packing and SciPy SLSQP optimization.
+
+Pure control dimension candidates, ordered XY clearance proposals and source
+press release-bias coefficients also live under `compute.geometry`; they consume
+explicit numeric dimensions/bounds, never a robot, task graph or physical state.
+Their callers own calibrated inputs, asset adaptation and qualification.
 
 Pure grasp samples, release clearances, ordered footprint proposals, source-axis
 adaptation and distal staging also live in `compute.geometry`. They consume

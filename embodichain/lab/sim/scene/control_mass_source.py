@@ -35,6 +35,7 @@ __all__ = [
     "adjacent_manifest_path",
     "qualify_mass_source_copy",
     "create_mass_source_copy",
+    "requires_derived_revolute_mass_source",
 ]
 
 _SCHEMA = "gen_sim.twist-mass-source/v1"
@@ -534,3 +535,19 @@ def create_mass_source_copy(
     result = qualify_mass_source_copy(runtime, manifest_sha256=_digest(manifest_bytes))
     _fresh(source, original)
     return result
+
+
+def requires_derived_revolute_mass_source() -> bool:
+    """Return the source-compatible mass route supported by this Lab schema.
+
+    Older source deployments declared fixed mass through the scale-policy field.
+    When that field is absent, the original deployment fallback uses a qualified
+    derived USD mass source. This descriptor reads configuration capability only;
+    it creates no simulator or asset and supplies no physical success verdict.
+
+    Returns:
+        Whether the schema requires the derived-source mass route.
+    """
+    from embodichain.lab.sim.cfg import ArticulationCfg
+
+    return "body_scale_mass_policy" not in ArticulationCfg.__dataclass_fields__
