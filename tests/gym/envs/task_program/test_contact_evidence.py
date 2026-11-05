@@ -38,10 +38,7 @@ from embodichain.lab.sim.sensors.contact.timeline import (
     ContactTimeline,
     ContactTimelineCfg,
 )
-from embodichain.lab.sim.sensors.joint_opening import (
-    DriverOpeningBinding,
-    create_joint_opening_reader,
-)
+from embodichain.lab.sim.atomic_actions.grip_evidence import DriverOpeningBinding
 from embodichain.lab.task_program.integrations.simulation.grip_evidence import (
     NativeGripEvidenceCfg,
     NativeGripEvidenceFactory,
@@ -199,7 +196,6 @@ def test_opening_does_not_resolve_invalid_or_nonopposing_contacts(damage):
     assert result.valid.tolist() == [False]
 
 
-@pytest.mark.parametrize("reader_kind", ["binding", "factory"])
 @pytest.mark.parametrize(
     "driver,mimic,opened",
     [
@@ -212,7 +208,7 @@ def test_opening_does_not_resolve_invalid_or_nonopposing_contacts(damage):
     ],
 )
 def test_declared_driver_opening_keeps_strict_boundary_and_finite_full_row(
-    driver, mimic, opened, reader_kind
+    driver, mimic, opened
 ):
     reads = []
 
@@ -228,11 +224,7 @@ def test_declared_driver_opening_keeps_strict_boundary_and_finite_full_row(
     binding = DriverOpeningBinding(
         "hand", ("drive", "compliant"), (0,), (0.0, 0.0), 0.05
     )
-    if reader_kind == "binding":
-        reader = binding.bind(robot)
-    else:
-        opening_reader = create_joint_opening_reader(robot, (binding,))
-        reader = lambda row: opening_reader("hand", row)
+    reader = binding.bind(robot)
     assert reads == []
     value = reader(0)
     assert reads == ["hand"]

@@ -161,9 +161,8 @@ sensor configuration, acquisition and history. Its ``sensor``, ``sampling``,
 ``history`` and ``timeline`` modules share one package; sensor-specific Warp
 adaptation kernels live under its private ``_warp`` directory. Generic physical
 evidence remains in ``lab.sim.evidence``; grasp interpretation and Task Program
-bindings remain in their owning layers. Calibrated driver-joint observations
-live in ``sensors.joint_opening``; physical release interpretation remains in
-``atomic_actions.grip_evidence``.
+bindings remain in their owning layers. Calibrated hand opening used for release
+interpretation belongs to ``atomic_actions.grip_evidence``, not the sensor layer.
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact
 

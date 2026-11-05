@@ -161,7 +161,6 @@ topics:
   - embodichain/lab/sim/sensors/contact/sensor.py
   - embodichain/lab/sim/sensors/contact/sampling.py
   - embodichain/lab/sim/sensors/contact/timeline.py
-  - embodichain/lab/sim/sensors/joint_opening.py
   - embodichain/lab/sim/sensors/support_observation.py
   - embodichain/lab/sim/evidence.py
   - embodichain/lab/sim/sensors/contact/_warp/scatter.py

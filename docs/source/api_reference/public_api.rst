@@ -3567,20 +3567,6 @@ classes; sensor acquisition never imports Task Program or Atomic implementation.
    PhysicalEvidenceBatch
    PhysicalEvidenceFrame
 
-embodichain.lab.sim.sensors.joint_opening
------------------------------------------
-
-Robot-owned driver calibration and read-only joint-opening observations.
-No model-name or task-name inference is performed.
-
-.. currentmodule:: embodichain.lab.sim.sensors.joint_opening
-
-.. autosummary::
-
-   DriverOpeningBinding
-   create_joint_opening_reader
-
-
 embodichain.compute.geometry.grip_contacts
 ------------------------------------------
 

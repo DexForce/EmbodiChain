@@ -187,16 +187,15 @@ to the integration and execution thresholds belong to the selected policy.
 The integration resolves those declarations against exact native owners and
 adapts semantic clauses to shared physical requests. Sensor acquisition/history
 lives in `lab.sim.sensors`; physical grip interpretation lives in
-`lab.sim.atomic_actions.grip_evidence`. Calibrated hand-opening observations live
-in `lab.sim.sensors.joint_opening`; the Atomic public `DriverOpeningBinding`
-import refers to that same type. Factories bind calibration before creating
-sensor resources; release predicates and experiment labels remain outside raw
-acquisition. Contact arithmetic lives in `compute.geometry.grip_contacts` and
-`compute.geometry.contact_support`. `lab.sim.evidence` is the common
-frame/batch/request owner. Existing Atomic public imports refer to the same
-types. No raw acquisition module imports Task Program or Task Engine. Invocation
-and episode associations are maintained by the execution host rather than fields
-on shared raw frames.
+`lab.sim.atomic_actions.grip_evidence`, including `DriverOpeningBinding.bind`
+for calibrated hand-opening observations. Factories bind those declarations
+before creating sensor resources; release predicates and experiment labels
+remain outside raw acquisition. Contact arithmetic lives in
+`compute.geometry.grip_contacts` and `compute.geometry.contact_support`.
+`lab.sim.evidence` is the common frame/batch/request owner. Existing Atomic public
+imports refer to the same types. No raw acquisition module imports Task Program
+or Task Engine. Invocation and episode associations are maintained by the
+execution host rather than fields on shared raw frames.
 
 Changes after the contact-evidence extraction must import the sensor modules
 rather than the removed integration-local contact_evidence/contact_timeline paths.
