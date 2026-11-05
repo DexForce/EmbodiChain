@@ -4066,6 +4066,7 @@ classes; sensor acquisition never imports Task Program or Atomic implementation.
 .. autosummary::
 
    PhysicalObservationStamp
+   RobotCommandObservation
 
    PhysicalEvidenceRequest
    PhysicalEvidenceBatch
@@ -4160,4 +4161,7 @@ pass the selected port to AtomicActionEngine.start.
    :members:
 
 .. autoclass:: CompositeTaskProgramPlanLifecycleFactory
+   :members:
+
+.. autoclass:: embodichain.lab.sim.evidence.RobotCommandObservation
    :members:
