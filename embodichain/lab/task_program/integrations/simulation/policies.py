@@ -37,6 +37,8 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 
 from embodichain.compute.geometry.rigid import rigid_pose_displacement
+from embodichain.compute.trajectory.stability import PositionRangeMonitor
+from ._joint_window import JointWindowRecord
 from embodichain.utils import configclass
 
 from embodichain.lab.gym.envs.objectives.conditions import evaluate_near_target
@@ -57,7 +59,10 @@ from embodichain.lab.task_program.compiler import (
     CompiledTaskProgramValidator,
 )
 from .bindings import SimulationSceneBinding
-from .stability import SimulationStabilityConditionCfg
+from .stability import (
+    SimulationStabilityConditionCfg,
+    SimulationJointStabilityConditionCfg,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -82,6 +87,8 @@ class _SimulationSettleTarget:
 @dataclass
 class _PolicyLifetime:
     closed: bool = False
+    observation_clock: object | None = None
+    observation_generation: int = 0
 
 
 @configclass
@@ -174,7 +181,12 @@ class SimulationSegmentPolicyPort:
         scene_binding: SimulationSceneBinding,
         *,
         settle_presets: (
-            Mapping[str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg]
+            Mapping[
+                str,
+                DynamicSettleMonitorCfg
+                | SimulationStabilityConditionCfg
+                | SimulationJointStabilityConditionCfg,
+            ]
             | None
         ) = None,
         env_ids: torch.Tensor | None = None,
@@ -210,7 +222,10 @@ class SimulationSegmentPolicyPort:
         if not isinstance(selected_presets, Mapping) or not selected_presets:
             raise ValueError("settle_presets must be a non-empty mapping.")
         normalized_presets: dict[
-            str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg
+            str,
+            DynamicSettleMonitorCfg
+            | SimulationStabilityConditionCfg
+            | SimulationJointStabilityConditionCfg,
         ] = {}
         for preset_id, cfg in selected_presets.items():
             if (
@@ -222,9 +237,9 @@ class SimulationSegmentPolicyPort:
                     "Settle preset IDs must be non-empty strings without outer "
                     "whitespace."
                 )
-            if (
-                not isinstance(cfg, DynamicSettleMonitorCfg)
-                and type(cfg) is not SimulationStabilityConditionCfg
+            if not isinstance(cfg, DynamicSettleMonitorCfg) and type(cfg) not in (
+                SimulationStabilityConditionCfg,
+                SimulationJointStabilityConditionCfg,
             ):
                 raise TypeError(
                     "settle_presets require dynamic monitors or typed stability conditions."
@@ -239,7 +254,8 @@ class SimulationSegmentPolicyPort:
         ):
             raise ValueError("step_dt must be finite and positive when supplied.")
         if step_dt is None and any(
-            type(cfg) is SimulationStabilityConditionCfg
+            type(cfg)
+            in (SimulationStabilityConditionCfg, SimulationJointStabilityConditionCfg)
             or (
                 isinstance(cfg, SimulationSettleMonitorCfg)
                 and cfg.measurement == "pose_delta"
@@ -266,12 +282,23 @@ class SimulationSegmentPolicyPort:
             self._objects,
             self._articulations,
         ) = self._resolve_native_entities()
+        self._joint_conditions = {}
+        for name, cfg in normalized_presets.items():
+            if type(cfg) is SimulationJointStabilityConditionCfg:
+                art = self._articulations.get(cfg.entity)
+                if art is None or cfg.joint not in art.joint_names:
+                    raise ValueError(
+                        "Joint stability requires its exact bound articulation and joint."
+                    )
+                self._joint_conditions[name] = (art, art.joint_names.index(cfg.joint))
         self._post_policy_results: dict[int, dict[str, object]] = {}
         self._post_policy_success: dict[int, torch.Tensor] = {}
         self._validator_results: dict[int, dict[str, object]] = {}
         self._validator_active_masks: dict[int, torch.Tensor] = {}
         self._lift_baselines: dict[int, torch.Tensor] = {}
         self._lifetime = _PolicyLifetime()
+        self._observation_clock: SupportControlClock | None = None
+        self._observation_generation = 0
         self._condition_runtime = None
         conditions = {
             name: cfg
@@ -300,6 +327,45 @@ class SimulationSegmentPolicyPort:
         self._require_open()
         if self._condition_runtime is not None:
             self._condition_runtime.bind_clock(clock)
+        if self._lifetime.observation_clock is not clock:
+            self._lifetime.observation_clock = clock
+            self._lifetime.observation_generation += 1
+        self._observation_clock = clock
+        self._observation_generation = self._lifetime.observation_generation
+
+    @property
+    def observation_clock(self) -> SupportControlClock | None:
+        """Return this session's current observation clock, or None before binding.
+
+        A later session can supersede this owner's observation binding. Reading
+        a superseded clock raises instead of assigning new facts to an old
+        execution. This guard does not manage active actions or cancellation.
+        """
+        self._require_open()
+        if self._observation_clock is None:
+            return None
+        self.validate_observation_scope(self._observation_clock)
+        return self._observation_clock
+
+    def validate_observation_scope(self, clock: SupportControlClock) -> None:
+        """Require the actual bridge's current observation ownership.
+
+        Args:
+            clock: Exact canonical clock supplied by the requesting bridge.
+
+        Raises:
+            ValueError: The session is unbound or superseded by another clock.
+            RuntimeError: Runtime resources are closed.
+        """
+        self._require_open()
+        if (
+            clock is None
+            or self._observation_clock is not clock
+            or self._observation_generation != self._lifetime.observation_generation
+        ):
+            raise ValueError(
+                "Observation capture belongs to another runtime/session clock."
+            )
 
     def capture_support_observation(
         self, preset_id: str, *, clock: SupportControlClock
@@ -326,36 +392,6 @@ class SimulationSegmentPolicyPort:
         if self._condition_runtime is None:
             raise ValueError("No native support condition is registered.")
         return self._condition_runtime.capture_current_support(preset_id, clock=clock)
-
-    def measure_support_geometry(
-        self,
-        preset_id: str,
-        *,
-        native_support: Mapping[str, Any],
-        object_pose: Any,
-        reference_pose: Any,
-    ) -> Mapping[str, Any]:
-        """Measure a captured support snapshot using the existing region geometry.
-
-        Args:
-            preset_id: Registered full-footprint support condition.
-            native_support: Owned current or recorded native support measurements.
-            object_pose: Matching observed payload poses, including exact historical slots.
-            reference_pose: Corresponding observed support poses.
-
-        Returns:
-            Owned footprint and contact-height measurements. This method samples
-            no contacts/live poses and computes no task acceptance decision.
-        """
-        self._require_open()
-        if self._condition_runtime is None:
-            raise ValueError("No support region condition is registered.")
-        return self._condition_runtime.measure_support_geometry(
-            preset_id,
-            native_support=native_support,
-            object_pose=object_pose,
-            reference_pose=reference_pose,
-        )
 
     def close_runtime_resources(self) -> None:
         """Mark condition sessions closed without destroying borrowed resources."""
@@ -416,6 +452,18 @@ class SimulationSegmentPolicyPort:
             )
         if (
             type(self._settle_presets[policy.cfg.preset])
+            is SimulationJointStabilityConditionCfg
+        ):
+            if (
+                policy.entity.entity_id
+                != self._settle_presets[policy.cfg.preset].entity
+            ):
+                raise ValueError(
+                    "Joint stability differs from the declared articulation."
+                )
+            return
+        if (
+            type(self._settle_presets[policy.cfg.preset])
             is SimulationStabilityConditionCfg
         ):
             self._condition_runtime.validate_policy(policy, segment=segment)
@@ -471,6 +519,11 @@ class SimulationSegmentPolicyPort:
         self.validate_policy(policy, segment=segment)
         active_mask = self._validate_active_mask(active_mask)
         preset = self._settle_presets[policy.cfg.preset]
+        if type(preset) is SimulationJointStabilityConditionCfg:
+            yield from self._joint_condition_actions(
+                policy, segment=segment, active_mask=active_mask
+            )
+            return
         if type(preset) is SimulationStabilityConditionCfg:
             yield from self._condition_runtime.actions(
                 policy, segment=segment, active_mask=active_mask
@@ -548,6 +601,158 @@ class SimulationSegmentPolicyPort:
             yield self._hold_robot_qpos(active_mask)
             elapsed_steps += 1
 
+    def _joint_condition_actions(
+        self,
+        policy: CompiledPostPolicy,
+        *,
+        segment: CompiledTaskProgramSegment,
+        active_mask: torch.Tensor,
+    ) -> Iterator[torch.Tensor]:
+        """Orchestrate sampling and holds around the pure coordinate monitor."""
+        cfg = self._settle_presets[policy.cfg.preset]
+        assert type(cfg) is SimulationJointStabilityConditionCfg
+        art, index = self._joint_conditions[policy.cfg.preset]
+        key = id(policy)
+        self._post_policy_results.pop(key, None)
+        self._post_policy_success.pop(key, None)
+        clock = self.observation_clock
+        hold = self._read_robot_qpos(self._robot, target=False).clone()
+        anchor = art.get_qpos()[:, index].clone()
+        if active_mask.shape != anchor.shape or active_mask.device != anchor.device:
+            raise ValueError("Joint stability rows must match the observed batch.")
+        monitor = PositionRangeMonitor(
+            anchor,
+            required_steps=math.ceil(cfg.duration / self._step_dt),
+            position_drift=cfg.position_drift,
+        )
+        timeout = math.ceil(cfg.timeout / self._step_dt)
+        if clock is not None and not math.isclose(
+            clock.step_dt, self._step_dt, rel_tol=0, abs_tol=1e-9
+        ):
+            raise ValueError(
+                "Joint observation clock differs from the control cadence."
+            )
+        start = None if clock is None else (clock.step_index, clock.now())
+        history = JointWindowRecord(
+            min(timeout + 1, cfg.max_observation_samples),
+            initial=anchor,
+            condition=cfg.to_condition_dict(),
+            env_ids=self._env_ids,
+            native_uid=next(
+                value.simulation_uid
+                for value in self._scene_binding.articulations
+                if value.entity_id == cfg.entity
+            ),
+            segment_id=segment.segment_id,
+            policy_source_path=list(policy.source_path),
+            observation_generation=self._observation_generation,
+            clock_start=start,
+            step_dt=self._step_dt,
+        )
+        timestamp = None
+        step = None
+        qpos = anchor
+        finite = torch.isfinite(qpos)
+        unavailable = torch.zeros_like(active_mask)
+        accepted = torch.zeros_like(active_mask)
+        completed = False
+        termination = "cancelled"
+        interrupted_reason = None
+        try:
+            for tick in range(timeout + 1):
+                self._require_open()
+                if clock is not None:
+                    self.validate_observation_scope(clock)
+                    if clock.step_index != start[0] + tick or not math.isclose(
+                        clock.now(),
+                        start[1] + tick * self._step_dt,
+                        rel_tol=0,
+                        abs_tol=1e-8,
+                    ):
+                        raise ValueError(
+                            "Joint stability requires acknowledged environment steps."
+                        )
+                observed = art.get_qpos()[:, index].clone()
+                if (
+                    observed.shape != anchor.shape
+                    or observed.device != anchor.device
+                    or observed.dtype != anchor.dtype
+                ):
+                    raise ValueError(
+                        "Joint observations changed batch shape, dtype or device."
+                    )
+                if clock is not None:
+                    acquired_at, acquired_step = clock.now(), clock.step_index
+                    self.validate_observation_scope(clock)
+                    if acquired_step != start[0] + tick or not math.isclose(
+                        acquired_at,
+                        start[1] + tick * self._step_dt,
+                        rel_tol=0,
+                        abs_tol=1e-8,
+                    ):
+                        raise ValueError(
+                            "The execution clock changed during joint acquisition."
+                        )
+                    timestamp, step = acquired_at, acquired_step
+                qpos = observed
+                history.append(qpos, step, timestamp)
+                finite = torch.isfinite(qpos)
+                unavailable |= active_mask & ~finite
+                within = (qpos - cfg.target).abs() <= cfg.tolerance
+                accepted = (
+                    monitor.observe(qpos, within, elapsed_steps=tick) & active_mask
+                )
+                if cfg.invalid_observation_policy == "isolate_rows":
+                    accepted &= ~unavailable
+                    done = (accepted | unavailable | ~active_mask).all()
+                else:
+                    done = (accepted | ~active_mask).all()
+                if (
+                    done
+                    or (
+                        cfg.invalid_observation_policy == "abort_batch"
+                        and not finite[active_mask].all()
+                    )
+                    or tick == timeout
+                ):
+                    termination = (
+                        "satisfied"
+                        if (accepted | ~active_mask).all()
+                        else (
+                            "invalid_observation"
+                            if (
+                                cfg.invalid_observation_policy == "abort_batch"
+                                and not finite[active_mask].all()
+                            )
+                            or (unavailable | accepted | ~active_mask).all()
+                            else "timed_out"
+                        )
+                    )
+                    completed = True
+                    break
+                yield hold.clone()
+        except GeneratorExit:
+            raise
+        except BaseException as error:
+            termination = "interrupted"
+            interrupted_reason = str(error) or type(error).__name__
+            raise
+        finally:
+            # Never retain a success when an exact policy execution was cancelled.
+            result = accepted if completed else torch.zeros_like(accepted)
+            if completed:
+                self._post_policy_success[key] = result.clone()
+            self._post_policy_results[key] = history.finish(
+                qpos,
+                active_mask=active_mask,
+                unavailable=unavailable,
+                accepted=result,
+                completed=completed,
+                termination=termination,
+                invalid_observation_policy=cfg.invalid_observation_policy,
+                interruption_reason=interrupted_reason,
+            )
+
     def post_policy_result(
         self,
         policy: Any,
@@ -576,10 +781,9 @@ class SimulationSegmentPolicyPort:
     ) -> Mapping[str, object]:
         """Return the latest JSON-safe settling trace for one policy.
 
-        The trace is available after the policy generator has started. A
-        terminal trace has status ``"settled"``, ``"timed_out"``, or
-        ``"skipped"`` when no rows remain active; an early demo interruption
-        intentionally retains the latest ``"running"`` snapshot for diagnosis.
+        Dynamic-settle traces retain their latest running or terminal status.
+        Joint-window records become available on completion, cancellation or
+        interruption, with execution termination separate from row conditions.
         """
         if type(policy) is not CompiledPostPolicy:
             raise TypeError("policy must be exactly CompiledPostPolicy.")
@@ -1390,6 +1594,36 @@ class SimulationSegmentPolicyPort:
         if require_finite and not bool(torch.isfinite(pose).all().item()):
             raise ValueError(f"Rigid object {entity_id!r} pose must be finite.")
         return pose.clone()
+
+    def measure_support_geometry(
+        self,
+        preset_id: str,
+        *,
+        native_support: Mapping[str, Any],
+        object_pose: Any,
+        reference_pose: Any,
+    ) -> Mapping[str, Any]:
+        """Measure a captured support snapshot using the existing region geometry.
+
+        Args:
+            preset_id: Registered full-footprint support condition.
+            native_support: Owned current or recorded native support measurements.
+            object_pose: Matching observed payload poses, including exact historical slots.
+            reference_pose: Corresponding observed support poses.
+
+        Returns:
+            Owned footprint and contact-height measurements. This method samples
+            no contacts/live poses and computes no task acceptance decision.
+        """
+        self._require_open()
+        if self._condition_runtime is None:
+            raise ValueError("No support region condition is registered.")
+        return self._condition_runtime.measure_support_geometry(
+            preset_id,
+            native_support=native_support,
+            object_pose=object_pose,
+            reference_pose=reference_pose,
+        )
 
 
 __all__ = ["SimulationSettleMonitorCfg"]

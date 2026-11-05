@@ -60,6 +60,13 @@ Gym configs remain supported when no conflicting component selector is used.
 
 ### Reusable Gym deployment components
 
+`resolve_gym_components()` in `lab.gym.utils.composition` exposes physical
+component expansion without Gym registration or simulator construction. Its
+`ResolvedGymComponents` owns independent config/profile/scene mappings for each
+call. Task Program selectors remain declarations; pass the returned skill
+profile to the public Task Program deployment composer for semantic preflight.
+This is not complete runtime-config validation.
+
 `config_to_cfg()` resolves optional `environment`,
 `embodiment.component`, and `scene.component` selections before ordinary Gym
 parsing. This is not

@@ -38,8 +38,9 @@ Preserve these coupled result rules in `motion_generator.py`:
   waypoints; only an explicit `is_linear` request adds Cartesian path samples.
   This avoids treating interpolated samples as mandatory rest points.
   `preserve_plan_samples` keeps its native grid and derivatives through
-  normalization. TrapezoidalPlanner declares both; TOPPRA preserves its solved
-  native samples. Explicit native sampling options remain authoritative over
+  normalization. TrapezoidalPlanner and TOPPRA declare both. Explicit
+  Cartesian-line requests retain their dense IK nodes, including joint targets
+  converted through FK. Explicit native sampling options remain authoritative over
   a generic facade count.
 - Failed rows hold the supplied start pose unless the backend declares
   `preserve_failed_plan_positions`; NeuralPlanner uses that capability to keep

@@ -115,6 +115,7 @@ from .extensions import (
     ParallelSafetyDeclaration,
     RegisteredSemanticLowererDeclaration,
     RegisteredSemanticLowererFactory,
+    RegisteredSemanticLowererSceneValidator,
     RuntimeTransportDeclaration,
     StandardExtensionDeclarations,
     build_standard_extension_declarations,
@@ -125,7 +126,10 @@ from .simulation.policies import (
     SimulationSettleMonitorCfg,
     default_simulation_settle_presets,
 )
-from .simulation.stability import SimulationStabilityConditionCfg
+from .simulation.stability import (
+    SimulationStabilityConditionCfg,
+    SimulationJointStabilityConditionCfg,
+)
 
 _CATALOG_FINGERPRINT_SCHEMA_VERSION = 4
 _POST_POLICY_KINDS = frozenset({"wait_stable"})
@@ -194,10 +198,19 @@ def _canonical_value(value: object) -> object:
             ),
         )
     if is_dataclass(value):
+        from embodichain.lab.sim.atomic_actions.policies import RecoveryPolicy
+
         metadata = {
             data_field.name: _canonical_value(getattr(value, data_field.name))
             for data_field in fields(value)
+            if not (
+                type(value) is RecoveryPolicy
+                and data_field.name == "planning_budget"
+                and getattr(value, data_field.name) is None
+            )
         }
+        if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
+            metadata.pop("retry_all_failed_plans")
         return {"type": _qualified_name(value), "fields": metadata}
     raise TypeError(
         "Registration fingerprint metadata contains unsupported value type "
@@ -230,14 +243,27 @@ def _digest(payload: object) -> str:
 
 
 def _snapshot_settle_presets(
-    values: Mapping[str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg],
-) -> Mapping[str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg]:
+    values: Mapping[
+        str,
+        DynamicSettleMonitorCfg
+        | SimulationStabilityConditionCfg
+        | SimulationJointStabilityConditionCfg,
+    ],
+) -> Mapping[
+    str,
+    DynamicSettleMonitorCfg
+    | SimulationStabilityConditionCfg
+    | SimulationJointStabilityConditionCfg,
+]:
     """Own one strict named settle-preset table."""
     if not isinstance(values, Mapping) or not values:
         raise ValueError("settle_presets must be a non-empty mapping.")
-    normalized: dict[str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg] = (
-        {}
-    )
+    normalized: dict[
+        str,
+        DynamicSettleMonitorCfg
+        | SimulationStabilityConditionCfg
+        | SimulationJointStabilityConditionCfg,
+    ] = {}
     for preset_id, preset in values.items():
         if (
             type(preset_id) is not str
@@ -248,9 +274,9 @@ def _snapshot_settle_presets(
                 "Settle preset IDs must be non-empty strings without outer "
                 "whitespace."
             )
-        if (
-            not isinstance(preset, DynamicSettleMonitorCfg)
-            and type(preset) is not SimulationStabilityConditionCfg
+        if not isinstance(preset, DynamicSettleMonitorCfg) and type(preset) not in (
+            SimulationStabilityConditionCfg,
+            SimulationJointStabilityConditionCfg,
         ):
             raise TypeError(
                 "settle_presets require dynamic monitors or typed stability conditions."
@@ -1038,7 +1064,10 @@ def _registration_payload(
     robot_profile: RobotSkillProfile,
     call_catalog: SemanticCallCatalog,
     settle_presets: Mapping[
-        str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg
+        str,
+        DynamicSettleMonitorCfg
+        | SimulationStabilityConditionCfg
+        | SimulationJointStabilityConditionCfg,
     ],
     relation_grounder_keys: frozenset[tuple[str, type[Affordance], str]],
     relation_grounders: tuple[RelationTargetGrounder, ...],
@@ -1171,7 +1200,10 @@ class SimulationTaskProgramRegistration:
         default_factory=builtin_semantic_call_catalog
     )
     settle_presets: Mapping[
-        str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg
+        str,
+        DynamicSettleMonitorCfg
+        | SimulationStabilityConditionCfg
+        | SimulationJointStabilityConditionCfg,
     ] = field(default_factory=default_simulation_settle_presets)
     relation_grounders: tuple[RelationTargetGrounder, ...] = ()
     handover_pose_providers: tuple[HandOverPoseProvider, ...] = ()
@@ -1231,7 +1263,16 @@ class SimulationTaskProgramRegistration:
             | {binding.entity_id for binding in self.scene_binding.articulations}
             | {binding.entity_id for binding in self.scene_binding.links}
         )
+        articulation_ids = {
+            binding.entity_id for binding in self.scene_binding.articulations
+        }
         for cfg in settle_presets.values():
+            if type(cfg) is SimulationJointStabilityConditionCfg:
+                if cfg.entity not in articulation_ids:
+                    raise ValueError(
+                        "Joint stability requires an explicit articulation binding."
+                    )
+                continue
             if type(cfg) is not SimulationStabilityConditionCfg:
                 continue
             if cfg.entity not in rigid_ids:
@@ -1291,6 +1332,9 @@ class SimulationTaskProgramRegistration:
             self.call_catalog,
             extensions.registered_semantic_lowerers,
         )
+        for factory in self.registered_semantic_lowerer_factories:
+            if isinstance(factory, RegisteredSemanticLowererSceneValidator):
+                factory.validate_scene_declaration(scene)
         selected_handover_provider = profile.grounding_providers.get("hand_over")
         registered_handover_provider_ids = {
             _handover_pose_provider_id(provider) for provider in handover_pose_providers
@@ -1357,7 +1401,11 @@ class SimulationTaskProgramRegistration:
                 condition_settle_entities={
                     key: cfg.entity
                     for key, cfg in settle_presets.items()
-                    if type(cfg) is SimulationStabilityConditionCfg
+                    if type(cfg)
+                    in (
+                        SimulationStabilityConditionCfg,
+                        SimulationJointStabilityConditionCfg,
+                    )
                 },
                 pose_delta_settle_preset_ids=frozenset(
                     key
@@ -1414,6 +1462,9 @@ class SimulationTaskProgramRegistration:
                 self.call_catalog,
                 extensions.registered_semantic_lowerers,
             )
+            for factory in self.registered_semantic_lowerer_factories:
+                if isinstance(factory, RegisteredSemanticLowererSceneValidator):
+                    factory.validate_scene_declaration(scene)
             relation_grounders = _snapshot_relation_grounders(self.relation_grounders)
             relation_grounder_keys = frozenset(
                 _relation_grounder_key(grounder) for grounder in relation_grounders

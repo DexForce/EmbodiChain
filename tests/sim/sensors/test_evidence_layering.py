@@ -36,6 +36,7 @@ from embodichain.lab.sim.atomic_actions.grip_evidence import GripContactObserver
 from embodichain.lab.sim.sensors.support_observation import NativeSupportObservation, NativeSupportResult, SupportObservationRegistry
 from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceBatch as ExistingBatch
 assert ExistingBatch is PhysicalEvidenceBatch
+assert DriverOpeningBinding.__module__ == "embodichain.lab.sim.atomic_actions.grip_evidence"
 sensor = SimpleNamespace(
     num_instances=1, dropped_contacts=0,
     contact_capabilities=SimpleNamespace(geometry=True, impulse=True),

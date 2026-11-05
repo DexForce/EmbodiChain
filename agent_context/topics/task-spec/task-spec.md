@@ -30,6 +30,11 @@ one in place invalidates its original identity. Construct a new TaskSpec for an
 intentional semantic change. Instructions, task identifiers and provenance
 metadata do not participate in normative identity.
 
+`RoleSpec.is_single_member` is a read-only query for `one` or explicit
+`count=1`. It does not rewrite the authored selector, serialized fields or
+semantic identity. Larger counts and `all` require complete separate binding
+and evidence; they cannot be reduced to an available subset.
+
 Milestone dependencies must be acyclic. All predicates for one milestone must
 hold at the same snapshot strictly after its predecessors. Missing evidence and
 incomplete temporal windows cannot certify success. Only an entirely satisfied
@@ -52,8 +57,12 @@ New placement bundles project the configured owner condition directly through
 `project_configured_placement_evidence_binding`, without a legacy constraint
 file or digest. The B0 fixture adapter separately checks its frozen source identity.
 TaskSpec verifies receipts, acquisition masks, episode IDs, sampled support windows
-and recorded execution prefixes. Lab owns the physical collector and recorded
-pose snapshots; no Lab module imports TaskSpec or Task Engine.
+and recorded execution prefixes. Lab owns the physical collector;
+[episode recording](../env-framework/env-framework.md#expert-trajectory-contract)
+supplies historical values with validity and episode/lifetime checks; the
+observation manager owns their semantic schema.
+Env dispatches capture/reset boundaries;
+no Lab module imports TaskSpec or Task Engine.
 
 Current goals cannot borrow recorded milestone success. The legacy instantaneous
 final-support scope requires its exact measured release and actual final runtime
@@ -62,15 +71,14 @@ therefore does not erase an available final physical negative. Recorded mileston
 still require their complete group prefix and original support receipt. Boundary snapshots do
 not establish a complete control-step trajectory. The explicit legacy contact
 scope and version-2 sampled-support scope retain their original meanings.
-The explicit revision-1 scope additionally verifies release-phase windows,
-actor/episode identity, stable policy clocks and raw contact patches. Declared
-full-footprint regions preserve the original planar `on`/`inside` checks; they
-are not general volume containment. Task families requiring handover or
-coordinated transport cannot use a single placement proof. Raw Lab snapshots
-carry no accepted/released claim; historical claims are checked when present.
-Recorded region geometry is recomputed from seeded poses and the original
-native load, then compared with the original policy snapshot, without sampling
-current contacts or substituting live poses.
+Explicit revision-1 support also checks release-phase windows, actor/episode
+identity, stable policy clocks and raw contact patches. Declared full-footprint
+regions retain the original planar `on`/`inside` checks; they do not establish
+general volume containment. Transfer/coordinated-transport tasks still require
+their separate operation proofs. Raw Lab snapshots carry no accepted/released
+claim; historical claims are checked when present. For a recorded region, Lab
+reprojects the exact raw history poses against owned geometry and the original
+support snapshot, retaining availability/errors and making no live acquisition.
 
 ## Focused validation
 

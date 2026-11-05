@@ -22,20 +22,24 @@ All seven-element root and rigid-object poses use EmbodiChain's
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any, Protocol, TypeAlias
+from collections.abc import Mapping
+from typing import Any, Protocol, TypeAlias, TYPE_CHECKING
+from dataclasses import asdict
 
 import torch
 from tensordict import TensorDictBase
 
 from embodichain.utils import logger
 
+if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+
 __all__ = [
     "capture_trajectory_state",
     "restore_trajectory_state",
-    "RecordedRigidPoseSnapshot",
-    "read_recorded_rigid_pose_snapshot",
+    "trajectory_observation_cfgs",
+    "export_observation_history",
 ]
 
 
@@ -196,111 +200,74 @@ def restore_trajectory_state(
             )
 
 
-@dataclass(frozen=True, slots=True, eq=False)
-class RecordedRigidPoseSnapshot:
-    """Owned rigid poses from exact completed trajectory boundary slots.
-
-    Frame indices are row-local trajectory slots, not simulation timestamps.
-    They must not be mixed with another clock domain without a proven mapping.
-    The snapshot carries the host episode IDs; it decides no task outcome.
-    """
-
-    object_uid: str
-    env_ids: tuple[int, ...]
-    episode_ids: tuple[int, ...]
-    frame_indices: tuple[int, ...]
-    poses: torch.Tensor
-
-    def __post_init__(self) -> None:
-        from embodichain.compute.geometry.rigid import validate_rigid_pose_batch
-
-        if (
-            type(self.object_uid) is not str
-            or not self.object_uid
-            or self.object_uid != self.object_uid.strip()
-        ):
-            raise ValueError(
-                "Recorded object UID must be an exact nonempty identifier."
-            )
-        size = len(self.env_ids)
-        if not size or len(set(self.env_ids)) != size:
-            raise ValueError("Recorded environment IDs must be nonempty and unique.")
-        for name, lower in (("env_ids", 0), ("episode_ids", 0), ("frame_indices", 1)):
-            values = tuple(getattr(self, name))
-            if len(values) != size or any(
-                type(value) is not int or value < lower for value in values
-            ):
-                raise ValueError(f"{name} must contain one qualified integer per row.")
-            object.__setattr__(self, name, values)
-        validate_rigid_pose_batch(self.poses, size)
-        object.__setattr__(self, "poses", self.poses.detach().clone())
-
-
-def read_recorded_rigid_pose_snapshot(
-    states: _TrajectoryState,
-    written_steps: torch.Tensor,
-    *,
-    object_uid: str,
-    frame_indices: Sequence[int],
-    episode_ids: Sequence[int],
-) -> RecordedRigidPoseSnapshot:
-    """Read seeded post-transition poses without live-state fallback.
+def trajectory_observation_cfgs(
+    env: _TrajectoryEnv, uids: list[str] | None = None
+) -> dict[str, ObservationCfg]:
+    """Declare replay fields through the same raw observation functors as policy.
 
     Args:
-        states: Existing trajectory state buffers, including ``rigid_objects``.
-        written_steps: Completed transition count for each recorded row.
-        object_uid: Explicit native rigid-object UID.
-        frame_indices: Positive exact boundary slot for each environment row.
-        episode_ids: Host-validated episode identity for those buffers.
+        env: Host exposing robot and scene registries for schema assembly.
+        uids: Optional allow-list for non-robot entities.
 
     Returns:
-        Independently owned CPU poses at the requested end-step slots. The
-        source dtype and xyzw-to-matrix conversion are preserved.
-
-    Raises:
-        ValueError: Recording is incomplete, a row/slot is missing, or poses
-            are not qualified. This never substitutes ``end_step - 1`` or a
-            current simulation pose.
-        KeyError: The selected rigid object was not recorded.
+        Recording-only add functors. No physical state is acquired here; legacy
+        trajectory field paths are export names, not another acquisition path.
     """
-    from embodichain.utils.math import xyz_quat_to_4x4_matrix
+    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg, SceneEntityCfg
+    from embodichain.lab.gym.envs.managers.observations import get_entity_state
 
-    if (
-        not isinstance(written_steps, torch.Tensor)
-        or written_steps.ndim != 1
-        or written_steps.dtype != torch.long
-    ):
-        raise ValueError("Recording requires an integer completed-step vector.")
-    frames, episodes = tuple(frame_indices), tuple(episode_ids)
-    size = written_steps.numel()
-    if (
-        len(frames) != size
-        or len(episodes) != size
-        or any(type(frame) is not int or frame <= 0 for frame in frames)
-    ):
-        raise ValueError("Recorded boundaries require one positive frame per row.")
-    values = states["rigid_objects"][object_uid]["pose"]
-    if (
-        not isinstance(values, torch.Tensor)
-        or values.ndim != 3
-        or values.shape[0] != size
-        or values.shape[-1] != 7
-    ):
-        raise ValueError("Recorded rigid poses must contain every requested row.")
-    completed = written_steps.detach().cpu().tolist()
-    if any(frame > completed[row] for row, frame in enumerate(frames)):
-        raise ValueError("The requested boundary is not fully recorded.")
-    if any(frame >= values.shape[1] for frame in frames):
-        raise ValueError("The seeded terminal state slot is unavailable.")
-    pose = xyz_quat_to_4x4_matrix(
-        torch.stack([values[row, frame] for row, frame in enumerate(frames)])
-        .detach()
-        .cpu()
-    )
-    return RecordedRigidPoseSnapshot(
-        object_uid,
-        tuple(range(size)),
-        episodes,
-        frames,
-        pose,
-    )
+    result = {}
+
+    def add(prefix: str, uid: str, quantities: tuple[str, ...]) -> None:
+        for quantity in quantities:
+            field = (
+                "root_pose"
+                if quantity == "pose" and prefix != "rigid_objects"
+                else quantity
+            )
+            name = f"{prefix}/{uid}/{field}" if prefix != "robot" else f"robot/{field}"
+            result[f"recording:{name}"] = ObservationCfg(
+                func=get_entity_state,
+                mode="add",
+                name=name,
+                params={"entity_cfg": SceneEntityCfg(uid=uid), "quantity": quantity},
+                consumers=("recording",),
+            )
+
+    add("robot", env.robot.uid, ("pose", "qpos", "qvel"))
+    for uid in env.sim._articulations:
+        if uids is None or uid in uids:
+            add("articulations", uid, ("pose", "qpos", "qvel"))
+    for uid in env.sim._rigid_objects:
+        if uids is None or uid in uids:
+            add("rigid_objects", uid, ("pose", "lin_vel", "ang_vel"))
+    return result
+
+
+def export_observation_history(
+    observations: ObservationManager,
+    env_ids: list[int] | None = None,
+    *,
+    device: str | torch.device = "cpu",
+) -> dict[str, Any]:
+    """Project numeric history through its single observation schema for export.
+
+    Args:
+        observations: Manager owning the field meanings and canonical IDs.
+        env_ids: Selected original environment rows, or all rows.
+        device: Snapshot destination device.
+
+    Returns:
+        Owned history with source descriptors and alias views. Existing
+        trajectory state projections can share the same snapshot tensors.
+    """
+    snapshot = observations.snapshot_history(env_ids, device=device)
+    fields = snapshot["fields"]
+    for name, values in fields.items():
+        metadata = asdict(observations.schema[name])
+        metadata["dtype"] = str(observations.schema[name].dtype)
+        values["descriptor"] = metadata
+    snapshot["fields"] = {
+        name: fields[field_id] for name, field_id in observations.field_ids.items()
+    }
+    return snapshot

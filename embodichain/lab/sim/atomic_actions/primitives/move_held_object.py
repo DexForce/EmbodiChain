@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import ClassVar
 
@@ -34,6 +34,7 @@ from embodichain.lab.sim.atomic_actions.control import (
     JointPositionCommand,
 )
 from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
 from embodichain.lab.sim.atomic_actions.goals import (
     PoseGoalValue,
     resolve_pose_goal,
@@ -81,9 +82,23 @@ class HeldObjectPoseGoal:
     pass the motion generator's normal checks. This is not an exhaustive search.
     """
 
+    object_id: str | None = field(default=None, kw_only=True)
+    """Optional exact held-object identity and retained-attachment effect.
+
+    Named goals reject another held object before planning and request terminal
+    effect verification without changing its verified attachment transform.
+    Omission retains the existing effectless transport contract.
+    """
+
     def __post_init__(self) -> None:
         if type(self.world_yaw_free) is not bool:
             raise TypeError("world_yaw_free must be a boolean.")
+        if self.object_id is not None and (
+            type(self.object_id) is not str
+            or not self.object_id
+            or self.object_id != self.object_id.strip()
+        ):
+            raise ValueError("object_id must be an exact non-empty identifier or None.")
         validate_pose_goal(
             self.object_target_pose,
             "object_target_pose",
@@ -131,6 +146,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
     ) -> ActionPlan:
         """Assemble externally supplied held-object transport."""
         target = self.require_goal(request)
+        self._validate_named_hold(request, context)
         motion = self._validate_nominal_motion(
             request, context, nominal_source, segments=("transport",)
         )
@@ -196,6 +212,11 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             context,
             success=motion.success & eligible,
             trajectory=motion.trajectory,
+            expected_effects=(
+                StateDelta(held_object_updates={key: held})
+                if target.object_id is not None
+                else None
+            ),
             segment_lengths=dict(motion.segment_lengths),
             replannable=False,
             diagnostics=PlannerDiagnostics(
@@ -210,6 +231,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
     ) -> ActionPlan:
         """Plan exact object-space transport without changing the attachment."""
         target = request.goal
+        self._validate_named_hold(request, context)
         options = request.skill_options
         binding = request.binding
         motion = binding.endpoint("primary", "motion")
@@ -318,6 +340,11 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             context,
             success=success,
             trajectory=timed,
+            expected_effects=(
+                StateDelta(held_object_updates={task_state_key: held_object})
+                if target.object_id is not None
+                else None
+            ),
             diagnostics=(
                 PlannerDiagnostics(
                     backend=self.planning_services.planner_name,
@@ -331,6 +358,26 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             ),
             segment_lengths={"transport": timed.waypoint_count},
         )
+
+    def _validate_named_hold(
+        self,
+        request: ResolvedActionRequest[HeldObjectPoseGoal, MoveHeldObjectOptions],
+        context: PlanningContext,
+    ) -> None:
+        """Validate named input ownership before native or nominal motion planning."""
+        expected = request.goal.object_id
+        if expected is None:
+            return
+        key = require_shared_task_state_key(
+            request.binding.endpoint("primary", "motion"),
+            request.binding.endpoint("primary", "grasp"),
+            participant="MoveHeldObject primary participant",
+        )
+        held = context.get_held_object(key)
+        if held is None or held.semantics.entity_id != expected:
+            raise ValueError(
+                f"MoveHeldObject requires object {expected!r} held under resource {key!r}."
+            )
 
 
 def _merge_yaw_paths(

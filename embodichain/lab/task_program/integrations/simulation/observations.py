@@ -28,6 +28,7 @@ from .stability import SimulationStabilityConditionCfg
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
     from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
     from ..catalog import SimulationTaskProgramRegistration
 
@@ -46,6 +47,8 @@ class SimulationSupportObservationCollector:
         environment: Initialized recording environment for this execution.
         bridge: Exact bridge whose clock and policy session drive this run.
         registration: Sealed declaration used to create the runtime.
+        observations: Observation manager owning the source schema and optional
+            numeric history. Historical capture requires this dependency.
     """
 
     def __init__(
@@ -53,6 +56,8 @@ class SimulationSupportObservationCollector:
         environment: EmbodiedEnv,
         bridge: TaskProgramDemoBridge,
         registration: SimulationTaskProgramRegistration,
+        *,
+        observations: ObservationManager | None = None,
     ) -> None:
         from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
         from ..catalog import SimulationTaskProgramRegistration, _canonical_value
@@ -112,8 +117,15 @@ class SimulationSupportObservationCollector:
             raise ValueError(
                 "Physical support collection requires initialized episode rows."
             )
+        if observations is not None:
+            if not observations.has_history:
+                raise ValueError(
+                    "Historical collection requires enabled observation history."
+                )
+            observations.validate_history_owner(environment.episode_context)
         self._env, self._bridge, self._port = environment, bridge, port
         self._registration = registration
+        self._observations = observations
         self._episodes = tuple(row["episode"] for row in identities)
         self._bindings = {
             item.entity_id: item for item in registration.scene_binding.rigid_objects
@@ -238,6 +250,15 @@ class SimulationSupportObservationCollector:
             RuntimeError: Recording or the requested policy measurement is absent.
         """
         self._check_episode()
+        frames = tuple(frame_indices)
+        if len(frames) != len(self._episodes) or any(
+            type(frame) is not int or frame <= 0 for frame in frames
+        ):
+            raise ValueError(
+                "Recorded support requires one positive completed boundary per row."
+            )
+        if self._observations is None:
+            raise RuntimeError("Observation history is unavailable.")
         cfg = self._condition(preset_id)
         segments = [
             segment
@@ -265,13 +286,42 @@ class SimulationSupportObservationCollector:
             raise RuntimeError(
                 "Recorded native support/acquisition measurement is unavailable."
             ) from error
-        poses = {}
+        from embodichain.compute.geometry.rigid import validate_rigid_pose_batch
+        from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+        fields = {}
         for name in (cfg.entity, cfg.reference):
-            poses[name] = self._env.capture_recorded_rigid_poses(
-                self._bindings[name].simulation_uid,
-                frame_indices,
-                episode_ids=self._episodes,
-            ).poses.tolist()
+            uid = self._bindings[name].simulation_uid
+            candidates = [
+                field
+                for field, descriptor in self._observations.schema.items()
+                if descriptor.entity_uid == uid
+                and descriptor.quantity == "pose"
+                and descriptor.coordinate_frame == "arena"
+                and descriptor.representation == "xyz_xyzw"
+                and descriptor.shape == (7,)
+                and descriptor.units == ("m", "unitless")
+            ]
+            if not candidates:
+                raise RuntimeError(
+                    f"Recorded raw arena pose for {uid!r} is unavailable."
+                )
+            # Described aliases share their raw source; names are consumer projections.
+            fields[name] = candidates[0]
+        snapshot = self._observations.read_history(
+            frame_indices,
+            fields=tuple(dict.fromkeys(fields.values())),
+            episode_ids=self._episodes,
+        )
+        poses = {}
+        for name, field in fields.items():
+            if not bool(snapshot.valid[field].all()):
+                raise RuntimeError(
+                    f"Recorded raw pose acquisition for {name!r} is unavailable: {snapshot.acquisition_errors[field]}."
+                )
+            matrices = xyz_quat_to_4x4_matrix(snapshot.values[field])
+            validate_rigid_pose_batch(matrices, len(snapshot.env_ids))
+            poses[name] = matrices.tolist()
         self._check_episode()
         acquisition["clock_domain"] = (
             "environment_step"
