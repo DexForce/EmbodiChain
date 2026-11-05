@@ -688,3 +688,28 @@ approach-path or contact evidence. No source file or simulation state is changed
 .. autofunction:: source_world_vertices
 
 .. autofunction:: source_obstacle_bounds
+
+
+Static placement affordance and collision inputs
+------------------------------------------------
+
+Adapt authored source meshes to explicit support/container/Pour target frames
+and horizontal proposal permission. Compute owns landing and pose arithmetic;
+callers supply arm origins, nominal reserves, clearances and ordered reservations.
+Unavailable floors retain None. These inputs provide no native reachability,
+contact or physical-success proof. Collision reads retain enabled source topology
+and owning-link frames through the shared authored-source reader.
+
+.. currentmodule:: embodichain.lab.sim.scene.declaration_placement
+
+.. autofunction:: source_container_target_pose
+
+.. autofunction:: source_support_target_pose
+
+.. autofunction:: source_pour_target_pose
+
+.. autofunction:: source_horizontal_slender_object
+
+.. currentmodule:: embodichain.lab.sim.scene.source_collisions
+
+.. autofunction:: read_source_collision_meshes
