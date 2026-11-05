@@ -6353,6 +6353,45 @@ def test_native_grip_evidence_config_is_closed_bound_and_provider_free(
             _decode_configured_task_program_integration(wrong)
 
 
+@pytest.mark.parametrize("reference_kind", ["native_uid", "explicit_alias"])
+def test_native_grip_preflight_preserves_scene_aliases_and_exact_native_owner(
+    monkeypatch, reference_kind
+):
+    from embodichain.lab.sim.sensors.contact.sensor import ContactSensor
+
+    monkeypatch.setattr(
+        ContactSensor,
+        "__init__",
+        lambda *a, **k: pytest.fail("Preflight constructed a contact sensor"),
+    )
+    payload = _integration_payload("hand_over")
+    body = payload["scene"]["rigid_objects"][0]
+    canonical = body["entity_id"]
+    uid = body["simulation_uid"] = "observed_native_" + canonical
+    alias = "observed_alias_" + canonical
+    body.setdefault("aliases", []).append(alias)
+    reference = uid if reference_kind == "native_uid" else alias
+    evidence = payload.setdefault("runtime_services", {})["control_part_evidence"] = {
+        "kind": "native_grip",
+        "sensor_uid": "observed_contacts",
+        "object_bindings": [[reference, uid]],
+        "pad_bindings": [["observation_hand", ["pad_a", "pad_b"]]],
+    }
+    registration = _decode_configured_task_program_integration(payload).registration
+    assert registration.control_part_evidence_factory.object_bindings == (
+        (reference, uid),
+    )
+    wrong = deepcopy(payload)
+    wrong["runtime_services"]["control_part_evidence"]["object_bindings"][0][
+        1
+    ] = "another_native_owner"
+    with pytest.raises(ValueError, match="registered rigid owners"):
+        _decode_configured_task_program_integration(wrong)
+    evidence["object_bindings"].append([canonical, uid])
+    with pytest.raises(ValueError, match="distinct canonical"):
+        _decode_configured_task_program_integration(payload)
+
+
 def test_pick_cartesian_and_fixed_flags_remain_explicit_default_inert():
     from embodichain.lab.task_program.integrations.catalog import _canonical_value
 

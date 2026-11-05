@@ -1748,7 +1748,9 @@ def _registration_payload(
 
 
 def _validate_native_planning_registration(
-    self: SimulationTaskProgramRegistration, profile: RobotSkillProfile
+    self: SimulationTaskProgramRegistration,
+    profile: RobotSkillProfile,
+    scene: SceneManifest,
 ) -> None:
     """Cross-check immutable planning declarations before constructing a live host."""
     from .simulation.place_scene import _validate_inside_binding
@@ -2001,9 +2003,15 @@ def _validate_native_planning_registration(
             item.entity_id: item.simulation_uid
             for item in self.scene_binding.rigid_objects
         }
-        if any(
-            (objects.get(entity) != uid for (entity, uid) in evidence.object_bindings)
-        ):
+        resolved = tuple(
+            (scene.resolve(entity, expected_type=SceneObjectRef).entity_id, uid)
+            for entity, uid in evidence.object_bindings
+        )
+        if len({entity for entity, _ in resolved}) != len(resolved):
+            raise ValueError(
+                "Native grip object bindings require distinct canonical identities."
+            )
+        if any(objects.get(entity) != uid for entity, uid in resolved):
             raise ValueError(
                 "Native grip object bindings must match exact registered rigid owners."
             )
@@ -2290,7 +2298,7 @@ class SimulationTaskProgramRegistration:
             raise ValueError(
                 "Idle clear/restore requires explicit discrete_mesh planning services."
             )
-        _validate_native_planning_registration(self, profile)
+        _validate_native_planning_registration(self, profile, scene)
         _validate_standard_effect_monitors(profile)
         _validate_standard_tracking_metrics(profile)
         extensions = build_standard_extension_declarations(

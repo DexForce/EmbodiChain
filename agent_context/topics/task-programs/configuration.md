@@ -185,6 +185,9 @@ capabilities or select a planning backend. Their physical hand bindings may be
 observed independently of the semantic profile. Actual manipulation calls still
 link their required grasp endpoints, and native planning/recorded-source services
 retain their explicit backend and batch restrictions.
+Evidence object aliases resolve through the same provider-free scene manifest as
+live registration; each canonical object must retain its exact native UID and
+appear only once.
 
 Continuation providers bind to the one assembled compiler/engine. Released
 cleanup/Park authority additionally binds to the actual EpisodeContext identity
