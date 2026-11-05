@@ -141,11 +141,14 @@ def _timing_generator(
 
 
 @pytest.mark.parametrize("planner_type", ["trapezoidal", "toppra"])
-def test_generator_prepends_observed_start_for_sparse_joint_goal(
+@pytest.mark.parametrize("is_interpolate", [False, True])
+def test_generator_prepends_explicit_start_for_sparse_joint_goal(
     planner_type: str,
+    is_interpolate: bool,
 ) -> None:
-    """A joint-only backend must start from the observed robot configuration."""
+    """An explicit start takes precedence over the current robot configuration."""
     generator = _timing_generator(planner_type=planner_type)
+    generator.robot.get_qpos = Mock(side_effect=AssertionError("Unexpected state read"))
 
     start = torch.tensor([[0.0, 0.0]], dtype=torch.float64)
     goal = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
@@ -154,12 +157,46 @@ def test_generator_prepends_observed_start_for_sparse_joint_goal(
         MotionGenOptions(
             start_qpos=start,
             sample_count=21,
+            is_interpolate=is_interpolate,
         ),
     )
 
     assert result.positions is not None
     torch.testing.assert_close(result.positions[:, 0], start)
     torch.testing.assert_close(result.positions[:, -1], goal)
+
+
+@pytest.mark.parametrize("planner_type", ["trapezoidal", "toppra"])
+@pytest.mark.parametrize("goal_count", [1, 2])
+def test_generator_observes_start_for_interpolated_sparse_joint_goals(
+    planner_type: str,
+    goal_count: int,
+) -> None:
+    """Interpolation without an explicit start includes the initial move per row."""
+    generator = _timing_generator(planner_type=planner_type)
+    start = torch.tensor([[0.1, -0.05], [-0.2, 0.1]], dtype=torch.float64)
+    goals = [
+        start + torch.tensor([0.2, -0.1], dtype=start.dtype) * index
+        for index in range(1, goal_count + 1)
+    ]
+    generator.robot.num_instances = start.shape[0]
+    generator.robot.get_joint_ids = Mock(return_value=[0, 1])
+    generator.robot.get_qvel_limits = Mock(return_value=torch.full_like(start, 0.2))
+    generator.robot.get_qpos = Mock(return_value=start)
+    options = MotionGenOptions(
+        control_part="arm",
+        is_interpolate=True,
+        sample_count=21,
+    )
+
+    result = generator.generate([PlanState.from_qpos(goal) for goal in goals], options)
+
+    assert result.success.tolist() == [True, True]
+    assert result.positions is not None
+    torch.testing.assert_close(result.positions[:, 0], start)
+    torch.testing.assert_close(result.positions[:, -1], goals[-1])
+    generator.robot.get_qpos.assert_called_once_with(name="arm")
+    assert options.start_qpos is None
 
 
 @pytest.mark.parametrize("planner_type", ["trapezoidal", "toppra"])

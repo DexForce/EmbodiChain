@@ -112,8 +112,9 @@ class MotionGenOptions:
     start_qpos: torch.Tensor | None = None
     """Observed controlled-joint start, shape ``(B, DOF)``.
 
-    Required for ``ik_interp``. Backend pre-interpolation reads the current
-    robot state when omitted; native backend requests use backend defaults.
+    Required for ``ik_interp``. With ``is_interpolate=True``, joint-only
+    backends read the current robot state when omitted, including sparse
+    waypoint planning. Other backend requests use backend defaults.
     """
 
     control_part: str | None = None
@@ -814,12 +815,18 @@ class MotionGenerator:
             and owns_sparse_waypoints
             and not options.is_linear
         )
-        should_preinterpolate = (
+        needs_joint_preparation = (
             len(move_types) == 1
             and options.is_interpolate
-            and not uses_sparse_joint_waypoints
             and not self.planner.supports_move_type(MoveType.EEF_MOVE)
             and self.planner.supports_move_type(MoveType.JOINT_MOVE)
+        )
+        # Sparse timing bypasses densification, but still needs the observed
+        # start when interpolation was requested without an explicit start.
+        if needs_joint_preparation and options.start_qpos is None:
+            options.start_qpos = self.robot.get_qpos(name=options.control_part)
+        should_preinterpolate = (
+            needs_joint_preparation and not uses_sparse_joint_waypoints
         )
 
         preparation_success = None
@@ -843,8 +850,6 @@ class MotionGenerator:
                     f"Unsupported move type for pre-interpolation: {move_type}"
                 )
 
-            if options.start_qpos is None:
-                options.start_qpos = self.robot.get_qpos(name=options.control_part)
             if options.start_qpos is not None:
                 start = options.start_qpos
                 if start.dim() == 1:
