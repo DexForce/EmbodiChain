@@ -947,6 +947,10 @@ Logical role requirements for downstream grounding, including cardinality,
 affordances, attributes and declared initial state. No simulator handles are
 stored in these contracts.
 
+``RoleSpec.is_single_member`` reports whether ``one`` or an explicit
+``count=1`` selects one member. It preserves authored cardinality, serialization
+and semantic hash; it does not qualify a partial binding or physical evidence.
+
 .. currentmodule:: embodichain.gen_sim.task_spec.contracts
 
 .. autosummary::
