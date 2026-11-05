@@ -143,6 +143,17 @@ are rejected. Omitting the target preserves fixed-distance `SlideOptions` and th
 original Slide tutorial. Slide remains open-loop; this extension does not certify
 contact or physical goal satisfaction.
 
+`source_native_contact` composes preserved explicit source policies with the
+shared Newton collision pipeline over the same GraspKit closing/opening/rest
+algorithms. Contact decisions retain the query owner's conservative interval
+semantics; threshold ambiguity remains unavailable. Scene keeps
+native geometry capture, including the caller-selected sampling grid. The source
+adapter owns only policy mapping, provenance and query cleanup; ordinary
+`ActionPlanningServices.prepare_grasp_query` retains Newton and shared defaults.
+`grasp_geometry.GraspOpeningTarget` is the single value definition, re-exported
+with the same identity from the existing Atomic/runtime imports. No concrete
+skill or alternate registry is installed by these query builders.
+
 ## Package map
 
 | Concern | Source of truth |
