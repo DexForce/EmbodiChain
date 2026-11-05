@@ -190,8 +190,43 @@ class MotionGenOptions:
     )
     """Use the current batched solver, or seed each pose from its predecessor."""
 
+    segment_sample_count_retries: tuple[int, ...] = field(default=(), kw_only=True)
+    """Ordered denser alternatives within one sampled Cartesian segment request.
+
+    These counts are independent of complete-action retries. The first count
+    also bounds eligibility of the original request, preserving the source
+    coarse-grid boundary. Only the explicit Cartesian segment helper consumes
+    them; ordinary ``generate`` calls reject non-default segment recovery.
+    """
+
+    segment_continuous_ik_recovery: bool = field(default=False, kw_only=True)
+    """Try unchanged-target/time continuous IK after segment samples fail.
+
+    Dense attempts advance the existing random stream. The continuous resolver
+    retains its own Torch-only fork; no outer action counter is reused.
+    """
+
     def __post_init__(self) -> None:
         """Validate backend-neutral motion generation options."""
+        segment_retries = self.segment_sample_count_retries
+        if (
+            type(segment_retries) is not tuple
+            or any(type(value) is not int or value < 2 for value in segment_retries)
+            or any(a >= b for a, b in zip(segment_retries, segment_retries[1:]))
+        ):
+            raise ValueError(
+                "segment_sample_count_retries must be a strictly increasing tuple of integer counts >=2."
+            )
+        if type(self.segment_continuous_ik_recovery) is not bool:
+            raise TypeError("segment_continuous_ik_recovery must be a boolean.")
+        if (segment_retries or self.segment_continuous_ik_recovery) and (
+            self.strategy != "ik_interp"
+            or self.interpolation_mode != "fixed_grid"
+            or self.ik_seed_mode != "sequential"
+        ):
+            raise ValueError(
+                "Cartesian segment recovery requires fixed-grid sequential ik_interp."
+            )
         if self.interpolation_mode not in {"adaptive", "fixed_grid"}:
             raise ValueError("interpolation_mode must be adaptive or fixed_grid.")
         if self.ik_seed_mode not in {"batched", "sequential"}:
@@ -680,6 +715,13 @@ class MotionGenerator:
         options = MotionGenOptions() if options is None else deepcopy(options)
         # Options are mutable config objects; revalidate at the call boundary.
         options.__post_init__()
+        if (
+            options.segment_sample_count_retries
+            or options.segment_continuous_ik_recovery
+        ):
+            raise ValueError(
+                "Segment recovery requires generate_cartesian_motion; ordinary generate cannot consume it."
+            )
 
         move_types = {state.move_type for state in target_states}
         heterogeneous = len(move_types) > 1
