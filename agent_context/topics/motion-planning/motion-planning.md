@@ -473,3 +473,11 @@ For stale obstacles, inspect collision capability/identity before planner tuning
 For altered trajectory duration or acceleration, inspect normalization and the
 destination clock before changing backend limits. Tutorials remain examples;
 validate these production boundaries directly.
+
+Registered parallel-jaw model input inventory is owned by
+`toolkits.graspkit.pg_grasp.model_geometry.get_parallel_jaw_model_asset_files()`.
+It shares the geometry factory's model asset registry and exact archive mesh
+bindings, then delegates local transitive enumeration to Data. Callers can seal
+model inputs without constructing geometry, samplers, robots or planners. Scalar
+opening ModelCfg values alone do not identify these external files; runtime
+assembly still owns TCP/contact transforms and native lifetime checks.
