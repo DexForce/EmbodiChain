@@ -104,6 +104,9 @@ from embodichain.lab.sim.atomic_actions import (
     PushObjectToolCalibration,
     RecoveryPolicy,
     SlideOptions,
+    SlidePlanningRecovery,
+    ArticulationWithdrawalPlanningRecovery,
+    ArticulationParkPlanningRecovery,
     TrackingPolicy,
 )
 from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
@@ -1011,6 +1014,11 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "contact_frame_to_eef",
                 "tool_calibrations",
                 "target_axis",
+                "drawer_placement",
+                "drawer_transport",
+                "preserve_vertical",
+                "drawer_containment",
+                "qualify_hand_clearance",
             }
         ),
     )
@@ -1148,6 +1156,8 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             optional=frozenset(
                 {
                     "hand_interp_steps",
+                    "drawer_placement",
+                    "preserve_vertical",
                     "release_settle_steps",
                     "lift_height",
                     "max_approach_retract_z",
@@ -1191,10 +1201,24 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 config["preserve_current_object_orientation"],
                 path=f"{path}.preserve_current_object_orientation",
             )
+        for name in ("drawer_placement", "preserve_vertical"):
+            if name in config:
+                kwargs[name] = _boolean(config[name], path=f"{path}.{name}")
         return PlaceOptions(**kwargs)
     if kind == "move_held_object":
-        _mapping(value, path=path, required=frozenset({"kind"}))
-        return MoveHeldObjectOptions()
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset({"drawer_transport", "preserve_vertical"}),
+        )
+        return MoveHeldObjectOptions(
+            **{
+                name: _boolean(config[name], path=f"{path}.{name}")
+                for name in ("drawer_transport", "preserve_vertical")
+                if name in config
+            }
+        )
     if kind == "move_joints":
         _mapping(
             value,
@@ -1439,17 +1463,23 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             required=frozenset({"kind"}),
             optional=frozenset(
                 {
+                    "drawer_containment",
                     "direction",
                     "hand_interp_steps",
                     "approach_distance",
                     "translation_distance",
                     "preshape_fraction",
+                    "qualify_hand_clearance",
                     "approach_along_grasp_axis",
                     "release_retreat_distance",
                 }
             ),
         )
         kwargs = {}
+        for name in ("drawer_containment",):
+            if name in config:
+                kwargs[name] = _boolean(config[name], path=f"{path}.{name}")
+
         if "direction" in config:
             kwargs["direction"] = _identifier(
                 config["direction"],
@@ -1477,6 +1507,10 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
         for name in ("preshape_fraction", "release_retreat_distance"):
             if name in config:
                 kwargs[name] = _real(config[name], path=f"{path}.{name}", minimum=0.0)
+        if "qualify_hand_clearance" in config:
+            kwargs["qualify_hand_clearance"] = _boolean(
+                config["qualify_hand_clearance"], path=f"{path}.qualify_hand_clearance"
+            )
         if "approach_along_grasp_axis" in config:
             kwargs["approach_along_grasp_axis"] = _boolean(
                 config["approach_along_grasp_axis"],
@@ -1789,6 +1823,7 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 "action_timeout",
                 "planning_budget",
                 "retry_all_failed_plans",
+                "planning_recovery",
             }
         ),
     )
@@ -1843,6 +1878,40 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 )
             )
         )
+    if config.get("planning_recovery") is not None:
+        declaration_path = f"{path}.planning_recovery"
+        declaration = _mapping(
+            config["planning_recovery"],
+            path=declaration_path,
+            required=frozenset({"kind", "revision"}),
+            optional=frozenset({"preshape_aperture_recovery"}),
+        )
+        kind = _identifier(declaration["kind"], path=f"{declaration_path}.kind")
+        types = {
+            "slide_bounded": SlidePlanningRecovery,
+            "articulation_withdrawal": ArticulationWithdrawalPlanningRecovery,
+            "articulation_park": ArticulationParkPlanningRecovery,
+        }
+        if kind not in types:
+            raise ValueError(f"Unsupported {declaration_path}.kind {kind!r}.")
+        if (
+            _integer(
+                declaration["revision"], path=f"{declaration_path}.revision", minimum=1
+            )
+            != 1
+        ):
+            raise ValueError(f"Unsupported {declaration_path}.revision.")
+        if kind == "slide_bounded":
+            kwargs["planning_recovery"] = SlidePlanningRecovery(
+                preshape_aperture_recovery=_boolean(
+                    declaration.get("preshape_aperture_recovery", False),
+                    path=f"{declaration_path}.preshape_aperture_recovery",
+                )
+            )
+        else:
+            if "preshape_aperture_recovery" in declaration:
+                raise ValueError("Preshape aperture recovery belongs only to Slide.")
+            kwargs["planning_recovery"] = types[kind]()
     return RecoveryPolicy(**kwargs)
 
 

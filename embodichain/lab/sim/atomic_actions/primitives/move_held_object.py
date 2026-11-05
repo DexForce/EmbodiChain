@@ -154,10 +154,6 @@ class MoveHeldObjectOptions(ActionOptions):
             raise TypeError("drawer_transport must be bool.")
         if type(self.preserve_vertical) is not bool:
             raise TypeError("preserve_vertical must be bool.")
-        if self.drawer_transport:
-            raise ValueError(
-                "Drawer transport is not installed in this held-motion layer."
-            )
         if self.preserve_vertical and not self.drawer_transport:
             raise ValueError("preserve_vertical requires explicit drawer planning.")
         if type(self.linear_segments) is not bool:
@@ -242,8 +238,10 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
     ) -> ActionPlan:
         """Dispatch explicit drawer transport or canonical alignment continuation."""
         if request.skill_options.drawer_transport:
-            raise ValueError(
-                "Drawer transport is not installed in this held-motion layer."
+            from ._drawer_planning import plan_move_held_object
+
+            return plan_move_held_object(
+                self, request, context, build=build, external_nominal=external_nominal
             )
         rule = request.recovery_policy.planning_recovery
         if rule is None or not rule.place_continuation:

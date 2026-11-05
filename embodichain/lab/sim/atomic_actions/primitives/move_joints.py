@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from typing import ClassVar
+from ..articulation_continuation import ArticulationParkPlanningRecovery
 from embodichain.lab.sim.atomic_actions.released_continuation import (
     ReleasedHandParkRecovery,
 )
@@ -144,7 +145,10 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     skill_id: ClassVar[str] = "move_joints"
     GoalType: ClassVar[type] = JointPositionGoal
     OptionsType: ClassVar[type] = MoveJointsOptions
-    PlanningRecoveryType: ClassVar[type] = ReleasedHandParkRecovery
+    PlanningRecoveryType: ClassVar[tuple[type[PlanningRecovery], ...]] = (
+        ArticulationParkPlanningRecovery,
+        ReleasedHandParkRecovery,
+    )
     agent_visible: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -196,7 +200,22 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
         request: ResolvedActionRequest[JointPositionGoal, MoveJointsOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        return self._plan_nominal(request, context)
+        if (
+            request.recovery_policy.planning_recovery is None
+            and self.planning_services.articulation_continuation_provider is None
+        ):
+            return self._plan_nominal(request, context)
+        from embodichain.lab.sim.atomic_actions.primitives._articulation_recovery import (
+            plan_articulation,
+        )
+
+        return plan_articulation(
+            self,
+            request,
+            context,
+            lambda selected, generate: self._plan_nominal(selected, context),
+            kind="park",
+        )
 
     def _plan_nominal(
         self,
@@ -367,6 +386,12 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     def _qualify_final_plan(self, request, context, plan) -> PlanQualification | None:
         if type(request.recovery_policy.planning_recovery) is ReleasedHandParkRecovery:
             return None
+        if request.recovery_policy.planning_recovery is not None:
+            from embodichain.lab.sim.atomic_actions.primitives._articulation_recovery import (
+                reject_articulation_transform,
+            )
+
+            return reject_articulation_transform(self, request, plan)
         if not request.skill_options.require_free_motion or not plan.plan_success.all():
             return None
         return self._qualify_free_motion(request, context, plan)

@@ -754,3 +754,19 @@ select a staging route or certify native collision freedom.
    :members:
 
 .. autofunction:: capture_robot_distal_meshes
+
+
+Prismatic native observations and source limits
+-----------------------------------------------
+
+``DrawerPayloadObservation`` borrows explicitly declared native owners and keeps
+payload geometry while refreshing poses on each guarded read. Planning-only
+containment and exposed-floor proposals do not establish execution evidence.
+Prismatic helpers verify scaled source/native joint identity, preserve the
+qualified public limit-cache repair, and measure declared support geometry.
+
+.. automodule:: embodichain.lab.sim.scene.drawer_observation
+   :members:
+
+.. automodule:: embodichain.lab.sim.scene.prismatic_control
+   :members:

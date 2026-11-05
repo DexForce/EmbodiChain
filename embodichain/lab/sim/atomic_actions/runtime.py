@@ -42,7 +42,10 @@ from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
 
 from embodichain.lab.sim.motion.mesh_collision import FreeMotionQuery
 from .released_continuation import ReleasedHandContinuationProvider
+from .drawer_planning import DrawerPlanningProvider
+from .articulation_continuation import ArticulationContinuationProvider
 from .planning_probes import (
+    SlideHandClearanceProvider,
     HeldStagingProvider,
     RetainedCommandProvider,
     JointPrefixPlanner,
@@ -116,6 +119,11 @@ class ActionPlanningServices:
         held_staging_provider: HeldStagingProvider | None = None,
         retained_command_provider: RetainedCommandProvider | None = None,
         released_hand_provider: ReleasedHandContinuationProvider | None = None,
+        slide_hand_clearance_provider: SlideHandClearanceProvider | None = None,
+        drawer_planning_provider: DrawerPlanningProvider | None = None,
+        articulation_continuation_provider: (
+            ArticulationContinuationProvider | None
+        ) = None,
     ) -> None:
         """Retain shared services and snapshot caller-owned calibration data.
 
@@ -135,6 +143,9 @@ class ActionPlanningServices:
             measured_rigid_provider: Same-robot measured manipulation facts.
             held_staging_provider: Same-robot staging declarations and geometry.
             retained_command_provider: Same-robot retained-command provenance.
+            slide_hand_clearance_provider: Explicit same-robot slide hand clearance service.
+            drawer_planning_provider: Explicit same-robot drawer planning service.
+            articulation_continuation_provider: Explicit same-robot articulation continuation service.
             released_hand_provider: Same-robot released suffix authority.
         """
         self._motion_generator = motion_generator
@@ -253,6 +264,28 @@ class ActionPlanningServices:
                 "released_hand_provider must own this engine's exact robot."
             )
         self._released_hand_provider = released_hand_provider
+        if slide_hand_clearance_provider is not None and (
+            not isinstance(slide_hand_clearance_provider, SlideHandClearanceProvider)
+            or slide_hand_clearance_provider.robot is not motion_generator.robot
+        ):
+            raise TypeError("Slide hand clearance requires this engine's exact robot.")
+        self._slide_hand_clearance_provider = slide_hand_clearance_provider
+        if drawer_planning_provider is not None and (
+            not isinstance(drawer_planning_provider, DrawerPlanningProvider)
+            or drawer_planning_provider.robot is not motion_generator.robot
+        ):
+            raise TypeError("Drawer provider must own the exact engine robot.")
+        self._drawer_planning_provider = drawer_planning_provider
+        if articulation_continuation_provider is not None and (
+            not isinstance(
+                articulation_continuation_provider, ArticulationContinuationProvider
+            )
+            or articulation_continuation_provider.robot is not self._robot
+        ):
+            raise TypeError(
+                "articulation_continuation_provider must own this engine's robot."
+            )
+        self._articulation_continuation_provider = articulation_continuation_provider
         if tracking_runtime is not None and not isinstance(
             tracking_runtime,
             TrackingRuntime,
@@ -334,6 +367,23 @@ class ActionPlanningServices:
     def released_hand_provider(self) -> ReleasedHandContinuationProvider | None:
         """Return the exact engine-owned cleanup/Park continuation service."""
         return self._released_hand_provider
+
+    @property
+    def articulation_continuation_provider(
+        self,
+    ) -> ArticulationContinuationProvider | None:
+        """Return explicit invocation-owned installed articulation plan facts."""
+        return self._articulation_continuation_provider
+
+    @property
+    def drawer_planning_provider(self) -> DrawerPlanningProvider | None:
+        """Return the explicitly installed live drawer input provider."""
+        return self._drawer_planning_provider
+
+    @property
+    def slide_hand_clearance_provider(self) -> SlideHandClearanceProvider | None:
+        """Return the explicitly installed prismatic hand geometry service."""
+        return self._slide_hand_clearance_provider
 
     @property
     def robot(self) -> Robot:
